@@ -136,17 +136,33 @@ function DF:ApplyAuraLayout(frame)
                                 self.elapsed = (self.elapsed or 0) + elapsed
                                 if self.elapsed < 0.1 then return end
                                 self.elapsed = 0
-                                
+
                                 local cd = self.cooldown
                                 local text = self:GetParent().dfCountdownText
-                                
-                                -- Use our stored values instead of API calls
-                                if cd and cd:IsShown() and cd.dfStart and cd.dfDuration and cd.dfDuration > 0 then
-                                    local remaining = (cd.dfStart + cd.dfDuration) - GetTime()
 
-                                    if remaining > 0.5 then
-                                        if remaining >= 3600 then
-                                            text:SetText(math.floor(remaining / 3600) .. "h")
+                                -- Use our stored values instead of API calls
+                                if cd and cd:IsShown() then
+                                    -- Capture any cooldown values we might have missed before the SetCooldown hook ran
+                                    if (not cd.dfStart or not cd.dfDuration) and cd.GetCooldownTimes then
+                                        local start, duration = cd:GetCooldownTimes()
+                                        if start and duration then
+                                            -- GetCooldownTimes returns milliseconds
+                                            start = start / 1000
+                                            duration = duration / 1000
+
+                                            if duration > 0 then
+                                                cd.dfStart = start
+                                                cd.dfDuration = duration
+                                            end
+                                        end
+                                    end
+
+                                    if cd.dfStart and cd.dfDuration and cd.dfDuration > 0 then
+                                        local remaining = (cd.dfStart + cd.dfDuration) - GetTime()
+
+                                        if remaining > 0.5 then
+                                            if remaining >= 3600 then
+                                                text:SetText(math.floor(remaining / 3600) .. "h")
                                         elseif remaining >= 60 then
                                             text:SetText(math.floor(remaining / 60) .. "m")
                                         elseif remaining >= 10 then
