@@ -341,6 +341,10 @@ function DF:SetupGUIPages(GUI, CreateTab, BuildPage)
         bCdHeader.hideOn = function(d) return not d.showAdvancedBuffOptions end
         local bCountdown = Add(GUI:CreateCheckbox(self, "Show Countdown", db, "raidBuffShowCountdown"), 30, 1)
         bCountdown.hideOn = function(d) return not d.showAdvancedBuffOptions end
+        local countdownFormats = {
+            ["TENTHS"] = "Tenths (<3s)",
+            ["WHOLE"] = "Whole Seconds",
+        }
         local bCdScale = Add(GUI:CreateSlider(self, "Countdown Scale", 0.5, 2.0, 0.1, db, "raidBuffCountdownScale"), 60, 1)
         bCdScale.hideOn = function(d) return not d.showAdvancedBuffOptions or not d.raidBuffShowCountdown end
         local bCdFont = Add(GUI:CreateDropdown(self, "Countdown Font", DF:GetFontList(), db, "raidBuffCountdownFont"), 60, 1)
@@ -353,6 +357,8 @@ function DF:SetupGUIPages(GUI, CreateTab, BuildPage)
         bCdOffX.hideOn = function(d) return not d.showAdvancedBuffOptions or not d.raidBuffShowCountdown end
         local bCdOffY = Add(GUI:CreateSlider(self, "Countdown Y", -20, 20, 1, db, "raidBuffCountdownY"), 60, 1)
         bCdOffY.hideOn = function(d) return not d.showAdvancedBuffOptions or not d.raidBuffShowCountdown end
+        local bCdFormat = Add(GUI:CreateDropdown(self, "Countdown Decimals", countdownFormats, db, "raidBuffCountdownDecimalMode"), 60, 1)
+        bCdFormat.hideOn = function(d) return not d.showAdvancedBuffOptions or not d.raidBuffShowCountdown end
         local bHideSwipe = Add(GUI:CreateCheckbox(self, "Hide Cooldown Swipe", db, "raidBuffHideSwipe"), 30, 1)
         bHideSwipe.hideOn = function(d) return not d.showAdvancedBuffOptions end
         
@@ -414,6 +420,8 @@ function DF:SetupGUIPages(GUI, CreateTab, BuildPage)
         dCdOffX.hideOn = function(d) return not d.showAdvancedDebuffOptions or not d.raidDebuffShowCountdown end
         local dCdOffY = Add(GUI:CreateSlider(self, "Countdown Y", -20, 20, 1, db, "raidDebuffCountdownY"), 60, 2)
         dCdOffY.hideOn = function(d) return not d.showAdvancedDebuffOptions or not d.raidDebuffShowCountdown end
+        local dCdFormat = Add(GUI:CreateDropdown(self, "Countdown Decimals", countdownFormats, db, "raidDebuffCountdownDecimalMode"), 60, 2)
+        dCdFormat.hideOn = function(d) return not d.showAdvancedDebuffOptions or not d.raidDebuffShowCountdown end
         local dHideSwipe = Add(GUI:CreateCheckbox(self, "Hide Cooldown Swipe", db, "raidDebuffHideSwipe"), 30, 2)
         dHideSwipe.hideOn = function(d) return not d.showAdvancedDebuffOptions end
     end)

@@ -36,7 +36,7 @@ function DF:ApplyAuraLayout(frame)
 
     -- Parse "PRIMARY_SECONDARY" growth strings (e.g., "LEFT_DOWN")
     -- Added stackFont argument and countdown arguments
-    local function ApplyLayout(auraFrames, scale, alpha, anchor, growthString, limit, offX, offY, maxCount, clickThrough, stackScale, stackAnchor, stackX, stackY, stackOutline, stackFont, showCountdown, countdownScale, countdownFont, countdownOutline, countdownX, countdownY, hideSwipe)
+    local function ApplyLayout(auraFrames, scale, alpha, anchor, growthString, limit, offX, offY, maxCount, clickThrough, stackScale, stackAnchor, stackX, stackY, stackOutline, stackFont, showCountdown, countdownScale, countdownFont, countdownOutline, countdownX, countdownY, countdownDecimalMode, hideSwipe)
         if not auraFrames then return end
         
         -- Split growth direction string
@@ -136,33 +136,78 @@ function DF:ApplyAuraLayout(frame)
                                 self.elapsed = (self.elapsed or 0) + elapsed
                                 if self.elapsed < 0.1 then return end
                                 self.elapsed = 0
-                                
+
                                 local cd = self.cooldown
                                 local text = self:GetParent().dfCountdownText
-                                
-                                -- Use our stored values instead of API calls
-                                if cd and cd:IsShown() and cd.dfStart and cd.dfDuration and cd.dfDuration > 0 then
-                                    local remaining = (cd.dfStart + cd.dfDuration) - GetTime()
-                                    
-                                    if remaining > 0.5 then
-                                        if remaining >= 3600 then
-                                            text:SetText(math.floor(remaining / 3600) .. "h")
-                                        elseif remaining >= 60 then
-                                            text:SetText(math.floor(remaining / 60) .. "m")
-                                        elseif remaining >= 10 then
-                                            text:SetText(math.floor(remaining))
-                                        elseif remaining >= 3 then
-                                            text:SetFormattedText("%.0f", remaining)
-                                        else
-                                            text:SetFormattedText("%.1f", remaining)
-                                        end
-                                        text:Show()
-                                    else
-                                        text:Hide()
-                                    end
-                                else
-                                    text:Hide()
+
+                                if not (cd and cd:IsShown() and text) then
+                                    if text then text:Hide() end
+                                    return
                                 end
+
+                                local function safeNumber(value)
+                                    if type(value) ~= "number" then
+                                        return nil
+                                    end
+
+                                    local ok, coerced = pcall(function()
+                                        return value + 0
+                                    end)
+
+                                    if ok then
+                                        return coerced
+                                    end
+
+                                    return nil
+                                end
+
+                                -- Capture any cooldown values we might have missed before the SetCooldown hook ran
+                                if (not cd.dfStart or not cd.dfDuration) and cd.GetCooldownTimes then
+                                    local start, duration = cd:GetCooldownTimes()
+                                    if start and duration then
+                                        -- GetCooldownTimes returns milliseconds
+                                        start = start / 1000
+                                        duration = duration / 1000
+
+                                        if duration > 0 then
+                                            cd.dfStart = start
+                                            cd.dfDuration = duration
+                                        end
+                                    end
+                                end
+
+                                local start = safeNumber(cd.dfStart)
+                                local duration = safeNumber(cd.dfDuration)
+
+                                if not (start and duration and duration > 0) then
+                                    text:Hide()
+                                    return
+                                end
+
+                                local ok, remaining = pcall(function()
+                                    return (start + duration) - GetTime()
+                                end)
+
+                                if not ok or remaining <= 0.5 then
+                                    text:Hide()
+                                    return
+                                end
+
+                                if remaining >= 3600 then
+                                    text:SetText(math.floor(remaining / 3600) .. "h")
+                                elseif remaining >= 60 then
+                                    text:SetText(math.floor(remaining / 60) .. "m")
+                                elseif remaining >= 10 then
+                                    text:SetText(math.floor(remaining))
+                                elseif countdownDecimalMode == "WHOLE" then
+                                    text:SetText(math.ceil(remaining))
+                                elseif remaining >= 3 then
+                                    text:SetFormattedText("%.0f", remaining)
+                                else
+                                    text:SetFormattedText("%.1f", remaining)
+                                end
+
+                                text:Show()
                             end)
                             aura.dfCountdownOverlay.hasOnUpdate = true
                         end
@@ -261,6 +306,7 @@ function DF:ApplyAuraLayout(frame)
         db.raidBuffCountdownOutline,
         db.raidBuffCountdownX,
         db.raidBuffCountdownY,
+        db.raidBuffCountdownDecimalMode,
         db.raidBuffHideSwipe
     )
 
@@ -288,6 +334,7 @@ function DF:ApplyAuraLayout(frame)
         db.raidDebuffCountdownOutline,
         db.raidDebuffCountdownX,
         db.raidDebuffCountdownY,
+        db.raidDebuffCountdownDecimalMode,
         db.raidDebuffHideSwipe
     )
 end
