@@ -36,7 +36,7 @@ function DF:ApplyAuraLayout(frame)
 
     -- Parse "PRIMARY_SECONDARY" growth strings (e.g., "LEFT_DOWN")
     -- Added stackFont argument and countdown arguments
-    local function ApplyLayout(auraFrames, scale, alpha, anchor, growthString, limit, offX, offY, maxCount, clickThrough, stackScale, stackAnchor, stackX, stackY, stackOutline, stackFont, showCountdown, countdownScale, countdownFont, countdownOutline, countdownX, countdownY, hideSwipe)
+    local function ApplyLayout(auraFrames, scale, alpha, anchor, growthString, limit, offX, offY, maxCount, clickThrough, stackScale, stackAnchor, stackX, stackY, stackOutline, stackFont, showCountdown, countdownScale, countdownFont, countdownOutline, countdownX, countdownY, countdownDecimalMode, hideSwipe)
         if not auraFrames then return end
         
         -- Split growth direction string
@@ -143,7 +143,7 @@ function DF:ApplyAuraLayout(frame)
                                 -- Use our stored values instead of API calls
                                 if cd and cd:IsShown() and cd.dfStart and cd.dfDuration and cd.dfDuration > 0 then
                                     local remaining = (cd.dfStart + cd.dfDuration) - GetTime()
-                                    
+
                                     if remaining > 0.5 then
                                         if remaining >= 3600 then
                                             text:SetText(math.floor(remaining / 3600) .. "h")
@@ -154,7 +154,11 @@ function DF:ApplyAuraLayout(frame)
                                         elseif remaining >= 3 then
                                             text:SetFormattedText("%.0f", remaining)
                                         else
-                                            text:SetFormattedText("%.1f", remaining)
+                                            if countdownDecimalMode == "WHOLE" then
+                                                text:SetFormattedText("%.0f", remaining)
+                                            else
+                                                text:SetFormattedText("%.1f", remaining)
+                                            end
                                         end
                                         text:Show()
                                     else
@@ -261,6 +265,7 @@ function DF:ApplyAuraLayout(frame)
         db.raidBuffCountdownOutline,
         db.raidBuffCountdownX,
         db.raidBuffCountdownY,
+        db.raidBuffCountdownDecimalMode,
         db.raidBuffHideSwipe
     )
 
@@ -288,6 +293,7 @@ function DF:ApplyAuraLayout(frame)
         db.raidDebuffCountdownOutline,
         db.raidDebuffCountdownX,
         db.raidDebuffCountdownY,
+        db.raidDebuffCountdownDecimalMode,
         db.raidDebuffHideSwipe
     )
 end
