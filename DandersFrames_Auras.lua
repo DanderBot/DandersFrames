@@ -36,7 +36,7 @@ function DF:ApplyAuraLayout(frame)
 
     -- Parse "PRIMARY_SECONDARY" growth strings (e.g., "LEFT_DOWN")
     -- Added stackFont argument and countdown arguments
-    local function ApplyLayout(auraFrames, scale, alpha, anchor, growthString, limit, offX, offY, maxCount, clickThrough, stackScale, stackAnchor, stackX, stackY, stackOutline, stackFont, showCountdown, countdownScale, countdownFont, countdownOutline, countdownX, countdownY)
+    local function ApplyLayout(auraFrames, scale, alpha, anchor, growthString, limit, offX, offY, maxCount, clickThrough, stackScale, stackAnchor, stackX, stackY, stackOutline, stackFont, showCountdown, countdownScale, countdownFont, countdownOutline, countdownX, countdownY, hideSwipe)
         if not auraFrames then return end
         
         -- Split growth direction string
@@ -92,6 +92,9 @@ function DF:ApplyAuraLayout(frame)
                     -- Always hide Blizzard's countdown - we'll use our own
                     aura.cooldown:SetHideCountdownNumbers(true)
                     
+                    -- Hide/Show the swipe animation
+                    aura.cooldown:SetDrawSwipe(not hideSwipe)
+                    
                     if showCountdown then
                         -- Create our custom countdown text overlay
                         if not aura.dfCountdownOverlay then
@@ -118,7 +121,16 @@ function DF:ApplyAuraLayout(frame)
                         -- Store reference to cooldown for OnUpdate
                         aura.dfCountdownOverlay.cooldown = aura.cooldown
                         
-                        -- Set up OnUpdate to read cooldown times
+                        -- Hook SetCooldown to capture start/duration before they become secret
+                        if not aura.cooldown.dfHooked then
+                            hooksecurefunc(aura.cooldown, "SetCooldown", function(self, start, duration)
+                                self.dfStart = start
+                                self.dfDuration = duration
+                            end)
+                            aura.cooldown.dfHooked = true
+                        end
+                        
+                        -- Set up OnUpdate to read cooldown times from our stored values
                         if not aura.dfCountdownOverlay.hasOnUpdate then
                             aura.dfCountdownOverlay:SetScript("OnUpdate", function(self, elapsed)
                                 self.elapsed = (self.elapsed or 0) + elapsed
@@ -128,8 +140,9 @@ function DF:ApplyAuraLayout(frame)
                                 local cd = self.cooldown
                                 local text = self:GetParent().dfCountdownText
                                 
-                                if cd and cd:IsShown() and cd:GetCooldownDuration() > 0 then
-                                    local remaining = cd:GetCooldownDuration() / 1000
+                                -- Use our stored values instead of API calls
+                                if cd and cd:IsShown() and cd.dfStart and cd.dfDuration and cd.dfDuration > 0 then
+                                    local remaining = (cd.dfStart + cd.dfDuration) - GetTime()
                                     
                                     if remaining > 0.5 then
                                         if remaining >= 3600 then
@@ -247,7 +260,8 @@ function DF:ApplyAuraLayout(frame)
         db.raidBuffCountdownFont,
         db.raidBuffCountdownOutline,
         db.raidBuffCountdownX,
-        db.raidBuffCountdownY
+        db.raidBuffCountdownY,
+        db.raidBuffHideSwipe
     )
 
     -- Apply to Debuffs
@@ -273,7 +287,8 @@ function DF:ApplyAuraLayout(frame)
         db.raidDebuffCountdownFont,
         db.raidDebuffCountdownOutline,
         db.raidDebuffCountdownX,
-        db.raidDebuffCountdownY
+        db.raidDebuffCountdownY,
+        db.raidDebuffHideSwipe
     )
 end
 

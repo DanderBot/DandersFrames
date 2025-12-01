@@ -214,6 +214,7 @@ DF.PartyDefaults = {
     raidBuffCountdownOutline = "OUTLINE",
     raidBuffCountdownX = 0,
     raidBuffCountdownY = 0,
+    raidBuffHideSwipe = false,
 
     -- Debuffs
     raidDebuffScale = 1,
@@ -238,6 +239,7 @@ DF.PartyDefaults = {
     raidDebuffCountdownOutline = "OUTLINE",
     raidDebuffCountdownX = 0,
     raidDebuffCountdownY = 0,
+    raidDebuffHideSwipe = false,
     
     -- Dispel Toggles
     showDispelIcon = true,
@@ -444,6 +446,7 @@ DF.RaidDefaults = {
     raidBuffCountdownOutline = "OUTLINE",
     raidBuffCountdownX = 0,
     raidBuffCountdownY = 0,
+    raidBuffHideSwipe = false,
 
     -- Debuffs
     raidDebuffScale = 1,
@@ -468,6 +471,7 @@ DF.RaidDefaults = {
     raidDebuffCountdownOutline = "OUTLINE",
     raidDebuffCountdownX = 0,
     raidDebuffCountdownY = 0,
+    raidDebuffHideSwipe = false,
     
     -- Dispel Toggles
     showDispelIcon = true,

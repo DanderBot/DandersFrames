@@ -353,6 +353,8 @@ function DF:SetupGUIPages(GUI, CreateTab, BuildPage)
         bCdOffX.hideOn = function(d) return not d.showAdvancedBuffOptions or not d.raidBuffShowCountdown end
         local bCdOffY = Add(GUI:CreateSlider(self, "Countdown Y", -20, 20, 1, db, "raidBuffCountdownY"), 60, 1)
         bCdOffY.hideOn = function(d) return not d.showAdvancedBuffOptions or not d.raidBuffShowCountdown end
+        local bHideSwipe = Add(GUI:CreateCheckbox(self, "Hide Cooldown Swipe", db, "raidBuffHideSwipe"), 30, 1)
+        bHideSwipe.hideOn = function(d) return not d.showAdvancedBuffOptions end
         
         -- COLUMN 2: Debuffs
         Add(GUI:CreateHeader(self, "Debuffs"), 30, 2)
@@ -412,6 +414,8 @@ function DF:SetupGUIPages(GUI, CreateTab, BuildPage)
         dCdOffX.hideOn = function(d) return not d.showAdvancedDebuffOptions or not d.raidDebuffShowCountdown end
         local dCdOffY = Add(GUI:CreateSlider(self, "Countdown Y", -20, 20, 1, db, "raidDebuffCountdownY"), 60, 2)
         dCdOffY.hideOn = function(d) return not d.showAdvancedDebuffOptions or not d.raidDebuffShowCountdown end
+        local dHideSwipe = Add(GUI:CreateCheckbox(self, "Hide Cooldown Swipe", db, "raidDebuffHideSwipe"), 30, 2)
+        dHideSwipe.hideOn = function(d) return not d.showAdvancedDebuffOptions end
     end)
     
     -- TAB 2.5: DISPELS
