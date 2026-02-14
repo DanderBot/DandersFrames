@@ -1,47 +1,91 @@
-## Interface: 120000
+## Interface: 120000, 120001
 ## Title: DandersFrames
-## Notes: Midnight Party/Raid frames.
+## Notes: Custom party/raid frames for WoW Midnight 12.0
+## X-Credits: Some optimization patterns informed by studying Grid2 and other community addons.
 ## Author: Danders
-## Version: 2.3.2
-## SavedVariables: DandersFramesDB
+## Version: 4.0.5
+## IconTexture: Interface\AddOns\DandersFrames\Media\DF_Icon
+## SavedVariables: DandersFramesDB_v2, DandersFramesClickCastingDB
+## SavedVariablesPerCharacter: DandersFramesCharDB
 ## AllowAddOnTableAccess: 1
+## OptionalDeps: Masque, LibSharedMedia-3.0, SharedMedia, SharedMedia_MyMedia, SharedMediaAdditionalFonts
 
-# -- Addon Compartment & Icon Settings --
-## IconTexture: Interface\AddOns\DandersFrames\DF_Icon
-## AddonCompartmentFunc: DandersFrames_OnAddonCompartmentClick
-
-# Load Libraries
+# Libraries
 Libs\LibStub\LibStub.lua
-Libs\CallbackHandler-1.0\CallbackHandler-1.0.xml
-Libs\AceAddon-3.0\AceAddon-3.0.xml
-Libs\AceGUI-3.0\AceGUI-3.0.xml
-Libs\AceConfig-3.0\AceConfig-3.0.xml
-Libs\AceConsole-3.0\AceConsole-3.0.xml
-Libs\AceDB-3.0\AceDB-3.0.xml
-Libs\AceDBOptions-3.0\AceDBOptions-3.0.xml
-Libs\AceEvent-3.0\AceEvent-3.0.xml
-
-# Minimap Libraries
+Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
+Libs\AceSerializer-3.0\AceSerializer-3.0.lua
 Libs\LibDataBroker-1.1\LibDataBroker-1.1.lua
 Libs\LibDBIcon-1.0\LibDBIcon-1.0.lua
+Libs\LibSharedMedia-3.0\LibSharedMedia-3.0.lua
+Libs\LibDeflate\LibDeflate.lua
+Libs\LibSerialize\LibSerialize.lua
 
-# Core Configuration & Utilities (Load First)
-DandersFrames_Config.lua
-DandersFrames_Profile.lua
-DandersFrames_Layout.lua
+# XML Templates (must load before Lua that uses them)
+DandersFrames.xml
+
+# Core
+Config.lua
+Profile.lua
+ExportCategories.lua
+Core.lua
+
+# GUI System
+GUI\IconLib.lua
+GUI\GUI.lua
+GUI\ColorPickerTest.lua
+Features\Search.lua
+Options\Options.lua
+Options\AutoProfiles.lua
+
+# Frame System
+Frames\Core.lua
+Frames\Colors.lua
+Frames\Create.lua
+Frames\Headers.lua
+Frames\Update.lua
+Frames\Bars.lua
+Frames\Icons.lua
+Frames\StatusIcons.lua
+Frames\Init.lua
+Frames\Position.lua
+Frames\Pets.lua
+
+# Test Mode
+TestMode\TestFramePool.lua
+TestMode\TestMode.lua
 
 # Features
-DandersFrames_Hooks.lua
-DandersFrames_Health.lua
-DandersFrames_Text.lua
-DandersFrames_Auras.lua
-DandersFrames_Bars.lua
-DandersFrames_Minimap.lua
-DandersFrames_EditMode.lua
+Features\Auras.lua
+Features\PrivateAuras.lua
+Features\Highlights.lua
+Features\ElementAppearance.lua
+Features\Range.lua
+Features\Sort.lua
+Features\SecureSort.lua
+Features\Dispel.lua
+Features\MyBuffIndicators.lua
+Features\TargetedSpells.lua
+Features\PinnedFrames.lua
+Features\FlatRaidFrames.lua
 
-# Options File
-DandersFrames_Options.lua
-DandersFrames_GUI.lua
+# Debug
+Debug\DebugAuras.lua
+Debug\AtlasBrowser.lua
+Debug\Performance.lua
+Debug\PerformanceTest.lua
+Debug\Profiler.lua
 
-# Main Core Logic (Load Last)
-DandersFrames.lua
+# Click-Casting System
+ClickCasting\Core.lua
+ClickCasting\Constants.lua
+ClickCasting\Profiles.lua
+ClickCasting\Frames.lua
+ClickCasting\Bindings.lua
+ClickCasting\Events.lua
+ClickCasting\UI\Main.lua
+ClickCasting\UI\ProfilesPanel.lua
+ClickCasting\UI\BindingEditor.lua
+ClickCasting\UI\Dialogs.lua
+
+# External API (for Wago UI Packs, etc.)
+API.lua

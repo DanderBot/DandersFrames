@@ -1,0 +1,17 @@
+# WoW SavedVariables
+SavedVariables/
+
+# OS junk
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editor / IDE files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Zip builds
+*.zip

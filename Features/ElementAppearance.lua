@@ -1,0 +1,1103 @@
+local addonName, DF = ...
+
+-- ============================================================
+-- ELEMENT APPEARANCE SYSTEM
+-- Centralized color AND alpha management for all frame elements
+-- Each element has a single function that determines its full appearance
+-- based on all relevant factors (OOR, dead, aggro, settings, etc.)
+--
+-- This replaces the separate color/alpha functions to prevent flickering
+-- and conflicts from multiple functions trying to set appearance.
+--
+-- Priority Order for determining appearance:
+-- 1. Aggro Override (health bar only)
+-- 2. Dead/Offline State
+-- 3. Out of Range (OOR) - element-specific or frame-level
+-- 4. Normal Settings
+--
+-- Integration Points:
+-- - Range timer (Range.lua) calls UpdateRangeAppearance every 0.2s
+--   (which skips per-element updates in standard OOR mode for performance)
+-- - ApplyDeadFade/ResetDeadFade (Colors.lua) delegate here
+-- - UpdateUnitFrame (Update.lua) calls for unit changes
+-- - Settings hooks call for live updates
+-- ============================================================
+
+-- Local caching for performance
+local pairs, ipairs = pairs, ipairs
+local UnitInRange = UnitInRange
+local UnitIsDeadOrGhost = UnitIsDeadOrGhost
+local UnitIsConnected = UnitIsConnected
+local UnitExists = UnitExists
+local UnitIsUnit = UnitIsUnit
+local UnitClass = UnitClass
+local IsInGroup = IsInGroup
+local IsInRaid = IsInRaid
+local CreateColor = CreateColor
+
+-- ============================================================
+-- PERFORMANCE FIX: Reusable ColorMixin objects
+-- SetVertexColorFromBoolean needs ColorMixin objects, but creating
+-- them every call (5x/sec per frame) causes massive memory allocation.
+-- We reuse the same objects and just update their values.
+-- ============================================================
+local reusableInRangeColor = CreateColor(1, 1, 1, 1)
+local reusableOutOfRangeColor = CreateColor(1, 1, 1, 1)
+
+-- ============================================================
+-- PERFORMANCE FIX: Default color tables
+-- These are used as fallbacks when db values are nil
+-- Avoids creating new tables on every call (called 5x/sec per frame)
+-- ============================================================
+local DEFAULT_COLOR_GRAY = {r = 0.5, g = 0.5, b = 0.5}
+local DEFAULT_COLOR_HEALTH = {r = 0.2, g = 0.8, b = 0.2}
+local DEFAULT_COLOR_DEAD_BG = {r = 0.3, g = 0, b = 0}
+local DEFAULT_COLOR_BACKGROUND = {r = 0.1, g = 0.1, b = 0.1, a = 0.8}
+local DEFAULT_COLOR_WHITE = {r = 1, g = 1, b = 1}
+
+-- ============================================================
+-- HELPER FUNCTIONS
+-- ============================================================
+
+-- Check if frame is a DandersFrames frame (process all our frames)
+local function IsDandersFrame(frame)
+    return frame and frame.dfIsDandersFrame
+end
+
+-- Get the appropriate database for this frame
+local function GetDB(frame)
+    return frame.isRaidFrame and DF:GetRaidDB() or DF:GetDB()
+end
+
+-- Get current range status for a unit
+-- Returns a normal boolean from Range.lua's cache (based on C_Spell_IsSpellInRange)
+local function GetInRange(frame)
+    -- Use cached value from Range.lua if available
+    -- Range.lua uses C_Spell_IsSpellInRange which returns normal booleans
+    if frame.dfInRange ~= nil then
+        return frame.dfInRange
+    end
+    
+    -- Fallback for frames not yet updated by range timer
+    local unit = frame.unit
+    if not unit then return true end
+    
+    if not UnitExists(unit) then
+        return true
+    elseif UnitIsUnit(unit, "player") then
+        return true  -- Player is always in range
+    end
+    
+    -- Default to in-range if no cached value yet
+    return true
+end
+
+-- Apply OOR alpha to any UI element (Frame, Texture, or FontString)
+-- dfInRange is always a normal boolean, so we can safely branch on it.
+-- Uses SetAlphaFromBoolean when available, falls back to SetAlpha.
+local function ApplyOORAlpha(element, inRange, inAlpha, oorAlpha)
+    if not element then return end
+    if element.SetAlphaFromBoolean then
+        element:SetAlphaFromBoolean(inRange, inAlpha, oorAlpha)
+    else
+        element:SetAlpha(inRange and inAlpha or oorAlpha)
+    end
+end
+
+-- Check if unit is dead or offline
+local function IsDeadOrOffline(frame)
+    local unit = frame.unit
+    if not unit or not UnitExists(unit) then return false end
+    return UnitIsDeadOrGhost(unit) or not UnitIsConnected(unit)
+end
+
+-- Check if unit is specifically offline (not just dead)
+local function IsOffline(frame)
+    local unit = frame.unit
+    if not unit or not UnitExists(unit) then return false end
+    return not UnitIsConnected(unit)
+end
+
+-- Get class color for a unit
+local function GetClassColor(frame)
+    local unit = frame.unit
+    if not unit or not UnitExists(unit) then
+        return DEFAULT_COLOR_GRAY
+    end
+    local _, class = UnitClass(unit)
+    return DF:GetClassColor(class)
+end
+
+-- ============================================================
+-- HEALTH BAR APPEARANCE
+-- Handles: color mode, dead/offline, aggro, OOR alpha
+-- We apply color via the texture's SetVertexColor to avoid secret value issues
+-- ============================================================
+
+function DF:UpdateHealthBarAppearance(frame)
+    if not IsDandersFrame(frame) then return end
+    if not frame.healthBar then return end
+    
+    local db = GetDB(frame)
+    if not db then return end
+    
+    -- Skip during test mode (test mode handles its own appearance)
+    if DF.testMode or DF.raidTestMode then return end
+    
+    local unit = frame.unit
+    local deadOrOffline = IsDeadOrOffline(frame)
+    local offline = IsOffline(frame)
+    local inRange = GetInRange(frame)
+    local aggroActive = frame.dfAggroActive and frame.dfAggroColor
+    
+    -- Get the texture - this is what we apply colors to
+    local tex = frame.healthBar:GetStatusBarTexture()
+    if not tex then return end
+    
+    -- ========================================
+    -- DETERMINE ALPHA
+    -- ========================================
+    local colorMode = db.healthColorMode or "CLASS"
+    local alpha
+    if colorMode == "CUSTOM" then
+        local c = db.healthColor
+        alpha = (c and c.a) or 1.0
+    else
+        alpha = db.classColorAlpha or 1.0
+    end
+    
+    if deadOrOffline and db.fadeDeadFrames then
+        alpha = db.fadeDeadHealthBar or 1
+    end
+    
+    -- ========================================
+    -- APPLY COLOR
+    -- ========================================
+    
+    if aggroActive then
+        -- Priority 1: Aggro override
+        local c = frame.dfAggroColor
+        tex:SetVertexColor(c.r, c.g, c.b)
+    elseif deadOrOffline then
+        -- Priority 2: Dead/Offline gray
+        if offline then
+            tex:SetVertexColor(0.5, 0.5, 0.5)
+        else
+            tex:SetVertexColor(0.3, 0.3, 0.3)
+        end
+    else
+        -- Priority 3: Normal color based on mode
+        if colorMode == "PERCENT" then
+            -- PERCENT mode: Use UnitHealthPercent with curve - returns ColorMixin
+            local curve = DF:GetCurveForUnit(unit, db)
+            if curve and unit and UnitHealthPercent then
+                local color = UnitHealthPercent(unit, true, curve)
+                if color then
+                    tex:SetVertexColor(color:GetRGB())
+                else
+                    -- Fallback to class color
+                    local classColor = GetClassColor(frame)
+                    tex:SetVertexColor(classColor.r, classColor.g, classColor.b)
+                end
+            else
+                -- Fallback to class color
+                local classColor = GetClassColor(frame)
+                tex:SetVertexColor(classColor.r, classColor.g, classColor.b)
+            end
+        elseif colorMode == "CLASS" then
+            local classColor = GetClassColor(frame)
+            tex:SetVertexColor(classColor.r, classColor.g, classColor.b)
+        elseif colorMode == "CUSTOM" then
+            local c = db.healthColor or DEFAULT_COLOR_HEALTH
+            tex:SetVertexColor(c.r, c.g, c.b)
+        else
+            -- Default fallback
+            tex:SetVertexColor(0, 0.8, 0)
+        end
+    end
+    
+    -- ========================================
+    -- APPLY ALPHA
+    -- ========================================
+    if db.oorEnabled then
+        -- Element-specific OOR mode
+        local oorAlpha = db.oorHealthBarAlpha or 0.2
+        ApplyOORAlpha(tex, inRange, alpha, oorAlpha)
+    else
+        -- Frame-level OOR mode - just apply alpha
+        tex:SetAlpha(alpha)
+    end
+end
+
+-- ============================================================
+-- MISSING HEALTH BAR APPEARANCE
+-- Handles: dead/offline custom color override
+-- ============================================================
+
+function DF:UpdateMissingHealthBarAppearance(frame)
+    if not IsDandersFrame(frame) then return end
+    if not frame.missingHealthBar then return end
+    
+    -- Skip during test mode
+    if DF.testMode or DF.raidTestMode then return end
+    
+    local unit = frame.unit
+    if not unit then return end
+    
+    -- SetMissingHealthBarValue handles the dead color override internally
+    DF.SetMissingHealthBarValue(frame.missingHealthBar, unit, frame)
+end
+
+-- ============================================================
+-- BACKGROUND APPEARANCE
+-- Handles: color mode, textured vs solid, dead/offline, OOR alpha
+-- ============================================================
+
+function DF:UpdateBackgroundAppearance(frame)
+    if not IsDandersFrame(frame) then return end
+    if not frame.background then return end
+    
+    local db = GetDB(frame)
+    if not db then return end
+    
+    -- Skip during test mode
+    if DF.testMode or DF.raidTestMode then return end
+    
+    -- Skip if actively adjusting background color in options (prevents flicker)
+    if DF.isAdjustingBackgroundColor then return end
+    
+    -- Handle backgroundMode visibility
+    local backgroundMode = db.backgroundMode or "BACKGROUND"
+    if backgroundMode == "MISSING_HEALTH" then
+        -- Only missing health bar visible, hide solid background
+        frame.background:SetAlpha(0)
+        return
+    end
+    -- For "BACKGROUND" or "BOTH", continue with normal background rendering
+    
+    local unit = frame.unit
+    local deadOrOffline = IsDeadOrOffline(frame)
+    local inRange = GetInRange(frame)
+    
+    -- Check if using textured background
+    local bgTexture = db.backgroundTexture or "Solid"
+    local isTexturedBg = bgTexture ~= "Solid" and bgTexture ~= ""
+    
+    -- ========================================
+    -- DETERMINE COLOR
+    -- ========================================
+    local r, g, b = 0.1, 0.1, 0.1  -- Default dark
+    local baseAlpha = 0.8
+    
+    local bgMode = db.backgroundColorMode or "CUSTOM"
+    
+    -- Check for dead custom color override (COLOR only, alpha handled separately)
+    local useDeadColor = deadOrOffline and db.fadeDeadFrames and db.fadeDeadUseCustomColor
+    
+    if useDeadColor then
+        -- Use custom dead COLOR (alpha is handled in next section)
+        local c = db.fadeDeadBackgroundColor or DEFAULT_COLOR_DEAD_BG
+        r, g, b = c.r, c.g, c.b
+        baseAlpha = 0.8
+    elseif bgMode == "CLASS" and unit and UnitExists(unit) then
+        local classColor = GetClassColor(frame)
+        r, g, b = classColor.r, classColor.g, classColor.b
+        baseAlpha = db.backgroundClassAlpha or 0.3
+    elseif bgMode == "CUSTOM" then
+        local c = db.backgroundColor or DEFAULT_COLOR_BACKGROUND
+        r, g, b = c.r, c.g, c.b
+        baseAlpha = c.a or 0.8
+    else
+        -- Fallback - use default background color (BLIZZARD/BLACK migrated to CUSTOM in v3.2.x)
+        local c = db.backgroundColor or DEFAULT_COLOR_BACKGROUND
+        r, g, b = c.r, c.g, c.b
+        baseAlpha = c.a or 0.8
+    end
+    
+    -- ========================================
+    -- DETERMINE ALPHA
+    -- ========================================
+    local finalAlpha = baseAlpha
+    
+    -- Dead fade ALWAYS affects alpha when enabled
+    if deadOrOffline and db.fadeDeadFrames then
+        finalAlpha = db.fadeDeadBackground or 1
+    end
+    
+    -- ========================================
+    -- APPLY APPEARANCE
+    -- ========================================
+    if db.oorEnabled then
+        -- Element-specific OOR mode
+        local oorBgAlpha = db.oorBackgroundAlpha or 0.1
+        
+        if isTexturedBg then
+            -- Textured background: use SetVertexColor for color+alpha
+            frame.background:SetAlpha(1.0)  -- Keep frame alpha at 1
+            if frame.background.SetVertexColorFromBoolean then
+                -- PERF: Reuse color objects instead of creating new ones
+                reusableInRangeColor:SetRGBA(r, g, b, finalAlpha)
+                reusableOutOfRangeColor:SetRGBA(r, g, b, oorBgAlpha)
+                frame.background:SetVertexColorFromBoolean(inRange, reusableInRangeColor, reusableOutOfRangeColor)
+            else
+                local effectiveAlpha = inRange and finalAlpha or oorBgAlpha
+                frame.background:SetVertexColor(r, g, b, effectiveAlpha)
+            end
+        else
+            -- Solid background: use SetColorTexture + ApplyOORAlpha
+            frame.background:SetColorTexture(r, g, b, 1.0)
+            ApplyOORAlpha(frame.background, inRange, finalAlpha, oorBgAlpha)
+        end
+    else
+        -- Frame-level OOR mode
+        if isTexturedBg then
+            frame.background:SetAlpha(1.0)
+            frame.background:SetVertexColor(r, g, b, finalAlpha)
+        else
+            frame.background:SetColorTexture(r, g, b, 1.0)
+            frame.background:SetAlpha(finalAlpha)
+        end
+    end
+end
+
+-- ============================================================
+-- NAME TEXT APPEARANCE
+-- Handles: color (class or custom), dead/offline, OOR alpha
+-- ============================================================
+
+function DF:UpdateNameTextAppearance(frame)
+    if not IsDandersFrame(frame) then return end
+    if not frame.nameText then return end
+    
+    -- Skip test frames - they handle their own appearance in TestMode.lua
+    if frame.dfIsTestFrame then return end
+    
+    local db = GetDB(frame)
+    if not db then return end
+    
+    local deadOrOffline = IsDeadOrOffline(frame)
+    local inRange = GetInRange(frame)
+    
+    -- ========================================
+    -- DETERMINE COLOR
+    -- ========================================
+    local r, g, b = 1, 1, 1  -- Default white
+    
+    if db.nameTextUseClassColor then
+        -- Class color always applies, even when dead/offline
+        local classColor = GetClassColor(frame)
+        r, g, b = classColor.r, classColor.g, classColor.b
+    elseif deadOrOffline then
+        -- Gray for dead/offline (only when not using class color)
+        r, g, b = 0.5, 0.5, 0.5
+    else
+        local c = db.nameTextColor or DEFAULT_COLOR_WHITE
+        r, g, b = c.r, c.g, c.b
+    end
+    
+    -- ========================================
+    -- DETERMINE ALPHA
+    -- ========================================
+    local alpha = 1.0
+    
+    if deadOrOffline and db.fadeDeadFrames then
+        alpha = db.fadeDeadName or 1.0
+    end
+    
+    -- ========================================
+    -- APPLY APPEARANCE
+    -- ========================================
+    if db.oorEnabled then
+        local oorAlpha = db.oorNameTextAlpha or 1
+        
+        -- Set color first
+        frame.nameText:SetTextColor(r, g, b, 1.0)
+        
+        -- Apply OOR alpha
+        ApplyOORAlpha(frame.nameText, inRange, alpha, oorAlpha)
+    else
+        -- Frame-level OOR: just apply color with alpha
+        frame.nameText:SetTextColor(r, g, b, alpha)
+    end
+end
+
+-- ============================================================
+-- HEALTH TEXT APPEARANCE
+-- ============================================================
+
+function DF:UpdateHealthTextAppearance(frame)
+    if not IsDandersFrame(frame) then return end
+    if not frame.healthText then return end
+    
+    local db = GetDB(frame)
+    if not db then return end
+    
+    -- Skip during test mode
+    if DF.testMode or DF.raidTestMode then return end
+    
+    local deadOrOffline = IsDeadOrOffline(frame)
+    local inRange = GetInRange(frame)
+    
+    -- ========================================
+    -- DETERMINE COLOR
+    -- ========================================
+    local r, g, b = 1, 1, 1  -- Default white
+    
+    if db.healthTextUseClassColor then
+        local classColor = GetClassColor(frame)
+        r, g, b = classColor.r, classColor.g, classColor.b
+    else
+        local c = db.healthTextColor or DEFAULT_COLOR_WHITE
+        r, g, b = c.r, c.g, c.b
+    end
+    
+    -- ========================================
+    -- DETERMINE ALPHA
+    -- ========================================
+    local alpha = 1.0
+    
+    if deadOrOffline and db.fadeDeadFrames then
+        alpha = db.fadeDeadHealthBar or 1  -- Health text follows health bar alpha
+    end
+    
+    -- ========================================
+    -- APPLY APPEARANCE
+    -- ========================================
+    if db.oorEnabled then
+        local oorAlpha = db.oorHealthTextAlpha or 0.25
+        
+        frame.healthText:SetTextColor(r, g, b, 1.0)
+        ApplyOORAlpha(frame.healthText, inRange, alpha, oorAlpha)
+    else
+        frame.healthText:SetTextColor(r, g, b, alpha)
+    end
+end
+
+-- ============================================================
+-- STATUS TEXT APPEARANCE
+-- ============================================================
+
+function DF:UpdateStatusTextAppearance(frame)
+    if not IsDandersFrame(frame) then return end
+    if not frame.statusText then return end
+    
+    local db = GetDB(frame)
+    if not db then return end
+    
+    -- Skip during test mode
+    if DF.testMode or DF.raidTestMode then return end
+    
+    local deadOrOffline = IsDeadOrOffline(frame)
+    
+    -- Status text color (usually white)
+    local c = db.statusTextColor or DEFAULT_COLOR_WHITE
+    local r, g, b = c.r, c.g, c.b
+    
+    -- Alpha based on dead fade settings
+    local alpha = 1.0
+    if deadOrOffline and db.fadeDeadFrames then
+        alpha = db.fadeDeadStatusText or 1.0
+    end
+    
+    frame.statusText:SetTextColor(r, g, b, alpha)
+end
+
+-- ============================================================
+-- POWER BAR APPEARANCE
+-- ============================================================
+
+function DF:UpdatePowerBarAppearance(frame)
+    if not IsDandersFrame(frame) then return end
+    if not frame.dfPowerBar then return end
+    
+    local db = GetDB(frame)
+    if not db then return end
+    
+    -- Skip during test mode
+    if DF.testMode or DF.raidTestMode then return end
+    
+    local deadOrOffline = IsDeadOrOffline(frame)
+    local inRange = GetInRange(frame)
+    
+    -- Power bar color is typically set by UpdateUnitFrame based on power type
+    -- Here we just handle alpha
+    
+    local alpha = 1.0
+    
+    if deadOrOffline and db.fadeDeadFrames then
+        alpha = db.fadeDeadPowerBar or 0
+    end
+    
+    if db.oorEnabled then
+        local oorAlpha = db.oorPowerBarAlpha or 0.2
+        ApplyOORAlpha(frame.dfPowerBar, inRange, alpha, oorAlpha)
+    else
+        frame.dfPowerBar:SetAlpha(alpha)
+    end
+end
+
+-- ============================================================
+-- BUFF ICONS APPEARANCE
+-- ============================================================
+
+function DF:UpdateBuffIconsAppearance(frame)
+    if not IsDandersFrame(frame) then return end
+    if not frame.buffIcons then return end
+    
+    local db = GetDB(frame)
+    if not db then return end
+    
+    -- Skip during test mode
+    if DF.testMode or DF.raidTestMode then return end
+    
+    local deadOrOffline = IsDeadOrOffline(frame)
+    local inRange = GetInRange(frame)
+    
+    local alpha = 1.0
+    if deadOrOffline and db.fadeDeadFrames then
+        alpha = db.fadeDeadAuras or 1.0
+    end
+    
+    if db.oorEnabled then
+        local oorAlpha = db.oorAurasAlpha or 0.2
+        
+        for _, icon in ipairs(frame.buffIcons) do
+            if icon then
+                ApplyOORAlpha(icon, inRange, alpha, oorAlpha)
+            end
+        end
+    else
+        for _, icon in ipairs(frame.buffIcons) do
+            if icon then
+                icon:SetAlpha(alpha)
+            end
+        end
+    end
+end
+
+-- ============================================================
+-- DEBUFF ICONS APPEARANCE
+-- ============================================================
+
+function DF:UpdateDebuffIconsAppearance(frame)
+    if not IsDandersFrame(frame) then return end
+    if not frame.debuffIcons then return end
+    
+    local db = GetDB(frame)
+    if not db then return end
+    
+    -- Skip during test mode
+    if DF.testMode or DF.raidTestMode then return end
+    
+    local deadOrOffline = IsDeadOrOffline(frame)
+    local inRange = GetInRange(frame)
+    
+    local alpha = 1.0
+    if deadOrOffline and db.fadeDeadFrames then
+        alpha = db.fadeDeadAuras or 1.0
+    end
+    
+    if db.oorEnabled then
+        local oorAlpha = db.oorAurasAlpha or 0.2
+        
+        for _, icon in ipairs(frame.debuffIcons) do
+            if icon then
+                ApplyOORAlpha(icon, inRange, alpha, oorAlpha)
+            end
+        end
+    else
+        for _, icon in ipairs(frame.debuffIcons) do
+            if icon then
+                icon:SetAlpha(alpha)
+            end
+        end
+    end
+end
+
+-- ============================================================
+-- ICON APPEARANCE (Role, Leader, Raid Target, Ready Check, Center Status)
+-- These icons don't change color, just alpha
+-- ============================================================
+
+function DF:UpdateRoleIconAppearance(frame)
+    if not IsDandersFrame(frame) then return end
+    if not frame.roleIcon then return end
+    
+    local db = GetDB(frame)
+    if not db then return end
+    
+    if DF.testMode or DF.raidTestMode then return end
+    
+    local deadOrOffline = IsDeadOrOffline(frame)
+    local inRange = GetInRange(frame)
+    
+    local alpha = 1.0
+    if deadOrOffline and db.fadeDeadFrames then
+        alpha = db.fadeDeadIcons or 1.0
+    end
+    
+    if db.oorEnabled then
+        local oorAlpha = db.oorIconsAlpha or 0.5
+        ApplyOORAlpha(frame.roleIcon, inRange, alpha, oorAlpha)
+    else
+        frame.roleIcon:SetAlpha(alpha)
+    end
+end
+
+function DF:UpdateLeaderIconAppearance(frame)
+    if not IsDandersFrame(frame) then return end
+    if not frame.leaderIcon then return end
+    
+    local db = GetDB(frame)
+    if not db then return end
+    
+    if DF.testMode or DF.raidTestMode then return end
+    
+    local deadOrOffline = IsDeadOrOffline(frame)
+    local inRange = GetInRange(frame)
+    
+    local alpha = 1.0
+    if deadOrOffline and db.fadeDeadFrames then
+        alpha = db.fadeDeadIcons or 1.0
+    end
+    
+    if db.oorEnabled then
+        local oorAlpha = db.oorIconsAlpha or 0.5
+        ApplyOORAlpha(frame.leaderIcon, inRange, alpha, oorAlpha)
+    else
+        frame.leaderIcon:SetAlpha(alpha)
+    end
+end
+
+function DF:UpdateRaidTargetIconAppearance(frame)
+    if not IsDandersFrame(frame) then return end
+    if not frame.raidTargetIcon then return end
+    
+    local db = GetDB(frame)
+    if not db then return end
+    
+    if DF.testMode or DF.raidTestMode then return end
+    
+    local deadOrOffline = IsDeadOrOffline(frame)
+    local inRange = GetInRange(frame)
+    
+    local alpha = 1.0
+    if deadOrOffline and db.fadeDeadFrames then
+        alpha = db.fadeDeadIcons or 1.0
+    end
+    
+    if db.oorEnabled then
+        local oorAlpha = db.oorIconsAlpha or 0.5
+        ApplyOORAlpha(frame.raidTargetIcon, inRange, alpha, oorAlpha)
+    else
+        frame.raidTargetIcon:SetAlpha(alpha)
+    end
+end
+
+function DF:UpdateReadyCheckIconAppearance(frame)
+    if not IsDandersFrame(frame) then return end
+    if not frame.readyCheckIcon then return end
+    
+    local db = GetDB(frame)
+    if not db then return end
+    
+    if DF.testMode or DF.raidTestMode then return end
+    
+    local deadOrOffline = IsDeadOrOffline(frame)
+    local inRange = GetInRange(frame)
+    
+    local alpha = 1.0
+    if deadOrOffline and db.fadeDeadFrames then
+        alpha = db.fadeDeadIcons or 1.0
+    end
+    
+    if db.oorEnabled then
+        local oorAlpha = db.oorIconsAlpha or 0.5
+        ApplyOORAlpha(frame.readyCheckIcon, inRange, alpha, oorAlpha)
+    else
+        frame.readyCheckIcon:SetAlpha(alpha)
+    end
+end
+
+function DF:UpdateCenterStatusIconAppearance(frame)
+    if not IsDandersFrame(frame) then return end
+    if not frame.centerStatusIcon then return end
+    
+    local db = GetDB(frame)
+    if not db then return end
+    
+    if DF.testMode or DF.raidTestMode then return end
+    
+    local deadOrOffline = IsDeadOrOffline(frame)
+    local inRange = GetInRange(frame)
+    
+    local alpha = 1.0
+    if deadOrOffline and db.fadeDeadFrames then
+        alpha = db.fadeDeadIcons or 1.0
+    end
+    
+    if db.oorEnabled then
+        local oorAlpha = db.oorIconsAlpha or 0.5
+        ApplyOORAlpha(frame.centerStatusIcon, inRange, alpha, oorAlpha)
+    else
+        frame.centerStatusIcon:SetAlpha(alpha)
+    end
+end
+
+-- ============================================================
+-- DISPEL OVERLAY APPEARANCE
+-- ============================================================
+
+function DF:UpdateDispelOverlayAppearance(frame)
+    if not IsDandersFrame(frame) then return end
+    if not frame.dfDispelOverlay then return end
+    
+    local db = GetDB(frame)
+    if not db then return end
+    
+    if DF.testMode or DF.raidTestMode then return end
+    
+    local inRange = GetInRange(frame)
+    
+    if db.oorEnabled then
+        local oorAlpha = db.oorDispelOverlayAlpha or 0.2
+        
+        -- PERF: Apply to elements directly without creating a table
+        local overlay = frame.dfDispelOverlay
+        ApplyOORAlpha(overlay.gradient, inRange, 1.0, oorAlpha)
+        ApplyOORAlpha(overlay.borderTop, inRange, 1.0, oorAlpha)
+        ApplyOORAlpha(overlay.borderBottom, inRange, 1.0, oorAlpha)
+        ApplyOORAlpha(overlay.borderLeft, inRange, 1.0, oorAlpha)
+        ApplyOORAlpha(overlay.borderRight, inRange, 1.0, oorAlpha)
+        ApplyOORAlpha(overlay.icon, inRange, 1.0, oorAlpha)
+        
+        -- For EDGE style, delegate to the dedicated function that re-applies SetGradient
+        if DF.ApplyDispelOverlayAppearance then
+            DF:ApplyDispelOverlayAppearance(frame)
+        end
+    else
+        -- Frame-level mode - dispel overlay follows frame alpha
+        if frame.dfDispelOverlay.gradient then frame.dfDispelOverlay.gradient:SetAlpha(1.0) end
+    end
+end
+
+-- ============================================================
+-- MY BUFF INDICATOR APPEARANCE
+-- ============================================================
+
+function DF:UpdateMyBuffIndicatorAppearance(frame)
+    -- Delegate to the dedicated appearance function in MyBuffIndicators.lua
+    -- This ensures there's only ONE place that sets colors/alpha
+    if DF.ApplyMyBuffIndicatorAppearance then
+        DF:ApplyMyBuffIndicatorAppearance(frame)
+    end
+end
+
+-- ============================================================
+-- MISSING BUFF ICON APPEARANCE
+-- ============================================================
+
+function DF:UpdateMissingBuffAppearance(frame)
+    if not IsDandersFrame(frame) then return end
+    if not frame.missingBuffFrame then return end
+    
+    -- PERF: Skip if missing buff frame isn't visible
+    if not frame.missingBuffFrame:IsShown() then return end
+    
+    local db = GetDB(frame)
+    if not db then return end
+    
+    if DF.testMode or DF.raidTestMode then return end
+    
+    local inRange = GetInRange(frame)
+    
+    if db.oorEnabled then
+        local oorAlpha = db.oorMissingBuffAlpha or 0.5
+        
+        ApplyOORAlpha(frame.missingBuffIcon, inRange, 1.0, oorAlpha)
+        ApplyOORAlpha(frame.missingBuffBorderLeft, inRange, 1.0, oorAlpha)
+        ApplyOORAlpha(frame.missingBuffBorderRight, inRange, 1.0, oorAlpha)
+        ApplyOORAlpha(frame.missingBuffBorderTop, inRange, 1.0, oorAlpha)
+        ApplyOORAlpha(frame.missingBuffBorderBottom, inRange, 1.0, oorAlpha)
+    end
+end
+
+-- ============================================================
+-- ABSORB BAR APPEARANCE
+-- ============================================================
+
+function DF:UpdateAbsorbBarAppearance(frame)
+    if not IsDandersFrame(frame) then return end
+    if not frame.dfAbsorbBar then return end
+    
+    -- PERF: Skip if absorb bar isn't visible
+    if not frame.dfAbsorbBar:IsShown() then return end
+    
+    local db = GetDB(frame)
+    if not db then return end
+    
+    if DF.testMode or DF.raidTestMode then return end
+    
+    local inRange = GetInRange(frame)
+    
+    if db.oorEnabled then
+        local oorAlpha = db.oorAbsorbBarAlpha or 0.5
+        ApplyOORAlpha(frame.dfAbsorbBar, inRange, 1.0, oorAlpha)
+    end
+end
+
+-- ============================================================
+-- HEAL ABSORB BAR APPEARANCE
+-- ============================================================
+
+function DF:UpdateHealAbsorbBarAppearance(frame)
+    if not IsDandersFrame(frame) then return end
+    if not frame.dfHealAbsorbBar then return end
+    
+    if not frame.dfHealAbsorbBar:IsShown() then return end
+    
+    local db = GetDB(frame)
+    if not db then return end
+    
+    if DF.testMode or DF.raidTestMode then return end
+    
+    local inRange = GetInRange(frame)
+    
+    if db.oorEnabled then
+        local oorAlpha = db.oorAbsorbBarAlpha or 0.5
+        ApplyOORAlpha(frame.dfHealAbsorbBar, inRange, 1.0, oorAlpha)
+    end
+end
+
+-- ============================================================
+-- HEAL PREDICTION BAR APPEARANCE
+-- ============================================================
+
+function DF:UpdateHealPredictionBarAppearance(frame)
+    if not IsDandersFrame(frame) then return end
+    if not frame.dfHealPredictionBar then return end
+    
+    if not frame.dfHealPredictionBar:IsShown() then return end
+    
+    local db = GetDB(frame)
+    if not db then return end
+    
+    if DF.testMode or DF.raidTestMode then return end
+    
+    local inRange = GetInRange(frame)
+    
+    if db.oorEnabled then
+        local oorAlpha = db.oorAbsorbBarAlpha or 0.5
+        ApplyOORAlpha(frame.dfHealPredictionBar, inRange, 1.0, oorAlpha)
+    end
+end
+
+-- ============================================================
+-- DEFENSIVE ICON APPEARANCE
+-- ============================================================
+
+function DF:UpdateDefensiveIconAppearance(frame)
+    if not IsDandersFrame(frame) then return end
+    if not frame.defensiveIcon then return end
+    
+    -- PERF: Skip if defensive icon isn't visible
+    if not frame.defensiveIcon:IsShown() then return end
+    
+    local db = GetDB(frame)
+    if not db then return end
+    
+    if DF.testMode or DF.raidTestMode then return end
+    
+    local inRange = GetInRange(frame)
+    local icon = frame.defensiveIcon
+    
+    if db.oorEnabled then
+        local oorAlpha = db.oorDefensiveIconAlpha or 0.5
+        
+        -- PERF: Apply to elements directly without creating a table
+        ApplyOORAlpha(icon.texture, inRange, 1.0, oorAlpha)
+        ApplyOORAlpha(icon.borderLeft, inRange, 1.0, oorAlpha)
+        ApplyOORAlpha(icon.borderRight, inRange, 1.0, oorAlpha)
+        ApplyOORAlpha(icon.borderTop, inRange, 1.0, oorAlpha)
+        ApplyOORAlpha(icon.borderBottom, inRange, 1.0, oorAlpha)
+        ApplyOORAlpha(icon.cooldown, inRange, 1.0, oorAlpha)
+        ApplyOORAlpha(icon.count, inRange, 1.0, oorAlpha)
+    end
+end
+
+-- ============================================================
+-- TARGETED SPELL CONTAINER APPEARANCE
+-- ============================================================
+
+function DF:UpdateTargetedSpellAppearance(frame)
+    if not IsDandersFrame(frame) then return end
+    if not frame.targetedSpellContainer then return end
+    
+    -- PERF: Skip if container isn't visible
+    if not frame.targetedSpellContainer:IsShown() then return end
+    
+    local db = GetDB(frame)
+    if not db then return end
+    
+    if DF.testMode or DF.raidTestMode then return end
+    
+    local inRange = GetInRange(frame)
+    
+    if db.oorEnabled then
+        local oorAlpha = db.oorTargetedSpellAlpha or 0.5
+        ApplyOORAlpha(frame.targetedSpellContainer, inRange, 1.0, oorAlpha)
+    else
+        frame.targetedSpellContainer:SetAlpha(1.0)
+    end
+end
+
+-- ============================================================
+-- FRAME-LEVEL APPEARANCE (for non-oorEnabled mode)
+-- ============================================================
+
+function DF:UpdateFrameAppearance(frame)
+    if not IsDandersFrame(frame) then return end
+    
+    local db = GetDB(frame)
+    if not db then return end
+    
+    if DF.testMode or DF.raidTestMode then return end
+    
+    -- Only apply frame-level alpha when NOT using element-specific mode
+    if db.oorEnabled then
+        -- In oorEnabled mode, frame stays at full alpha
+        ApplyOORAlpha(frame, true, 1.0, 1.0)
+    else
+        -- Frame-level OOR mode
+        local inRange = GetInRange(frame)
+        local outOfRangeAlpha = db.rangeFadeAlpha or 0.4
+        ApplyOORAlpha(frame, inRange, 1.0, outOfRangeAlpha)
+    end
+end
+
+-- ============================================================
+-- RANGE-ONLY APPEARANCE UPDATE (Performance optimization)
+-- Called by Range.lua instead of UpdateAllElementAppearances.
+-- In standard OOR mode (oorEnabled=false), only the parent frame's
+-- alpha needs updating — WoW's frame hierarchy cascades it to all
+-- children automatically. This reduces 18 function calls to 1.
+-- In element-specific OOR mode (oorEnabled=true), each element has
+-- its own alpha, so we fall through to the full update path.
+-- ============================================================
+
+function DF:UpdateRangeAppearance(frame)
+    if not IsDandersFrame(frame) then return end
+    
+    local db = GetDB(frame)
+    if not db then return end
+    
+    if db.oorEnabled then
+        -- Element-specific OOR mode: each element has its own alpha
+        -- Must update all elements individually
+        DF:UpdateAllElementAppearances(frame)
+    else
+        -- Standard mode: single SetAlpha on the parent frame cascades to all children.
+        -- Element alphas (dead state, base alpha, etc.) are already set by other
+        -- update paths (death events, settings changes, full refreshes).
+        -- We only need to update the frame-level OOR alpha here.
+        DF:UpdateFrameAppearance(frame)
+    end
+end
+
+-- ============================================================
+-- UPDATE ALL ELEMENT APPEARANCES
+-- Master function to update all elements at once
+-- ============================================================
+
+function DF:UpdateAllElementAppearances(frame)
+    if not IsDandersFrame(frame) then return end
+    
+    -- Update frame-level appearance first
+    DF:UpdateFrameAppearance(frame)
+    
+    -- Update each element
+    DF:UpdateHealthBarAppearance(frame)
+    DF:UpdateMissingHealthBarAppearance(frame)
+    DF:UpdateBackgroundAppearance(frame)
+    DF:UpdateNameTextAppearance(frame)
+    DF:UpdateHealthTextAppearance(frame)
+    DF:UpdateStatusTextAppearance(frame)
+    DF:UpdatePowerBarAppearance(frame)
+    DF:UpdateBuffIconsAppearance(frame)
+    DF:UpdateDebuffIconsAppearance(frame)
+    DF:UpdateRoleIconAppearance(frame)
+    DF:UpdateLeaderIconAppearance(frame)
+    DF:UpdateRaidTargetIconAppearance(frame)
+    DF:UpdateReadyCheckIconAppearance(frame)
+    DF:UpdateCenterStatusIconAppearance(frame)
+    DF:UpdateDispelOverlayAppearance(frame)
+    DF:UpdateMyBuffIndicatorAppearance(frame)
+    DF:UpdateMissingBuffAppearance(frame)
+    DF:UpdateAbsorbBarAppearance(frame)
+    DF:UpdateHealAbsorbBarAppearance(frame)
+    DF:UpdateHealPredictionBarAppearance(frame)
+    DF:UpdateDefensiveIconAppearance(frame)
+    DF:UpdateTargetedSpellAppearance(frame)
+end
+
+-- ============================================================
+-- HELPER: Update all DandersFrames frames
+-- ============================================================
+
+function DF:UpdateAllFrameAppearances()
+    local function updateFrame(frame)
+        if frame and frame.dfIsDandersFrame then
+            DF:UpdateAllElementAppearances(frame)
+        end
+    end
+    
+    -- All frames (party/raid/arena) via iterator
+    if DF.IterateAllFrames then
+        DF:IterateAllFrames(updateFrame)
+    end
+    
+    -- Pinned frames
+    if DF.PinnedFrames and DF.PinnedFrames.initialized and DF.PinnedFrames.headers then
+        for setIndex = 1, 2 do
+            local header = DF.PinnedFrames.headers[setIndex]
+            if header then
+                for i = 1, 40 do
+                    local child = header:GetAttribute("child" .. i)
+                    if child then
+                        updateFrame(child)
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- ============================================================
+-- BACKWARD COMPATIBILITY
+-- These functions redirect to the new appearance functions
+-- for code that still calls the old alpha-only functions
+-- ============================================================
+
+-- Redirect old alpha functions to new appearance functions
+DF.UpdateAllElementAlphas = DF.UpdateAllElementAppearances
+DF.UpdateAllSecureFrameAlphas = DF.UpdateAllFrameAppearances
+
+-- Individual redirects (in case any code calls these directly)
+DF.UpdateHealthBarAlpha = DF.UpdateHealthBarAppearance
+DF.UpdateBackgroundAlpha = DF.UpdateBackgroundAppearance
+DF.UpdateNameTextAlpha = DF.UpdateNameTextAppearance
+DF.UpdateHealthTextAlpha = DF.UpdateHealthTextAppearance
+DF.UpdateStatusTextAlpha = DF.UpdateStatusTextAppearance
+DF.UpdatePowerBarAlpha = DF.UpdatePowerBarAppearance
+DF.UpdateBuffIconsAlpha = DF.UpdateBuffIconsAppearance
+DF.UpdateDebuffIconsAlpha = DF.UpdateDebuffIconsAppearance
+DF.UpdateRoleIconAlpha = DF.UpdateRoleIconAppearance
+DF.UpdateLeaderIconAlpha = DF.UpdateLeaderIconAppearance
+DF.UpdateRaidTargetIconAlpha = DF.UpdateRaidTargetIconAppearance
+DF.UpdateReadyCheckIconAlpha = DF.UpdateReadyCheckIconAppearance
+DF.UpdateCenterStatusIconAlpha = DF.UpdateCenterStatusIconAppearance
+DF.UpdateDispelOverlayAlpha = DF.UpdateDispelOverlayAppearance
+DF.UpdateMissingBuffAlpha = DF.UpdateMissingBuffAppearance
+DF.UpdateDefensiveIconAlpha = DF.UpdateDefensiveIconAppearance
+DF.UpdateTargetedSpellAlpha = DF.UpdateTargetedSpellAppearance
+DF.UpdateFrameAlpha = DF.UpdateFrameAppearance
