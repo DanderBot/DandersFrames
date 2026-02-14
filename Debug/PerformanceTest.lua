@@ -15,6 +15,7 @@ DF.PerfTest = {
     enableDefensive = true,
     enableMissingBuff = true,
     enableRange = true,
+    enableHealthFade = true,
     enableHighlights = true,
     enableHealPrediction = true,
     enableAbsorbs = true,
@@ -130,6 +131,7 @@ local function CreatePerfTestFrame()
     CreateCheckbox(frame, "Defensive Icon", "enableDefensive", col1X, yStart + (i * yStep)); i = i + 1
     CreateCheckbox(frame, "Missing Buff Icon", "enableMissingBuff", col1X, yStart + (i * yStep)); i = i + 1
     CreateCheckbox(frame, "Range Checking", "enableRange", col1X, yStart + (i * yStep)); i = i + 1
+    CreateCheckbox(frame, "Health Threshold Fade", "enableHealthFade", col1X, yStart + (i * yStep)); i = i + 1
     CreateCheckbox(frame, "Highlights (Target/Mouse)", "enableHighlights", col1X, yStart + (i * yStep)); i = i + 1
     CreateCheckbox(frame, "Heal Prediction", "enableHealPrediction", col1X, yStart + (i * yStep)); i = i + 1
     CreateCheckbox(frame, "Absorb Shields", "enableAbsorbs", col1X, yStart + (i * yStep)); i = i + 1

@@ -891,6 +891,25 @@ DF.PartyDefaults = {
     fadeDeadStatusText = 1,
     fadeDeadUseCustomColor = false,
 
+    -- Health threshold fading (fade when health above threshold)
+    healthFadeEnabled = false,
+    healthFadeAlpha = 0.5,
+    healthFadeThreshold = 100,
+    hfCancelOnDispel = true,
+    hfElementSpecific = false,
+    hfHealthBarAlpha = 0.3,
+    hfBackgroundAlpha = 0.3,
+    hfNameTextAlpha = 0.5,
+    hfHealthTextAlpha = 0.5,
+    hfAurasAlpha = 0.5,
+    hfIconsAlpha = 0.5,
+    hfDispelOverlayAlpha = 0.3,
+    hfMyBuffIndicatorAlpha = 0.5,
+    hfPowerBarAlpha = 0.3,
+    hfMissingBuffAlpha = 0.5,
+    hfDefensiveIconAlpha = 0.5,
+    hfTargetedSpellAlpha = 0.5,
+
     -- Debuff settings
     debuffAlpha = 1,
     debuffAnchor = "BOTTOMLEFT",
@@ -1947,6 +1966,25 @@ DF.RaidDefaults = {
     fadeDeadPowerBar = 0,
     fadeDeadStatusText = 1,
     fadeDeadUseCustomColor = false,
+
+    -- Health threshold fading (fade when health above threshold)
+    healthFadeEnabled = false,
+    healthFadeAlpha = 0.5,
+    healthFadeThreshold = 100,
+    hfCancelOnDispel = true,
+    hfElementSpecific = false,
+    hfHealthBarAlpha = 0.3,
+    hfBackgroundAlpha = 0.3,
+    hfNameTextAlpha = 0.5,
+    hfHealthTextAlpha = 0.5,
+    hfAurasAlpha = 0.5,
+    hfIconsAlpha = 0.5,
+    hfDispelOverlayAlpha = 0.3,
+    hfMyBuffIndicatorAlpha = 0.5,
+    hfPowerBarAlpha = 0.3,
+    hfMissingBuffAlpha = 0.5,
+    hfDefensiveIconAlpha = 0.5,
+    hfTargetedSpellAlpha = 0.5,
 
     -- Debuff settings
     debuffAlpha = 1,

@@ -633,6 +633,9 @@ rangeAnimGroup:SetLooping("REPEAT")
 local function RangeCheckFrame(frame)
     if frame and frame:IsShown() then
         DF:UpdateRange(frame)
+        if DF.UpdateHealthFade then
+            DF:UpdateHealthFade(frame)
+        end
     end
 end
 
@@ -671,6 +674,9 @@ rangeAnimGroup:SetScript("OnLoop", function()
                 local frame = DF.raidPetFrames[i]
                 if frame and not frame.dfPetHidden then
                     DF:UpdatePetRange(frame)
+                    if DF.UpdatePetHealthFade then
+                        DF:UpdatePetHealthFade(frame)
+                    end
                 end
             end
         end
@@ -697,6 +703,9 @@ rangeAnimGroup:SetScript("OnLoop", function()
             local petFrame = DF.petFrames.player
             if not petFrame.dfPetHidden then
                 DF:UpdatePetRange(petFrame)
+                if DF.UpdatePetHealthFade then
+                    DF:UpdatePetHealthFade(petFrame)
+                end
             end
         end
         
@@ -705,6 +714,9 @@ rangeAnimGroup:SetScript("OnLoop", function()
                 local frame = DF.partyPetFrames[i]
                 if frame and not frame.dfPetHidden then
                     DF:UpdatePetRange(frame)
+                    if DF.UpdatePetHealthFade then
+                        DF:UpdatePetHealthFade(frame)
+                    end
                 end
             end
         end

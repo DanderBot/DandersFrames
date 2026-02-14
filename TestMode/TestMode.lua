@@ -662,8 +662,51 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
         frame.dfTestDeadFadeAlphas = nil
     end
     
+    -- Health-based fading (above threshold): only when in range, alive, and option enabled
+    local healthPct = (testData.healthPercent or 1) * 100
+    local threshold = db.fullHealthFadeThreshold or 100
+    local isAboveHealthThreshold = not isOutOfRange and not applyDeadFade
+        and db.fullHealthFadeEnabled
+        and (healthPct >= threshold - 0.5)
+    if isAboveHealthThreshold and db.fhCancelOnDispel and frame.dfDispelOverlay and frame.dfDispelOverlay:IsShown() then
+        isAboveHealthThreshold = false
+    end
+    
+    if isAboveHealthThreshold then
+        if db.fhElementSpecific then
+            healthBarAlpha = db.fhHealthBarAlpha or 0.5
+            backgroundAlpha = db.fhBackgroundAlpha or 0.5
+            nameAlpha = db.fhNameTextAlpha or 0.5
+            healthTextAlpha = db.fhHealthTextAlpha or 0.5
+            aurasAlpha = db.fhAurasAlpha or 0.5
+            iconsAlpha = db.fhIconsAlpha or 0.5
+            powerBarAlpha = db.fhPowerBarAlpha or 0.5
+            dispelAlpha = db.fhDispelOverlayAlpha or 0.5
+            targetedSpellAlpha = db.fhTargetedSpellAlpha or 0.5
+        else
+            local fhAlpha = db.fullHealthFadeAlpha or 0.5
+            healthBarAlpha = fhAlpha
+            backgroundAlpha = fhAlpha
+            nameAlpha = fhAlpha
+            healthTextAlpha = fhAlpha
+            aurasAlpha = fhAlpha
+            iconsAlpha = fhAlpha
+            powerBarAlpha = fhAlpha
+            dispelAlpha = fhAlpha
+            targetedSpellAlpha = fhAlpha
+        end
+        frame.dfTestHealthFadeAlphas = {
+            icons = iconsAlpha,
+            power = powerBarAlpha,
+            dispel = dispelAlpha,
+            targetedSpell = targetedSpellAlpha,
+        }
+    else
+        frame.dfTestHealthFadeAlphas = nil
+    end
+    
     -- Update name color with appropriate alpha
-    -- OOR takes priority over dead fade
+    -- Priority: OOR > dead fade > health-based fade
     local finalNameAlpha = nameAlpha
     if not isOutOfRange and applyDeadFade then
         finalNameAlpha = db.fadeDeadName or 1.0
@@ -813,6 +856,19 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
                 frame.background:SetVertexColor(0, 0, 0, 0.8 * backgroundAlpha)
             end
         end
+    end
+    
+    -- Frame-level alpha when not using element-specific OOR (same as live UpdateFrameAppearance)
+    if not db.oorEnabled then
+        if isOutOfRange then
+            frame:SetAlpha(db.rangeFadeAlpha or db.rangeAlpha or 0.55)
+        elseif isAboveHealthThreshold and not db.fhElementSpecific then
+            frame:SetAlpha(db.fullHealthFadeAlpha or 0.5)
+        else
+            frame:SetAlpha(1)
+        end
+    else
+        frame:SetAlpha(1)
     end
     
     -- Apply alpha to health text
@@ -1184,14 +1240,14 @@ function DF:UpdateTestIcons(frame, testData)
         end
     end
     
-    -- Apply alpha to icons - check dead fade first, then OOR alpha
+    -- Apply alpha to icons - check dead fade first, then health-based fade, then OOR alpha
     local alpha = 1.0
     if frame.dfTestDeadFadeAlphas and frame.dfTestDeadFadeAlphas.icons then
-        -- Dead fade takes priority
         alpha = frame.dfTestDeadFadeAlphas.icons
     elseif frame.dfDeadFadeApplied then
-        -- Dead fade already applied the correct alpha in ApplyDeadFade, don't override
         return
+    elseif frame.dfTestHealthFadeAlphas and frame.dfTestHealthFadeAlphas.icons then
+        alpha = frame.dfTestHealthFadeAlphas.icons
     elseif frame.dfTestOORAlphas and frame.dfTestOORAlphas.icons then
         alpha = frame.dfTestOORAlphas.icons
     end
@@ -1635,12 +1691,14 @@ function DF:UpdateTestStatusIcons(frame, testData)
         end
     end
     
-    -- Apply alpha to status icons based on dead/OOR fade
+    -- Apply alpha to status icons based on dead / health-based / OOR fade
     local alpha = 1.0
     if frame.dfTestDeadFadeAlphas and frame.dfTestDeadFadeAlphas.icons then
         alpha = frame.dfTestDeadFadeAlphas.icons
     elseif frame.dfDeadFadeApplied then
         return
+    elseif frame.dfTestHealthFadeAlphas and frame.dfTestHealthFadeAlphas.icons then
+        alpha = frame.dfTestHealthFadeAlphas.icons
     elseif frame.dfTestOORAlphas and frame.dfTestOORAlphas.icons then
         alpha = frame.dfTestOORAlphas.icons
     end
@@ -3431,11 +3489,12 @@ function DF:UpdateTestPowerBar(frame, testData)
         end
     end
     
-    -- Apply OOR alpha or dead fade alpha
+    -- Apply dead / health-based / OOR alpha
     local alpha = 1.0
     if frame.dfTestDeadFadeAlphas and frame.dfTestDeadFadeAlphas.power then
-        -- Dead fade takes priority
         alpha = frame.dfTestDeadFadeAlphas.power
+    elseif frame.dfTestHealthFadeAlphas and frame.dfTestHealthFadeAlphas.power then
+        alpha = frame.dfTestHealthFadeAlphas.power
     elseif frame.dfTestOORAlphas and frame.dfTestOORAlphas.power then
         alpha = frame.dfTestOORAlphas.power
     end
@@ -5128,8 +5187,10 @@ function DF:UpdateTestTargetedSpell(frame, testData)
         local durationColor = db.targetedSpellDurationColor or {r = 1, g = 1, b = 1}
         local alpha = db.targetedSpellAlpha or 1.0
         
-        -- Apply OOR alpha if frame is out of range
-        if frame.dfTestOORAlphas and frame.dfTestOORAlphas.targetedSpell then
+        -- Apply health-based or OOR alpha in test mode
+        if frame.dfTestHealthFadeAlphas and frame.dfTestHealthFadeAlphas.targetedSpell then
+            alpha = alpha * frame.dfTestHealthFadeAlphas.targetedSpell
+        elseif frame.dfTestOORAlphas and frame.dfTestOORAlphas.targetedSpell then
             alpha = alpha * frame.dfTestOORAlphas.targetedSpell
         end
         

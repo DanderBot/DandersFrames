@@ -74,6 +74,8 @@ end
 DF.GetSafeHealthPercent = GetSafeHealthPercent
 
 -- Helper to set health bar value safely
+-- When health threshold fading is enabled, a hidden bar receives the same value so its
+-- OnValueChanged callback gets the resolved (non-secret) percent and updates dfComputedAboveThreshold.
 local function SetHealthBarValue(bar, unit, frame)
     if not bar then return end
     
@@ -96,6 +98,29 @@ local function SetHealthBarValue(bar, unit, frame)
         bar:SetValue(pct, Enum.StatusBarInterpolation.ExponentialEaseOut)
     else
         bar:SetValue(pct)
+    end
+
+    -- Health threshold fading: use a hidden bar so OnValueChanged receives resolved value (safe with secret values)
+    if frame then
+        if not frame.dfHealthCheckBar then
+            frame.dfHealthCheckBar = CreateFrame("StatusBar", nil, bar)
+            frame.dfHealthCheckBar:SetSize(1, 1)
+            frame.dfHealthCheckBar:SetMinMaxValues(0, 100)
+            frame.dfHealthCheckBar:SetAlpha(0)
+            frame.dfHealthCheckBar:Hide()
+            frame.dfHealthCheckBar:SetScript("OnValueChanged", function(self, value)
+                if frame then
+                    local thresholdDb = frame.isRaidFrame and (DF.GetRaidDB and DF:GetRaidDB()) or (DF.GetDB and DF:GetDB())
+                    local threshold = (thresholdDb and thresholdDb.healthFadeThreshold) or 100
+                    frame.dfComputedAboveThreshold = (value >= threshold - 0.5)
+                    if DF.UpdateHealthFade then
+                        DF:UpdateHealthFade(frame)
+                    end
+                end
+            end)
+        end
+        frame.dfHealthCheckBar:SetMinMaxValues(0, 100)
+        frame.dfHealthCheckBar:SetValue(pct)
     end
 end
 

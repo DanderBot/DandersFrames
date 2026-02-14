@@ -837,6 +837,25 @@ DF.ExportCategories = {
         "hoverHighlightMode",
         "hoverHighlightThickness",
         
+        -- Health Threshold Fading
+        "healthFadeEnabled",
+        "healthFadeAlpha",
+        "healthFadeThreshold",
+        "hfCancelOnDispel",
+        "hfElementSpecific",
+        "hfHealthBarAlpha",
+        "hfBackgroundAlpha",
+        "hfNameTextAlpha",
+        "hfHealthTextAlpha",
+        "hfAurasAlpha",
+        "hfIconsAlpha",
+        "hfDispelOverlayAlpha",
+        "hfMyBuffIndicatorAlpha",
+        "hfPowerBarAlpha",
+        "hfMissingBuffAlpha",
+        "hfDefensiveIconAlpha",
+        "hfTargetedSpellAlpha",
+
         -- Out of Range
         "oorEnabled",
         "rangeAlpha",
