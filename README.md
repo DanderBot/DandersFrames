@@ -23,13 +23,17 @@ A party and raid frame addon for World of Warcraft: Midnight.
 
 ## Contributing
 
-Pull requests are welcome! Please test your changes in-game before submitting.
+Pull requests are welcome! If you'd like to contribute, please follow these steps:
 
 1. Fork this repository
 2. Create a feature branch (`git checkout -b my-feature`)
 3. Commit your changes (`git commit -m "Add my feature"`)
 4. Push to your fork (`git push origin my-feature`)
-5. Open a Pull Request
+5. Open a Pull Request with a clear description of your changes
+
+Please test all changes thoroughly in-game before submitting.
+
+All pull requests are reviewed at our discretion, and not all submissions will be merged. We appreciate every contribution, but we reserve the right to decline changes that don't align with the direction of the project. We encourage respectful and constructive collaboration, and we're grateful to everyone who takes the time to contribute.
 
 ## Libraries
 
@@ -46,4 +50,4 @@ This addon bundles the following third-party libraries, each under their own res
 
 ## License
 
-All rights reserved unless otherwise stated.
+All rights reserved.
