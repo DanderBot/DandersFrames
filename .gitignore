@@ -16,5 +16,9 @@ Desktop.ini
 # Zip builds
 *.zip
 
+# Claude Code (local dev only)
+CLAUDE.md
+.claude/
+
 # Reference material (not for repo)
 _Reference/
