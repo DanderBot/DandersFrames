@@ -570,6 +570,10 @@ local function RefreshAllOverrideIndicators()
     if GUI.UpdatePositionOverrideIndicator then
         GUI.UpdatePositionOverrideIndicator()
     end
+    -- Refresh tab override stars (auto-profiles)
+    if DF.AutoProfilesUI and DF.AutoProfilesUI.RefreshTabOverrideStars then
+        DF.AutoProfilesUI:RefreshTabOverrideStars()
+    end
 end
 GUI.RefreshAllOverrideIndicators = RefreshAllOverrideIndicators
 
@@ -4255,6 +4259,11 @@ function DF:ToggleGUI()
         if AutoProfilesUI and AutoProfilesUI.RefreshEditingUI then
             AutoProfilesUI:RefreshEditingUI()
         end
+
+        -- Refresh override stars (shows if a runtime profile is active)
+        if AutoProfilesUI and AutoProfilesUI.RefreshTabOverrideStars then
+            AutoProfilesUI:RefreshTabOverrideStars()
+        end
         
         DF.GUIFrame:Show()
         GUI:RefreshCurrentPage()
@@ -5089,9 +5098,29 @@ function DF:CreateGUI()
     GUI.clickCastPanel = clickCastPanel
     
     -- =========================================================================
-    -- FOOTER BAR (Discord & Donation links)
+    -- FOOTER BAR (Discord & Donation links + bottom drag handle)
     -- =========================================================================
-    local footer = CreateFrame("Frame", nil, frame)
+
+    -- Bottom drag bar (mirrors titleBar for dragging from the bottom)
+    local bottomBar = CreateFrame("Frame", nil, frame)
+    bottomBar:SetHeight(30)
+    bottomBar:SetPoint("BOTTOMLEFT", 0, 0)
+    bottomBar:SetPoint("BOTTOMRIGHT", -16, 0)  -- Leave space for resize handle
+    bottomBar:EnableMouse(true)
+    bottomBar:RegisterForDrag("LeftButton")
+    bottomBar:SetScript("OnDragStart", function() frame:StartMoving() end)
+    bottomBar:SetScript("OnDragStop", function()
+        frame:StopMovingOrSizing()
+        local point, _, relPoint, x, y = frame:GetPoint()
+        if DF.db and DF.db.party then
+            DF.db.party.guiPoint = point
+            DF.db.party.guiRelPoint = relPoint
+            DF.db.party.guiX = x
+            DF.db.party.guiY = y
+        end
+    end)
+
+    local footer = CreateFrame("Frame", nil, bottomBar)
     footer:SetPoint("BOTTOMLEFT", 12, 8)
     footer:SetPoint("BOTTOMRIGHT", -12, 8)
     footer:SetHeight(22)

@@ -2,10 +2,19 @@
 
 ## [4.0.6] - 2026-02-15
 
+### Bug Fixes
+* `/df resetgui` command now works — was referencing wrong frame variable, also shows the GUI after resetting
+* Settings UI can now be dragged from the bottom banner in addition to the title bar
+* Test mode frames now properly reset to global settings when exiting auto-profile editing
+
 ### New Features
 * Auto-profiles now activate at runtime — raid frame settings automatically switch based on content type and raid size
 * Chat notifications when auto-profiles activate or deactivate
 * Combat-safe profile switching — queued during combat, applied when combat ends
+* Sidebar onboarding hint when entering auto-profile edit mode — highlights that all settings tabs are editable
+* Orange star indicators on sidebar tabs that contain overridden auto-profile settings (visible during edit mode and when a runtime profile is active)
+* `/df overrides` command — prints all overridden settings grouped by tab to chat
+* Hover over override count on auto-profile rows to see a tooltip with full override details per tab
 
 ## [4.0.5] - 2026-02-14
 

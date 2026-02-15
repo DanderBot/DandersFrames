@@ -71,6 +71,125 @@ local PINNED_OVERRIDABLE = {
     autoAddDPS = true, keepOfflinePlayers = true, players = true,
 }
 
+-- ============================================================
+-- OVERRIDE KEY → TAB MAPPING
+-- Maps override key prefixes to sidebar tab IDs for display.
+-- Ordered most-specific first to avoid false matches
+-- (e.g. "healthText" before "health", "defensiveIcon" before "debuff").
+-- ============================================================
+local OVERRIDE_TAB_MAP = {
+    -- Display
+    {"soloMode",            "display_visibility",   "Visibility"},
+    {"showMinimapButton",   "display_visibility",   "Visibility"},
+    {"restedIndicator",     "display_visibility",   "Visibility"},
+    {"hidePlayerFrame",     "display_visibility",   "Visibility"},
+    {"hideDefaultPlayerFrame", "display_visibility", "Visibility"},
+    {"hideBlizzardPartyFrames", "display_visibility", "Visibility"},
+    {"hideBlizzardRaidFrames", "display_visibility", "Visibility"},
+    {"showBlizzardSideMenu", "display_visibility",  "Visibility"},
+    {"tooltip",             "display_tooltips",     "Tooltips"},
+    {"rangeFade",           "display_fading",       "Fading"},
+    {"oor",                 "display_fading",       "Fading"},
+    {"dead",                "display_fading",       "Fading"},
+    {"offline",             "display_fading",       "Fading"},
+    {"pet",                 "display_pets",         "Pet Frames"},
+    -- General (specific before generic)
+    {"fontShadow",          "general_fonts",        "Global Fonts"},
+    {"groupLabel",          "general_labels",       "Group Labels"},
+    {"raidUseGroups",       "general_frame",        "Frame"},
+    {"raidGroupVisible",    "general_frame",        "Frame"},
+    {"raidPlayerPerRow",    "general_frame",        "Frame"},
+    {"raidFlat",            "general_frame",        "Frame"},
+    {"frame",               "general_frame",        "Frame"},
+    {"background",          "general_frame",        "Frame"},
+    {"missingHealth",       "general_frame",        "Frame"},
+    {"border",              "general_frame",        "Frame"},
+    {"anchor",              "general_frame",        "Frame"},
+    {"sort",                "general_sorting",      "Sorting"},
+    {"selfPosition",        "general_sorting",      "Sorting"},
+    {"rolePriority",        "general_sorting",      "Sorting"},
+    {"classPriority",       "general_sorting",      "Sorting"},
+    {"colorPickerOverride", "general_integrations", "Integrations"},
+    {"colorPickerGlobalOverride", "general_integrations", "Integrations"},
+    {"masqueBorderControl", "general_integrations", "Integrations"},
+    {"buffDisableMouse",    "general_integrations", "Integrations"},
+    {"debuffDisableMouse",  "general_integrations", "Integrations"},
+    {"defensiveIconDisableMouse", "general_integrations", "Integrations"},
+    {"targetedSpellDisableMouse", "general_integrations", "Integrations"},
+    -- Bars (specific text keys before generic "health" prefix)
+    {"healthText",          "text_health",          "Health Text"},
+    {"healthFont",          "text_health",          "Health Text"},
+    {"health",              "bars_health",          "Health Bar"},
+    {"classColor",          "bars_health",          "Health Bar"},
+    {"smoothBars",          "bars_health",          "Health Bar"},
+    {"resourceBar",         "bars_resource",        "Resource Bar"},
+    {"absorbBar",           "bars_absorb",          "Absorbs"},
+    {"healAbsorb",          "bars_absorb",          "Absorbs"},
+    {"healPrediction",      "bars_healpred",        "Heal Prediction"},
+    -- Text
+    {"statusText",          "text_status",          "Status Text"},
+    {"name",                "text_name",            "Name Text"},
+    -- Auras (specific before generic)
+    {"myBuffIndicator",     "auras_mybuffindicators", "My Buff Indicators"},
+    {"bossDebuff",          "auras_bossdebuffs",    "Boss Debuffs"},
+    {"missingBuff",         "auras_missingbuffs",   "Missing Buffs"},
+    {"defensiveIcon",       "auras_defensiveicon",  "Defensive Icon"},
+    {"debuff",              "auras_debuffs",        "Debuffs"},
+    {"buff",                "auras_buffs",          "Buffs"},
+    {"dispel",              "auras_dispel",         "Dispel Overlay"},
+    -- Indicators (specific before generic)
+    {"personalTargeted",    "indicators_personal_targeted", "Personal Targeted"},
+    {"targetedSpell",       "indicators_targetedspells", "Targeted Spells"},
+    {"roleIcon",            "indicators_icons",     "Icons"},
+    {"leaderIcon",          "indicators_icons",     "Icons"},
+    {"raidTargetIcon",      "indicators_icons",     "Icons"},
+    {"readyCheckIcon",      "indicators_icons",     "Icons"},
+    {"summonIcon",          "indicators_icons",     "Icons"},
+    {"resurrectionIcon",    "indicators_icons",     "Icons"},
+    {"phasedIcon",          "indicators_icons",     "Icons"},
+    {"afkIcon",             "indicators_icons",     "Icons"},
+    {"vehicleIcon",         "indicators_icons",     "Icons"},
+    {"raidRoleIcon",        "indicators_icons",     "Icons"},
+    {"statusIconFont",      "indicators_icons",     "Icons"},
+    {"selectionHighlight",  "indicators_highlights", "Highlights"},
+    {"hoverHighlight",      "indicators_highlights", "Highlights"},
+    {"aggroHighlight",      "indicators_highlights", "Highlights"},
+    {"aggro",               "indicators_highlights", "Highlights"},
+    -- Pinned frames (prefix match for "pinned.N.setting" format)
+    {"pinned.",             "general_pinnedframes", "Pinned Frames"},
+}
+
+-- Returns tabId, tabLabel for a given override key
+local function GetOverrideTabId(key)
+    -- Strip table-based suffix (e.g. "raidGroupVisible_1" → "raidGroupVisible")
+    local baseKey = key:match("^(.+)_%d+$") or key
+    for _, entry in ipairs(OVERRIDE_TAB_MAP) do
+        local prefix = entry[1]
+        if baseKey:sub(1, #prefix) == prefix then
+            return entry[2], entry[3]
+        end
+    end
+    return nil, "Unknown"
+end
+
+-- Groups override keys by tab, returns { [tabId] = { tabLabel, keys = {} } }, unknownKeys
+local function GroupOverridesByTab(overrides)
+    local groups = {}
+    local unknownKeys = {}
+    for key, _ in pairs(overrides) do
+        local tabId, tabLabel = GetOverrideTabId(key)
+        if tabId then
+            if not groups[tabId] then
+                groups[tabId] = { tabLabel = tabLabel, keys = {} }
+            end
+            tinsert(groups[tabId].keys, key)
+        else
+            tinsert(unknownKeys, key)
+        end
+    end
+    return groups, unknownKeys
+end
+
 -- Get a value from the live database, handling raid keys, table keys, and pinned keys
 local function GetRaidValue(key)
     -- Pinned frame key (stored at DF.db.raid.pinnedFrames, not DF.db.pinnedFrames)
@@ -795,7 +914,65 @@ function AutoProfilesUI:CreateProfileRow(GUI, pageFrame, parent, contentType, pr
     end
     overrideText:SetWidth(80)
     overrideText:SetJustifyH("LEFT")
-    
+
+    -- Hoverable overlay on override count to show tooltip with details
+    if overrideCount > 0 then
+        local overrideBtn = CreateFrame("Button", nil, row)
+        overrideBtn:SetPoint("LEFT", overrideText, "LEFT", -4, 0)
+        overrideBtn:SetSize(88, 22)
+
+        overrideBtn:SetScript("OnEnter", function(self)
+            overrideText:SetTextColor(1, 0.8, 0.2)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText("Override Details", 1, 0.67, 0)
+            GameTooltip:AddLine(" ")
+
+            local groups, unknownKeys = GroupOverridesByTab(profile.overrides)
+            local tabOrder = {}
+            for tabId in pairs(groups) do tinsert(tabOrder, tabId) end
+            table.sort(tabOrder)
+
+            for _, tabId in ipairs(tabOrder) do
+                local group = groups[tabId]
+                GameTooltip:AddLine(group.tabLabel .. " (" .. #group.keys .. ")", 1, 0.67, 0)
+                table.sort(group.keys)
+                for _, key in ipairs(group.keys) do
+                    local value = profile.overrides[key]
+                    local displayVal
+                    if type(value) == "boolean" then
+                        displayVal = value and "true" or "false"
+                    elseif type(value) == "table" then
+                        if value.r then
+                            displayVal = string.format("(%.1f, %.1f, %.1f)", value.r, value.g, value.b)
+                        else
+                            displayVal = "{table}"
+                        end
+                    else
+                        displayVal = tostring(value)
+                    end
+                    GameTooltip:AddDoubleLine("  " .. key, displayVal, 0.8, 0.8, 0.8, 1, 1, 1)
+                end
+            end
+
+            if #unknownKeys > 0 then
+                GameTooltip:AddLine("Other (" .. #unknownKeys .. ")", 0.5, 0.5, 0.5)
+                table.sort(unknownKeys)
+                for _, key in ipairs(unknownKeys) do
+                    GameTooltip:AddDoubleLine("  " .. key, tostring(profile.overrides[key]), 0.5, 0.5, 0.5, 0.7, 0.7, 0.7)
+                end
+            end
+
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine("Use /df overrides for full details in chat", 0.4, 0.4, 0.4)
+            GameTooltip:Show()
+        end)
+
+        overrideBtn:SetScript("OnLeave", function()
+            overrideText:SetTextColor(1, 0.67, 0)
+            GameTooltip:Hide()
+        end)
+    end
+
     -- Edit Settings button
     local editBtn = CreateFrame("Button", nil, row, "BackdropTemplate")
     editBtn:SetSize(75, 20)
@@ -1638,6 +1815,9 @@ function AutoProfilesUI:EnterEditing(contentType, profileIndex)
     -- Show sidebar onboarding hint (dismissed on first user tab click)
     self:ShowSidebarHint()
 
+    -- Show override stars on tabs that have overridden settings
+    self:RefreshTabOverrideStars()
+
     return true
 end
 
@@ -1721,11 +1901,21 @@ function AutoProfilesUI:ExitEditing(skipUIUpdates)
     -- Hide sidebar hint if still showing
     self:HideSidebarHint()
 
+    -- Clear override stars (they'll refresh after EvaluateAndApply if a runtime profile re-applies)
+    self:RefreshTabOverrideStars()
+
     -- Skip UI updates when GUI is closing (UI will reset on next open anyway)
     if skipUIUpdates then return end
     
     -- Refresh frames to show global settings again
     if DF.UpdateAll then DF:UpdateAll() end
+
+    -- Test mode needs a full layout refresh so frames re-read restored global values
+    -- UpdateAll() only calls UpdateRaidTestFrames() which skips ApplyTestFrameLayout(),
+    -- so frame sizes, textures, fonts etc. would remain stuck on overridden values
+    if (DF.testMode or DF.raidTestMode) and DF.RefreshTestFramesWithLayout then
+        DF:RefreshTestFramesWithLayout()
+    end
     
     -- Refresh pinned frames to show global settings again
     if DF.PinnedFrames then
@@ -1993,9 +2183,19 @@ function AutoProfilesUI:SetupEditingBanner()
     sidebarHint:EnableMouse(false)  -- Don't block clicks on tabs underneath
     sidebarHint:Hide()
 
-    -- Hint text at the bottom of the sidebar
-    local hintText = sidebarHint:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    hintText:SetPoint("BOTTOM", sidebarHint, "BOTTOM", 0, 8)
+    -- Hint label at the top of the sidebar with a background
+    local hintBg = CreateFrame("Frame", nil, sidebarHint, "BackdropTemplate")
+    hintBg:SetPoint("TOPLEFT", sidebarHint, "TOPLEFT", 1, -1)
+    hintBg:SetPoint("TOPRIGHT", sidebarHint, "TOPRIGHT", -1, -1)
+    hintBg:SetHeight(32)
+    hintBg:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+    })
+    hintBg:SetBackdropColor(0.12, 0.06, 0.02, 0.95)
+    hintBg:EnableMouse(false)
+
+    local hintText = hintBg:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    hintText:SetPoint("CENTER", hintBg, "CENTER", 0, 0)
     hintText:SetWidth(140)
     hintText:SetJustifyH("CENTER")
     hintText:SetText("|cffff8020Select any tab|r to customise\nthis profile's settings")
@@ -2019,6 +2219,47 @@ function AutoProfilesUI:SetupEditingBanner()
     self.sidebarHint = sidebarHint
     self.sidebarHintDismissed = false
 
+    -- =============================================
+    -- OVERRIDE STAR INDICATORS ON TABS
+    -- Small orange star on tabs that have overridden settings
+    -- =============================================
+    for tabName, tab in pairs(GUI.Tabs) do
+        if not tab.overrideStar then
+            local star = tab:CreateTexture(nil, "OVERLAY")
+            star:SetSize(10, 10)
+            star:SetPoint("LEFT", 12, 0)
+            star:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\star")
+            star:SetVertexColor(1, 0.67, 0)
+            star:Hide()
+            tab.overrideStar = star
+        end
+    end
+
+    -- Stars on category headers (visible when category is collapsed)
+    for catName, cat in pairs(GUI.Categories) do
+        if not cat.overrideStar then
+            local star = cat:CreateTexture(nil, "OVERLAY")
+            star:SetSize(8, 8)
+            star:SetPoint("RIGHT", -6, 0)
+            star:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\star")
+            star:SetVertexColor(1, 0.67, 0)
+            star:Hide()
+            cat.overrideStar = star
+        end
+    end
+
+    -- Hook tab button clicks to dismiss sidebar hint
+    -- Tab OnClick calls the local SelectTab (not GUI.SelectTab), so we must
+    -- hook each button directly to detect user tab clicks
+    for _, btn in pairs(GUI.Tabs) do
+        btn:HookScript("OnClick", function()
+            if AutoProfilesUI:IsEditing() and not AutoProfilesUI.sidebarHintDismissed
+               and not AutoProfilesUI.suppressHintDismiss then
+                AutoProfilesUI:HideSidebarHint()
+            end
+        end)
+    end
+
     -- Hook into page display to adjust offset when banner is shown
     local originalSelectTab = GUI.SelectTab
     GUI.SelectTab = function(name)
@@ -2027,12 +2268,6 @@ function AutoProfilesUI:SetupEditingBanner()
         -- After selecting tab, update banner and page offset
         AutoProfilesUI:UpdateEditingBanner()
         AutoProfilesUI:UpdatePageOffset()
-
-        -- Dismiss sidebar hint on the first user tab click while editing
-        if AutoProfilesUI:IsEditing() and not AutoProfilesUI.sidebarHintDismissed
-           and not AutoProfilesUI.suppressHintDismiss then
-            AutoProfilesUI:HideSidebarHint()
-        end
 
         -- Re-apply disabled tab styling (SelectTab/UpdateThemeColors may have reset colors)
         if AutoProfilesUI:IsEditing() then
@@ -2072,6 +2307,65 @@ function AutoProfilesUI:HideSidebarHint()
     if self.sidebarHint then
         self.sidebarHintDismissed = true
         self.sidebarHint:Hide()
+    end
+end
+
+-- Refresh orange star indicators on sidebar tabs/categories
+-- Shows stars on tabs that contain overridden settings
+function AutoProfilesUI:RefreshTabOverrideStars()
+    local GUI = DF.GUI
+    if not GUI or not GUI.Tabs then return end
+
+    -- Determine which profile's overrides to display
+    local profile
+    if self:IsEditing() then
+        profile = self.editingProfile
+    elseif self.activeRuntimeProfile and GUI.SelectedMode == "raid" then
+        profile = self.activeRuntimeProfile
+    end
+
+    -- Build set of tabIds with overrides
+    local tabsWithOverrides = {}
+    if profile and profile.overrides then
+        for key in pairs(profile.overrides) do
+            local tabId = GetOverrideTabId(key)
+            if tabId then
+                tabsWithOverrides[tabId] = true
+            end
+        end
+    end
+
+    -- Update tab stars
+    for tabName, tab in pairs(GUI.Tabs) do
+        if tab.overrideStar then
+            if tabsWithOverrides[tabName] then
+                tab.overrideStar:Show()
+            else
+                tab.overrideStar:Hide()
+            end
+        end
+    end
+
+    -- Update category stars (show if ANY child tab has overrides)
+    if GUI.Categories then
+        for catName, cat in pairs(GUI.Categories) do
+            if cat.overrideStar then
+                local hasOverride = false
+                if cat.children then
+                    for _, childBtn in ipairs(cat.children) do
+                        if childBtn.tabName and tabsWithOverrides[childBtn.tabName] then
+                            hasOverride = true
+                            break
+                        end
+                    end
+                end
+                if hasOverride then
+                    cat.overrideStar:Show()
+                else
+                    cat.overrideStar:Hide()
+                end
+            end
+        end
     end
 end
 
@@ -2158,7 +2452,10 @@ function AutoProfilesUI:SetProfileSetting(key, value)
             self.editingProfile.overrides[key] = value
         end
     end
-    
+
+    -- Refresh tab stars so they update live as settings change
+    self:RefreshTabOverrideStars()
+
     return true
 end
 
@@ -2184,7 +2481,10 @@ function AutoProfilesUI:ResetProfileSetting(key)
     else
         SetRaidValue(key, globalValue)
     end
-    
+
+    -- Refresh tab stars so they update live as overrides are removed
+    self:RefreshTabOverrideStars()
+
     return true
 end
 
@@ -2325,6 +2625,9 @@ function AutoProfilesUI:ApplyRuntimeProfile(profile, contentKey)
     print("|cff00ff00DandersFrames:|r Auto-profile |cffffffff\""
         .. (profile.name or "Unnamed") .. "\"|r activated ("
         .. contentName .. ", " .. raidSize .. " players)")
+
+    -- Update tab override stars
+    self:RefreshTabOverrideStars()
 end
 
 -- Remove the active runtime profile, restoring global values
@@ -2358,6 +2661,9 @@ function AutoProfilesUI:RemoveRuntimeProfile()
     end
 
     print("|cff00ff00DandersFrames:|r Auto-profile deactivated, using global settings")
+
+    -- Update tab override stars
+    self:RefreshTabOverrideStars()
 end
 
 -- Evaluate current content/raid state and apply/remove profiles as needed
@@ -2427,6 +2733,87 @@ autoProfileEventFrame:SetScript("OnEvent", function(self, event)
     -- GROUP_ROSTER_UPDATE, ZONE_CHANGED_NEW_AREA, PLAYER_ENTERING_WORLD
     QueueAutoProfileEval()
 end)
+
+-- ============================================================
+-- PRINT OVERRIDES: /df overrides
+-- Shows which settings are overridden, grouped by tab
+-- ============================================================
+
+function AutoProfilesUI:PrintOverrides()
+    -- Determine which profile to report on
+    local profile, source
+    if self:IsEditing() then
+        profile = self.editingProfile
+        source = "Editing"
+    elseif self.activeRuntimeProfile then
+        profile = self.activeRuntimeProfile
+        source = "Runtime"
+    else
+        local activeProfile = self:GetActiveProfile()
+        if activeProfile then
+            profile = activeProfile
+            source = "Matched (not applied)"
+        end
+    end
+
+    if not profile then
+        print("|cffff8020DandersFrames:|r No auto-profile is currently active or being edited.")
+        return
+    end
+
+    if not profile.overrides or not next(profile.overrides) then
+        print("|cffff8020DandersFrames:|r Profile \"" .. (profile.name or "Unnamed") .. "\" has no overrides.")
+        return
+    end
+
+    -- Count total
+    local total = 0
+    for _ in pairs(profile.overrides) do total = total + 1 end
+
+    print("|cffff8020DandersFrames Auto-Profile Overrides:|r")
+    print("  Profile: |cffffffff\"" .. (profile.name or "Unnamed") .. "\"|r (" .. source .. ")")
+    print("  Total: |cffffffff" .. total .. " override" .. (total > 1 and "s" or "") .. "|r")
+
+    -- Group by tab
+    local groups, unknownKeys = GroupOverridesByTab(profile.overrides)
+
+    -- Sort tab IDs for consistent output
+    local tabOrder = {}
+    for tabId in pairs(groups) do
+        tinsert(tabOrder, tabId)
+    end
+    table.sort(tabOrder)
+
+    for _, tabId in ipairs(tabOrder) do
+        local group = groups[tabId]
+        print("  |cffffaa00" .. group.tabLabel .. "|r (" .. #group.keys .. "):")
+        table.sort(group.keys)
+        for _, key in ipairs(group.keys) do
+            local value = profile.overrides[key]
+            local displayValue
+            if type(value) == "table" then
+                if value.r and value.g and value.b then
+                    displayValue = string.format("|cffffffff(%.2f, %.2f, %.2f)|r", value.r, value.g, value.b)
+                else
+                    displayValue = "|cffffffff{table}|r"
+                end
+            elseif type(value) == "boolean" then
+                displayValue = value and "|cff00ff00true|r" or "|cffff4444false|r"
+            else
+                displayValue = "|cffffffff" .. tostring(value) .. "|r"
+            end
+            print("    " .. key .. " = " .. displayValue)
+        end
+    end
+
+    if #unknownKeys > 0 then
+        print("  |cff999999Other|r (" .. #unknownKeys .. "):")
+        table.sort(unknownKeys)
+        for _, key in ipairs(unknownKeys) do
+            print("    " .. key .. " = " .. tostring(profile.overrides[key]))
+        end
+    end
+end
 
 -- ============================================================
 -- DEBUG: Auto Profile Detection Test

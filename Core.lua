@@ -3541,19 +3541,30 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
                 -- Reset GUI scale, size, and position to defaults
                 if DF.db and DF.db.party then
                     DF.db.party.guiScale = 1.0
-                    DF.db.party.guiWidth = 720
-                    DF.db.party.guiHeight = 550
+                    DF.db.party.guiWidth = 760
+                    DF.db.party.guiHeight = 520
+                    DF.db.party.guiPoint = nil
+                    DF.db.party.guiRelPoint = nil
+                    DF.db.party.guiX = nil
+                    DF.db.party.guiY = nil
                 end
-                if DF.GUI and DF.GUI.frame then
-                    DF.GUI.frame:ClearAllPoints()
-                    DF.GUI.frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
-                    DF.GUI.frame:SetSize(720, 550)
-                    DF.GUI.frame:SetScale(1.0)
-                    if DF.GUI.ScaleSlider then
+                if DF.GUIFrame then
+                    DF.GUIFrame:ClearAllPoints()
+                    DF.GUIFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+                    DF.GUIFrame:SetSize(760, 520)
+                    DF.GUIFrame:SetScale(1.0)
+                    if DF.GUI and DF.GUI.ScaleSlider then
                         DF.GUI.ScaleSlider:SetValue(1.0)
                     end
+                    DF.GUIFrame:Show()
                 end
                 print("|cff00ff00DandersFrames:|r GUI reset to default size, scale, and position.")
+            elseif msg == "overrides" then
+                if DF.AutoProfilesUI and DF.AutoProfilesUI.PrintOverrides then
+                    DF.AutoProfilesUI:PrintOverrides()
+                else
+                    print("|cff00ff00DandersFrames:|r Auto profiles module not loaded.")
+                end
             elseif msg == "test" then
                 if DF.ToggleTestPanel then DF:ToggleTestPanel() end
             elseif msg == "hide" then
