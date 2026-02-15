@@ -5,21 +5,9 @@
 ### Bug Fixes
 * `/df resetgui` command now works — was referencing wrong frame variable, also shows the GUI after resetting
 * Settings UI can now be dragged from the bottom banner in addition to the title bar
-* Test mode frames now properly reset to global settings when exiting auto-profile editing
-* Fix profile corruption when spec auto-switch triggers while auto-profile overrides are active — overridden values were being permanently saved into the profile
 * Fix party frame mover (blue rectangle) showing wrong size after switching between profiles with different orientations or frame dimensions
-* Fix GUI controls stomping auto-profile overrides — changing a slider/checkbox/dropdown while a runtime profile is active no longer causes frames to flash with the wrong values
 * Fix Wago UI pack imports overwriting previous profiles — importing multiple profiles sequentially no longer corrupts the first imported profile
-
-### New Features
-* Auto-profiles now activate at runtime — raid frame settings automatically switch based on content type and raid size
-* Chat notifications when auto-profiles activate or deactivate
-* Combat-safe profile switching — queued during combat, applied when combat ends
-* Sidebar onboarding hint when entering auto-profile edit mode — highlights that all settings tabs are editable
-* Orange star indicators on sidebar tabs that contain overridden auto-profile settings (visible during edit mode and when a runtime profile is active)
-* `/df overrides` command — prints all overridden settings grouped by tab to chat
-* Hover over override count on auto-profile rows to see a tooltip with full override details per tab
-* Override indicators on controls during runtime auto-profile — star icon and global value shown on overridden settings so users know what's active vs what their global is
+* Fix error when duplicating a profile
 
 ## [4.0.5] - 2026-02-14
 

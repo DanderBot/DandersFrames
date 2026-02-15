@@ -442,12 +442,41 @@ function AutoProfilesUI:BuildPage(GUI, pageFrame, db, Add, AddSpace)
     -- Only show for Raid mode
     if GUI.SelectedMode ~= "raid" then
         Add(GUI:CreateHeader(pageFrame.child, "Raid Auto Profiles"), 40, "both")
-        Add(GUI:CreateLabel(pageFrame.child, 
+        Add(GUI:CreateLabel(pageFrame.child,
             "Auto Profiles is a Raid-only feature. Switch to Raid mode to configure automatic profile switching based on content type and group size.",
             500, {r = 0.6, g = 0.6, b = 0.6}), 60, "both")
         return
     end
-    
+
+    -- Gate auto-profiles behind alpha/beta channel — show "Coming Soon" on stable
+    if DF.RELEASE_CHANNEL == "release" then
+        Add(GUI:CreateHeader(pageFrame.child, "Auto Profiles"), 40, "both")
+        AddSpace(20, "both")
+
+        local comingSoon = CreateFrame("Frame", nil, pageFrame.child, "BackdropTemplate")
+        comingSoon:SetSize(500, 120)
+        comingSoon:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8x8",
+            edgeFile = "Interface\\Buttons\\WHITE8x8",
+            edgeSize = 1,
+        })
+        comingSoon:SetBackdropColor(0.1, 0.1, 0.1, 0.8)
+        comingSoon:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
+
+        local title = comingSoon:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        title:SetPoint("CENTER", 0, 14)
+        title:SetText("Coming Soon")
+        title:SetTextColor(1.0, 0.5, 0.2)
+
+        local subtitle = comingSoon:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        subtitle:SetPoint("CENTER", 0, -10)
+        subtitle:SetText("Automatic profile switching based on content type and group size.")
+        subtitle:SetTextColor(0.5, 0.5, 0.5)
+
+        Add(comingSoon, 130, "both")
+        return
+    end
+
     -- =============================================
     -- Enable Checkbox
     -- =============================================
@@ -2785,6 +2814,7 @@ end
 
 autoProfileEventFrame:SetScript("OnEvent", function(self, event)
     if not DF.initialized then return end
+    if DF.RELEASE_CHANNEL == "release" then return end  -- Auto-profiles disabled on stable
 
     if event == "PLAYER_REGEN_ENABLED" then
         -- Process queued evaluation from combat lockdown
