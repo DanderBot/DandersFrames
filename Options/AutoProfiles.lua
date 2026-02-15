@@ -1627,11 +1627,17 @@ function AutoProfilesUI:EnterEditing(contentType, profileIndex)
     self:RefreshEditingUI()
     
     -- Switch to a settings tab (e.g., Layout/Frame)
+    -- Suppress sidebar hint dismissal for this initial SelectTab call
+    self.suppressHintDismiss = true
     local GUI = DF.GUI
     if GUI and GUI.SelectTab then
         GUI.SelectTab("general_frame")
     end
-    
+    self.suppressHintDismiss = false
+
+    -- Show sidebar onboarding hint (dismissed on first user tab click)
+    self:ShowSidebarHint()
+
     return true
 end
 
@@ -1711,7 +1717,10 @@ function AutoProfilesUI:ExitEditing(skipUIUpdates)
     self.editingContentType = nil
     self.editingProfileIndex = nil
     self.globalSnapshot = nil
-    
+
+    -- Hide sidebar hint if still showing
+    self:HideSidebarHint()
+
     -- Skip UI updates when GUI is closing (UI will reset on next open anyway)
     if skipUIUpdates then return end
     
@@ -1962,21 +1971,69 @@ end
 function AutoProfilesUI:SetupEditingBanner()
     local GUI = DF.GUI
     if not GUI or not GUI.contentFrame then return end
-    
+
     -- Create the banner parented to the main content frame
     local banner = self:CreateEditingBanner(GUI.contentFrame)
     banner:SetPoint("TOPLEFT", GUI.contentFrame, "TOPLEFT", 0, 0)
     banner:SetPoint("TOPRIGHT", GUI.contentFrame, "TOPRIGHT", 0, 0)
-    
+
+    -- =============================================
+    -- SIDEBAR ONBOARDING HINT
+    -- Subtle orange border + text on the sidebar when editing starts.
+    -- Dismissed on the first user tab click.
+    -- =============================================
+    local sidebarHint = CreateFrame("Frame", nil, GUI.tabFrame, "BackdropTemplate")
+    sidebarHint:SetAllPoints(GUI.tabFrame)
+    sidebarHint:SetBackdrop({
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = 1,
+    })
+    sidebarHint:SetBackdropBorderColor(1, 0.5, 0.2, 0.8)
+    sidebarHint:SetFrameLevel(GUI.tabFrame:GetFrameLevel() + 10)
+    sidebarHint:EnableMouse(false)  -- Don't block clicks on tabs underneath
+    sidebarHint:Hide()
+
+    -- Hint text at the bottom of the sidebar
+    local hintText = sidebarHint:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    hintText:SetPoint("BOTTOM", sidebarHint, "BOTTOM", 0, 8)
+    hintText:SetWidth(140)
+    hintText:SetJustifyH("CENTER")
+    hintText:SetText("|cffff8020Select any tab|r to customise\nthis profile's settings")
+    hintText:SetTextColor(0.75, 0.75, 0.75)
+
+    -- Subtle pulse animation on the border
+    local pulseAlpha = 0.4
+    local pulseDir = 1
+    sidebarHint:SetScript("OnUpdate", function(self, elapsed)
+        pulseAlpha = pulseAlpha + elapsed * pulseDir * 0.6
+        if pulseAlpha >= 0.8 then
+            pulseAlpha = 0.8
+            pulseDir = -1
+        elseif pulseAlpha <= 0.3 then
+            pulseAlpha = 0.3
+            pulseDir = 1
+        end
+        self:SetBackdropBorderColor(1, 0.5, 0.2, pulseAlpha)
+    end)
+
+    self.sidebarHint = sidebarHint
+    self.sidebarHintDismissed = false
+
     -- Hook into page display to adjust offset when banner is shown
     local originalSelectTab = GUI.SelectTab
     GUI.SelectTab = function(name)
         originalSelectTab(name)
-        
+
         -- After selecting tab, update banner and page offset
         AutoProfilesUI:UpdateEditingBanner()
         AutoProfilesUI:UpdatePageOffset()
-        
+
+        -- Dismiss sidebar hint on the first user tab click while editing
+        if AutoProfilesUI:IsEditing() and not AutoProfilesUI.sidebarHintDismissed
+           and not AutoProfilesUI.suppressHintDismiss then
+            AutoProfilesUI:HideSidebarHint()
+        end
+
         -- Re-apply disabled tab styling (SelectTab/UpdateThemeColors may have reset colors)
         if AutoProfilesUI:IsEditing() then
             local tabsToDisable = {"profiles_auto", "profiles_manage", "profiles_importexport"}
@@ -1994,13 +2051,27 @@ function AutoProfilesUI:SetupEditingBanner()
             end
         end
     end
-    
+
     -- Also hook RefreshCurrentPage
     local originalRefresh = GUI.RefreshCurrentPage
     GUI.RefreshCurrentPage = function()
         originalRefresh()
         AutoProfilesUI:UpdateEditingBanner()
         AutoProfilesUI:UpdatePageOffset()
+    end
+end
+
+function AutoProfilesUI:ShowSidebarHint()
+    if self.sidebarHint then
+        self.sidebarHintDismissed = false
+        self.sidebarHint:Show()
+    end
+end
+
+function AutoProfilesUI:HideSidebarHint()
+    if self.sidebarHint then
+        self.sidebarHintDismissed = true
+        self.sidebarHint:Hide()
     end
 end
 
