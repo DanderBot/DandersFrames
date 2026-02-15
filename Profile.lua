@@ -128,13 +128,28 @@ function DF:SetProfile(name)
         print("|cff00ff00DandersFrames:|r Created new profile: " .. name)
     end
     
+    -- Clear auto-profile runtime state (old profile's data becomes stale)
+    if DF.AutoProfilesUI then
+        DF.AutoProfilesUI.activeRuntimeProfile = nil
+        DF.AutoProfilesUI.activeRuntimeContentKey = nil
+        DF.AutoProfilesUI.runtimeBaseline = nil
+        DF.AutoProfilesUI.pendingAutoProfileEval = false
+    end
+
     -- Switch to the profile
     DandersFramesDB_v2.currentProfile = name
     DF.db = DandersFramesDB_v2.profiles[name]
-    
+
     -- Apply the profile with full refresh
     DF:FullProfileRefresh()
     print("|cff00ff00DandersFrames:|r Switched to profile: " .. name)
+
+    -- Re-evaluate auto-profiles for the new profile
+    C_Timer.After(0.1, function()
+        if DF.AutoProfilesUI then
+            DF.AutoProfilesUI:EvaluateAndApply()
+        end
+    end)
 end
 
 -- Delete a profile

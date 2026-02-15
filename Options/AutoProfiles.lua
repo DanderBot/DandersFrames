@@ -244,18 +244,41 @@ end
 -- Delete a profile
 function AutoProfilesUI:DeleteProfile(contentKey, index)
     self:InitDefaults()
-    
+
+    -- Capture a reference before deletion to check if it was the active runtime profile
+    local deletedProfile
     if contentKey == "mythic" then
+        deletedProfile = DF.db.raidAutoProfiles.mythic.profile
         DF.db.raidAutoProfiles.mythic.profile = nil
-        return true
+    else
+        local profiles = DF.db.raidAutoProfiles[contentKey].profiles
+        if profiles[index] then
+            deletedProfile = profiles[index]
+            table.remove(profiles, index)
+        else
+            return false
+        end
     end
-    
-    local profiles = DF.db.raidAutoProfiles[contentKey].profiles
-    if profiles[index] then
-        table.remove(profiles, index)
-        return true
+
+    -- If the deleted profile was the active runtime profile, deactivate it
+    if deletedProfile and self.activeRuntimeProfile == deletedProfile then
+        -- Restore baseline values directly (profile is already gone so RemoveRuntimeProfile
+        -- can't check override values — just restore everything)
+        if self.runtimeBaseline then
+            for key, originalValue in pairs(self.runtimeBaseline) do
+                SetRaidValue(key, DeepCopyValue(originalValue))
+            end
+        end
+        self.activeRuntimeProfile = nil
+        self.activeRuntimeContentKey = nil
+        self.runtimeBaseline = nil
+        if DF.FullProfileRefresh then
+            DF:FullProfileRefresh()
+        end
+        print("|cff00ff00DandersFrames:|r Auto-profile deactivated (profile deleted)")
     end
-    return false
+
+    return true
 end
 
 -- Update profile range
@@ -313,7 +336,14 @@ function AutoProfilesUI:BuildPage(GUI, pageFrame, db, Add, AddSpace)
         nil, nil,  -- dbTable, dbKey (not used)
         function() pageFrame:Refresh() end,  -- callback
         function() return autoDb.enabled end,  -- customGet
-        function(val) autoDb.enabled = val end  -- customSet
+        function(val)                           -- customSet
+            autoDb.enabled = val
+            if not val then
+                AutoProfilesUI:RemoveRuntimeProfile()
+            else
+                AutoProfilesUI:EvaluateAndApply()
+            end
+        end
     )
     Add(enableCheck, 30, "both")
     
@@ -1479,13 +1509,24 @@ AutoProfilesUI.editingContentType = nil
 AutoProfilesUI.editingProfileIndex = nil
 AutoProfilesUI.globalSnapshot = nil  -- Snapshot of true global values during editing
 
+-- Runtime auto-profile state (not persisted — rebuilt on login/reload via events)
+AutoProfilesUI.activeRuntimeProfile = nil     -- Currently applied profile reference
+AutoProfilesUI.activeRuntimeContentKey = nil  -- "mythic"/"instanced"/"openWorld"
+AutoProfilesUI.runtimeBaseline = nil          -- { [key] = original_value } for overridden keys only
+AutoProfilesUI.pendingAutoProfileEval = false -- Queued evaluation during combat
+
 function AutoProfilesUI:IsEditing()
     return self.editingProfile ~= nil
 end
 
 function AutoProfilesUI:EnterEditing(contentType, profileIndex)
+    -- Remove runtime profile first so snapshot captures true globals
+    if self.activeRuntimeProfile then
+        self:RemoveRuntimeProfile()
+    end
+
     local autoDb = DF.db.raidAutoProfiles
-    
+
     if contentType == "mythic" then
         self.editingProfile = autoDb.mythic.profile
         self.editingProfileIndex = nil
@@ -1698,6 +1739,11 @@ function AutoProfilesUI:ExitEditing(skipUIUpdates)
     if GUI and GUI.SelectTab then
         GUI.SelectTab("profiles_auto")
     end
+
+    -- Re-evaluate auto-profiles (may re-apply if still in matching content)
+    C_Timer.After(0.1, function()
+        AutoProfilesUI:EvaluateAndApply()
+    end)
 end
 
 function AutoProfilesUI:GetEditingInfo()
@@ -2134,6 +2180,184 @@ function AutoProfilesUI:GetActiveProfile()
 end
 
 -- ============================================================
+-- RUNTIME PROFILE APPLICATION
+-- Applies/removes auto-profile overrides at runtime based on
+-- content type and raid size changes
+-- ============================================================
+
+-- Deep-compare two values (handles tables like colors and arrays)
+local function DeepCompare(a, b)
+    if type(a) ~= type(b) then return false end
+    if type(a) ~= "table" then return a == b end
+    -- Array comparison
+    if #a > 0 or #b > 0 then
+        if #a ~= #b then return false end
+        for i = 1, #a do
+            if a[i] ~= b[i] then return false end
+        end
+        return true
+    end
+    -- Hash comparison
+    for k, v in pairs(a) do
+        if b[k] ~= v then return false end
+    end
+    for k, v in pairs(b) do
+        if a[k] ~= v then return false end
+    end
+    return true
+end
+
+-- Deep-copy a value (shallow for non-tables)
+local function DeepCopyValue(value)
+    if type(value) ~= "table" then return value end
+    local copy = {}
+    for k, v in pairs(value) do copy[k] = v end
+    return copy
+end
+
+-- Get a display name for a content key
+local function GetContentDisplayName(contentKey)
+    if contentKey == "mythic" then return "Mythic"
+    elseif contentKey == "instanced" then return "Instanced/PvP"
+    elseif contentKey == "openWorld" then return "Open World"
+    end
+    return contentKey or "Unknown"
+end
+
+-- Apply a profile's overrides to the live database
+function AutoProfilesUI:ApplyRuntimeProfile(profile, contentKey)
+    if not profile or not profile.overrides then return end
+
+    -- Build baseline: snapshot current (global) values for each overridden key
+    self.runtimeBaseline = {}
+    for key, _ in pairs(profile.overrides) do
+        self.runtimeBaseline[key] = DeepCopyValue(GetRaidValue(key))
+    end
+
+    -- Write overrides into the live database
+    for key, value in pairs(profile.overrides) do
+        SetRaidValue(key, DeepCopyValue(value))
+    end
+
+    -- Store active state
+    self.activeRuntimeProfile = profile
+    self.activeRuntimeContentKey = contentKey
+
+    -- Refresh all frames to reflect new settings
+    if DF.FullProfileRefresh then
+        DF:FullProfileRefresh()
+    end
+
+    -- Chat notification
+    local raidSize = GetNumGroupMembers()
+    local contentName = GetContentDisplayName(contentKey)
+    print("|cff00ff00DandersFrames:|r Auto-profile |cffffffff\""
+        .. (profile.name or "Unnamed") .. "\"|r activated ("
+        .. contentName .. ", " .. raidSize .. " players)")
+end
+
+-- Remove the active runtime profile, restoring global values
+function AutoProfilesUI:RemoveRuntimeProfile()
+    if not self.activeRuntimeProfile then return end
+
+    local profile = self.activeRuntimeProfile
+
+    -- Restore baseline values, but respect user changes made while profile was active
+    if self.runtimeBaseline and profile.overrides then
+        for key, baselineValue in pairs(self.runtimeBaseline) do
+            local overrideValue = profile.overrides[key]
+            local liveValue = GetRaidValue(key)
+
+            -- Only restore if the live value still matches the override
+            -- (if user changed it via settings, keep their change)
+            if overrideValue ~= nil and DeepCompare(liveValue, overrideValue) then
+                SetRaidValue(key, DeepCopyValue(baselineValue))
+            end
+        end
+    end
+
+    -- Clear runtime state
+    self.activeRuntimeProfile = nil
+    self.activeRuntimeContentKey = nil
+    self.runtimeBaseline = nil
+
+    -- Refresh all frames to reflect global settings
+    if DF.FullProfileRefresh then
+        DF:FullProfileRefresh()
+    end
+
+    print("|cff00ff00DandersFrames:|r Auto-profile deactivated, using global settings")
+end
+
+-- Evaluate current content/raid state and apply/remove profiles as needed
+function AutoProfilesUI:EvaluateAndApply()
+    if not DF.initialized then return end
+    if self:IsEditing() then return end
+
+    -- Cannot modify secure frames during combat — queue for later
+    if InCombatLockdown() then
+        self.pendingAutoProfileEval = true
+        return
+    end
+
+    -- Determine what profile should be active
+    local newProfile, contentKey = self:GetActiveProfile()
+
+    -- No change — same profile (or both nil)
+    if newProfile == self.activeRuntimeProfile then return end
+    if newProfile == nil and self.activeRuntimeProfile == nil then return end
+
+    -- Remove old profile if one was active
+    if self.activeRuntimeProfile then
+        self:RemoveRuntimeProfile()
+    end
+
+    -- Apply new profile if one matches
+    if newProfile then
+        self:ApplyRuntimeProfile(newProfile, contentKey)
+    end
+end
+
+-- ============================================================
+-- EVENT FRAME & THROTTLE
+-- Listens for content/roster changes and triggers evaluation
+-- ============================================================
+
+local autoProfileEventFrame = CreateFrame("Frame")
+autoProfileEventFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
+autoProfileEventFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+autoProfileEventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+autoProfileEventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+
+-- Frame-based throttle: multiple events in the same frame collapse into one evaluation
+local autoProfileThrottleFrame = CreateFrame("Frame")
+autoProfileThrottleFrame:Hide()
+autoProfileThrottleFrame:SetScript("OnUpdate", function(self)
+    self:Hide()
+    AutoProfilesUI:EvaluateAndApply()
+end)
+
+local function QueueAutoProfileEval()
+    autoProfileThrottleFrame:Show()
+end
+
+autoProfileEventFrame:SetScript("OnEvent", function(self, event)
+    if not DF.initialized then return end
+
+    if event == "PLAYER_REGEN_ENABLED" then
+        -- Process queued evaluation from combat lockdown
+        if AutoProfilesUI.pendingAutoProfileEval then
+            AutoProfilesUI.pendingAutoProfileEval = false
+            QueueAutoProfileEval()
+        end
+        return
+    end
+
+    -- GROUP_ROSTER_UPDATE, ZONE_CHANGED_NEW_AREA, PLAYER_ENTERING_WORLD
+    QueueAutoProfileEval()
+end)
+
+-- ============================================================
 -- DEBUG: Auto Profile Detection Test
 -- Usage: /dfautotest - Print current detection results
 -- ============================================================
@@ -2169,7 +2393,28 @@ SlashCmdList["DFAUTOTEST"] = function()
     else
         print("  Active Profile: |cff999999None (using global settings)|r")
     end
-    
+
+    -- Runtime state
+    print("  --- Runtime State ---")
+    local rtProfile = AutoProfilesUI.activeRuntimeProfile
+    if rtProfile then
+        local rtOverrides = 0
+        if rtProfile.overrides then
+            for _ in pairs(rtProfile.overrides) do rtOverrides = rtOverrides + 1 end
+        end
+        local rtBaseline = 0
+        if AutoProfilesUI.runtimeBaseline then
+            for _ in pairs(AutoProfilesUI.runtimeBaseline) do rtBaseline = rtBaseline + 1 end
+        end
+        print("  Runtime Profile: |cff00ff00\"" .. (rtProfile.name or "Unnamed") .. "\"|r ("
+            .. tostring(AutoProfilesUI.activeRuntimeContentKey) .. ")")
+        print("  Applied Overrides: |cffffffff" .. rtOverrides .. "|r, Baseline Keys: |cffffffff" .. rtBaseline .. "|r")
+    else
+        print("  Runtime Profile: |cff999999None|r")
+    end
+    print("  Pending Combat Eval: " .. (AutoProfilesUI.pendingAutoProfileEval and "|cffff8020YES|r" or "|cff999999No|r"))
+    print("  Editing Mode: " .. (AutoProfilesUI:IsEditing() and "|cffff8020YES|r" or "|cff999999No|r"))
+
     -- Also list all configured profiles for context
     if autoDb then
         print("  --- Configured Profiles ---")

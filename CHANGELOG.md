@@ -1,5 +1,12 @@
 # DandersFrames Changelog
 
+## [4.0.6] - 2026-02-15
+
+### New Features
+* Auto-profiles now activate at runtime — raid frame settings automatically switch based on content type and raid size
+* Chat notifications when auto-profiles activate or deactivate
+* Combat-safe profile switching — queued during combat, applied when combat ends
+
 ## [4.0.5] - 2026-02-14
 
 ### Bug Fixes
