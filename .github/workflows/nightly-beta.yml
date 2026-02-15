@@ -1,0 +1,59 @@
+name: Nightly Beta
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+jobs:
+  nightly-beta:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for changes since last beta
+        id: check
+        run: |
+          LAST_BETA=$(git tag -l 'v*-beta*' --sort=-v:refname | head -n1)
+          LAST_RELEASE=$(git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude '*-*' HEAD 2>/dev/null || echo "")
+          REF="${LAST_BETA:-${LAST_RELEASE}}"
+
+          if [ -n "$REF" ]; then
+            CHANGES=$(git log "${REF}..HEAD" --oneline --no-merges | grep -cv '\[skip ci\]' || true)
+          else
+            CHANGES=$(git log HEAD --oneline --no-merges | grep -cv '\[skip ci\]' || true)
+          fi
+
+          echo "changes=$CHANGES" >> $GITHUB_OUTPUT
+          echo "Changes since ${REF:-inception}: $CHANGES"
+
+      - name: Create beta tag and trigger release
+        if: steps.check.outputs.changes != '0'
+        run: |
+          BASE=$(git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude '*-*' HEAD 2>/dev/null || echo "v0.1.0")
+          SHA=$(git rev-parse HEAD)
+
+          # Find next available beta number (API check handles ghost refs from deleted tags)
+          NUM=1
+          while gh api "repos/${{ github.repository }}/git/ref/tags/${BASE}-beta.${NUM}" --silent 2>/dev/null; do
+            NUM=$((NUM + 1))
+          done
+
+          # Create tag, retry with next number on conflict (ghost ref not visible via GET)
+          for i in $(seq 0 4); do
+            TAG="${BASE}-beta.$((NUM + i))"
+            if gh api "repos/${{ github.repository }}/git/refs" \
+                 -f ref="refs/tags/${TAG}" -f sha="${SHA}" 2>/dev/null; then
+              echo "Created tag: ${TAG}"
+              gh workflow run release.yml -f "tag=${TAG}"
+              echo "Triggered release build"
+              exit 0
+            fi
+          done
+          echo "::error::Could not create beta tag"
+          exit 1
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}

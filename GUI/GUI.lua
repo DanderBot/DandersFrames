@@ -4328,7 +4328,10 @@ function DF:CreateGUI()
     
     local title = titleBar:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     title:SetPoint("LEFT", 12, 0)
-    title:SetText("DandersFrames v" .. (DF.VERSION or "?"))
+    local versionStr = DF.ADDON_VERSION or DF.VERSION or "?"
+    local channelTags = { alpha = " |cffff8800alpha|r", beta = " |cffff8800beta|r" }
+    local channelTag = channelTags[DF.RELEASE_CHANNEL] or ""
+    title:SetText("DandersFrames " .. versionStr .. channelTag)
     local c = GetThemeColor()
     title:SetTextColor(c.r, c.g, c.b)
     title.UpdateTheme = function()
@@ -4363,7 +4366,92 @@ function DF:CreateGUI()
         closeIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     end)
     closeBtn:SetScript("OnClick", function() frame:Hide() end)
-    
+
+    -- Info button (changelog)
+    local infoBtn = CreateFrame("Button", nil, frame, "BackdropTemplate")
+    infoBtn:SetSize(20, 20)
+    infoBtn:SetPoint("TOPRIGHT", -32, -5)
+    infoBtn:SetFrameStrata("FULLSCREEN_DIALOG")
+    infoBtn:SetFrameLevel(210)
+    infoBtn:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = 1,
+    })
+    infoBtn:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
+    infoBtn:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
+    local infoIcon = infoBtn:CreateTexture(nil, "OVERLAY")
+    infoIcon:SetPoint("CENTER")
+    infoIcon:SetSize(12, 12)
+    infoIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\info")
+    infoIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    infoBtn:SetScript("OnEnter", function(self)
+        local tc = GetThemeColor()
+        self:SetBackdropBorderColor(tc.r, tc.g, tc.b, 1)
+        infoIcon:SetVertexColor(tc.r, tc.g, tc.b)
+    end)
+    infoBtn:SetScript("OnLeave", function(self)
+        self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
+        infoIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    end)
+
+    -- Changelog overlay
+    local changelogOverlay = CreateFrame("Frame", nil, frame, "BackdropTemplate")
+    changelogOverlay:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -34)
+    changelogOverlay:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -12, 36)
+    changelogOverlay:SetFrameStrata("FULLSCREEN_DIALOG")
+    changelogOverlay:SetFrameLevel(300)
+    CreatePanelBackdrop(changelogOverlay)
+    changelogOverlay:Hide()
+
+    local changelogTitle = changelogOverlay:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    changelogTitle:SetPoint("TOPLEFT", 12, -10)
+    changelogTitle:SetText("Changelog")
+    changelogTitle:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+
+    local backBtn = CreateFrame("Button", nil, changelogOverlay, "BackdropTemplate")
+    backBtn:SetSize(60, 22)
+    backBtn:SetPoint("TOPRIGHT", -8, -6)
+    CreateElementBackdrop(backBtn)
+    local backText = backBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    backText:SetPoint("CENTER")
+    backText:SetText("Back")
+    backText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+    backBtn:SetScript("OnEnter", function(self)
+        local tc = GetThemeColor()
+        self:SetBackdropBorderColor(tc.r, tc.g, tc.b, 1)
+    end)
+    backBtn:SetScript("OnLeave", function(self)
+        self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
+    end)
+    backBtn:SetScript("OnClick", function() changelogOverlay:Hide() end)
+
+    local changelogScroll = CreateFrame("ScrollFrame", nil, changelogOverlay, "UIPanelScrollFrameTemplate")
+    changelogScroll:SetPoint("TOPLEFT", 8, -34)
+    changelogScroll:SetPoint("BOTTOMRIGHT", -26, 8)
+
+    local changelogEdit = CreateFrame("EditBox", nil, changelogScroll)
+    changelogEdit:SetMultiLine(true)
+    changelogEdit:SetAutoFocus(false)
+    changelogEdit:SetFontObject(GameFontHighlightSmall)
+    changelogEdit:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    changelogEdit:SetWidth(changelogScroll:GetWidth() or 500)
+    changelogEdit:SetText(DF.CHANGELOG_TEXT or "No changelog available.")
+    changelogEdit:SetCursorPosition(0)
+    changelogEdit:EnableMouse(true)
+    changelogEdit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    changelogEdit:SetScript("OnEditFocusGained", function(self) self:HighlightText(0, 0) end)
+    changelogScroll:SetScrollChild(changelogEdit)
+
+    infoBtn:SetScript("OnClick", function()
+        if changelogOverlay:IsShown() then
+            changelogOverlay:Hide()
+        else
+            changelogEdit:SetWidth(changelogScroll:GetWidth())
+            changelogOverlay:Show()
+        end
+    end)
+
     -- =========================================================================
     -- RESIZE HANDLE (bottom-right corner)
     -- =========================================================================
@@ -5051,7 +5139,7 @@ function DF:CreateGUI()
     -- Version on the right
     local versionText = footer:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     versionText:SetPoint("RIGHT", footer, "RIGHT", -2, 0)
-    versionText:SetText("v" .. (DF.VERSION or "?"))
+    versionText:SetText(versionStr .. channelTag)
     versionText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.5)
     
     -- Create the click casting UI content

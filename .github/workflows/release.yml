@@ -1,0 +1,124 @@
+name: Package and Release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build (e.g. v1.0.0-beta.1). Leave empty for alpha build.'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Check if build is needed
+        id: guard
+        run: |
+          # Tags and workflow_dispatch always build
+          if [[ "$GITHUB_REF" == refs/tags/* ]] || [[ -n "${{ inputs.tag }}" ]] || [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            echo "skip=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Branch pushes: skip if only docs/CI files changed
+          DOMINATED=true
+          for f in $(git diff --name-only HEAD~1..HEAD 2>/dev/null); do
+            case "$f" in
+              *.md|*.sh|.github/*|.gitignore|.pkgmeta) ;;
+              *) DOMINATED=false; break ;;
+            esac
+          done
+          echo "skip=$DOMINATED" >> $GITHUB_OUTPUT
+
+      - name: Generate Changelog.lua
+        if: steps.guard.outputs.skip != 'true'
+        id: changelog
+        run: |
+          chmod +x generate_changelog.sh
+          if [[ "$GITHUB_REF" == refs/heads/* ]] && [[ -z "${{ inputs.tag }}" ]]; then
+            export FORCE_ALPHA=true
+          fi
+          ./generate_changelog.sh
+
+          VERSION=$(grep 'DF.ADDON_VERSION' Changelog.lua | sed 's/.*= "\(.*\)"/\1/')
+          CHANNEL=$(grep 'DF.RELEASE_CHANNEL' Changelog.lua | sed 's/.*= "\(.*\)"/\1/')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "channel=$CHANNEL" >> $GITHUB_OUTPUT
+
+          NOTES=$(awk '/^## / { count++; if (count > 1) exit } count >= 1 { print }' CHANGELOG.md | head -c 1800 | sed -e :a -e '/^[[:space:]-]*$/{ $d; N; ba; }')
+          {
+            echo "notes<<NOTES_EOF"
+            echo "$NOTES"
+            echo "NOTES_EOF"
+          } >> $GITHUB_OUTPUT
+
+      - name: Package and Release
+        if: steps.guard.outputs.skip != 'true'
+        uses: BigWigsMods/packager@v2
+        env:
+          CF_API_KEY: ${{ secrets.CF_API_KEY }}
+          GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Notify Discord
+        if: steps.guard.outputs.skip != 'true' && success()
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          VERSION: ${{ steps.changelog.outputs.version }}
+          CHANNEL: ${{ steps.changelog.outputs.channel }}
+          NOTES: ${{ steps.changelog.outputs.notes }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "No Discord webhook configured, skipping."
+            exit 0
+          fi
+
+          case "$CHANNEL" in
+            release)
+              COLOR=3066993
+              TITLE="DandersFrames ${VERSION} — New Release"
+              FOOTER="Available on CurseForge"
+              ;;
+            beta)
+              COLOR=16755200
+              TITLE="DandersFrames ${VERSION} — Beta"
+              FOOTER="Available on CurseForge (Beta channel)"
+              ;;
+            *)
+              COLOR=9474192
+              TITLE="DandersFrames ${VERSION} — Alpha"
+              FOOTER="Available on CurseForge (Alpha channel)"
+              ;;
+          esac
+
+          PAYLOAD=$(jq -n \
+            --arg title "$TITLE" \
+            --arg desc "$NOTES" \
+            --arg color "$COLOR" \
+            --arg footer "$FOOTER" \
+            --arg url "https://www.curseforge.com/wow/addons/danders-frames" \
+            '{
+              embeds: [{
+                title: $title,
+                description: $desc,
+                color: ($color | tonumber),
+                url: $url,
+                footer: { text: $footer }
+              }]
+            }')
+
+          curl -s -o /dev/null -w "%{http_code}" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD" \
+            "$DISCORD_WEBHOOK_URL"
