@@ -355,7 +355,13 @@ function DF:UpdateAbsorb(frame, testIndex)
     
     customBar:Show()
     customBar:ClearAllPoints()
-    customBar:SetAlpha(1)  -- Reset frame alpha (may have been set to 0 by ATTACHED_OVERFLOW mode)
+    -- Reset frame alpha (may have been set to 0 by ATTACHED_OVERFLOW mode)
+    -- Respect OOR fade: if unit is out of range, use the configured OOR alpha instead of 1
+    local absorbAlpha = 1
+    if db.oorEnabled and frame.dfInRange == false then
+        absorbAlpha = db.oorAbsorbBarAlpha or 0.5
+    end
+    customBar:SetAlpha(absorbAlpha)
     
     -- ============================================================
     -- MODE: FLOATING
@@ -833,16 +839,21 @@ function DF:UpdateAbsorb(frame, testIndex)
         DF.SetBarValue(overflowBar, absorbs, frame)
         
         -- Use SetAlphaFromBoolean to toggle between attached and overflow bars
-        -- Frame alpha: 1 when visible, 0 when hidden (bar texture alpha controlled by SetStatusBarColor)
+        -- Frame alpha: visAlpha when visible, 0 when hidden (bar texture alpha controlled by SetStatusBarColor)
         -- When clamped: show overflow, hide attached
         -- When not clamped: hide overflow, show attached
+        -- Respect OOR fade: use OOR alpha instead of 1 when unit is out of range
+        local visAlpha = 1
+        if db.oorEnabled and frame.dfInRange == false then
+            visAlpha = db.oorAbsorbBarAlpha or 0.5
+        end
         overflowVisHelper:Show()
-        overflowVisHelper:SetAlphaFromBoolean(isClamped, 1, 0)
+        overflowVisHelper:SetAlphaFromBoolean(isClamped, visAlpha, 0)
         overflowBar:SetAlpha(overflowVisHelper:GetAlpha())
         overflowBar:Show()
-        
+
         attachedVisHelper:Show()
-        attachedVisHelper:SetAlphaFromBoolean(isClamped, 0, 1)  -- Inverse: 0 when clamped, 1 when not
+        attachedVisHelper:SetAlphaFromBoolean(isClamped, 0, visAlpha)  -- Inverse: 0 when clamped, visAlpha when not
         customBar:SetAlpha(attachedVisHelper:GetAlpha())
 
     -- ============================================================

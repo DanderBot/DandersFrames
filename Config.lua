@@ -1237,6 +1237,7 @@ DF.PartyDefaults = {
     nameTextY = -10,
 
     -- Out of Range
+    oorAbsorbBarAlpha = 0.20000000298023,
     oorAurasAlpha = 0.20000000298023,
     oorBackgroundAlpha = 0.10000000149012,
     oorDefensiveIconAlpha = 0.5,
@@ -2296,6 +2297,7 @@ DF.RaidDefaults = {
     nameTextY = -10,
 
     -- Out of Range
+    oorAbsorbBarAlpha = 0.20000000298023,
     oorAurasAlpha = 0.20000000298023,
     oorBackgroundAlpha = 0.10000000149012,
     oorDefensiveIconAlpha = 0.5,

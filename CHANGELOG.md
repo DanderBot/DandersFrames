@@ -15,6 +15,7 @@
 * Fix icon alpha settings (role, leader, raid target, ready check) reverting to 100% after releasing the slider — appearance system was ignoring user-set alpha values
 * Fix click-casting not working when clicking on aura/defensive icons — mouse click events were not propagating to the parent unit button
 * Fix click-casting "Spell not learned" when queuing as different spec — macros now resolve the current spec's spell override instead of using the stored root spell name
+* Fix absorb bar not fading when unit is out of range — health event updates were overwriting the OOR alpha on every tick
 
 ### New Features
 * Debug Console — persistent debug logging system with in-game viewer (`/df debug` to toggle, `/df console` to view). Logs persist across reloads with category filtering, severity levels, and clipboard export
