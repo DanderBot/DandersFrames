@@ -772,12 +772,15 @@ function DF:CreateFrameElementsExtended(frame, db)
     if frame.defensiveIcon.SetPropagateMouseMotion then
         frame.defensiveIcon:SetPropagateMouseMotion(true)
     end
+    if frame.defensiveIcon.SetPropagateMouseClicks then
+        frame.defensiveIcon:SetPropagateMouseClicks(true)
+    end
     if frame.defensiveIcon.SetMouseClickEnabled then
         frame.defensiveIcon:SetMouseClickEnabled(false)
     end
-    
+
     frame.defensiveBar = frame.defensiveIcon  -- Alias
-    
+
     -- External defensive frame (simplified)
     frame.externalDefFrame = CreateFrame("Frame", nil, frame.contentOverlay)
     frame.externalDefFrame:SetSize(24, 24)
@@ -1478,13 +1481,17 @@ function DF:CreateUnitFrame(unit, index, isRaid)
     end)
     
     -- === MOUSE HANDLING FOR DEFENSIVE ICON ===
-    -- SetPropagateMouseMotion(true): Mouse events propagate to parent frame
-    -- This allows tooltips while the PARENT receives click/hover for bindings
+    -- SetPropagateMouseMotion(true): Mouse motion events propagate to parent frame
+    -- SetPropagateMouseClicks(true): Mouse click events propagate to parent frame
+    -- SetMouseClickEnabled(false): This frame itself does not consume clicks
+    -- Together these allow tooltips on hover while the PARENT receives all clicks for bindings
     frame.defensiveIcon:EnableMouse(true)
     if frame.defensiveIcon.SetPropagateMouseMotion then
         frame.defensiveIcon:SetPropagateMouseMotion(true)
     end
-    -- Fallback for older API
+    if frame.defensiveIcon.SetPropagateMouseClicks then
+        frame.defensiveIcon:SetPropagateMouseClicks(true)
+    end
     if frame.defensiveIcon.SetMouseClickEnabled then
         frame.defensiveIcon:SetMouseClickEnabled(false)
     end
@@ -2174,14 +2181,18 @@ function DF:CreateAuraIcon(parent, index, auraType)
     end)
     
     -- === MOUSE HANDLING FOR AURAS ===
-    -- SetPropagateMouseMotion(true): Mouse events propagate to parent frame
-    -- This allows tooltips on the aura while the PARENT receives click/hover for bindings
-    -- This is how Blizzard's CompactRaidFrames handle it (discovered via Clique source)
+    -- SetPropagateMouseMotion(true): Mouse motion events propagate to parent frame
+    -- SetPropagateMouseClicks(true): Mouse click events propagate to parent frame
+    -- SetMouseClickEnabled(false): This frame itself does not consume clicks
+    -- Together these allow tooltips on hover while the PARENT receives all clicks for bindings
+    -- This matches Grid2's approach (IndicatorMidnightTooltip.lua:EnableFrameTooltips)
     icon:EnableMouse(true)
     if icon.SetPropagateMouseMotion then
         icon:SetPropagateMouseMotion(true)
     end
-    -- Fallback for older API
+    if icon.SetPropagateMouseClicks then
+        icon:SetPropagateMouseClicks(true)
+    end
     if icon.SetMouseClickEnabled then
         icon:SetMouseClickEnabled(false)
     end

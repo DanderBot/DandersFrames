@@ -998,8 +998,14 @@ function DF:UpdateAuraClickThrough()
                         -- Complete click-through - no mouse interaction at all
                         icon:EnableMouse(false)
                     else
-                        -- Allow tooltips but pass clicks through
+                        -- Allow tooltips but pass clicks/motion through to parent for bindings
                         icon:EnableMouse(true)
+                        if icon.SetPropagateMouseMotion then
+                            icon:SetPropagateMouseMotion(true)
+                        end
+                        if icon.SetPropagateMouseClicks then
+                            icon:SetPropagateMouseClicks(true)
+                        end
                         if icon.SetMouseClickEnabled then
                             icon:SetMouseClickEnabled(false)
                         end
@@ -1017,8 +1023,14 @@ function DF:UpdateAuraClickThrough()
                         -- Complete click-through - no mouse interaction at all
                         icon:EnableMouse(false)
                     else
-                        -- Allow tooltips but pass clicks through
+                        -- Allow tooltips but pass clicks/motion through to parent for bindings
                         icon:EnableMouse(true)
+                        if icon.SetPropagateMouseMotion then
+                            icon:SetPropagateMouseMotion(true)
+                        end
+                        if icon.SetPropagateMouseClicks then
+                            icon:SetPropagateMouseClicks(true)
+                        end
                         if icon.SetMouseClickEnabled then
                             icon:SetMouseClickEnabled(false)
                         end
@@ -1034,8 +1046,14 @@ function DF:UpdateAuraClickThrough()
                 -- Complete click-through - no mouse interaction at all
                 frame.defensiveIcon:EnableMouse(false)
             else
-                -- Allow tooltips but pass clicks through
+                -- Allow tooltips but pass clicks/motion through to parent for bindings
                 frame.defensiveIcon:EnableMouse(true)
+                if frame.defensiveIcon.SetPropagateMouseMotion then
+                    frame.defensiveIcon:SetPropagateMouseMotion(true)
+                end
+                if frame.defensiveIcon.SetPropagateMouseClicks then
+                    frame.defensiveIcon:SetPropagateMouseClicks(true)
+                end
                 if frame.defensiveIcon.SetMouseClickEnabled then
                     frame.defensiveIcon:SetMouseClickEnabled(false)
                 end
@@ -1052,9 +1070,21 @@ function DF:UpdateAuraClickThrough()
                         icon:EnableMouse(false)
                         icon.iconFrame:EnableMouse(false)
                     else
-                        -- Allow tooltips but pass clicks through
+                        -- Allow tooltips but pass clicks/motion through to parent for bindings
                         icon:EnableMouse(true)
                         icon.iconFrame:EnableMouse(true)
+                        if icon.SetPropagateMouseMotion then
+                            icon:SetPropagateMouseMotion(true)
+                        end
+                        if icon.SetPropagateMouseClicks then
+                            icon:SetPropagateMouseClicks(true)
+                        end
+                        if icon.iconFrame.SetPropagateMouseMotion then
+                            icon.iconFrame:SetPropagateMouseMotion(true)
+                        end
+                        if icon.iconFrame.SetPropagateMouseClicks then
+                            icon.iconFrame:SetPropagateMouseClicks(true)
+                        end
                         if icon.SetMouseClickEnabled then
                             icon:SetMouseClickEnabled(false)
                         end
