@@ -45,29 +45,43 @@ local MENU_COMBAT_PRESCRIPT = [[
 -- ============================================================
 
 -- Helper to check if a spell is known/usable (used at bind-time for fallback selection)
-local function IsSpellKnownByName(spellName)
+local function IsSpellKnownByName(spellName, spellId)
     if not spellName then return false end
-    
-    -- Try to get spell info
+
+    local bookType = Enum.SpellBookSpellBank.Player
+
+    -- If we have a stored spell ID, check the override chain first
+    -- This handles spec-specific variants (e.g. Remove Corruption -> Nature's Cure)
+    -- where the stored name may not match the current spec's version
+    if spellId and C_Spell.GetOverrideSpell then
+        local overrideId = C_Spell.GetOverrideSpell(spellId)
+        if overrideId then
+            if C_SpellBook and C_SpellBook.IsSpellInSpellBook then
+                if C_SpellBook.IsSpellInSpellBook(overrideId, bookType, true) then
+                    return true
+                end
+            end
+        end
+    end
+
+    -- Try by name (original behavior)
     local spellInfo = C_Spell.GetSpellInfo(spellName)
     if not spellInfo then return false end
-    
-    local spellId = spellInfo.spellID
-    if not spellId then return false end
-    
-    local bookType = Enum.SpellBookSpellBank.Player
-    
+
+    local resolvedId = spellInfo.spellID
+    if not resolvedId then return false end
+
     -- Use IsSpellInSpellBook with includeOverrides=true to handle hero talent overrides
     -- (e.g., Chrono Flames which overrides Living Flame)
     if C_SpellBook and C_SpellBook.IsSpellInSpellBook then
-        return C_SpellBook.IsSpellInSpellBook(spellId, bookType, true)
+        return C_SpellBook.IsSpellInSpellBook(resolvedId, bookType, true)
     end
-    
+
     -- Fallback for older API
     if C_SpellBook and C_SpellBook.IsSpellKnownOrInSpellBook then
-        return C_SpellBook.IsSpellKnownOrInSpellBook(spellId, bookType, true)
+        return C_SpellBook.IsSpellKnownOrInSpellBook(resolvedId, bookType, true)
     end
-    
+
     return false
 end
 
@@ -1943,7 +1957,20 @@ function CC:BuildMacroTextForBinding(binding, forGlobalBinding)
     
     -- Handle different action types
     if actionType == self.ACTION_TYPES.SPELL then
+        -- Resolve current override spell name for casting
+        -- Bindings store the root spell ID/name (e.g. "Remove Corruption"), but the
+        -- current spec may use a different override (e.g. "Nature's Cure" for Resto).
+        -- Use GetOverrideSpell to get the correct castable name for the active spec.
         local spellName = binding.spellName
+        if binding.spellId and C_Spell.GetOverrideSpell then
+            local overrideId = C_Spell.GetOverrideSpell(binding.spellId)
+            if overrideId and overrideId ~= binding.spellId then
+                local overrideInfo = C_Spell.GetSpellInfo(overrideId)
+                if overrideInfo and overrideInfo.name then
+                    spellName = overrideInfo.name
+                end
+            end
+        end
         if not spellName then return nil end
         
         local parts = {}
@@ -2120,7 +2147,7 @@ function CC:BuildCombinedMacroForBindings(bindings, forGlobalBinding)
     local function findBestSpell(list)
         for _, b in ipairs(list) do
             if b.actionType == self.ACTION_TYPES.SPELL and b.spellName then
-                if IsSpellKnownByName and IsSpellKnownByName(b.spellName) then
+                if IsSpellKnownByName and IsSpellKnownByName(b.spellName, b.spellId) then
                     return b
                 end
             end
@@ -2780,7 +2807,7 @@ function CC:FindBestKnownSpellBinding(bindings)
     for _, item in ipairs(bindings) do
         local b = item.binding
         if b.actionType == self.ACTION_TYPES.SPELL and b.spellName then
-            if IsSpellKnownByName(b.spellName) then
+            if IsSpellKnownByName(b.spellName, b.spellId) then
                 return b
             end
         end
