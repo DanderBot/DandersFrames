@@ -11,6 +11,9 @@
 * Fix pet frames vanishing after reload — pet frame updates were skipped in header mode, so they were never shown after login or `/rl`
 * Fix pet frame font crash on non-English clients
 * Reduce redundant pet frame updates during startup (throttled from 6 calls to 1-2)
+* Fix resource bar border not showing after login/reload — was calling non-existent function
+* Fix heal absorb bar showing smaller than actual absorb amount — calculator was subtracting incoming heals from absorb value
+* Replace pcall wrappers with nil checks in absorb/heal calculator hot paths for better performance
 
 ### New Features
 * Debug Console — persistent debug logging system with in-game viewer (`/df debug` to toggle, `/df console` to view). Logs persist across reloads with category filtering, severity levels, and clipboard export

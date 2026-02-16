@@ -467,19 +467,21 @@ function DF:UpdateAbsorb(frame, testIndex)
             
             -- Set clamp mode from settings (default to 1 = Missing Health)
             local clampMode = db.absorbBarAttachedClampMode or 1
-            pcall(function() calc:SetDamageAbsorbClampMode(clampMode) end)
-            
+            if calc.SetDamageAbsorbClampMode then calc:SetDamageAbsorbClampMode(clampMode) end
+
             -- Populate the calculator
             UnitGetDetailedHealPrediction(unit, nil, calc)
-            
+
             -- Get clamped absorbs and clamped bool
-            local getSuccess, result1, result2 = pcall(function() return calc:GetDamageAbsorbs() end)
-            if getSuccess and result1 then
-                attachedAbsorbs = result1
-                isClamped = result2  -- This is a secret bool in M+
+            if calc.GetDamageAbsorbs then
+                local result1, result2 = calc:GetDamageAbsorbs()
+                if result1 then
+                    attachedAbsorbs = result1
+                    isClamped = result2  -- This is a secret bool in M+
+                end
             end
         end
-        
+
         -- Create/update overshield glow at max health position
         if db.absorbBarShowOvershield then
             -- Create glow texture if needed (directly on health bar)
@@ -700,19 +702,21 @@ function DF:UpdateAbsorb(frame, testIndex)
             
             -- Set clamp mode from settings (default to 1 = Missing Health)
             local clampMode = db.absorbBarAttachedClampMode or 1
-            pcall(function() calc:SetDamageAbsorbClampMode(clampMode) end)
-            
+            if calc.SetDamageAbsorbClampMode then calc:SetDamageAbsorbClampMode(clampMode) end
+
             -- Populate the calculator
             UnitGetDetailedHealPrediction(unit, nil, calc)
-            
+
             -- Get clamped absorbs and clamped bool
-            local getSuccess, result1, result2 = pcall(function() return calc:GetDamageAbsorbs() end)
-            if getSuccess and result1 then
-                attachedAbsorbs = result1
-                isClamped = result2  -- This is a secret bool in M+
+            if calc.GetDamageAbsorbs then
+                local result1, result2 = calc:GetDamageAbsorbs()
+                if result1 then
+                    attachedAbsorbs = result1
+                    isClamped = result2  -- This is a secret bool in M+
+                end
             end
         end
-        
+
         local healthOrient = db.healthOrientation or "HORIZONTAL"
         local inset = 0
         if db.showFrameBorder ~= false then
@@ -1091,15 +1095,21 @@ function DF:UpdateHealAbsorb(frame, testIndex)
             local calc = frame.healAbsorbCalculator
             
             -- Set clamp mode: 0 = CurrentHealth (don't go past 0 health)
-            pcall(function() calc:SetHealAbsorbClampMode(0) end)
+            if calc.SetHealAbsorbClampMode then calc:SetHealAbsorbClampMode(0) end
+            -- Set heal absorb mode: 1 = Total (return raw absorb values without
+            -- subtracting incoming heals). Default mode 0 reduces heal absorbs by
+            -- incoming heal amount, causing the bar to show less than actual absorb.
+            if calc.SetHealAbsorbMode then calc:SetHealAbsorbMode(1) end
             
             -- Populate the calculator
             UnitGetDetailedHealPrediction(unit, nil, calc)
             
             -- Get clamped heal absorbs
-            local getSuccess, result1 = pcall(function() return calc:GetHealAbsorbs() end)
-            if getSuccess and result1 then
-                attachedHealAbsorb = result1
+            if calc.GetHealAbsorbs then
+                local result = calc:GetHealAbsorbs()
+                if result then
+                    attachedHealAbsorb = result
+                end
             end
         end
         
