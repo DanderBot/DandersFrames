@@ -570,8 +570,17 @@ local function RefreshAllOverrideIndicators()
     if GUI.UpdatePositionOverrideIndicator then
         GUI.UpdatePositionOverrideIndicator()
     end
+    -- Refresh tab override stars (auto-profiles)
+    if DF.AutoProfilesUI and DF.AutoProfilesUI.RefreshTabOverrideStars then
+        DF.AutoProfilesUI:RefreshTabOverrideStars()
+    end
 end
 GUI.RefreshAllOverrideIndicators = RefreshAllOverrideIndicators
+
+-- Allow other files to register widgets with override indicators
+function GUI.RegisterOverrideWidget(widget)
+    table.insert(overrideWidgets, widget)
+end
 
 -- Slash command to toggle debug mode
 SLASH_DFOVERRIDEDEBUG1 = "/dfoverridedebug"
@@ -667,7 +676,7 @@ local function AddOverrideIndicators(container, lbl, dbKey, onReset, verticalOff
             return
         end
         
-        -- Only show when in raid mode and editing
+        -- Only show when in raid mode
         local GUI = DF.GUI
         if not GUI or GUI.SelectedMode ~= "raid" then
             self.overrideStar:Hide()
@@ -676,20 +685,61 @@ local function AddOverrideIndicators(container, lbl, dbKey, onReset, verticalOff
             self.overrideCheckIcon:Hide()
             return
         end
-        
+
         local AutoProfilesUI = DF.AutoProfilesUI
-        if not AutoProfilesUI or not AutoProfilesUI:IsEditing() then
+        local isEditing = AutoProfilesUI and AutoProfilesUI:IsEditing()
+        local isRuntimeOverridden = AutoProfilesUI and AutoProfilesUI:IsOverriddenByRuntime(dbKey)
+
+        -- Hide everything if not editing AND not runtime-overridden
+        if not isEditing and not isRuntimeOverridden then
             self.overrideStar:Hide()
             self.overrideResetBtn:Hide()
             self.overrideGlobalText:Hide()
             self.overrideCheckIcon:Hide()
             return
         end
-        
+
+        -- Runtime override mode: show star + global value, but no reset button
+        if isRuntimeOverridden and not isEditing then
+            self.overrideStar:Show()
+            self.overrideResetBtn:Hide()  -- Can't reset runtime overrides from controls
+            self.overrideCheckIcon:Hide()
+
+            local globalValue = AutoProfilesUI:GetRuntimeGlobalValue(dbKey)
+
+            -- Format global value for display
+            local globalDisplay
+            if type(globalValue) == "boolean" then
+                globalDisplay = globalValue and "Yes" or "No"
+            elseif type(globalValue) == "number" then
+                if globalValue == math.floor(globalValue) then
+                    globalDisplay = tostring(globalValue)
+                else
+                    globalDisplay = string.format("%.2f", globalValue)
+                end
+            elseif type(globalValue) == "table" then
+                if globalValue.r then
+                    globalDisplay = "Color"
+                else
+                    globalDisplay = "..."
+                end
+            else
+                globalDisplay = tostring(globalValue or "None")
+            end
+
+            self.overrideGlobalText:SetText("(Global: " .. globalDisplay .. ")")
+            self.overrideGlobalText:ClearAllPoints()
+            self.overrideGlobalText:SetPoint("LEFT", lbl, "RIGHT", 4, 0)
+            self.overrideGlobalText:SetTextColor(0.5, 0.5, 0.5)
+            self.overrideGlobalText:Show()
+            return
+        end
+
+        -- Editing mode: existing behavior
         -- Check if setting is overridden
         local isOverridden = AutoProfilesUI:IsSettingOverridden(dbKey)
         local globalValue = AutoProfilesUI:GetGlobalValue(dbKey)
-        
+
         -- Show/hide star and reset button
         if isOverridden then
             self.overrideStar:Show()
@@ -698,7 +748,7 @@ local function AddOverrideIndicators(container, lbl, dbKey, onReset, verticalOff
             self.overrideStar:Hide()
             self.overrideResetBtn:Hide()
         end
-        
+
         -- Format global value for display
         local globalDisplay
         if type(globalValue) == "boolean" then
@@ -719,12 +769,12 @@ local function AddOverrideIndicators(container, lbl, dbKey, onReset, verticalOff
         else
             globalDisplay = tostring(globalValue or "None")
         end
-        
+
         -- Show global value inline with label
         self.overrideGlobalText:SetText("(Global: " .. globalDisplay .. ")")
         self.overrideGlobalText:ClearAllPoints()
         self.overrideGlobalText:SetPoint("LEFT", lbl, "RIGHT", 4, 0)
-        
+
         if isOverridden then
             self.overrideGlobalText:SetTextColor(0.5, 0.5, 0.5)
             self.overrideCheckIcon:Hide()
@@ -924,8 +974,16 @@ function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, 
             print("  overrideKey:", overrideKey)
             print("  new value:", val)
         end
+
+        -- Runtime override protection: redirect to baseline, skip refresh
+        if GUI.SelectedMode == "raid" and DF.AutoProfilesUI
+           and DF.AutoProfilesUI:HandleRuntimeWrite(effectiveOverrideKey, val) then
+            if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators(val) end
+            return
+        end
+
         if customSet then customSet(val) elseif dbTable and dbKey then dbTable[dbKey] = val end
-        
+
         -- If editing a profile, also set the override (use effectiveOverrideKey)
         if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() and effectiveOverrideKey then
             DF.AutoProfilesUI:SetProfileSetting(effectiveOverrideKey, val)
@@ -1060,6 +1118,12 @@ function GUI:CreateEditBox(parent, label, dbTable, dbKey, callback, width)
     local function SaveValue()
         if dbTable and dbKey then
             local val = editbox:GetText()
+            -- Runtime override protection
+            if GUI.SelectedMode == "raid" and DF.AutoProfilesUI
+               and DF.AutoProfilesUI:HandleRuntimeWrite(dbKey, val) then
+                if frame.UpdateOverrideIndicators then frame:UpdateOverrideIndicators(val) end
+                return
+            end
             dbTable[dbKey] = val
             -- Track override when editing a profile
             if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() then
@@ -1261,8 +1325,18 @@ function GUI:CreateSlider(parent, label, minVal, maxVal, step, dbTable, dbKey, c
         else
             value = math.floor(value / step + 0.5) * step
         end
+
+        -- Runtime override protection: redirect to baseline, skip refresh
+        if GUI.SelectedMode == "raid" and DF.AutoProfilesUI
+           and DF.AutoProfilesUI:HandleRuntimeWrite(dbKey, value) then
+            if not input:HasFocus() then input:SetText(FormatValue(value)) end
+            UpdateFill()
+            if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators(value) end
+            return
+        end
+
         dbTable[dbKey] = value
-        
+
         -- If editing a profile, also set the override
         if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() and dbKey then
             DF.AutoProfilesUI:SetProfileSetting(dbKey, value)
@@ -1284,32 +1358,46 @@ function GUI:CreateSlider(parent, label, minVal, maxVal, step, dbTable, dbKey, c
         local val = tonumber(self:GetText())
         if val then
             val = math.max(minVal, math.min(maxVal, val))
+
+            -- Runtime override protection: redirect to baseline, skip refresh
+            if GUI.SelectedMode == "raid" and DF.AutoProfilesUI
+               and DF.AutoProfilesUI:HandleRuntimeWrite(dbKey, val) then
+                self:SetText(FormatValue(val))
+                suppressCallback = true
+                slider:SetValue(val)
+                suppressCallback = false
+                UpdateFill()
+                if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators(val) end
+                self:ClearFocus()
+                return
+            end
+
             dbTable[dbKey] = val
             suppressCallback = true
             slider:SetValue(val)
             suppressCallback = false
-            
+
             -- Update input text to show actual value entered
             self:SetText(FormatValue(val))
             UpdateFill()
-            
+
             -- If editing a profile, also set the override
             if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() and dbKey then
                 DF.AutoProfilesUI:SetProfileSetting(dbKey, val)
             end
-            
+
             -- Update override indicators
             if container.UpdateOverrideIndicators then
                 container:UpdateOverrideIndicators(val)
             end
-            
+
             -- FIX 2025-01-20: Call callback OR lightweightUpdate (some sliders have nil callback)
             if callback then
                 callback()
             elseif lightweightUpdate then
                 lightweightUpdate()
             end
-            
+
             -- Guaranteed full update (SetValue may not fire OnValueChanged if value didn't change)
             DF:UpdateAll()
         else
@@ -1651,13 +1739,22 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback)
         menuBtn.Highlight:SetColorTexture(c.r, c.g, c.b, 0.3)
         
         menuBtn:SetScript("OnClick", function()
+            -- Runtime override protection: redirect to baseline, skip refresh
+            if GUI.SelectedMode == "raid" and DF.AutoProfilesUI
+               and DF.AutoProfilesUI:HandleRuntimeWrite(dbKey, opt.key) then
+                UpdateText()
+                menuFrame:Hide()
+                if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators(opt.key) end
+                return
+            end
+
             dbTable[dbKey] = opt.key
-            
+
             -- If editing a profile, also set the override
             if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() and dbKey then
                 DF.AutoProfilesUI:SetProfileSetting(dbKey, opt.key)
             end
-            
+
             UpdateText()
             menuFrame:Hide()
             DF:UpdateAll()
@@ -1943,6 +2040,14 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
             menuBtn.Highlight:SetColorTexture(c.r, c.g, c.b, 0.3)
             
             menuBtn:SetScript("OnClick", function()
+                -- Runtime override protection
+                if GUI.SelectedMode == "raid" and DF.AutoProfilesUI
+                   and DF.AutoProfilesUI:HandleRuntimeWrite(dbKey, opt.key) then
+                    UpdateText()
+                    menuFrame:Hide()
+                    if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators(opt.key) end
+                    return
+                end
                 dbTable[dbKey] = opt.key
                 -- Track override when editing a profile
                 if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() and dbKey then
@@ -1956,7 +2061,7 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
                 DF:UpdateAll()
                 if callback then callback() end
             end)
-            
+
             table.insert(menuButtons, menuBtn)
         end
     end
@@ -2246,6 +2351,14 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback)
             menuBtn.Highlight:SetColorTexture(c.r, c.g, c.b, 0.3)
             
             menuBtn:SetScript("OnClick", function()
+                -- Runtime override protection
+                if GUI.SelectedMode == "raid" and DF.AutoProfilesUI
+                   and DF.AutoProfilesUI:HandleRuntimeWrite(dbKey, opt.key) then
+                    UpdateText()
+                    menuFrame:Hide()
+                    if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators(opt.key) end
+                    return
+                end
                 -- Store font NAME in database (not path)
                 dbTable[dbKey] = opt.key
                 -- Track override when editing a profile
@@ -4250,6 +4363,11 @@ function DF:ToggleGUI()
         if AutoProfilesUI and AutoProfilesUI.RefreshEditingUI then
             AutoProfilesUI:RefreshEditingUI()
         end
+
+        -- Refresh override stars (shows if a runtime profile is active)
+        if AutoProfilesUI and AutoProfilesUI.RefreshTabOverrideStars then
+            AutoProfilesUI:RefreshTabOverrideStars()
+        end
         
         DF.GUIFrame:Show()
         GUI:RefreshCurrentPage()
@@ -4328,7 +4446,20 @@ function DF:CreateGUI()
     
     local title = titleBar:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     title:SetPoint("LEFT", 12, 0)
-    title:SetText("DandersFrames v" .. (DF.VERSION or "?"))
+    local addonVer = DF.ADDON_VERSION
+    local tocVer = DF.VERSION
+    -- Prefer ADDON_VERSION from CI, fall back to TOC version, skip placeholders
+    local versionStr
+    if addonVer and addonVer ~= "dev" then
+        versionStr = addonVer
+    elseif tocVer and not tocVer:find("@") then
+        versionStr = "v" .. tocVer
+    else
+        versionStr = "v" .. (DF.ADDON_VERSION_FALLBACK or "4.0.5")
+    end
+    local channelTags = { alpha = " |cffff8800alpha|r", beta = " |cffff8800beta|r" }
+    local channelTag = channelTags[DF.RELEASE_CHANNEL] or ""
+    title:SetText("DandersFrames " .. versionStr .. channelTag)
     local c = GetThemeColor()
     title:SetTextColor(c.r, c.g, c.b)
     title.UpdateTheme = function()
@@ -4363,7 +4494,135 @@ function DF:CreateGUI()
         closeIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     end)
     closeBtn:SetScript("OnClick", function() frame:Hide() end)
-    
+
+    -- Info button (changelog)
+    local infoBtn = CreateFrame("Button", nil, frame, "BackdropTemplate")
+    infoBtn:SetSize(20, 20)
+    infoBtn:SetPoint("TOPRIGHT", -32, -5)
+    infoBtn:SetFrameStrata("FULLSCREEN_DIALOG")
+    infoBtn:SetFrameLevel(210)
+    infoBtn:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = 1,
+    })
+    infoBtn:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
+    infoBtn:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
+    local infoIcon = infoBtn:CreateTexture(nil, "OVERLAY")
+    infoIcon:SetPoint("CENTER")
+    infoIcon:SetSize(16, 16)
+    infoIcon:SetAtlas("QuestNormal")
+    infoIcon:SetDesaturated(true)
+    infoIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    infoBtn:SetScript("OnEnter", function(self)
+        local tc = GetThemeColor()
+        self:SetBackdropBorderColor(tc.r, tc.g, tc.b, 1)
+        infoIcon:SetVertexColor(tc.r, tc.g, tc.b)
+    end)
+    infoBtn:SetScript("OnLeave", function(self)
+        self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
+        infoIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    end)
+
+    -- Changelog overlay (covers full content area below title bar)
+    local changelogOverlay = CreateFrame("Frame", nil, frame, "BackdropTemplate")
+    changelogOverlay:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, -30)
+    changelogOverlay:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
+    changelogOverlay:SetFrameStrata("FULLSCREEN_DIALOG")
+    changelogOverlay:SetFrameLevel(300)
+    CreatePanelBackdrop(changelogOverlay)
+    changelogOverlay:Hide()
+
+    -- Header bar within the overlay
+    local changelogHeader = CreateFrame("Frame", nil, changelogOverlay)
+    changelogHeader:SetPoint("TOPLEFT", 8, -8)
+    changelogHeader:SetPoint("TOPRIGHT", -8, -8)
+    changelogHeader:SetHeight(24)
+
+    local changelogTitle = changelogHeader:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    changelogTitle:SetPoint("LEFT", 4, 0)
+    changelogTitle:SetText("Changelog — " .. versionStr)
+    changelogTitle:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+
+    local backBtn = CreateFrame("Button", nil, changelogHeader, "BackdropTemplate")
+    backBtn:SetSize(60, 22)
+    backBtn:SetPoint("RIGHT", 0, 0)
+    CreateElementBackdrop(backBtn)
+    local backText = backBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    backText:SetPoint("CENTER")
+    backText:SetText("Back")
+    backText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+    backBtn:SetScript("OnEnter", function(self)
+        local tc = GetThemeColor()
+        self:SetBackdropBorderColor(tc.r, tc.g, tc.b, 1)
+    end)
+    backBtn:SetScript("OnLeave", function(self)
+        self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
+    end)
+    backBtn:SetScript("OnClick", function() changelogOverlay:Hide() end)
+
+    -- Convert markdown changelog to WoW color-coded plain text
+    local function FormatChangelog(text)
+        if not text or text == "" then return "No changelog available." end
+        local tc = GetThemeColor()
+        local themeHex = format("%02x%02x%02x", tc.r * 255, tc.g * 255, tc.b * 255)
+        local dimHex = format("%02x%02x%02x", C_TEXT_DIM.r * 255, C_TEXT_DIM.g * 255, C_TEXT_DIM.b * 255)
+        local textHex = format("%02x%02x%02x", C_TEXT.r * 255, C_TEXT.g * 255, C_TEXT.b * 255)
+
+        local lines = {}
+        for line in text:gmatch("[^\n]*") do
+            if line:match("^# ") then
+                -- Main title — skip (already shown in header bar)
+            elseif line:match("^## ") then
+                -- Version header
+                local content = line:gsub("^##%s*", "")
+                lines[#lines + 1] = format("|cff%s%s|r", themeHex, content)
+            elseif line:match("^### ") then
+                -- Section header
+                local content = line:gsub("^###%s*", "")
+                lines[#lines + 1] = format("\n|cff%s%s|r", textHex, content)
+            elseif line:match("^%*%s") or line:match("^%-%s") then
+                -- Bullet point
+                local content = line:gsub("^[%*%-]%s*", "")
+                lines[#lines + 1] = format("  |cff%s\226\128\162|r  |cff%s%s|r", themeHex, dimHex, content)
+            elseif line:match("^%s*$") then
+                lines[#lines + 1] = ""
+            else
+                lines[#lines + 1] = format("|cff%s%s|r", dimHex, line)
+            end
+        end
+
+        return table.concat(lines, "\n")
+    end
+
+    local changelogScroll = CreateFrame("ScrollFrame", nil, changelogOverlay, "UIPanelScrollFrameTemplate")
+    changelogScroll:SetPoint("TOPLEFT", 8, -38)
+    changelogScroll:SetPoint("BOTTOMRIGHT", -26, 8)
+
+    local changelogContent = CreateFrame("EditBox", nil, changelogScroll)
+    changelogContent:SetMultiLine(true)
+    changelogContent:SetAutoFocus(false)
+    changelogContent:SetFontObject(GameFontHighlightSmall)
+    changelogContent:SetWidth(changelogScroll:GetWidth() or 500)
+    changelogContent:SetText(FormatChangelog(DF.CHANGELOG_TEXT))
+    changelogContent:SetCursorPosition(0)
+    changelogContent:EnableMouse(true)
+    changelogContent:EnableKeyboard(false)
+    changelogContent:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    changelogContent:SetScript("OnEditFocusGained", function(self) self:HighlightText(0, 0) end)
+    changelogScroll:SetScrollChild(changelogContent)
+
+    infoBtn:SetScript("OnClick", function()
+        if changelogOverlay:IsShown() then
+            changelogOverlay:Hide()
+        else
+            changelogContent:SetWidth(changelogScroll:GetWidth())
+            changelogContent:SetText(FormatChangelog(DF.CHANGELOG_TEXT))
+            changelogContent:SetCursorPosition(0)
+            changelogOverlay:Show()
+        end
+    end)
+
     -- =========================================================================
     -- RESIZE HANDLE (bottom-right corner)
     -- =========================================================================
@@ -4943,9 +5202,29 @@ function DF:CreateGUI()
     GUI.clickCastPanel = clickCastPanel
     
     -- =========================================================================
-    -- FOOTER BAR (Discord & Donation links)
+    -- FOOTER BAR (Discord & Donation links + bottom drag handle)
     -- =========================================================================
-    local footer = CreateFrame("Frame", nil, frame)
+
+    -- Bottom drag bar (mirrors titleBar for dragging from the bottom)
+    local bottomBar = CreateFrame("Frame", nil, frame)
+    bottomBar:SetHeight(30)
+    bottomBar:SetPoint("BOTTOMLEFT", 0, 0)
+    bottomBar:SetPoint("BOTTOMRIGHT", -16, 0)  -- Leave space for resize handle
+    bottomBar:EnableMouse(true)
+    bottomBar:RegisterForDrag("LeftButton")
+    bottomBar:SetScript("OnDragStart", function() frame:StartMoving() end)
+    bottomBar:SetScript("OnDragStop", function()
+        frame:StopMovingOrSizing()
+        local point, _, relPoint, x, y = frame:GetPoint()
+        if DF.db and DF.db.party then
+            DF.db.party.guiPoint = point
+            DF.db.party.guiRelPoint = relPoint
+            DF.db.party.guiX = x
+            DF.db.party.guiY = y
+        end
+    end)
+
+    local footer = CreateFrame("Frame", nil, bottomBar)
     footer:SetPoint("BOTTOMLEFT", 12, 8)
     footer:SetPoint("BOTTOMRIGHT", -12, 8)
     footer:SetHeight(22)
@@ -5051,7 +5330,7 @@ function DF:CreateGUI()
     -- Version on the right
     local versionText = footer:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     versionText:SetPoint("RIGHT", footer, "RIGHT", -2, 0)
-    versionText:SetText("v" .. (DF.VERSION or "?"))
+    versionText:SetText(versionStr .. channelTag)
     versionText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.5)
     
     -- Create the click casting UI content

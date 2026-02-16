@@ -1446,6 +1446,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 if set.keepOfflinePlayers == nil then set.keepOfflinePlayers = true end
                 if set.columnAnchor == nil then set.columnAnchor = "START" end
                 if set.frameAnchor == nil then set.frameAnchor = "START" end
+                if set.locked == nil then set.locked = false end
+                if set.showLabel == nil then set.showLabel = false end
+                if set.players == nil then set.players = {} end
             end
         end
         
@@ -1503,7 +1506,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             tab.text = tab:CreateFontString(nil, "OVERLAY", "GameFontNormal")
             tab.text:SetPoint("CENTER")
             tab.text:SetText("Highlight " .. i)
-            tab:SetScript("OnClick", function() activeHighlightTab = i; RefreshTabs(); RefreshControls() end)
+            tab:SetScript("OnClick", function() activeHighlightTab = i; RefreshTabs(); RefreshControls(); if GUI.RefreshAllOverrideIndicators then GUI.RefreshAllOverrideIndicators() end end)
             tab:SetScript("OnEnter", function(s) if activeHighlightTab ~= i then s:SetBackdropBorderColor(0.4, 0.4, 0.4, 1); s.text:SetTextColor(0.7, 0.7, 0.7) end end)
             tab:SetScript("OnLeave", function() RefreshTabs() end)
             tabButtons[i] = tab
@@ -1511,6 +1514,183 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         RefreshTabs()
         
         AddSpace(10, "both")
+        
+        -- Helper to get the pinned override key for the current active tab
+        local function GetPinnedKey(dbKey)
+            return "pinned." .. activeHighlightTab .. "." .. dbKey
+        end
+        
+        -- Add override indicators (star, reset, global text) to a pinned frame control
+        local function AddPinnedOverrideIndicators(container, lbl, dbKey, onReset)
+            local AutoProfilesUI = DF.AutoProfilesUI
+            if not AutoProfilesUI then return end
+            
+            -- Reset button
+            local resetBtn = CreateFrame("Button", nil, container, "BackdropTemplate")
+            resetBtn:SetSize(18, 18)
+            resetBtn:SetPoint("TOPRIGHT", container, "TOPRIGHT", 0, 0)
+            resetBtn:SetBackdrop({
+                bgFile = "Interface\\Buttons\\WHITE8x8",
+                edgeFile = "Interface\\Buttons\\WHITE8x8",
+                edgeSize = 1,
+            })
+            resetBtn:SetBackdropColor(0.1, 0.1, 0.1, 0.8)
+            resetBtn:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
+            resetBtn:Hide()
+            
+            local resetIcon = resetBtn:CreateTexture(nil, "OVERLAY")
+            resetIcon:SetPoint("CENTER")
+            resetIcon:SetSize(12, 12)
+            resetIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\refresh")
+            resetIcon:SetVertexColor(0.6, 0.6, 0.6)
+            
+            resetBtn:SetScript("OnEnter", function(s)
+                s:SetBackdropBorderColor(1, 0.8, 0.2, 1)
+                resetIcon:SetVertexColor(1, 0.8, 0.2)
+                GameTooltip:SetOwner(s, "ANCHOR_RIGHT")
+                GameTooltip:SetText("Reset to Global")
+                GameTooltip:Show()
+            end)
+            resetBtn:SetScript("OnLeave", function(s)
+                s:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
+                resetIcon:SetVertexColor(0.6, 0.6, 0.6)
+                GameTooltip:Hide()
+            end)
+            resetBtn:SetScript("OnClick", function()
+                if onReset then onReset() end
+            end)
+            container.overrideResetBtn = resetBtn
+            
+            -- Star icon
+            local starIcon = container:CreateTexture(nil, "OVERLAY")
+            starIcon:SetSize(12, 12)
+            starIcon:SetPoint("RIGHT", resetBtn, "LEFT", -4, 0)
+            starIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\star")
+            starIcon:SetVertexColor(1, 0.8, 0.2)
+            starIcon:Hide()
+            container.overrideStar = starIcon
+            
+            -- Global value text
+            local globalText = container:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            globalText:SetPoint("LEFT", lbl, "RIGHT", 4, 0)
+            globalText:SetTextColor(0.4, 0.4, 0.4)
+            globalText:Hide()
+            container.overrideGlobalText = globalText
+            
+            -- Checkmark icon
+            local checkIcon = container:CreateTexture(nil, "OVERLAY")
+            checkIcon:SetSize(8, 8)
+            checkIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\check")
+            checkIcon:SetVertexColor(0.3, 0.7, 0.3)
+            checkIcon:Hide()
+            container.overrideCheckIcon = checkIcon
+            
+            container.UpdateOverrideIndicators = function(self)
+                -- Debug mode
+                if GUI.IsOverrideDebugMode and GUI.IsOverrideDebugMode() then
+                    self.overrideStar:Show()
+                    self.overrideResetBtn:Show()
+                    self.overrideGlobalText:SetText("(debug)")
+                    self.overrideGlobalText:SetTextColor(1, 0.8, 0.2)
+                    self.overrideGlobalText:Show()
+                    self.overrideCheckIcon:Hide()
+                    return
+                end
+                
+                -- Only show in raid mode while editing
+                if not GUI or GUI.SelectedMode ~= "raid" then
+                    self.overrideStar:Hide(); self.overrideResetBtn:Hide()
+                    self.overrideGlobalText:Hide(); self.overrideCheckIcon:Hide()
+                    return
+                end
+                
+                local isEditing = AutoProfilesUI and AutoProfilesUI:IsEditing()
+                local pinnedKey = GetPinnedKey(dbKey)
+                local isRuntimeOverridden = AutoProfilesUI and AutoProfilesUI:IsOverriddenByRuntime(pinnedKey)
+
+                -- Hide everything if not editing AND not runtime-overridden
+                if not isEditing and not isRuntimeOverridden then
+                    self.overrideStar:Hide(); self.overrideResetBtn:Hide()
+                    self.overrideGlobalText:Hide(); self.overrideCheckIcon:Hide()
+                    return
+                end
+
+                -- Runtime override mode: show star + global value, no reset button
+                if isRuntimeOverridden and not isEditing then
+                    self.overrideStar:Show()
+                    self.overrideResetBtn:Hide()
+                    self.overrideCheckIcon:Hide()
+
+                    local globalValue = AutoProfilesUI:GetRuntimeGlobalValue(pinnedKey)
+                    local globalDisplay
+                    if type(globalValue) == "boolean" then
+                        globalDisplay = globalValue and "Yes" or "No"
+                    elseif type(globalValue) == "number" then
+                        if globalValue == math.floor(globalValue) then
+                            globalDisplay = tostring(globalValue)
+                        else
+                            globalDisplay = string.format("%.2f", globalValue)
+                        end
+                    elseif type(globalValue) == "table" then
+                        globalDisplay = "..."
+                    else
+                        globalDisplay = tostring(globalValue or "None")
+                    end
+
+                    self.overrideGlobalText:SetText("Global: " .. globalDisplay)
+                    self.overrideGlobalText:SetTextColor(0.5, 0.5, 0.5)
+                    self.overrideGlobalText:Show()
+                    return
+                end
+
+                -- Editing mode: existing behavior
+                local isOverridden = AutoProfilesUI:IsSettingOverridden(pinnedKey)
+                local globalValue = AutoProfilesUI:GetGlobalValue(pinnedKey)
+
+                if isOverridden then
+                    self.overrideStar:Show()
+                    self.overrideResetBtn:Show()
+                else
+                    self.overrideStar:Hide()
+                    self.overrideResetBtn:Hide()
+                end
+
+                -- Format global value for display
+                local globalDisplay
+                if type(globalValue) == "boolean" then
+                    globalDisplay = globalValue and "Yes" or "No"
+                elseif type(globalValue) == "number" then
+                    if globalValue == math.floor(globalValue) then
+                        globalDisplay = tostring(globalValue)
+                    else
+                        globalDisplay = string.format("%.2f", globalValue)
+                    end
+                elseif type(globalValue) == "table" then
+                    globalDisplay = "..."
+                else
+                    globalDisplay = tostring(globalValue or "None")
+                end
+
+                -- Show global text with check/star positioning
+                if isOverridden then
+                    self.overrideGlobalText:SetText("Global: " .. globalDisplay)
+                    self.overrideGlobalText:SetTextColor(0.4, 0.4, 0.4)
+                    self.overrideGlobalText:Show()
+                    self.overrideCheckIcon:Hide()
+                else
+                    self.overrideGlobalText:SetText("Global: " .. globalDisplay)
+                    self.overrideGlobalText:SetTextColor(0.3, 0.7, 0.3)
+                    self.overrideGlobalText:Show()
+                    self.overrideCheckIcon:SetPoint("RIGHT", self.overrideGlobalText, "LEFT", -2, 0)
+                    self.overrideCheckIcon:Show()
+                end
+            end
+            
+            -- Register for global refresh
+            if GUI.RegisterOverrideWidget then
+                GUI.RegisterOverrideWidget(container)
+            end
+        end
         
         -- Helper function to create refreshable checkbox
         local function CreateRefreshableCheckbox(parent, label, dbKey, callback)
@@ -1533,8 +1713,39 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             txt:SetPoint("LEFT", cb, "RIGHT", 8, 0)
             txt:SetText(label)
             txt:SetTextColor(0.8, 0.8, 0.8)
-            cb:SetScript("OnClick", function(s) GetCurrentSet()[dbKey] = s:GetChecked(); if callback then callback(GetCurrentSet()) end; DF:UpdateAll() end)
-            container.Refresh = function() cb:SetChecked(GetCurrentSet()[dbKey]) end
+            cb:SetScript("OnClick", function(s)
+                local val = s:GetChecked()
+                -- Runtime override protection
+                if GUI.SelectedMode == "raid" and DF.AutoProfilesUI
+                   and DF.AutoProfilesUI:HandleRuntimeWrite(GetPinnedKey(dbKey), val) then
+                    if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators() end
+                    return
+                end
+                GetCurrentSet()[dbKey] = val
+                if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() then
+                    DF.AutoProfilesUI:SetProfileSetting(GetPinnedKey(dbKey), val)
+                end
+                if callback then callback(GetCurrentSet()) end
+                DF:UpdateAll()
+                if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators() end
+            end)
+            container.Refresh = function()
+                cb:SetChecked(GetCurrentSet()[dbKey])
+                if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators() end
+            end
+            
+            -- Override indicators with reset
+            AddPinnedOverrideIndicators(container, txt, dbKey, function()
+                local AutoProfilesUI = DF.AutoProfilesUI
+                if AutoProfilesUI then
+                    AutoProfilesUI:ResetProfileSetting(GetPinnedKey(dbKey))
+                    cb:SetChecked(GetCurrentSet()[dbKey])
+                    if callback then callback(GetCurrentSet()) end
+                    DF:UpdateAll()
+                    if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators() end
+                end
+            end)
+            
             container.Refresh()
             table.insert(controlsToRefresh, container)
             return container
@@ -1583,10 +1794,69 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             input:SetTextInsets(2, 2, 0, 0)
             local function UpdateFill() local pct = (slider:GetValue() - minVal) / (maxVal - minVal); fill:SetWidth(math.max(1, pct * 168)) end
             local function UpdateValue(val) slider:SetValue(val); input:SetText(step < 1 and string.format("%.1f", val) or string.format("%d", val)); UpdateFill() end
-            slider:SetScript("OnValueChanged", function(_, value) GetCurrentSet()[dbKey] = value; input:SetText(step < 1 and string.format("%.1f", value) or string.format("%d", value)); UpdateFill(); if callback then callback() end end)
-            input:SetScript("OnEnterPressed", function(s) local val = tonumber(s:GetText()); if val then val = math.max(minVal, math.min(maxVal, val)); GetCurrentSet()[dbKey] = val; slider:SetValue(val); s:SetText(step < 1 and string.format("%.1f", val) or string.format("%d", val)); UpdateFill(); if callback then callback() end; DF:UpdateAll() end; s:ClearFocus() end)
+            slider:SetScript("OnValueChanged", function(_, value)
+                -- Runtime override protection
+                if GUI.SelectedMode == "raid" and DF.AutoProfilesUI
+                   and DF.AutoProfilesUI:HandleRuntimeWrite(GetPinnedKey(dbKey), value) then
+                    input:SetText(step < 1 and string.format("%.1f", value) or string.format("%d", value))
+                    UpdateFill()
+                    if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators() end
+                    return
+                end
+                GetCurrentSet()[dbKey] = value
+                input:SetText(step < 1 and string.format("%.1f", value) or string.format("%d", value))
+                UpdateFill()
+                if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() then
+                    DF.AutoProfilesUI:SetProfileSetting(GetPinnedKey(dbKey), value)
+                end
+                if callback then callback() end
+                if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators() end
+            end)
+            input:SetScript("OnEnterPressed", function(s)
+                local val = tonumber(s:GetText())
+                if val then
+                    val = math.max(minVal, math.min(maxVal, val))
+                    -- Runtime override protection
+                    if GUI.SelectedMode == "raid" and DF.AutoProfilesUI
+                       and DF.AutoProfilesUI:HandleRuntimeWrite(GetPinnedKey(dbKey), val) then
+                        s:SetText(step < 1 and string.format("%.1f", val) or string.format("%d", val))
+                        slider:SetValue(val)
+                        UpdateFill()
+                        if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators() end
+                        s:ClearFocus()
+                        return
+                    end
+                    GetCurrentSet()[dbKey] = val
+                    slider:SetValue(val)
+                    s:SetText(step < 1 and string.format("%.1f", val) or string.format("%d", val))
+                    UpdateFill()
+                    if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() then
+                        DF.AutoProfilesUI:SetProfileSetting(GetPinnedKey(dbKey), val)
+                    end
+                    if callback then callback() end
+                    DF:UpdateAll()
+                    if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators() end
+                end
+                s:ClearFocus()
+            end)
             input:SetScript("OnEscapePressed", function(s) s:ClearFocus(); UpdateValue(GetCurrentSet()[dbKey]) end)
-            container.Refresh = function() UpdateValue(GetCurrentSet()[dbKey] or minVal) end
+            container.Refresh = function()
+                UpdateValue(GetCurrentSet()[dbKey] or minVal)
+                if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators() end
+            end
+            
+            -- Override indicators with reset
+            AddPinnedOverrideIndicators(container, lbl, dbKey, function()
+                local AutoProfilesUI = DF.AutoProfilesUI
+                if AutoProfilesUI then
+                    AutoProfilesUI:ResetProfileSetting(GetPinnedKey(dbKey))
+                    UpdateValue(GetCurrentSet()[dbKey] or minVal)
+                    if callback then callback() end
+                    DF:UpdateAll()
+                    if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators() end
+                end
+            end)
+            
             container.Refresh()
             table.insert(controlsToRefresh, container)
             return container
@@ -1642,14 +1912,46 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 menuBtn.Highlight:SetAllPoints()
                 local tc = GUI.GetThemeColor()
                 menuBtn.Highlight:SetColorTexture(tc.r, tc.g, tc.b, 0.3)
-                menuBtn:SetScript("OnClick", function() GetCurrentSet()[dbKey] = opt.key; UpdateText(); menuFrame:Hide(); if callback then callback() end end)
+                menuBtn:SetScript("OnClick", function()
+                    -- Runtime override protection
+                    if GUI.SelectedMode == "raid" and DF.AutoProfilesUI
+                       and DF.AutoProfilesUI:HandleRuntimeWrite(GetPinnedKey(dbKey), opt.key) then
+                        UpdateText()
+                        menuFrame:Hide()
+                        if wrapper.UpdateOverrideIndicators then wrapper:UpdateOverrideIndicators() end
+                        return
+                    end
+                    GetCurrentSet()[dbKey] = opt.key
+                    UpdateText()
+                    menuFrame:Hide()
+                    if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() then
+                        DF.AutoProfilesUI:SetProfileSetting(GetPinnedKey(dbKey), opt.key)
+                    end
+                    if callback then callback() end
+                    if wrapper.UpdateOverrideIndicators then wrapper:UpdateOverrideIndicators() end
+                end)
                 menuHeight = menuHeight + 22
             end
             menuFrame:SetSize(220, menuHeight + 4)
             btn:SetScript("OnClick", function() if menuFrame:IsShown() then menuFrame:Hide() else menuFrame:Show() end end)
             btn:SetScript("OnEnter", function(s) s:SetBackdropBorderColor(0.5, 0.5, 0.5, 1) end)
             btn:SetScript("OnLeave", function(s) s:SetBackdropBorderColor(0.3, 0.3, 0.3, 1) end)
-            wrapper.Refresh = function() UpdateText() end
+            wrapper.Refresh = function()
+                UpdateText()
+                if wrapper.UpdateOverrideIndicators then wrapper:UpdateOverrideIndicators() end
+            end
+            
+            -- Override indicators with reset
+            AddPinnedOverrideIndicators(wrapper, lbl, dbKey, function()
+                local AutoProfilesUI = DF.AutoProfilesUI
+                if AutoProfilesUI then
+                    AutoProfilesUI:ResetProfileSetting(GetPinnedKey(dbKey))
+                    UpdateText()
+                    if callback then callback() end
+                    if wrapper.UpdateOverrideIndicators then wrapper:UpdateOverrideIndicators() end
+                end
+            end)
+            
             UpdateText()
             table.insert(controlsToRefresh, wrapper)
             return wrapper
@@ -1663,8 +1965,22 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end
         end
         
-        -- Forward declaration for roster widget
+        -- Forward declaration for roster widget and unit selection header
         local rosterWidget
+        local unitSelHeader
+        
+        -- Helper: sync players array to override system after auto-populate
+        local function SyncPlayersOverride()
+            if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() then
+                local players = GetCurrentSet().players
+                local copy = {}
+                for i, v in ipairs(players) do copy[i] = v end
+                DF.AutoProfilesUI:SetProfileSetting(GetPinnedKey("players"), copy)
+                if unitSelHeader and unitSelHeader.UpdateOverrideIndicators then
+                    unitSelHeader:UpdateOverrideIndicators()
+                end
+            end
+        end
         
         -- ===== SETTINGS GROUP (Column 1) =====
         local settingsGroup = GUI:CreateSettingsGroup(self.child, 280)
@@ -1745,6 +2061,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 DF.PinnedFrames:AutoPopulateSet(GetCurrentSet())
                 DF.PinnedFrames:UpdateHeaderNameList(activeHighlightTab)
                 if rosterWidget then rosterWidget:Refresh() end
+                SyncPlayersOverride()
             end
         end), 28)
         autoPopGroup:AddWidget(CreateRefreshableCheckbox(self.child, "Auto-add Healers", "autoAddHealers", function()
@@ -1752,6 +2069,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 DF.PinnedFrames:AutoPopulateSet(GetCurrentSet())
                 DF.PinnedFrames:UpdateHeaderNameList(activeHighlightTab)
                 if rosterWidget then rosterWidget:Refresh() end
+                SyncPlayersOverride()
             end
         end), 28)
         autoPopGroup:AddWidget(CreateRefreshableCheckbox(self.child, "Auto-add DPS", "autoAddDPS", function()
@@ -1759,6 +2077,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 DF.PinnedFrames:AutoPopulateSet(GetCurrentSet())
                 DF.PinnedFrames:UpdateHeaderNameList(activeHighlightTab)
                 if rosterWidget then rosterWidget:Refresh() end
+                SyncPlayersOverride()
             end
         end), 28)
         autoPopGroup:AddWidget(CreateRefreshableCheckbox(self.child, "Keep when offline/left", "keepOfflinePlayers", function() end), 28)
@@ -1767,20 +2086,56 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         
         -- ===== UNIT SELECTION (full width) =====
         AddSpace(10, "both")
-        Add(GUI:CreateHeader(self.child, "Unit Selection"), 40, "both")
+        
+        -- Unit Selection header with override indicator
+        unitSelHeader = CreateFrame("Frame", nil, self.child)
+        unitSelHeader:SetSize(500, 40)
+        local unitSelTitle = unitSelHeader:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        unitSelTitle:SetPoint("LEFT", 0, 0)
+        unitSelTitle:SetText("Unit Selection")
+        unitSelTitle:SetTextColor(1, 1, 1)
+        
+        -- Override indicator for players list (header-level)
+        AddPinnedOverrideIndicators(unitSelHeader, unitSelTitle, "players", function()
+            local AutoProfilesUI = DF.AutoProfilesUI
+            if AutoProfilesUI then
+                AutoProfilesUI:ResetProfileSetting(GetPinnedKey("players"))
+                if rosterWidget and rosterWidget.Refresh then rosterWidget:Refresh() end
+                if DF.PinnedFrames then DF.PinnedFrames:UpdateHeaderNameList(activeHighlightTab) end
+                if unitSelHeader.UpdateOverrideIndicators then unitSelHeader:UpdateOverrideIndicators() end
+            end
+        end)
+        unitSelHeader.Refresh = function(self)
+            if self.UpdateOverrideIndicators then self:UpdateOverrideIndicators() end
+        end
+        
+        Add(unitSelHeader, 40, "both")
         
         rosterWidget = GUI:CreateHighlightRosterWidget(
             self.child,
             function() return GetCurrentSet().players end,
-            function(players) GetCurrentSet().players = players end,
+            function(players)
+                GetCurrentSet().players = players
+                if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() then
+                    -- Deep copy the players array for the override
+                    local copy = {}
+                    for i, v in ipairs(players) do copy[i] = v end
+                    DF.AutoProfilesUI:SetProfileSetting(GetPinnedKey("players"), copy)
+                    if unitSelHeader.UpdateOverrideIndicators then unitSelHeader:UpdateOverrideIndicators() end
+                end
+            end,
             function()
                 if DF.PinnedFrames then DF.PinnedFrames:UpdateHeaderNameList(activeHighlightTab) end
             end
         )
         
         local originalRefresh = rosterWidget.Refresh
-        rosterWidget.Refresh = function(s) if originalRefresh then originalRefresh(s) end end
+        rosterWidget.Refresh = function(s)
+            if originalRefresh then originalRefresh(s) end
+            if unitSelHeader.UpdateOverrideIndicators then unitSelHeader:UpdateOverrideIndicators() end
+        end
         table.insert(controlsToRefresh, rosterWidget)
+        table.insert(controlsToRefresh, unitSelHeader)
         Add(rosterWidget, 340, "both")
         
         RefreshControls()

@@ -1,0 +1,13 @@
+package-as: DandersFrames
+enable-nolib-creation: no
+
+ignore:
+  - CHANGELOG.md
+  - README.md
+  - generate_changelog.sh
+  - .github
+  - .gitignore
+
+manual-changelog:
+  filename: CHANGELOG.md
+  markup-type: markdown

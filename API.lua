@@ -80,21 +80,14 @@ function DandersFrames_Import(str, profileKey)
             targetName = importData.profileName or "Imported Profile"
         end
         
-        -- If profileKey is provided and profile exists, we overwrite it
-        -- If profileKey is provided and doesn't exist, we create it
-        -- If no profileKey, create new profile (may auto-rename for uniqueness)
-        local createNew = not profileKey or profileKey == ""
-        
-        local success = DF:ApplyImportedProfile(importData, nil, nil, targetName, createNew)
-        
+        -- Always create a new profile for each import so that sequential imports
+        -- (e.g. Wago packs importing multiple profiles) each get their own
+        -- independent table. Without this, the second import mutates DF.db
+        -- which still points to the first imported profile's table.
+        -- allowOverwrite=true lets Wago packs re-import into the same profile name.
+        local success = DF:ApplyImportedProfile(importData, nil, nil, targetName, true, true)
+
         if success then
-            -- If profileKey was provided, switch to that profile
-            if profileKey and profileKey ~= "" then
-                if DandersFramesDB_v2 then
-                    DandersFramesDB_v2.profiles[profileKey] = DF:DeepCopy(DF.db)
-                    DandersFramesDB_v2.currentProfile = profileKey
-                end
-            end
             
             -- Return the actual profile name
             local actualName = DandersFramesDB_v2 and DandersFramesDB_v2.currentProfile or targetName

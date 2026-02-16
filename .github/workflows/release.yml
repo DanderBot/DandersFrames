@@ -1,0 +1,151 @@
+name: Package and Release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build (e.g. v1.0.0-beta.1). Leave empty for alpha build.'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Check if build is needed
+        id: guard
+        run: |
+          # Tags and workflow_dispatch always build
+          if [[ "$GITHUB_REF" == refs/tags/* ]] || [[ -n "${{ inputs.tag }}" ]] || [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            echo "skip=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Branch pushes: skip if only docs/CI files changed
+          DOMINATED=true
+          for f in $(git diff --name-only HEAD~1..HEAD 2>/dev/null); do
+            case "$f" in
+              *.md|*.sh|.github/*|.gitignore|.pkgmeta) ;;
+              *) DOMINATED=false; break ;;
+            esac
+          done
+          echo "skip=$DOMINATED" >> $GITHUB_OUTPUT
+
+      - name: Generate Changelog.lua
+        if: steps.guard.outputs.skip != 'true'
+        id: changelog
+        run: |
+          chmod +x generate_changelog.sh
+          if [[ "$GITHUB_REF" == refs/heads/* ]] && [[ -z "${{ inputs.tag }}" ]]; then
+            export FORCE_ALPHA=true
+          fi
+          ./generate_changelog.sh
+
+          VERSION=$(grep 'DF.ADDON_VERSION' Changelog.lua | sed 's/.*= "\(.*\)"/\1/')
+          CHANNEL=$(grep 'DF.RELEASE_CHANNEL' Changelog.lua | sed 's/.*= "\(.*\)"/\1/')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "channel=$CHANNEL" >> $GITHUB_OUTPUT
+
+          NOTES=$(awk '/^## / { count++; if (count > 1) exit } count >= 1 { print }' CHANGELOG.md | head -c 1800 | sed -e :a -e '/^[[:space:]-]*$/{ $d; N; ba; }')
+          {
+            echo "notes<<NOTES_EOF"
+            echo "$NOTES"
+            echo "NOTES_EOF"
+          } >> $GITHUB_OUTPUT
+
+      - name: Create local tag for clean zip naming
+        if: steps.guard.outputs.skip != 'true'
+        run: |
+          VERSION="${{ steps.changelog.outputs.version }}"
+          # Create a local-only tag so the packager uses a clean name
+          # e.g. v4.0.5-alpha.3 -> zip becomes DandersFrames-v4.0.5-alpha.3
+          if ! git tag --list | grep -qx "$VERSION"; then
+            git tag "$VERSION"
+          fi
+
+      - name: Package and Release
+        if: steps.guard.outputs.skip != 'true'
+        uses: BigWigsMods/packager@v2
+        env:
+          CF_API_KEY: ${{ secrets.CF_API_KEY }}
+          GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Notify Discord (dev channel — alpha/beta)
+        if: steps.guard.outputs.skip != 'true' && success() && steps.changelog.outputs.channel != 'release'
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_DEV }}
+          VERSION: ${{ steps.changelog.outputs.version }}
+          CHANNEL: ${{ steps.changelog.outputs.channel }}
+          NOTES: ${{ steps.changelog.outputs.notes }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "No dev Discord webhook configured, skipping."
+            exit 0
+          fi
+
+          case "$CHANNEL" in
+            beta)  EMOJI="🧪"; LABEL="Beta ${VERSION} Available for Testing!" ;;
+            *)     EMOJI="🧪"; LABEL="Alpha ${VERSION} Available for Testing!" ;;
+          esac
+
+          # Build changelog body from NOTES (strip the ## header line, keep the rest)
+          BODY=$(echo "$NOTES" | sed '1{/^## /d}' | sed '/^[[:space:]]*$/d')
+
+          MESSAGE="### ${EMOJI} ${LABEL}
+          **Download:** [CurseForge](<https://www.curseforge.com/wow/addons/danders-frames>) *(select \"$(echo "$CHANNEL" | sed 's/.*/\u&/')\" from the dropdown)* • [GitHub Releases](<https://github.com/DanderBot/DandersFrames/releases>)
+          **Support Development:** [PayPal](<https://paypal.me/dandersframesaddon>)
+          ${BODY}
+          *$(echo "$CHANNEL" | sed 's/.*/\u&/') builds are available on CurseForge by selecting \"$(echo "$CHANNEL" | sed 's/.*/\u&/')\" in the file dropdown, or from [GitHub Releases](<https://github.com/DanderBot/DandersFrames/releases>).*"
+
+          # Remove leading whitespace from heredoc-style indentation
+          MESSAGE=$(echo "$MESSAGE" | sed 's/^          //')
+
+          PAYLOAD=$(jq -n --arg content "$MESSAGE" '{ content: $content }')
+
+          curl -s -o /dev/null -w "%{http_code}" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD" \
+            "$DISCORD_WEBHOOK_URL"
+
+      - name: Notify Discord (release channel — stable only)
+        if: steps.guard.outputs.skip != 'true' && success() && steps.changelog.outputs.channel == 'release'
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_RELEASE }}
+          VERSION: ${{ steps.changelog.outputs.version }}
+          NOTES: ${{ steps.changelog.outputs.notes }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "No release Discord webhook configured, skipping."
+            exit 0
+          fi
+
+          # Build changelog body from NOTES (strip the ## header line, keep the rest)
+          BODY=$(echo "$NOTES" | sed '1{/^## /d}' | sed '/^[[:space:]]*$/d')
+
+          MESSAGE="<@&1444387824005808128>
+          ### 🔔 Update ${VERSION} is Live!
+          **Download:** [CurseForge](<https://www.curseforge.com/wow/addons/danders-frames>) • [Wago](<https://addons.wago.io/addons/danders-frames>) • [GitHub Releases](<https://github.com/DanderBot/DandersFrames/releases>)
+          **Support Development:** [PayPal](<https://paypal.me/dandersframesaddon>)
+          ${BODY}
+          *Note: It may take 15-30 minutes to appear on the CurseForge client.*"
+
+          # Remove leading whitespace from heredoc-style indentation
+          MESSAGE=$(echo "$MESSAGE" | sed 's/^          //')
+
+          PAYLOAD=$(jq -n --arg content "$MESSAGE" '{ content: $content }')
+
+          curl -s -o /dev/null -w "%{http_code}" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD" \
+            "$DISCORD_WEBHOOK_URL"

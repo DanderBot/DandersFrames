@@ -2053,3 +2053,111 @@ SlashCmdList["DFDISPEL"] = function(msg)
         DF:DebugDispel(msg ~= "" and msg or "player")
     end
 end
+
+-- ============================================================
+-- PRIVATE AURA DISPEL SLOT TEST
+-- Compares BlizzardAuraCache vs GetAuraSlots to detect private
+-- dispellable auras that the cache can't see
+-- ============================================================
+
+SLASH_DFSLOTTEST1 = "/dfslottest"
+SlashCmdList["DFSLOTTEST"] = function(msg)
+    print("|cff00ff00DandersFrames:|r Private Aura Dispel Slot Test")
+    print("")
+    
+    -- Check API availability
+    if not C_UnitAuras or not C_UnitAuras.GetAuraSlots then
+        print("  |cffff0000C_UnitAuras.GetAuraSlots not available!|r")
+        return
+    end
+    
+    -- Build unit list from current group
+    local units = {}
+    if IsInRaid() then
+        for i = 1, GetNumGroupMembers() do
+            table.insert(units, "raid" .. i)
+        end
+    elseif IsInGroup() then
+        table.insert(units, "player")
+        for i = 1, GetNumGroupMembers() - 1 do
+            table.insert(units, "party" .. i)
+        end
+    else
+        table.insert(units, "player")
+    end
+    
+    print(string.format("  Scanning %d unit(s)...", #units))
+    print(string.format("  %-12s  %-12s  %-12s  %s", "Unit", "Cache", "Slots", "Result"))
+    print("  " .. string.rep("-", 60))
+    
+    local cacheHits, slotHits, mismatches = 0, 0, 0
+    
+    for _, unit in ipairs(units) do
+        if UnitExists(unit) then
+            -- Check 1: Existing BlizzardAuraCache
+            local cacheFound = false
+            local cache = DF.BlizzardAuraCache and DF.BlizzardAuraCache[unit]
+            if cache and cache.playerDispellable then
+                local id = next(cache.playerDispellable)
+                if id then cacheFound = true end
+            end
+            
+            -- Check 2: GetAuraSlots with RAID_PLAYER_DISPELLABLE filter
+            local slotsFound = false
+            local ok, result = pcall(function()
+                return C_UnitAuras.GetAuraSlots(unit, "HARMFUL|RAID_PLAYER_DISPELLABLE", 1)
+            end)
+            if ok and result then
+                -- GetAuraSlots returns multiple values, not a table
+                -- First return is count, then slot indices
+                if type(result) == "number" and result > 0 then
+                    slotsFound = true
+                elseif type(result) == "table" and result[1] then
+                    slotsFound = true
+                end
+            end
+            
+            -- Also try the multi-return form in case it doesn't return a table
+            if not slotsFound then
+                local ok2, count, slot1 = pcall(C_UnitAuras.GetAuraSlots, unit, "HARMFUL|RAID_PLAYER_DISPELLABLE", 1)
+                if ok2 then
+                    if type(count) == "number" and count > 0 then
+                        slotsFound = true
+                    elseif slot1 then
+                        slotsFound = true
+                    end
+                end
+            end
+            
+            -- Format result
+            local cacheStr = cacheFound and "|cff00ff00YES|r" or "|cffff0000NO|r "
+            local slotsStr = slotsFound and "|cff00ff00YES|r" or "|cffff0000NO|r "
+            
+            local result = ""
+            if cacheFound then cacheHits = cacheHits + 1 end
+            if slotsFound then slotHits = slotHits + 1 end
+            
+            if cacheFound and slotsFound then
+                result = "|cff00ff00normal debuff|r"
+            elseif not cacheFound and slotsFound then
+                result = "|cffff00ffPRIVATE AURA!|r"
+                mismatches = mismatches + 1
+            elseif cacheFound and not slotsFound then
+                result = "|cffffcc00cache only (stale?)|r"
+                mismatches = mismatches + 1
+            else
+                result = "|cff888888clean|r"
+            end
+            
+            local name = UnitName(unit) or unit
+            print(string.format("  %-12s  %-12s  %-12s  %s", name, cacheStr, slotsStr, result))
+        end
+    end
+    
+    print("")
+    print(string.format("  Summary: Cache=%d  Slots=%d  Private=%d", cacheHits, slotHits, mismatches))
+    
+    if mismatches > 0 then
+        print("  |cffff00ff>> Private dispellable auras detected! GetAuraSlots works! <<|r")
+    end
+end

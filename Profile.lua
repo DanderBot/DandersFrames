@@ -102,6 +102,29 @@ function DF:GetCurrentProfile()
     return DandersFramesDB_v2 and DandersFramesDB_v2.currentProfile or "Default"
 end
 
+-- Save the current profile to the profiles table, stripping any
+-- active auto-profile runtime overrides so they don't contaminate
+-- the saved data.  Call this instead of raw DeepCopy(DF.db) saves.
+function DF:SaveCurrentProfile()
+    if not DF.db then return end
+    local currentName = DandersFramesDB_v2 and DandersFramesDB_v2.currentProfile or "Default"
+    if not DandersFramesDB_v2 or not DandersFramesDB_v2.profiles then return end
+
+    -- Strip runtime overrides before saving (if any are active)
+    local stripped = false
+    if DF.AutoProfilesUI and DF.AutoProfilesUI.StripRuntimeOverrides then
+        stripped = DF.AutoProfilesUI:StripRuntimeOverrides()
+    end
+
+    -- Save clean profile
+    DandersFramesDB_v2.profiles[currentName] = DF:DeepCopy(DF.db)
+
+    -- Re-apply overrides to keep live state intact
+    if stripped and DF.AutoProfilesUI.ReapplyRuntimeOverrides then
+        DF.AutoProfilesUI:ReapplyRuntimeOverrides()
+    end
+end
+
 -- Set/create a profile
 function DF:SetProfile(name)
     if not name or name == "" then return end
@@ -110,12 +133,9 @@ function DF:SetProfile(name)
     if not DandersFramesDB_v2 then DandersFramesDB_v2 = {} end
     if not DandersFramesDB_v2.profiles then DandersFramesDB_v2.profiles = {} end
     
-    -- Save current profile before switching
-    local currentName = DandersFramesDB_v2.currentProfile or "Default"
-    if DF.db then
-        DandersFramesDB_v2.profiles[currentName] = DF:DeepCopy(DF.db)
-    end
-    
+    -- Save current profile before switching (strips runtime overrides)
+    DF:SaveCurrentProfile()
+
     -- Create new profile if doesn't exist
     if not DandersFramesDB_v2.profiles[name] then
         DandersFramesDB_v2.profiles[name] = {
@@ -128,13 +148,28 @@ function DF:SetProfile(name)
         print("|cff00ff00DandersFrames:|r Created new profile: " .. name)
     end
     
+    -- Clear auto-profile runtime state (old profile's data becomes stale)
+    if DF.AutoProfilesUI then
+        DF.AutoProfilesUI.activeRuntimeProfile = nil
+        DF.AutoProfilesUI.activeRuntimeContentKey = nil
+        DF.AutoProfilesUI.runtimeBaseline = nil
+        DF.AutoProfilesUI.pendingAutoProfileEval = false
+    end
+
     -- Switch to the profile
     DandersFramesDB_v2.currentProfile = name
     DF.db = DandersFramesDB_v2.profiles[name]
-    
+
     -- Apply the profile with full refresh
     DF:FullProfileRefresh()
     print("|cff00ff00DandersFrames:|r Switched to profile: " .. name)
+
+    -- Re-evaluate auto-profiles for the new profile
+    C_Timer.After(0.1, function()
+        if DF.AutoProfilesUI then
+            DF.AutoProfilesUI:EvaluateAndApply()
+        end
+    end)
 end
 
 -- Delete a profile
@@ -156,7 +191,9 @@ function DF:DuplicateProfile(newName)
         print("|cffff6666DandersFrames:|r Please enter a profile name.")
         return false
     end
-    
+
+    local currentName = DandersFramesDB_v2 and DandersFramesDB_v2.currentProfile or "Default"
+
     -- Initialize profiles table if needed
     if not DandersFramesDB_v2 then DandersFramesDB_v2 = {} end
     if not DandersFramesDB_v2.profiles then DandersFramesDB_v2.profiles = {} end
@@ -167,14 +204,20 @@ function DF:DuplicateProfile(newName)
         return false
     end
     
-    -- Save current profile first
-    local currentName = DandersFramesDB_v2.currentProfile or "Default"
-    if DF.db then
-        DandersFramesDB_v2.profiles[currentName] = DF:DeepCopy(DF.db)
+    -- Save current profile first (strips runtime overrides)
+    DF:SaveCurrentProfile()
+
+    -- Create new profile as a clean copy of current
+    -- (SaveCurrentProfile already stripped overrides temporarily,
+    -- but they're re-applied now, so strip again for the copy)
+    local stripped = false
+    if DF.AutoProfilesUI and DF.AutoProfilesUI.StripRuntimeOverrides then
+        stripped = DF.AutoProfilesUI:StripRuntimeOverrides()
     end
-    
-    -- Create new profile as a copy of current
     DandersFramesDB_v2.profiles[newName] = DF:DeepCopy(DF.db)
+    if stripped and DF.AutoProfilesUI.ReapplyRuntimeOverrides then
+        DF.AutoProfilesUI:ReapplyRuntimeOverrides()
+    end
     
     -- Switch to the new profile
     DandersFramesDB_v2.currentProfile = newName
@@ -461,41 +504,46 @@ end
 -- selectedFrameTypes: table like {party = true, raid = true}, or nil for all in the data
 -- newProfileName: name for the new profile to create (if nil, uses name from import data)
 -- createNewProfile: if true, creates a new profile instead of overwriting current
-function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTypes, newProfileName, createNewProfile)
+-- allowOverwrite: if true, allow overwriting an existing profile with the same name (used by Wago API)
+function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTypes, newProfileName, createNewProfile, allowOverwrite)
     if not importData then return false end
-    
+
     local importInfo = self:GetImportInfo(importData)
-    
+
     -- Default to all available frame types
     selectedFrameTypes = selectedFrameTypes or {
         party = importInfo.hasParty,
         raid = importInfo.hasRaid,
     }
-    
+
     -- Handle profile creation
     if createNewProfile then
         local profileName = newProfileName or importInfo.profileName or "Imported Profile"
-        
-        -- Ensure unique name by checking the actual profiles storage
-        local baseName = profileName
-        local counter = 1
-        while DandersFramesDB_v2 and DandersFramesDB_v2.profiles and DandersFramesDB_v2.profiles[profileName] do
-            counter = counter + 1
-            profileName = baseName .. " " .. counter
+
+        -- Ensure unique name unless overwrite is explicitly allowed (e.g. Wago API imports)
+        if not allowOverwrite then
+            local baseName = profileName
+            local counter = 1
+            while DandersFramesDB_v2 and DandersFramesDB_v2.profiles and DandersFramesDB_v2.profiles[profileName] do
+                counter = counter + 1
+                profileName = baseName .. " " .. counter
+            end
         end
         
         -- Initialize profiles table if needed
         if not DandersFramesDB_v2 then DandersFramesDB_v2 = {} end
         if not DandersFramesDB_v2.profiles then DandersFramesDB_v2.profiles = {} end
         
-        -- Save current profile before switching
-        local currentName = DandersFramesDB_v2.currentProfile or "Default"
-        if DF.db then
-            DandersFramesDB_v2.profiles[currentName] = DF:DeepCopy(DF.db)
-        end
-        
+        -- Save current profile before switching (strips runtime overrides)
+        DF:SaveCurrentProfile()
+
         -- Create new profile as a COPY of current profile (not defaults)
         -- This way, any categories NOT selected for import will keep the user's current settings
+        -- Strip overrides temporarily so the copy is clean
+        local stripped = false
+        if DF.AutoProfilesUI and DF.AutoProfilesUI.StripRuntimeOverrides then
+            stripped = DF.AutoProfilesUI:StripRuntimeOverrides()
+        end
         DandersFramesDB_v2.profiles[profileName] = {
             party = DF:DeepCopy(DF.db.party or DF.PartyDefaults),
             raid = DF:DeepCopy(DF.db.raid or DF.RaidDefaults),
@@ -503,7 +551,10 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
             classColors = DF:DeepCopy(DF.db.classColors or {}),
             powerColors = DF:DeepCopy(DF.db.powerColors or {}),
         }
-        
+        if stripped and DF.AutoProfilesUI.ReapplyRuntimeOverrides then
+            DF.AutoProfilesUI:ReapplyRuntimeOverrides()
+        end
+
         -- Switch to the new profile
         DandersFramesDB_v2.currentProfile = profileName
         DF.db = DandersFramesDB_v2.profiles[profileName]

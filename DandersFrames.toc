@@ -3,7 +3,8 @@
 ## Notes: Custom party/raid frames for WoW Midnight 12.0
 ## X-Credits: Some optimization patterns informed by studying Grid2 and other community addons.
 ## Author: Danders
-## Version: 4.0.5
+## Version: @project-version@
+## X-Curse-Project-ID: 1389690
 ## IconTexture: Interface\AddOns\DandersFrames\Media\DF_Icon
 ## SavedVariables: DandersFramesDB_v2, DandersFramesClickCastingDB
 ## SavedVariablesPerCharacter: DandersFramesCharDB
@@ -25,6 +26,7 @@ DandersFrames.xml
 
 # Core
 Config.lua
+Changelog.lua
 Profile.lua
 ExportCategories.lua
 Core.lua

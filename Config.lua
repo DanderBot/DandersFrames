@@ -22,10 +22,11 @@ local function RegisterCustomMedia()
     local LSM = GetLSM()
     if not LSM then return end
     
-    -- Register custom fonts
-    LSM:Register(LSM.MediaType.FONT, "DF Expressway", "Interface\\AddOns\\DandersFrames\\Fonts\\Expressway.ttf")
-    LSM:Register(LSM.MediaType.FONT, "DF Roboto SemiBold", "Interface\\AddOns\\DandersFrames\\Fonts\\Roboto-SemiBold.ttf")
-    LSM:Register(LSM.MediaType.FONT, "DF Roboto Bold", "Interface\\AddOns\\DandersFrames\\Fonts\\Roboto-Bold.ttf")
+    -- Register custom fonts (langmask covers all locales so fonts work on all clients)
+    local ALL_LOCALES = LSM.LOCALE_BIT_western + LSM.LOCALE_BIT_koKR + LSM.LOCALE_BIT_ruRU + LSM.LOCALE_BIT_zhCN + LSM.LOCALE_BIT_zhTW
+    LSM:Register(LSM.MediaType.FONT, "DF Expressway", "Interface\\AddOns\\DandersFrames\\Fonts\\Expressway.ttf", ALL_LOCALES)
+    LSM:Register(LSM.MediaType.FONT, "DF Roboto SemiBold", "Interface\\AddOns\\DandersFrames\\Fonts\\Roboto-SemiBold.ttf", ALL_LOCALES)
+    LSM:Register(LSM.MediaType.FONT, "DF Roboto Bold", "Interface\\AddOns\\DandersFrames\\Fonts\\Roboto-Bold.ttf", ALL_LOCALES)
     
     -- Register custom statusbar textures
     LSM:Register(LSM.MediaType.STATUSBAR, "DF Flat", "Interface\\Buttons\\WHITE8x8")
