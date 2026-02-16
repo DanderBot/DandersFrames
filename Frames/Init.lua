@@ -1035,10 +1035,15 @@ function DF:UpdateLiveRaidFrames()
         if DF.partyContainer then
             DF.partyContainer:Hide()
         end
-        
+
+        -- Update pet frames (must be called in header mode too, not just legacy mode)
+        if DF.UpdateAllPetFrames then
+            DF:UpdateAllPetFrames()
+        end
+
         return
     end
-    
+
     -- LEGACY MODE: Old code for non-header system (fallback)
     if not DF.raidContainer then return end
     if not DF.initialized then return end
@@ -1251,7 +1256,12 @@ function DF:UpdateAllFrames()
         -- settings actually change (from Options UI, profile switches, etc.),
         -- not during roster updates.
         -- The SecureGroupHeaderTemplate handles child positioning automatically.
-        
+
+        -- Update pet frames (must be called in header mode too, not just legacy mode)
+        if DF.UpdateAllPetFrames then
+            DF:UpdateAllPetFrames()
+        end
+
         return
     end
     

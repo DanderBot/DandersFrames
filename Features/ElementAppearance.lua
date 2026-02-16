@@ -656,13 +656,13 @@ function DF:UpdateRoleIconAppearance(frame)
     local deadOrOffline = IsDeadOrOffline(frame)
     local inRange = GetInRange(frame)
     
-    local alpha = 1.0
+    local alpha = db.roleIconAlpha or 1.0
     if deadOrOffline and db.fadeDeadFrames then
-        alpha = db.fadeDeadIcons or 1.0
+        alpha = (db.fadeDeadIcons or 1.0) * (db.roleIconAlpha or 1.0)
     elseif IsHealthFadeEnabled(db) and IsHealthFaded(frame) and not deadOrOffline and db.hfElementSpecific then
         alpha = DF:GetHealthFadeAlpha(frame, "icons")
     end
-    
+
     if db.oorEnabled then
         local oorAlpha = db.oorIconsAlpha or 0.5
         ApplyOORAlpha(frame.roleIcon, inRange, alpha, oorAlpha)
@@ -683,13 +683,13 @@ function DF:UpdateLeaderIconAppearance(frame)
     local deadOrOffline = IsDeadOrOffline(frame)
     local inRange = GetInRange(frame)
     
-    local alpha = 1.0
+    local alpha = db.leaderIconAlpha or 1.0
     if deadOrOffline and db.fadeDeadFrames then
-        alpha = db.fadeDeadIcons or 1.0
+        alpha = (db.fadeDeadIcons or 1.0) * (db.leaderIconAlpha or 1.0)
     elseif IsHealthFadeEnabled(db) and IsHealthFaded(frame) and not deadOrOffline and db.hfElementSpecific then
         alpha = DF:GetHealthFadeAlpha(frame, "icons")
     end
-    
+
     if db.oorEnabled then
         local oorAlpha = db.oorIconsAlpha or 0.5
         ApplyOORAlpha(frame.leaderIcon, inRange, alpha, oorAlpha)
@@ -710,13 +710,13 @@ function DF:UpdateRaidTargetIconAppearance(frame)
     local deadOrOffline = IsDeadOrOffline(frame)
     local inRange = GetInRange(frame)
     
-    local alpha = 1.0
+    local alpha = db.raidTargetIconAlpha or 1.0
     if deadOrOffline and db.fadeDeadFrames then
-        alpha = db.fadeDeadIcons or 1.0
+        alpha = (db.fadeDeadIcons or 1.0) * (db.raidTargetIconAlpha or 1.0)
     elseif IsHealthFadeEnabled(db) and IsHealthFaded(frame) and not deadOrOffline and db.hfElementSpecific then
         alpha = DF:GetHealthFadeAlpha(frame, "icons")
     end
-    
+
     if db.oorEnabled then
         local oorAlpha = db.oorIconsAlpha or 0.5
         ApplyOORAlpha(frame.raidTargetIcon, inRange, alpha, oorAlpha)
@@ -737,13 +737,13 @@ function DF:UpdateReadyCheckIconAppearance(frame)
     local deadOrOffline = IsDeadOrOffline(frame)
     local inRange = GetInRange(frame)
     
-    local alpha = 1.0
+    local alpha = db.readyCheckIconAlpha or 1.0
     if deadOrOffline and db.fadeDeadFrames then
-        alpha = db.fadeDeadIcons or 1.0
+        alpha = (db.fadeDeadIcons or 1.0) * (db.readyCheckIconAlpha or 1.0)
     elseif IsHealthFadeEnabled(db) and IsHealthFaded(frame) and not deadOrOffline and db.hfElementSpecific then
         alpha = DF:GetHealthFadeAlpha(frame, "icons")
     end
-    
+
     if db.oorEnabled then
         local oorAlpha = db.oorIconsAlpha or 0.5
         ApplyOORAlpha(frame.readyCheckIcon, inRange, alpha, oorAlpha)

@@ -467,19 +467,21 @@ function DF:UpdateAbsorb(frame, testIndex)
             
             -- Set clamp mode from settings (default to 1 = Missing Health)
             local clampMode = db.absorbBarAttachedClampMode or 1
-            pcall(function() calc:SetDamageAbsorbClampMode(clampMode) end)
-            
+            if calc.SetDamageAbsorbClampMode then calc:SetDamageAbsorbClampMode(clampMode) end
+
             -- Populate the calculator
             UnitGetDetailedHealPrediction(unit, nil, calc)
-            
+
             -- Get clamped absorbs and clamped bool
-            local getSuccess, result1, result2 = pcall(function() return calc:GetDamageAbsorbs() end)
-            if getSuccess and result1 then
-                attachedAbsorbs = result1
-                isClamped = result2  -- This is a secret bool in M+
+            if calc.GetDamageAbsorbs then
+                local result1, result2 = calc:GetDamageAbsorbs()
+                if result1 then
+                    attachedAbsorbs = result1
+                    isClamped = result2  -- This is a secret bool in M+
+                end
             end
         end
-        
+
         -- Create/update overshield glow at max health position
         if db.absorbBarShowOvershield then
             -- Create glow texture if needed (directly on health bar)
@@ -700,19 +702,21 @@ function DF:UpdateAbsorb(frame, testIndex)
             
             -- Set clamp mode from settings (default to 1 = Missing Health)
             local clampMode = db.absorbBarAttachedClampMode or 1
-            pcall(function() calc:SetDamageAbsorbClampMode(clampMode) end)
-            
+            if calc.SetDamageAbsorbClampMode then calc:SetDamageAbsorbClampMode(clampMode) end
+
             -- Populate the calculator
             UnitGetDetailedHealPrediction(unit, nil, calc)
-            
+
             -- Get clamped absorbs and clamped bool
-            local getSuccess, result1, result2 = pcall(function() return calc:GetDamageAbsorbs() end)
-            if getSuccess and result1 then
-                attachedAbsorbs = result1
-                isClamped = result2  -- This is a secret bool in M+
+            if calc.GetDamageAbsorbs then
+                local result1, result2 = calc:GetDamageAbsorbs()
+                if result1 then
+                    attachedAbsorbs = result1
+                    isClamped = result2  -- This is a secret bool in M+
+                end
             end
         end
-        
+
         local healthOrient = db.healthOrientation or "HORIZONTAL"
         local inset = 0
         if db.showFrameBorder ~= false then
@@ -1091,15 +1095,21 @@ function DF:UpdateHealAbsorb(frame, testIndex)
             local calc = frame.healAbsorbCalculator
             
             -- Set clamp mode: 0 = CurrentHealth (don't go past 0 health)
-            pcall(function() calc:SetHealAbsorbClampMode(0) end)
+            if calc.SetHealAbsorbClampMode then calc:SetHealAbsorbClampMode(0) end
+            -- Set heal absorb mode: 1 = Total (return raw absorb values without
+            -- subtracting incoming heals). Default mode 0 reduces heal absorbs by
+            -- incoming heal amount, causing the bar to show less than actual absorb.
+            if calc.SetHealAbsorbMode then calc:SetHealAbsorbMode(1) end
             
             -- Populate the calculator
             UnitGetDetailedHealPrediction(unit, nil, calc)
             
             -- Get clamped heal absorbs
-            local getSuccess, result1 = pcall(function() return calc:GetHealAbsorbs() end)
-            if getSuccess and result1 then
-                attachedHealAbsorb = result1
+            if calc.GetHealAbsorbs then
+                local result = calc:GetHealAbsorbs()
+                if result then
+                    attachedHealAbsorb = result
+                end
             end
         end
         
@@ -1639,12 +1649,6 @@ function DF:UpdateRoleIcon(frame, source)
     -- Use raid DB for raid frames, party DB for party frames
     local db = frame.isRaidFrame and DF:GetRaidDB() or DF:GetDB()
     
-    -- Hide completely in combat check (different from roleIconOnlyInCombat)
-    if db.roleIconHideInCombat and InCombatLockdown() then
-        frame.roleIcon:Hide()
-        return
-    end
-    
     local role = UnitGroupRolesAssigned(frame.unit)
     
     -- Use our tracked combat state (set by PLAYER_REGEN events)
@@ -1661,8 +1665,8 @@ function DF:UpdateRoleIcon(frame, source)
     end
     
     -- Determine if we should apply show settings
-    -- If "Only Apply Settings in Combat" is checked, settings only apply during combat
-    -- Out of combat, all icons show regardless of individual settings
+    -- If "Show All Roles Out of Combat" is checked, role filters only apply during combat
+    -- Out of combat, all role icons show regardless of individual filter settings
     local applySettings = true
     if db.roleIconOnlyInCombat and not inCombat then
         applySettings = false  -- Out of combat, show all icons
@@ -1690,29 +1694,9 @@ function DF:UpdateRoleIcon(frame, source)
         return
     end
     
-    local style = db.roleIconStyle or "BLIZZARD"
-    
-    if style == "CUSTOM" then
-        -- Use custom icons from addon folder
-        if role == "TANK" then
-            frame.roleIcon.texture:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\DF_Tank")
-        elseif role == "HEALER" then
-            frame.roleIcon.texture:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\DF_Healer")
-        elseif role == "DAMAGER" then
-            frame.roleIcon.texture:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\DF_DPS")
-        end
-        frame.roleIcon.texture:SetTexCoord(0, 1, 0, 1)
-    else
-        -- BLIZZARD style
-        frame.roleIcon.texture:SetTexture("Interface\\LFGFrame\\UI-LFG-ICON-PORTRAITROLES")
-        if role == "TANK" then
-            frame.roleIcon.texture:SetTexCoord(0, 0.296875, 0.296875, 0.65)
-        elseif role == "HEALER" then
-            frame.roleIcon.texture:SetTexCoord(0.296875, 0.59375, 0, 0.296875)
-        elseif role == "DAMAGER" then
-            frame.roleIcon.texture:SetTexCoord(0.296875, 0.59375, 0.296875, 0.65)
-        end
-    end
+    local tex, l, r, t, b = DF:GetRoleIconTexture(db, role)
+    frame.roleIcon.texture:SetTexture(tex)
+    frame.roleIcon.texture:SetTexCoord(l, r, t, b)
     
     frame.roleIcon:Show()
     

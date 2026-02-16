@@ -579,7 +579,7 @@ function DF:SafeSetFont(fontString, fontNameOrPath, fontSize, outline)
     
     -- Try to use font family for multi-alphabet support (WoW 11.x+)
     local fontFamilyName = GetOrCreateFontFamily(fontPath, actualOutline, useShadow)
-    
+
     if fontFamilyName and _G[fontFamilyName] then
         -- IMPORTANT: First reset to a font object to clear any direct SetFont() state
         -- This makes the fontString receptive to SetFontObject() changes
@@ -1493,9 +1493,11 @@ DF.PartyDefaults = {
     roleIconHide = false,
     roleIconHideDPS = true,
     roleIconHideHealer = false,
-    roleIconHideInCombat = false,
     roleIconHideOnlyInCombat = true,
     roleIconHideTank = true,
+    roleIconExternalDPS = "",
+    roleIconExternalHealer = "",
+    roleIconExternalTank = "",
     roleIconOnlyInCombat = false,
     roleIconScale = 1,
     roleIconShowDPS = true,
@@ -1634,7 +1636,7 @@ DF.PartyDefaults = {
     testShowMissingBuff = false,
     testShowMyBuffIndicator = false,
     testShowOutOfRange = false,
-    testShowPets = false,
+    testShowPets = true,
     testShowSelection = false,
     testShowStatusIcons = false,
     testShowTargetedSpell = false,
@@ -2579,9 +2581,11 @@ DF.RaidDefaults = {
     roleIconHide = false,
     roleIconHideDPS = true,
     roleIconHideHealer = false,
-    roleIconHideInCombat = false,
     roleIconHideOnlyInCombat = true,
     roleIconHideTank = true,
+    roleIconExternalDPS = "",
+    roleIconExternalHealer = "",
+    roleIconExternalTank = "",
     roleIconOnlyInCombat = false,
     roleIconScale = 1,
     roleIconShowDPS = true,
@@ -2720,7 +2724,7 @@ DF.RaidDefaults = {
     testShowMissingBuff = false,
     testShowMyBuffIndicator = false,
     testShowOutOfRange = false,
-    testShowPets = false,
+    testShowPets = true,
     testShowSelection = false,
     testShowStatusIcons = false,
     testShowTargetedSpell = false,

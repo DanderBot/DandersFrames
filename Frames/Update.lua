@@ -591,6 +591,15 @@ function DF:UpdateUnitFrame(frame, source)
         end
         if frame.nameText then
             local name = DF:GetUnitName(unit) or unit
+            -- Truncate name if needed (UTF-8 aware)
+            local nameLength = db.nameTextLength or 0
+            if nameLength > 0 and DF:UTF8Len(name) > nameLength then
+                if db.nameTextTruncateMode == "ELLIPSIS" then
+                    name = DF:UTF8Sub(name, 1, nameLength) .. "..."
+                else
+                    name = DF:UTF8Sub(name, 1, nameLength)
+                end
+            end
             frame.nameText:SetText(name)
             -- TODO CLEANUP: Color now handled by ElementAppearance via ApplyDeadFade
             -- frame.nameText:SetTextColor(0.5, 0.5, 0.5, 1)
@@ -1816,16 +1825,69 @@ function DF:RefreshAllFonts()
         end)
     end
     
-    -- Refresh pet frames
-    if DF.partyPetFrames then
-        for _, frame in pairs(DF.partyPetFrames) do
-            RefreshFrameFonts(frame, partyDb)
+    -- Refresh pet frames (use pet-specific font keys, not main frame keys)
+    local function RefreshPetFonts(frame, db)
+        if not frame then return end
+        if frame.nameText then
+            local nameFont = db.petNameFont or "Fonts\\FRIZQT__.TTF"
+            local nameFontSize = db.petNameFontSize or 9
+            local nameFontOutline = db.petNameFontOutline or "OUTLINE"
+            if nameFontOutline == "NONE" then nameFontOutline = "" end
+            DF:SafeSetFont(frame.nameText, nameFont, nameFontSize, nameFontOutline)
+        end
+        if frame.healthText then
+            local healthFont = db.petHealthFont or "Fonts\\ARIALN.TTF"
+            local healthFontSize = db.petHealthFontSize or 8
+            local healthFontOutline = db.petHealthFontOutline or "OUTLINE"
+            if healthFontOutline == "NONE" then healthFontOutline = "" end
+            DF:SafeSetFont(frame.healthText, healthFont, healthFontSize, healthFontOutline)
         end
     end
-    
+
+    -- Refresh live pet frames
+    if DF.petFrames and DF.petFrames.player then
+        RefreshPetFonts(DF.petFrames.player, partyDb)
+    end
+
+    if DF.partyPetFrames then
+        for _, frame in pairs(DF.partyPetFrames) do
+            RefreshPetFonts(frame, partyDb)
+        end
+    end
+
     if DF.raidPetFrames then
         for _, frame in pairs(DF.raidPetFrames) do
-            RefreshFrameFonts(frame, raidDb)
+            RefreshPetFonts(frame, raidDb)
+        end
+    end
+
+    -- Refresh test pet frames (these exist when in test mode)
+    if DF.testMode and DF.testPetFrames then
+        for i = 0, 4 do
+            RefreshPetFonts(DF.testPetFrames[i], partyDb)
+        end
+    end
+
+    if DF.raidTestMode and DF.testRaidPetFrames then
+        for i = 1, 40 do
+            RefreshPetFonts(DF.testRaidPetFrames[i], raidDb)
+        end
+    end
+
+    -- Also refresh test party/raid frames for main frame fonts
+    if DF.testMode and DF.testPartyFrames then
+        for i = 0, 4 do
+            if DF.testPartyFrames[i] then
+                RefreshFrameFonts(DF.testPartyFrames[i], partyDb)
+            end
+        end
+    end
+
+    if DF.raidTestMode and DF.testRaidFrames then
+        for i = 1, 40 do
+            if DF.testRaidFrames[i] then
+                RefreshFrameFonts(DF.testRaidFrames[i], raidDb)
+            end
         end
     end
 end

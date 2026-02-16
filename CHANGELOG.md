@@ -1,5 +1,22 @@
 # DandersFrames Changelog
 
+## [4.0.7] - 2026-02-16
+
+### Bug Fixes
+* Fix pet frames vanishing after reload — pet frame updates were skipped in header mode, so they were never shown after login or `/rl`
+* Fix pet frame font crash on non-English clients
+* Reduce redundant pet frame updates during startup (throttled from 6 calls to 1-2)
+* Fix resource bar border not showing after login/reload — was calling non-existent function
+* Fix heal absorb bar showing smaller than actual absorb amount — calculator was subtracting incoming heals from absorb value
+* Replace pcall wrappers with nil checks in absorb/heal calculator hot paths for better performance
+* Fix profile direction switch not applying — switching to a profile with a different grow direction now correctly reconfigures header orientation
+* Fix name text truncation not applied to offline players — offline frames showed full names ignoring the truncation setting
+* Fix summon icon permanently stuck on frames after M+ start or group leave — summon icons now refresh on roster and zone changes
+* Fix icon alpha settings (role, leader, raid target, ready check) reverting to 100% after releasing the slider — appearance system was ignoring user-set alpha values
+
+### New Features
+* Debug Console — persistent debug logging system with in-game viewer (`/df debug` to toggle, `/df console` to view). Logs persist across reloads with category filtering, severity levels, and clipboard export
+
 ## [4.0.6] - 2026-02-15
 
 ### Bug Fixes

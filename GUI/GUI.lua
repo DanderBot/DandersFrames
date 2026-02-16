@@ -1759,6 +1759,7 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback)
             menuFrame:Hide()
             DF:UpdateAll()
             if callback then callback() end
+            if parent.RefreshStates then parent:RefreshStates() end
         end)
         
         table.insert(menuButtons, menuBtn)

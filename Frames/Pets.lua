@@ -10,6 +10,10 @@ DF.petFrames = DF.petFrames or {}
 DF.partyPetFrames = DF.partyPetFrames or {}
 DF.raidPetFrames = DF.raidPetFrames or {}
 
+-- Storage for test mode pet frames (non-secure, independent of live frames)
+DF.testPetFrames = DF.testPetFrames or {}       -- [0]=player pet, [1-4]=party pets
+DF.testRaidPetFrames = DF.testRaidPetFrames or {} -- [1-40]=raid pets
+
 -- ============================================================
 -- PET FRAME CREATION
 -- ============================================================
@@ -61,16 +65,17 @@ function DF:CreatePetFrame(unit, ownerFrame, isRaid)
     })
     frame.border:SetBackdropBorderColor(0, 0, 0, 1)
     
-    -- Name text
+    -- Name text — do NOT use SetFont() directly; use SetFontObject so that
+    -- later SafeSetFont calls with font families can properly override
     frame.nameText = frame.healthBar:CreateFontString(nil, "OVERLAY")
-    frame.nameText:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")  -- Default font, updated by UpdatePetFrameAppearance
+    frame.nameText:SetFontObject(GameFontNormal)
     frame.nameText:SetPoint("CENTER", 0, 0)
     frame.nameText:SetTextColor(1, 1, 1)
     frame.nameText:SetText("")
-    
-    -- Health text (optional, can be toggled)
+
+    -- Health text (optional, can be toggled) — same pattern: no direct SetFont()
     frame.healthText = frame.healthBar:CreateFontString(nil, "OVERLAY")
-    frame.healthText:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")  -- Default font, updated by UpdatePetFrameAppearance
+    frame.healthText:SetFontObject(GameFontNormal)
     frame.healthText:SetPoint("RIGHT", -2, 0)
     frame.healthText:SetTextColor(1, 1, 1)
     frame.healthText:SetText("")
@@ -129,6 +134,129 @@ function DF:CreatePetFrame(unit, ownerFrame, isRaid)
     frame:Hide()
     
     return frame
+end
+
+-- ============================================================
+-- TEST PET FRAME CREATION
+-- Non-secure Button frames for test mode preview
+-- ============================================================
+
+function DF:CreateTestPetFrame(unit, ownerTestFrame, isRaid)
+    local db = isRaid and DF:GetRaidDB() or DF:GetDB()
+    local parent = ownerTestFrame or (isRaid and DF.testRaidContainer or DF.testPartyContainer)
+
+    -- Generate frame name
+    local frameName = "DandersFrames_TestPet_" .. unit:gsub("pet", "Pet")
+
+    -- Create as regular Button (NOT SecureUnitButtonTemplate)
+    -- This allows show/hide at any time without combat lockdown
+    local frame = CreateFrame("Button", frameName, parent)
+    frame:SetSize(db.petFrameWidth or 80, db.petFrameHeight or 20)
+    frame.unit = unit
+    frame.ownerFrame = ownerTestFrame
+    frame.isPetFrame = true
+    frame.isRaidFrame = isRaid
+    frame.dfIsTestFrame = true
+    frame.dfIsDandersFrame = true
+
+    -- Store owner unit for consistency with live pet frames
+    local ownerUnit = unit:gsub("pet", "")
+    if ownerUnit == "" then ownerUnit = "player" end
+    frame.ownerUnit = ownerUnit
+
+    -- Background
+    frame.background = frame:CreateTexture(nil, "BACKGROUND")
+    frame.background:SetAllPoints()
+    frame.background:SetColorTexture(0.1, 0.1, 0.1, 0.8)
+
+    -- Health bar
+    frame.healthBar = CreateFrame("StatusBar", nil, frame)
+    frame.healthBar:SetAllPoints()
+    frame.healthBar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
+    frame.healthBar:SetMinMaxValues(0, 100)
+    frame.healthBar:SetValue(100)
+    frame.healthBar:SetStatusBarColor(0, 0.8, 0)
+
+    -- Health bar background (for deficit)
+    frame.healthBar.bg = frame.healthBar:CreateTexture(nil, "BACKGROUND")
+    frame.healthBar.bg:SetAllPoints()
+    frame.healthBar.bg:SetColorTexture(0.2, 0.2, 0.2, 0.8)
+
+    -- Border
+    frame.border = CreateFrame("Frame", nil, frame, "BackdropTemplate")
+    frame.border:SetPoint("TOPLEFT", -1, 1)
+    frame.border:SetPoint("BOTTOMRIGHT", 1, -1)
+    frame.border:SetBackdrop({
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = 1,
+    })
+    frame.border:SetBackdropBorderColor(0, 0, 0, 1)
+
+    -- Name text — do NOT use SetFont() directly; use SafeSetFont or SetFontObject
+    -- so that later SafeSetFont calls with font families can properly override
+    frame.nameText = frame.healthBar:CreateFontString(nil, "OVERLAY")
+    frame.nameText:SetFontObject(GameFontNormal)
+    frame.nameText:SetPoint("CENTER", 0, 0)
+    frame.nameText:SetTextColor(1, 1, 1)
+    frame.nameText:SetText("")
+
+    -- Health text (optional, can be toggled) — same pattern: no direct SetFont()
+    frame.healthText = frame.healthBar:CreateFontString(nil, "OVERLAY")
+    frame.healthText:SetFontObject(GameFontNormal)
+    frame.healthText:SetPoint("RIGHT", -2, 0)
+    frame.healthText:SetTextColor(1, 1, 1)
+    frame.healthText:SetText("")
+    frame.healthText:Hide()
+
+    -- No events registered - test frames use fake data
+    -- No click-casting registration - test frames aren't for real unit targeting
+
+    -- Initial hide
+    frame:Hide()
+
+    return frame
+end
+
+-- ============================================================
+-- TEST PET FRAME INITIALIZATION
+-- ============================================================
+
+function DF:InitializeTestPetFrames()
+    -- Create test pet frames for each test party frame
+    for i = 0, 4 do
+        if not DF.testPetFrames[i] and DF.testPartyFrames[i] then
+            local unit = i == 0 and "pet" or ("partypet" .. i)
+            DF.testPetFrames[i] = DF:CreateTestPetFrame(unit, DF.testPartyFrames[i], false)
+        end
+    end
+end
+
+function DF:InitializeTestRaidPetFrames()
+    -- Create test pet frames for each test raid frame
+    for i = 1, 40 do
+        if not DF.testRaidPetFrames[i] and DF.testRaidFrames[i] then
+            DF.testRaidPetFrames[i] = DF:CreateTestPetFrame("raidpet" .. i, DF.testRaidFrames[i], true)
+        end
+    end
+end
+
+-- ============================================================
+-- TEST PET FRAME CLEANUP
+-- ============================================================
+
+function DF:HideAllTestPetFrames()
+    for i = 0, 4 do
+        if DF.testPetFrames[i] then DF.testPetFrames[i]:Hide() end
+    end
+    -- Also hide pet group container if it exists
+    if DF.petGroupContainer then DF.petGroupContainer:Hide() end
+end
+
+function DF:HideAllTestRaidPetFrames()
+    for i = 1, 40 do
+        if DF.testRaidPetFrames[i] then DF.testRaidPetFrames[i]:Hide() end
+    end
+    if DF.raidPetGroupContainer then DF.raidPetGroupContainer:Hide() end
 end
 
 -- ============================================================
@@ -191,7 +319,7 @@ end
 -- Note: When showing, we don't set alpha to 1 because range fading may need a different alpha
 function DF:SetPetFrameVisible(frame, visible)
     if not frame then return end
-    
+
     if visible then
         -- Mark as visible - range system will set appropriate alpha
         frame.dfPetHidden = false
@@ -200,6 +328,8 @@ function DF:SetPetFrameVisible(frame, visible)
         -- Also try to show if not in combat (for proper click targeting)
         if not InCombatLockdown() then
             frame:Show()
+        else
+            DF:Debug("PET", "SetPetFrameVisible: %s wants SHOW but InCombatLockdown - using alpha only", frame.unit or "?")
         end
     else
         -- Mark as hidden and set alpha to 0
@@ -321,9 +451,9 @@ end
 -- Apply visual styling to pet frame
 function DF:ApplyPetFrameStyle(frame)
     if not frame then return end
-    
+
     local db = frame.isRaidFrame and DF:GetRaidDB() or DF:GetDB()
-    
+
     -- Calculate size - optionally match owner's dimensions (only in ATTACHED mode)
     local width = db.petFrameWidth or 80
     local height = db.petFrameHeight or 20
@@ -369,7 +499,7 @@ function DF:ApplyPetFrameStyle(frame)
     local nameFontSize = db.petNameFontSize or 9
     local nameFontOutline = db.petNameFontOutline or "OUTLINE"
     DF:SafeSetFont(frame.nameText, nameFont, nameFontSize, nameFontOutline)
-    
+
     -- Name text position
     frame.nameText:ClearAllPoints()
     local nameAnchor = db.petNameAnchor or "CENTER"
@@ -419,19 +549,20 @@ end
 
 function DF:UpdatePetFrame(frame)
     if not frame then return end
-    
+
     local db = frame.isRaidFrame and DF:GetRaidDB() or DF:GetDB()
-    
+
     -- Check if owner is dead - hide pet frame if so
     local ownerUnit = frame.unit:gsub("pet", "")
     if ownerUnit == "" then ownerUnit = "player" end
-    
+
     -- Test mode handling
     local isInTestMode = (frame.isRaidFrame and DF.raidTestMode) or (not frame.isRaidFrame and DF.testMode)
-    
+
     if isInTestMode then
         -- Check if pets should be shown in test mode
         if db.testShowPets == false then
+            DF:Debug("PET", "UpdatePetFrame: %s HIDDEN (testShowPets=false)", frame.unit)
             DF:SetPetFrameVisible(frame, false)
             return
         end
@@ -441,17 +572,21 @@ function DF:UpdatePetFrame(frame)
         DF:SetPetFrameVisible(frame, true)
         return
     end
-    
+
     -- Update visibility and data
-    if UnitExists(frame.unit) and not UnitIsDeadOrGhost(ownerUnit) then
+    local unitExists = UnitExists(frame.unit)
+    local ownerDead = UnitIsDeadOrGhost(ownerUnit)
+    if unitExists and not ownerDead then
         -- Apply visual styling
         DF:ApplyPetFrameStyle(frame)
         -- Update health and name
         DF:UpdatePetHealth(frame)
         DF:UpdatePetName(frame)
         DF:SetPetFrameVisible(frame, true)
+        DF:Debug("PET", "UpdatePetFrame: %s VISIBLE (unitExists=%s ownerDead=%s)", frame.unit, tostring(unitExists), tostring(ownerDead))
     else
         DF:SetPetFrameVisible(frame, false)
+        DF:Debug("PET", "UpdatePetFrame: %s HIDDEN (unitExists=%s ownerDead=%s)", frame.unit, tostring(unitExists), tostring(ownerDead))
     end
 end
 
@@ -494,25 +629,43 @@ end
 
 -- Lightweight update for live slider preview (no full rebuild)
 function DF:LightweightUpdatePetFrames()
-    -- Update player pet
-    if DF.petFrames.player then
-        DF:ApplyPetFrameStyle(DF.petFrames.player)
-        DF:PositionPetFrame(DF.petFrames.player)
-    end
-    
-    -- Update party pets
-    for i = 1, 4 do
-        if DF.partyPetFrames[i] then
-            DF:ApplyPetFrameStyle(DF.partyPetFrames[i])
-            DF:PositionPetFrame(DF.partyPetFrames[i])
+    -- Test mode: update test pet frames
+    if DF.testMode then
+        for i = 0, 4 do
+            if DF.testPetFrames[i] then
+                DF:ApplyPetFrameStyle(DF.testPetFrames[i])
+                DF:PositionPetFrame(DF.testPetFrames[i])
+            end
+        end
+    else
+        -- Live mode: update real pet frames
+        if DF.petFrames.player then
+            DF:ApplyPetFrameStyle(DF.petFrames.player)
+            DF:PositionPetFrame(DF.petFrames.player)
+        end
+        for i = 1, 4 do
+            if DF.partyPetFrames[i] then
+                DF:ApplyPetFrameStyle(DF.partyPetFrames[i])
+                DF:PositionPetFrame(DF.partyPetFrames[i])
+            end
         end
     end
-    
-    -- Update raid pets
-    for i = 1, 40 do
-        if DF.raidPetFrames[i] then
-            DF:ApplyPetFrameStyle(DF.raidPetFrames[i])
-            DF:PositionPetFrame(DF.raidPetFrames[i])
+
+    -- Raid test mode: update test raid pet frames
+    if DF.raidTestMode then
+        for i = 1, 40 do
+            if DF.testRaidPetFrames[i] then
+                DF:ApplyPetFrameStyle(DF.testRaidPetFrames[i])
+                DF:PositionPetFrame(DF.testRaidPetFrames[i])
+            end
+        end
+    else
+        -- Live mode: update real raid pet frames
+        for i = 1, 40 do
+            if DF.raidPetFrames[i] then
+                DF:ApplyPetFrameStyle(DF.raidPetFrames[i])
+                DF:PositionPetFrame(DF.raidPetFrames[i])
+            end
         end
     end
 end
@@ -571,44 +724,39 @@ end
 
 function DF:UpdatePetGroupLayout()
     local db = DF:GetDB()
-    
-    -- Only use group layout if in GROUPED mode and pets are enabled
-    if db.petGroupMode ~= "GROUPED" or not db.petEnabled then
-        -- Hide pet group container if it exists
+    local isTestMode = DF.testMode
+
+    -- Only use group layout if in GROUPED mode and pets are enabled/shown
+    local petsEnabled = isTestMode and (db.petEnabled and db.testShowPets ~= false) or (not isTestMode and db.petEnabled)
+    if db.petGroupMode ~= "GROUPED" or not petsEnabled then
         if DF.petGroupContainer then
             DF.petGroupContainer:Hide()
         end
         return
     end
-    
+
     -- Create container if needed
     if not DF.petGroupContainer then
         DF:CreatePetGroupContainer()
     end
-    
+
     local container = DF.petGroupContainer
-    local partyContainer = DF.container
-    
-    if not partyContainer then return end
-    
+
+    -- In live mode, need a party container reference
+    if not isTestMode and not DF.container then return end
+
     -- Collect visible pet frames
     local petFrames = {}
-    
-    -- In test mode, show all pet frames based on testFrameCount
-    local isTestMode = DF.testMode
-    
+    local testFrameCount = db.testFrameCount or 5
+
     if isTestMode then
-        if db.testShowPets == false then
-            container:Hide()
-            return
-        end
-        local testFrameCount = db.testFrameCount or 5
-        if testFrameCount >= 1 and DF.petFrames.player then
-            table.insert(petFrames, DF.petFrames.player)
+        -- Test mode: use test pet frames
+        if testFrameCount >= 1 and DF.testPetFrames[0] then
+            table.insert(petFrames, DF.testPetFrames[0])
         end
         for i = 1, 4 do
-            if (i + 1) <= testFrameCount and DF.partyPetFrames[i] then
-                table.insert(petFrames, DF.partyPetFrames[i])
+            if (i + 1) <= testFrameCount and DF.testPetFrames[i] then
+                table.insert(petFrames, DF.testPetFrames[i])
             end
         end
     else
@@ -622,26 +770,25 @@ function DF:UpdatePetGroupLayout()
             end
         end
     end
-    
+
     if #petFrames == 0 then
         container:Hide()
         return
     end
-    
+
     -- Get settings
     local growth = db.petGroupGrowth or "HORIZONTAL"
     local spacing = db.petGroupSpacing or 2
     local anchor = db.petGroupAnchor or "BOTTOM"
     local offsetX = db.petGroupOffsetX or 0
     local offsetY = db.petGroupOffsetY or -5
-    
+
     -- Calculate container size using pet frame dimensions
-    -- Note: Match Owner Width/Height only applies to ATTACHED mode, not GROUPED mode
     local petWidth = db.petFrameWidth or 80
     local petHeight = db.petFrameHeight or 18
-    
+
     local containerWidth, containerHeight
-    
+
     if growth == "HORIZONTAL" then
         containerWidth = (#petFrames * petWidth) + ((#petFrames - 1) * spacing)
         containerHeight = petHeight
@@ -649,28 +796,25 @@ function DF:UpdatePetGroupLayout()
         containerWidth = petWidth
         containerHeight = (#petFrames * petHeight) + ((#petFrames - 1) * spacing)
     end
-    
+
     container:SetSize(containerWidth, containerHeight)
-    
+
     -- Calculate the actual center of visible party frames
     local visibleFrames = {}
-    local testFrameCount = db.testFrameCount or 5
-    
-    -- Collect visible party frames via iterator
-    if DF.IteratePartyFrames then
-        local frameIdx = 0
+
+    if isTestMode then
+        -- Test mode: iterate test party frames directly
+        for i = 0, 4 do
+            local frame = DF.testPartyFrames[i]
+            if frame and frame:IsShown() and (i < testFrameCount) then
+                table.insert(visibleFrames, frame)
+            end
+        end
+    elseif DF.IteratePartyFrames then
+        -- Live mode: use the iterator
         DF:IteratePartyFrames(function(frame)
-            frameIdx = frameIdx + 1
             if frame and frame:IsShown() then
-                if DF.testMode then
-                    -- In test mode, only use frames up to testFrameCount
-                    if frameIdx <= testFrameCount then
-                        table.insert(visibleFrames, frame)
-                    end
-                else
-                    -- Normal mode
-                    table.insert(visibleFrames, frame)
-                end
+                table.insert(visibleFrames, frame)
             end
         end)
     end
@@ -829,39 +973,38 @@ end
 
 function DF:UpdateRaidPetGroupLayout()
     local db = DF:GetRaidDB()
-    
-    -- Only use group layout if in GROUPED mode and pets are enabled
-    if db.petGroupMode ~= "GROUPED" or not db.petEnabled then
+    local isTestMode = DF.raidTestMode
+
+    -- Only use group layout if in GROUPED mode and pets are enabled/shown
+    local petsEnabled = isTestMode and (db.petEnabled and db.testShowPets ~= false) or (not isTestMode and db.petEnabled)
+    if db.petGroupMode ~= "GROUPED" or not petsEnabled then
         if DF.raidPetGroupContainer then
             DF.raidPetGroupContainer:Hide()
         end
         return
     end
-    
+
     -- Create container if needed
     if not DF.raidPetGroupContainer then
         DF:CreateRaidPetGroupContainer()
     end
-    
+
     local container = DF.raidPetGroupContainer
-    local raidContainer = DF.raidContainer
-    
-    if not raidContainer then return end
-    
+
+    -- In live mode, need a raid container reference
+    if not isTestMode and not DF.raidContainer then return end
+    local raidContainer = isTestMode and DF.testRaidContainer or DF.raidContainer
+
     -- Collect visible pet frames (cap at 10 for test mode)
     local petFrames = {}
-    local isTestMode = DF.raidTestMode
-    local maxPets = 10  -- Cap for test mode display
-    
+    local maxPets = 10
+
     if isTestMode then
-        if db.testShowPets == false then
-            container:Hide()
-            return
-        end
+        -- Test mode: use test raid pet frames
         local testFrameCount = math.min(db.raidTestFrameCount or 10, maxPets)
         for i = 1, testFrameCount do
-            if DF.raidPetFrames[i] then
-                table.insert(petFrames, DF.raidPetFrames[i])
+            if DF.testRaidPetFrames[i] then
+                table.insert(petFrames, DF.testRaidPetFrames[i])
             end
         end
     else
@@ -871,12 +1014,12 @@ function DF:UpdateRaidPetGroupLayout()
             end
         end
     end
-    
+
     if #petFrames == 0 then
         container:Hide()
         return
     end
-    
+
     -- Get pet group settings
     local petFrameWidth = db.petFrameWidth or 72
     local petFrameHeight = db.petFrameHeight or 18
@@ -885,7 +1028,7 @@ function DF:UpdateRaidPetGroupLayout()
     local petAnchor = db.petGroupAnchor or "RIGHT"
     local offsetX = db.petGroupOffsetX or 5
     local offsetY = db.petGroupOffsetY or 0
-    
+
     -- Size container based on pet frame dimensions and growth direction
     local containerWidth, containerHeight
     if petGrowth == "HORIZONTAL" then
@@ -896,37 +1039,48 @@ function DF:UpdateRaidPetGroupLayout()
         containerHeight = (#petFrames * petFrameHeight) + ((#petFrames - 1) * petSpacing)
     end
     container:SetSize(containerWidth, containerHeight)
-    
+
     -- Find actual bounds and edge frames of visible raid frames
     local minX, maxX, minY, maxY
     local leftmostFrame, rightmostFrame, topmostFrame, bottommostFrame
-    
-    if DF.IterateRaidFrames then
-        DF:IterateRaidFrames(function(frame)
-            if frame and frame:IsShown() then
-                local left, bottom, width, height = frame:GetRect()
-                if left and bottom and width and height then
-                    local right = left + width
-                    local top = bottom + height
-                    
-                    if not minX or left < minX then 
-                        minX = left 
-                        leftmostFrame = frame
-                    end
-                    if not maxX or right > maxX then 
-                        maxX = right 
-                        rightmostFrame = frame
-                    end
-                    if not minY or bottom < minY then 
-                        minY = bottom 
-                        bottommostFrame = frame
-                    end
-                    if not maxY or top > maxY then 
-                        maxY = top 
-                        topmostFrame = frame
-                    end
+
+    -- Helper to process frame bounds
+    local function processFrameBounds(frame)
+        if frame and frame:IsShown() then
+            local left, bottom, width, height = frame:GetRect()
+            if left and bottom and width and height then
+                local right = left + width
+                local top = bottom + height
+
+                if not minX or left < minX then
+                    minX = left
+                    leftmostFrame = frame
+                end
+                if not maxX or right > maxX then
+                    maxX = right
+                    rightmostFrame = frame
+                end
+                if not minY or bottom < minY then
+                    minY = bottom
+                    bottommostFrame = frame
+                end
+                if not maxY or top > maxY then
+                    maxY = top
+                    topmostFrame = frame
                 end
             end
+        end
+    end
+
+    if isTestMode then
+        -- Test mode: iterate test raid frames directly
+        local testFrameCount = db.raidTestFrameCount or 10
+        for i = 1, testFrameCount do
+            processFrameBounds(DF.testRaidFrames[i])
+        end
+    elseif DF.IterateRaidFrames then
+        DF:IterateRaidFrames(function(frame)
+            processFrameBounds(frame)
         end)
     end
     
@@ -1024,29 +1178,44 @@ end
 
 function DF:InitializePetFrames()
     local db = DF:GetDB()
-    
+
+    DF:Debug("PET", "InitializePetFrames called. petEnabled=%s petFramesInitialized=%s", tostring(db.petEnabled), tostring(DF.petFramesInitialized))
+
     -- Don't create if pets are disabled
-    if not db.petEnabled then return end
-    
+    if not db.petEnabled then
+        DF:Debug("PET", "InitializePetFrames: SKIPPED - pets disabled")
+        return
+    end
+
     -- Create player pet frame
     local playerFrame = DF:GetPlayerFrame()
     if not DF.petFrames.player and playerFrame then
         DF.petFrames.player = DF:CreatePetFrame("pet", playerFrame, false)
+        DF:Debug("PET", "InitializePetFrames: created player pet frame")
     end
-    
+    DF:Debug("PET", "InitializePetFrames: playerFrame=%s petFrames.player=%s", tostring(playerFrame ~= nil), tostring(DF.petFrames.player ~= nil))
+
     -- Create party pet frames
+    local partyCount = 0
     for i = 1, 4 do
         local partyFrame = DF:GetPartyFrame(i)
         if not DF.partyPetFrames[i] and partyFrame then
             DF.partyPetFrames[i] = DF:CreatePetFrame("partypet" .. i, partyFrame, false)
+            partyCount = partyCount + 1
         end
     end
-    
-    -- Mark as initialized
-    DF.petFramesInitialized = true
-    
-    -- Position all pet frames
-    DF:UpdateAllPetFramePositions()
+    DF:Debug("PET", "InitializePetFrames: created %d new party pet frames", partyCount)
+
+    -- Only mark as initialized if at least one frame was actually created
+    -- This allows retry when headers become available (e.g., joining a group)
+    if DF.petFrames.player or next(DF.partyPetFrames) then
+        DF.petFramesInitialized = true
+        DF:Debug("PET", "InitializePetFrames: marked as initialized, positioning frames")
+        -- Position all pet frames
+        DF:UpdateAllPetFramePositions()
+    else
+        DF:Debug("PET", "InitializePetFrames: NO frames created - will retry later")
+    end
 end
 
 function DF:InitializeRaidPetFrames()
@@ -1071,41 +1240,95 @@ end
 -- UPDATE ALL PET FRAMES
 -- ============================================================
 
-function DF:UpdateAllPetFrames()
+local lastPetUpdateTime = 0
+
+function DF:UpdateAllPetFrames(force)
+    -- Throttle: skip if already ran this frame (multiple callers during startup/updates)
+    local now = GetTime()
+    if not force and now == lastPetUpdateTime then return end
+    lastPetUpdateTime = now
+
     local db = DF:GetDB()
-    
+
+    DF:Debug("PET", "UpdateAllPetFrames called. testMode=%s raidTestMode=%s petEnabled=%s testShowPets=%s",
+        tostring(DF.testMode), tostring(DF.raidTestMode), tostring(db.petEnabled), tostring(db.testShowPets))
+
     -- Hide party pet group container if in raid test mode
     if DF.raidTestMode then
+        DF:Debug("PET", "UpdateAllPetFrames: hiding party pets (raid test mode active)")
         if DF.petFrames.player then DF.petFrames.player:Hide() end
         for i = 1, 4 do
             if DF.partyPetFrames[i] then DF.partyPetFrames[i]:Hide() end
         end
-        if DF.petGroupContainer then DF.petGroupContainer:Hide() end
+        DF:HideAllTestPetFrames()
         return
     end
-    
-    -- In test mode, check testShowPets; outside test mode, check petEnabled
-    local shouldShowPets = DF.testMode and (db.testShowPets ~= false) or (not DF.testMode and db.petEnabled)
-    
+
+    -- In test mode, show pets if enabled AND testShowPets is on; outside test mode, check petEnabled
+    local shouldShowPets
+    if DF.testMode then
+        shouldShowPets = db.petEnabled and (db.testShowPets ~= false)
+    else
+        shouldShowPets = db.petEnabled
+    end
+
+    DF:Debug("PET", "UpdateAllPetFrames: shouldShowPets=%s", tostring(shouldShowPets))
+
     if not shouldShowPets then
         -- Hide all pet frames if disabled
-        if DF.petFrames.player then DF.petFrames.player:Hide() end
-        for i = 1, 4 do
-            if DF.partyPetFrames[i] then DF.partyPetFrames[i]:Hide() end
+        if DF.testMode then
+            DF:HideAllTestPetFrames()
+        else
+            if DF.petFrames.player then DF.petFrames.player:Hide() end
+            for i = 1, 4 do
+                if DF.partyPetFrames[i] then DF.partyPetFrames[i]:Hide() end
+            end
+            if DF.petGroupContainer then DF.petGroupContainer:Hide() end
         end
-        if DF.petGroupContainer then DF.petGroupContainer:Hide() end
         return
     end
-    
+
+    -- Test mode: use test pet frames
+    if DF.testMode then
+        -- Initialize test pet frames if needed
+        DF:InitializeTestPetFrames()
+
+        local testFrameCount = db.testFrameCount or 5
+
+        -- Update test pet frames
+        for i = 0, 4 do
+            if DF.testPetFrames[i] then
+                if i < testFrameCount then
+                    DF:UpdatePetFrame(DF.testPetFrames[i])
+                    DF:PositionPetFrame(DF.testPetFrames[i])
+                else
+                    DF.testPetFrames[i]:Hide()
+                end
+            end
+        end
+
+        -- Update group layout if in grouped mode
+        if db.petGroupMode == "GROUPED" then
+            DF:UpdatePetGroupLayout()
+        end
+        return
+    end
+
+    -- Live mode: use real pet frames
     -- Initialize if needed
+    DF:Debug("PET", "UpdateAllPetFrames: LIVE MODE - calling InitializePetFrames")
     DF:InitializePetFrames()
-    
+
+    DF:Debug("PET", "UpdateAllPetFrames: LIVE MODE - playerPet=%s partyPets=%d",
+        tostring(DF.petFrames.player ~= nil),
+        (DF.partyPetFrames[1] and 1 or 0) + (DF.partyPetFrames[2] and 1 or 0) + (DF.partyPetFrames[3] and 1 or 0) + (DF.partyPetFrames[4] and 1 or 0))
+
     -- Update player pet
     if DF.petFrames.player then
         DF:UpdatePetFrame(DF.petFrames.player)
         DF:PositionPetFrame(DF.petFrames.player)
     end
-    
+
     -- Update party pets
     for i = 1, 4 do
         if DF.partyPetFrames[i] then
@@ -1113,39 +1336,77 @@ function DF:UpdateAllPetFrames()
             DF:PositionPetFrame(DF.partyPetFrames[i])
         end
     end
-    
+
     -- Update group layout if in grouped mode
     if db.petGroupMode == "GROUPED" then
         DF:UpdatePetGroupLayout()
     end
 end
 
-function DF:UpdateAllRaidPetFrames()
+local lastRaidPetUpdateTime = 0
+
+function DF:UpdateAllRaidPetFrames(force)
+    -- Throttle: skip if already ran this frame (multiple callers during startup/updates)
+    local now = GetTime()
+    if not force and now == lastRaidPetUpdateTime then return end
+    lastRaidPetUpdateTime = now
+
     local db = DF:GetRaidDB()
-    
+
     -- Hide raid pet frames if in party test mode (not raid test mode)
     if DF.testMode and not DF.raidTestMode then
         for i = 1, 40 do
             if DF.raidPetFrames[i] then DF.raidPetFrames[i]:Hide() end
         end
-        if DF.raidPetGroupContainer then DF.raidPetGroupContainer:Hide() end
+        DF:HideAllTestRaidPetFrames()
         return
     end
-    
-    -- In test mode, check testShowPets; outside test mode, check petEnabled
-    local shouldShowPets = DF.raidTestMode and (db.testShowPets ~= false) or (not DF.raidTestMode and db.petEnabled)
-    
+
+    -- In test mode, show pets if enabled AND testShowPets is on; outside test mode, check petEnabled
+    local shouldShowPets
+    if DF.raidTestMode then
+        shouldShowPets = db.petEnabled and (db.testShowPets ~= false)
+    else
+        shouldShowPets = db.petEnabled
+    end
+
     if not shouldShowPets then
-        -- Hide all raid pet frames if disabled
-        for i = 1, 40 do
-            if DF.raidPetFrames[i] then DF.raidPetFrames[i]:Hide() end
+        if DF.raidTestMode then
+            DF:HideAllTestRaidPetFrames()
+        else
+            for i = 1, 40 do
+                if DF.raidPetFrames[i] then DF.raidPetFrames[i]:Hide() end
+            end
+            if DF.raidPetGroupContainer then DF.raidPetGroupContainer:Hide() end
         end
-        if DF.raidPetGroupContainer then DF.raidPetGroupContainer:Hide() end
         return
     end
-    
+
+    -- Raid test mode: use test pet frames
+    if DF.raidTestMode then
+        DF:InitializeTestRaidPetFrames()
+
+        local testFrameCount = db.raidTestFrameCount or 10
+
+        for i = 1, 40 do
+            if DF.testRaidPetFrames[i] then
+                if i <= testFrameCount then
+                    DF:UpdatePetFrame(DF.testRaidPetFrames[i])
+                    DF:PositionPetFrame(DF.testRaidPetFrames[i])
+                else
+                    DF.testRaidPetFrames[i]:Hide()
+                end
+            end
+        end
+
+        if db.petGroupMode == "GROUPED" then
+            DF:UpdateRaidPetGroupLayout()
+        end
+        return
+    end
+
+    -- Live mode: use real raid pet frames
     -- Initialize if needed (deferred creation)
-    -- Only create pet frames for existing raid frames
     local frameIdx = 0
     if DF.IterateRaidFrames then
         DF:IterateRaidFrames(function(frame)
@@ -1155,7 +1416,7 @@ function DF:UpdateAllRaidPetFrames()
             end
         end)
     end
-    
+
     -- Update all raid pets
     for i = 1, 40 do
         if DF.raidPetFrames[i] then
@@ -1163,7 +1424,7 @@ function DF:UpdateAllRaidPetFrames()
             DF:PositionPetFrame(DF.raidPetFrames[i])
         end
     end
-    
+
     -- Update group layout if in grouped mode
     if db.petGroupMode == "GROUPED" then
         DF:UpdateRaidPetGroupLayout()
@@ -1227,13 +1488,16 @@ end
 -- This will be called from the main event handler
 function DF:HandleUnitPetEvent(unit)
     local db = DF:GetDB()
-    
+
+    DF:Debug("PET", "HandleUnitPetEvent: unit=%s petEnabled=%s petFramesInitialized=%s", tostring(unit), tostring(db.petEnabled), tostring(DF.petFramesInitialized))
+
     -- Lazy-load pet frames on first pet event (if pets are enabled)
+    -- InitializePetFrames sets the flag internally only when frames are created
     if db.petEnabled and not DF.petFramesInitialized then
+        DF:Debug("PET", "HandleUnitPetEvent: lazy-loading pet frames")
         DF:InitializePetFrames()
-        DF.petFramesInitialized = true
     end
-    
+
     DF:OnPetChanged(unit)
 end
 
@@ -1244,25 +1508,39 @@ end
 function DF:ApplyPetSettings()
     local db = DF:GetDB()
     local raidDb = DF:GetRaidDB()
-    
+
+    DF:Debug("PET", "ApplyPetSettings called. testMode=%s raidTestMode=%s petEnabled=%s raidPetEnabled=%s",
+        tostring(DF.testMode), tostring(DF.raidTestMode), tostring(db.petEnabled), tostring(raidDb.petEnabled))
+
     -- Update party/solo pet frames
-    if db.petEnabled then
-        DF:InitializePetFrames()
-        DF:UpdateAllPetFrames()
+    local partyPetsEnabled = DF.testMode and (db.petEnabled and db.testShowPets ~= false) or (not DF.testMode and db.petEnabled)
+    if partyPetsEnabled then
+        if DF.testMode then
+            DF:InitializeTestPetFrames()
+        else
+            DF:InitializePetFrames()
+        end
+        DF:UpdateAllPetFrames(true)  -- force: explicit settings change
     else
-        -- Hide all party pet frames
+        -- Hide all party pet frames (both live and test)
         if DF.petFrames.player then DF.petFrames.player:Hide() end
         for i = 1, 4 do
             if DF.partyPetFrames[i] then DF.partyPetFrames[i]:Hide() end
         end
+        DF:HideAllTestPetFrames()
     end
-    
+
     -- Update raid pet frames
-    if raidDb.petEnabled then
-        DF:UpdateAllRaidPetFrames()
+    local raidPetsEnabled = DF.raidTestMode and (raidDb.petEnabled and raidDb.testShowPets ~= false) or (not DF.raidTestMode and raidDb.petEnabled)
+    if raidPetsEnabled then
+        if DF.raidTestMode then
+            DF:InitializeTestRaidPetFrames()
+        end
+        DF:UpdateAllRaidPetFrames(true)  -- force: explicit settings change
     else
         for i = 1, 40 do
             if DF.raidPetFrames[i] then DF.raidPetFrames[i]:Hide() end
         end
+        DF:HideAllTestRaidPetFrames()
     end
 end

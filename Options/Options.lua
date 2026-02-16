@@ -103,7 +103,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     end
     
     -- Define category order (updated structure)
-    GUI.CategoryOrder = {"general", "clickcast", "display", "bars", "text", "auras", "indicators", "profiles"}
+    GUI.CategoryOrder = {"general", "clickcast", "display", "bars", "text", "auras", "indicators", "profiles", "debug"}
     
     -- ========================================
     -- CATEGORY: General
@@ -709,8 +709,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             GROUPED = "Separate Pet Group",
         }
         layoutGroup:AddWidget(GUI:CreateDropdown(self.child, "Layout Mode", groupModeValues, db, "petGroupMode", function()
-            if DF.UpdateAllPetFrames then DF:UpdateAllPetFrames() end
-            if DF.UpdateAllRaidPetFrames then DF:UpdateAllRaidPetFrames() end
+            if DF.UpdateAllPetFrames then DF:UpdateAllPetFrames(true) end
+            if DF.UpdateAllRaidPetFrames then DF:UpdateAllRaidPetFrames(true) end
             GUI:RefreshCurrentPage()
         end), 55)
         
@@ -4740,7 +4740,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         
         local roleStyleOptions = {
             BLIZZARD = "Blizzard",
-            CUSTOM = "Custom",
+            CUSTOM = "DF Icons",
+            EXTERNAL = "External",
         }
         
         local outlineOptions = {
@@ -4797,13 +4798,32 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- ROLE ICON (Collapsible)
         -- ============================================
         local roleSection = Add(GUI:CreateCollapsibleSection(self.child, "Role Icon", false, 250), 28, 1)
-        
-        local roleOnlyInCombat = Add(GUI:CreateCheckbox(self.child, "Only Apply Settings in Combat", db, "roleIconOnlyInCombat", function() DF:UpdateAllRoleIcons() end), 30, 1)
-        roleSection:RegisterChild(roleOnlyInCombat)
-        
-        local roleStyle = Add(GUI:CreateDropdown(self.child, "Icon Style", roleStyleOptions, db, "roleIconStyle", nil), 55, 1)
+
+        local roleStyle = Add(GUI:CreateDropdown(self.child, "Icon Style", roleStyleOptions, db, "roleIconStyle", function() DF:UpdateAllRoleIcons() end), 55, 1)
         roleSection:RegisterChild(roleStyle)
-        
+
+        local roleExtTank = Add(GUI:CreateEditBox(self.child, "Tank Icon Path", db, "roleIconExternalTank", function() DF:UpdateAllRoleIcons() end), 55, 1)
+        roleSection:RegisterChild(roleExtTank)
+        roleExtTank.hideOn = function(d) return d.roleIconStyle ~= "EXTERNAL" end
+
+        local roleExtHealer = Add(GUI:CreateEditBox(self.child, "Healer Icon Path", db, "roleIconExternalHealer", function() DF:UpdateAllRoleIcons() end), 55, 1)
+        roleSection:RegisterChild(roleExtHealer)
+        roleExtHealer.hideOn = function(d) return d.roleIconStyle ~= "EXTERNAL" end
+
+        local roleExtDPS = Add(GUI:CreateEditBox(self.child, "DPS Icon Path", db, "roleIconExternalDPS", function() DF:UpdateAllRoleIcons() end), 55, 1)
+        roleSection:RegisterChild(roleExtDPS)
+        roleExtDPS.hideOn = function(d) return d.roleIconStyle ~= "EXTERNAL" end
+
+        local roleExtNote = Add(GUI:CreateLabel(self.child, "Enter WoW texture paths (file extensions are stripped automatically). Leave empty to use DF Icons as fallback.", 250), 40, 1)
+        roleSection:RegisterChild(roleExtNote)
+        roleExtNote.hideOn = function(d) return d.roleIconStyle ~= "EXTERNAL" end
+
+        local roleOnlyInCombat = Add(GUI:CreateCheckbox(self.child, "Show All Roles Out of Combat", db, "roleIconOnlyInCombat", function() DF:UpdateAllRoleIcons() end), 30, 1)
+        roleSection:RegisterChild(roleOnlyInCombat)
+
+        local roleOnlyInCombatDesc = Add(GUI:CreateLabel(self.child, "When enabled, all role icons are shown outside of combat. The filters below only apply during combat.", 250), 40, 1)
+        roleSection:RegisterChild(roleOnlyInCombatDesc)
+
         local roleShowTank = Add(GUI:CreateCheckbox(self.child, "Show Tank", db, "roleIconShowTank", nil), 30, 1)
         roleSection:RegisterChild(roleShowTank)
         
@@ -4818,9 +4838,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         
         local roleAlpha = Add(GUI:CreateSlider(self.child, "Alpha", 0.1, 1.0, 0.05, db, "roleIconAlpha", nil, function() DF:LightweightUpdateIconAlpha("role") end, true), 55, 1)
         roleSection:RegisterChild(roleAlpha)
-        
-        local roleHide = Add(GUI:CreateCheckbox(self.child, "Hide in Combat", db, "roleIconHideInCombat", function() DF:UpdateAllRoleIcons() end), 30, 1)
-        roleSection:RegisterChild(roleHide)
         
         local roleAnchor = Add(GUI:CreateDropdown(self.child, "Anchor", anchorOptions, db, "roleIconAnchor", function() DF:LightweightUpdateIconPosition("role") end), 55, 1)
         roleSection:RegisterChild(roleAnchor)
@@ -6290,5 +6307,350 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             {pageId = "profiles_manage", label = "Manage Profiles"},
         }), 30, "both")
     end)
-    
+
+    -- ========================================
+    -- CATEGORY: Debug
+    -- ========================================
+    CreateCategory("debug", "Debug")
+
+    -- Debug > Console
+    local pageDebugConsole = CreateSubTab("debug", "debug_console", "Console")
+    BuildPage(pageDebugConsole, function(self, db, Add, AddSpace, AddSyncPoint)
+
+        -- Proxy table for debug settings (dropdown/slider don't support customGet/customSet)
+        local debugProxy = setmetatable({}, {
+            __index = function(_, k)
+                return DandersFramesDB_v2 and DandersFramesDB_v2.debug and DandersFramesDB_v2.debug[k]
+            end,
+            __newindex = function(_, k, v)
+                if DandersFramesDB_v2 and DandersFramesDB_v2.debug then
+                    DandersFramesDB_v2.debug[k] = v
+                end
+            end,
+        })
+
+        -- Helper to add to section (for explicit column control)
+        local function AddToSection(widget, col, colNum)
+            widget.layoutCol = colNum or col
+            table.insert(self.children, widget)
+        end
+
+        -- ========================================
+        -- COLUMN 1: CONTROLS
+        -- ========================================
+
+        -- Settings Group: Debug Console
+        local consoleSettingsGroup = GUI:CreateSettingsGroup(self.child, 280)
+        consoleSettingsGroup:AddWidget(GUI:CreateHeader(self.child, "Debug Console"), 40)
+
+        -- Enable Debug Logging checkbox
+        consoleSettingsGroup:AddWidget(GUI:CreateCheckbox(self.child, "Enable Debug Logging", nil, nil, function()
+            if DF.DebugConsole then
+                DF.DebugConsole:RefreshDisplay()
+            end
+        end, function()
+            -- customGet
+            return DandersFramesDB_v2 and DandersFramesDB_v2.debug and DandersFramesDB_v2.debug.enabled or false
+        end, function(val)
+            -- customSet
+            if DF.DebugConsole then
+                DF.DebugConsole:SetEnabled(val)
+            elseif DandersFramesDB_v2 and DandersFramesDB_v2.debug then
+                DandersFramesDB_v2.debug.enabled = val
+            end
+        end), 28)
+
+        -- Echo to Chat checkbox
+        consoleSettingsGroup:AddWidget(GUI:CreateCheckbox(self.child, "Echo to Chat", nil, nil, nil, function()
+            -- customGet
+            return DandersFramesDB_v2 and DandersFramesDB_v2.debug and DandersFramesDB_v2.debug.chatEcho or false
+        end, function(val)
+            -- customSet
+            if DandersFramesDB_v2 and DandersFramesDB_v2.debug then
+                DandersFramesDB_v2.debug.chatEcho = val
+            end
+        end), 28)
+
+        -- Minimum Log Level dropdown
+        local logLevelOptions = {
+            ["INFO"]  = "Info (All)",
+            ["WARN"]  = "Warnings + Errors",
+            ["ERROR"] = "Errors Only",
+        }
+        local logLevelDropdown = GUI:CreateDropdown(self.child, "Minimum Log Level", logLevelOptions, debugProxy, "logLevel", function()
+            if DF.DebugConsole then
+                DF.DebugConsole:RefreshDisplay()
+            end
+        end)
+        consoleSettingsGroup:AddWidget(logLevelDropdown, 55)
+
+        -- Max Log Entries slider
+        local maxLinesSlider = GUI:CreateSlider(self.child, "Max Log Entries", 100, 2000, 100, debugProxy, "maxLines", function()
+            if DF.DebugConsole then
+                DF.DebugConsole:PruneLog()
+                DF.DebugConsole:RefreshDisplay()
+            end
+        end)
+        consoleSettingsGroup:AddWidget(maxLinesSlider, 55)
+
+        -- Entry count label
+        local entryCountLabel = GUI:CreateLabel(self.child, "", 260)
+        local function UpdateEntryCount()
+            local count = DF.DebugConsole and DF.DebugConsole:GetLogEntryCount() or 0
+            entryCountLabel:SetText("|cff888888Log entries: " .. count .. "|r")
+        end
+        UpdateEntryCount()
+        consoleSettingsGroup:AddWidget(entryCountLabel, 20)
+
+        AddToSection(consoleSettingsGroup, nil, 1)
+
+        -- Settings Group: Category Filters
+        local filterGroup = GUI:CreateSettingsGroup(self.child, 280)
+        filterGroup:AddWidget(GUI:CreateHeader(self.child, "Category Filters"), 40)
+
+        -- All / None buttons row
+        local filterBtnRow = CreateFrame("Frame", nil, self.child)
+        filterBtnRow:SetSize(260, 24)
+
+        local btnAll = GUI:CreateButton(filterBtnRow, "All", 60, 22, function()
+            if DandersFramesDB_v2 and DandersFramesDB_v2.debug then
+                local filters = DandersFramesDB_v2.debug.filters
+                if DF.DebugConsole then
+                    for cat in pairs(DF.DebugConsole:GetKnownCategories()) do
+                        filters[cat] = true
+                    end
+                end
+            end
+            -- Refresh filter checkboxes and display
+            if self.filterCheckboxes then
+                for _, cb in pairs(self.filterCheckboxes) do
+                    if cb.SetChecked then cb:SetChecked(true) end
+                end
+            end
+            if DF.DebugConsole then DF.DebugConsole:RefreshDisplay() end
+        end)
+        btnAll:SetPoint("LEFT", 0, 0)
+
+        local btnNone = GUI:CreateButton(filterBtnRow, "None", 60, 22, function()
+            if DandersFramesDB_v2 and DandersFramesDB_v2.debug then
+                local filters = DandersFramesDB_v2.debug.filters
+                if DF.DebugConsole then
+                    for cat in pairs(DF.DebugConsole:GetKnownCategories()) do
+                        filters[cat] = false
+                    end
+                end
+            end
+            -- Refresh filter checkboxes and display
+            if self.filterCheckboxes then
+                for _, cb in pairs(self.filterCheckboxes) do
+                    if cb.SetChecked then cb:SetChecked(false) end
+                end
+            end
+            if DF.DebugConsole then DF.DebugConsole:RefreshDisplay() end
+        end)
+        btnNone:SetPoint("LEFT", btnAll, "RIGHT", 6, 0)
+
+        filterGroup:AddWidget(filterBtnRow, 28)
+
+        -- Dynamic category filter checkboxes
+        self.filterCheckboxes = {}
+        if DF.DebugConsole then
+            local categories = DF.DebugConsole:GetKnownCategories()
+            local sortedCats = {}
+            for cat in pairs(categories) do
+                tinsert(sortedCats, cat)
+            end
+            table.sort(sortedCats)
+
+            for _, cat in ipairs(sortedCats) do
+                local catCheckbox = GUI:CreateCheckbox(self.child, cat, nil, nil, function()
+                    if DF.DebugConsole then DF.DebugConsole:RefreshDisplay() end
+                end, function()
+                    -- customGet: absent = visible (true), explicit false = hidden
+                    local filters = DandersFramesDB_v2 and DandersFramesDB_v2.debug and DandersFramesDB_v2.debug.filters
+                    if not filters then return true end
+                    return filters[cat] ~= false
+                end, function(val)
+                    -- customSet
+                    if DandersFramesDB_v2 and DandersFramesDB_v2.debug then
+                        DandersFramesDB_v2.debug.filters[cat] = val
+                    end
+                end)
+                filterGroup:AddWidget(catCheckbox, 28)
+                self.filterCheckboxes[cat] = catCheckbox
+            end
+        end
+
+        -- Show message if no categories yet
+        if not DF.DebugConsole or not next(DF.DebugConsole:GetKnownCategories()) then
+            local noCatLabel = GUI:CreateLabel(self.child, "|cff666666No categories yet. Enable debug logging and trigger some events.|r", 260)
+            filterGroup:AddWidget(noCatLabel, 28)
+        end
+
+        AddToSection(filterGroup, nil, 1)
+
+        -- Settings Group: Actions
+        local actionsGroup = GUI:CreateSettingsGroup(self.child, 280)
+        actionsGroup:AddWidget(GUI:CreateHeader(self.child, "Actions"), 40)
+
+        -- Clear Log button
+        actionsGroup:AddWidget(GUI:CreateButton(self.child, "Clear Log", 260, 26, function()
+            if DF.DebugConsole then
+                DF.DebugConsole:ClearLog()
+                UpdateEntryCount()
+            end
+        end), 32)
+
+        -- Copy All to Clipboard button
+        actionsGroup:AddWidget(GUI:CreateButton(self.child, "Copy All to Clipboard", 260, 26, function()
+            if not DF.DebugConsole then return end
+            local text = DF.DebugConsole:GetExportText()
+
+            -- Create export popup
+            local popup = CreateFrame("Frame", "DFDebugExportPopup", UIParent, "BackdropTemplate")
+            popup:SetSize(500, 350)
+            popup:SetPoint("CENTER")
+            popup:SetFrameStrata("DIALOG")
+            popup:SetFrameLevel(200)
+            if not popup.SetBackdrop then Mixin(popup, BackdropTemplateMixin) end
+            popup:SetBackdrop({
+                bgFile = "Interface\\Buttons\\WHITE8x8",
+                edgeFile = "Interface\\Buttons\\WHITE8x8",
+                edgeSize = 1,
+            })
+            popup:SetBackdropColor(0.1, 0.1, 0.1, 0.95)
+            popup:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
+            popup:EnableMouse(true)
+            popup:SetMovable(true)
+            popup:RegisterForDrag("LeftButton")
+            popup:SetScript("OnDragStart", popup.StartMoving)
+            popup:SetScript("OnDragStop", popup.StopMovingOrSizing)
+
+            -- Title
+            local title = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+            title:SetPoint("TOP", 0, -10)
+            title:SetText("Debug Log Export")
+            title:SetTextColor(0.9, 0.9, 0.9)
+
+            -- Instructions
+            local instructions = popup:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            instructions:SetPoint("TOP", title, "BOTTOM", 0, -4)
+            instructions:SetText("Press Ctrl+A to select all, then Ctrl+C to copy")
+            instructions:SetTextColor(0.6, 0.6, 0.6)
+
+            -- Scroll container
+            local scrollContainer = CreateFrame("Frame", nil, popup, "BackdropTemplate")
+            scrollContainer:SetPoint("TOPLEFT", 12, -45)
+            scrollContainer:SetPoint("BOTTOMRIGHT", -12, 40)
+            scrollContainer:SetBackdrop({
+                bgFile = "Interface\\Buttons\\WHITE8x8",
+                edgeFile = "Interface\\Buttons\\WHITE8x8",
+                edgeSize = 1,
+            })
+            scrollContainer:SetBackdropColor(0.05, 0.05, 0.05, 0.9)
+            scrollContainer:SetBackdropBorderColor(0.2, 0.2, 0.2, 1)
+
+            local scroll = CreateFrame("ScrollFrame", nil, scrollContainer, "UIPanelScrollFrameTemplate")
+            scroll:SetPoint("TOPLEFT", 4, -4)
+            scroll:SetPoint("BOTTOMRIGHT", -22, 4)
+
+            local editBox = CreateFrame("EditBox", nil, scroll)
+            editBox:SetMultiLine(true)
+            editBox:SetFontObject(GameFontHighlightSmall)
+            editBox:SetWidth(440)
+            editBox:SetAutoFocus(true)
+            editBox:SetScript("OnEscapePressed", function()
+                popup:Hide()
+            end)
+            scroll:SetScrollChild(editBox)
+
+            editBox:SetText(text)
+            editBox:HighlightText()
+
+            -- Close button
+            local closeBtn = GUI:CreateButton(popup, "Close", 80, 24, function()
+                popup:Hide()
+            end)
+            closeBtn:SetPoint("BOTTOM", 0, 10)
+
+            popup:SetScript("OnHide", function(self)
+                self:SetParent(nil)
+                self:ClearAllPoints()
+            end)
+        end), 32)
+
+        AddToSection(actionsGroup, nil, 1)
+
+        -- ========================================
+        -- COLUMN 2: LOG VIEWER
+        -- ========================================
+
+        local logViewerGroup = GUI:CreateSettingsGroup(self.child, 340)
+        logViewerGroup:AddWidget(GUI:CreateHeader(self.child, "Log Viewer"), 40)
+
+        -- Scrollable read-only EditBox for log display
+        local logScrollContainer = CreateFrame("Frame", nil, self.child, "BackdropTemplate")
+        logScrollContainer:SetSize(320, 400)
+        logScrollContainer:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8x8",
+            edgeFile = "Interface\\Buttons\\WHITE8x8",
+            edgeSize = 1,
+        })
+        logScrollContainer:SetBackdropColor(0.05, 0.05, 0.05, 0.9)
+        logScrollContainer:SetBackdropBorderColor(0.2, 0.2, 0.2, 1)
+
+        local logScroll = CreateFrame("ScrollFrame", nil, logScrollContainer, "UIPanelScrollFrameTemplate")
+        logScroll:SetPoint("TOPLEFT", 4, -4)
+        logScroll:SetPoint("BOTTOMRIGHT", -22, 4)
+
+        local logEditBox = CreateFrame("EditBox", nil, logScroll)
+        logEditBox:SetMultiLine(true)
+        logEditBox:SetFontObject(GameFontHighlightSmall)
+        logEditBox:SetWidth(290)
+        logEditBox:SetHeight(390)
+        logEditBox:SetAutoFocus(false)
+        logEditBox:SetScript("OnEscapePressed", function(s) s:ClearFocus() end)
+        -- Make read-only by reverting any typed text
+        logEditBox:SetScript("OnTextChanged", function(s, userInput)
+            if userInput and DF.DebugConsole then
+                DF.DebugConsole:RefreshDisplay()
+            end
+        end)
+        logScroll:SetScrollChild(logEditBox)
+
+        logScrollContainer:EnableMouse(true)
+        logScrollContainer:SetScript("OnMouseDown", function() logEditBox:SetFocus() end)
+        logScroll:EnableMouse(true)
+        logScroll:SetScript("OnMouseDown", function() logEditBox:SetFocus() end)
+
+        logViewerGroup:AddWidget(logScrollContainer, 405)
+
+        -- Refresh count label when page shows
+        local refreshBtn = GUI:CreateButton(self.child, "Refresh", 320, 24, function()
+            if DF.DebugConsole then
+                DF.DebugConsole:RefreshDisplay()
+                UpdateEntryCount()
+            end
+        end)
+        logViewerGroup:AddWidget(refreshBtn, 28)
+
+        AddToSection(logViewerGroup, nil, 2)
+
+        -- Register live EditBox with DebugConsole
+        if DF.DebugConsole then
+            DF.DebugConsole:SetLiveEditBox(logEditBox)
+            -- Initial refresh
+            DF.DebugConsole:RefreshDisplay()
+            UpdateEntryCount()
+        end
+
+        -- Unregister on page hide
+        self:SetScript("OnHide", function()
+            if DF.DebugConsole then
+                DF.DebugConsole:SetLiveEditBox(nil)
+            end
+        end)
+
+    end)
+
 end

@@ -605,3 +605,50 @@ function DF:GetFrameForUnit(unit)
     
     return foundFrame
 end
+
+-- ============================================================
+-- ROLE ICON TEXTURE HELPER
+-- Centralizes texture resolution for all role icon styles
+-- ============================================================
+local ROLE_ICON_TEXTURES = {
+    TANK = "Interface\\AddOns\\DandersFrames\\Media\\DF_Tank",
+    HEALER = "Interface\\AddOns\\DandersFrames\\Media\\DF_Healer",
+    DAMAGER = "Interface\\AddOns\\DandersFrames\\Media\\DF_DPS",
+}
+
+local BLIZZARD_ROLE_COORDS = {
+    TANK = {0, 0.296875, 0.296875, 0.65},
+    HEALER = {0.296875, 0.59375, 0, 0.296875},
+    DAMAGER = {0.296875, 0.59375, 0.296875, 0.65},
+}
+
+function DF:GetRoleIconTexture(db, role)
+    local style = db.roleIconStyle or "BLIZZARD"
+
+    if style == "EXTERNAL" then
+        local path
+        if role == "TANK" then path = db.roleIconExternalTank
+        elseif role == "HEALER" then path = db.roleIconExternalHealer
+        elseif role == "DAMAGER" then path = db.roleIconExternalDPS
+        end
+        -- Fall back to DF Icons if path is empty
+        if path and path ~= "" then
+            -- Strip everything before "Interface" (e.g. full filesystem paths)
+            path = path:gsub("^.*[/\\]([Ii]nterface)", "%1")
+            -- Strip file extensions (.tga, .blp, .png) — WoW expects paths without them
+            path = path:gsub("%.[tT][gG][aA]$", "")
+            path = path:gsub("%.[bB][lL][pP]$", "")
+            path = path:gsub("%.[pP][nN][gG]$", "")
+            return path, 0, 1, 0, 1
+        end
+        style = "CUSTOM"
+    end
+
+    if style == "CUSTOM" then
+        return ROLE_ICON_TEXTURES[role], 0, 1, 0, 1
+    else
+        -- BLIZZARD
+        local c = BLIZZARD_ROLE_COORDS[role]
+        return "Interface\\LFGFrame\\UI-LFG-ICON-PORTRAITROLES", c[1], c[2], c[3], c[4]
+    end
+end

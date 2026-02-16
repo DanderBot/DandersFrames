@@ -31,6 +31,9 @@ Profile.lua
 ExportCategories.lua
 Core.lua
 
+# Debug Console (loads early so all modules can use DF:Debug)
+Debug\DebugConsole.lua
+
 # GUI System
 GUI\IconLib.lua
 GUI\GUI.lua

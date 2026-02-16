@@ -805,8 +805,8 @@ function DF:InitializeHeaderChild(frame)
                     DF:UpdateHighlights(self)
                 end
                 -- Resource bar
-                if DF.PositionResourceBar then
-                    DF:PositionResourceBar(self)
+                if DF.ApplyResourceBarLayout then
+                    DF:ApplyResourceBarLayout(self)
                 end
                 if DF.UpdateResourceBar then
                     DF:UpdateResourceBar(self)
@@ -4023,9 +4023,9 @@ function DF:FullFrameRefresh(frame)
     if DF.UpdateAllStatusIcons then DF:UpdateAllStatusIcons(frame) end
     
     -- Bars
-    -- NOTE: PositionResourceBar must be called first to show/hide the bar based on settings
+    -- NOTE: ApplyResourceBarLayout must be called first to show/hide the bar based on settings
     -- UpdateResourceBar only updates values for already-visible bars
-    if DF.PositionResourceBar then DF:PositionResourceBar(frame) end
+    if DF.ApplyResourceBarLayout then DF:ApplyResourceBarLayout(frame) end
     if DF.UpdateResourceBar then DF:UpdateResourceBar(frame) end
     if DF.UpdateAbsorb then DF:UpdateAbsorb(frame) end
     if DF.UpdateHealAbsorb then DF:UpdateHealAbsorb(frame) end
@@ -7597,7 +7597,17 @@ function DF:ProcessRosterUpdate()
     if raidDb.petEnabled and DF.UpdateAllRaidPetFrames then
         DF:UpdateAllRaidPetFrames()
     end
-    
+
+    -- Refresh summon icons on all frames — clears stale "Summon Pending" icons
+    -- when leaving a group or entering an instance (M+ start, zone change)
+    if DF.UpdateSummonIcon and DF.IterateAllFrames then
+        DF:IterateAllFrames(function(frame)
+            if frame and frame.unit then
+                DF:UpdateSummonIcon(frame)
+            end
+        end)
+    end
+
     if DF.debugHeaders then
         print("|cFF00FF00[DF Headers]|r Roster update processed")
     end
