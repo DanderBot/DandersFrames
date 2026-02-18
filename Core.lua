@@ -3041,11 +3041,12 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
             }
         end
         
-        -- Initialize per-character saved variables for spec auto-switch
+        -- Initialize per-character saved variables
         if not DandersFramesCharDB then
             DandersFramesCharDB = {
                 enableSpecSwitch = false,
                 specProfiles = {},
+                currentProfile = nil,  -- seeded from account-wide on first login
             }
         end
         
@@ -3061,7 +3062,12 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         
         -- Ensure structure exists in per-character DB
         if DandersFramesCharDB.specProfiles == nil then DandersFramesCharDB.specProfiles = {} end
-        
+
+        -- Seed per-character profile from account-wide on first login for this character
+        if not DandersFramesCharDB.currentProfile then
+            DandersFramesCharDB.currentProfile = DandersFramesDB_v2.currentProfile
+        end
+
         -- Migrate from old format (profile.party/raid) to new format (profiles)
         if DandersFramesDB_v2.profile and not DandersFramesDB_v2.profiles then
             DandersFramesDB_v2.profiles = {
@@ -3084,13 +3090,15 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
             }
         end
         
-        -- Set current profile
-        local currentProfile = DandersFramesDB_v2.currentProfile
+        -- Set current profile (per-character takes priority over account-wide)
+        local currentProfile = DandersFramesCharDB.currentProfile or DandersFramesDB_v2.currentProfile
         if not DandersFramesDB_v2.profiles[currentProfile] then
             currentProfile = "Default"
-            DandersFramesDB_v2.currentProfile = "Default"
         end
-        
+        -- Keep both in sync
+        DandersFramesCharDB.currentProfile = currentProfile
+        DandersFramesDB_v2.currentProfile = currentProfile
+
         DF.db = DandersFramesDB_v2.profiles[currentProfile]
         
         -- Ensure both modes exist in current profile

@@ -1824,7 +1824,12 @@ function AutoProfilesUI:EnterEditing(contentType, profileIndex)
             DF.PinnedFrames:UpdateHeaderNameList(i)
         end
     end
-    
+
+    -- Refresh test mode frames so they display override values
+    if DF.raidTestMode and DF.RefreshTestFramesWithLayout then
+        DF:RefreshTestFramesWithLayout()
+    end
+
     -- Refresh the GUI to show editing banner and disable Auto Profiles tab
     self:RefreshEditingUI()
     

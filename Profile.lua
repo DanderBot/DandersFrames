@@ -156,8 +156,11 @@ function DF:SetProfile(name)
         DF.AutoProfilesUI.pendingAutoProfileEval = false
     end
 
-    -- Switch to the profile
+    -- Switch to the profile (update both account-wide and per-character)
     DandersFramesDB_v2.currentProfile = name
+    if DandersFramesCharDB then
+        DandersFramesCharDB.currentProfile = name
+    end
     DF.db = DandersFramesDB_v2.profiles[name]
 
     -- Apply the profile with full refresh
