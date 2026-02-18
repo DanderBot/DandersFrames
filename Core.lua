@@ -3395,7 +3395,15 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         if DF.InitializeFrames then
             DF:InitializeFrames()
         end
-        
+
+        -- Apply aura click-through settings immediately at ADDON_LOADED.
+        -- SetPropagateMouseMotion() is a protected operation — it must run
+        -- here (not in a delayed PLAYER_LOGIN callback) so it works during
+        -- combat reload when InCombatLockdown() is temporarily false.
+        if DF.UpdateAuraClickThrough then
+            DF:UpdateAuraClickThrough()
+        end
+
         -- Initialize Masque support if available
         local Masque = LibStub and LibStub("Masque", true)
         if Masque then
@@ -3879,10 +3887,9 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
             
             -- Apply saved CVar settings after world is ready
             DF:ApplySavedCVarSettings()
-            -- Apply click-through settings
-            if DF.UpdateAuraClickThrough then
-                DF:UpdateAuraClickThrough()
-            end
+            -- NOTE: UpdateAuraClickThrough is called at ADDON_LOADED (not here)
+            -- because SetPropagateMouseMotion() is protected and must run before
+            -- combat lockdown activates on combat reload.
             -- Update rested indicator
             if DF.UpdateRestedIndicator then
                 DF:UpdateRestedIndicator()
