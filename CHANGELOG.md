@@ -28,6 +28,8 @@
 * Fix health fade not working in test mode — setting keys were mismatched between Config defaults and TestMode references
 * Fix health fade threshold slider causing lag during drag — callback parameters were in the wrong position
 * Fix health fade not updating during test mode animate health — animation ticker now re-evaluates the fade threshold
+* Fix leader icon not updating on first leader change (contributed by riyuk)
+* Fix forbidden table iteration in FindHealthManaBars (contributed by riyuk)
 
 ### New Features
 * Add "Sync with Raid/Party" toggle per settings page — keeps party and raid settings in sync automatically when enabled, with per-profile persistence (contributed by Enf0)
