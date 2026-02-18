@@ -2511,15 +2511,22 @@ function CC:ApplyBindingsToFrameUnified(frame)
     local hasAnyBindings = false
     local isDandersFrame = frame.dfIsDandersFrame == true
     local isBlizzardFrame = frame.dfIsBlizzardFrame == true
-    
+
+    local mapEntries = 0
     for keyString, data in pairs(self.unifiedMacroMap) do
+        mapEntries = mapEntries + 1
         local binding = data.templateBinding
         if self:ShouldBindingApplyToFrame(binding, frame) then
             hasAnyBindings = true
             break
         end
     end
-    
+
+    -- Debug for first party header child only
+    if frameName == "DandersPartyHeaderUnitButton1" then
+        DF:Debug("CLICK", "ApplyToFrame %s: mapEntries=%d hasAny=%s isDF=%s enabled=%s bindCount=%d", frameName, mapEntries, tostring(hasAnyBindings), tostring(isDandersFrame), tostring(self.db.enabled), self.db.bindings and #self.db.bindings or -1)
+    end
+
     -- If no bindings apply to this frame
     if not hasAnyBindings then
         if isDandersFrame then
