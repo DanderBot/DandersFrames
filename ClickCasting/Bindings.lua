@@ -1166,12 +1166,12 @@ function CC:SetEnabled(enabled)
                 local mt1 = tostring(child1:GetAttribute("macrotext1") or "nil"):sub(1, 40)
                 local snippet = tostring(child1:GetAttribute("dfBindingSnippet") or "nil"):sub(1, 80)
                 local clickReg = child1:GetScript("OnClick") and "hasOnClick" or "noOnClick"
-                -- Check for a virtual button type
-                local vb1 = child1:GetAttribute("type-dfKb1") or "nil"
-                local vbmt1 = tostring(child1:GetAttribute("macrotext-dfKb1") or "nil"):sub(1, 40)
+                -- Check for a virtual button type (match the name from snippet: "keyq")
+                local vbQ = child1:GetAttribute("type-keyq") or "nil"
+                local vbQmt = tostring(child1:GetAttribute("macrotext-keyq") or "nil"):sub(1, 60)
                 DF:Debug("CLICK", "Post-Apply child1: t1=%s t2=%s mt1=%s", t1, t2, mt1)
                 DF:Debug("CLICK", "Post-Apply child1: snippet=%s", snippet)
-                DF:Debug("CLICK", "Post-Apply child1: vb1type=%s vb1mt=%s", vb1, vbmt1)
+                DF:Debug("CLICK", "Post-Apply child1: type-keyq=%s macrotext-keyq=%s", vbQ, vbQmt)
             end
         end
 
