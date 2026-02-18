@@ -7,7 +7,12 @@ local addonName, DF = ...
 function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     
     -- Helper function to create a themed "Copy to Raid/Party" button for a section
-    local function CreateCopyButton(parent, prefixes, sectionName)
+    local function CreateCopyButton(parent, prefixes, sectionName, pageId)
+        -- Register section in the sync registry
+        if pageId then
+            DF.SectionRegistry[pageId] = prefixes
+        end
+
         local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
         btn:SetSize(115, 26)
         
@@ -29,6 +34,29 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         btn.Text = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         btn.Text:SetPoint("LEFT", btn.Icon, "RIGHT", 4, 0)
         
+        -- Sync toggle button
+        local linkBtn
+        if pageId then
+            linkBtn = CreateFrame("Button", nil, btn, "BackdropTemplate")
+            linkBtn:SetSize(120, 26)
+            linkBtn:SetPoint("RIGHT", btn, "LEFT", -4, 0)
+
+            if not linkBtn.SetBackdrop then Mixin(linkBtn, BackdropTemplateMixin) end
+            linkBtn:SetBackdrop({
+                bgFile = "Interface\\Buttons\\WHITE8x8",
+                edgeFile = "Interface\\Buttons\\WHITE8x8",
+                edgeSize = 1,
+            })
+
+            linkBtn.Icon = linkBtn:CreateTexture(nil, "OVERLAY")
+            linkBtn.Icon:SetPoint("LEFT", 8, 0)
+            linkBtn.Icon:SetSize(14, 14)
+            linkBtn.Icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\refresh")
+
+            linkBtn.Text = linkBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            linkBtn.Text:SetPoint("LEFT", linkBtn.Icon, "RIGHT", 4, 0)
+        end
+
         -- Update appearance based on current mode
         local function UpdateAppearance()
             local mode = GUI.SelectedMode or "party"
@@ -45,6 +73,25 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             btn:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 0.5)
             btn.Text:SetTextColor(0.6, 0.6, 0.6)
             btn.Icon:SetVertexColor(0.6, 0.6, 0.6)
+
+            -- Update sync button appearance
+            if linkBtn then
+                local dest = mode == "party" and "Raid" or "Party"
+                local isLinked = DF.db and DF.db.linkedSections and DF.db.linkedSections[pageId]
+                if isLinked then
+                    linkBtn.Text:SetText("Synced with " .. dest)
+                    linkBtn:SetBackdropColor(themeColor.r * 0.2, themeColor.g * 0.2, themeColor.b * 0.2, 1)
+                    linkBtn:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
+                    linkBtn.Text:SetTextColor(themeColor.r, themeColor.g, themeColor.b)
+                    linkBtn.Icon:SetVertexColor(themeColor.r, themeColor.g, themeColor.b)
+                else
+                    linkBtn.Text:SetText("Sync with " .. dest)
+                    linkBtn:SetBackdropColor(0.18, 0.18, 0.18, 1)
+                    linkBtn:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 0.5)
+                    linkBtn.Text:SetTextColor(0.6, 0.6, 0.6)
+                    linkBtn.Icon:SetVertexColor(0.6, 0.6, 0.6)
+                end
+            end
         end
         
         -- Store for refresh
@@ -91,6 +138,60 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             }
             StaticPopup_Show("DANDERSFRAMES_COPY_SECTION")
         end)
+
+        -- Sync button event handlers
+        if linkBtn then
+            linkBtn:SetScript("OnEnter", function(self)
+                local themeColor = GUI.GetThemeColor()
+                local isLinked = DF.db and DF.db.linkedSections and DF.db.linkedSections[pageId]
+                self:SetBackdropColor(themeColor.r * 0.3, themeColor.g * 0.3, themeColor.b * 0.3, 1)
+                self:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
+                self.Text:SetTextColor(themeColor.r, themeColor.g, themeColor.b)
+                self.Icon:SetVertexColor(themeColor.r, themeColor.g, themeColor.b)
+
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                if isLinked then
+                    GameTooltip:SetText("Synced: " .. sectionName)
+                    GameTooltip:AddLine("Party & Raid " .. sectionName .. " settings are synced.\nClick to stop syncing.", 1, 1, 1, true)
+                else
+                    GameTooltip:SetText("Sync: " .. sectionName)
+                    GameTooltip:AddLine("Click to sync Party & Raid " .. sectionName .. " settings.\nChanges in one mode will automatically apply to the other.", 1, 1, 1, true)
+                end
+                GameTooltip:Show()
+            end)
+
+            linkBtn:SetScript("OnLeave", function()
+                UpdateAppearance()
+                GameTooltip:Hide()
+            end)
+
+            linkBtn:SetScript("OnClick", function()
+                if not DF.db then return end
+                if not DF.db.linkedSections then DF.db.linkedSections = {} end
+
+                if DF.db.linkedSections[pageId] then
+                    DF.db.linkedSections[pageId] = nil
+                    UpdateAppearance()
+                else
+                    local mode = GUI.SelectedMode or "party"
+                    local dest = mode == "party" and "Raid" or "Party"
+                    StaticPopupDialogs["DANDERSFRAMES_LINK_SECTION"] = {
+                        text = "Sync " .. sectionName .. " settings?\n\nThis will copy current " .. sectionName .. " settings to " .. dest .. " and keep them in sync.",
+                        button1 = "Sync",
+                        button2 = "Cancel",
+                        OnAccept = function()
+                            DF.db.linkedSections[pageId] = true
+                            DF:CopySectionSettings(prefixes, mode)
+                            if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
+                        end,
+                        timeout = 0,
+                        whileDead = true,
+                        hideOnEscape = true,
+                    }
+                    StaticPopup_Show("DANDERSFRAMES_LINK_SECTION")
+                end
+            end)
+        end
         
         -- Initial update
         UpdateAppearance()
@@ -221,7 +322,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     local pageTooltips = CreateSubTab("display", "display_tooltips", "Tooltips")
     BuildPage(pageTooltips, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top right (positioned automatically via rightAlign)
-        Add(CreateCopyButton(self.child, {"tooltip"}, "Tooltips"), 25, 2)
+        Add(CreateCopyButton(self.child, {"tooltip"}, "Tooltips", "display_tooltips"), 25, 2)
         
         -- Anchor position values (shared)
         local anchorPositionValues = {
@@ -356,7 +457,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     local pageFading = CreateSubTab("display", "display_fading", "Fading")
     BuildPage(pageFading, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top right
-        Add(CreateCopyButton(self.child, {"rangeFade", "oor", "dead", "offline"}, "Fading"), 25, 2)
+        Add(CreateCopyButton(self.child, {"rangeFade", "oor", "dead", "offline"}, "Fading", "display_fading"), 25, 2)
         
         -- Sync point: ensures both columns start below the copy button
         AddSpace(10, "both")
@@ -605,7 +706,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     local pagePets = CreateSubTab("display", "display_pets", "Pet Frames")
     BuildPage(pagePets, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top right
-        Add(CreateCopyButton(self.child, {"pet"}, "Pet Frames"), 25, 2)
+        Add(CreateCopyButton(self.child, {"pet"}, "Pet Frames", "display_pets"), 25, 2)
         
         -- Check modes for conditional content
         local isGroupedMode = db.petGroupMode == "GROUPED"
@@ -847,7 +948,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     local pageFrame = CreateSubTab("general", "general_frame", "Frame")
     BuildPage(pageFrame, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top
-        Add(CreateCopyButton(self.child, {"frame", "background", "missingHealth", "border", "anchor"}, "Frame"), 25, 2)
+        Add(CreateCopyButton(self.child, {"frame", "background", "missingHealth", "border", "anchor"}, "Frame", "general_frame"), 25, 2)
         
         -- Migration: Ensure new flat raid settings have defaults
         if db.raidFlatGrowthAnchor == nil then db.raidFlatGrowthAnchor = "START" end
@@ -2065,7 +2166,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     local pageSorting = CreateSubTab("general", "general_sorting", "Sorting")
     BuildPage(pageSorting, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top
-        Add(CreateCopyButton(self.child, {"sort", "selfPosition", "rolePriority", "classPriority"}, "Sorting"), 25, 2)
+        Add(CreateCopyButton(self.child, {"sort", "selfPosition", "rolePriority", "classPriority"}, "Sorting", "general_sorting"), 25, 2)
         
         -- Helper function to trigger sort for current mode
         local function TriggerSortForCurrentMode()
@@ -2463,7 +2564,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     local pageHealthBar = CreateSubTab("bars", "bars_health", "Health Bar")
     BuildPage(pageHealthBar, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top
-        Add(CreateCopyButton(self.child, {"health", "classColor", "smoothBars"}, "Health Bar"), 25, 2)
+        Add(CreateCopyButton(self.child, {"health", "classColor", "smoothBars"}, "Health Bar", "bars_health"), 25, 2)
         
         -- ===== COLOR GROUP (Column 1) =====
         local colorGroup = GUI:CreateSettingsGroup(self.child, 280)
@@ -2601,7 +2702,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     local pageResource = CreateSubTab("bars", "bars_resource", "Resource Bar")
     BuildPage(pageResource, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top
-        Add(CreateCopyButton(self.child, {"resourceBar"}, "Resource Bar"), 25, 2)
+        Add(CreateCopyButton(self.child, {"resourceBar"}, "Resource Bar", "bars_resource"), 25, 2)
         
         -- ===== SETTINGS GROUP (Column 1) =====
         local settingsGroup = GUI:CreateSettingsGroup(self.child, 280)
@@ -2749,7 +2850,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     local pageAbsorb = CreateSubTab("bars", "bars_absorb", "Absorbs")
     BuildPage(pageAbsorb, function(self, db, Add, AddSpace)
         -- Copy button at top
-        Add(CreateCopyButton(self.child, {"absorbBar", "healAbsorb"}, "Absorbs"), 25, 2)
+        Add(CreateCopyButton(self.child, {"absorbBar", "healAbsorb"}, "Absorbs", "bars_absorb"), 25, 2)
         
         local currentSection = nil
         
@@ -2960,7 +3061,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     local pageHealPrediction = CreateSubTab("bars", "bars_healpred", "Heal Prediction")
     BuildPage(pageHealPrediction, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top
-        Add(CreateCopyButton(self.child, {"healPrediction"}, "Heal Prediction"), 25, 2)
+        Add(CreateCopyButton(self.child, {"healPrediction"}, "Heal Prediction", "bars_healpred"), 25, 2)
         
         -- ===== SETTINGS GROUP (Column 1) =====
         local settingsGroup = GUI:CreateSettingsGroup(self.child, 280)
@@ -3053,7 +3154,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     local pageHealthText = CreateSubTab("text", "text_health", "Health Text")
     BuildPage(pageHealthText, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top
-        Add(CreateCopyButton(self.child, {"healthText", "healthFont"}, "Health Text"), 25, 2)
+        Add(CreateCopyButton(self.child, {"healthText", "healthFont"}, "Health Text", "text_health"), 25, 2)
         
         -- ===== FORMAT GROUP (Column 1) =====
         local formatGroup = GUI:CreateSettingsGroup(self.child, 280)
@@ -3102,7 +3203,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     local pageStatusText = CreateSubTab("text", "text_status", "Status Text")
     BuildPage(pageStatusText, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top
-        Add(CreateCopyButton(self.child, {"statusText"}, "Status Text"), 25, 2)
+        Add(CreateCopyButton(self.child, {"statusText"}, "Status Text", "text_status"), 25, 2)
         
         -- ===== SETTINGS GROUP (Column 1) =====
         local settingsGroup = GUI:CreateSettingsGroup(self.child, 280)
@@ -3161,7 +3262,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     local pageNameText = CreateSubTab("text", "text_name", "Name Text")
     BuildPage(pageNameText, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top
-        Add(CreateCopyButton(self.child, {"name"}, "Name Text"), 25, 2)
+        Add(CreateCopyButton(self.child, {"name"}, "Name Text", "text_name"), 25, 2)
         
         -- ===== FONT GROUP (Column 1) =====
         local fontGroup = GUI:CreateSettingsGroup(self.child, 280)
@@ -3220,7 +3321,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     local pageBuffs = CreateSubTab("auras", "auras_buffs", "Buffs")
     BuildPage(pageBuffs, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top right
-        Add(CreateCopyButton(self.child, {"buff"}, "Buffs"), 25, 2)
+        Add(CreateCopyButton(self.child, {"buff"}, "Buffs", "auras_buffs"), 25, 2)
         
         AddSpace(10, "both")
         
@@ -3405,7 +3506,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     local pageMyBuffIndicators = CreateSubTab("auras", "auras_mybuffindicators", "My Buff Indicators")
     BuildPage(pageMyBuffIndicators, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top
-        Add(CreateCopyButton(self.child, {"myBuffIndicator"}, "My Buff Indicators"), 25, 2)
+        Add(CreateCopyButton(self.child, {"myBuffIndicator"}, "My Buff Indicators", "auras_mybuffindicators"), 25, 2)
         
         AddSpace(10, "both")
         
@@ -3515,7 +3616,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     local pageDebuffs = CreateSubTab("auras", "auras_debuffs", "Debuffs")
     BuildPage(pageDebuffs, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top
-        Add(CreateCopyButton(self.child, {"debuff"}, "Debuffs"), 25, 2)
+        Add(CreateCopyButton(self.child, {"debuff"}, "Debuffs", "auras_debuffs"), 25, 2)
         
         AddSpace(10, "both")
         
@@ -3705,7 +3806,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     local pageBossDebuffs = CreateSubTab("auras", "auras_bossdebuffs", "Boss Debuffs")
     BuildPage(pageBossDebuffs, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top
-        Add(CreateCopyButton(self.child, {"bossDebuff"}, "Boss Debuffs"), 25, 2)
+        Add(CreateCopyButton(self.child, {"bossDebuff"}, "Boss Debuffs", "auras_bossdebuffs"), 25, 2)
         
         AddSpace(10, "both")
         
@@ -3831,7 +3932,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     local pageMissingBuffs = CreateSubTab("auras", "auras_missingbuffs", "Missing Buffs")
     BuildPage(pageMissingBuffs, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top
-        Add(CreateCopyButton(self.child, {"missingBuff"}, "Missing Buffs"), 25, 2)
+        Add(CreateCopyButton(self.child, {"missingBuff"}, "Missing Buffs", "auras_missingbuffs"), 25, 2)
         
         AddSpace(10, "both")
         
@@ -3973,7 +4074,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     local pageDefensiveIcon = CreateSubTab("auras", "auras_defensiveicon", "Defensive Icon")
     BuildPage(pageDefensiveIcon, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top
-        Add(CreateCopyButton(self.child, {"defensiveIcon"}, "Defensive Icon"), 25, 2)
+        Add(CreateCopyButton(self.child, {"defensiveIcon"}, "Defensive Icon", "auras_defensiveicon"), 25, 2)
         
         local anchorOptions = {
             CENTER = "Center", TOP = "Top", BOTTOM = "Bottom", LEFT = "Left", RIGHT = "Right",
@@ -4147,7 +4248,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     local pageTargetedSpells = CreateSubTab("indicators", "indicators_targetedspells", "Targeted Spells")
     BuildPage(pageTargetedSpells, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top
-        Add(CreateCopyButton(self.child, {"targetedSpell"}, "Targeted Spells"), 25, 2)
+        Add(CreateCopyButton(self.child, {"targetedSpell"}, "Targeted Spells", "indicators_targetedspells"), 25, 2)
         
         AddSpace(10, "both")
         
@@ -4389,7 +4490,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     local pagePersonalTargeted = CreateSubTab("indicators", "indicators_personal_targeted", "Personal Targeted")
     BuildPage(pagePersonalTargeted, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top
-        Add(CreateCopyButton(self.child, {"personalTargeted"}, "Personal Targeted"), 25, 2)
+        Add(CreateCopyButton(self.child, {"personalTargeted"}, "Personal Targeted", "indicators_personal_targeted"), 25, 2)
         
         AddSpace(10, "both")
         
@@ -4596,7 +4697,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     local pageIcons = CreateSubTab("indicators", "indicators_icons", "Icons")
     BuildPage(pageIcons, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top
-        Add(CreateCopyButton(self.child, {"roleIcon", "leaderIcon", "raidTargetIcon", "readyCheckIcon", "summonIcon", "resurrectionIcon", "phasedIcon", "afkIcon", "vehicleIcon", "raidRoleIcon", "statusIconFont", "statusIconFontSize", "statusIconFontOutline"}, "Icons"), 25, 2)
+        Add(CreateCopyButton(self.child, {"roleIcon", "leaderIcon", "raidTargetIcon", "readyCheckIcon", "summonIcon", "resurrectionIcon", "phasedIcon", "afkIcon", "vehicleIcon", "raidRoleIcon", "statusIconFont", "statusIconFontSize", "statusIconFontOutline"}, "Icons", "indicators_icons"), 25, 2)
         
         local anchorOptions = {
             CENTER = "Center",
@@ -5049,7 +5150,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     local pageHighlights = CreateSubTab("indicators", "indicators_highlights", "Highlights")
     BuildPage(pageHighlights, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top
-        Add(CreateCopyButton(self.child, {"selectionHighlight", "hoverHighlight", "aggroHighlight", "aggro"}, "Highlights"), 25, 2)
+        Add(CreateCopyButton(self.child, {"selectionHighlight", "hoverHighlight", "aggroHighlight", "aggro"}, "Highlights", "indicators_highlights"), 25, 2)
         
         AddSpace(10, "both")
         
@@ -5200,7 +5301,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     local pageDispel = CreateSubTab("auras", "auras_dispel", "Dispel Overlay")
     BuildPage(pageDispel, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top
-        Add(CreateCopyButton(self.child, {"dispel"}, "Dispel Overlay"), 25, 2)
+        Add(CreateCopyButton(self.child, {"dispel"}, "Dispel Overlay", "auras_dispel"), 25, 2)
         
         AddSpace(10, "both")
         

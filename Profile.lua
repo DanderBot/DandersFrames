@@ -36,6 +36,28 @@ function DF:CopyProfile(srcMode, destMode)
     print("|cff00ff00DandersFrames:|r Copied settings from " .. s .. " to " .. d .. ".")
 end
 
+-- Copies matching settings between Party and Raid (no refresh, no print)
+-- Used by SyncLinkedSections for automatic background syncing
+function DF:CopySectionSettingsRaw(prefixes, srcMode)
+    if not DF.db then return end
+    srcMode = srcMode or "party"
+    local destMode = srcMode == "party" and "raid" or "party"
+    if not DF.db[srcMode] or not DF.db[destMode] then return end
+
+    for key, value in pairs(DF.db[srcMode]) do
+        for _, prefix in ipairs(prefixes) do
+            if key:sub(1, #prefix) == prefix then
+                if type(value) == "table" then
+                    DF.db[destMode][key] = DF:DeepCopy(value)
+                else
+                    DF.db[destMode][key] = value
+                end
+                break
+            end
+        end
+    end
+end
+
 -- Copies a specific section of settings between Party and Raid modes
 -- prefixes: table of string prefixes to match, e.g. {"buff", "debuff"}
 -- srcMode: optional, the source mode ("party" or "raid"). If not provided, defaults to "party"
@@ -144,6 +166,7 @@ function DF:SetProfile(name)
             raidAutoProfiles = DF:DeepCopy(DF.RaidAutoProfilesDefaults),
             classColors = {},
             powerColors = {},
+            linkedSections = {},
         }
         print("|cff00ff00DandersFrames:|r Created new profile: " .. name)
     end
@@ -553,6 +576,7 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
             raidAutoProfiles = DF:DeepCopy(DF.db.raidAutoProfiles or DF.RaidAutoProfilesDefaults),
             classColors = DF:DeepCopy(DF.db.classColors or {}),
             powerColors = DF:DeepCopy(DF.db.powerColors or {}),
+            linkedSections = {},
         }
         if stripped and DF.AutoProfilesUI.ReapplyRuntimeOverrides then
             DF.AutoProfilesUI:ReapplyRuntimeOverrides()

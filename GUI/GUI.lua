@@ -16,6 +16,8 @@ local C_HOVER      = {r = 0.22, g = 0.22, b = 0.22, a = 1}
 local C_TEXT       = {r = 0.9, g = 0.9, b = 0.9, a = 1}
 local C_TEXT_DIM   = {r = 0.6, g = 0.6, b = 0.6, a = 1}
 
+DF.SectionRegistry = DF.SectionRegistry or {}
+
 -- Track selected mode
 GUI.SelectedMode = "party"
 
@@ -5046,6 +5048,8 @@ function DF:CreateGUI()
     end)
     
     btnParty:SetScript("OnClick", function()
+        DF:SyncLinkedSections()
+
         -- Before switching tabs, clean up current mode's test mode and unlock state
         if GUI.SelectedMode == "raid" then
             -- Lock raid frames if unlocked
@@ -5074,6 +5078,8 @@ function DF:CreateGUI()
         GUI:RefreshCurrentPage()
     end)
     btnRaid:SetScript("OnClick", function()
+        DF:SyncLinkedSections()
+
         -- Before switching tabs, clean up current mode's test mode and unlock state
         if GUI.SelectedMode == "party" then
             -- Lock party frames if unlocked

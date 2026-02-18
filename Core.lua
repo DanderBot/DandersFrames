@@ -1358,6 +1358,20 @@ function DF:LightweightUpdateAuraDurationText(auraType)
     IterateFramesInMode(mode, UpdateDuration)
 end
 
+-- Sync linked sections between party and raid modes
+function DF:SyncLinkedSections()
+    if not DF.GUI or not DF.db or not DF.db.linkedSections then return end
+    if not next(DF.db.linkedSections) then return end
+    local mode = DF.GUI.SelectedMode
+    if mode ~= "party" and mode ~= "raid" then return end
+
+    for pageId, prefixes in pairs(DF.SectionRegistry or {}) do
+        if DF.db.linkedSections[pageId] then
+            DF:CopySectionSettingsRaw(prefixes, mode)
+        end
+    end
+end
+
 -- Update aura border settings (both regular and expiring borders)
 function DF:LightweightUpdateAuraBorder(auraType)
     local mode = DF.GUI and DF.GUI.SelectedMode or "party"
@@ -3098,6 +3112,7 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
                 raidAutoProfiles = DF:DeepCopy(DF.RaidAutoProfilesDefaults),
                 classColors = {},
                 powerColors = {},
+                linkedSections = {},
             }
         end
         
@@ -3129,6 +3144,11 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         -- Ensure powerColors table exists (shared across party/raid)
         if not DF.db.powerColors then
             DF.db.powerColors = {}
+        end
+
+        -- Ensure linkedSections table exists (shared across party/raid)
+        if not DF.db.linkedSections then
+            DF.db.linkedSections = {}
         end
         
         -- Migrate any missing settings from defaults
@@ -4095,6 +4115,8 @@ function DF:UpdateAll()
         return
     end
     
+    DF:SyncLinkedSections()
+
     -- Invalidate aura layout so all frames re-apply layout on next aura update
     DF:InvalidateAuraLayout()
     
