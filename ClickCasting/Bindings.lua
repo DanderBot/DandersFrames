@@ -429,40 +429,28 @@ function CC:ApplyBindings()
     -- Build unified macro map (all bindings converted to macros)
     self.unifiedMacroMap = self:BuildUnifiedMacroMap()
 
-    -- Debug: count bindings and macro map entries
-    local bindingCount = self.db.bindings and #self.db.bindings or 0
-    local mapCount = 0
-    if self.unifiedMacroMap then
-        for _ in pairs(self.unifiedMacroMap) do mapCount = mapCount + 1 end
-    end
-    DF:Debug("CLICK", "ApplyBindings: %d bindings in db, %d entries in macroMap, enabled=%s", bindingCount, mapCount, tostring(self.db.enabled))
-
     -- Set up hovercast button attributes for third-party frame support
     self:SetupHovercastButtonAttributes()
-    
+
     -- IMPORTANT: Clear Blizzard click-casting BEFORE applying our bindings
     -- This ensures our bindings take precedence and aren't overwritten
     if self.db.enabled then
         self:RefreshBlizzardClickCastClearing()
     end
-    
+
     -- Apply bindings in two passes to avoid "script ran too long":
     -- Pass 1 (immediate): Non-pinned frames (~50-90 frames)
     -- Pass 2 (deferred):  Pinned frames (~80 frames), batched after a short delay
     if self.registeredFrames then
-        local applyCount = 0
         local deferredFrames = {}
 
         for frame in pairs(self.registeredFrames) do
-            applyCount = applyCount + 1
             if frame.isPinnedFrame then
                 deferredFrames[#deferredFrames + 1] = frame
             else
                 self:ApplyBindingsToFrameUnified(frame)
             end
         end
-        
-        DF:Debug("CLICK", "ApplyBindings: applied to %d frames (%d deferred/pinned)", applyCount, #deferredFrames)
 
         -- Defer pinned frames if any exist
         if #deferredFrames > 0 then
@@ -1091,128 +1079,22 @@ function CC:SetEnabled(enabled)
     end
     
     if enabled then
-        -- Clear dfClickCastRegistered flags so frames can be re-committed
-        -- to the new ClickCastFrames metatable that SetupClickCastFramesGlobal
-        -- is about to create (the old flags were against the previous table)
-        if DF.partyHeader then
-            for i = 1, 5 do
-                local child = DF.partyHeader:GetAttribute("child" .. i)
-                if child then child.dfClickCastRegistered = nil end
-            end
-        end
-        if DF.raidSeparatedHeaders then
-            for g = 1, 8 do
-                local header = DF.raidSeparatedHeaders[g]
-                if header then
-                    for i = 1, 5 do
-                        local child = header:GetAttribute("child" .. i)
-                        if child then child.dfClickCastRegistered = nil end
-                    end
-                end
-            end
-        end
-        if DF.FlatRaidFrames and DF.FlatRaidFrames.header then
-            for i = 1, 40 do
-                local child = DF.FlatRaidFrames.header:GetAttribute("child" .. i)
-                if child then child.dfClickCastRegistered = nil end
-            end
-        end
-
-        -- Set up our metatable on ClickCastFrames (this is skipped on initial load if disabled)
-        self:SetupClickCastFramesGlobal()
-
-        -- Register all frames in ClickCastFrames that aren't already registered
-        local ccfCount = 0
-        if ClickCastFrames then
-            for frame, frameEnabled in pairs(ClickCastFrames) do
-                if frameEnabled and type(frame) == "table" then
-                    ccfCount = ccfCount + 1
-                    self:RegisterFrame(frame)
-                end
-            end
-        end
-        DF:Debug("CLICK", "SetEnabled: ClickCastFrames had %d frames", ccfCount)
-
-        local regCount = 0
-        self:RegisterAllFrames()
-        if self.registeredFrames then
-            for _ in pairs(self.registeredFrames) do regCount = regCount + 1 end
-        end
-        DF:Debug("CLICK", "SetEnabled: registeredFrames has %d frames after RegisterAllFrames", regCount)
-
-        -- Debug: check party header children state
-        if DF.partyHeader then
-            for i = 1, 5 do
-                local child = DF.partyHeader:GetAttribute("child" .. i)
-                if child then
-                    local name = child:GetName() or "unnamed"
-                    local t1 = child:GetAttribute("type1") or "nil"
-                    local s1 = tostring(child:GetAttribute("spell1") or "nil"):sub(1, 30)
-                    local kbSetup = child.dfKeyboardHandlersSetup and "yes" or "no"
-                    local inReg = (self.registeredFrames and self.registeredFrames[child]) and "yes" or "no"
-                    DF:Debug("CLICK", "  child%d: %s type1=%s spell1=%s kbSetup=%s registered=%s", i, name, t1, s1, kbSetup, inReg)
-                end
-            end
-        end
-
-        self:ApplyBindings()
-
-        -- Debug: verify bindings were applied
-        if DF.partyHeader then
-            local child1 = DF.partyHeader:GetAttribute("child1")
-            if child1 then
-                local t1 = child1:GetAttribute("type1") or "nil"
-                local t2 = child1:GetAttribute("type2") or "nil"
-                local mt1 = tostring(child1:GetAttribute("macrotext1") or "nil"):sub(1, 40)
-                local snippet = tostring(child1:GetAttribute("dfBindingSnippet") or "nil"):sub(1, 80)
-                local clickReg = child1:GetScript("OnClick") and "hasOnClick" or "noOnClick"
-                -- Check for a virtual button type (match the name from snippet: "keyq")
-                local vbQ = child1:GetAttribute("type-keyq") or "nil"
-                local vbQmt = tostring(child1:GetAttribute("macrotext-keyq") or "nil"):sub(1, 60)
-                DF:Debug("CLICK", "Post-Apply child1: t1=%s t2=%s mt1=%s", t1, t2, mt1)
-                DF:Debug("CLICK", "Post-Apply child1: snippet=%s", snippet)
-                DF:Debug("CLICK", "Post-Apply child1: type-keyq=%s macrotext-keyq=%s", vbQ, vbQmt)
-            end
-        end
-
-        -- Disable Blizzard's click casting to prevent conflicts
-        self:DisableBlizzardClickCasting()
+        -- Reload UI so click-casting initializes cleanly from scratch.
+        -- WrapScript bindings (keyboard hover-cast) must be installed during
+        -- the initial secure frame setup to work reliably in combat.
+        -- The enabled state is already saved, so InitializeSecureFrames will
+        -- pick it up and do the full registration on the fresh load.
+        C_Timer.After(0.1, function()
+            ReloadUI()
+        end)
     else
-        -- Clear global bindings first
-        self:ClearGlobalBindings()
-        
-        -- Restore Blizzard default behavior to all registered frames
-        if self.registeredFrames then
-            for frame in pairs(self.registeredFrames) do
-                self:RestoreBlizzardDefaults(frame)
-            end
-        end
-        
-        -- Also restore defaults to any DF frames that might not be in registeredFrames
-        if DF.playerFrame then
-            self:RestoreBlizzardDefaults(DF.playerFrame)
-        end
-        
-        if DF.partyFrames then
-            for _, frame in pairs(DF.partyFrames) do
-                self:RestoreBlizzardDefaults(frame)
-            end
-        end
-        
-        if DF.raidFrames then
-            for _, frame in pairs(DF.raidFrames) do
-                self:RestoreBlizzardDefaults(frame)
-            end
-        end
-        
-        if DF.petFrames then
-            for _, frame in pairs(DF.petFrames) do
-                self:RestoreBlizzardDefaults(frame)
-            end
-        end
-        
-        -- Note: User needs to /reload for Clique/Clicked to fully work after disabling
-        -- This is because we can't restore their metatable dynamically
+        -- Reload UI so click-casting state is fully cleaned up.
+        -- WrapScript handlers and secure frame state need a fresh environment
+        -- to be properly removed. Also needed for Clique/Clicked to reclaim
+        -- their metatable on ClickCastFrames.
+        C_Timer.After(0.1, function()
+            ReloadUI()
+        end)
     end
 end
 
@@ -2519,19 +2401,12 @@ function CC:ApplyBindingsToFrameUnified(frame)
     local isDandersFrame = frame.dfIsDandersFrame == true
     local isBlizzardFrame = frame.dfIsBlizzardFrame == true
 
-    local mapEntries = 0
     for keyString, data in pairs(self.unifiedMacroMap) do
-        mapEntries = mapEntries + 1
         local binding = data.templateBinding
         if self:ShouldBindingApplyToFrame(binding, frame) then
             hasAnyBindings = true
             break
         end
-    end
-
-    -- Debug for first party header child only
-    if frameName == "DandersPartyHeaderUnitButton1" then
-        DF:Debug("CLICK", "ApplyToFrame %s: mapEntries=%d hasAny=%s isDF=%s enabled=%s bindCount=%d", frameName, mapEntries, tostring(hasAnyBindings), tostring(isDandersFrame), tostring(self.db.enabled), self.db.bindings and #self.db.bindings or -1)
     end
 
     -- If no bindings apply to this frame
