@@ -1846,9 +1846,7 @@ function DF:CreateUnitFrame(unit, index, isRaid)
     -- ========================================
     -- CLICK-CAST REGISTRATION
     -- ========================================
-    if ClickCastFrames then
-        ClickCastFrames[frame] = true
-    end
+    DF:RegisterFrameWithClickCast(frame)
     
     -- ========================================
     -- PING SUPPORT

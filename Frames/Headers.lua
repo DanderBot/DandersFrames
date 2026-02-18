@@ -697,11 +697,9 @@ function DF:InitializeHeaderChild(frame)
     -- Mark as initialized
     frame.dfInitialized = true
     
-    -- Register with click casting system
-    if ClickCastFrames then
-        ClickCastFrames[frame] = true
-    end
-    
+    -- Register with click casting system (Clique, Clicked, etc.)
+    DF:RegisterFrameWithClickCast(frame)
+
     -- ========================================
     -- HOVER HANDLING (OnEnter/OnLeave)
     -- Sets dfIsHovered flag and updates highlights
@@ -847,9 +845,7 @@ function DF:InitializePetHeaderChild(frame)
     frame:RegisterForClicks("AnyUp")
     frame.dfInitialized = true
     
-    if ClickCastFrames then
-        ClickCastFrames[frame] = true
-    end
+    DF:RegisterFrameWithClickCast(frame)
 end
 
 -- ============================================================

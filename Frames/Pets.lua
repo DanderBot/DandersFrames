@@ -25,7 +25,7 @@ function DF:CreatePetFrame(unit, ownerFrame, isRaid)
     -- Generate frame name based on unit
     local frameName = "DandersFrames_Pet_" .. unit:gsub("pet", "Pet")
     
-    local frame = CreateFrame("Button", frameName, parent, "SecureUnitButtonTemplate")
+    local frame = CreateFrame("Button", frameName, parent, "SecureUnitButtonTemplate,SecureHandlerEnterLeaveTemplate")
     frame:SetSize(db.petFrameWidth or 80, db.petFrameHeight or 20)
     frame.unit = unit
     frame.ownerFrame = ownerFrame
@@ -126,9 +126,7 @@ function DF:CreatePetFrame(unit, ownerFrame, isRaid)
     DF:RegisterFrameForPing(frame)
     
     -- Register with external click-casting addons (Clique, Clicked, etc.)
-    if ClickCastFrames then
-        ClickCastFrames[frame] = true
-    end
+    DF:RegisterFrameWithClickCast(frame)
     
     -- Initial hide - will be shown when pet exists
     frame:Hide()

@@ -945,26 +945,50 @@ function DF:LockRaidFrames()
     print("|cff00ff00DandersFrames:|r Raid frames locked.")
 end
 
+-- ============================================================
+-- CLICK-CAST REGISTRATION HELPERS
+-- Centralised registration for Clique / Clicked / other click-cast addons.
+-- The dfClickCastRegistered guard ensures each frame is only registered once,
+-- preventing the duplicate registration that caused Clique's WrapScript to
+-- scramble OnEnter/OnLeave on first login.
+-- ============================================================
+
+function DF:RegisterFrameWithClickCast(frame)
+    if not frame then return end
+    -- Guard: only register once — this is the key fix for the Clique bug.
+    -- Without this, frames get registered multiple times (at creation and again
+    -- at PLAYER_ENTERING_WORLD+0.5s), triggering Clique's __newindex each time
+    -- and causing it to re-wrap OnEnter/OnLeave, scrambling the script chain.
+    if frame.dfClickCastRegistered then return end
+
+    if ClickCastFrames then
+        ClickCastFrames[frame] = true
+    end
+
+    frame.dfClickCastRegistered = true
+end
+
+function DF:UnregisterFrameWithClickCast(frame)
+    if not frame then return end
+    if ClickCastFrames then
+        ClickCastFrames[frame] = false
+    end
+    frame.dfClickCastRegistered = nil
+end
+
 function DF:RegisterRaidClickCastFrames()
-    if not ClickCastFrames then return end
-    
-    -- CLEANUP_AFTER_MIGRATION: Using GetAllRaidFrames() for header-based frames
     for _, frame in pairs(DF:GetAllRaidFrames()) do
         if frame then
-            ClickCastFrames[frame] = true
+            DF:RegisterFrameWithClickCast(frame)
         end
     end
 end
 
--- Register all frames with click-casting addons (Clicked, Clique, etc.)
 function DF:RegisterClickCastFrames()
-    if not ClickCastFrames then return end
-    
-    -- Register party frames via iterator (header children)
     if DF.IteratePartyFrames then
         DF:IteratePartyFrames(function(frame)
             if frame then
-                ClickCastFrames[frame] = true
+                DF:RegisterFrameWithClickCast(frame)
             end
         end)
     end
@@ -1112,11 +1136,11 @@ function DF:UpdateLiveRaidFrames()
                     if DF.UpdateExternalDefIcon then DF:UpdateExternalDefIcon(frame) end
                 end
                 
-                if ClickCastFrames then ClickCastFrames[frame] = true end
+                DF:RegisterFrameWithClickCast(frame)
             end
         end
     end
-    
+
     -- Hide party frames when in raid (legacy mode)
     if DF.container then
         DF.container:Hide()
@@ -1513,7 +1537,7 @@ function DF:UpdateAllFrames()
             end
             frame:Show()
             -- Register with click-cast addons when shown
-            if ClickCastFrames then ClickCastFrames[frame] = true end
+            DF:RegisterFrameWithClickCast(frame)
             DF:ApplyFrameStyle(frame)
             if DF.testMode then
                 DF:UpdateTestFrame(frame, 0)
@@ -1525,13 +1549,13 @@ function DF:UpdateAllFrames()
                 UnregisterUnitWatch(frame)
                 frame:Show()
                 -- Register with click-cast addons when shown
-                if ClickCastFrames then ClickCastFrames[frame] = true end
+                DF:RegisterFrameWithClickCast(frame)
                 DF:ApplyFrameStyle(frame)  -- Apply style BEFORE UpdateTestFrame so dead fade isn't lost
                 DF:UpdateTestFrame(frame, frameData.index)
             else
                 DF:SafeRegisterUnitWatch(frame)
                 -- Register with click-cast addons
-                if ClickCastFrames then ClickCastFrames[frame] = true end
+                DF:RegisterFrameWithClickCast(frame)
                 DF:ApplyFrameStyle(frame)
                 DF:UpdateFrame(frame)
             end
@@ -1573,7 +1597,7 @@ function DF:UpdateAllFrames()
                 DF:SafeRegisterUnitWatch(DF.playerFrame)
             else
                 DF:SafeUnregisterUnitWatch(DF.playerFrame)
-                if ClickCastFrames then ClickCastFrames[DF.playerFrame] = false end
+                DF:UnregisterFrameWithClickCast(DF.playerFrame)
             end
         end
         -- Always register ALL party frames (1-4), even if currently solo
@@ -1590,9 +1614,9 @@ function DF:UpdateAllFrames()
     if DF.testMode and not (testFrameCount >= 1) then
         UnregisterUnitWatch(DF.playerFrame)
         DF.playerFrame:Hide()
-        if ClickCastFrames then ClickCastFrames[DF.playerFrame] = false end
+        DF:UnregisterFrameWithClickCast(DF.playerFrame)
     end
-    
+
     for i = 1, 4 do
         local frame = DF.partyFrames[i]
         if frame then
@@ -1613,7 +1637,7 @@ function DF:UpdateAllFrames()
                 -- Outside test mode: do NOT unregister - let RegisterUnitWatch handle
                 -- visibility so frames can appear during combat when party members join
                 -- Unregister from click-cast addons when hidden
-                if ClickCastFrames then ClickCastFrames[frame] = false end
+                DF:UnregisterFrameWithClickCast(frame)
             end
         end
     end
