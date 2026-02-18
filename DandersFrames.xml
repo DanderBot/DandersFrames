@@ -26,7 +26,7 @@
          PET BUTTON TEMPLATE (for SecureGroupPetHeaderTemplate)
          ============================================================ -->
     
-    <Button name="DandersPetButtonTemplate" inherits="SecureUnitButtonTemplate" virtual="true">
+    <Button name="DandersPetButtonTemplate" inherits="SecureUnitButtonTemplate,SecureHandlerEnterLeaveTemplate" virtual="true">
         <Attributes>
             <Attribute name="toggleForVehicle" type="boolean" value="false"/>
         </Attributes>
