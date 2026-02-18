@@ -1354,6 +1354,7 @@ end
 -- Sync linked sections between party and raid modes
 function DF:SyncLinkedSections()
     if not DF.GUI or not DF.db or not DF.db.linkedSections then return end
+    if not next(DF.db.linkedSections) then return end
     local mode = DF.GUI.SelectedMode
     if mode ~= "party" and mode ~= "raid" then return end
 
