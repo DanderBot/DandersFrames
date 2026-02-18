@@ -996,30 +996,76 @@ end
 
 -- Commit all deferred registrations. Called once at PLAYER_ENTERING_WORLD
 -- after Clique's metatable is in place.
+--
+-- Iterates ALL header children directly (not via unit-based lookups like
+-- IteratePartyFrames/GetAllRaidFrames) because at commit time some frames
+-- may not have units assigned yet (e.g., party frames when solo-queuing
+-- for a dungeon — the header pre-creates children but units aren't set
+-- until group members actually appear).
 function DF:CommitAllClickCastRegistrations()
     DF.clickCastReady = true
 
-    -- Party frames
-    if DF.IteratePartyFrames then
-        DF:IteratePartyFrames(function(frame)
-            if frame and frame.dfNeedsClickCast and not frame.dfClickCastRegistered then
-                if ClickCastFrames then
-                    ClickCastFrames[frame] = true
-                end
-                frame.dfClickCastRegistered = true
-                frame.dfNeedsClickCast = nil
-            end
-        end)
-    end
-
-    -- Raid frames
-    for _, frame in pairs(DF:GetAllRaidFrames()) do
+    local function commitFrame(frame)
         if frame and frame.dfNeedsClickCast and not frame.dfClickCastRegistered then
             if ClickCastFrames then
                 ClickCastFrames[frame] = true
             end
             frame.dfClickCastRegistered = true
             frame.dfNeedsClickCast = nil
+        end
+    end
+
+    -- Party header children (player + party1-4)
+    if DF.partyHeader then
+        for i = 1, 5 do
+            commitFrame(DF.partyHeader:GetAttribute("child" .. i))
+        end
+    end
+
+    -- Arena header children
+    if DF.arenaHeader then
+        for i = 1, 5 do
+            commitFrame(DF.arenaHeader:GetAttribute("child" .. i))
+        end
+    end
+
+    -- Raid separated headers (8 groups x 5)
+    if DF.raidSeparatedHeaders then
+        for g = 1, 8 do
+            local header = DF.raidSeparatedHeaders[g]
+            if header then
+                for i = 1, 5 do
+                    commitFrame(header:GetAttribute("child" .. i))
+                end
+            end
+        end
+    end
+
+    -- Flat raid header (up to 40)
+    if DF.FlatRaidFrames and DF.FlatRaidFrames.header then
+        for i = 1, 40 do
+            commitFrame(DF.FlatRaidFrames.header:GetAttribute("child" .. i))
+        end
+    end
+
+    -- Combined raid header
+    if DF.raidCombinedHeader then
+        for i = 1, 40 do
+            commitFrame(DF.raidCombinedHeader:GetAttribute("child" .. i))
+        end
+    end
+
+    -- Pet frames
+    if DF.petFrames then
+        for _, frame in pairs(DF.petFrames) do
+            commitFrame(frame)
+        end
+    end
+
+    -- Pinned frames header
+    if DF.pinnedHeader then
+        for i = 1, 5 do
+            commitFrame(DF.pinnedHeader:GetAttribute("child" .. i))
         end
     end
 end
