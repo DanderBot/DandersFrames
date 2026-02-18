@@ -1288,26 +1288,29 @@ function DF:UpdateAuraIconsDirect(frame, icons, auraType, maxAuras)
     local durationY = db[prefix .. "DurationY"] or 0
     local durationAnchor = db[prefix .. "DurationAnchor"] or "CENTER"
     
-    -- Single pass: iterate approved IDs → fetch data → apply to icon
+    -- Slot-ordered iteration: walk Blizzard's aura slots 1→40 to preserve native order
+    -- We only read auraInstanceID (a plain integer, not secret) for cache lookup
     local displayedCount = 0
-    
-    for auraInstanceID in pairs(cacheSet) do
-        if displayedCount >= maxAuras then break end
-        
-        -- Guard: ensure we have an icon slot available
-        local nextIcon = icons[displayedCount + 1]
-        if not nextIcon then break end
-        
-        -- Fetch aura data directly by ID (Tier 2: no slot scanning)
-        local auraData = GetAuraDataByAuraInstanceID and GetAuraDataByAuraInstanceID(unit, auraInstanceID)
-        if auraData then
+    local auraFilter = auraType == "BUFF" and "HELPFUL" or "HARMFUL"
+    local slot = 1
+
+    while displayedCount < maxAuras and slot <= 40 do
+        local auraData = C_UnitAuras and C_UnitAuras.GetAuraDataByIndex(unit, slot, auraFilter)
+        if not auraData then break end
+
+        local auraInstanceID = auraData.auraInstanceID
+        if auraInstanceID and cacheSet[auraInstanceID] then
+            -- Guard: ensure we have an icon slot available
+            local nextIcon = icons[displayedCount + 1]
+            if not nextIcon then break end
+
             -- Set texture (validates the aura is displayable)
             local auraIconTexture = auraData.icon
             local canDisplay = false
             if auraIconTexture then
                 canDisplay = SafeSetTexture(nextIcon, auraIconTexture)
             end
-            
+
             -- Check raid buff filtering
             local skipAura = false
             if canDisplay and shouldFilterRaidBuffs and raidBuffIcons and auraIconTexture then
@@ -1315,22 +1318,22 @@ function DF:UpdateAuraIconsDirect(frame, icons, auraType, maxAuras)
                     skipAura = true
                 end
             end
-            
+
             if canDisplay and not skipAura then
                 displayedCount = displayedCount + 1
                 local icon = icons[displayedCount]
                 -- Note: texture already set by SafeSetTexture above
-                
+
                 -- Store aura tracking data (reuse existing table)
                 if not icon.auraData then
                     icon.auraData = { index = 0, auraInstanceID = nil }
                 end
-                icon.auraData.index = 0  -- No slot index in direct mode
+                icon.auraData.index = slot
                 icon.auraData.auraInstanceID = auraInstanceID
-                
+
                 -- Set cooldown
                 SafeSetCooldown(icon.cooldown, auraData.expirationTime, auraData.duration)
-                
+
                 -- Stack count
                 icon.count:SetText("")
                 local stackMinimum = icon.stackMinimum or 2
@@ -1340,12 +1343,12 @@ function DF:UpdateAuraIconsDirect(frame, icons, auraType, maxAuras)
                         icon.count:SetText(stackText)
                     end
                 end
-                
+
                 -- Expiration data
                 icon.expirationTime = nil
                 icon.auraDuration = nil
                 icon.hasExpiration = false
-                
+
                 if C_UnitAuras.DoesAuraHaveExpirationTime then
                     icon.hasExpiration = C_UnitAuras.DoesAuraHaveExpirationTime(unit, auraInstanceID)
                     icon.expirationTime = auraData.expirationTime
@@ -1360,7 +1363,7 @@ function DF:UpdateAuraIconsDirect(frame, icons, auraType, maxAuras)
                         icon.auraDuration = auraData.duration
                     end
                 end
-                
+
                 -- Cooldown swipe visibility
                 if icon.cooldown then
                     if icon.cooldown.SetShownFromBoolean then
@@ -1369,7 +1372,7 @@ function DF:UpdateAuraIconsDirect(frame, icons, auraType, maxAuras)
                         icon.cooldown:Show()
                     end
                 end
-                
+
                 -- Duration text visibility
                 if icon.duration then
                     if icon.showDuration then
@@ -1382,7 +1385,7 @@ function DF:UpdateAuraIconsDirect(frame, icons, auraType, maxAuras)
                         icon.duration:Hide()
                     end
                 end
-                
+
                 -- Border color (normal, not expiring)
                 if borderEnabled and not masqueBorderControl then
                     if auraType == "DEBUFF" and not unitDeadOrOffline then
@@ -1390,14 +1393,14 @@ function DF:UpdateAuraIconsDirect(frame, icons, auraType, maxAuras)
                             if not DF.debuffBorderCurve then
                                 local curve = C_CurveUtil.CreateColorCurve()
                                 curve:SetType(Enum.LuaCurveType.Step)
-                                
+
                                 local noneColor = db.debuffBorderColorNone or {r = 0.8, g = 0.0, b = 0.0}
                                 local magicColor = db.debuffBorderColorMagic or {r = 0.2, g = 0.6, b = 1.0}
                                 local curseColor = db.debuffBorderColorCurse or {r = 0.6, g = 0.0, b = 1.0}
                                 local diseaseColor = db.debuffBorderColorDisease or {r = 0.6, g = 0.4, b = 0.0}
                                 local poisonColor = db.debuffBorderColorPoison or {r = 0.0, g = 0.6, b = 0.0}
                                 local bleedColor = db.debuffBorderColorBleed or {r = 1.0, g = 0.0, b = 0.0}
-                                
+
                                 curve:AddPoint(0, CreateColor(noneColor.r, noneColor.g, noneColor.b, 0.8))
                                 curve:AddPoint(1, CreateColor(magicColor.r, magicColor.g, magicColor.b, 0.8))
                                 curve:AddPoint(2, CreateColor(curseColor.r, curseColor.g, curseColor.b, 0.8))
@@ -1405,10 +1408,10 @@ function DF:UpdateAuraIconsDirect(frame, icons, auraType, maxAuras)
                                 curve:AddPoint(4, CreateColor(poisonColor.r, poisonColor.g, poisonColor.b, 0.8))
                                 curve:AddPoint(9, CreateColor(bleedColor.r, bleedColor.g, bleedColor.b, 0.8))
                                 curve:AddPoint(11, CreateColor(bleedColor.r, bleedColor.g, bleedColor.b, 0.8))
-                                
+
                                 DF.debuffBorderCurve = curve
                             end
-                            
+
                             local borderColor = C_UnitAuras.GetAuraDispelTypeColor(unit, auraInstanceID, DF.debuffBorderCurve)
                             if borderColor then
                                 local r, g, b, a = 0.8, 0, 0, 0.8
@@ -1432,7 +1435,7 @@ function DF:UpdateAuraIconsDirect(frame, icons, auraType, maxAuras)
                 elseif not masqueBorderControl then
                     icon.border:Hide()
                 end
-                
+
                 -- Find native cooldown text (first time only, cached on icon)
                 if not icon.nativeCooldownText and icon.cooldown then
                     local regions = {icon.cooldown:GetRegions()}
@@ -1440,26 +1443,42 @@ function DF:UpdateAuraIconsDirect(frame, icons, auraType, maxAuras)
                         if region and region.GetObjectType and region:GetObjectType() == "FontString" then
                             icon.nativeCooldownText = region
                             icon.nativeTextReparented = false
-                            
+
                             -- Immediately apply font settings to prevent large default font flash
                             if DF.SafeSetFont then
                                 DF:SafeSetFont(region, durationFont, durationSize, durationOutline)
                             end
                             region:ClearAllPoints()
                             region:SetPoint(durationAnchor, icon, durationAnchor, durationX, durationY)
-                            
+
                             break
                         end
                     end
                 end
-                
+
                 icon:Show()
-                
+
                 -- Register for shared timer updates
                 DF:RegisterIconForAuraTimer(icon)
             end
         end
+
+        slot = slot + 1
     end
+
+    -- Legacy: non-deterministic pairs() iteration over cache set
+    -- Kept for reference in case we want an unordered/ID-based option in the future
+    --[[
+    for auraInstanceID in pairs(cacheSet) do
+        if displayedCount >= maxAuras then break end
+        local nextIcon = icons[displayedCount + 1]
+        if not nextIcon then break end
+        local auraData = GetAuraDataByAuraInstanceID and GetAuraDataByAuraInstanceID(unit, auraInstanceID)
+        if auraData then
+            -- ... same display logic as above ...
+        end
+    end
+    --]]
     
     -- Hide remaining icons
     for i = displayedCount + 1, #icons do
