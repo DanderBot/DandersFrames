@@ -1064,12 +1064,25 @@ function CC:GetBinding(index)
 end
 
 -- Enable/disable click-casting
+-- Static popup for reload confirmation after toggling click-casting
+StaticPopupDialogs["DANDERSFRAMES_CLICKCAST_RELOAD"] = {
+    text = "Click-casting changes require a UI reload to take effect.\n\nReload now?",
+    button1 = "Reload",
+    button2 = "Later",
+    OnAccept = function()
+        ReloadUI()
+    end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+}
+
 function CC:SetEnabled(enabled)
     self.db.enabled = enabled
     if self.profile and self.profile.options then
         self.profile.options.enabled = enabled
     end
-    
+
     -- Update the header attribute so secure snippets know whether to run
     -- This is critical for allowing Clique/Clicked to work when we're disabled
     if self.header then
@@ -1077,25 +1090,11 @@ function CC:SetEnabled(enabled)
             self.header:SetAttribute("dfClickCastEnabled", enabled)
         end
     end
-    
-    if enabled then
-        -- Reload UI so click-casting initializes cleanly from scratch.
-        -- WrapScript bindings (keyboard hover-cast) must be installed during
-        -- the initial secure frame setup to work reliably in combat.
-        -- The enabled state is already saved, so InitializeSecureFrames will
-        -- pick it up and do the full registration on the fresh load.
-        C_Timer.After(0.1, function()
-            ReloadUI()
-        end)
-    else
-        -- Reload UI so click-casting state is fully cleaned up.
-        -- WrapScript handlers and secure frame state need a fresh environment
-        -- to be properly removed. Also needed for Clique/Clicked to reclaim
-        -- their metatable on ClickCastFrames.
-        C_Timer.After(0.1, function()
-            ReloadUI()
-        end)
-    end
+
+    -- Click-casting toggle requires a reload for WrapScript bindings and
+    -- secure frame state to initialize (or tear down) cleanly.
+    -- The enabled state is already saved to SavedVariables above.
+    StaticPopup_Show("DANDERSFRAMES_CLICKCAST_RELOAD")
 end
 
 -- Check if click-casting is enabled
