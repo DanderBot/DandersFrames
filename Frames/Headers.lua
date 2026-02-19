@@ -708,25 +708,28 @@ function DF:InitializeHeaderChild(frame)
     -- ========================================
     frame:HookScript("OnEnter", function(self)
         local frameDb = self.isRaidFrame and DF:GetRaidDB() or DF:GetDB()
-        
+
         -- Set hover state and update highlights
         self.dfIsHovered = true
         if DF.UpdateHighlights then
             DF:UpdateHighlights(self)
         end
-        
+
+        -- Binding tooltip (independent of unit tooltip settings)
+        if DF.ShowBindingTooltip then DF:ShowBindingTooltip(self) end
+
         -- Check if we're actually hovering a child element (aura) with SetPropagateMouseMotion
         local focus = GetMouseFocus and GetMouseFocus() or GetMouseFoci and GetMouseFoci()[1]
         if focus and focus ~= self and focus.unitFrame == self then
             return
         end
-        
+
         -- Check if tooltips are enabled
         if not frameDb.tooltipFrameEnabled then return end
-        
+
         -- Check if tooltips disabled in combat
         if frameDb.tooltipFrameDisableInCombat and InCombatLockdown() then return end
-        
+
         -- Show tooltip
         if self.unit and UnitExists(self.unit) then
             local anchorType = frameDb.tooltipFrameAnchor or "CURSOR"
@@ -759,8 +762,9 @@ function DF:InitializeHeaderChild(frame)
             return
         end
         GameTooltip:Hide()
+        if DFBindingTooltip and focus ~= self then DFBindingTooltip:Hide(); DFBindingTooltip.anchorFrame = nil end
     end)
-    
+
     -- Apply layout (this configures all the visual elements properly)
     if DF.ApplyFrameLayout then
         DF:ApplyFrameLayout(frame)

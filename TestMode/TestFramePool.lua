@@ -96,9 +96,17 @@ local function CreateTestFrame(index, isRaid)
         DF:ApplyAuraLayout(frame, "DEBUFF")
     end
     
+    -- Binding tooltip on hover
+    frame:SetScript("OnEnter", function(self)
+        if DF.ShowBindingTooltip then DF:ShowBindingTooltip(self) end
+    end)
+    frame:SetScript("OnLeave", function(self)
+        if DFBindingTooltip then DFBindingTooltip:Hide(); DFBindingTooltip.anchorFrame = nil end
+    end)
+
     -- Hide by default
     frame:Hide()
-    
+
     return frame
 end
 
