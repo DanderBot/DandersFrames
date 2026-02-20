@@ -2,64 +2,43 @@
 
 ## [4.0.7] - 2026-02-18
 
-### Improvements
-* Refactor auto layout runtime overrides to use a read-through overlay proxy — overrides are now applied transparently at read time instead of mutating the saved raid settings table, eliminating profile contamination on logout/reload and removing the strip/reapply save dance
-* Remove element-specific health fade alpha (per-element sliders) — frame-level fade via SetAlpha cascades to all children, making per-element curves unnecessary and improving performance
-* Fix CI releasing and posting Discord notifications on changelog-only commits — Changelog.lua is now in the build guard skip list
-* Add tooltip to override star icons — hovering the star explains the setting is overridden by auto layout and how to change it
-
 ### Bug Fixes
-* Fix health fade threshold comparison error with secret numbers — use C_CurveUtil color curves to encode fade alpha, resolving health percent entirely engine-side without any Lua comparison of secret values
-* Fix auto layout runtime override contaminating global profile on setting change — proxy now blocks read-then-write loops that would copy override values into SavedVariables, while still persisting intentional user changes
-* Fix auto layout not re-evaluating active profile when player range is changed — editing a profile's range now triggers immediate profile re-evaluation
-* Fix auto layout error when editing active profile — DeepCompare was defined after its first use
-* Fix auto layout error when disabling — HandleRuntimeWrite now guards against nil key
-* Fix party frame container not repositioning when dragging the frame width or height slider — lightweight size update now re-applies header settings during drag
-* Fix auto layout override editing contaminating the global profile — snapshot/restore now uses recursive deep copy to prevent shared nested table references
-* Fix extra row spacing when editing auto layout overrides — slider drags now trigger full test frame layout refresh
-* Fix auto layout edit button available on non-active profiles — greyed out with tooltip explaining only the active layout can be edited
-* Fix auto layout override count showing +1 — unmapped keys no longer inflate the badge count
-* Fix raidTestFrameCount not trackable as a profile override — added to OVERRIDE_TAB_MAP under Frame tab
-* Fix auto layout override values not showing on test mode frames — entering edit mode now refreshes test frames after applying overrides
-* Fix profiles not persisting per character — currentProfile is now stored in per-character saved variables so each character remembers their own profile
-* Fix pet frames vanishing after reload — pet frame updates were skipped in header mode, so they were never shown after login or `/rl`
+* Fix health fade errors with secret numbers — rewritten to use curve-based engine-side resolution, no Lua comparison of protected values
+* Fix health fade not working correctly on pet frames
+* Fix health fade not working in test mode and not updating during health animation
+* Fix health fade threshold slider causing lag during drag
+* Fix profiles not persisting per character — each character now remembers their own active profile
+* Fix pet frames vanishing after reload
 * Fix pet frame font crash on non-English clients
-* Reduce redundant pet frame updates during startup (throttled from 6 calls to 1-2)
-* Fix resource bar border not showing after login/reload — was calling non-existent function
-* Fix heal absorb bar showing smaller than actual absorb amount — calculator was subtracting incoming heals from absorb value
-* Replace pcall wrappers with nil checks in absorb/heal calculator hot paths for better performance
-* Fix profile direction switch not applying — switching to a profile with a different grow direction now correctly reconfigures header orientation
-* Fix name text truncation not applied to offline players — offline frames showed full names ignoring the truncation setting
-* Fix summon icon permanently stuck on frames after M+ start or group leave — summon icons now refresh on roster and zone changes
-* Fix icon alpha settings (role, leader, raid target, ready check) reverting to 100% after releasing the slider — appearance system was ignoring user-set alpha values
-* Fix click-casting not working when clicking on aura/defensive icons — mouse click events were not propagating to the parent unit button
-* Fix click-casting "Spell not learned" when queuing as different spec — macros now resolve the current spec's spell override instead of using the stored root spell name
-* Fix absorb bar not fading when unit is out of range — health event updates were overwriting the OOR alpha on every tick
-* Fix pet health fade crash from secret number arithmetic — pet frames now use the same curve-based approach as player frames
-* Fix health fade not working in test mode — setting keys were mismatched between Config defaults and TestMode references
-* Fix health fade threshold slider causing lag during drag — callback parameters were in the wrong position
-* Fix health fade not updating during test mode animate health — animation ticker now re-evaluates the fade threshold
+* Fix party frame container not repositioning when dragging width or height sliders
+* Fix profile direction switch not applying when switching profiles
+* Fix resource bar border not showing after login/reload
+* Fix resource bar showing white when first made visible
+* Fix resource bar not matching frame width on resize and test mode
+* Fix heal absorb bar showing smaller than actual absorb amount
+* Fix absorb bar not fading when unit is out of range
+* Fix name text truncation not applied to offline players
+* Fix summon icon permanently stuck on frames after M+ start or group leave
+* Fix icon alpha settings (role, leader, raid target, ready check) reverting to 100% after releasing slider
+* Fix click-casting not working when clicking on aura/defensive icons
+* Fix click-casting "Spell not learned" when queuing as different spec
+* Fix DF click-casting not working until reload when first enabled
+* Fix Clique compatibility — prevent duplicate registration, defer writes, commit all header children
+* Fix aura click-through not updating safely on login
 * Fix leader icon not updating on first leader change (contributed by riyuk)
 * Fix forbidden table iteration in FindHealthManaBars (contributed by riyuk)
-* Fix resource bar showing white when first made visible — color was not initialized before the first show
-* Fix resource bar not matching frame width on resize and test mode — width now updates in both live and test frame paths
-* Fix Clique compatibility — prevent duplicate ClickCastFrames registration, defer writes until after metatable is ready, and commit all header children instead of only unit-matched frames
-* Fix DF click-casting not working until reload when first enabled — bindings are now applied immediately on enable without requiring `/rl`
-* Fix aura click-through not updating safely on login — moved UpdateAuraClickThrough to ADDON_LOADED to avoid combat lockdown issues
+* Various auto layout stability fixes
 
 ### New Features
-* Add "Sync with Raid/Party" toggle per settings page — keeps party and raid settings in sync automatically when enabled, with per-profile persistence (contributed by Enf0)
 * Add health fade system — fades frames when a unit's health is above a configurable threshold, with dispel cancel override and test mode support (contributed by X-Steeve)
-* Add class power pips — displays class-specific resources (Holy Power, Chi, Combo Points, Soul Shards, Arcane Charges, Essence) on the player's party/raid frame as colored pips with configurable size, position, and anchor (contributed by X-Steeve)
-* Add class power pip color options — custom foreground color toggle and background color picker with alpha
-* Add vertical pip layout — LEFT/RIGHT anchor positions stack pips along the frame side
-* Add class power role filter — checkboxes to show pips only for tank, healer, or DPS roles
-* Add class power test mode multi-frame support — all relevant class test frames now show partially filled pips for preview
-* Auto-show changelog when opening settings for the first time after an update
-* Rename "Auto Profiles" to "Auto Layouts" throughout the settings UI
-* Add per-class resource bar filter toggles — show or hide the resource bar based on class
-* Auto-reload UI when toggling click-casting enable/disable — prompts for reload so bindings take effect immediately
-* Debug Console — persistent debug logging system with in-game viewer (`/df debug` to toggle, `/df console` to view). Logs persist across reloads with category filtering, severity levels, and clipboard export
+* Add class power pips — displays class-specific resources (Holy Power, Chi, Combo Points, etc.) on the player's frame as colored pips with configurable size, position, and anchor (contributed by X-Steeve)
+* Add class power pip color, vertical layout, and role filter options
+* Add "Sync with Raid/Party" toggle per settings page (contributed by Enf0)
+* Add per-class resource bar filter toggles
+* Auto-reload UI when toggling click-casting enable/disable
+* Auto-show changelog when opening settings after an update
+* Rename "Auto Profiles" to "Auto Layouts" throughout the UI
+* Debug Console — in-game debug log viewer (`/df debug` to toggle, `/df console` to view)
 
 ## [4.0.6] - 2026-02-15
 

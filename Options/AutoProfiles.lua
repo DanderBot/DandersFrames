@@ -26,7 +26,7 @@ local CONTENT_TYPES = {
     {
         key = "instanced",
         title = "Instanced / PvP",
-        description = "Raids, dungeons, battlegrounds (1-40)",
+        description = "Raids, battlegrounds (1-40)",
         minRange = 1,
         maxRange = 40,
         isFixed = false,
@@ -492,7 +492,7 @@ function AutoProfilesUI:BuildPage(GUI, pageFrame, db, Add, AddSpace)
     -- =============================================
     -- Enable Checkbox
     -- =============================================
-    local enableCheck = GUI:CreateCheckbox(pageFrame.child, "Enable Raid Auto-Switching Profiles", 
+    local enableCheck = GUI:CreateCheckbox(pageFrame.child, "Enable Raid Auto-Switching Layouts",
         nil, nil,  -- dbTable, dbKey (not used)
         function() pageFrame:Refresh() end,  -- callback
         function() return autoDb.enabled end,  -- customGet
@@ -582,9 +582,9 @@ function AutoProfilesUI:BuildPage(GUI, pageFrame, db, Add, AddSpace)
             if profile.overrides then
                 for _ in pairs(profile.overrides) do overrideCount = overrideCount + 1 end
             end
-            statusLine2:SetText("|cff66ff66Profile:|r |cffffffff\"" .. (profile.name or "Unnamed") .. "\"|r |cff666666— " .. rangeText .. " · " .. overrideCount .. " override" .. (overrideCount ~= 1 and "s" or "") .. "|r")
+            statusLine2:SetText("|cff66ff66Layout:|r |cffffffff\"" .. (profile.name or "Unnamed") .. "\"|r |cff666666— " .. rangeText .. " · " .. overrideCount .. " override" .. (overrideCount ~= 1 and "s" or "") .. "|r")
         else
-            statusLine2:SetText("|cff66ff66Profile:|r |cff999999None active (using global settings)|r")
+            statusLine2:SetText("|cff66ff66Layout:|r |cff999999None active (using global settings)|r")
         end
     end
     
@@ -657,7 +657,7 @@ function AutoProfilesUI:BuildPage(GUI, pageFrame, db, Add, AddSpace)
     step1:SetPoint("TOPLEFT", 10, yOff)
     step1:SetPoint("RIGHT", infoBody, "RIGHT", -10, 0)
     step1:SetJustifyH("LEFT")
-    step1:SetText("|cffff8020" .. "1.|r Create profiles below for different player ranges within each content type. Profiles only store settings that |cffffffffdiffer|r from your global settings — everything else is inherited automatically.")
+    step1:SetText("|cffff8020" .. "1.|r Create layouts below for different player ranges within each content type. Layouts only store settings that |cffffffffdiffer|r from your global settings — everything else is inherited automatically.")
     step1:SetTextColor(0.65, 0.65, 0.65)
     yOff = yOff - 30
     
@@ -736,7 +736,7 @@ function AutoProfilesUI:BuildPage(GUI, pageFrame, db, Add, AddSpace)
     step5:SetPoint("TOPLEFT", 10, yOff)
     step5:SetPoint("RIGHT", infoBody, "RIGHT", -10, 0)
     step5:SetJustifyH("LEFT")
-    step5:SetText("|cffff8020" .. "5.|r When you enter matching content, the profile's overrides are applied on top of your global settings. If no profile matches, global settings are used as-is.")
+    step5:SetText("|cffff8020" .. "5.|r When you enter matching content, the layout's overrides are applied on top of your global settings. If no layout matches, global settings are used as-is.")
     step5:SetTextColor(0.65, 0.65, 0.65)
     
     Add(infoContainer, infoHeaderHeight + (infoCollapsed and 0 or infoBodyHeight), "both")
@@ -769,7 +769,7 @@ function AutoProfilesUI:CreateContentTypeSection(GUI, pageFrame, contentType)
     local bodyPadding = 10
     local bodyHeight = (numProfiles * rowHeight) + addButtonHeight + bodyPadding
     
-    -- If no profiles and is mythic, need extra space for "no profile set" text
+    -- If no layouts and is mythic, need extra space for "no layout set" text
     if contentType.key == "mythic" and numProfiles == 0 then
         bodyHeight = 60  -- Empty text + add button + padding
     elseif contentType.isFixed and numProfiles > 0 then
@@ -861,14 +861,14 @@ function AutoProfilesUI:CreateContentTypeSection(GUI, pageFrame, contentType)
     if contentType.key == "mythic" and numProfiles == 0 then
         local emptyText = section.body:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         emptyText:SetPoint("TOP", 0, -10)
-        emptyText:SetText("|cff666666No profile set. Using global settings.|r")
+        emptyText:SetText("|cff666666No layout set. Using global settings.|r")
         
         -- Add button for mythic (centered, full width)
         local addBtn = self:CreateAddButton(GUI, pageFrame, section.body, contentType)
         addBtn:SetPoint("TOPLEFT", 10, -32)
         addBtn:SetPoint("TOPRIGHT", -10, -32)
     elseif not contentType.isFixed then
-        -- Add Profile button (full width)
+        -- Add Layout button (full width)
         local addBtn = self:CreateAddButton(GUI, pageFrame, section.body, contentType)
         addBtn:SetPoint("TOPLEFT", 10, y - 5)
         addBtn:SetPoint("TOPRIGHT", -10, y - 5)
@@ -1085,7 +1085,7 @@ function AutoProfilesUI:CreateProfileRow(GUI, pageFrame, parent, contentType, pr
         self:SetBackdropBorderColor(0.8, 0.2, 0.2, 1)
         deleteIcon:SetVertexColor(1, 0.3, 0.3)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText("Delete Profile")
+        GameTooltip:SetText("Delete Layout")
         GameTooltip:Show()
     end)
     deleteBtn:SetScript("OnLeave", function(self)
@@ -1114,7 +1114,7 @@ function AutoProfilesUI:CreateProfileRow(GUI, pageFrame, parent, contentType, pr
     return row
 end
 
--- Create Add Profile button
+-- Create Add Layout button
 function AutoProfilesUI:CreateAddButton(GUI, pageFrame, parent, contentType)
     local self = AutoProfilesUI
     
@@ -1131,7 +1131,7 @@ function AutoProfilesUI:CreateAddButton(GUI, pageFrame, parent, contentType)
     -- Centered text
     local btnText = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     btnText:SetPoint("CENTER", 0, 0)
-    btnText:SetText("+ Add Profile")
+    btnText:SetText("+ Add Layout")
     btnText:SetTextColor(0.5, 0.5, 0.5)
     
     btn:SetScript("OnEnter", function(self)
@@ -1148,7 +1148,7 @@ function AutoProfilesUI:CreateAddButton(GUI, pageFrame, parent, contentType)
             AutoProfilesUI:CreateProfile("mythic", "Mythic Setup")
             if pageFrame.Refresh then pageFrame:Refresh() end
         else
-            -- Show add profile dialog
+            -- Show add layout dialog
             AutoProfilesUI:ShowProfileDialog(contentType, nil, nil, pageFrame)
         end
     end)
@@ -1225,7 +1225,7 @@ function AutoProfilesUI:CreateProfileDialog()
     -- =============================================
     local nameLabel = dialog:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     nameLabel:SetPoint("TOPLEFT", 12, -40)
-    nameLabel:SetText("Profile Name")
+    nameLabel:SetText("Layout Name")
     nameLabel:SetTextColor(0.6, 0.6, 0.6)
     dialog.nameLabel = nameLabel
     
@@ -1517,7 +1517,7 @@ function AutoProfilesUI:CreateProfileDialog()
     
     local createText = createBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     createText:SetPoint("CENTER")
-    createText:SetText("Create Profile")
+    createText:SetText("Create Layout")
     createText:SetTextColor(1, 0.5, 0.2)
     dialog.createBtnText = createText
     
@@ -1560,7 +1560,7 @@ function AutoProfilesUI:ShowProfileDialog(contentType, profile, profileIndex, pa
     
     -- Set title
     if dialog.isEditMode then
-        dialog.title:SetText("Edit Profile Range")
+        dialog.title:SetText("Edit Layout Range")
         dialog.createBtnText:SetText("Save Changes")
         dialog.nameLabel:Hide()
         dialog.nameInput:Hide()
@@ -1573,8 +1573,8 @@ function AutoProfilesUI:ShowProfileDialog(contentType, profile, profileIndex, pa
         dialog.validationIcon:SetPoint("TOPLEFT", 12, -100)
         dialog:SetHeight(175)
     else
-        dialog.title:SetText("Add Profile")
-        dialog.createBtnText:SetText("Create Profile")
+        dialog.title:SetText("Add Layout")
+        dialog.createBtnText:SetText("Create Layout")
         dialog.nameLabel:Show()
         dialog.nameInput:Show()
         -- Reset positions to default
