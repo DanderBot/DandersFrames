@@ -348,18 +348,8 @@ function DF:UpdateTestFrameHealthOnly(frame, index)
         if isAbove and db.hfCancelOnDispel and frame.dfDispelOverlay and frame.dfDispelOverlay:IsShown() then
             isAbove = false
         end
-        if isAbove then
-            if db.hfElementSpecific then
-                frame.healthBar:SetAlpha(db.hfHealthBarAlpha or 0.5)
-            elseif not db.oorEnabled then
-                frame:SetAlpha(db.healthFadeAlpha or 0.5)
-            end
-        else
-            if db.hfElementSpecific then
-                frame.healthBar:SetAlpha(1.0)
-            elseif not db.oorEnabled then
-                frame:SetAlpha(1.0)
-            end
+        if not db.oorEnabled then
+            frame:SetAlpha(isAbove and (db.healthFadeAlpha or 0.5) or 1.0)
         end
     end
 
@@ -696,28 +686,16 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     end
     
     if isAboveHealthThreshold then
-        if db.hfElementSpecific then
-            healthBarAlpha = db.hfHealthBarAlpha or 0.5
-            backgroundAlpha = db.hfBackgroundAlpha or 0.5
-            nameAlpha = db.hfNameTextAlpha or 0.5
-            healthTextAlpha = db.hfHealthTextAlpha or 0.5
-            aurasAlpha = db.hfAurasAlpha or 0.5
-            iconsAlpha = db.hfIconsAlpha or 0.5
-            powerBarAlpha = db.hfPowerBarAlpha or 0.5
-            dispelAlpha = db.hfDispelOverlayAlpha or 0.5
-            targetedSpellAlpha = db.hfTargetedSpellAlpha or 0.5
-        else
-            local hfAlpha = db.healthFadeAlpha or 0.5
-            healthBarAlpha = hfAlpha
-            backgroundAlpha = hfAlpha
-            nameAlpha = hfAlpha
-            healthTextAlpha = hfAlpha
-            aurasAlpha = hfAlpha
-            iconsAlpha = hfAlpha
-            powerBarAlpha = hfAlpha
-            dispelAlpha = hfAlpha
-            targetedSpellAlpha = hfAlpha
-        end
+        local hfAlpha = db.healthFadeAlpha or 0.5
+        healthBarAlpha = hfAlpha
+        backgroundAlpha = hfAlpha
+        nameAlpha = hfAlpha
+        healthTextAlpha = hfAlpha
+        aurasAlpha = hfAlpha
+        iconsAlpha = hfAlpha
+        powerBarAlpha = hfAlpha
+        dispelAlpha = hfAlpha
+        targetedSpellAlpha = hfAlpha
         frame.dfTestHealthFadeAlphas = {
             icons = iconsAlpha,
             power = powerBarAlpha,
@@ -885,7 +863,7 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     if not db.oorEnabled then
         if isOutOfRange then
             frame:SetAlpha(db.rangeFadeAlpha or db.rangeAlpha or 0.55)
-        elseif isAboveHealthThreshold and not db.hfElementSpecific then
+        elseif isAboveHealthThreshold then
             frame:SetAlpha(db.healthFadeAlpha or 0.5)
         else
             frame:SetAlpha(1)

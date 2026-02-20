@@ -74,12 +74,12 @@ end
 DF.GetSafeHealthPercent = GetSafeHealthPercent
 
 -- Helper to set health bar value safely
--- GetSafeHealthPercent uses CurveConstants.ScaleTo100 which returns a non-secret
--- number (0-100) that is safe to compare in Lua.
+-- Uses CurveConstants.ScaleTo100 for the bar value, then delegates
+-- threshold fading to HealthFade.lua's curve-based system.
 local function SetHealthBarValue(bar, unit, frame)
     if not bar then return end
 
-    -- Get health percent (0-100) — non-secret via CurveConstants.ScaleTo100
+    -- Get health percent (0-100) via CurveConstants.ScaleTo100
     local pct = GetSafeHealthPercent(unit)
 
     -- Set bar range and value
@@ -100,10 +100,8 @@ local function SetHealthBarValue(bar, unit, frame)
         bar:SetValue(pct)
     end
 
-    -- Health threshold fading: compare directly (pct is non-secret)
-    if frame and pct then
-        local threshold = (db and db.healthFadeThreshold) or 100
-        frame.dfComputedAboveThreshold = (pct >= threshold - 0.5)
+    -- Health threshold fading (curve-based, no Lua-side secret comparison)
+    if frame then
         if DF.UpdateHealthFade then
             DF:UpdateHealthFade(frame)
         end

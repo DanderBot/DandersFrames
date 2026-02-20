@@ -119,11 +119,6 @@ local function IsOffline(frame)
     return not UnitIsConnected(unit)
 end
 
--- Check if unit is above health threshold (for health threshold fading)
-local function IsHealthFaded(frame)
-    return frame.dfIsHealthFaded == true
-end
-
 -- Check if health threshold fade is enabled
 local function IsHealthFadeEnabled(db)
     return db and db.healthFadeEnabled
@@ -179,8 +174,6 @@ function DF:UpdateHealthBarAppearance(frame)
     
     if deadOrOffline and db.fadeDeadFrames then
         alpha = db.fadeDeadHealthBar or 1
-    elseif IsHealthFadeEnabled(db) and IsHealthFaded(frame) and not deadOrOffline and db.hfElementSpecific then
-        alpha = DF:GetHealthFadeAlpha(frame, "healthBar")
     end
     
     -- ========================================
@@ -334,8 +327,6 @@ function DF:UpdateBackgroundAppearance(frame)
     
     if deadOrOffline and db.fadeDeadFrames then
         finalAlpha = db.fadeDeadBackground or 1
-    elseif IsHealthFadeEnabled(db) and IsHealthFaded(frame) and not deadOrOffline and db.hfElementSpecific then
-        finalAlpha = DF:GetHealthFadeAlpha(frame, "background")
     end
     
     -- ========================================
@@ -416,8 +407,6 @@ function DF:UpdateNameTextAppearance(frame)
     
     if deadOrOffline and db.fadeDeadFrames then
         alpha = db.fadeDeadName or 1.0
-    elseif IsHealthFadeEnabled(db) and IsHealthFaded(frame) and not deadOrOffline and db.hfElementSpecific then
-        alpha = DF:GetHealthFadeAlpha(frame, "nameText")
     end
     
     -- ========================================
@@ -474,8 +463,6 @@ function DF:UpdateHealthTextAppearance(frame)
     
     if deadOrOffline and db.fadeDeadFrames then
         alpha = db.fadeDeadHealthBar or 1  -- Health text follows health bar alpha
-    elseif IsHealthFadeEnabled(db) and IsHealthFaded(frame) and not deadOrOffline and db.hfElementSpecific then
-        alpha = DF:GetHealthFadeAlpha(frame, "healthText")
     end
     
     -- ========================================
@@ -514,8 +501,6 @@ function DF:UpdateStatusTextAppearance(frame)
     local alpha = 1.0
     if deadOrOffline and db.fadeDeadFrames then
         alpha = db.fadeDeadStatusText or 1.0
-    elseif IsHealthFadeEnabled(db) and IsHealthFaded(frame) and not deadOrOffline and db.hfElementSpecific then
-        alpha = DF:GetHealthFadeAlpha(frame, "healthText")  -- status text uses same key as health text for health fade
     end
     
     frame.statusText:SetTextColor(r, g, b, alpha)
@@ -545,8 +530,6 @@ function DF:UpdatePowerBarAppearance(frame)
     
     if deadOrOffline and db.fadeDeadFrames then
         alpha = db.fadeDeadPowerBar or 0
-    elseif IsHealthFadeEnabled(db) and IsHealthFaded(frame) and not deadOrOffline and db.hfElementSpecific then
-        alpha = DF:GetHealthFadeAlpha(frame, "powerBar")
     end
     
     if db.oorEnabled then
@@ -577,13 +560,11 @@ function DF:UpdateBuffIconsAppearance(frame)
     local alpha = 1.0
     if deadOrOffline and db.fadeDeadFrames then
         alpha = db.fadeDeadAuras or 1.0
-    elseif IsHealthFadeEnabled(db) and IsHealthFaded(frame) and not deadOrOffline and db.hfElementSpecific then
-        alpha = DF:GetHealthFadeAlpha(frame, "auras")
     end
-    
+
     if db.oorEnabled then
         local oorAlpha = db.oorAurasAlpha or 0.2
-        
+
         for _, icon in ipairs(frame.buffIcons) do
             if icon then
                 ApplyOORAlpha(icon, inRange, alpha, oorAlpha)
@@ -618,13 +599,11 @@ function DF:UpdateDebuffIconsAppearance(frame)
     local alpha = 1.0
     if deadOrOffline and db.fadeDeadFrames then
         alpha = db.fadeDeadAuras or 1.0
-    elseif IsHealthFadeEnabled(db) and IsHealthFaded(frame) and not deadOrOffline and db.hfElementSpecific then
-        alpha = DF:GetHealthFadeAlpha(frame, "auras")
     end
-    
+
     if db.oorEnabled then
         local oorAlpha = db.oorAurasAlpha or 0.2
-        
+
         for _, icon in ipairs(frame.debuffIcons) do
             if icon then
                 ApplyOORAlpha(icon, inRange, alpha, oorAlpha)
@@ -659,8 +638,6 @@ function DF:UpdateRoleIconAppearance(frame)
     local alpha = db.roleIconAlpha or 1.0
     if deadOrOffline and db.fadeDeadFrames then
         alpha = (db.fadeDeadIcons or 1.0) * (db.roleIconAlpha or 1.0)
-    elseif IsHealthFadeEnabled(db) and IsHealthFaded(frame) and not deadOrOffline and db.hfElementSpecific then
-        alpha = DF:GetHealthFadeAlpha(frame, "icons")
     end
 
     if db.oorEnabled then
@@ -686,8 +663,6 @@ function DF:UpdateLeaderIconAppearance(frame)
     local alpha = db.leaderIconAlpha or 1.0
     if deadOrOffline and db.fadeDeadFrames then
         alpha = (db.fadeDeadIcons or 1.0) * (db.leaderIconAlpha or 1.0)
-    elseif IsHealthFadeEnabled(db) and IsHealthFaded(frame) and not deadOrOffline and db.hfElementSpecific then
-        alpha = DF:GetHealthFadeAlpha(frame, "icons")
     end
 
     if db.oorEnabled then
@@ -713,8 +688,6 @@ function DF:UpdateRaidTargetIconAppearance(frame)
     local alpha = db.raidTargetIconAlpha or 1.0
     if deadOrOffline and db.fadeDeadFrames then
         alpha = (db.fadeDeadIcons or 1.0) * (db.raidTargetIconAlpha or 1.0)
-    elseif IsHealthFadeEnabled(db) and IsHealthFaded(frame) and not deadOrOffline and db.hfElementSpecific then
-        alpha = DF:GetHealthFadeAlpha(frame, "icons")
     end
 
     if db.oorEnabled then
@@ -740,8 +713,6 @@ function DF:UpdateReadyCheckIconAppearance(frame)
     local alpha = db.readyCheckIconAlpha or 1.0
     if deadOrOffline and db.fadeDeadFrames then
         alpha = (db.fadeDeadIcons or 1.0) * (db.readyCheckIconAlpha or 1.0)
-    elseif IsHealthFadeEnabled(db) and IsHealthFaded(frame) and not deadOrOffline and db.hfElementSpecific then
-        alpha = DF:GetHealthFadeAlpha(frame, "icons")
     end
 
     if db.oorEnabled then
@@ -767,10 +738,8 @@ function DF:UpdateCenterStatusIconAppearance(frame)
     local alpha = 1.0
     if deadOrOffline and db.fadeDeadFrames then
         alpha = db.fadeDeadIcons or 1.0
-    elseif IsHealthFadeEnabled(db) and IsHealthFaded(frame) and not deadOrOffline and db.hfElementSpecific then
-        alpha = DF:GetHealthFadeAlpha(frame, "icons")
     end
-    
+
     if db.oorEnabled then
         local oorAlpha = db.oorIconsAlpha or 0.5
         ApplyOORAlpha(frame.centerStatusIcon, inRange, alpha, oorAlpha)
@@ -798,8 +767,6 @@ function DF:UpdateDispelOverlayAppearance(frame)
     local alpha = 1.0
     if deadOrOffline and db.fadeDeadFrames then
         alpha = db.fadeDeadBackground or 1
-    elseif IsHealthFadeEnabled(db) and IsHealthFaded(frame) and not deadOrOffline and db.hfElementSpecific then
-        alpha = DF:GetHealthFadeAlpha(frame, "dispelOverlay")
     end
     
     if db.oorEnabled then
@@ -835,9 +802,6 @@ function DF:UpdateMyBuffIndicatorAppearance(frame)
     if not db then return end
     if DF.testMode or DF.raidTestMode then return end
     if not frame.dfMyBuffOverlay or not frame.dfMyBuffOverlay:IsShown() then return end
-    if not db.oorEnabled and IsHealthFadeEnabled(db) and IsHealthFaded(frame) and db.hfElementSpecific then
-        frame.dfMyBuffOverlay:SetAlpha(DF:GetHealthFadeAlpha(frame, "myBuffIndicator"))
-    end
 end
 
 -- ============================================================
@@ -859,10 +823,7 @@ function DF:UpdateMissingBuffAppearance(frame)
     local inRange = GetInRange(frame)
     
     local alpha = 1.0
-    if IsHealthFadeEnabled(db) and IsHealthFaded(frame) and db.hfElementSpecific then
-        alpha = DF:GetHealthFadeAlpha(frame, "missingBuff")
-    end
-    
+
     if db.oorEnabled then
         local oorAlpha = db.oorMissingBuffAlpha or 0.5
         ApplyOORAlpha(frame.missingBuffIcon, inRange, alpha, oorAlpha)
@@ -969,10 +930,7 @@ function DF:UpdateDefensiveIconAppearance(frame)
     local icon = frame.defensiveIcon
     
     local alpha = 1.0
-    if IsHealthFadeEnabled(db) and IsHealthFaded(frame) and db.hfElementSpecific then
-        alpha = DF:GetHealthFadeAlpha(frame, "defensiveIcon")
-    end
-    
+
     if db.oorEnabled then
         local oorAlpha = db.oorDefensiveIconAlpha or 0.5
         ApplyOORAlpha(icon.texture, inRange, alpha, oorAlpha)
@@ -1012,10 +970,7 @@ function DF:UpdateTargetedSpellAppearance(frame)
     local inRange = GetInRange(frame)
     
     local alpha = 1.0
-    if IsHealthFadeEnabled(db) and IsHealthFaded(frame) and db.hfElementSpecific then
-        alpha = DF:GetHealthFadeAlpha(frame, "targetedSpell")
-    end
-    
+
     if db.oorEnabled then
         local oorAlpha = db.oorTargetedSpellAlpha or 0.5
         ApplyOORAlpha(frame.targetedSpellContainer, inRange, alpha, oorAlpha)
@@ -1040,10 +995,9 @@ function DF:UpdateFrameAppearance(frame)
         ApplyOORAlpha(frame, true, 1.0, 1.0)
     else
         local inRange = GetInRange(frame)
-        -- Frame-level: health-based fade (above threshold) or OOR
-        if IsHealthFadeEnabled(db) and IsHealthFaded(frame) and not db.hfElementSpecific then
-            local healthFadeAlpha = db.healthFadeAlpha or 0.5
-            frame:SetAlpha(healthFadeAlpha)
+        -- Frame-level: health fade via curve (re-evaluate for range changes)
+        if IsHealthFadeEnabled(db) and frame.dfHealthFadeActive and DF.ApplyHealthFadeAlpha and DF:ApplyHealthFadeAlpha(frame) then
+            -- Curve applied alpha directly, includes OOR state
         else
             local outOfRangeAlpha = db.rangeFadeAlpha or 0.4
             ApplyOORAlpha(frame, inRange, 1.0, outOfRangeAlpha)

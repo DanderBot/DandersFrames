@@ -1,45 +1,109 @@
 local addonName, DF = ...
 
 -- ============================================================
--- HEALTH THRESHOLD FADE SYSTEM
--- Fades frames/elements when a unit's health is above a configurable
--- threshold. UnitHealthPercent has SecretReturns=true (Blizzard API doc):
--- we use a hidden StatusBar in Core.lua whose OnValueChanged receives
--- a resolved value; dfComputedAboveThreshold is set there.
--- Cancel-on-dispel supported.
+-- HEALTH THRESHOLD FADE SYSTEM (Curve-Based)
+-- Fades frames when a unit's health is above a configurable threshold.
+-- Uses C_CurveUtil.CreateColorCurve() to encode the fade alpha in the
+-- curve's alpha channel, then passes UnitHealthPercent(unit, true, curve)
+-- to get a ColorMixin whose GetRGBA() alpha is the resolved fade value.
+-- The result goes straight to frame:SetAlpha() — NO Lua-side comparison
+-- ever touches the secret number.
+-- Frame-level fade only — element-specific removed for performance.
 -- ============================================================
 
--- Upvalue all frequently used globals for performance
+-- Upvalue frequently used globals
 local UnitExists = UnitExists
-local issecretvalue = issecretvalue or function() return false end
+local UnitHealthPercent = UnitHealthPercent
+local CreateColor = CreateColor
+local wipe = wipe
+
+-- ============================================================
+-- CURVE CACHE
+-- Curves keyed by (threshold, belowAlpha, aboveAlpha).
+-- Typically only 1-2 unique curves at any time.
+-- ============================================================
+
+local healthFadeCurveCache = {}
+
+local function BuildHealthFadeCurve(threshold, belowAlpha, aboveAlpha)
+    local key = threshold .. "_" .. belowAlpha .. "_" .. aboveAlpha
+    if healthFadeCurveCache[key] then return healthFadeCurveCache[key] end
+
+    local curve = C_CurveUtil.CreateColorCurve()
+    curve:SetType(Enum.LuaCurveType.Linear)
+
+    local pos = threshold / 100  -- 0-1 range
+    local belowColor = CreateColor(1, 1, 1, belowAlpha)
+    local aboveColor = CreateColor(1, 1, 1, aboveAlpha)
+
+    -- Step function at threshold boundary
+    curve:AddPoint(0, belowColor)
+    if pos > 0.001 then curve:AddPoint(pos - 0.001, belowColor) end
+    if pos < 0.999 then curve:AddPoint(pos + 0.001, aboveColor) end
+    curve:AddPoint(1, aboveColor)
+
+    healthFadeCurveCache[key] = curve
+    return curve
+end
 
 -- Invalidate curve cache when options change (called from Options.lua)
 function DF:InvalidateHealthFadeCurve()
-    -- Reserved for future curve-based implementation
+    wipe(healthFadeCurveCache)
 end
 
 -- ============================================================
--- APPLY CANCEL OVERRIDES (dispel only)
--- frame.dfComputedAboveThreshold is set by Core's hidden bar OnValueChanged (resolved value).
+-- APPLY HEALTH FADE ALPHA
+-- Builds a curve encoding the fade, evaluates it via UnitHealthPercent,
+-- and applies the result directly to frame:SetAlpha().
+-- Returns true if health fade alpha was applied.
+-- NO secret number comparisons — the curve result goes straight to SetAlpha.
 -- ============================================================
-local function ApplyCancelOverrides(frame, isAboveThreshold)
-    if not isAboveThreshold or not frame or not frame.unit then return isAboveThreshold end
-    local db = frame.isRaidFrame and DF:GetRaidDB() or DF:GetDB()
-    if not db then return isAboveThreshold end
 
+function DF:ApplyHealthFadeAlpha(frame)
+    if not frame or not frame.unit then return false end
+
+    local db = frame.isRaidFrame and DF:GetRaidDB() or DF:GetDB()
+    if not db or not db.healthFadeEnabled then return false end
+
+    -- Skip in test mode (test mode handles its own fade)
+    if DF.testMode or DF.raidTestMode then return false end
+
+    -- Dispel cancel: if dispel overlay is showing, cancel fade
+    -- (IsShown is a non-tainted boolean)
     if db.hfCancelOnDispel then
         if frame.dfDispelOverlay and frame.dfDispelOverlay:IsShown() then
             return false
         end
     end
 
-    return isAboveThreshold
+    -- Determine below-threshold alpha based on range state
+    -- frame.dfInRange is a non-tainted boolean from Range.lua
+    local belowAlpha
+    if not db.oorEnabled and frame.dfInRange == false then
+        belowAlpha = db.rangeFadeAlpha or 0.4
+    else
+        belowAlpha = 1.0
+    end
+
+    local aboveAlpha = db.healthFadeAlpha or 0.5
+    local threshold = db.healthFadeThreshold or 100
+
+    -- Build curve and resolve via WoW engine (no secret number comparison)
+    local curve = BuildHealthFadeCurve(threshold, belowAlpha, aboveAlpha)
+    local color = UnitHealthPercent(frame.unit, true, curve)
+    if not color then return false end
+
+    -- Extract alpha and apply directly — never compare, never store
+    local _, _, _, alpha = color:GetRGBA()
+    if not alpha then return false end
+
+    frame:SetAlpha(alpha)
+    return true
 end
 
 -- ============================================================
 -- UPDATE HEALTH FADE STATE FOR A FRAME
--- Base "above threshold" from frame.dfComputedAboveThreshold (set by hidden bar
--- OnValueChanged with resolved value; UnitHealthPercent has SecretReturns=true).
+-- Called from SetHealthBarValue on every health update.
 -- ============================================================
 
 function DF:UpdateHealthFade(frame)
@@ -55,8 +119,8 @@ function DF:UpdateHealthFade(frame)
 
     local db = frame.isRaidFrame and DF:GetRaidDB() or DF:GetDB()
     if not db or not db.healthFadeEnabled then
-        if frame.dfIsHealthFaded then
-            frame.dfIsHealthFaded = false
+        if frame.dfHealthFadeActive then
+            frame.dfHealthFadeActive = false
             if DF.UpdateAllElementAppearances then
                 DF:UpdateAllElementAppearances(frame)
             end
@@ -64,12 +128,13 @@ function DF:UpdateHealthFade(frame)
         return
     end
 
-    -- Use resolved value from hidden bar callback (safe to use); nil = not yet set = don't fade
-    local isAboveThreshold = (frame.dfComputedAboveThreshold == true)
-    isAboveThreshold = ApplyCancelOverrides(frame, isAboveThreshold)
+    local applied = DF:ApplyHealthFadeAlpha(frame)
+    local wasActive = frame.dfHealthFadeActive
 
-    if frame.dfIsHealthFaded ~= isAboveThreshold then
-        frame.dfIsHealthFaded = isAboveThreshold
+    frame.dfHealthFadeActive = applied
+
+    -- On transition off (dispel cancel etc), restore normal appearance
+    if wasActive and not applied then
         if DF.UpdateAllElementAppearances then
             DF:UpdateAllElementAppearances(frame)
         end
@@ -78,15 +143,9 @@ end
 
 -- ============================================================
 -- UPDATE HEALTH FADE FOR PET FRAMES
--- (Pet frames still use percent check; no curve needed for simplicity)
+-- Same curve approach — only set frame:SetAlpha (cascades to children).
+-- Do NOT also set healthBar:SetAlpha or the alpha double-stacks.
 -- ============================================================
-
-local function GetPetHealthPercent(unit)
-    if not unit or not UnitExists(unit) then return 0 end
-    local pct = DF.GetSafeHealthPercent and DF.GetSafeHealthPercent(unit) or 0
-    if issecretvalue(pct) then return 0 end
-    return pct
-end
 
 function DF:UpdatePetHealthFade(frame)
     if not frame or not frame.unit then return end
@@ -94,66 +153,29 @@ function DF:UpdatePetHealthFade(frame)
 
     local db = frame.isRaidFrame and DF:GetRaidDB() or DF:GetDB()
     if not db or not db.healthFadeEnabled then
-        frame.dfIsHealthFaded = false
+        frame.dfHealthFadeActive = false
+        frame:SetAlpha(1.0)
         return
     end
 
-    local pct = GetPetHealthPercent(frame.unit)
     local threshold = db.healthFadeThreshold or 100
-    local isAboveThreshold = (pct >= threshold - 0.5)
+    local aboveAlpha = db.healthFadeAlpha or 0.5
 
-    if frame.dfIsHealthFaded ~= isAboveThreshold then
-        frame.dfIsHealthFaded = isAboveThreshold
-        local healthFadeAlpha = db.healthFadeAlpha or 0.5
-        if frame.SetAlpha then
-            frame:SetAlpha(isAboveThreshold and healthFadeAlpha or 1.0)
-        end
-        if frame.healthBar then
-            frame.healthBar:SetAlpha(isAboveThreshold and healthFadeAlpha or 1.0)
-        end
-    end
+    local curve = BuildHealthFadeCurve(threshold, 1.0, aboveAlpha)
+    local color = UnitHealthPercent(frame.unit, true, curve)
+    if not color then return end
+
+    local _, _, _, alpha = color:GetRGBA()
+    if not alpha then return end
+
+    frame:SetAlpha(alpha)
 end
 
 -- ============================================================
--- HELPER: Check if a frame should be faded (above health threshold)
--- Used by ElementAppearance.lua. Now derived from curve when possible.
+-- HELPER: Check if a frame is currently health-faded
 -- ============================================================
 
 function DF:IsHealthFaded(frame)
     if not frame then return false end
-    local db = frame.isRaidFrame and DF:GetRaidDB() or DF:GetDB()
-    if not db or not db.healthFadeEnabled then
-        return false
-    end
-    return frame.dfIsHealthFaded == true
+    return frame.dfHealthFadeActive == true
 end
-
--- ============================================================
--- HELPER: Get health fade alpha for an element
--- Used by ElementAppearance.lua. For frame-level fade, can use curve alpha.
--- ============================================================
-
-local HEALTH_FADE_ALPHA_MAP = {
-    healthBar = "hfHealthBarAlpha",
-    background = "hfBackgroundAlpha",
-    nameText = "hfNameTextAlpha",
-    healthText = "hfHealthTextAlpha",
-    auras = "hfAurasAlpha",
-    icons = "hfIconsAlpha",
-    dispelOverlay = "hfDispelOverlayAlpha",
-    powerBar = "hfPowerBarAlpha",
-    missingBuff = "hfMissingBuffAlpha",
-    defensiveIcon = "hfDefensiveIconAlpha",
-    targetedSpell = "hfTargetedSpellAlpha",
-    myBuffIndicator = "hfMyBuffIndicatorAlpha",
-    frame = "healthFadeAlpha",
-}
-
-function DF:GetHealthFadeAlpha(frame, elementKey)
-    if not frame then return 1.0 end
-    local db = frame.isRaidFrame and DF:GetRaidDB() or DF:GetDB()
-    if not db then return 1.0 end
-    local dbKey = HEALTH_FADE_ALPHA_MAP[elementKey] or "healthFadeAlpha"
-    return db[dbKey] or 0.5
-end
-

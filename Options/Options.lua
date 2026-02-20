@@ -709,12 +709,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local function HideHFOptions(d)
             return not d.healthFadeEnabled
         end
-        local function HideHFElementOptions(d)
-            return not d.healthFadeEnabled or not d.hfElementSpecific
-        end
-        local function HideHFFrameAlpha(d)
-            return not d.healthFadeEnabled or d.hfElementSpecific
-        end
 
         local hfThreshold = hfGroup:AddWidget(GUI:CreateSlider(self.child, "Health Threshold (%)", 50, 100, 1, db, "healthFadeThreshold", function()
             DF:UpdateAllFrames()
@@ -739,39 +733,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end
 
         local hfFrameAlpha = hfGroup:AddWidget(GUI:CreateSlider(self.child, "Frame Alpha (Above Threshold)", 0.1, 1.0, 0.05, db, "healthFadeAlpha", nil, RefreshHealthFade, true), 55)
-        hfFrameAlpha.hideOn = HideHFFrameAlpha
-        hfFrameAlpha.tooltip = "Frame opacity when health is above the threshold (element-specific disabled)."
-
-        local hfElementSpecific = hfGroup:AddWidget(GUI:CreateCheckbox(self.child, "Enable Element-Specific Alpha", db, "hfElementSpecific", function()
-            self:RefreshStates()
-            RefreshHealthFade()
-        end), 30)
-        hfElementSpecific.hideOn = HideHFOptions
-
-        local hfHealth = hfGroup:AddWidget(GUI:CreateSlider(self.child, "Health Bar Alpha", 0.0, 1.0, 0.05, db, "hfHealthBarAlpha", nil, RefreshHealthFade, true), 55)
-        hfHealth.hideOn = HideHFElementOptions
-        local hfBg = hfGroup:AddWidget(GUI:CreateSlider(self.child, "Background Alpha", 0.0, 1.0, 0.05, db, "hfBackgroundAlpha", nil, RefreshHealthFade, true), 55)
-        hfBg.hideOn = HideHFElementOptions
-        local hfName = hfGroup:AddWidget(GUI:CreateSlider(self.child, "Name Text Alpha", 0.0, 1.0, 0.05, db, "hfNameTextAlpha", nil, RefreshHealthFade, true), 55)
-        hfName.hideOn = HideHFElementOptions
-        local hfHealthText = hfGroup:AddWidget(GUI:CreateSlider(self.child, "Health Text Alpha", 0.0, 1.0, 0.05, db, "hfHealthTextAlpha", nil, RefreshHealthFade, true), 55)
-        hfHealthText.hideOn = HideHFElementOptions
-        local hfAuras = hfGroup:AddWidget(GUI:CreateSlider(self.child, "Auras Alpha", 0.0, 1.0, 0.05, db, "hfAurasAlpha", nil, RefreshHealthFade, true), 55)
-        hfAuras.hideOn = HideHFElementOptions
-        local hfIcons = hfGroup:AddWidget(GUI:CreateSlider(self.child, "Icons Alpha", 0.0, 1.0, 0.05, db, "hfIconsAlpha", nil, RefreshHealthFade, true), 55)
-        hfIcons.hideOn = HideHFElementOptions
-        local hfDispel = hfGroup:AddWidget(GUI:CreateSlider(self.child, "Dispel Overlay Alpha", 0.0, 1.0, 0.05, db, "hfDispelOverlayAlpha", nil, RefreshHealthFade, true), 55)
-        hfDispel.hideOn = HideHFElementOptions
-        local hfMyBuff = hfGroup:AddWidget(GUI:CreateSlider(self.child, "My Buff Indicator Alpha", 0.0, 1.0, 0.05, db, "hfMyBuffIndicatorAlpha", nil, RefreshHealthFade, true), 55)
-        hfMyBuff.hideOn = HideHFElementOptions
-        local hfPower = hfGroup:AddWidget(GUI:CreateSlider(self.child, "Power Bar Alpha", 0.0, 1.0, 0.05, db, "hfPowerBarAlpha", nil, RefreshHealthFade, true), 55)
-        hfPower.hideOn = HideHFElementOptions
-        local hfMissingBuff = hfGroup:AddWidget(GUI:CreateSlider(self.child, "Missing Buff Alpha", 0.0, 1.0, 0.05, db, "hfMissingBuffAlpha", nil, RefreshHealthFade, true), 55)
-        hfMissingBuff.hideOn = HideHFElementOptions
-        local hfDefensive = hfGroup:AddWidget(GUI:CreateSlider(self.child, "Defensive Icon Alpha", 0.0, 1.0, 0.05, db, "hfDefensiveIconAlpha", nil, RefreshHealthFade, true), 55)
-        hfDefensive.hideOn = HideHFElementOptions
-        local hfTargetedSpell = hfGroup:AddWidget(GUI:CreateSlider(self.child, "Targeted Spell Alpha", 0.0, 1.0, 0.05, db, "hfTargetedSpellAlpha", nil, RefreshHealthFade, true), 55)
-        hfTargetedSpell.hideOn = HideHFElementOptions
+        hfFrameAlpha.hideOn = HideHFOptions
+        hfFrameAlpha.tooltip = "Frame opacity when health is above the threshold."
 
         Add(hfGroup, nil, "both")
         
