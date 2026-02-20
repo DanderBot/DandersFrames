@@ -201,55 +201,63 @@ local function GroupOverridesByTab(overrides)
     return groups, unknownKeys
 end
 
--- Get a value from the live database, handling raid keys, table keys, and pinned keys
+-- Get a value from the real raid database, handling raid keys, table keys, and pinned keys.
+-- Always reads the real table (DF._realRaidDB) — never the overlay proxy.
 local function GetRaidValue(key)
-    -- Pinned frame key (stored at DF.db.raid.pinnedFrames, not DF.db.pinnedFrames)
+    local realRaid = DF._realRaidDB or (DF.db and DF.db.raid)
+    if not realRaid then return nil end
+
+    -- Pinned frame key (stored at raid.pinnedFrames)
     local setIndex, setting = ParsePinnedKey(key)
     if setIndex and setting then
-        local pf = DF.db.raid and DF.db.raid.pinnedFrames
+        local pf = realRaid.pinnedFrames
         local sets = pf and pf.sets
         if sets and sets[setIndex] then
             return sets[setIndex][setting]
         end
         return nil
     end
-    
+
     -- Table-based raid key
     local tableName, index = ParseTableKey(key)
     if tableName and index then
-        local tbl = DF.db.raid[tableName]
+        local tbl = realRaid[tableName]
         if type(tbl) == "table" then
             return tbl[index]
         end
         return nil
     end
-    
+
     -- Direct raid key
-    return DF.db.raid[key]
+    return realRaid[key]
 end
 
--- Set a value in the live database, handling raid keys, table keys, and pinned keys
+-- Set a value in the real raid database, handling raid keys, table keys, and pinned keys.
+-- Always writes to the real table (DF._realRaidDB) — never the overlay proxy.
 local function SetRaidValue(key, value)
-    -- Pinned frame key (stored at DF.db.raid.pinnedFrames, not DF.db.pinnedFrames)
+    local realRaid = DF._realRaidDB or (DF.db and DF.db.raid)
+    if not realRaid then return end
+
+    -- Pinned frame key (stored at raid.pinnedFrames)
     local setIndex, setting = ParsePinnedKey(key)
     if setIndex and setting then
-        local pf = DF.db.raid and DF.db.raid.pinnedFrames
+        local pf = realRaid.pinnedFrames
         local sets = pf and pf.sets
         if sets and sets[setIndex] then
             sets[setIndex][setting] = value
         end
         return
     end
-    
+
     -- Table-based raid key
     local tableName, index = ParseTableKey(key)
     if tableName and index then
-        local tbl = DF.db.raid[tableName]
+        local tbl = realRaid[tableName]
         if type(tbl) == "table" then
             tbl[index] = value
         end
     else
-        DF.db.raid[key] = value
+        realRaid[key] = value
     end
 end
 
@@ -392,16 +400,9 @@ function AutoProfilesUI:DeleteProfile(contentKey, index)
 
     -- If the deleted profile was the active runtime profile, deactivate it
     if deletedProfile and self.activeRuntimeProfile == deletedProfile then
-        -- Restore baseline values directly (profile is already gone so RemoveRuntimeProfile
-        -- can't check override values — just restore everything)
-        if self.runtimeBaseline then
-            for key, originalValue in pairs(self.runtimeBaseline) do
-                SetRaidValue(key, DeepCopyValue(originalValue))
-            end
-        end
+        DF.raidOverrides = nil
         self.activeRuntimeProfile = nil
         self.activeRuntimeContentKey = nil
-        self.runtimeBaseline = nil
         if DF.FullProfileRefresh then
             DF:FullProfileRefresh()
         end
@@ -1748,7 +1749,6 @@ AutoProfilesUI.globalSnapshot = nil  -- Snapshot of true global values during ed
 -- Runtime auto-profile state (not persisted — rebuilt on login/reload via events)
 AutoProfilesUI.activeRuntimeProfile = nil     -- Currently applied profile reference
 AutoProfilesUI.activeRuntimeContentKey = nil  -- "mythic"/"instanced"/"openWorld"
-AutoProfilesUI.runtimeBaseline = nil          -- { [key] = original_value } for overridden keys only
 AutoProfilesUI.pendingAutoProfileEval = false -- Queued evaluation during combat
 
 function AutoProfilesUI:IsEditing()
@@ -1756,9 +1756,12 @@ function AutoProfilesUI:IsEditing()
 end
 
 function AutoProfilesUI:EnterEditing(contentType, profileIndex)
-    -- Remove runtime profile first so snapshot captures true globals
+    -- Clear overlay so snapshot captures true globals (no RemoveRuntimeProfile
+    -- needed — real table was never mutated)
     if self.activeRuntimeProfile then
-        self:RemoveRuntimeProfile()
+        DF.raidOverrides = nil
+        self.activeRuntimeProfile = nil
+        self.activeRuntimeContentKey = nil
     end
 
     local autoDb = DF.db.raidAutoProfiles
@@ -1779,15 +1782,15 @@ function AutoProfilesUI:EnterEditing(contentType, profileIndex)
     self.editingContentType = contentType
     
     -- Snapshot ALL true global values before anything gets modified
-    -- This lets controls freely write to db.raid for live preview while
+    -- This lets controls freely write to DF._realRaidDB for live preview while
     -- SetProfileSetting/GetGlobalValue always know the original globals
     self.globalSnapshot = {}
-    for key, value in pairs(DF.db.raid) do
+    for key, value in pairs(DF._realRaidDB) do
         self.globalSnapshot[key] = DeepCopyValue(value)
     end
-    
+
     -- Snapshot pinned frames overridable settings (stored as "pinned.N.setting" keys)
-    -- Pinned frames live at db.raid.pinnedFrames (not db.pinnedFrames)
+    -- Pinned frames live at raid.pinnedFrames
     -- IMPORTANT: Iterate PINNED_OVERRIDABLE keys rather than set keys to ensure
     -- we capture ALL overridable settings, even ones that are nil due to missing migration.
     -- If a key is nil, backfill a default so both the snapshot and set are consistent.
@@ -1799,7 +1802,7 @@ function AutoProfilesUI:EnterEditing(contentType, profileIndex)
         autoAddTanks = false, autoAddHealers = false, autoAddDPS = false,
         keepOfflinePlayers = true, players = {},
     }
-    local pinnedFrames = DF.db.raid and DF.db.raid.pinnedFrames
+    local pinnedFrames = DF._realRaidDB and DF._realRaidDB.pinnedFrames
     if pinnedFrames and pinnedFrames.sets then
         for setIdx, set in pairs(pinnedFrames.sets) do
             for setting, _ in pairs(PINNED_OVERRIDABLE) do
@@ -1884,9 +1887,9 @@ function AutoProfilesUI:ExitEditing(skipUIUpdates)
         end
 
         -- Remove orphan keys created during editing that aren't tracked overrides
-        for key in pairs(DF.db.raid) do
+        for key in pairs(DF._realRaidDB) do
             if self.globalSnapshot[key] == nil and not overrides[key] then
-                DF.db.raid[key] = nil
+                DF._realRaidDB[key] = nil
             end
         end
     end
@@ -2550,20 +2553,66 @@ local function GetContentDisplayName(contentKey)
     return contentKey or "Unknown"
 end
 
--- Apply a profile's overrides to the live database
+-- Apply a profile's overrides as a read-through overlay (does NOT mutate the real raid table)
 function AutoProfilesUI:ApplyRuntimeProfile(profile, contentKey)
     if not profile or not profile.overrides then return end
 
-    -- Build baseline: snapshot current (global) values for each overridden key
-    self.runtimeBaseline = {}
-    for key, _ in pairs(profile.overrides) do
-        self.runtimeBaseline[key] = DeepCopyValue(GetRaidValue(key))
+    -- Group nested overrides by parent table so multiple overrides on the same
+    -- parent (e.g. raidGroupVisible_1 and raidGroupVisible_3) share one copy
+    local tableGroups = {}   -- { [parentTable] = { [index] = value, ... } }
+    local pinnedGroups = {}  -- { [setIndex] = { [setting] = value, ... } }
+    local simpleKeys = {}    -- { [key] = value }
+
+    for key, value in pairs(profile.overrides) do
+        local setIndex, setting = ParsePinnedKey(key)
+        if setIndex and setting then
+            if not pinnedGroups[setIndex] then pinnedGroups[setIndex] = {} end
+            pinnedGroups[setIndex][setting] = value
+        else
+            local tableName, index = ParseTableKey(key)
+            if tableName and index then
+                if not tableGroups[tableName] then tableGroups[tableName] = {} end
+                tableGroups[tableName][index] = value
+            else
+                simpleKeys[key] = value
+            end
+        end
     end
 
-    -- Write overrides into the live database
-    for key, value in pairs(profile.overrides) do
-        SetRaidValue(key, DeepCopyValue(value))
+    -- Build the overlay table
+    local overlay = {}
+
+    -- Simple keys: direct copy
+    for key, value in pairs(simpleKeys) do
+        overlay[key] = DeepCopyValue(value)
     end
+
+    -- Table keys: deep-copy parent from real table, apply overrides
+    for tableName, indices in pairs(tableGroups) do
+        local parent = DeepCopyValue(DF._realRaidDB[tableName])
+        if type(parent) ~= "table" then parent = {} end
+        for index, value in pairs(indices) do
+            parent[index] = DeepCopyValue(value)
+        end
+        overlay[tableName] = parent
+    end
+
+    -- Pinned keys: deep-copy pinnedFrames from real table, apply overrides
+    if next(pinnedGroups) then
+        local pf = DeepCopyValue(DF._realRaidDB.pinnedFrames)
+        if type(pf) ~= "table" then pf = {} end
+        if type(pf.sets) ~= "table" then pf.sets = {} end
+        for setIdx, settings in pairs(pinnedGroups) do
+            if not pf.sets[setIdx] then pf.sets[setIdx] = {} end
+            for setting, value in pairs(settings) do
+                pf.sets[setIdx][setting] = DeepCopyValue(value)
+            end
+        end
+        overlay.pinnedFrames = pf
+    end
+
+    -- Activate the overlay (proxy reads this automatically)
+    DF.raidOverrides = overlay
 
     -- Store active state
     self.activeRuntimeProfile = profile
@@ -2585,30 +2634,16 @@ function AutoProfilesUI:ApplyRuntimeProfile(profile, contentKey)
     self:RefreshTabOverrideStars()
 end
 
--- Remove the active runtime profile, restoring global values
+-- Remove the active runtime profile overlay
 function AutoProfilesUI:RemoveRuntimeProfile()
     if not self.activeRuntimeProfile then return end
 
-    local profile = self.activeRuntimeProfile
-
-    -- Restore baseline values, but respect user changes made while profile was active
-    if self.runtimeBaseline and profile.overrides then
-        for key, baselineValue in pairs(self.runtimeBaseline) do
-            local overrideValue = profile.overrides[key]
-            local liveValue = GetRaidValue(key)
-
-            -- Only restore if the live value still matches the override
-            -- (if user changed it via settings, keep their change)
-            if overrideValue ~= nil and DeepCompare(liveValue, overrideValue) then
-                SetRaidValue(key, DeepCopyValue(baselineValue))
-            end
-        end
-    end
+    -- Clear overlay — proxy falls through to real table immediately
+    DF.raidOverrides = nil
 
     -- Clear runtime state
     self.activeRuntimeProfile = nil
     self.activeRuntimeContentKey = nil
-    self.runtimeBaseline = nil
 
     -- Refresh all frames to reflect global settings
     if DF.FullProfileRefresh then
@@ -2621,69 +2656,87 @@ function AutoProfilesUI:RemoveRuntimeProfile()
     self:RefreshTabOverrideStars()
 end
 
--- Strip runtime overrides from DF.db.raid, restoring baseline values
--- Called by Profile.lua before saving to prevent override contamination
--- Returns true if overrides were stripped (caller should call ReapplyRuntimeOverrides after save)
-function AutoProfilesUI:StripRuntimeOverrides()
-    if not self.runtimeBaseline or not self.activeRuntimeProfile then return false end
-    local overrides = self.activeRuntimeProfile.overrides
-    if not overrides then return false end
-
-    for key, baselineValue in pairs(self.runtimeBaseline) do
-        SetRaidValue(key, DeepCopyValue(baselineValue))
-    end
-    return true
-end
-
--- Re-apply runtime overrides to DF.db.raid after a clean save
-function AutoProfilesUI:ReapplyRuntimeOverrides()
-    if not self.activeRuntimeProfile then return end
-    local overrides = self.activeRuntimeProfile.overrides
-    if not overrides then return end
-
-    for key, value in pairs(overrides) do
-        SetRaidValue(key, DeepCopyValue(value))
-    end
-end
-
 -- ============================================================
 -- RUNTIME WRITE INTERCEPTION
--- Prevents GUI controls from stomping override values in DF.db.raid
--- when a runtime auto-profile is active.
+-- When a user changes a global setting via GUI while an auto-profile
+-- overlay is active, the proxy __newindex already writes to the real
+-- table. This function tells the caller whether the key is overridden
+-- so the GUI can suppress visual refresh (the overlay value stays visible).
 -- ============================================================
 
 -- Intercept a GUI control write for an overridden key.
--- Stores the user's new global value in runtimeBaseline (takes effect when profile deactivates).
--- Returns true if the write was intercepted (caller should skip db write + frame refresh).
+-- The proxy __newindex already wrote the user's value to the real table.
+-- For nested keys we also need to update the real sub-table manually.
+-- Returns true if the key is overridden (caller should skip frame refresh).
 function AutoProfilesUI:HandleRuntimeWrite(key, value)
-    if not self.activeRuntimeProfile or not self.runtimeBaseline then return false end
-    if self.runtimeBaseline[key] == nil then return false end  -- key not overridden
+    if not self.activeRuntimeProfile or not DF.raidOverrides then return false end
 
-    -- Store the user's new global in the baseline (takes effect when profile deactivates)
-    if type(value) == "table" then
-        local copy = {}
-        for k, v in pairs(value) do copy[k] = v end
-        self.runtimeBaseline[key] = copy
-    else
-        self.runtimeBaseline[key] = value
+    -- Check if this key (or its parent) is covered by the overlay
+    local setIndex, setting = ParsePinnedKey(key)
+    if setIndex and setting then
+        -- Pinned key: write to real table directly
+        local pf = DF._realRaidDB.pinnedFrames
+        if pf and pf.sets and pf.sets[setIndex] then
+            pf.sets[setIndex][setting] = value
+        end
+        return DF.raidOverrides.pinnedFrames ~= nil
     end
-    return true  -- intercepted
+
+    local tableName, index = ParseTableKey(key)
+    if tableName and index then
+        -- Table key: write to real parent table
+        local tbl = DF._realRaidDB[tableName]
+        if type(tbl) == "table" then
+            tbl[index] = value
+        end
+        return DF.raidOverrides[tableName] ~= nil
+    end
+
+    -- Simple key: proxy __newindex already wrote to real table
+    return DF.raidOverrides[key] ~= nil
 end
 
 -- Check if a setting key is currently overridden by an active runtime profile.
 -- Used by the GUI to show visual indicators on overridden controls.
 function AutoProfilesUI:IsOverriddenByRuntime(key)
-    if not self.activeRuntimeProfile or not self.runtimeBaseline then return false end
-    return self.runtimeBaseline[key] ~= nil
+    if not self.activeRuntimeProfile or not DF.raidOverrides then return false end
+
+    local setIndex, setting = ParsePinnedKey(key)
+    if setIndex and setting then
+        return DF.raidOverrides.pinnedFrames ~= nil
+    end
+
+    local tableName, index = ParseTableKey(key)
+    if tableName and index then
+        return DF.raidOverrides[tableName] ~= nil
+    end
+
+    return DF.raidOverrides[key] ~= nil
 end
 
 -- Get the global (baseline) value of an overridden key for display in indicators.
--- Returns the baseline value if overridden, otherwise falls back to the current raid value.
+-- With the overlay proxy the real table is always clean, so just read from it.
 function AutoProfilesUI:GetRuntimeGlobalValue(key)
-    if self.runtimeBaseline and self.runtimeBaseline[key] ~= nil then
-        return self.runtimeBaseline[key]
+    local setIndex, setting = ParsePinnedKey(key)
+    if setIndex and setting then
+        local pf = DF._realRaidDB and DF._realRaidDB.pinnedFrames
+        local sets = pf and pf.sets
+        if sets and sets[setIndex] then
+            return sets[setIndex][setting]
+        end
+        return nil
     end
-    return GetRaidValue(key)
+
+    local tableName, index = ParseTableKey(key)
+    if tableName and index then
+        local tbl = DF._realRaidDB[tableName]
+        if type(tbl) == "table" then
+            return tbl[index]
+        end
+        return nil
+    end
+
+    return DF._realRaidDB[key]
 end
 
 -- Evaluate current content/raid state and apply/remove profiles as needed
@@ -2881,13 +2934,13 @@ SlashCmdList["DFAUTOTEST"] = function()
         if rtProfile.overrides then
             for _ in pairs(rtProfile.overrides) do rtOverrides = rtOverrides + 1 end
         end
-        local rtBaseline = 0
-        if AutoProfilesUI.runtimeBaseline then
-            for _ in pairs(AutoProfilesUI.runtimeBaseline) do rtBaseline = rtBaseline + 1 end
+        local overlayKeys = 0
+        if DF.raidOverrides then
+            for _ in pairs(DF.raidOverrides) do overlayKeys = overlayKeys + 1 end
         end
         print("  Runtime Profile: |cff00ff00\"" .. (rtProfile.name or "Unnamed") .. "\"|r ("
             .. tostring(AutoProfilesUI.activeRuntimeContentKey) .. ")")
-        print("  Applied Overrides: |cffffffff" .. rtOverrides .. "|r, Baseline Keys: |cffffffff" .. rtBaseline .. "|r")
+        print("  Applied Overrides: |cffffffff" .. rtOverrides .. "|r, Overlay Keys: |cffffffff" .. overlayKeys .. "|r")
     else
         print("  Runtime Profile: |cff999999None|r")
     end

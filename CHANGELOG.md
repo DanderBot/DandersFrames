@@ -2,6 +2,9 @@
 
 ## [4.0.7] - 2026-02-18
 
+### Improvements
+* Refactor auto layout runtime overrides to use a read-through overlay proxy — overrides are now applied transparently at read time instead of mutating the saved raid settings table, eliminating profile contamination on logout/reload and removing the strip/reapply save dance
+
 ### Bug Fixes
 * Fix party frame container not repositioning when dragging the frame width or height slider — lightweight size update now re-applies header settings during drag
 * Fix auto layout override editing contaminating the global profile — snapshot/restore now uses recursive deep copy to prevent shared nested table references

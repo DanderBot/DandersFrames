@@ -3035,6 +3035,57 @@ function DF:CheckElvUICompatibility()
 end
 
 -- ============================================================
+-- DB OVERLAY PROXY
+-- Wraps DF.db so auto-profile overrides are read-through without
+-- mutating the real SavedVariables table.
+-- ============================================================
+
+function DF:WrapDB()
+    -- Store references to the real (serializable) tables
+    self._realProfile = self.db
+    self._realRaidDB  = self._realProfile.raid
+
+    -- Raid proxy: reads check raidOverrides first, writes go to real table
+    local raidProxy = setmetatable({}, {
+        __realTable = self._realRaidDB,
+        __index = function(_, key)
+            local overrides = DF.raidOverrides
+            if overrides and overrides[key] ~= nil then
+                return overrides[key]
+            end
+            return DF._realRaidDB[key]
+        end,
+        __newindex = function(_, key, value)
+            DF._realRaidDB[key] = value
+        end,
+    })
+    self._raidProxy = raidProxy
+
+    -- Profile proxy: intercepts .raid access, everything else falls through
+    self.db = setmetatable({}, {
+        __isDBProxy = true,
+        __index = function(_, key)
+            if key == "raid" then
+                return raidProxy
+            end
+            return DF._realProfile[key]
+        end,
+        __newindex = function(_, key, value)
+            if key == "raid" then
+                -- Full raid table replacement (e.g. import)
+                DF._realProfile.raid = value
+                DF._realRaidDB = value
+                -- Update the raid proxy's metatable reference
+                local mt = getmetatable(raidProxy)
+                mt.__realTable = value
+            else
+                DF._realProfile[key] = value
+            end
+        end,
+    })
+end
+
+-- ============================================================
 -- INITIALIZATION
 -- ============================================================
 
@@ -3375,6 +3426,10 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
                 MigrateResourceBarRoleFilter(profile.raid)
             end
         end
+
+        -- Wrap DF.db with overlay proxy (must happen AFTER all migrations,
+        -- BEFORE anything that reads through the proxy)
+        DF:WrapDB()
 
         -- Initialize Debug Console (must happen after SavedVariables are ready)
         if DF.DebugConsole then

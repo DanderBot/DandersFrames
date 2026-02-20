@@ -6,6 +6,12 @@ local addonName, DF = ...
 
 function DF:DeepCopy(src)
     if type(src) ~= "table" then return src end
+    -- Unwrap proxy tables to their real backing store
+    local mt = getmetatable(src)
+    if mt then
+        if mt.__isDBProxy then src = DF._realProfile end
+        if mt.__realTable then src = mt.__realTable end
+    end
     local dest = {}
     for k, v in pairs(src) do
         dest[k] = DF:DeepCopy(v)
@@ -44,7 +50,12 @@ function DF:CopySectionSettingsRaw(prefixes, srcMode)
     local destMode = srcMode == "party" and "raid" or "party"
     if not DF.db[srcMode] or not DF.db[destMode] then return end
 
-    for key, value in pairs(DF.db[srcMode]) do
+    -- Unwrap proxy for iteration (Lua 5.1 has no __pairs)
+    local src = DF.db[srcMode]
+    local mt = getmetatable(src)
+    if mt and mt.__realTable then src = mt.__realTable end
+
+    for key, value in pairs(src) do
         for _, prefix in ipairs(prefixes) do
             if key:sub(1, #prefix) == prefix then
                 if type(value) == "table" then
@@ -70,9 +81,14 @@ function DF:CopySectionSettings(prefixes, srcMode)
     local destMode = srcMode == "party" and "raid" or "party"
     
     if not DF.db[srcMode] or not DF.db[destMode] then return end
-    
+
+    -- Unwrap proxy for iteration (Lua 5.1 has no __pairs)
+    local src = DF.db[srcMode]
+    local mt = getmetatable(src)
+    if mt and mt.__realTable then src = mt.__realTable end
+
     local count = 0
-    for key, value in pairs(DF.db[srcMode]) do
+    for key, value in pairs(src) do
         for _, prefix in ipairs(prefixes) do
             if key:sub(1, #prefix) == prefix then
                 -- Deep copy if table, otherwise direct assign
@@ -86,7 +102,7 @@ function DF:CopySectionSettings(prefixes, srcMode)
             end
         end
     end
-    
+
     -- Full refresh - these buttons aren't used often so a complete refresh is fine
     DF:FullProfileRefresh()
     
@@ -124,27 +140,14 @@ function DF:GetCurrentProfile()
     return DandersFramesDB_v2 and DandersFramesDB_v2.currentProfile or "Default"
 end
 
--- Save the current profile to the profiles table, stripping any
--- active auto-profile runtime overrides so they don't contaminate
--- the saved data.  Call this instead of raw DeepCopy(DF.db) saves.
+-- Save the current profile to the profiles table.
+-- DeepCopy unwraps the overlay proxy, so saved data is always clean.
 function DF:SaveCurrentProfile()
     if not DF.db then return end
     local currentName = DandersFramesDB_v2 and DandersFramesDB_v2.currentProfile or "Default"
     if not DandersFramesDB_v2 or not DandersFramesDB_v2.profiles then return end
 
-    -- Strip runtime overrides before saving (if any are active)
-    local stripped = false
-    if DF.AutoProfilesUI and DF.AutoProfilesUI.StripRuntimeOverrides then
-        stripped = DF.AutoProfilesUI:StripRuntimeOverrides()
-    end
-
-    -- Save clean profile
     DandersFramesDB_v2.profiles[currentName] = DF:DeepCopy(DF.db)
-
-    -- Re-apply overrides to keep live state intact
-    if stripped and DF.AutoProfilesUI.ReapplyRuntimeOverrides then
-        DF.AutoProfilesUI:ReapplyRuntimeOverrides()
-    end
 end
 
 -- Set/create a profile
@@ -175,9 +178,9 @@ function DF:SetProfile(name)
     if DF.AutoProfilesUI then
         DF.AutoProfilesUI.activeRuntimeProfile = nil
         DF.AutoProfilesUI.activeRuntimeContentKey = nil
-        DF.AutoProfilesUI.runtimeBaseline = nil
         DF.AutoProfilesUI.pendingAutoProfileEval = false
     end
+    DF.raidOverrides = nil
 
     -- Switch to the profile (update both account-wide and per-character)
     DandersFramesDB_v2.currentProfile = name
@@ -185,6 +188,7 @@ function DF:SetProfile(name)
         DandersFramesCharDB.currentProfile = name
     end
     DF.db = DandersFramesDB_v2.profiles[name]
+    DF:WrapDB()
 
     -- Apply the profile with full refresh
     DF:FullProfileRefresh()
@@ -230,25 +234,17 @@ function DF:DuplicateProfile(newName)
         return false
     end
     
-    -- Save current profile first (strips runtime overrides)
+    -- Save current profile before switching
     DF:SaveCurrentProfile()
 
-    -- Create new profile as a clean copy of current
-    -- (SaveCurrentProfile already stripped overrides temporarily,
-    -- but they're re-applied now, so strip again for the copy)
-    local stripped = false
-    if DF.AutoProfilesUI and DF.AutoProfilesUI.StripRuntimeOverrides then
-        stripped = DF.AutoProfilesUI:StripRuntimeOverrides()
-    end
+    -- Create new profile as a clean copy of current (DeepCopy unwraps proxies)
     DandersFramesDB_v2.profiles[newName] = DF:DeepCopy(DF.db)
-    if stripped and DF.AutoProfilesUI.ReapplyRuntimeOverrides then
-        DF.AutoProfilesUI:ReapplyRuntimeOverrides()
-    end
-    
+
     -- Switch to the new profile
     DandersFramesDB_v2.currentProfile = newName
     DF.db = DandersFramesDB_v2.profiles[newName]
-    
+    DF:WrapDB()
+
     -- Apply the profile with full refresh
     DF:FullProfileRefresh()
     
@@ -560,16 +556,12 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
         if not DandersFramesDB_v2 then DandersFramesDB_v2 = {} end
         if not DandersFramesDB_v2.profiles then DandersFramesDB_v2.profiles = {} end
         
-        -- Save current profile before switching (strips runtime overrides)
+        -- Save current profile before switching
         DF:SaveCurrentProfile()
 
         -- Create new profile as a COPY of current profile (not defaults)
         -- This way, any categories NOT selected for import will keep the user's current settings
-        -- Strip overrides temporarily so the copy is clean
-        local stripped = false
-        if DF.AutoProfilesUI and DF.AutoProfilesUI.StripRuntimeOverrides then
-            stripped = DF.AutoProfilesUI:StripRuntimeOverrides()
-        end
+        -- DeepCopy unwraps proxies automatically
         DandersFramesDB_v2.profiles[profileName] = {
             party = DF:DeepCopy(DF.db.party or DF.PartyDefaults),
             raid = DF:DeepCopy(DF.db.raid or DF.RaidDefaults),
@@ -578,13 +570,11 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
             powerColors = DF:DeepCopy(DF.db.powerColors or {}),
             linkedSections = {},
         }
-        if stripped and DF.AutoProfilesUI.ReapplyRuntimeOverrides then
-            DF.AutoProfilesUI:ReapplyRuntimeOverrides()
-        end
 
         -- Switch to the new profile
         DandersFramesDB_v2.currentProfile = profileName
         DF.db = DandersFramesDB_v2.profiles[profileName]
+        DF:WrapDB()
         
         print("|cff00ff00DandersFrames:|r Created new profile: " .. profileName)
     end
