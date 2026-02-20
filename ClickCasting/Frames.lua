@@ -904,7 +904,7 @@ function CC:FindHealthManaBars(obj)
         if checked[current] then return end
         
         checked[current] = true
-        if not pcall(pairs, current) then return end
+        if not pcall(next, current) then return end
         for key, value in pairs(current) do
             if key == "HealthBar" or key == "healthBar" then
                 health = value

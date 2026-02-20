@@ -2595,6 +2595,9 @@ function CC:RefreshSpellGrid(skipScrollReset)
     if self.quickBindCb then
         self.quickBindCb:SetChecked(self.db.options.quickBindEnabled)
     end
+    if self.bindTipCb then
+        self.bindTipCb:SetChecked(self.db.options.showBindingTooltip)
+    end
     if self.UpdateSmartResText then
         self.UpdateSmartResText()
     end
