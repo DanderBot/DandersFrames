@@ -41,6 +41,46 @@ DF.AuraDesigner.SpecInfo = {
 }
 
 -- ============================================================
+-- SPELL IDS PER SPEC
+-- Used to fetch real spell icons via C_Spell.GetSpellTexture()
+-- ============================================================
+DF.AuraDesigner.SpellIDs = {
+    PreservationEvoker = {
+        Echo = 364343, Reversion = 366155, EchoReversion = 367364,
+        DreamBreath = 355941, EchoDreamBreath = 376788, TimeDilation = 357170,
+        Rewind = 363534, DreamFlight = 363502, Lifebind = 373267, VerdantEmbrace = 409895,
+    },
+    AugmentationEvoker = {
+        Prescience = 410089, ShiftingSands = 413984, BlisteringScales = 360827,
+        InfernosBlessing = 410263, SymbioticBloom = 410686, EbonMight = 395152,
+    },
+    RestorationDruid = {
+        Rejuvenation = 774, Regrowth = 8936, Lifebloom = 33763,
+        Germination = 155777, WildGrowth = 48438, IronBark = 102342,
+    },
+    DisciplinePriest = {
+        PowerWordShield = 17, Atonement = 194384, PainSuppression = 33206,
+        VoidShield = 1253593, PrayerOfMending = 41635, PowerInfusion = 10060,
+    },
+    HolyPriest = {
+        Renew = 139, EchoOfLight = 77489, GuardianSpirit = 47788,
+        PrayerOfMending = 41635, PowerInfusion = 10060,
+    },
+    MistweaverMonk = {
+        RenewingMist = 119611, EnvelopingMist = 124682, SoothingMist = 115175,
+        LifeCocoon = 116849, AspectOfHarmony = 450769, StrengthOfTheBlackOx = 443113,
+    },
+    RestorationShaman = {
+        Riptide = 61295, EarthShield = 383648,
+    },
+    HolyPaladin = {
+        BeaconOfFaith = 156910, EternalFlame = 156322, BeaconOfLight = 53563,
+        BlessingOfProtection = 1022, HolyBulwark = 432496, SacredWeapon = 432502,
+        BlessingOfSacrifice = 6940, BeaconOfVirtue = 200025, BeaconOfTheSavior = 1244893,
+    },
+}
+
+-- ============================================================
 -- TRACKABLE AURAS PER SPEC
 -- Each aura: { name = "InternalName", display = "Display Name", color = {r,g,b} }
 -- Colors are used for tile accents in the Options UI

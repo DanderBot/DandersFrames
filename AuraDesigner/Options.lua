@@ -231,6 +231,23 @@ local function CreateExpiringProxy(auraName)
     })
 end
 
+-- Get spell icon texture for an aura
+local function GetAuraIcon(specKey, auraName)
+    local spellIDs = DF.AuraDesigner.SpellIDs
+    if not spellIDs or not specKey then return nil end
+    local specIDs = spellIDs[specKey]
+    if not specIDs then return nil end
+    local spellID = specIDs[auraName]
+    if not spellID or spellID == 0 then return nil end
+    -- Use modern API first, fall back to legacy
+    if C_Spell and C_Spell.GetSpellTexture then
+        return C_Spell.GetSpellTexture(spellID)
+    elseif GetSpellTexture then
+        return GetSpellTexture(spellID)
+    end
+    return nil
+end
+
 -- Count active effects for an aura
 local function CountActiveEffects(auraName)
     local adDB = GetAuraDesignerDB()
@@ -285,11 +302,30 @@ local function CreateAuraTile(parent, auraInfo, index)
     tile.iconBg:SetBackdropColor(auraInfo.color[1] * 0.25, auraInfo.color[2] * 0.25, auraInfo.color[3] * 0.25, 1)
     tile.iconBg:SetBackdropBorderColor(0.27, 0.27, 0.27, 1)
 
-    -- Icon letter (first letter as placeholder)
+    -- Spell icon texture (with letter fallback)
+    local spec = ResolveSpec()
+    local iconTex = GetAuraIcon(spec, auraInfo.name)
+
+    tile.icon = tile.iconBg:CreateTexture(nil, "ARTWORK")
+    tile.icon:SetPoint("TOPLEFT", 2, -2)
+    tile.icon:SetPoint("BOTTOMRIGHT", -2, 2)
+
+    if iconTex then
+        tile.icon:SetTexture(iconTex)
+        tile.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)  -- trim icon borders
+    else
+        -- Fallback: colored square with first letter
+        tile.icon:SetColorTexture(auraInfo.color[1] * 0.3, auraInfo.color[2] * 0.3, auraInfo.color[3] * 0.3, 1)
+    end
+
+    -- Fallback letter (shown if no spell icon available)
     tile.letter = tile.iconBg:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     tile.letter:SetPoint("CENTER", 0, 0)
     tile.letter:SetText(auraInfo.display:sub(1, 1))
     tile.letter:SetTextColor(auraInfo.color[1], auraInfo.color[2], auraInfo.color[3])
+    if iconTex then
+        tile.letter:Hide()  -- hide letter when we have a real icon
+    end
 
     -- Name label
     tile.nameLabel = tile:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -765,12 +801,20 @@ local function BuildPerAuraView(parent, auraName)
     local iconBg = parent:CreateTexture(nil, "ARTWORK")
     iconBg:SetPoint("TOPLEFT", 10, yPos)
     iconBg:SetSize(32, 32)
-    iconBg:SetColorTexture(auraInfo.color[1] * 0.4, auraInfo.color[2] * 0.4, auraInfo.color[3] * 0.4, 1)
+
+    local rpIconTex = GetAuraIcon(spec, auraName)
+    if rpIconTex then
+        iconBg:SetTexture(rpIconTex)
+        iconBg:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    else
+        iconBg:SetColorTexture(auraInfo.color[1] * 0.4, auraInfo.color[2] * 0.4, auraInfo.color[3] * 0.4, 1)
+    end
 
     local letter = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     letter:SetPoint("CENTER", iconBg, "CENTER", 0, 0)
     letter:SetText(auraInfo.display:sub(1, 1))
     letter:SetTextColor(auraInfo.color[1], auraInfo.color[2], auraInfo.color[3])
+    if rpIconTex then letter:Hide() end
 
     local nameText = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     nameText:SetPoint("LEFT", iconBg, "RIGHT", 8, 4)
@@ -1028,7 +1072,14 @@ local function RefreshRightPanel()
                 end
             end
             if auraInfo then
-                rightPanel.selIcon:SetColorTexture(auraInfo.color[1] * 0.4, auraInfo.color[2] * 0.4, auraInfo.color[3] * 0.4, 1)
+                local selIconTex = GetAuraIcon(spec, selectedAura)
+                if selIconTex then
+                    rightPanel.selIcon:SetTexture(selIconTex)
+                    rightPanel.selIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+                else
+                    rightPanel.selIcon:SetTexCoord(0, 1, 0, 1)
+                    rightPanel.selIcon:SetColorTexture(auraInfo.color[1] * 0.4, auraInfo.color[2] * 0.4, auraInfo.color[3] * 0.4, 1)
+                end
                 rightPanel.selName:SetText(auraInfo.display)
                 rightPanel.selName:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
                 local effectCount = CountActiveEffects(selectedAura)
@@ -1078,9 +1129,19 @@ local function CreateEnableBanner(parent)
     banner:SetPoint("TOPRIGHT", parent, "TOPRIGHT", 0, 0)
     ApplyBackdrop(banner, {r = 0.14, g = 0.14, b = 0.14, a = 1}, {r = 0.30, g = 0.30, b = 0.30, a = 0.5})
 
-    local cb = CreateFrame("CheckButton", nil, banner, "UICheckButtonTemplate")
-    cb:SetPoint("LEFT", 8, 0)
-    cb:SetSize(24, 24)
+    -- Themed checkbox (matches GUI:CreateCheckbox style)
+    local cb = CreateFrame("CheckButton", nil, banner, "BackdropTemplate")
+    cb:SetSize(18, 18)
+    cb:SetPoint("LEFT", 10, 0)
+    ApplyBackdrop(cb, C_ELEMENT, {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5})
+
+    cb.Check = cb:CreateTexture(nil, "OVERLAY")
+    cb.Check:SetTexture("Interface\\Buttons\\WHITE8x8")
+    local tc = GetThemeColor()
+    cb.Check:SetVertexColor(tc.r, tc.g, tc.b)
+    cb.Check:SetPoint("CENTER")
+    cb.Check:SetSize(10, 10)
+    cb:SetCheckedTexture(cb.Check)
 
     local adDB = GetAuraDesignerDB()
     cb:SetChecked(adDB.enabled)
@@ -1091,7 +1152,7 @@ local function CreateEnableBanner(parent)
     end)
 
     local cbLabel = banner:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    cbLabel:SetPoint("LEFT", cb, "RIGHT", 2, 0)
+    cbLabel:SetPoint("LEFT", cb, "RIGHT", 8, 0)
     cbLabel:SetText("Enable Aura Designer")
     cbLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
 
@@ -1270,15 +1331,21 @@ local ANCHOR_POSITIONS = {
 
 local anchorDots = {}
 
-local function CreateFramePreview(parent, yOffset)
-    local FRAME_W, FRAME_H = 220, 80
-    local POWER_H = 6
+local function CreateFramePreview(parent, yOffset, rightPanelRef)
+    -- Read current frame settings for the preview
+    local mode = (GUI and GUI.SelectedMode) or "party"
+    local frameDB = DF:GetDB(mode) or DF.PartyDefaults
+    local FRAME_W = frameDB.frameWidth or 125
+    local FRAME_H = frameDB.frameHeight or 64
+    local POWER_H = frameDB.powerBarHeight or 4
+    local showPower = frameDB.showPowerBar
 
     -- Outer container with label
     local container = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    container:SetHeight(FRAME_H + 50)  -- room for label + instructions
+    container:SetHeight(max(FRAME_H + 60, 130))  -- room for label + frame + instructions
+    local rightInset = rightPanelRef and (rightPanelRef:GetWidth() + 6) or 290
     container:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, yOffset)
-    container:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -290, yOffset)
+    container:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -rightInset, yOffset)
     ApplyBackdrop(container, {r = 0.12, g = 0.12, b = 0.12, a = 1}, C_BORDER)
 
     -- "Frame Preview" label
@@ -1294,57 +1361,91 @@ local function CreateFramePreview(parent, yOffset)
     ApplyBackdrop(mockFrame, {r = 0.07, g = 0.07, b = 0.07, a = 1}, {r = 0.27, g = 0.27, b = 0.27, a = 1})
     container.mockFrame = mockFrame
 
+    -- Resolve health texture
+    local healthTexPath = frameDB.healthTexture or "Interface\\Buttons\\WHITE8x8"
+
     -- Health bar background
     local healthBg = mockFrame:CreateTexture(nil, "BACKGROUND")
     healthBg:SetPoint("TOPLEFT", 1, -1)
-    healthBg:SetPoint("BOTTOMRIGHT", mockFrame, "BOTTOMRIGHT", -1, POWER_H + 1)
+    if showPower then
+        healthBg:SetPoint("BOTTOMRIGHT", mockFrame, "BOTTOMRIGHT", -1, POWER_H + 1)
+    else
+        healthBg:SetPoint("BOTTOMRIGHT", mockFrame, "BOTTOMRIGHT", -1, 1)
+    end
     healthBg:SetColorTexture(0, 0, 0, 0.4)
 
-    -- Health bar fill (72% health, green gradient approximation)
+    -- Health bar fill (72% health)
     local healthFill = mockFrame:CreateTexture(nil, "ARTWORK")
     healthFill:SetPoint("TOPLEFT", 1, -1)
-    healthFill:SetPoint("BOTTOMLEFT", mockFrame, "BOTTOMLEFT", 1, POWER_H + 1)
+    if showPower then
+        healthFill:SetPoint("BOTTOMLEFT", mockFrame, "BOTTOMLEFT", 1, POWER_H + 1)
+    else
+        healthFill:SetPoint("BOTTOMLEFT", mockFrame, "BOTTOMLEFT", 1, 1)
+    end
     healthFill:SetWidth(FRAME_W * 0.72)
-    healthFill:SetColorTexture(0.18, 0.80, 0.44, 0.85)
+    healthFill:SetTexture(healthTexPath)
+    healthFill:SetVertexColor(0.18, 0.80, 0.44, 0.85)
     container.healthFill = healthFill
 
     -- Missing health region
     local missingHealth = mockFrame:CreateTexture(nil, "ARTWORK")
     missingHealth:SetPoint("TOPRIGHT", mockFrame, "TOPRIGHT", -1, -1)
-    missingHealth:SetPoint("BOTTOMRIGHT", mockFrame, "BOTTOMRIGHT", -1, POWER_H + 1)
+    if showPower then
+        missingHealth:SetPoint("BOTTOMRIGHT", mockFrame, "BOTTOMRIGHT", -1, POWER_H + 1)
+    else
+        missingHealth:SetPoint("BOTTOMRIGHT", mockFrame, "BOTTOMRIGHT", -1, 1)
+    end
     missingHealth:SetWidth(FRAME_W * 0.28)
     missingHealth:SetColorTexture(0, 0, 0, 0.4)
 
-    -- Power bar
-    local powerBg = mockFrame:CreateTexture(nil, "ARTWORK")
-    powerBg:SetPoint("BOTTOMLEFT", 1, 1)
-    powerBg:SetPoint("BOTTOMRIGHT", mockFrame, "BOTTOMRIGHT", -1, 0)
-    powerBg:SetHeight(POWER_H)
-    powerBg:SetColorTexture(0.07, 0.07, 0.07, 1)
+    -- Power bar (only if enabled in settings)
+    if showPower then
+        local powerBg = mockFrame:CreateTexture(nil, "ARTWORK")
+        powerBg:SetPoint("BOTTOMLEFT", 1, 1)
+        powerBg:SetPoint("BOTTOMRIGHT", mockFrame, "BOTTOMRIGHT", -1, 0)
+        powerBg:SetHeight(POWER_H)
+        powerBg:SetColorTexture(0.07, 0.07, 0.07, 1)
 
-    local powerFill = mockFrame:CreateTexture(nil, "ARTWORK", nil, 1)
-    powerFill:SetPoint("BOTTOMLEFT", 1, 1)
-    powerFill:SetHeight(POWER_H)
-    powerFill:SetWidth(FRAME_W * 0.85)
-    powerFill:SetColorTexture(0.27, 0.53, 1, 0.9)
+        local powerFill = mockFrame:CreateTexture(nil, "ARTWORK", nil, 1)
+        powerFill:SetPoint("BOTTOMLEFT", 1, 1)
+        powerFill:SetHeight(POWER_H)
+        powerFill:SetWidth(FRAME_W * 0.85)
+        powerFill:SetColorTexture(0.27, 0.53, 1, 0.9)
 
-    -- Power bar top border
-    local powerBorder = mockFrame:CreateTexture(nil, "ARTWORK", nil, 2)
-    powerBorder:SetPoint("BOTTOMLEFT", mockFrame, "BOTTOMLEFT", 1, POWER_H)
-    powerBorder:SetPoint("BOTTOMRIGHT", mockFrame, "BOTTOMRIGHT", -1, POWER_H)
-    powerBorder:SetHeight(1)
-    powerBorder:SetColorTexture(0.2, 0.2, 0.2, 1)
+        -- Power bar top border
+        local powerBorder = mockFrame:CreateTexture(nil, "ARTWORK", nil, 2)
+        powerBorder:SetPoint("BOTTOMLEFT", mockFrame, "BOTTOMLEFT", 1, POWER_H)
+        powerBorder:SetPoint("BOTTOMRIGHT", mockFrame, "BOTTOMRIGHT", -1, POWER_H)
+        powerBorder:SetHeight(1)
+        powerBorder:SetColorTexture(0.2, 0.2, 0.2, 1)
+    end
 
-    -- Name text
-    local nameText = mockFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    nameText:SetPoint("TOP", mockFrame, "TOP", 0, -6)
+    -- Resolve fonts from settings
+    local nameFontPath = DF:GetFontPath(frameDB.nameFont) or "Fonts\\FRIZQT__.TTF"
+    local nameFontSize = frameDB.nameFontSize or 11
+    local healthFontPath = DF:GetFontPath(frameDB.healthFont) or "Fonts\\FRIZQT__.TTF"
+    local healthFontSize = frameDB.healthFontSize or 10
+
+    -- Name text (uses user's font + anchor settings)
+    local nameAnchor = frameDB.nameTextAnchor or "TOP"
+    local nameOffX = frameDB.nameTextX or 0
+    local nameOffY = frameDB.nameTextY or -10
+
+    local nameText = mockFrame:CreateFontString(nil, "OVERLAY")
+    nameText:SetFont(nameFontPath, nameFontSize, "OUTLINE")
+    nameText:SetPoint(nameAnchor, mockFrame, nameAnchor, nameOffX, nameOffY)
     nameText:SetText("Danders")
     nameText:SetTextColor(0.18, 0.80, 0.44, 1)
     container.nameText = nameText
 
-    -- Health percentage
-    local hpText = mockFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    hpText:SetPoint("BOTTOM", mockFrame, "BOTTOM", 0, POWER_H + 4)
+    -- Health percentage (uses user's font + anchor settings)
+    local healthAnchor = frameDB.healthTextAnchor or "CENTER"
+    local healthOffX = frameDB.healthTextX or 0
+    local healthOffY = frameDB.healthTextY or 4
+
+    local hpText = mockFrame:CreateFontString(nil, "OVERLAY")
+    hpText:SetFont(healthFontPath, healthFontSize, "OUTLINE")
+    hpText:SetPoint(healthAnchor, mockFrame, healthAnchor, healthOffX, healthOffY)
     hpText:SetText("72%")
     hpText:SetTextColor(0.87, 0.87, 0.87, 1)
     container.hpText = hpText
@@ -1404,11 +1505,12 @@ end
 -- With header bar and horizontal scroll for effect entries
 -- ============================================================
 
-local function CreateActiveEffectsStrip(parent, yOffset)
+local function CreateActiveEffectsStrip(parent, yOffset, rightPanelRef)
+    local rightInset = rightPanelRef and (rightPanelRef:GetWidth() + 6) or 290
     local wrapper = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     wrapper:SetHeight(104)  -- 18 header + 82 strip + 4 padding
     wrapper:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, yOffset)
-    wrapper:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -290, yOffset)
+    wrapper:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -rightInset, yOffset)
     ApplyBackdrop(wrapper, {r = 0.12, g = 0.12, b = 0.12, a = 1}, C_BORDER)
 
     -- Header
@@ -1548,10 +1650,25 @@ local function RefreshActiveEffectsStrip()
         local tc = GetThemeColor()
         iconFrame:SetBackdropBorderColor(tc.r, tc.g, tc.b, 1)
 
+        -- Spell icon or letter fallback
+        local spec = ResolveSpec()
+        local effIconTex = GetAuraIcon(spec, effect.auraName)
+
+        local effIcon = iconFrame:CreateTexture(nil, "ARTWORK")
+        effIcon:SetPoint("TOPLEFT", 2, -2)
+        effIcon:SetPoint("BOTTOMRIGHT", -2, 2)
+        if effIconTex then
+            effIcon:SetTexture(effIconTex)
+            effIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        else
+            effIcon:SetColorTexture(effect.color[1] * 0.3, effect.color[2] * 0.3, effect.color[3] * 0.3, 1)
+        end
+
         local letter = iconFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         letter:SetPoint("CENTER", 0, 0)
         letter:SetText(effect.display:sub(1, 1))
         letter:SetTextColor(effect.color[1], effect.color[2], effect.color[3])
+        if effIconTex then letter:Hide() end
 
         -- Type label (uppercase accent text)
         local typeLabel = entry:CreateFontString(nil, "OVERLAY")
@@ -1608,6 +1725,7 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     local TILE_STRIP_H = 82   -- inner scroll area
     local SECTION_GAP = 8
     local RIGHT_PANEL_W = 280
+    local RIGHT_GAP = 6       -- gap between left content and right panel
 
     -- ========================================
     -- MAIN FRAME
@@ -1618,7 +1736,7 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     local yPos = 0
 
     -- ========================================
-    -- ENABLE BANNER
+    -- ENABLE BANNER (full width)
     -- ========================================
     enableBanner = CreateEnableBanner(mainFrame)
     enableBanner:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 0, yPos)
@@ -1627,67 +1745,18 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     yPos = yPos - (BANNER_H + 4)
 
     -- ========================================
-    -- ATTRIBUTION ROW
+    -- ATTRIBUTION ROW (full width)
     -- ========================================
     attributionRow = CreateAttributionRow(mainFrame, yPos)
     yPos = yPos - (ATTRIB_H + 4)
 
     -- ========================================
-    -- TILE STRIP (header + scrolling tiles)
+    -- RIGHT PANEL (fixed 280px, starts here)
+    -- Built BEFORE left content so left content can anchor to it
     -- ========================================
-    local tileWrap = CreateFrame("Frame", nil, mainFrame, "BackdropTemplate")
-    tileWrap:SetHeight(TILE_HEADER_H + TILE_STRIP_H)
-    tileWrap:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 0, yPos)
-    tileWrap:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", 0, yPos)
-    ApplyBackdrop(tileWrap, C_PANEL, C_BORDER)
-
-    -- Header bar
-    local tileHeader = CreateStripHeader(tileWrap, "TRACKABLE AURAS")
-    tileHeader:SetPoint("TOPLEFT", 0, 0)
-    tileHeader:SetPoint("TOPRIGHT", 0, 0)
-
-    -- Scroll area below header
-    tileStrip = CreateFrame("ScrollFrame", nil, tileWrap)
-    tileStrip:SetPoint("TOPLEFT", 0, -TILE_HEADER_H)
-    tileStrip:SetPoint("BOTTOMRIGHT", 0, 0)
-    tileStrip:EnableMouseWheel(true)
-
-    tileStripContent = CreateFrame("Frame", nil, tileStrip)
-    tileStripContent:SetHeight(TILE_STRIP_H)
-    tileStripContent:SetWidth(800)
-    tileStrip:SetScrollChild(tileStripContent)
-
-    tileStrip:SetScript("OnMouseWheel", function(self, delta)
-        local current = self:GetHorizontalScroll()
-        local maxScroll = max(0, tileStripContent:GetWidth() - self:GetWidth())
-        local newScroll = max(0, min(maxScroll, current - (delta * 68)))
-        self:SetHorizontalScroll(newScroll)
-    end)
-
-    yPos = yPos - (TILE_HEADER_H + TILE_STRIP_H + SECTION_GAP)
-
-    -- ========================================
-    -- FRAME PREVIEW + ACTIVE EFFECTS (left of right panel)
-    -- The frame preview and active effects strip occupy
-    -- the left side, the right panel sits on the right.
-    -- ========================================
-    framePreview = CreateFramePreview(mainFrame, yPos)
-    local previewH = framePreview:GetHeight()
-    yPos = yPos - (previewH + SECTION_GAP)
-
-    -- ========================================
-    -- ACTIVE EFFECTS STRIP
-    -- ========================================
-    activeEffectsStrip = CreateActiveEffectsStrip(mainFrame, yPos)
-
-    -- ========================================
-    -- RIGHT PANEL (fixed 280px)
-    -- Starts below the enable banner + attribution
-    -- ========================================
-    local rightTopOffset = -(BANNER_H + 4 + ATTRIB_H + 4)
     rightPanel = CreateFrame("Frame", nil, mainFrame, "BackdropTemplate")
     rightPanel:SetWidth(RIGHT_PANEL_W)
-    rightPanel:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", 0, rightTopOffset)
+    rightPanel:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", 0, yPos)
     rightPanel:SetPoint("BOTTOMRIGHT", mainFrame, "BOTTOMRIGHT", 0, 0)
     ApplyBackdrop(rightPanel, {r = 0.10, g = 0.10, b = 0.10, a = 1}, {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5})
 
@@ -1726,6 +1795,53 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
         scrollBar:SetPoint("TOPLEFT", rightScrollFrame, "TOPRIGHT", 2, -16)
         scrollBar:SetPoint("BOTTOMLEFT", rightScrollFrame, "BOTTOMRIGHT", 2, 16)
     end
+
+    -- ========================================
+    -- LEFT CONTENT: TILE STRIP
+    -- All left content anchors TOPRIGHT to rightPanel's TOPLEFT
+    -- ========================================
+    local tileWrap = CreateFrame("Frame", nil, mainFrame, "BackdropTemplate")
+    tileWrap:SetHeight(TILE_HEADER_H + TILE_STRIP_H)
+    tileWrap:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 0, yPos)
+    tileWrap:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", -(RIGHT_PANEL_W + RIGHT_GAP), yPos)
+    ApplyBackdrop(tileWrap, C_PANEL, C_BORDER)
+
+    -- Header bar
+    local tileHeader = CreateStripHeader(tileWrap, "TRACKABLE AURAS")
+    tileHeader:SetPoint("TOPLEFT", 0, 0)
+    tileHeader:SetPoint("TOPRIGHT", 0, 0)
+
+    -- Scroll area below header
+    tileStrip = CreateFrame("ScrollFrame", nil, tileWrap)
+    tileStrip:SetPoint("TOPLEFT", 0, -TILE_HEADER_H)
+    tileStrip:SetPoint("BOTTOMRIGHT", 0, 0)
+    tileStrip:EnableMouseWheel(true)
+
+    tileStripContent = CreateFrame("Frame", nil, tileStrip)
+    tileStripContent:SetHeight(TILE_STRIP_H)
+    tileStripContent:SetWidth(800)
+    tileStrip:SetScrollChild(tileStripContent)
+
+    tileStrip:SetScript("OnMouseWheel", function(self, delta)
+        local current = self:GetHorizontalScroll()
+        local maxScroll = max(0, tileStripContent:GetWidth() - self:GetWidth())
+        local newScroll = max(0, min(maxScroll, current - (delta * 68)))
+        self:SetHorizontalScroll(newScroll)
+    end)
+
+    yPos = yPos - (TILE_HEADER_H + TILE_STRIP_H + SECTION_GAP)
+
+    -- ========================================
+    -- LEFT CONTENT: FRAME PREVIEW
+    -- ========================================
+    framePreview = CreateFramePreview(mainFrame, yPos, rightPanel)
+    local previewH = framePreview:GetHeight()
+    yPos = yPos - (previewH + SECTION_GAP)
+
+    -- ========================================
+    -- LEFT CONTENT: ACTIVE EFFECTS STRIP
+    -- ========================================
+    activeEffectsStrip = CreateActiveEffectsStrip(mainFrame, yPos, rightPanel)
 
     -- ========================================
     -- POPULATE
