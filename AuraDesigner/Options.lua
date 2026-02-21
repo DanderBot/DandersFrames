@@ -267,36 +267,53 @@ local activeTiles = {}
 -- ============================================================
 
 local function CreateAuraTile(parent, auraInfo, index)
+    local TILE_W, ICON_SZ = 68, 56
     local tile = CreateFrame("Button", nil, parent, "BackdropTemplate")
-    tile:SetSize(64, 82)
-    ApplyBackdrop(tile, C_ELEMENT, {r = 0.27, g = 0.27, b = 0.27, a = 1})
+    tile:SetSize(TILE_W, ICON_SZ + 18)  -- icon + name row
+    -- No backdrop on tile itself, icon carries the visual
 
     -- Icon area (colored square as placeholder until real spell icons)
-    tile.iconBg = tile:CreateTexture(nil, "ARTWORK")
-    tile.iconBg:SetPoint("TOP", 0, -4)
-    tile.iconBg:SetSize(48, 48)
-    tile.iconBg:SetColorTexture(auraInfo.color[1] * 0.4, auraInfo.color[2] * 0.4, auraInfo.color[3] * 0.4, 1)
+    tile.iconBg = CreateFrame("Frame", nil, tile, "BackdropTemplate")
+    tile.iconBg:SetPoint("TOP", 0, 0)
+    tile.iconBg:SetSize(ICON_SZ, ICON_SZ)
+    if not tile.iconBg.SetBackdrop then Mixin(tile.iconBg, BackdropTemplateMixin) end
+    tile.iconBg:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = 2,
+    })
+    tile.iconBg:SetBackdropColor(auraInfo.color[1] * 0.25, auraInfo.color[2] * 0.25, auraInfo.color[3] * 0.25, 1)
+    tile.iconBg:SetBackdropBorderColor(0.27, 0.27, 0.27, 1)
 
     -- Icon letter (first letter as placeholder)
-    tile.letter = tile:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    tile.letter:SetPoint("CENTER", tile.iconBg, "CENTER", 0, 0)
+    tile.letter = tile.iconBg:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    tile.letter:SetPoint("CENTER", 0, 0)
     tile.letter:SetText(auraInfo.display:sub(1, 1))
     tile.letter:SetTextColor(auraInfo.color[1], auraInfo.color[2], auraInfo.color[3])
 
     -- Name label
     tile.nameLabel = tile:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    tile.nameLabel:SetPoint("BOTTOM", 0, 2)
-    tile.nameLabel:SetWidth(60)
+    tile.nameLabel:SetPoint("TOP", tile.iconBg, "BOTTOM", 0, -3)
+    tile.nameLabel:SetWidth(TILE_W)
     tile.nameLabel:SetMaxLines(1)
     tile.nameLabel:SetText(auraInfo.display)
     tile.nameLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
 
-    -- Configured badge
-    tile.badge = tile:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    tile.badge:SetPoint("TOPRIGHT", -2, -2)
+    -- Configured badge (bottom-right of icon)
+    tile.badge = tile.iconBg:CreateFontString(nil, "OVERLAY")
+    tile.badge:SetFont("Fonts\\FRIZQT__.TTF", 8, "OUTLINE")
+    tile.badge:SetPoint("BOTTOMRIGHT", tile.iconBg, "BOTTOMRIGHT", -2, 2)
     tile.badge:SetText("")
     tile.badge:SetTextColor(1, 1, 1)
     tile.badge:Hide()
+
+    -- Badge background (small accent pill)
+    tile.badgeBg = tile.iconBg:CreateTexture(nil, "ARTWORK", nil, 1)
+    tile.badgeBg:SetPoint("CENTER", tile.badge, "CENTER", 0, 0)
+    tile.badgeBg:SetSize(14, 12)
+    local tc = GetThemeColor()
+    tile.badgeBg:SetColorTexture(tc.r, tc.g, tc.b, 0.85)
+    tile.badgeBg:Hide()
 
     tile.auraInfo = auraInfo
     tile.auraName = auraInfo.name
@@ -304,14 +321,16 @@ local function CreateAuraTile(parent, auraInfo, index)
     tile.SetSelected = function(self, selected)
         if selected then
             local c = GetThemeColor()
-            self:SetBackdropBorderColor(c.r, c.g, c.b, 1)
+            self.iconBg:SetBackdropBorderColor(c.r, c.g, c.b, 1)
         else
             local adDB = GetAuraDesignerDB()
             local auraCfg = adDB.auras[self.auraName]
             if auraCfg then
-                self:SetBackdropBorderColor(self.auraInfo.color[1], self.auraInfo.color[2], self.auraInfo.color[3], 0.8)
+                -- Configured: accent border with glow feel
+                local c = GetThemeColor()
+                self.iconBg:SetBackdropBorderColor(c.r, c.g, c.b, 0.6)
             else
-                self:SetBackdropBorderColor(0.27, 0.27, 0.27, 1)
+                self.iconBg:SetBackdropBorderColor(0.27, 0.27, 0.27, 1)
             end
         end
     end
@@ -321,20 +340,21 @@ local function CreateAuraTile(parent, auraInfo, index)
         if count > 0 then
             self.badge:SetText(count)
             self.badge:Show()
+            self.badgeBg:Show()
         else
             self.badge:Hide()
+            self.badgeBg:Hide()
         end
     end
 
     tile:SetScript("OnEnter", function(self)
         if selectedAura ~= self.auraName then
-            self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
+            local c = GetThemeColor()
+            self.iconBg:SetBackdropBorderColor(c.r, c.g, c.b, 0.8)
         end
     end)
     tile:SetScript("OnLeave", function(self)
-        if selectedAura ~= self.auraName then
-            self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-        end
+        self:SetSelected(selectedAura == self.auraName)
     end)
 
     tile:SetScript("OnClick", function(self)
@@ -346,23 +366,31 @@ local function CreateAuraTile(parent, auraInfo, index)
 end
 
 local function CreateGlobalSettingsTile(parent)
+    local TILE_W, ICON_SZ = 68, 56
     local tile = CreateFrame("Button", nil, parent, "BackdropTemplate")
-    tile:SetSize(64, 82)
-    ApplyBackdrop(tile, C_ELEMENT, {r = 0.40, g = 0.40, b = 0.40, a = 1})
+    tile:SetSize(TILE_W, ICON_SZ + 18)
 
-    tile.iconBg = tile:CreateTexture(nil, "ARTWORK")
-    tile.iconBg:SetPoint("TOP", 0, -4)
-    tile.iconBg:SetSize(48, 48)
-    tile.iconBg:SetColorTexture(0.25, 0.25, 0.25, 1)
+    -- Icon area (dashed border effect via backdrop)
+    tile.iconBg = CreateFrame("Frame", nil, tile, "BackdropTemplate")
+    tile.iconBg:SetPoint("TOP", 0, 0)
+    tile.iconBg:SetSize(ICON_SZ, ICON_SZ)
+    if not tile.iconBg.SetBackdrop then Mixin(tile.iconBg, BackdropTemplateMixin) end
+    tile.iconBg:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = 2,
+    })
+    tile.iconBg:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
+    tile.iconBg:SetBackdropBorderColor(0.40, 0.40, 0.40, 1)
 
-    tile.letter = tile:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    tile.letter:SetPoint("CENTER", tile.iconBg, "CENTER", 0, 0)
+    tile.letter = tile.iconBg:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    tile.letter:SetPoint("CENTER", 0, 0)
     tile.letter:SetText("*")
     tile.letter:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
     tile.nameLabel = tile:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    tile.nameLabel:SetPoint("BOTTOM", 0, 2)
-    tile.nameLabel:SetWidth(60)
+    tile.nameLabel:SetPoint("TOP", tile.iconBg, "BOTTOM", 0, -3)
+    tile.nameLabel:SetWidth(TILE_W)
     tile.nameLabel:SetMaxLines(1)
     tile.nameLabel:SetText("Global")
     tile.nameLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
@@ -373,21 +401,19 @@ local function CreateGlobalSettingsTile(parent)
     tile.SetSelected = function(self, isSelected)
         if isSelected then
             local c = GetThemeColor()
-            self:SetBackdropBorderColor(c.r, c.g, c.b, 1)
+            self.iconBg:SetBackdropBorderColor(c.r, c.g, c.b, 1)
         else
-            self:SetBackdropBorderColor(0.40, 0.40, 0.40, 1)
+            self.iconBg:SetBackdropBorderColor(0.40, 0.40, 0.40, 1)
         end
     end
 
     tile:SetScript("OnEnter", function(self)
         if selectedAura ~= nil then
-            self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
+            self.iconBg:SetBackdropBorderColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 1)
         end
     end)
     tile:SetScript("OnLeave", function(self)
-        if selectedAura ~= nil then
-            self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-        end
+        self:SetSelected(selectedAura == nil)
     end)
 
     tile:SetScript("OnClick", function(self)
@@ -418,22 +444,25 @@ local function PopulateTileStrip()
     local auras = Adapter:GetTrackableAuras(spec)
     if not auras or #auras == 0 then return end
 
+    local TILE_GAP = 6
+    local TILE_PAD = 10  -- left/right padding inside strip
+
     local globalTile = CreateGlobalSettingsTile(tileStripContent)
-    globalTile:SetPoint("LEFT", tileStripContent, "LEFT", 4, 0)
+    globalTile:SetPoint("LEFT", tileStripContent, "LEFT", TILE_PAD, 0)
     globalTile:SetSelected(selectedAura == nil)
     activeTiles[#activeTiles + 1] = globalTile
 
     local prevTile = globalTile
     for i, auraInfo in ipairs(auras) do
         local tile = CreateAuraTile(tileStripContent, auraInfo, i)
-        tile:SetPoint("LEFT", prevTile, "RIGHT", 4, 0)
+        tile:SetPoint("LEFT", prevTile, "RIGHT", TILE_GAP, 0)
         tile:SetSelected(selectedAura == auraInfo.name)
         tile:UpdateBadge()
         activeTiles[#activeTiles + 1] = tile
         prevTile = tile
     end
 
-    local totalWidth = (#auras + 1) * (64 + 4) + 4
+    local totalWidth = TILE_PAD + (#auras + 1) * (68 + TILE_GAP) + TILE_PAD
     tileStripContent:SetWidth(totalWidth)
 end
 
@@ -975,6 +1004,53 @@ local function RefreshRightPanel()
 
     if not rightScrollChild then return end
 
+    -- ========================================
+    -- Update right panel header
+    -- ========================================
+    if rightPanel and rightPanel.selHeader then
+        if selectedAura == nil then
+            -- Global view header
+            rightPanel.selIcon:SetColorTexture(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
+            rightPanel.selName:SetText("Global Defaults")
+            local tc = GetThemeColor()
+            rightPanel.selName:SetTextColor(tc.r, tc.g, tc.b)
+            rightPanel.selSub:SetText("Default values for all auras")
+        else
+            -- Per-aura header
+            local spec = ResolveSpec()
+            local auraInfo
+            if spec then
+                for _, info in ipairs(Adapter:GetTrackableAuras(spec)) do
+                    if info.name == selectedAura then
+                        auraInfo = info
+                        break
+                    end
+                end
+            end
+            if auraInfo then
+                rightPanel.selIcon:SetColorTexture(auraInfo.color[1] * 0.4, auraInfo.color[2] * 0.4, auraInfo.color[3] * 0.4, 1)
+                rightPanel.selName:SetText(auraInfo.display)
+                rightPanel.selName:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+                local effectCount = CountActiveEffects(selectedAura)
+                if effectCount > 0 then
+                    rightPanel.selSub:SetText(effectCount .. " effect(s) configured")
+                    rightPanel.selSub:SetTextColor(auraInfo.color[1], auraInfo.color[2], auraInfo.color[3])
+                else
+                    rightPanel.selSub:SetText("Not configured")
+                    rightPanel.selSub:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+                end
+            else
+                rightPanel.selIcon:SetColorTexture(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
+                rightPanel.selName:SetText(selectedAura)
+                rightPanel.selName:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+                rightPanel.selSub:SetText("")
+            end
+        end
+    end
+
+    -- ========================================
+    -- Build right panel content
+    -- ========================================
     local container = CreateFrame("Frame", nil, rightScrollChild)
     container:SetPoint("TOPLEFT", 0, 0)
     container:SetPoint("TOPRIGHT", 0, 0)
@@ -1151,41 +1227,224 @@ local function CreateAttributionRow(parent, yOffset)
 end
 
 -- ============================================================
--- FRAME PREVIEW (placeholder for Sub-Step 4)
+-- STRIP HEADER HELPER
+-- Creates a small header bar (TRACKABLE AURAS, ACTIVE EFFECTS, etc.)
 -- ============================================================
 
-local function CreateFramePreview(parent, yOffset)
-    local preview = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    preview:SetHeight(80)
-    preview:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, yOffset)
-    preview:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -290, yOffset)
-    ApplyBackdrop(preview, {r = 0.10, g = 0.10, b = 0.10, a = 1}, C_BORDER)
+local function CreateStripHeader(parent, text, accentColor)
+    local header = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    header:SetHeight(18)
+    ApplyBackdrop(header, C_BACKGROUND, {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5})
 
-    local placeholder = preview:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    placeholder:SetPoint("CENTER", 0, 0)
-    placeholder:SetText("Frame Preview")
-    placeholder:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.5)
+    local label = header:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    label:SetPoint("LEFT", 10, 0)
+    label:SetText(text)
+    if accentColor then
+        label:SetTextColor(accentColor.r, accentColor.g, accentColor.b)
+    else
+        label:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    end
 
-    return preview
+    header.label = label
+    return header
 end
 
 -- ============================================================
--- ACTIVE EFFECTS STRIP (placeholder for Sub-Step 4)
+-- FRAME PREVIEW
+-- Mock unit frame with health bar, power bar, name, health %,
+-- and 9 anchor point dots for indicator placement
+-- ============================================================
+
+-- Anchor point positions relative to the mock frame (260x90)
+local ANCHOR_POSITIONS = {
+    TOPLEFT     = { x = 0,   y = 0,    ax = "TOPLEFT",     ay = "TOPLEFT"     },
+    TOP         = { x = 0.5, y = 0,    ax = "TOP",         ay = "TOP"         },
+    TOPRIGHT    = { x = 1,   y = 0,    ax = "TOPRIGHT",    ay = "TOPRIGHT"    },
+    LEFT        = { x = 0,   y = 0.5,  ax = "LEFT",        ay = "LEFT"        },
+    CENTER      = { x = 0.5, y = 0.5,  ax = "CENTER",      ay = "CENTER"      },
+    RIGHT       = { x = 1,   y = 0.5,  ax = "RIGHT",       ay = "RIGHT"       },
+    BOTTOMLEFT  = { x = 0,   y = 1,    ax = "BOTTOMLEFT",  ay = "BOTTOMLEFT"  },
+    BOTTOM      = { x = 0.5, y = 1,    ax = "BOTTOM",      ay = "BOTTOM"      },
+    BOTTOMRIGHT = { x = 1,   y = 1,    ax = "BOTTOMRIGHT", ay = "BOTTOMRIGHT" },
+}
+
+local anchorDots = {}
+
+local function CreateFramePreview(parent, yOffset)
+    local FRAME_W, FRAME_H = 220, 80
+    local POWER_H = 6
+
+    -- Outer container with label
+    local container = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    container:SetHeight(FRAME_H + 50)  -- room for label + instructions
+    container:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, yOffset)
+    container:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -290, yOffset)
+    ApplyBackdrop(container, {r = 0.12, g = 0.12, b = 0.12, a = 1}, C_BORDER)
+
+    -- "Frame Preview" label
+    local previewLabel = container:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    previewLabel:SetPoint("TOPLEFT", 8, -4)
+    previewLabel:SetText("FRAME PREVIEW")
+    previewLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+
+    -- Mock unit frame (centered in container)
+    local mockFrame = CreateFrame("Frame", nil, container, "BackdropTemplate")
+    mockFrame:SetSize(FRAME_W, FRAME_H)
+    mockFrame:SetPoint("CENTER", container, "CENTER", 0, -4)
+    ApplyBackdrop(mockFrame, {r = 0.07, g = 0.07, b = 0.07, a = 1}, {r = 0.27, g = 0.27, b = 0.27, a = 1})
+    container.mockFrame = mockFrame
+
+    -- Health bar background
+    local healthBg = mockFrame:CreateTexture(nil, "BACKGROUND")
+    healthBg:SetPoint("TOPLEFT", 1, -1)
+    healthBg:SetPoint("BOTTOMRIGHT", mockFrame, "BOTTOMRIGHT", -1, POWER_H + 1)
+    healthBg:SetColorTexture(0, 0, 0, 0.4)
+
+    -- Health bar fill (72% health, green gradient approximation)
+    local healthFill = mockFrame:CreateTexture(nil, "ARTWORK")
+    healthFill:SetPoint("TOPLEFT", 1, -1)
+    healthFill:SetPoint("BOTTOMLEFT", mockFrame, "BOTTOMLEFT", 1, POWER_H + 1)
+    healthFill:SetWidth(FRAME_W * 0.72)
+    healthFill:SetColorTexture(0.18, 0.80, 0.44, 0.85)
+    container.healthFill = healthFill
+
+    -- Missing health region
+    local missingHealth = mockFrame:CreateTexture(nil, "ARTWORK")
+    missingHealth:SetPoint("TOPRIGHT", mockFrame, "TOPRIGHT", -1, -1)
+    missingHealth:SetPoint("BOTTOMRIGHT", mockFrame, "BOTTOMRIGHT", -1, POWER_H + 1)
+    missingHealth:SetWidth(FRAME_W * 0.28)
+    missingHealth:SetColorTexture(0, 0, 0, 0.4)
+
+    -- Power bar
+    local powerBg = mockFrame:CreateTexture(nil, "ARTWORK")
+    powerBg:SetPoint("BOTTOMLEFT", 1, 1)
+    powerBg:SetPoint("BOTTOMRIGHT", mockFrame, "BOTTOMRIGHT", -1, 0)
+    powerBg:SetHeight(POWER_H)
+    powerBg:SetColorTexture(0.07, 0.07, 0.07, 1)
+
+    local powerFill = mockFrame:CreateTexture(nil, "ARTWORK", nil, 1)
+    powerFill:SetPoint("BOTTOMLEFT", 1, 1)
+    powerFill:SetHeight(POWER_H)
+    powerFill:SetWidth(FRAME_W * 0.85)
+    powerFill:SetColorTexture(0.27, 0.53, 1, 0.9)
+
+    -- Power bar top border
+    local powerBorder = mockFrame:CreateTexture(nil, "ARTWORK", nil, 2)
+    powerBorder:SetPoint("BOTTOMLEFT", mockFrame, "BOTTOMLEFT", 1, POWER_H)
+    powerBorder:SetPoint("BOTTOMRIGHT", mockFrame, "BOTTOMRIGHT", -1, POWER_H)
+    powerBorder:SetHeight(1)
+    powerBorder:SetColorTexture(0.2, 0.2, 0.2, 1)
+
+    -- Name text
+    local nameText = mockFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    nameText:SetPoint("TOP", mockFrame, "TOP", 0, -6)
+    nameText:SetText("Danders")
+    nameText:SetTextColor(0.18, 0.80, 0.44, 1)
+    container.nameText = nameText
+
+    -- Health percentage
+    local hpText = mockFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    hpText:SetPoint("BOTTOM", mockFrame, "BOTTOM", 0, POWER_H + 4)
+    hpText:SetText("72%")
+    hpText:SetTextColor(0.87, 0.87, 0.87, 1)
+    container.hpText = hpText
+
+    -- Border overlay (used when border effect is active)
+    container.borderOverlay = CreateFrame("Frame", nil, mockFrame, "BackdropTemplate")
+    container.borderOverlay:SetAllPoints()
+    container.borderOverlay:SetFrameLevel(mockFrame:GetFrameLevel() + 5)
+    container.borderOverlay:Hide()
+
+    -- ========================================
+    -- 9 ANCHOR POINT DOTS
+    -- ========================================
+    wipe(anchorDots)
+    for anchorName, pos in pairs(ANCHOR_POSITIONS) do
+        local dotFrame = CreateFrame("Frame", nil, mockFrame)
+        dotFrame:SetSize(20, 20)
+        dotFrame:SetFrameLevel(mockFrame:GetFrameLevel() + 10)
+
+        -- Position the dot zone
+        dotFrame:SetPoint(pos.ax, mockFrame, pos.ay, 0, 0)
+
+        -- The visible dot
+        local dot = dotFrame:CreateTexture(nil, "OVERLAY")
+        dot:SetSize(6, 6)
+        dot:SetPoint("CENTER", 0, 0)
+        dot:SetColorTexture(0.45, 0.45, 0.95, 0.3)
+        dotFrame.dot = dot
+
+        -- Hover zone (invisible button)
+        local hoverBtn = CreateFrame("Button", nil, dotFrame)
+        hoverBtn:SetAllPoints()
+        hoverBtn:SetScript("OnEnter", function()
+            dot:SetSize(10, 10)
+            dot:SetColorTexture(0.45, 0.45, 0.95, 0.7)
+        end)
+        hoverBtn:SetScript("OnLeave", function()
+            dot:SetSize(6, 6)
+            dot:SetColorTexture(0.45, 0.45, 0.95, 0.3)
+        end)
+
+        dotFrame.anchorName = anchorName
+        anchorDots[anchorName] = dotFrame
+    end
+
+    -- Instructions row
+    local instrText = container:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    instrText:SetPoint("BOTTOM", container, "BOTTOM", 0, 4)
+    instrText:SetText("Click an anchor to place | Right-click to remove")
+    instrText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.6)
+
+    return container
+end
+
+-- ============================================================
+-- ACTIVE EFFECTS STRIP
+-- With header bar and horizontal scroll for effect entries
 -- ============================================================
 
 local function CreateActiveEffectsStrip(parent, yOffset)
-    local strip = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    strip:SetHeight(82)
-    strip:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, yOffset)
-    strip:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -290, yOffset)
-    ApplyBackdrop(strip, {r = 0.10, g = 0.10, b = 0.10, a = 1}, C_BORDER)
+    local wrapper = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    wrapper:SetHeight(104)  -- 18 header + 82 strip + 4 padding
+    wrapper:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, yOffset)
+    wrapper:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -290, yOffset)
+    ApplyBackdrop(wrapper, {r = 0.12, g = 0.12, b = 0.12, a = 1}, C_BORDER)
 
-    strip.placeholder = strip:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    strip.placeholder:SetPoint("CENTER", 0, 0)
-    strip.placeholder:SetText("Enable effects on an aura to see them here")
-    strip.placeholder:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.5)
+    -- Header
+    local tc = GetThemeColor()
+    local header = CreateStripHeader(wrapper, "ACTIVE EFFECTS", tc)
+    header:SetPoint("TOPLEFT", 0, 0)
+    header:SetPoint("TOPRIGHT", 0, 0)
+    wrapper.header = header
 
-    return strip
+    -- Strip scroll area
+    local stripScroll = CreateFrame("ScrollFrame", nil, wrapper)
+    stripScroll:SetPoint("TOPLEFT", 0, -18)
+    stripScroll:SetPoint("BOTTOMRIGHT", 0, 0)
+    stripScroll:EnableMouseWheel(true)
+
+    local stripContent = CreateFrame("Frame", nil, stripScroll)
+    stripContent:SetHeight(82)
+    stripContent:SetWidth(800)
+    stripScroll:SetScrollChild(stripContent)
+
+    stripScroll:SetScript("OnMouseWheel", function(self, delta)
+        local current = self:GetHorizontalScroll()
+        local maxScrollVal = max(0, stripContent:GetWidth() - self:GetWidth())
+        local newScroll = max(0, min(maxScrollVal, current - (delta * 68)))
+        self:SetHorizontalScroll(newScroll)
+    end)
+
+    wrapper.stripContent = stripContent
+
+    -- Placeholder text
+    wrapper.placeholder = wrapper:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    wrapper.placeholder:SetPoint("CENTER", stripScroll, "CENTER", 0, 0)
+    wrapper.placeholder:SetText("Enable effects on an aura to see them here")
+    wrapper.placeholder:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.5)
+
+    return wrapper
 end
 
 -- ============================================================
@@ -1240,12 +1499,13 @@ local function RefreshActiveEffectsStrip()
     end
     activeEffectsStrip.placeholder:Hide()
 
-    local xOffset = 4
+    local stripParent = activeEffectsStrip.stripContent or activeEffectsStrip
+    local xOffset = 10
     for _, effect in ipairs(effects) do
-        local entry = CreateFrame("Button", nil, activeEffectsStrip, "BackdropTemplate")
-        entry:SetSize(64, 74)
-        entry:SetPoint("LEFT", activeEffectsStrip, "LEFT", xOffset, 0)
-        ApplyBackdrop(entry, C_ELEMENT, {r = 0.30, g = 0.30, b = 0.30, a = 0.5})
+        local entry = CreateFrame("Button", nil, stripParent, "BackdropTemplate")
+        entry:SetSize(68, 74)
+        entry:SetPoint("LEFT", stripParent, "LEFT", xOffset, 0)
+        ApplyBackdrop(entry, {r = 0, g = 0, b = 0, a = 0}, {r = 0, g = 0, b = 0, a = 0})  -- transparent bg, hover reveals
 
         -- X button to disable
         local xBtn = CreateFrame("Button", nil, entry)
@@ -1274,23 +1534,31 @@ local function RefreshActiveEffectsStrip()
         name:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
         name:SetJustifyH("CENTER")
 
-        -- Icon placeholder
-        local iconBg = entry:CreateTexture(nil, "ARTWORK")
-        iconBg:SetPoint("CENTER", 0, 2)
-        iconBg:SetSize(28, 28)
-        iconBg:SetColorTexture(effect.color[1] * 0.4, effect.color[2] * 0.4, effect.color[3] * 0.4, 1)
+        -- Icon with accent border
+        local iconFrame = CreateFrame("Frame", nil, entry, "BackdropTemplate")
+        iconFrame:SetSize(36, 36)
+        iconFrame:SetPoint("CENTER", 0, 2)
+        if not iconFrame.SetBackdrop then Mixin(iconFrame, BackdropTemplateMixin) end
+        iconFrame:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8x8",
+            edgeFile = "Interface\\Buttons\\WHITE8x8",
+            edgeSize = 2,
+        })
+        iconFrame:SetBackdropColor(effect.color[1] * 0.25, effect.color[2] * 0.25, effect.color[3] * 0.25, 1)
+        local tc = GetThemeColor()
+        iconFrame:SetBackdropBorderColor(tc.r, tc.g, tc.b, 1)
 
-        local letter = entry:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        letter:SetPoint("CENTER", iconBg, "CENTER", 0, 0)
+        local letter = iconFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        letter:SetPoint("CENTER", 0, 0)
         letter:SetText(effect.display:sub(1, 1))
         letter:SetTextColor(effect.color[1], effect.color[2], effect.color[3])
 
-        -- Type label
-        local typeLabel = entry:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        -- Type label (uppercase accent text)
+        local typeLabel = entry:CreateFontString(nil, "OVERLAY")
+        typeLabel:SetFont("Fonts\\FRIZQT__.TTF", 7, "OUTLINE")
         typeLabel:SetPoint("BOTTOM", 0, 3)
-        typeLabel:SetWidth(60)
+        typeLabel:SetWidth(64)
         typeLabel:SetMaxLines(1)
-        local tc = GetThemeColor()
         typeLabel:SetText(effect.typeLabel:upper())
         typeLabel:SetTextColor(tc.r, tc.g, tc.b)
 
@@ -1300,14 +1568,24 @@ local function RefreshActiveEffectsStrip()
             DF:AuraDesigner_RefreshPage()
         end)
         entry:SetScript("OnEnter", function(self)
-            self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
+            self:SetBackdropColor(1, 1, 1, 0.03)
         end)
         entry:SetScript("OnLeave", function(self)
-            self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
+            self:SetBackdropColor(0, 0, 0, 0)
         end)
 
         tinsert(activeEffectEntries, entry)
-        xOffset = xOffset + 68
+        xOffset = xOffset + 74
+    end
+
+    -- Update scroll content width
+    if stripParent.SetWidth then
+        stripParent:SetWidth(max(xOffset + 10, 100))
+    end
+
+    -- Update header count
+    if activeEffectsStrip.header and activeEffectsStrip.header.label then
+        activeEffectsStrip.header.label:SetText("ACTIVE EFFECTS (" .. #effects .. ")")
     end
 end
 
@@ -1322,6 +1600,14 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     Adapter = DF.AuraDesigner.Adapter
 
     local parent = page.child
+
+    -- Layout constants
+    local BANNER_H = 36
+    local ATTRIB_H = 20
+    local TILE_HEADER_H = 18
+    local TILE_STRIP_H = 82   -- inner scroll area
+    local SECTION_GAP = 8
+    local RIGHT_PANEL_W = 280
 
     -- ========================================
     -- MAIN FRAME
@@ -1338,25 +1624,36 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     enableBanner:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 0, yPos)
     enableBanner:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", 0, yPos)
     enableBanner.UpdateSpecText()
-    yPos = yPos - 40
+    yPos = yPos - (BANNER_H + 4)
 
     -- ========================================
     -- ATTRIBUTION ROW
     -- ========================================
     attributionRow = CreateAttributionRow(mainFrame, yPos)
-    yPos = yPos - 24
+    yPos = yPos - (ATTRIB_H + 4)
 
     -- ========================================
-    -- TILE STRIP
+    -- TILE STRIP (header + scrolling tiles)
     -- ========================================
-    tileStrip = CreateFrame("ScrollFrame", nil, mainFrame)
-    tileStrip:SetHeight(90)
-    tileStrip:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 0, yPos)
-    tileStrip:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", 0, yPos)
+    local tileWrap = CreateFrame("Frame", nil, mainFrame, "BackdropTemplate")
+    tileWrap:SetHeight(TILE_HEADER_H + TILE_STRIP_H)
+    tileWrap:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 0, yPos)
+    tileWrap:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", 0, yPos)
+    ApplyBackdrop(tileWrap, C_PANEL, C_BORDER)
+
+    -- Header bar
+    local tileHeader = CreateStripHeader(tileWrap, "TRACKABLE AURAS")
+    tileHeader:SetPoint("TOPLEFT", 0, 0)
+    tileHeader:SetPoint("TOPRIGHT", 0, 0)
+
+    -- Scroll area below header
+    tileStrip = CreateFrame("ScrollFrame", nil, tileWrap)
+    tileStrip:SetPoint("TOPLEFT", 0, -TILE_HEADER_H)
+    tileStrip:SetPoint("BOTTOMRIGHT", 0, 0)
     tileStrip:EnableMouseWheel(true)
 
     tileStripContent = CreateFrame("Frame", nil, tileStrip)
-    tileStripContent:SetHeight(90)
+    tileStripContent:SetHeight(TILE_STRIP_H)
     tileStripContent:SetWidth(800)
     tileStrip:SetScrollChild(tileStripContent)
 
@@ -1367,18 +1664,16 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
         self:SetHorizontalScroll(newScroll)
     end)
 
-    local tileStripBg = CreateFrame("Frame", nil, mainFrame, "BackdropTemplate")
-    tileStripBg:SetAllPoints(tileStrip)
-    tileStripBg:SetFrameLevel(mainFrame:GetFrameLevel())
-    ApplyBackdrop(tileStripBg, {r = 0.10, g = 0.10, b = 0.10, a = 0.5}, {r = 0.20, g = 0.20, b = 0.20, a = 0.5})
-
-    yPos = yPos - 94
+    yPos = yPos - (TILE_HEADER_H + TILE_STRIP_H + SECTION_GAP)
 
     -- ========================================
-    -- FRAME PREVIEW
+    -- FRAME PREVIEW + ACTIVE EFFECTS (left of right panel)
+    -- The frame preview and active effects strip occupy
+    -- the left side, the right panel sits on the right.
     -- ========================================
     framePreview = CreateFramePreview(mainFrame, yPos)
-    yPos = yPos - 84
+    local previewH = framePreview:GetHeight()
+    yPos = yPos - (previewH + SECTION_GAP)
 
     -- ========================================
     -- ACTIVE EFFECTS STRIP
@@ -1387,15 +1682,37 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
 
     -- ========================================
     -- RIGHT PANEL (fixed 280px)
+    -- Starts below the enable banner + attribution
     -- ========================================
+    local rightTopOffset = -(BANNER_H + 4 + ATTRIB_H + 4)
     rightPanel = CreateFrame("Frame", nil, mainFrame, "BackdropTemplate")
-    rightPanel:SetWidth(280)
-    rightPanel:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", 0, -64)
+    rightPanel:SetWidth(RIGHT_PANEL_W)
+    rightPanel:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", 0, rightTopOffset)
     rightPanel:SetPoint("BOTTOMRIGHT", mainFrame, "BOTTOMRIGHT", 0, 0)
-    ApplyBackdrop(rightPanel, {r = 0.10, g = 0.10, b = 0.10, a = 1}, {r = 0.20, g = 0.20, b = 0.20, a = 0.5})
+    ApplyBackdrop(rightPanel, {r = 0.10, g = 0.10, b = 0.10, a = 1}, {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5})
 
+    -- Right panel selected-aura header
+    rightPanel.selHeader = CreateFrame("Frame", nil, rightPanel, "BackdropTemplate")
+    rightPanel.selHeader:SetHeight(40)
+    rightPanel.selHeader:SetPoint("TOPLEFT", 0, 0)
+    rightPanel.selHeader:SetPoint("TOPRIGHT", 0, 0)
+    ApplyBackdrop(rightPanel.selHeader, C_BACKGROUND, {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5})
+
+    rightPanel.selIcon = rightPanel.selHeader:CreateTexture(nil, "ARTWORK")
+    rightPanel.selIcon:SetPoint("LEFT", 10, 0)
+    rightPanel.selIcon:SetSize(28, 28)
+
+    rightPanel.selName = rightPanel.selHeader:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    rightPanel.selName:SetPoint("TOPLEFT", rightPanel.selIcon, "TOPRIGHT", 8, -2)
+    rightPanel.selName:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+
+    rightPanel.selSub = rightPanel.selHeader:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    rightPanel.selSub:SetPoint("TOPLEFT", rightPanel.selName, "BOTTOMLEFT", 0, -1)
+    rightPanel.selSub:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+
+    -- Scroll frame below header
     rightScrollFrame = CreateFrame("ScrollFrame", nil, rightPanel, "UIPanelScrollFrameTemplate")
-    rightScrollFrame:SetPoint("TOPLEFT", 0, 0)
+    rightScrollFrame:SetPoint("TOPLEFT", 0, -40)
     rightScrollFrame:SetPoint("BOTTOMRIGHT", -22, 0)
 
     rightScrollChild = CreateFrame("Frame", nil, rightScrollFrame)
@@ -1428,12 +1745,7 @@ function DF:AuraDesigner_RefreshPage()
     -- Refresh tile states
     for _, tile in ipairs(activeTiles) do
         tile:SetSelected(selectedAura == tile.auraName)
-        tile:UpdateBadge()
-        if selectedAura == tile.auraName then
-            tile:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 1)
-        else
-            tile:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-        end
+        if tile.UpdateBadge then tile:UpdateBadge() end
     end
 
     -- Check if spec changed
@@ -1453,29 +1765,31 @@ function DF:AuraDesigner_RefreshPage()
         enableBanner.UpdateSpecText()
     end
 
-    -- Tab disable logic: grey out Buffs + My Buff Indicators when enabled
+    -- Tab disable logic: strikethrough + 0.3 opacity when Aura Designer is enabled
     if GUI and GUI.Tabs then
         local adEnabled = GetAuraDesignerDB().enabled
-        local buffsTab = GUI.Tabs["auras_buffs"]
-        local myBuffTab = GUI.Tabs["auras_mybuffindicators"]
-        if buffsTab then
-            buffsTab.disabled = adEnabled
-            if adEnabled then
-                buffsTab.Text:SetTextColor(0.2, 0.2, 0.2)
-                buffsTab.Text:SetAlpha(0.8)
-            else
-                buffsTab.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-                buffsTab.Text:SetAlpha(1)
-            end
-        end
-        if myBuffTab then
-            myBuffTab.disabled = adEnabled
-            if adEnabled then
-                myBuffTab.Text:SetTextColor(0.2, 0.2, 0.2)
-                myBuffTab.Text:SetAlpha(0.8)
-            else
-                myBuffTab.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-                myBuffTab.Text:SetAlpha(1)
+        local disableTabs = { "auras_buffs", "auras_mybuffindicators" }
+        for _, tabKey in ipairs(disableTabs) do
+            local tab = GUI.Tabs[tabKey]
+            if tab then
+                tab.disabled = adEnabled
+                if adEnabled then
+                    tab:SetAlpha(0.3)
+                    -- Add strikethrough if not already present
+                    if not tab._strikethrough then
+                        tab._strikethrough = tab:CreateTexture(nil, "OVERLAY")
+                        tab._strikethrough:SetColorTexture(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.6)
+                        tab._strikethrough:SetHeight(1)
+                        tab._strikethrough:SetPoint("LEFT", tab.Text or tab, "LEFT", 0, 0)
+                        tab._strikethrough:SetPoint("RIGHT", tab.Text or tab, "RIGHT", 0, 0)
+                    end
+                    tab._strikethrough:Show()
+                else
+                    tab:SetAlpha(1)
+                    if tab._strikethrough then
+                        tab._strikethrough:Hide()
+                    end
+                end
             end
         end
     end
