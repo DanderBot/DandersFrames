@@ -1366,7 +1366,11 @@ local function BuildPerAuraView(parent, auraName)
             end
         end
     end
-    if not auraInfo then return end
+    if not auraInfo then
+        DF:DebugWarn("AuraDesigner: BuildPerAuraView - auraInfo is nil for", auraName, "spec:", spec)
+        return
+    end
+    DF:Debug("AuraDesigner: BuildPerAuraView started for", auraName, "parent:", parent:GetName() or "anon", "parent visible:", parent:IsVisible())
 
     local adDB = GetAuraDesignerDB()
     local auraCfg = adDB.auras[auraName]
@@ -1555,6 +1559,8 @@ local function BuildPerAuraView(parent, auraName)
             yPos = yPos - contentHeight - 2
         end
     end
+
+    DF:Debug("AuraDesigner: Created", #sectionStates, "type sections, yPos:", yPos)
 
     -- ===== DIVIDER =====
     yPos = yPos - 4
@@ -1769,11 +1775,15 @@ local function RefreshRightPanel()
     if selectedAura == nil then
         BuildGlobalView(container)
     else
+        DF:Debug("AuraDesigner: Building per-aura view for", selectedAura)
         BuildPerAuraView(container, selectedAura)
+        DF:Debug("AuraDesigner: Container height after build:", container:GetHeight())
     end
 
     -- Update scroll child height to match content
-    rightScrollChild:SetHeight(container:GetHeight())
+    local containerH = container:GetHeight()
+    rightScrollChild:SetHeight(containerH)
+    DF:Debug("AuraDesigner: ScrollChild height set to", containerH, "| ScrollFrame visible:", rightScrollFrame:IsVisible())
 end
 
 -- ============================================================
