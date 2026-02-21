@@ -264,6 +264,27 @@ end
 local anchorDots = {}
 
 -- ============================================================
+-- FRAME REFERENCES (populated during build)
+-- Declared early so drag/indicator/effects code can capture them
+-- ============================================================
+local mainFrame           -- The root frame for the entire page
+local leftPanel           -- Left content area (flexible width)
+local rightPanel          -- Right settings panel (280px fixed)
+local tileStripHeader     -- Header bar for tile strip (stores countLabel)
+local enableBanner        -- Enable toggle banner
+local attributionRow      -- HARF attribution row
+local tileStrip           -- Horizontal scrolling aura tile palette
+local tileStripContent    -- ScrollChild for tile strip
+local framePreview        -- Mock unit frame preview
+local activeEffectsStrip  -- Active effects list below preview
+local rightScrollFrame    -- Scroll frame for right panel content
+local rightScrollChild    -- ScrollChild for right panel
+
+-- Tile button pool
+local tilePool = {}
+local activeTiles = {}
+
+-- ============================================================
 -- DRAG AND DROP SYSTEM
 -- Modeled after DandersCDM's ghost-based drag pattern:
 --   Ghost frame (TOOLTIP strata, EnableMouse false) follows cursor
@@ -664,26 +685,6 @@ local function RefreshPreviewEffects()
 end
 
 -- ============================================================
--- FRAME REFERENCES (populated during build)
--- ============================================================
-local mainFrame           -- The root frame for the entire page
-local leftPanel           -- Left content area (flexible width)
-local rightPanel          -- Right settings panel (280px fixed)
-local tileStripHeader     -- Header bar for tile strip (stores countLabel)
-local enableBanner        -- Enable toggle banner
-local attributionRow      -- HARF attribution row
-local tileStrip           -- Horizontal scrolling aura tile palette
-local tileStripContent    -- ScrollChild for tile strip
-local framePreview        -- Mock unit frame preview
-local activeEffectsStrip  -- Active effects list below preview
-local rightScrollFrame    -- Scroll frame for right panel content
-local rightScrollChild    -- ScrollChild for right panel
-
--- Tile button pool
-local tilePool = {}
-local activeTiles = {}
-
--- ============================================================
 -- TILE STRIP
 -- ============================================================
 
@@ -1023,15 +1024,19 @@ local function BuildTypeContent(parent, typeKey, auraName, width)
         AddWidget(GUI:CreateSlider(parent, "Scale", 0.5, 3.0, 0.05, proxy, "scale"), 54)
         AddWidget(GUI:CreateSlider(parent, "Alpha", 0, 1, 0.05, proxy, "alpha"), 54)
         AddWidget(GUI:CreateCheckbox(parent, "Show Border", proxy, "borderEnabled"), 28)
+        AddWidget(GUI:CreateSlider(parent, "Border Thickness", 1, 5, 1, proxy, "borderThickness"), 54)
         AddWidget(GUI:CreateCheckbox(parent, "Hide Cooldown Swipe", proxy, "hideSwipe"), 28)
         AddDivider()
-        -- Duration & stacks
+        -- Duration
         AddWidget(GUI:CreateCheckbox(parent, "Show Duration Text", proxy, "showDuration"), 28)
         AddWidget(GUI:CreateSlider(parent, "Duration Scale", 0.5, 2.0, 0.1, proxy, "durationScale"), 54)
         AddWidget(GUI:CreateCheckbox(parent, "Color Duration by Time", proxy, "durationColorByTime"), 28)
         AddDivider()
+        -- Stacks
         AddWidget(GUI:CreateCheckbox(parent, "Show Stacks", proxy, "showStacks"), 28)
         AddWidget(GUI:CreateSlider(parent, "Stack Minimum", 1, 10, 1, proxy, "stackMinimum"), 54)
+        AddWidget(GUI:CreateSlider(parent, "Stack Scale", 0.5, 2.0, 0.1, proxy, "stackScale"), 54)
+        AddWidget(GUI:CreateDropdown(parent, "Stack Font", DF:GetFontList(), proxy, "stackFont"), 54)
 
     elseif typeKey == "square" then
         -- Placement
@@ -1046,10 +1051,14 @@ local function BuildTypeContent(parent, typeKey, auraName, width)
         AddWidget(GUI:CreateColorPicker(parent, "Color", proxy, "color", true), 28)
         AddWidget(GUI:CreateSlider(parent, "Alpha", 0, 1, 0.05, proxy, "alpha"), 54)
         AddWidget(GUI:CreateCheckbox(parent, "Show Border", proxy, "borderEnabled"), 28)
+        AddWidget(GUI:CreateSlider(parent, "Border Thickness", 1, 5, 1, proxy, "borderThickness"), 54)
         AddDivider()
         -- Duration & stacks
         AddWidget(GUI:CreateCheckbox(parent, "Show Duration", proxy, "showDuration"), 28)
         AddWidget(GUI:CreateCheckbox(parent, "Show Stacks", proxy, "showStacks"), 28)
+        AddWidget(GUI:CreateSlider(parent, "Min Stacks", 1, 10, 1, proxy, "stackMinimum"), 54)
+        AddWidget(GUI:CreateSlider(parent, "Stack Scale", 0.5, 2.0, 0.1, proxy, "stackScale"), 54)
+        AddWidget(GUI:CreateDropdown(parent, "Stack Font", DF:GetFontList(), proxy, "stackFont"), 54)
 
     elseif typeKey == "bar" then
         -- Placement
@@ -1062,10 +1071,13 @@ local function BuildTypeContent(parent, typeKey, auraName, width)
         AddWidget(GUI:CreateSlider(parent, "Width", 0, 200, 1, proxy, "width"), 54)
         AddWidget(GUI:CreateSlider(parent, "Height", 1, 30, 1, proxy, "height"), 54)
         AddWidget(GUI:CreateCheckbox(parent, "Match Frame Width", proxy, "matchFrameWidth"), 28)
+        AddWidget(GUI:CreateCheckbox(parent, "Match Frame Height", proxy, "matchFrameHeight"), 28)
         AddDivider()
-        -- Colors
+        -- Colors & border
         AddWidget(GUI:CreateColorPicker(parent, "Fill Color", proxy, "fillColor", true), 28)
         AddWidget(GUI:CreateColorPicker(parent, "Background Color", proxy, "bgColor", true), 28)
+        AddWidget(GUI:CreateCheckbox(parent, "Show Border", proxy, "showBorder"), 28)
+        AddWidget(GUI:CreateSlider(parent, "Border Thickness", 1, 4, 1, proxy, "borderThickness"), 54)
         AddWidget(GUI:CreateColorPicker(parent, "Border Color", proxy, "borderColor", true), 28)
         AddWidget(GUI:CreateSlider(parent, "Alpha", 0, 1, 0.05, proxy, "alpha"), 54)
 
@@ -1361,17 +1373,14 @@ local function BuildPerAuraView(parent, auraName)
     end
     yPos = yPos - 46
 
-    -- ===== PRIORITY SLIDER =====
-    local auraProxy = CreateAuraProxy(auraName)
-    -- Ensure priority default
-    if not auraCfg or auraCfg.priority == nil then
-        EnsureAuraConfig(auraName)
-    end
-
-    local priority = GUI:CreateSlider(parent, "Priority", 1, 10, 1, auraProxy, "priority")
-    priority:SetPoint("TOPLEFT", 5, yPos)
-    priority:SetWidth(contentWidth - 10)
-    yPos = yPos - 58
+    -- ===== INTRO PARAGRAPH =====
+    local introText = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    introText:SetPoint("TOPLEFT", 10, yPos)
+    introText:SetWidth(contentWidth - 20)
+    introText:SetText("Configure how this aura appears when active on a unit frame.")
+    introText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    introText:SetJustifyH("LEFT")
+    yPos = yPos - 18
 
     -- ===== DIVIDER =====
     local div1 = parent:CreateTexture(nil, "ARTWORK")
@@ -1382,9 +1391,27 @@ local function BuildPerAuraView(parent, auraName)
 
     -- ===== 8 INDICATOR TYPE SECTIONS =====
     -- Each section: collapsible header with enable checkbox + content
+    -- Placed types (icon/square/bar) first, then frame-level types
     local sectionStates = {}
+    local placedCount = 0
 
     for _, typeDef in ipairs(INDICATOR_TYPES) do
+        -- Insert separator between placed types and frame-level types
+        if not typeDef.placed and placedCount > 0 then
+            yPos = yPos - 4
+            local sepLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            sepLabel:SetPoint("TOPLEFT", 10, yPos)
+            sepLabel:SetText("FRAME-LEVEL EFFECTS")
+            sepLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+            yPos = yPos - 14
+            local sep = parent:CreateTexture(nil, "ARTWORK")
+            sep:SetPoint("TOPLEFT", 10, yPos)
+            sep:SetSize(238, 1)
+            sep:SetColorTexture(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.3)
+            yPos = yPos - 6
+            placedCount = -1  -- only insert once
+        end
+        if typeDef.placed then placedCount = placedCount + 1 end
         local typeKey = typeDef.key
         local typeLabel = typeDef.label
         local isEnabled = auraCfg and auraCfg[typeKey] ~= nil
@@ -1543,6 +1570,24 @@ local function BuildPerAuraView(parent, auraName)
     div2:SetColorTexture(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
     yPos = yPos - 12
 
+    -- ===== PRIORITY SLIDER (after type sections) =====
+    local auraProxy = CreateAuraProxy(auraName)
+    if not auraCfg or auraCfg.priority == nil then
+        EnsureAuraConfig(auraName)
+    end
+
+    local priority = GUI:CreateSlider(parent, "Priority", 1, 10, 1, auraProxy, "priority")
+    priority:SetPoint("TOPLEFT", 5, yPos)
+    priority:SetWidth(contentWidth - 10)
+    yPos = yPos - 58
+
+    -- ===== DIVIDER =====
+    local div3 = parent:CreateTexture(nil, "ARTWORK")
+    div3:SetPoint("TOPLEFT", 10, yPos)
+    div3:SetSize(238, 1)
+    div3:SetColorTexture(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
+    yPos = yPos - 12
+
     -- ===== EXPIRING INDICATOR SECTION =====
     local expTitle = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     expTitle:SetPoint("TOPLEFT", 10, yPos)
@@ -1565,6 +1610,11 @@ local function BuildPerAuraView(parent, auraName)
     local expBorder = GUI:CreateCheckbox(parent, "Border on Expiring", expProxy, "borderEnabled")
     expBorder:SetPoint("TOPLEFT", 5, yPos)
     yPos = yPos - 28
+
+    local expBorderThickness = GUI:CreateSlider(parent, "Border Thickness", 1, 5, 1, expProxy, "borderThickness")
+    expBorderThickness:SetPoint("TOPLEFT", 5, yPos)
+    expBorderThickness:SetWidth(contentWidth - 10)
+    yPos = yPos - 54
 
     local expBorderColor = GUI:CreateColorPicker(parent, "Expiring Border Color", expProxy, "borderColor", true)
     expBorderColor:SetPoint("TOPLEFT", 5, yPos)
