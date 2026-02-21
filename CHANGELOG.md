@@ -28,6 +28,8 @@
 * Fix leader icon not updating on first leader change (contributed by riyuk)
 * Fix forbidden table iteration in FindHealthManaBars (contributed by riyuk)
 * Various auto layout stability fixes
+* Fix auto layout settings contamination between party and raid modes
+* Fix auto layout override values getting stuck on test mode frames after profile switch
 
 ### New Features
 * Add health fade system — fades frames when a unit's health is above a configurable threshold, with dispel cancel override and test mode support (contributed by X-Steeve)
@@ -39,6 +41,7 @@
 * Auto-show changelog when opening settings after an update
 * Rename "Auto Profiles" to "Auto Layouts" throughout the UI
 * Debug Console — in-game debug log viewer (`/df debug` to toggle, `/df console` to view)
+* Aura Designer UI (work in progress — not yet functional)
 
 ## [4.0.6] - 2026-02-15
 

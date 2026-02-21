@@ -4499,11 +4499,13 @@ function DF:FullProfileRefresh()
     end
     
     -- === UPDATE TEST FRAMES IF ACTIVE ===
-    if DF.testMode and DF.RefreshTestFrames then
+    -- Use full layout refresh so test frames re-read all settings through the
+    -- proxy — picks up runtime auto-layout overrides or restored base values.
+    if (DF.testMode or DF.raidTestMode) and DF.RefreshTestFramesWithLayout then
+        DF:RefreshTestFramesWithLayout()
+    elseif DF.testMode and DF.RefreshTestFrames then
         DF:RefreshTestFrames()
-    end
-    
-    if DF.raidTestMode and DF.UpdateRaidTestFrames then
+    elseif DF.raidTestMode and DF.UpdateRaidTestFrames then
         DF:UpdateRaidTestFrames()
     end
     
