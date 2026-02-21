@@ -1370,45 +1370,8 @@ local function BuildPerAuraView(parent, auraName)
 
     local adDB = GetAuraDesignerDB()
     local auraCfg = adDB.auras[auraName]
-    local yPos = -10
+    local yPos = -6
     local contentWidth = 258
-
-    -- ===== HEADER: icon + name + status =====
-    local iconBg = parent:CreateTexture(nil, "ARTWORK")
-    iconBg:SetPoint("TOPLEFT", 10, yPos)
-    iconBg:SetSize(32, 32)
-
-    local rpIconTex = GetAuraIcon(spec, auraName)
-    if rpIconTex then
-        iconBg:SetTexture(rpIconTex)
-        iconBg:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-    else
-        iconBg:SetColorTexture(auraInfo.color[1] * 0.4, auraInfo.color[2] * 0.4, auraInfo.color[3] * 0.4, 1)
-    end
-
-    local letter = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    letter:SetPoint("CENTER", iconBg, "CENTER", 0, 0)
-    letter:SetText(auraInfo.display:sub(1, 1))
-    letter:SetTextColor(auraInfo.color[1], auraInfo.color[2], auraInfo.color[3])
-    if rpIconTex then letter:Hide() end
-
-    local nameText = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    nameText:SetPoint("LEFT", iconBg, "RIGHT", 8, 4)
-    nameText:SetText(auraInfo.display)
-    nameText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-
-    local statusText = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    statusText:SetPoint("TOPLEFT", nameText, "BOTTOMLEFT", 0, -2)
-
-    local effectCount = CountActiveEffects(auraName)
-    if effectCount > 0 then
-        statusText:SetText(effectCount .. " effect(s) active")
-        statusText:SetTextColor(auraInfo.color[1], auraInfo.color[2], auraInfo.color[3])
-    else
-        statusText:SetText("Not configured")
-        statusText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    end
-    yPos = yPos - 46
 
     -- ===== INTRO PARAGRAPH =====
     local introText = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -1435,17 +1398,12 @@ local function BuildPerAuraView(parent, auraName)
     for _, typeDef in ipairs(INDICATOR_TYPES) do
         -- Insert separator between placed types and frame-level types
         if not typeDef.placed and placedCount > 0 then
+            yPos = yPos - 2
+            local sepLine = parent:CreateTexture(nil, "ARTWORK")
+            sepLine:SetPoint("TOPLEFT", 0, yPos)
+            sepLine:SetSize(contentWidth, 1)
+            sepLine:SetColorTexture(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
             yPos = yPos - 4
-            local sepLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            sepLabel:SetPoint("TOPLEFT", 10, yPos)
-            sepLabel:SetText("FRAME-LEVEL EFFECTS")
-            sepLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-            yPos = yPos - 14
-            local sep = parent:CreateTexture(nil, "ARTWORK")
-            sep:SetPoint("TOPLEFT", 10, yPos)
-            sep:SetSize(238, 1)
-            sep:SetColorTexture(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.3)
-            yPos = yPos - 6
             placedCount = -1  -- only insert once
         end
         if typeDef.placed then placedCount = placedCount + 1 end
@@ -1453,16 +1411,29 @@ local function BuildPerAuraView(parent, auraName)
         local typeLabel = typeDef.label
         local isEnabled = auraCfg and auraCfg[typeKey] ~= nil
 
-        -- Section header
+        -- Section header (mockup .fx-ghdr style: element bg, border, clear visibility)
         local header = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-        header:SetSize(contentWidth, 26)
+        header:SetHeight(26)
         header:SetPoint("TOPLEFT", 0, yPos)
-        ApplyBackdrop(header, C_PANEL, {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5})
+        header:SetPoint("RIGHT", parent, "RIGHT", 0, 0)
+        ApplyBackdrop(header, C_ELEMENT, C_BORDER)
 
-        -- Enable checkbox (13x13, accent bg + white check when enabled)
+        -- Chevron arrow (text-based, left side)
+        local chevron = header:CreateFontString(nil, "OVERLAY")
+        chevron:SetFont("Fonts\\FRIZQT__.TTF", 8, "OUTLINE")
+        chevron:SetPoint("LEFT", 8, 0)
+        chevron:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+
+        -- Title label (after chevron)
+        local title = header:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        title:SetPoint("LEFT", chevron, "RIGHT", 6, 0)
+        title:SetText(typeLabel)
+
+        -- Enable checkbox (13x13, right side — matches mockup layout)
         local cb = CreateFrame("CheckButton", nil, header, "BackdropTemplate")
         cb:SetSize(13, 13)
-        cb:SetPoint("LEFT", 6, 0)
+        cb:SetPoint("RIGHT", -8, 0)
+        cb:SetFrameLevel(header:GetFrameLevel() + 5)
         ApplyBackdrop(cb, C_ELEMENT, C_BORDER)
 
         cb.Check = cb:CreateTexture(nil, "OVERLAY")
@@ -1473,36 +1444,22 @@ local function BuildPerAuraView(parent, auraName)
         cb:SetCheckedTexture(cb.Check)
         cb:SetChecked(isEnabled)
 
-        -- Update checkbox appearance based on checked state
-        local function UpdateCheckboxStyle()
+        -- Update checkbox + title appearance based on state
+        local function UpdateSectionStyle()
             local tc = GetThemeColor()
             if cb:GetChecked() then
                 cb:SetBackdropColor(tc.r, tc.g, tc.b, 1)
                 cb:SetBackdropBorderColor(tc.r, tc.g, tc.b, 1)
+                title:SetTextColor(tc.r, tc.g, tc.b)  -- accent color when enabled
             else
                 cb:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
                 cb:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
+                title:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
             end
         end
-        UpdateCheckboxStyle()
+        UpdateSectionStyle()
 
-        -- Arrow
-        local arrow = header:CreateTexture(nil, "OVERLAY")
-        arrow:SetPoint("LEFT", cb, "RIGHT", 4, 0)
-        arrow:SetSize(10, 10)
-        arrow:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-
-        -- Title
-        local title = header:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        title:SetPoint("LEFT", arrow, "RIGHT", 4, 0)
-        title:SetText(typeLabel)
-        if isEnabled then
-            title:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-        else
-            title:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-        end
-
-        -- Content container
+        -- Content container (below header, hidden by default)
         local content = CreateFrame("Frame", nil, parent)
         content:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -2)
         content:SetWidth(contentWidth)
@@ -1511,14 +1468,14 @@ local function BuildPerAuraView(parent, auraName)
         -- Expand/collapse state
         local expanded = false
 
-        local function UpdateArrow()
+        local function UpdateChevron()
             if expanded and isEnabled then
-                arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
+                chevron:SetText("\226\150\188")  -- ▼
             else
-                arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
+                chevron:SetText("\226\150\182")  -- ▶
             end
         end
-        UpdateArrow()
+        UpdateChevron()
 
         -- Build content if enabled
         local contentHeight = 0
@@ -1542,14 +1499,13 @@ local function BuildPerAuraView(parent, auraName)
         -- Click header to toggle expand (with hover highlight)
         local headerClick = CreateFrame("Button", nil, header)
         headerClick:SetAllPoints()
+        headerClick:SetFrameLevel(header:GetFrameLevel() + 2)
         headerClick:RegisterForClicks("LeftButtonUp")
         headerClick:SetScript("OnEnter", function()
-            if isEnabled then
-                header:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
-            end
+            header:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
         end)
         headerClick:SetScript("OnLeave", function()
-            header:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 1)
+            header:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
         end)
         headerClick:SetScript("OnClick", function()
             if not isEnabled then return end
@@ -1560,25 +1516,27 @@ local function BuildPerAuraView(parent, auraName)
             else
                 content:Hide()
             end
-            UpdateArrow()
-            -- Recalculate layout
+            UpdateChevron()
             DF:AuraDesigner_RefreshPage()
         end)
 
         -- Checkbox click to enable/disable type
         cb:SetScript("OnClick", function(self)
             local checked = self:GetChecked()
-            UpdateCheckboxStyle()
+            UpdateSectionStyle()
             local cfg = EnsureAuraConfig(auraName)
             if checked then
                 EnsureTypeConfig(auraName, typeKey)
                 isEnabled = true
                 sectionData.enabled = true
-                title:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+                -- Auto-expand when enabling
+                expanded = true
+                sectionData.expanded = true
                 -- Rebuild content
                 local _, h = BuildTypeContent(content, typeKey, auraName, contentWidth)
                 contentHeight = h
                 sectionData.contentHeight = h
+                content:Show()
             else
                 cfg[typeKey] = nil
                 isEnabled = false
@@ -1586,9 +1544,8 @@ local function BuildPerAuraView(parent, auraName)
                 expanded = false
                 sectionData.expanded = false
                 content:Hide()
-                title:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
             end
-            UpdateArrow()
+            UpdateChevron()
             DF:AuraDesigner_RefreshPage()
         end)
 
