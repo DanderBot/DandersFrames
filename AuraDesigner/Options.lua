@@ -352,22 +352,33 @@ local function CreateAuraTile(parent, auraInfo, index)
     tile.badgeBg:SetColorTexture(tc.r, tc.g, tc.b, 0.85)
     tile.badgeBg:Hide()
 
+    -- Glow overlay (simulates box-shadow for selected/configured state)
+    tile.glow = tile:CreateTexture(nil, "BACKGROUND")
+    tile.glow:SetPoint("TOPLEFT", tile.iconBg, "TOPLEFT", -4, 4)
+    tile.glow:SetPoint("BOTTOMRIGHT", tile.iconBg, "BOTTOMRIGHT", 4, -4)
+    tile.glow:SetColorTexture(0, 0, 0, 0)  -- invisible by default
+    tile.glow:Hide()
+
     tile.auraInfo = auraInfo
     tile.auraName = auraInfo.name
 
     tile.SetSelected = function(self, selected)
+        local c = GetThemeColor()
         if selected then
-            local c = GetThemeColor()
             self.iconBg:SetBackdropBorderColor(c.r, c.g, c.b, 1)
+            self.glow:SetColorTexture(c.r, c.g, c.b, 0.25)
+            self.glow:Show()
         else
             local adDB = GetAuraDesignerDB()
             local auraCfg = adDB.auras[self.auraName]
             if auraCfg then
-                -- Configured: accent border with glow feel
-                local c = GetThemeColor()
+                -- Configured: accent border, subtle glow
                 self.iconBg:SetBackdropBorderColor(c.r, c.g, c.b, 0.6)
+                self.glow:SetColorTexture(c.r, c.g, c.b, 0.15)
+                self.glow:Show()
             else
                 self.iconBg:SetBackdropBorderColor(0.27, 0.27, 0.27, 1)
+                self.glow:Hide()
             end
         end
     end
@@ -576,44 +587,69 @@ local function BuildTypeContent(parent, typeKey, auraName, width)
         totalHeight = totalHeight + (height or 30)
     end
 
+    local function AddDivider()
+        totalHeight = totalHeight + 4
+        local div = parent:CreateTexture(nil, "ARTWORK")
+        div:SetPoint("TOPLEFT", parent, "TOPLEFT", 10, -totalHeight)
+        div:SetSize(contentWidth - 20, 1)
+        div:SetColorTexture(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.4)
+        totalHeight = totalHeight + 6
+    end
+
     if typeKey == "icon" then
+        -- Placement
         AddWidget(GUI:CreateDropdown(parent, "Anchor", ANCHOR_OPTIONS, proxy, "anchor", function() DF:AuraDesigner_RefreshPage() end), 54)
         AddWidget(GUI:CreateSlider(parent, "Offset X", -50, 50, 1, proxy, "offsetX"), 54)
         AddWidget(GUI:CreateSlider(parent, "Offset Y", -50, 50, 1, proxy, "offsetY"), 54)
         AddWidget(GUI:CreateDropdown(parent, "Growth", GROWTH_OPTIONS, proxy, "growth"), 54)
         AddWidget(GUI:CreateSlider(parent, "Spacing", 0, 20, 1, proxy, "spacing"), 54)
+        AddDivider()
+        -- Sizing & appearance
         AddWidget(GUI:CreateSlider(parent, "Size", 8, 64, 1, proxy, "size"), 54)
         AddWidget(GUI:CreateSlider(parent, "Scale", 0.5, 3.0, 0.05, proxy, "scale"), 54)
         AddWidget(GUI:CreateSlider(parent, "Alpha", 0, 1, 0.05, proxy, "alpha"), 54)
         AddWidget(GUI:CreateCheckbox(parent, "Show Border", proxy, "borderEnabled"), 28)
         AddWidget(GUI:CreateCheckbox(parent, "Hide Cooldown Swipe", proxy, "hideSwipe"), 28)
+        AddDivider()
+        -- Duration & stacks
         AddWidget(GUI:CreateCheckbox(parent, "Show Duration Text", proxy, "showDuration"), 28)
         AddWidget(GUI:CreateSlider(parent, "Duration Scale", 0.5, 2.0, 0.1, proxy, "durationScale"), 54)
         AddWidget(GUI:CreateCheckbox(parent, "Color Duration by Time", proxy, "durationColorByTime"), 28)
+        AddDivider()
         AddWidget(GUI:CreateCheckbox(parent, "Show Stacks", proxy, "showStacks"), 28)
         AddWidget(GUI:CreateSlider(parent, "Stack Minimum", 1, 10, 1, proxy, "stackMinimum"), 54)
 
     elseif typeKey == "square" then
+        -- Placement
         AddWidget(GUI:CreateDropdown(parent, "Anchor", ANCHOR_OPTIONS, proxy, "anchor", function() DF:AuraDesigner_RefreshPage() end), 54)
         AddWidget(GUI:CreateSlider(parent, "Offset X", -50, 50, 1, proxy, "offsetX"), 54)
         AddWidget(GUI:CreateSlider(parent, "Offset Y", -50, 50, 1, proxy, "offsetY"), 54)
         AddWidget(GUI:CreateDropdown(parent, "Growth", GROWTH_OPTIONS, proxy, "growth"), 54)
         AddWidget(GUI:CreateSlider(parent, "Spacing", 0, 20, 1, proxy, "spacing"), 54)
+        AddDivider()
+        -- Appearance
         AddWidget(GUI:CreateSlider(parent, "Size", 4, 32, 1, proxy, "size"), 54)
         AddWidget(GUI:CreateColorPicker(parent, "Color", proxy, "color", true), 28)
         AddWidget(GUI:CreateSlider(parent, "Alpha", 0, 1, 0.05, proxy, "alpha"), 54)
         AddWidget(GUI:CreateCheckbox(parent, "Show Border", proxy, "borderEnabled"), 28)
+        AddDivider()
+        -- Duration & stacks
         AddWidget(GUI:CreateCheckbox(parent, "Show Duration", proxy, "showDuration"), 28)
         AddWidget(GUI:CreateCheckbox(parent, "Show Stacks", proxy, "showStacks"), 28)
 
     elseif typeKey == "bar" then
+        -- Placement
         AddWidget(GUI:CreateDropdown(parent, "Anchor", ANCHOR_OPTIONS, proxy, "anchor", function() DF:AuraDesigner_RefreshPage() end), 54)
         AddWidget(GUI:CreateSlider(parent, "Offset X", -50, 50, 1, proxy, "offsetX"), 54)
         AddWidget(GUI:CreateSlider(parent, "Offset Y", -50, 50, 1, proxy, "offsetY"), 54)
+        AddDivider()
+        -- Size & orientation
         AddWidget(GUI:CreateDropdown(parent, "Orientation", BAR_ORIENT_OPTIONS, proxy, "orientation"), 54)
         AddWidget(GUI:CreateSlider(parent, "Width", 0, 200, 1, proxy, "width"), 54)
         AddWidget(GUI:CreateSlider(parent, "Height", 1, 30, 1, proxy, "height"), 54)
         AddWidget(GUI:CreateCheckbox(parent, "Match Frame Width", proxy, "matchFrameWidth"), 28)
+        AddDivider()
+        -- Colors
         AddWidget(GUI:CreateColorPicker(parent, "Fill Color", proxy, "fillColor", true), 28)
         AddWidget(GUI:CreateColorPicker(parent, "Background Color", proxy, "bgColor", true), 28)
         AddWidget(GUI:CreateColorPicker(parent, "Border Color", proxy, "borderColor", true), 28)
@@ -623,6 +659,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width)
         AddWidget(GUI:CreateDropdown(parent, "Style", BORDER_STYLE_OPTIONS, proxy, "style"), 54)
         AddWidget(GUI:CreateColorPicker(parent, "Color", proxy, "color", true), 28)
         AddWidget(GUI:CreateSlider(parent, "Thickness", 1, 8, 1, proxy, "thickness"), 54)
+        AddDivider()
         AddWidget(GUI:CreateCheckbox(parent, "Pulsate", proxy, "pulsate"), 28)
         AddWidget(GUI:CreateSlider(parent, "Pulse Speed", 0.1, 2.0, 0.1, proxy, "speed"), 54)
 
@@ -944,20 +981,32 @@ local function BuildPerAuraView(parent, auraName)
         header:SetPoint("TOPLEFT", 0, yPos)
         ApplyBackdrop(header, C_PANEL, {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5})
 
-        -- Enable checkbox
+        -- Enable checkbox (13x13, accent bg + white check when enabled)
         local cb = CreateFrame("CheckButton", nil, header, "BackdropTemplate")
-        cb:SetSize(14, 14)
+        cb:SetSize(13, 13)
         cb:SetPoint("LEFT", 6, 0)
         ApplyBackdrop(cb, C_ELEMENT, C_BORDER)
 
         cb.Check = cb:CreateTexture(nil, "OVERLAY")
         cb.Check:SetTexture("Interface\\Buttons\\WHITE8x8")
-        local tc = GetThemeColor()
-        cb.Check:SetVertexColor(tc.r, tc.g, tc.b)
+        cb.Check:SetVertexColor(1, 1, 1)  -- white checkmark
         cb.Check:SetPoint("CENTER")
-        cb.Check:SetSize(8, 8)
+        cb.Check:SetSize(7, 7)
         cb:SetCheckedTexture(cb.Check)
         cb:SetChecked(isEnabled)
+
+        -- Update checkbox appearance based on checked state
+        local function UpdateCheckboxStyle()
+            local tc = GetThemeColor()
+            if cb:GetChecked() then
+                cb:SetBackdropColor(tc.r, tc.g, tc.b, 1)
+                cb:SetBackdropBorderColor(tc.r, tc.g, tc.b, 1)
+            else
+                cb:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
+                cb:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
+            end
+        end
+        UpdateCheckboxStyle()
 
         -- Arrow
         local arrow = header:CreateTexture(nil, "OVERLAY")
@@ -1012,10 +1061,18 @@ local function BuildPerAuraView(parent, auraName)
 
         yPos = yPos - 28  -- header height + gap
 
-        -- Click header to toggle expand
+        -- Click header to toggle expand (with hover highlight)
         local headerClick = CreateFrame("Button", nil, header)
         headerClick:SetAllPoints()
         headerClick:RegisterForClicks("LeftButtonUp")
+        headerClick:SetScript("OnEnter", function()
+            if isEnabled then
+                header:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
+            end
+        end)
+        headerClick:SetScript("OnLeave", function()
+            header:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 1)
+        end)
         headerClick:SetScript("OnClick", function()
             if not isEnabled then return end
             expanded = not expanded
@@ -1033,6 +1090,7 @@ local function BuildPerAuraView(parent, auraName)
         -- Checkbox click to enable/disable type
         cb:SetScript("OnClick", function(self)
             local checked = self:GetChecked()
+            UpdateCheckboxStyle()
             local cfg = EnsureAuraConfig(auraName)
             if checked then
                 EnsureTypeConfig(auraName, typeKey)
@@ -1184,10 +1242,10 @@ local function RefreshRightPanel()
             rightPanel.copySourceAura = nil
             rightPanel.copyDropdownText:SetText("Select aura...")
             rightPanel.copyDropdownText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-            rightScrollFrame:SetPoint("TOPLEFT", 0, -66)  -- 40 header + 26 copy row
+            rightScrollFrame:SetPoint("TOPLEFT", 0, -88)  -- 22 title + 40 header + 26 copy row
         else
             rightPanel.copyRow:Hide()
-            rightScrollFrame:SetPoint("TOPLEFT", 0, -40)  -- just header
+            rightScrollFrame:SetPoint("TOPLEFT", 0, -62)  -- 22 title + 40 header
         end
     end
 
@@ -1755,16 +1813,26 @@ local function RefreshActiveEffectsStrip()
         entry:SetPoint("LEFT", stripParent, "LEFT", xOffset, 0)
         ApplyBackdrop(entry, {r = 0, g = 0, b = 0, a = 0}, {r = 0, g = 0, b = 0, a = 0})  -- transparent bg, hover reveals
 
-        -- X button to disable
-        local xBtn = CreateFrame("Button", nil, entry)
+        -- X button to disable (circular with danger hover)
+        local xBtn = CreateFrame("Button", nil, entry, "BackdropTemplate")
         xBtn:SetSize(14, 14)
         xBtn:SetPoint("TOPRIGHT", -1, -1)
+        xBtn:SetFrameLevel(entry:GetFrameLevel() + 5)
+        ApplyBackdrop(xBtn, {r = 0, g = 0, b = 0, a = 0}, {r = 0, g = 0, b = 0, a = 0})
         local xText = xBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        xText:SetAllPoints()
-        xText:SetText("x")
+        xText:SetPoint("CENTER", 0, 0)
+        xText:SetText("\195\151")  -- × multiplication sign
         xText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-        xBtn:SetScript("OnEnter", function() xText:SetTextColor(1, 0.3, 0.3) end)
-        xBtn:SetScript("OnLeave", function() xText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b) end)
+        xBtn:SetScript("OnEnter", function(self)
+            xText:SetTextColor(0.9, 0.25, 0.25)
+            self:SetBackdropColor(0.8, 0.27, 0.27, 0.2)
+            self:SetBackdropBorderColor(0.8, 0.27, 0.27, 0.4)
+        end)
+        xBtn:SetScript("OnLeave", function(self)
+            xText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+            self:SetBackdropColor(0, 0, 0, 0)
+            self:SetBackdropBorderColor(0, 0, 0, 0)
+        end)
         xBtn:SetScript("OnClick", function()
             local cfg = adDB.auras[effect.auraName]
             if cfg then
@@ -1906,11 +1974,23 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     rightPanel:SetPoint("BOTTOMRIGHT", mainFrame, "BOTTOMRIGHT", 0, 0)
     ApplyBackdrop(rightPanel, {r = 0.10, g = 0.10, b = 0.10, a = 1}, {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5})
 
+    -- Right panel "SETTINGS" title bar
+    rightPanel.titleBar = CreateFrame("Frame", nil, rightPanel, "BackdropTemplate")
+    rightPanel.titleBar:SetHeight(22)
+    rightPanel.titleBar:SetPoint("TOPLEFT", 0, 0)
+    rightPanel.titleBar:SetPoint("TOPRIGHT", 0, 0)
+    ApplyBackdrop(rightPanel.titleBar, {r = 0.09, g = 0.09, b = 0.09, a = 1}, {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5})
+
+    local settingsTitle = rightPanel.titleBar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    settingsTitle:SetPoint("LEFT", 10, 0)
+    settingsTitle:SetText("SETTINGS")
+    settingsTitle:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+
     -- Right panel selected-aura header
     rightPanel.selHeader = CreateFrame("Frame", nil, rightPanel, "BackdropTemplate")
     rightPanel.selHeader:SetHeight(40)
-    rightPanel.selHeader:SetPoint("TOPLEFT", 0, 0)
-    rightPanel.selHeader:SetPoint("TOPRIGHT", 0, 0)
+    rightPanel.selHeader:SetPoint("TOPLEFT", rightPanel.titleBar, "BOTTOMLEFT", 0, 0)
+    rightPanel.selHeader:SetPoint("TOPRIGHT", rightPanel.titleBar, "BOTTOMRIGHT", 0, 0)
     ApplyBackdrop(rightPanel.selHeader, C_BACKGROUND, {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5})
 
     rightPanel.selIcon = rightPanel.selHeader:CreateTexture(nil, "ARTWORK")
@@ -1930,7 +2010,9 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     rightPanel.copyRow:SetHeight(26)
     rightPanel.copyRow:SetPoint("TOPLEFT", rightPanel.selHeader, "BOTTOMLEFT", 0, 0)
     rightPanel.copyRow:SetPoint("TOPRIGHT", rightPanel.selHeader, "BOTTOMRIGHT", 0, 0)
-    ApplyBackdrop(rightPanel.copyRow, {r = 0.11, g = 0.11, b = 0.13, a = 1}, {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5})
+    -- Accent-tinted background (matches mockup rgba(115,115,242,.04) over panel)
+    local ctc = GetThemeColor()
+    ApplyBackdrop(rightPanel.copyRow, {r = C_PANEL.r + ctc.r * 0.04, g = C_PANEL.g + ctc.g * 0.04, b = C_PANEL.b + ctc.b * 0.04, a = 1}, {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5})
     rightPanel.copyRow:Hide()
 
     local copyLabel = rightPanel.copyRow:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -2088,8 +2170,9 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     end)
 
     -- Scroll frame below header (and copy row when visible)
+    -- Default offset: 22 title + 40 header = 62
     rightScrollFrame = CreateFrame("ScrollFrame", nil, rightPanel, "UIPanelScrollFrameTemplate")
-    rightScrollFrame:SetPoint("TOPLEFT", 0, -40)
+    rightScrollFrame:SetPoint("TOPLEFT", 0, -62)
     rightScrollFrame:SetPoint("BOTTOMRIGHT", -22, 0)
 
     rightScrollChild = CreateFrame("Frame", nil, rightScrollFrame)
