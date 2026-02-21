@@ -1366,11 +1366,7 @@ local function BuildPerAuraView(parent, auraName)
             end
         end
     end
-    if not auraInfo then
-        DF:DebugWarn("AuraDesigner: BuildPerAuraView - auraInfo is nil for", auraName, "spec:", spec)
-        return
-    end
-    DF:Debug("AuraDesigner: BuildPerAuraView started for", auraName, "parent:", parent:GetName() or "anon", "parent visible:", parent:IsVisible())
+    if not auraInfo then return end
 
     local adDB = GetAuraDesignerDB()
     local auraCfg = adDB.auras[auraName]
@@ -1560,7 +1556,6 @@ local function BuildPerAuraView(parent, auraName)
         end
     end
 
-    DF:Debug("AuraDesigner: Created", #sectionStates, "type sections, yPos:", yPos)
 
     -- ===== DIVIDER =====
     yPos = yPos - 4
@@ -1775,15 +1770,12 @@ local function RefreshRightPanel()
     if selectedAura == nil then
         BuildGlobalView(container)
     else
-        DF:Debug("AuraDesigner: Building per-aura view for", selectedAura)
         BuildPerAuraView(container, selectedAura)
-        DF:Debug("AuraDesigner: Container height after build:", container:GetHeight())
     end
 
     -- Update scroll child height to match content
     local containerH = container:GetHeight()
     rightScrollChild:SetHeight(containerH)
-    DF:Debug("AuraDesigner: ScrollChild height set to", containerH, "| ScrollFrame visible:", rightScrollFrame:IsVisible())
 end
 
 -- ============================================================
@@ -2504,6 +2496,21 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     -- ========================================
     mainFrame = CreateFrame("Frame", nil, parent)
     mainFrame:SetAllPoints()
+
+    -- Override RefreshStates: Aura Designer uses its own layout system, not the
+    -- standard widget-based one. The default RefreshStates would calculate maxY = 0
+    -- (no standard widgets) and set page.child:SetHeight(~40), which makes mainFrame
+    -- (via SetAllPoints) too short. This causes rightPanel and rightScrollFrame to
+    -- have zero effective height since their BOTTOMRIGHT anchors to mainFrame's bottom.
+    page.RefreshStates = function(self)
+        -- Set scroll child height to match the visible page area so mainFrame fills it
+        local pageH = self:GetHeight()
+        self.child:SetHeight(math.max(pageH, 600))
+        -- Keep scroll child width in sync with content area
+        if self.child and GUI.contentFrame then
+            self.child:SetWidth(GUI.contentFrame:GetWidth() - 30)
+        end
+    end
 
     local yPos = 0
 
