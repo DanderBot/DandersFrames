@@ -261,6 +261,407 @@ local function CountActiveEffects(auraName)
 end
 
 -- ============================================================
+-- DRAG AND DROP SYSTEM
+-- Modeled after DandersCDM's ghost-based drag pattern:
+--   Ghost frame (TOOLTIP strata, EnableMouse false) follows cursor
+--   Anchor dots act as drop targets via OnEnter/OnLeave
+--   OnUpdate frame polls IsMouseButtonDown for drop detection
+-- ============================================================
+
+local dragState = {
+    isDragging = false,
+    auraName = nil,         -- Which aura is being dragged
+    auraInfo = nil,         -- Full aura info table
+    specKey = nil,          -- Spec key for icon lookup
+    dropAnchor = nil,       -- Currently hovered anchor name
+}
+
+local dragGhost = nil
+local dragUpdateFrame = nil
+
+local function CreateDragGhost()
+    if dragGhost then return dragGhost end
+
+    dragGhost = CreateFrame("Frame", "DFAuraDesignerDragGhost", UIParent, "BackdropTemplate")
+    dragGhost:SetSize(36, 36)
+    dragGhost:SetFrameStrata("TOOLTIP")
+    dragGhost:SetFrameLevel(1000)
+    dragGhost:EnableMouse(false)  -- KEY: mouse events pass through to drop targets
+    dragGhost:Hide()
+
+    if not dragGhost.SetBackdrop then Mixin(dragGhost, BackdropTemplateMixin) end
+    dragGhost:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = 2,
+    })
+    dragGhost:SetBackdropColor(0.05, 0.05, 0.05, 0.9)
+
+    -- Spell icon
+    local icon = dragGhost:CreateTexture(nil, "ARTWORK")
+    icon:SetPoint("TOPLEFT", 3, -3)
+    icon:SetPoint("BOTTOMRIGHT", -3, 3)
+    icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    dragGhost.icon = icon
+
+    -- Name label under ghost
+    local label = dragGhost:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    label:SetPoint("TOP", dragGhost, "BOTTOM", 0, -2)
+    label:SetTextColor(1, 1, 1, 0.8)
+    dragGhost.label = label
+
+    return dragGhost
+end
+
+local function StartDrag(auraName, auraInfo, specKey)
+    if dragState.isDragging then return end
+
+    dragState.isDragging = true
+    dragState.auraName = auraName
+    dragState.auraInfo = auraInfo
+    dragState.specKey = specKey
+    dragState.dropAnchor = nil
+
+    -- Setup ghost
+    local ghost = CreateDragGhost()
+    local tc = GetThemeColor()
+    ghost:SetBackdropBorderColor(tc.r, tc.g, tc.b, 1)
+
+    -- Set icon
+    local iconTex = GetAuraIcon(specKey, auraName)
+    if iconTex then
+        ghost.icon:SetTexture(iconTex)
+    else
+        ghost.icon:SetColorTexture(auraInfo.color[1] * 0.4, auraInfo.color[2] * 0.4, auraInfo.color[3] * 0.4, 1)
+    end
+    ghost.label:SetText(auraInfo.display)
+    ghost:Show()
+
+    -- Enlarge all anchor dots to signal they are drop targets
+    for _, dotFrame in pairs(anchorDots) do
+        dotFrame.dot:SetSize(10, 10)
+        dotFrame.dot:SetColorTexture(0.45, 0.45, 0.95, 0.5)
+    end
+
+    -- Start cursor following
+    if not dragUpdateFrame then
+        dragUpdateFrame = CreateFrame("Frame")
+    end
+    dragUpdateFrame:SetScript("OnUpdate", function()
+        if not dragState.isDragging then
+            dragUpdateFrame:Hide()
+            return
+        end
+
+        local x, y = GetCursorPosition()
+        local scale = UIParent:GetEffectiveScale()
+        local cursorX, cursorY = x / scale, y / scale
+
+        -- Offset ghost below-right of cursor so drop target is visible
+        ghost:ClearAllPoints()
+        ghost:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", cursorX + 10, cursorY - 10)
+
+        -- Detect mouse release
+        if not IsMouseButtonDown("LeftButton") then
+            EndDrag()
+        end
+    end)
+    dragUpdateFrame:Show()
+end
+
+local function EndDrag()
+    if not dragState.isDragging then return end
+
+    local auraName = dragState.auraName
+    local dropAnchor = dragState.dropAnchor
+
+    -- Clear state
+    dragState.isDragging = false
+    dragState.auraName = nil
+    dragState.auraInfo = nil
+    dragState.specKey = nil
+    dragState.dropAnchor = nil
+
+    -- Hide ghost
+    if dragGhost then dragGhost:Hide() end
+
+    -- Stop cursor following
+    if dragUpdateFrame then
+        dragUpdateFrame:Hide()
+        dragUpdateFrame:SetScript("OnUpdate", nil)
+    end
+
+    -- Reset anchor dots to default
+    for _, dotFrame in pairs(anchorDots) do
+        dotFrame.dot:SetSize(6, 6)
+        dotFrame.dot:SetColorTexture(0.45, 0.45, 0.95, 0.3)
+    end
+
+    -- Process the drop
+    if auraName and dropAnchor then
+        -- Enable Icon type at this anchor (or update existing)
+        local typeCfg = EnsureTypeConfig(auraName, "icon")
+        typeCfg.anchor = dropAnchor
+
+        -- Select the aura
+        selectedAura = auraName
+    end
+
+    -- Refresh everything
+    DF:AuraDesigner_RefreshPage()
+end
+
+-- Forward-declare so StartDrag/EndDrag can reference each other
+-- (EndDrag is local, defined above; we just need it visible in the OnUpdate closure)
+
+-- ============================================================
+-- PLACED INDICATORS ON PREVIEW
+-- Small icons/squares/bars rendered at anchor positions
+-- ============================================================
+
+local placedIndicators = {}
+
+local function ClearPlacedIndicators()
+    for _, ind in ipairs(placedIndicators) do
+        ind:Hide()
+        ind:SetParent(nil)
+    end
+    wipe(placedIndicators)
+end
+
+local function RefreshPlacedIndicators()
+    ClearPlacedIndicators()
+    if not framePreview then return end
+
+    local mockFrame = framePreview.mockFrame
+    if not mockFrame then return end
+
+    local adDB = GetAuraDesignerDB()
+    local spec = ResolveSpec()
+    if not spec then return end
+
+    local tc = GetThemeColor()
+    local auraList = Adapter and Adapter:GetTrackableAuras(spec)
+    if not auraList then return end
+
+    -- Build lookup
+    local infoLookup = {}
+    for _, info in ipairs(auraList) do
+        infoLookup[info.name] = info
+    end
+
+    -- Iterate all configured auras, find placed types with anchors
+    for auraName, auraCfg in pairs(adDB.auras) do
+        local info = infoLookup[auraName]
+        if info then
+            for _, typeDef in ipairs(INDICATOR_TYPES) do
+                if typeDef.placed and auraCfg[typeDef.key] then
+                    local typeCfg = auraCfg[typeDef.key]
+                    local anchor = typeCfg.anchor
+                    local anchorPos = anchor and ANCHOR_POSITIONS[anchor]
+                    if anchorPos then
+                        local isSelected = (auraName == selectedAura)
+
+                        if typeDef.key == "icon" then
+                            -- Render a small icon at the anchor
+                            local ind = CreateFrame("Button", nil, mockFrame, "BackdropTemplate")
+                            local sz = typeCfg.size or 16
+                            ind:SetSize(sz, sz)
+                            ind:SetFrameLevel(mockFrame:GetFrameLevel() + 8)
+                            ind:SetPoint(anchorPos.ax, mockFrame, anchorPos.ay,
+                                typeCfg.offsetX or 0, -(typeCfg.offsetY or 0))
+
+                            ApplyBackdrop(ind, {r = 0, g = 0, b = 0, a = 0.6},
+                                isSelected and {r = tc.r, g = tc.g, b = tc.b, a = 1}
+                                or {r = 0.3, g = 0.3, b = 0.3, a = 0.8})
+
+                            local iconTex = ind:CreateTexture(nil, "ARTWORK")
+                            iconTex:SetPoint("TOPLEFT", 1, -1)
+                            iconTex:SetPoint("BOTTOMRIGHT", -1, 1)
+                            local tex = GetAuraIcon(spec, auraName)
+                            if tex then
+                                iconTex:SetTexture(tex)
+                                iconTex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+                            else
+                                iconTex:SetColorTexture(info.color[1] * 0.5, info.color[2] * 0.5, info.color[3] * 0.5, 1)
+                            end
+
+                            -- Duration text
+                            local dur = ind:CreateFontString(nil, "OVERLAY")
+                            dur:SetFont("Fonts\\FRIZQT__.TTF", max(sz * 0.45, 7), "OUTLINE")
+                            dur:SetPoint("BOTTOM", 0, -1)
+                            dur:SetText("12s")
+                            dur:SetTextColor(1, 1, 1, 0.8)
+
+                            -- Right-click to remove
+                            ind:RegisterForClicks("RightButtonUp")
+                            local capturedAura = auraName
+                            ind:SetScript("OnClick", function(_, button)
+                                if button == "RightButton" then
+                                    local cfg = adDB.auras[capturedAura]
+                                    if cfg then cfg.icon = nil end
+                                    DF:AuraDesigner_RefreshPage()
+                                end
+                            end)
+                            -- Left-click to select
+                            ind:SetScript("OnMouseUp", function(_, button)
+                                if button == "LeftButton" then
+                                    selectedAura = capturedAura
+                                    DF:AuraDesigner_RefreshPage()
+                                end
+                            end)
+
+                            tinsert(placedIndicators, ind)
+
+                        elseif typeDef.key == "square" then
+                            local ind = CreateFrame("Button", nil, mockFrame, "BackdropTemplate")
+                            local sz = typeCfg.size or 10
+                            ind:SetSize(sz, sz)
+                            ind:SetFrameLevel(mockFrame:GetFrameLevel() + 8)
+                            ind:SetPoint(anchorPos.ax, mockFrame, anchorPos.ay,
+                                typeCfg.offsetX or 0, -(typeCfg.offsetY or 0))
+
+                            local clr = typeCfg.color or {r = 1, g = 1, b = 1, a = 1}
+                            ApplyBackdrop(ind, clr,
+                                isSelected and {r = tc.r, g = tc.g, b = tc.b, a = 1}
+                                or {r = 0.3, g = 0.3, b = 0.3, a = 0.5})
+
+                            -- Right-click to remove
+                            ind:RegisterForClicks("RightButtonUp")
+                            local capturedAura = auraName
+                            ind:SetScript("OnClick", function(_, button)
+                                if button == "RightButton" then
+                                    local cfg = adDB.auras[capturedAura]
+                                    if cfg then cfg.square = nil end
+                                    DF:AuraDesigner_RefreshPage()
+                                end
+                            end)
+
+                            tinsert(placedIndicators, ind)
+
+                        elseif typeDef.key == "bar" then
+                            local ind = CreateFrame("Button", nil, mockFrame, "BackdropTemplate")
+                            local bw = typeCfg.matchFrameWidth and (mockFrame:GetWidth() - 2) or (typeCfg.width or 40)
+                            local bh = typeCfg.height or 4
+                            ind:SetSize(bw, bh)
+                            ind:SetFrameLevel(mockFrame:GetFrameLevel() + 7)
+                            ind:SetPoint(anchorPos.ax, mockFrame, anchorPos.ay,
+                                typeCfg.offsetX or 0, -(typeCfg.offsetY or 0))
+
+                            local fillClr = typeCfg.fillColor or {r = 1, g = 1, b = 1, a = 1}
+                            ApplyBackdrop(ind,
+                                {r = fillClr.r * 0.7, g = fillClr.g * 0.7, b = fillClr.b * 0.7, a = fillClr.a or 1},
+                                isSelected and {r = tc.r, g = tc.g, b = tc.b, a = 1}
+                                or {r = 0, g = 0, b = 0, a = 0})
+
+                            -- Fill bar at 60%
+                            local fill = ind:CreateTexture(nil, "ARTWORK")
+                            fill:SetPoint("TOPLEFT", 1, -1)
+                            fill:SetPoint("BOTTOMLEFT", 1, 1)
+                            fill:SetWidth(max(1, bw * 0.6))
+                            fill:SetColorTexture(fillClr.r, fillClr.g, fillClr.b, fillClr.a or 1)
+
+                            -- Right-click to remove
+                            ind:RegisterForClicks("RightButtonUp")
+                            local capturedAura = auraName
+                            ind:SetScript("OnClick", function(_, button)
+                                if button == "RightButton" then
+                                    local cfg = adDB.auras[capturedAura]
+                                    if cfg then cfg.bar = nil end
+                                    DF:AuraDesigner_RefreshPage()
+                                end
+                            end)
+
+                            tinsert(placedIndicators, ind)
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- ============================================================
+-- PREVIEW EFFECTS
+-- Apply frame-level effects (border, healthbar, text, alpha)
+-- for the currently selected aura on the mock frame
+-- ============================================================
+
+local function RefreshPreviewEffects()
+    if not framePreview then return end
+    local mockFrame = framePreview.mockFrame
+    if not mockFrame then return end
+
+    -- Reset to defaults
+    if framePreview.borderOverlay then
+        framePreview.borderOverlay:Hide()
+    end
+    if framePreview.healthFill then
+        framePreview.healthFill:SetVertexColor(0.18, 0.80, 0.44, 0.85)
+    end
+    if framePreview.nameText then
+        framePreview.nameText:SetTextColor(0.18, 0.80, 0.44, 1)
+    end
+    if framePreview.hpText then
+        framePreview.hpText:SetTextColor(0.87, 0.87, 0.87, 1)
+    end
+    mockFrame:SetAlpha(1)
+
+    -- If no aura selected, stay at defaults
+    if not selectedAura then return end
+
+    local adDB = GetAuraDesignerDB()
+    local auraCfg = adDB.auras[selectedAura]
+    if not auraCfg then return end
+
+    -- Border effect
+    if auraCfg.border then
+        local clr = auraCfg.border.color or {r = 1, g = 1, b = 1, a = 1}
+        local thickness = auraCfg.border.thickness or 2
+        local overlay = framePreview.borderOverlay
+        if not overlay.SetBackdrop then Mixin(overlay, BackdropTemplateMixin) end
+        overlay:SetBackdrop({
+            edgeFile = "Interface\\Buttons\\WHITE8x8",
+            edgeSize = thickness,
+        })
+        overlay:SetBackdropBorderColor(clr.r, clr.g, clr.b, clr.a or 1)
+        overlay:Show()
+    end
+
+    -- Health bar color
+    if auraCfg.healthbar and framePreview.healthFill then
+        local clr = auraCfg.healthbar.color or {r = 1, g = 1, b = 1, a = 1}
+        local blend = auraCfg.healthbar.blend or 0.5
+        if auraCfg.healthbar.mode == "Replace" then
+            framePreview.healthFill:SetVertexColor(clr.r, clr.g, clr.b, clr.a or 1)
+        else
+            -- Tint: blend original green with the configured color
+            local r = 0.18 * (1 - blend) + clr.r * blend
+            local g = 0.80 * (1 - blend) + clr.g * blend
+            local b = 0.44 * (1 - blend) + clr.b * blend
+            framePreview.healthFill:SetVertexColor(r, g, b, 0.85)
+        end
+    end
+
+    -- Name text color
+    if auraCfg.nametext and framePreview.nameText then
+        local clr = auraCfg.nametext.color or {r = 1, g = 1, b = 1, a = 1}
+        framePreview.nameText:SetTextColor(clr.r, clr.g, clr.b, clr.a or 1)
+    end
+
+    -- Health text color
+    if auraCfg.healthtext and framePreview.hpText then
+        local clr = auraCfg.healthtext.color or {r = 1, g = 1, b = 1, a = 1}
+        framePreview.hpText:SetTextColor(clr.r, clr.g, clr.b, clr.a or 1)
+    end
+
+    -- Frame alpha
+    if auraCfg.framealpha then
+        mockFrame:SetAlpha(auraCfg.framealpha.alpha or 0.5)
+    end
+end
+
+-- ============================================================
 -- FRAME REFERENCES (populated during build)
 -- ============================================================
 local mainFrame           -- The root frame for the entire page
@@ -396,18 +797,29 @@ local function CreateAuraTile(parent, auraInfo, index)
     end
 
     tile:SetScript("OnEnter", function(self)
-        if selectedAura ~= self.auraName then
+        if selectedAura ~= self.auraName and not dragState.isDragging then
             local c = GetThemeColor()
             self.iconBg:SetBackdropBorderColor(c.r, c.g, c.b, 0.8)
         end
     end)
     tile:SetScript("OnLeave", function(self)
-        self:SetSelected(selectedAura == self.auraName)
+        if not dragState.isDragging then
+            self:SetSelected(selectedAura == self.auraName)
+        end
     end)
 
     tile:SetScript("OnClick", function(self)
         selectedAura = self.auraName
         DF:AuraDesigner_RefreshPage()
+    end)
+
+    -- Drag support: drag aura tile onto frame preview to place at anchor
+    tile:RegisterForDrag("LeftButton")
+    tile:SetScript("OnDragStart", function(self)
+        local spec = ResolveSpec()
+        if spec then
+            StartDrag(self.auraName, self.auraInfo, spec)
+        end
     end)
 
     return tile
@@ -1632,6 +2044,18 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef)
     container.borderOverlay:SetFrameLevel(mockFrame:GetFrameLevel() + 5)
     container.borderOverlay:Hide()
 
+    -- Click background to deselect aura (return to Global view)
+    local bgClick = CreateFrame("Button", nil, mockFrame)
+    bgClick:SetAllPoints()
+    bgClick:SetFrameLevel(mockFrame:GetFrameLevel() + 1)  -- Below dots and indicators
+    bgClick:RegisterForClicks("LeftButtonUp")
+    bgClick:SetScript("OnClick", function()
+        if selectedAura then
+            selectedAura = nil
+            DF:AuraDesigner_RefreshPage()
+        end
+    end)
+
     -- ========================================
     -- 9 ANCHOR POINT DOTS
     -- ========================================
@@ -1651,16 +2075,32 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef)
         dot:SetColorTexture(0.45, 0.45, 0.95, 0.3)
         dotFrame.dot = dot
 
-        -- Hover zone (invisible button)
+        -- Hover zone (invisible button) -- also acts as drop target during drag
         local hoverBtn = CreateFrame("Button", nil, dotFrame)
         hoverBtn:SetAllPoints()
+        local capturedAnchorName = anchorName
         hoverBtn:SetScript("OnEnter", function()
-            dot:SetSize(10, 10)
-            dot:SetColorTexture(0.45, 0.45, 0.95, 0.7)
+            if dragState.isDragging then
+                -- Drag hover: enlarge and accent-color the dot
+                local tc = GetThemeColor()
+                dot:SetSize(14, 14)
+                dot:SetColorTexture(tc.r, tc.g, tc.b, 0.9)
+                dragState.dropAnchor = capturedAnchorName
+            else
+                dot:SetSize(10, 10)
+                dot:SetColorTexture(0.45, 0.45, 0.95, 0.7)
+            end
         end)
         hoverBtn:SetScript("OnLeave", function()
-            dot:SetSize(6, 6)
-            dot:SetColorTexture(0.45, 0.45, 0.95, 0.3)
+            if dragState.isDragging then
+                -- Revert to drag-active state (not default)
+                dot:SetSize(10, 10)
+                dot:SetColorTexture(0.45, 0.45, 0.95, 0.5)
+                dragState.dropAnchor = nil
+            else
+                dot:SetSize(6, 6)
+                dot:SetColorTexture(0.45, 0.45, 0.95, 0.3)
+            end
         end)
 
         dotFrame.anchorName = anchorName
@@ -2265,6 +2705,8 @@ function DF:AuraDesigner_RefreshPage()
     -- Refresh panels
     RefreshRightPanel()
     RefreshActiveEffectsStrip()
+    RefreshPlacedIndicators()
+    RefreshPreviewEffects()
 
     -- Update enable state
     if enableBanner then
