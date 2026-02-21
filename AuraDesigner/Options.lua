@@ -260,6 +260,9 @@ local function CountActiveEffects(auraName)
     return count
 end
 
+-- Anchor dot pool (populated during CreateFramePreview, used by drag system)
+local anchorDots = {}
+
 -- ============================================================
 -- DRAG AND DROP SYSTEM
 -- Modeled after DandersCDM's ghost-based drag pattern:
@@ -1916,8 +1919,6 @@ local ANCHOR_POSITIONS = {
     BOTTOM      = { x = 0.5, y = 1,    ax = "BOTTOM",      ay = "BOTTOM"      },
     BOTTOMRIGHT = { x = 1,   y = 1,    ax = "BOTTOMRIGHT", ay = "BOTTOMRIGHT" },
 }
-
-local anchorDots = {}
 
 local function CreateFramePreview(parent, yOffset, rightPanelRef)
     -- Read current frame settings for the preview
