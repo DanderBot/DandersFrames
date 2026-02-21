@@ -1839,6 +1839,18 @@ function AutoProfilesUI:EnterEditing(contentType, profileIndex)
         end
     end
     
+    -- Persist a lightweight recovery flag so a crash/disconnect during editing
+    -- can be detected on next login and contaminated values reset to defaults
+    local recoveryKeys = {}
+    for key in pairs(self.globalSnapshot) do
+        recoveryKeys[#recoveryKeys + 1] = key
+    end
+    DF.db.raidAutoEditingRecovery = {
+        contentType = contentType,
+        profileIndex = profileIndex,
+        snapshotKeys = recoveryKeys,
+    }
+
     -- Apply existing overrides to db.raid for live preview
     local overrideCount = 0
     if self.editingProfile.overrides then
@@ -1951,6 +1963,11 @@ function AutoProfilesUI:ExitEditing(skipUIUpdates)
     self.editingContentType = nil
     self.editingProfileIndex = nil
     self.globalSnapshot = nil
+
+    -- Clear crash recovery flag — editing exited cleanly
+    if DF.db then
+        DF.db.raidAutoEditingRecovery = nil
+    end
 
     -- Hide sidebar hint if still showing
     self:HideSidebarHint()

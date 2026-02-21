@@ -1366,6 +1366,10 @@ end
 function DF:SyncLinkedSections()
     if not DF.GUI or not DF.db or not DF.db.linkedSections then return end
     if not next(DF.db.linkedSections) then return end
+    -- Skip sync during auto layout editing — _realRaidDB contains preview
+    -- overrides and syncing would contaminate the other mode's settings
+    local apu = DF.AutoProfilesUI
+    if apu and apu:IsEditing() then return end
     local mode = DF.GUI.SelectedMode
     if mode ~= "party" and mode ~= "raid" then return end
 
@@ -3034,6 +3038,21 @@ function DF:CheckElvUICompatibility()
     DF.elvUIWarningPopup = popup
 end
 
+-- Deep equality check for the proxy contamination guard.
+-- Lua's == is reference equality for tables, so a new table with identical
+-- contents would bypass the guard and leak override values into _realRaidDB.
+local function DeepEquals(a, b)
+    if a == b then return true end
+    if type(a) ~= "table" or type(b) ~= "table" then return false end
+    for k, v in pairs(a) do
+        if not DeepEquals(v, b[k]) then return false end
+    end
+    for k in pairs(b) do
+        if a[k] == nil then return false end
+    end
+    return true
+end
+
 -- ============================================================
 -- DB OVERLAY PROXY
 -- Wraps DF.db so auto-profile overrides are read-through without
@@ -3063,7 +3082,7 @@ function DF:WrapDB()
             if overrides and overrides[key] ~= nil then
                 local apu = DF.AutoProfilesUI
                 if apu and apu.activeRuntimeProfile and not apu:IsEditing() then
-                    if value == overrides[key] then
+                    if DeepEquals(value, overrides[key]) then
                         return
                     end
                 end
@@ -3437,6 +3456,44 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
                 MigrateResourceBarRoleFilter(profile.party)
                 MigrateResourceBarRoleFilter(profile.raid)
             end
+        end
+
+        -- Recover from crash/disconnect during auto layout editing.
+        -- If the recovery flag exists, the previous session was editing an auto layout
+        -- when it crashed — _realRaidDB may still contain override values baked in.
+        -- Compare each key against the profile's overrides and reset contaminated ones.
+        if DF.db.raidAutoEditingRecovery then
+            local recovery = DF.db.raidAutoEditingRecovery
+            local autoDb = DF.db.raidAutoProfiles
+            local profile
+            if recovery.contentType == "mythic" then
+                profile = autoDb and autoDb.mythic and autoDb.mythic.profile
+            else
+                local ct = autoDb and autoDb[recovery.contentType]
+                profile = ct and ct.profiles and ct.profiles[recovery.profileIndex]
+            end
+            if profile and profile.overrides and recovery.snapshotKeys then
+                local recovered = 0
+                for _, key in ipairs(recovery.snapshotKeys) do
+                    local overrideVal = profile.overrides[key]
+                    if overrideVal ~= nil and DeepEquals(DF.db.raid[key], overrideVal) then
+                        -- This value matches the override — reset to default
+                        local default = DF.RaidDefaults[key]
+                        if default ~= nil then
+                            if type(default) == "table" then
+                                DF.db.raid[key] = DF:DeepCopy(default)
+                            else
+                                DF.db.raid[key] = default
+                            end
+                            recovered = recovered + 1
+                        end
+                    end
+                end
+                if recovered > 0 then
+                    print("|cff00ff00DandersFrames:|r Recovered " .. recovered .. " raid settings from interrupted auto layout editing session.")
+                end
+            end
+            DF.db.raidAutoEditingRecovery = nil
         end
 
         -- Wrap DF.db with overlay proxy (must happen AFTER all migrations,
