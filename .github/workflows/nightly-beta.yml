@@ -48,8 +48,6 @@ jobs:
             if gh api "repos/${{ github.repository }}/git/refs" \
                  -f ref="refs/tags/${TAG}" -f sha="${SHA}" 2>/dev/null; then
               echo "Created tag: ${TAG}"
-              gh workflow run release.yml -f "tag=${TAG}"
-              echo "Triggered release build"
               exit 0
             fi
           done

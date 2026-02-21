@@ -50,6 +50,11 @@ jobs:
           if [[ "$GITHUB_REF" == refs/heads/* ]] && [[ -z "${{ inputs.tag }}" ]]; then
             export FORCE_ALPHA=true
           fi
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            export OVERRIDE_TAG="${GITHUB_REF#refs/tags/}"
+          elif [[ -n "${{ inputs.tag }}" ]]; then
+            export OVERRIDE_TAG="${{ inputs.tag }}"
+          fi
           ./generate_changelog.sh
 
           VERSION=$(grep 'DF.ADDON_VERSION' Changelog.lua | sed 's/.*= "\(.*\)"/\1/')
