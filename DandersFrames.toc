@@ -71,6 +71,12 @@ Features\Sort.lua
 Features\SecureSort.lua
 Features\Dispel.lua
 Features\MyBuffIndicators.lua
+
+# Aura Designer
+AuraDesigner\Config.lua
+AuraDesigner\AuraAdapter.lua
+AuraDesigner\Options.lua
+
 Features\TargetedSpells.lua
 Features\PinnedFrames.lua
 Features\FlatRaidFrames.lua

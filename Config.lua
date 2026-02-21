@@ -1788,6 +1788,27 @@ DF.PartyDefaults = {
         },
     },
 
+    -- Aura Designer
+    auraDesigner = {
+        enabled = false,
+        spec = "auto",
+        defaults = {
+            iconSize = 24,
+            iconScale = 1.0,
+            showDuration = true,
+            showStacks = true,
+            durationFont = "Fonts\\FRIZQT__.TTF",
+            durationScale = 1.0,
+            stackFont = "Fonts\\FRIZQT__.TTF",
+            stackScale = 1.0,
+            iconBorderEnabled = true,
+            iconBorderThickness = 1,
+            stackMinimum = 2,
+            durationColorByTime = false,
+        },
+        auras = {},
+    },
+
 }
 
 DF.RaidDefaults = {
@@ -2885,6 +2906,27 @@ DF.RaidDefaults = {
                 keepOfflinePlayers = false,
             },
         },
+    },
+
+    -- Aura Designer
+    auraDesigner = {
+        enabled = false,
+        spec = "auto",
+        defaults = {
+            iconSize = 24,
+            iconScale = 1.0,
+            showDuration = true,
+            showStacks = true,
+            durationFont = "Fonts\\FRIZQT__.TTF",
+            durationScale = 1.0,
+            stackFont = "Fonts\\FRIZQT__.TTF",
+            stackScale = 1.0,
+            iconBorderEnabled = true,
+            iconBorderThickness = 1,
+            stackMinimum = 2,
+            durationColorByTime = false,
+        },
+        auras = {},
     },
 
 }

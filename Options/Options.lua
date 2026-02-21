@@ -3517,7 +3517,15 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     -- CATEGORY: Auras
     -- ========================================
     CreateCategory("auras", "Auras")
-    
+
+    -- Auras > Aura Designer
+    local pageAuraDesigner = CreateSubTab("auras", "auras_auradesigner", "Aura Designer")
+    BuildPage(pageAuraDesigner, function(self, db, Add, AddSpace, AddSyncPoint)
+        if DF.BuildAuraDesignerPage then
+            DF.BuildAuraDesignerPage(GUI, self, db)
+        end
+    end)
+
     -- Auras > Buffs (combined Layout + Appearance with collapsible sections)
     local pageBuffs = CreateSubTab("auras", "auras_buffs", "Buffs")
     BuildPage(pageBuffs, function(self, db, Add, AddSpace, AddSyncPoint)

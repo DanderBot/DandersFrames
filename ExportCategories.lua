@@ -1014,6 +1014,13 @@ DF.ExportCategories = {
     pinnedFrames = {
         "pinnedFrames",  -- The entire pinnedFrames table is treated as one setting
     },
+
+    -- ===========================================
+    -- AURA DESIGNER - Spec-specific aura indicators
+    -- ===========================================
+    auraDesigner = {
+        "auraDesigner",  -- The entire auraDesigner table is treated as one setting
+    },
 }
 
 -- ===========================================
@@ -1060,6 +1067,11 @@ DF.ExportCategoryInfo = {
         description = "Separate frame sets for selected players",
         order = 8,
     },
+    auraDesigner = {
+        name = "Aura Designer",
+        description = "Spec-specific aura indicators and effects",
+        order = 9,
+    },
 }
 
 -- ===========================================
@@ -1068,7 +1080,7 @@ DF.ExportCategoryInfo = {
 DF.ExportPresets = {
     all = {
         name = "All",
-        categories = {"position", "layout", "bars", "auras", "text", "icons", "other", "pinnedFrames"},
+        categories = {"position", "layout", "bars", "auras", "text", "icons", "other", "pinnedFrames", "auraDesigner"},
     },
     appearance = {
         name = "Appearance",
