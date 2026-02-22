@@ -179,11 +179,22 @@ local function EnsureTypeConfig(auraName, typeKey)
                 -- Size & orientation
                 orientation = "HORIZONTAL", width = 60, height = 6,
                 matchFrameWidth = true, matchFrameHeight = false,
-                -- Colors & border
+                -- Texture & colors
+                texture = "Interface\\TargetingFrame\\UI-StatusBar",
                 fillColor = {r = 1, g = 1, b = 1, a = 1},
                 bgColor = {r = 0, g = 0, b = 0, a = 0.5},
+                -- Border
                 showBorder = true, borderThickness = 1,
-                borderColor = {r = 0, g = 0, b = 0, a = 1}, alpha = 1.0,
+                borderColor = {r = 0, g = 0, b = 0, a = 1},
+                -- Spark
+                showSpark = true,
+                -- Alpha
+                alpha = 1.0,
+                -- Duration text
+                showDuration = true, durationFont = "Fonts\\FRIZQT__.TTF",
+                durationScale = 1.0, durationOutline = "OUTLINE",
+                durationAnchor = "CENTER", durationX = 0, durationY = 0,
+                durationColorByTime = true,
             }
         elseif typeKey == "border" then
             auraCfg[typeKey] = {
@@ -250,10 +261,17 @@ local TYPE_DEFAULTS = {
         anchor = "BOTTOM", offsetX = 0, offsetY = 0,
         orientation = "HORIZONTAL", width = 60, height = 6,
         matchFrameWidth = true, matchFrameHeight = false,
+        texture = "Interface\\TargetingFrame\\UI-StatusBar",
         fillColor = {r = 1, g = 1, b = 1, a = 1},
         bgColor = {r = 0, g = 0, b = 0, a = 0.5},
         showBorder = true, borderThickness = 1,
-        borderColor = {r = 0, g = 0, b = 0, a = 1}, alpha = 1.0,
+        borderColor = {r = 0, g = 0, b = 0, a = 1},
+        showSpark = true,
+        alpha = 1.0,
+        showDuration = true, durationFont = "Fonts\\FRIZQT__.TTF",
+        durationScale = 1.0, durationOutline = "OUTLINE",
+        durationAnchor = "CENTER", durationX = 0, durationY = 0,
+        durationColorByTime = true,
     },
 }
 
@@ -1279,7 +1297,10 @@ local function BuildTypeContent(parent, typeKey, auraName, width)
         AddWidget(GUI:CreateCheckbox(parent, "Match Frame Width", proxy, "matchFrameWidth"), 28)
         AddWidget(GUI:CreateCheckbox(parent, "Match Frame Height", proxy, "matchFrameHeight"), 28)
         AddDivider()
-        -- Colors & border
+        -- Texture
+        AddWidget(GUI:CreateTextureDropdown(parent, "Bar Texture", proxy, "texture"), 54)
+        AddDivider()
+        -- Colors
         AddWidget(GUI:CreateColorPicker(parent, "Fill Color", proxy, "fillColor", true,
             function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
             function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
@@ -1288,13 +1309,28 @@ local function BuildTypeContent(parent, typeKey, auraName, width)
             function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
             function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
             true), 28)
+        AddWidget(GUI:CreateSlider(parent, "Alpha", 0, 1, 0.05, proxy, "alpha"), 54)
+        AddDivider()
+        -- Border
         AddWidget(GUI:CreateCheckbox(parent, "Show Border", proxy, "showBorder"), 28)
         AddWidget(GUI:CreateSlider(parent, "Border Thickness", 1, 4, 1, proxy, "borderThickness"), 54)
         AddWidget(GUI:CreateColorPicker(parent, "Border Color", proxy, "borderColor", true,
             function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
             function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
             true), 28)
-        AddWidget(GUI:CreateSlider(parent, "Alpha", 0, 1, 0.05, proxy, "alpha"), 54)
+        AddDivider()
+        -- Spark
+        AddWidget(GUI:CreateCheckbox(parent, "Show Spark", proxy, "showSpark"), 28)
+        AddDivider()
+        -- Duration text
+        AddWidget(GUI:CreateCheckbox(parent, "Show Duration Text", proxy, "showDuration"), 28)
+        AddWidget(GUI:CreateDropdown(parent, "Duration Font", DF:GetFontList(), proxy, "durationFont"), 54)
+        AddWidget(GUI:CreateSlider(parent, "Duration Scale", 0.5, 2.0, 0.1, proxy, "durationScale"), 54)
+        AddWidget(GUI:CreateDropdown(parent, "Duration Outline", OUTLINE_OPTIONS, proxy, "durationOutline"), 54)
+        AddWidget(GUI:CreateDropdown(parent, "Duration Anchor", ANCHOR_OPTIONS, proxy, "durationAnchor"), 54)
+        AddWidget(GUI:CreateSlider(parent, "Duration Offset X", -20, 20, 1, proxy, "durationX"), 54)
+        AddWidget(GUI:CreateSlider(parent, "Duration Offset Y", -20, 20, 1, proxy, "durationY"), 54)
+        AddWidget(GUI:CreateCheckbox(parent, "Color Duration by Time", proxy, "durationColorByTime"), 28)
 
     elseif typeKey == "border" then
         AddWidget(GUI:CreateDropdown(parent, "Style", BORDER_STYLE_OPTIONS, proxy, "style"), 54)

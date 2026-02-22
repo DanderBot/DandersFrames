@@ -924,14 +924,23 @@ local function GetBarMap(frame)
     return frame.dfAD_bars
 end
 
+local DEFAULT_BAR_TEXTURE = "Interface\\TargetingFrame\\UI-StatusBar"
+
 local function CreateADBar(frame, auraName)
     local bar = CreateFrame("StatusBar", nil, frame.contentOverlay or frame)
     bar:SetSize(60, 6)
-    bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
+    bar:SetStatusBarTexture(DEFAULT_BAR_TEXTURE)
     bar:SetMinMaxValues(0, 1)
     bar:SetFrameLevel((frame.contentOverlay or frame):GetFrameLevel() + 10)
     bar.dfAD_auraName = auraName
 
+    -- Background texture
+    bar.bg = bar:CreateTexture(nil, "BACKGROUND")
+    bar.bg:SetAllPoints()
+    bar.bg:SetTexture(DEFAULT_BAR_TEXTURE)
+    bar.bg:SetVertexColor(0.15, 0.15, 0.15, 0.8)
+
+    -- Border frame
     bar.borderFrame = CreateFrame("Frame", nil, bar, "BackdropTemplate")
     bar.borderFrame:SetPoint("TOPLEFT", -1, 1)
     bar.borderFrame:SetPoint("BOTTOMRIGHT", 1, -1)
@@ -943,10 +952,81 @@ local function CreateADBar(frame, auraName)
         bar.borderFrame:SetBackdropBorderColor(0, 0, 0, 1)
     end
 
-    bar.bg = bar:CreateTexture(nil, "BACKGROUND")
-    bar.bg:SetAllPoints()
-    bar.bg:SetTexture("Interface\\TargetingFrame\\UI-StatusBar")
-    bar.bg:SetVertexColor(0.15, 0.15, 0.15, 0.8)
+    -- Spark (bright line at the bar's leading edge)
+    bar.spark = bar:CreateTexture(nil, "OVERLAY")
+    bar.spark:SetTexture("Interface\\CastingBar\\UI-CastingBar-Spark")
+    bar.spark:SetBlendMode("ADD")
+    bar.spark:SetSize(12, 24)
+    bar.spark:Hide()
+
+    -- Text overlay (above everything for duration text)
+    bar.textOverlay = CreateFrame("Frame", nil, bar)
+    bar.textOverlay:SetAllPoints(bar)
+    bar.textOverlay:SetFrameLevel(bar:GetFrameLevel() + 5)
+    bar.textOverlay:EnableMouse(false)
+
+    -- Duration text
+    bar.duration = bar.textOverlay:CreateFontString(nil, "OVERLAY")
+    bar.duration:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
+    bar.duration:SetPoint("CENTER", 0, 0)
+    bar.duration:SetTextColor(1, 1, 1)
+
+    -- OnUpdate for continuous countdown
+    bar.dfAD_duration = 0
+    bar.dfAD_expirationTime = 0
+    bar.dfAD_elapsed = 0
+    bar:SetScript("OnUpdate", function(self, elapsed)
+        self.dfAD_elapsed = self.dfAD_elapsed + elapsed
+        if self.dfAD_elapsed < 0.03 then return end  -- ~30 fps
+        self.dfAD_elapsed = 0
+
+        if self.dfAD_duration <= 0 or self.dfAD_expirationTime <= 0 then return end
+
+        local remaining = self.dfAD_expirationTime - GetTime()
+        if remaining < 0 then remaining = 0 end
+        local pct = min(1, remaining / self.dfAD_duration)
+        self:SetValue(pct)
+
+        -- Update spark position
+        if self.spark and self.spark:IsShown() then
+            local orient = self:GetOrientation()
+            if orient == "HORIZONTAL" then
+                local barWidth = self:GetWidth()
+                self.spark:ClearAllPoints()
+                self.spark:SetPoint("CENTER", self, "LEFT", barWidth * pct, 0)
+            else
+                local barHeight = self:GetHeight()
+                self.spark:ClearAllPoints()
+                self.spark:SetPoint("CENTER", self, "BOTTOM", 0, barHeight * pct)
+            end
+        end
+
+        -- Update duration text
+        if self.duration and self.duration:IsShown() then
+            if remaining >= 60 then
+                self.duration:SetText(format("%dm", remaining / 60))
+            else
+                self.duration:SetText(format("%.1f", remaining))
+            end
+
+            -- Color by remaining time
+            if self.dfAD_durationColorByTime then
+                local colorPct = max(0, min(1, remaining / self.dfAD_duration))
+                local r, g, b
+                if colorPct < 0.3 then
+                    local t = colorPct / 0.3
+                    r, g, b = 1, 0.5 * t, 0
+                elseif colorPct < 0.5 then
+                    local t = (colorPct - 0.3) / 0.2
+                    r, g, b = 1, 0.5 + 0.5 * t, 0
+                else
+                    local t = (colorPct - 0.5) / 0.5
+                    r, g, b = 1 - t, 1, 0
+                end
+                self.duration:SetTextColor(r, g, b, 1)
+            end
+        end
+    end)
 
     bar:Hide()
     return bar
@@ -966,58 +1046,159 @@ function Indicators:ApplyBar(frame, config, auraData, defaults, auraName)
 
     local bar = GetOrCreateADBar(frame, auraName)
 
-    -- Size
+    -- ========================================
+    -- SIZE & ORIENTATION
+    -- ========================================
     local width = config.width or 60
     local height = config.height or 6
     if config.matchFrameWidth then width = frame:GetWidth() end
     if config.matchFrameHeight then height = frame:GetHeight() end
     bar:SetSize(width, height)
 
-    -- Alpha
     bar:SetAlpha(config.alpha or 1.0)
 
-    -- Orientation
     local orientation = config.orientation or "HORIZONTAL"
     bar:SetOrientation(orientation)
 
-    -- Colors
+    -- ========================================
+    -- TEXTURE
+    -- ========================================
+    local texture = config.texture or DEFAULT_BAR_TEXTURE
+    bar:SetStatusBarTexture(texture)
+    if bar.bg then
+        bar.bg:SetTexture(texture)
+    end
+
+    -- ========================================
+    -- COLORS
+    -- ========================================
     local fillColor = config.fillColor
     if fillColor then
-        bar:SetStatusBarColor(fillColor[1] or fillColor.r or 0.3, fillColor[2] or fillColor.g or 0.7, fillColor[3] or fillColor.b or 0.3, 1)
+        bar:SetStatusBarColor(fillColor[1] or fillColor.r or 1, fillColor[2] or fillColor.g or 1, fillColor[3] or fillColor.b or 1, 1)
     else
-        bar:SetStatusBarColor(0.3, 0.7, 0.3, 1)
+        bar:SetStatusBarColor(1, 1, 1, 1)
     end
 
     local bgColor = config.bgColor
     if bgColor and bar.bg then
-        bar.bg:SetVertexColor(bgColor[1] or bgColor.r or 0.15, bgColor[2] or bgColor.g or 0.15, bgColor[3] or bgColor.b or 0.15, 0.8)
+        bar.bg:SetVertexColor(bgColor[1] or bgColor.r or 0, bgColor[2] or bgColor.g or 0, bgColor[3] or bgColor.b or 0, bgColor[4] or bgColor.a or 0.5)
     end
 
-    -- Border
+    -- ========================================
+    -- BORDER
+    -- ========================================
     local showBorder = config.showBorder
     if showBorder == nil then showBorder = true end
+    local borderThickness = config.borderThickness or 1
+
     if bar.borderFrame then
         if showBorder then
+            bar.borderFrame:ClearAllPoints()
+            bar.borderFrame:SetPoint("TOPLEFT", -borderThickness, borderThickness)
+            bar.borderFrame:SetPoint("BOTTOMRIGHT", borderThickness, -borderThickness)
+            if bar.borderFrame.SetBackdrop then
+                bar.borderFrame:SetBackdrop({
+                    edgeFile = "Interface\\Buttons\\WHITE8x8",
+                    edgeSize = borderThickness,
+                })
+                local borderColor = config.borderColor
+                if borderColor then
+                    bar.borderFrame:SetBackdropBorderColor(borderColor[1] or borderColor.r or 0, borderColor[2] or borderColor.g or 0, borderColor[3] or borderColor.b or 0, borderColor[4] or borderColor.a or 1)
+                else
+                    bar.borderFrame:SetBackdropBorderColor(0, 0, 0, 1)
+                end
+            end
             bar.borderFrame:Show()
         else
             bar.borderFrame:Hide()
         end
     end
 
-    -- Position — each aura has its own anchor, no growth
+    -- ========================================
+    -- POSITION
+    -- ========================================
     local anchor = config.anchor or "BOTTOM"
     local offsetX = config.offsetX or 0
     local offsetY = config.offsetY or 0
     bar:ClearAllPoints()
     bar:SetPoint(anchor, frame, anchor, offsetX, offsetY)
 
-    -- Fill based on remaining duration
-    if auraData.duration and auraData.duration > 0 and auraData.expirationTime then
+    -- ========================================
+    -- SPARK
+    -- ========================================
+    local showSpark = config.showSpark
+    if showSpark == nil then showSpark = true end
+    if bar.spark then
+        if showSpark then
+            bar.spark:SetSize(12, max(height * 3, 12))
+            bar.spark:Show()
+        else
+            bar.spark:Hide()
+        end
+    end
+
+    -- ========================================
+    -- COUNTDOWN DATA (drives the OnUpdate ticker)
+    -- ========================================
+    local hasDuration = auraData.duration and auraData.duration > 0
+                        and auraData.expirationTime and auraData.expirationTime > 0
+    if hasDuration then
+        bar.dfAD_duration = auraData.duration
+        bar.dfAD_expirationTime = auraData.expirationTime
         local remaining = auraData.expirationTime - GetTime()
         local pct = max(0, min(1, remaining / auraData.duration))
         bar:SetValue(pct)
     else
+        bar.dfAD_duration = 0
+        bar.dfAD_expirationTime = 0
         bar:SetValue(1)  -- Permanent aura = full bar
+    end
+
+    -- ========================================
+    -- DURATION TEXT
+    -- ========================================
+    local showDuration = config.showDuration
+    if showDuration == nil then showDuration = false end
+    local durationFont = config.durationFont or "Fonts\\FRIZQT__.TTF"
+    local durationScale = config.durationScale or 1.0
+    local durationOutline = config.durationOutline or "OUTLINE"
+    if durationOutline == "NONE" then durationOutline = "" end
+    local durationAnchor = config.durationAnchor or "CENTER"
+    local durationX = config.durationX or 0
+    local durationY = config.durationY or 0
+    local durationColorByTime = config.durationColorByTime
+    if durationColorByTime == nil then durationColorByTime = true end
+
+    -- Store color-by-time flag for OnUpdate to read
+    bar.dfAD_durationColorByTime = durationColorByTime
+
+    if bar.duration then
+        if showDuration and hasDuration then
+            local durationSize = 10 * durationScale
+            DF:SafeSetFont(bar.duration, durationFont, durationSize, durationOutline)
+            bar.duration:ClearAllPoints()
+            bar.duration:SetPoint(durationAnchor, bar, durationAnchor, durationX, durationY)
+
+            -- Set initial text (OnUpdate will keep it updated)
+            local remaining = max(0, auraData.expirationTime - GetTime())
+            if remaining >= 60 then
+                bar.duration:SetText(format("%dm", remaining / 60))
+            else
+                bar.duration:SetText(format("%.1f", remaining))
+            end
+
+            if not durationColorByTime then
+                bar.duration:SetTextColor(1, 1, 1, 1)
+            end
+            bar.duration:Show()
+        else
+            bar.duration:Hide()
+        end
+    end
+
+    -- Ensure mouse doesn't block clicks on the unit frame
+    if not InCombatLockdown() and bar.SetMouseClickEnabled then
+        bar:SetMouseClickEnabled(false)
     end
 
     bar:Show()
