@@ -83,17 +83,20 @@ end
 -- Uses C_UnitAuras.DoesAuraHaveExpirationTime when available (handles secrets).
 -- Falls back to direct comparison when values are non-secret (e.g., preview).
 local function HasAuraDuration(auraData, unit)
-    -- If we have unit + auraInstanceID, use the secret-safe API
-    if unit and auraData.auraInstanceID
-       and C_UnitAuras and C_UnitAuras.DoesAuraHaveExpirationTime then
-        return C_UnitAuras.DoesAuraHaveExpirationTime(unit, auraData.auraInstanceID)
+    -- When a real unit is present, the Duration object pipeline
+    -- (SetCooldownFromDurationObject / SetTimerDuration) handles everything
+    -- including permanent auras. Return true so we enter those code paths;
+    -- the APIs are secret-safe and handle zero-duration correctly.
+    -- We avoid DoesAuraHaveExpirationTime because it returns a secret boolean
+    -- that can't be used in conditionals.
+    if unit and auraData.auraInstanceID then
+        return true
     end
-    -- Fallback for preview (non-secret mock data) or old clients
+    -- Fallback for preview (non-secret mock data)
     local dur = auraData.duration
     local exp = auraData.expirationTime
     if dur and exp then
         if issecretvalue(dur) or issecretvalue(exp) then
-            -- Secret values exist = aura is active, assume has duration
             return true
         end
         return dur > 0 and exp > 0
