@@ -1,14 +1,31 @@
 local addonName, DF = ...
-DF.ADDON_VERSION = "v4.0.7-alpha.2"
-DF.BUILD_DATE = "2026-02-20T20:03:02Z"
+DF.ADDON_VERSION = "v4.0.7-alpha.20"
+DF.BUILD_DATE = "2026-02-21T19:46:48Z"
 DF.RELEASE_CHANNEL = "alpha"
 DF.CHANGELOG_TEXT = [===[
 # DandersFrames Changelog
 
-## Unreleased (v4.0.7-alpha.2)
+## Unreleased (v4.0.7-alpha.20)
 
-- Rename remaining Profile references to Layout, compact changelog
-- Fix auto layout profile contamination and add override star tooltips
+- Fix auto layout override values stuck on test mode frames
+- Fix auto layout settings contamination bugs
+- Fix right panel scroll frame having zero height
+- Add debug logging to per-aura view to diagnose invisible settings
+- Restyle per-aura right panel: remove duplicate header, visible type sections
+- Add missing defaults for square and bar type configs
+- Add UI polish: selected highlight, drag hints, icon border, collapsible expiring, copy mode fix
+- Move ANCHOR_POSITIONS declaration before placed indicators code
+- Fix placed indicators, add missing controls, reorder per-aura view
+- Fix EndDrag nil error: forward-declare before StartDrag
+- Fix anchorDots nil error: move declaration before drag system
+- Add drag-and-drop, placed indicators, and preview effects
+- Polish Aura Designer UI: SETTINGS header, tile glow, section styling
+- Fix copy-from dropdown: replace removed EasyMenu with custom popup
+- Add copy-from dropdown, instruction badges, global settings panel
+- Fix Aura Designer UI: themed checkbox, layout, spell icons, preview settings
+- Improve Aura Designer UI visual fidelity
+- Add Aura Designer UI skeleton (Options GUI, config defaults, adapter stub)
+- Add debug logging to auto layouts system
 
 ---
 
@@ -41,6 +58,8 @@ DF.CHANGELOG_TEXT = [===[
 * Fix leader icon not updating on first leader change (contributed by riyuk)
 * Fix forbidden table iteration in FindHealthManaBars (contributed by riyuk)
 * Various auto layout stability fixes
+* Fix auto layout settings contamination between party and raid modes
+* Fix auto layout override values getting stuck on test mode frames after profile switch
 
 ### New Features
 * Add health fade system — fades frames when a unit's health is above a configurable threshold, with dispel cancel override and test mode support (contributed by X-Steeve)
@@ -52,6 +71,7 @@ DF.CHANGELOG_TEXT = [===[
 * Auto-show changelog when opening settings after an update
 * Rename "Auto Profiles" to "Auto Layouts" throughout the UI
 * Debug Console — in-game debug log viewer (`/df debug` to toggle, `/df console` to view)
+* Aura Designer UI (work in progress — not yet functional)
 
 ## [4.0.6] - 2026-02-15
 

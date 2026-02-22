@@ -41,7 +41,7 @@
 * Auto-show changelog when opening settings after an update
 * Rename "Auto Profiles" to "Auto Layouts" throughout the UI
 * Debug Console — in-game debug log viewer (`/df debug` to toggle, `/df console` to view)
-* Aura Designer UI (work in progress — not yet functional)
+* Aura Designer (work in progress) — icon, square, and bar indicators are implemented; more indicator types coming soon
 
 ## [4.0.6] - 2026-02-15
 
