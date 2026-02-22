@@ -2633,11 +2633,22 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     local pageHealthBar = CreateSubTab("bars", "bars_health", "Health Bar")
     BuildPage(pageHealthBar, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top
-        Add(CreateCopyButton(self.child, {"health", "classColor", "smoothBars"}, "Health Bar", "bars_health"), 25, 2)
+        Add(CreateCopyButton(self.child, {"health", "classColor", "smoothBars", "background", "missingHealth"}, "Health Bar", "bars_health"), 25, 2)
+        
+        local currentSection = nil
+        local function AddToSection(widget, height, col)
+            Add(widget, height, col)
+            if currentSection then currentSection:RegisterChild(widget) end
+            return widget
+        end
+        
+        -- ===== HEALTH BAR SECTION =====
+        local healthBarSection = Add(GUI:CreateCollapsibleSection(self.child, "Health Bar", true), 36, "both")
+        currentSection = healthBarSection
         
         -- ===== COLOR GROUP (Column 1) =====
         local colorGroup = GUI:CreateSettingsGroup(self.child, 280)
-        colorGroup:AddWidget(GUI:CreateHeader(self.child, "Health Bar Color"), 40)
+        colorGroup:AddWidget(GUI:CreateHeader(self.child, "Color"), 40)
         
         local colorModes = { CLASS = "Class Color", CUSTOM = "Custom Color", PERCENT = "Health Gradient" }
         colorGroup:AddWidget(GUI:CreateDropdown(self.child, "Color Mode", colorModes, db, "healthColorMode", function()
@@ -2653,11 +2664,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local customColor = colorGroup:AddWidget(GUI:CreateColorPicker(self.child, "Custom Health Color", db, "healthColor", true, nil, function() DF:LightweightUpdateHealthColor() end, true), 35)
         customColor.hideOn = function(d) return d.healthColorMode ~= "CUSTOM" end
         
-        Add(colorGroup, nil, 1)
+        AddToSection(colorGroup, nil, 1)
         
         -- ===== TEXTURE GROUP (Column 2) =====
         local textureGroup = GUI:CreateSettingsGroup(self.child, 280)
-        textureGroup:AddWidget(GUI:CreateHeader(self.child, "Health Bar Texture"), 40)
+        textureGroup:AddWidget(GUI:CreateHeader(self.child, "Texture"), 40)
         textureGroup:AddWidget(GUI:CreateTextureDropdown(self.child, "Texture", db, "healthTexture"), 55)
         
         local orientOptions = {
@@ -2667,13 +2678,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         textureGroup:AddWidget(GUI:CreateDropdown(self.child, "Fill Direction", orientOptions, db, "healthOrientation", function() DF:UpdateAllFrames() end), 55)
         textureGroup:AddWidget(GUI:CreateCheckbox(self.child, "Smooth Bar Animation", db, "smoothBars", function() DF:UpdateAllFrames() end), 30)
         
-        Add(textureGroup, nil, 2)
+        AddToSection(textureGroup, nil, 2)
         
         -- ===== GRADIENT PREVIEW (full width, conditional) =====
-        local gradHeader = Add(GUI:CreateHeader(self.child, "Gradient Colors"), 40, "both")
+        local gradHeader = AddToSection(GUI:CreateHeader(self.child, "Gradient"), 40, "both")
         gradHeader.hideOn = function(d) return d.healthColorMode ~= "PERCENT" end
         
-        local gradBar = Add(GUI:CreateGradientBar(self.child, 550, 24, db), 35, "both")
+        local gradBar = AddToSection(GUI:CreateGradientBar(self.child, 550, 24, db), 35, "both")
         gradBar.hideOn = function(d) return d.healthColorMode ~= "PERCENT" end
         
         -- ===== HIGH HEALTH GROUP (Column 1, conditional) =====
@@ -2683,7 +2694,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         highGroup:AddWidget(GUI:CreateCheckbox(self.child, "Use Class Color", db, "healthColorHighUseClass", function() if gradBar.UpdatePreview then gradBar.UpdatePreview() end DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() end), 30)
         highGroup:AddWidget(GUI:CreateSlider(self.child, "Weight", 1, 5, 1, db, "healthColorHighWeight", function() if gradBar.UpdatePreview then gradBar.UpdatePreview() end DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() end, function() DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() if gradBar.UpdatePreview then gradBar.UpdatePreview() end end, true), 55)
         highGroup.hideOn = function(d) return d.healthColorMode ~= "PERCENT" end
-        Add(highGroup, nil, 1)
+        AddToSection(highGroup, nil, 1)
         
         -- ===== MEDIUM HEALTH GROUP (Column 2, conditional) =====
         local medGroup = GUI:CreateSettingsGroup(self.child, 280)
@@ -2692,7 +2703,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         medGroup:AddWidget(GUI:CreateCheckbox(self.child, "Use Class Color", db, "healthColorMediumUseClass", function() if gradBar.UpdatePreview then gradBar.UpdatePreview() end DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() end), 30)
         medGroup:AddWidget(GUI:CreateSlider(self.child, "Weight", 1, 5, 1, db, "healthColorMediumWeight", function() if gradBar.UpdatePreview then gradBar.UpdatePreview() end DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() end, function() DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() if gradBar.UpdatePreview then gradBar.UpdatePreview() end end, true), 55)
         medGroup.hideOn = function(d) return d.healthColorMode ~= "PERCENT" end
-        Add(medGroup, nil, 2)
+        AddToSection(medGroup, nil, 2)
         
         -- ===== LOW HEALTH GROUP (Column 1, conditional) =====
         local lowGroup = GUI:CreateSettingsGroup(self.child, 280)
@@ -2701,7 +2712,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         lowGroup:AddWidget(GUI:CreateCheckbox(self.child, "Use Class Color", db, "healthColorLowUseClass", function() if gradBar.UpdatePreview then gradBar.UpdatePreview() end DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() end), 30)
         lowGroup:AddWidget(GUI:CreateSlider(self.child, "Weight", 1, 5, 1, db, "healthColorLowWeight", function() if gradBar.UpdatePreview then gradBar.UpdatePreview() end DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() end, function() DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() if gradBar.UpdatePreview then gradBar.UpdatePreview() end end, true), 55)
         lowGroup.hideOn = function(d) return d.healthColorMode ~= "PERCENT" end
-        Add(lowGroup, nil, 1)
+        AddToSection(lowGroup, nil, 1)
         
         -- ===== BACKGROUND GROUP (Column 1) =====
         local bgGroup = GUI:CreateSettingsGroup(self.child, 280)
@@ -2724,11 +2735,18 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local bgClassAlpha = bgGroup:AddWidget(GUI:CreateSlider(self.child, "Background Alpha", 0, 1, 0.05, db, "backgroundClassAlpha", nil, function() DF:LightweightUpdateBackgroundColor() end, true), 55)
         bgClassAlpha.hideOn = function(d) return d.backgroundColorMode ~= "CLASS" end
         
-        Add(bgGroup, nil, 1)
+        AddToSection(bgGroup, nil, 1)
         
-        -- ===== MISSING HEALTH GROUP (Column 2) =====
+        currentSection = nil
+        AddSpace(10, "both")
+        
+        -- ===== MISSING HEALTH SECTION =====
+        local missingSection = Add(GUI:CreateCollapsibleSection(self.child, "Missing Health", true), 36, "both")
+        currentSection = missingSection
+        
+        -- ===== MISSING HEALTH GROUP (Column 1) =====
         local missingGroup = GUI:CreateSettingsGroup(self.child, 280)
-        missingGroup:AddWidget(GUI:CreateHeader(self.child, "Missing Health"), 40)
+        missingGroup:AddWidget(GUI:CreateHeader(self.child, "Settings"), 40)
         
         local bgFillModes = { BACKGROUND = "Background Only", MISSING_HEALTH = "Missing Health Only", BOTH = "Both" }
         local bgFillMode = missingGroup:AddWidget(GUI:CreateDropdown(self.child, "Background Fill", bgFillModes, db, "backgroundMode", function()
@@ -2743,9 +2761,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end, missingHealthTextureOptions), 55)
         missingHealthTexture.hideOn = function(d) return d.backgroundMode == "BACKGROUND" end
         
-        local missingHealthColorModes = { CUSTOM = "Custom Color", CLASS = "Class Color" }
+        local missingHealthColorModes = { CUSTOM = "Custom Color", CLASS = "Class Color", PERCENT = "Health Gradient" }
         local missingHealthColorMode = missingGroup:AddWidget(GUI:CreateDropdown(self.child, "Color Mode", missingHealthColorModes, db, "missingHealthColorMode", function()
             self:RefreshStates()
+            DF:UpdateColorCurve()
             DF:UpdateAllFrames()
         end), 55)
         missingHealthColorMode.hideOn = function(d) return d.backgroundMode == "BACKGROUND" end
@@ -2756,7 +2775,46 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local missingHealthClassAlpha = missingGroup:AddWidget(GUI:CreateSlider(self.child, "Class Color Alpha", 0, 1, 0.05, db, "missingHealthClassAlpha", nil, function() DF:UpdateAllFrames() end, true), 55)
         missingHealthClassAlpha.hideOn = function(d) return d.backgroundMode == "BACKGROUND" or d.missingHealthColorMode ~= "CLASS" end
         
-        Add(missingGroup, nil, 2)
+        local missingHealthGradientAlpha = missingGroup:AddWidget(GUI:CreateSlider(self.child, "Gradient Color Alpha", 0, 1, 0.05, db, "missingHealthGradientAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
+        missingHealthGradientAlpha.hideOn = function(d) return d.backgroundMode == "BACKGROUND" or d.missingHealthColorMode ~= "PERCENT" end
+
+        AddToSection(missingGroup, nil, 1)
+
+        -- ===== MISSING HEALTH GRADIENT PREVIEW (full width, conditional) =====
+        local mhGradHeader = AddToSection(GUI:CreateHeader(self.child, "Gradient"), 40, "both")
+        mhGradHeader.hideOn = function(d) return d.backgroundMode == "BACKGROUND" or d.missingHealthColorMode ~= "PERCENT" end
+
+        local mhGradBar = AddToSection(GUI:CreateGradientBar(self.child, 550, 24, db, "missingHealthColor"), 35, "both")
+        mhGradBar.hideOn = function(d) return d.backgroundMode == "BACKGROUND" or d.missingHealthColorMode ~= "PERCENT" end
+
+        -- ===== MISSING HEALTH HIGH GROUP (Column 1, conditional) =====
+        local mhHighGroup = GUI:CreateSettingsGroup(self.child, 280)
+        mhHighGroup:AddWidget(GUI:CreateHeader(self.child, "High Health (100%)"), 40)
+        mhHighGroup:AddWidget(GUI:CreateColorPicker(self.child, "Color", db, "missingHealthColorHigh", false, function() if mhGradBar.UpdatePreview then mhGradBar.UpdatePreview() end end, function() DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() if mhGradBar.UpdatePreview then mhGradBar.UpdatePreview() end end, true), 35)
+        mhHighGroup:AddWidget(GUI:CreateCheckbox(self.child, "Use Class Color", db, "missingHealthColorHighUseClass", function() if mhGradBar.UpdatePreview then mhGradBar.UpdatePreview() end DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() end), 30)
+        mhHighGroup:AddWidget(GUI:CreateSlider(self.child, "Weight", 1, 5, 1, db, "missingHealthColorHighWeight", function() if mhGradBar.UpdatePreview then mhGradBar.UpdatePreview() end DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() end, function() DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() if mhGradBar.UpdatePreview then mhGradBar.UpdatePreview() end end, true), 55)
+        mhHighGroup.hideOn = function(d) return d.backgroundMode == "BACKGROUND" or d.missingHealthColorMode ~= "PERCENT" end
+        AddToSection(mhHighGroup, nil, 1)
+
+        -- ===== MISSING HEALTH MEDIUM GROUP (Column 2, conditional) =====
+        local mhMedGroup = GUI:CreateSettingsGroup(self.child, 280)
+        mhMedGroup:AddWidget(GUI:CreateHeader(self.child, "Medium Health (50%)"), 40)
+        mhMedGroup:AddWidget(GUI:CreateColorPicker(self.child, "Color", db, "missingHealthColorMedium", false, function() if mhGradBar.UpdatePreview then mhGradBar.UpdatePreview() end end, function() DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() if mhGradBar.UpdatePreview then mhGradBar.UpdatePreview() end end, true), 35)
+        mhMedGroup:AddWidget(GUI:CreateCheckbox(self.child, "Use Class Color", db, "missingHealthColorMediumUseClass", function() if mhGradBar.UpdatePreview then mhGradBar.UpdatePreview() end DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() end), 30)
+        mhMedGroup:AddWidget(GUI:CreateSlider(self.child, "Weight", 1, 5, 1, db, "missingHealthColorMediumWeight", function() if mhGradBar.UpdatePreview then mhGradBar.UpdatePreview() end DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() end, function() DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() if mhGradBar.UpdatePreview then mhGradBar.UpdatePreview() end end, true), 55)
+        mhMedGroup.hideOn = function(d) return d.backgroundMode == "BACKGROUND" or d.missingHealthColorMode ~= "PERCENT" end
+        AddToSection(mhMedGroup, nil, 2)
+
+        -- ===== MISSING HEALTH LOW GROUP (Column 1, conditional) =====
+        local mhLowGroup = GUI:CreateSettingsGroup(self.child, 280)
+        mhLowGroup:AddWidget(GUI:CreateHeader(self.child, "Low Health (0%)"), 40)
+        mhLowGroup:AddWidget(GUI:CreateColorPicker(self.child, "Color", db, "missingHealthColorLow", false, function() if mhGradBar.UpdatePreview then mhGradBar.UpdatePreview() end end, function() DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() if mhGradBar.UpdatePreview then mhGradBar.UpdatePreview() end end, true), 35)
+        mhLowGroup:AddWidget(GUI:CreateCheckbox(self.child, "Use Class Color", db, "missingHealthColorLowUseClass", function() if mhGradBar.UpdatePreview then mhGradBar.UpdatePreview() end DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() end), 30)
+        mhLowGroup:AddWidget(GUI:CreateSlider(self.child, "Weight", 1, 5, 1, db, "missingHealthColorLowWeight", function() if mhGradBar.UpdatePreview then mhGradBar.UpdatePreview() end DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() end, function() DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() if mhGradBar.UpdatePreview then mhGradBar.UpdatePreview() end end, true), 55)
+        mhLowGroup.hideOn = function(d) return d.backgroundMode == "BACKGROUND" or d.missingHealthColorMode ~= "PERCENT" end
+        AddToSection(mhLowGroup, nil, 1)
+        
+        currentSection = nil
         
         -- See Also links
         AddSpace(20, "both")

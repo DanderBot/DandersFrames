@@ -115,7 +115,17 @@ DF.ExportCategories = {
         
         -- Missing Health Background
         "missingHealthColor",
+        "missingHealthColorHigh",
+        "missingHealthColorHighUseClass",
+        "missingHealthColorHighWeight",
+        "missingHealthColorLow",
+        "missingHealthColorLowUseClass",
+        "missingHealthColorLowWeight",
+        "missingHealthColorMedium",
+        "missingHealthColorMediumUseClass",
+        "missingHealthColorMediumWeight",
         "missingHealthColorMode",
+        "missingHealthGradientAlpha",
         "missingHealthTexture",
         "missingHealthClassAlpha",
         

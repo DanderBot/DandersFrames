@@ -106,13 +106,18 @@ DF.SetBarValue = SetBarValue
 
 function DF:UpdateColorCurve()
     DF.CurveCache = {}
+    DF.MissingHealthCurveCache = {}
 end
 
 -- Get a color curve for gradient mode
-function DF:GetCurveForUnit(unit, db)
+-- prefix: db key prefix ("healthColor" or "missingHealthColor")
+-- cache: cache table to use (DF.CurveCache or DF.MissingHealthCurveCache)
+function DF:GetCurveForUnit(unit, db, prefix, cache)
     if not unit then return nil end
+    prefix = prefix or "healthColor"
+    cache = cache or DF.CurveCache
     
-    local useClass = db.healthColorLowUseClass or db.healthColorMediumUseClass or db.healthColorHighUseClass
+    local useClass = db[prefix .. "LowUseClass"] or db[prefix .. "MediumUseClass"] or db[prefix .. "HighUseClass"]
     local class = "DEFAULT"
     
     if useClass then
@@ -120,8 +125,7 @@ function DF:GetCurveForUnit(unit, db)
         if not class then class = "DEFAULT" end
     end
     
-    if not DF.CurveCache then DF.CurveCache = {} end
-    if DF.CurveCache[class] then return DF.CurveCache[class] end
+    if cache[class] then return cache[class] end
     
     if not C_CurveUtil or not C_CurveUtil.CreateColorCurve then return nil end
     
@@ -129,19 +133,19 @@ function DF:GetCurveForUnit(unit, db)
     curve:SetType(Enum.LuaCurveType.Linear)
     
     local function GetStageColor(stage)
-        if db["healthColor" .. stage .. "UseClass"] and class ~= "DEFAULT" then
+        if db[prefix .. stage .. "UseClass"] and class ~= "DEFAULT" then
             local c = DF:GetClassColor(class)
             if c then return c.r, c.g, c.b, 1.0 end
             return 0.5, 0.5, 0.5, 1.0
         else
-            local c = db["healthColor" .. stage]
+            local c = db[prefix .. stage]
             return c.r, c.g, c.b, c.a or 1
         end
     end
     
-    local lowW = math.max(1, math.floor(db.healthColorLowWeight or 1))
-    local medW = math.max(1, math.floor(db.healthColorMediumWeight or 1))
-    local highW = math.max(1, math.floor(db.healthColorHighWeight or 1))
+    local lowW = math.max(1, math.floor(db[prefix .. "LowWeight"] or 1))
+    local medW = math.max(1, math.floor(db[prefix .. "MediumWeight"] or 1))
+    local highW = math.max(1, math.floor(db[prefix .. "HighWeight"] or 1))
     
     local lr, lg, lb, la = GetStageColor("Low")
     local mr, mg, mb, ma = GetStageColor("Medium")
@@ -164,29 +168,26 @@ function DF:GetCurveForUnit(unit, db)
         curve:AddPoint(position, col)
     end
     
-    DF.CurveCache[class] = curve
+    cache[class] = curve
     return curve
 end
 
 -- Get gradient color for a health percentage using actual db settings
 -- This replicates the curve logic for test mode where we don't have a real unit
-function DF:GetHealthGradientColor(percent, db, testClass)
-    -- Get weights
-    local lowW = math.max(1, math.floor(db.healthColorLowWeight or 1))
-    local medW = math.max(1, math.floor(db.healthColorMediumWeight or 1))
-    local highW = math.max(1, math.floor(db.healthColorHighWeight or 1))
+-- prefix: db key prefix ("healthColor" or "missingHealthColor")
+function DF:GetHealthGradientColor(percent, db, testClass, prefix)
+    prefix = prefix or "healthColor"
     
-    -- Helper to get stage color (respects "use class color" option)
+    local lowW = math.max(1, math.floor(db[prefix .. "LowWeight"] or 1))
+    local medW = math.max(1, math.floor(db[prefix .. "MediumWeight"] or 1))
+    local highW = math.max(1, math.floor(db[prefix .. "HighWeight"] or 1))
+    
     local function GetStageColor(stage)
-        local useClassKey = "healthColor" .. stage .. "UseClass"
-        local colorKey = "healthColor" .. stage
-        
-        if db[useClassKey] and testClass then
+        if db[prefix .. stage .. "UseClass"] and testClass then
             local c = DF:GetClassColor(testClass)
             if c then return {r = c.r, g = c.g, b = c.b} end
         end
-        
-        return db[colorKey] or {r = 0.5, g = 0.5, b = 0.5}
+        return db[prefix .. stage] or {r = 0.5, g = 0.5, b = 0.5}
     end
     
     local lowColor = GetStageColor("Low")

@@ -150,6 +150,13 @@ local function SetMissingHealthBarValue(bar, unit, frame)
         bar:SetValue(missingHealth)
     end
     
+    -- Update texture before color (SetStatusBarTexture resets vertex color)
+    local texture = db and db.missingHealthTexture
+    if not texture or texture == "" then
+        texture = db and db.healthTexture or "Interface\\TargetingFrame\\UI-StatusBar"
+    end
+    bar:SetStatusBarTexture(texture)
+    
     -- Update color based on color mode
     local colorMode = db and db.missingHealthColorMode or "CUSTOM"
     local r, g, b, a
@@ -163,6 +170,23 @@ local function SetMissingHealthBarValue(bar, unit, frame)
         local c = db.fadeDeadBackgroundColor or {r = 0.3, g = 0, b = 0}
         r, g, b = c.r, c.g, c.b
         a = db.fadeDeadBackground or 0.4
+    elseif colorMode == "PERCENT" and unit and UnitExists(unit) then
+        -- Use health gradient curve
+        local applied = false
+        local curve = DF:GetCurveForUnit(unit, db, "missingHealthColor", DF.MissingHealthCurveCache)
+        if curve and UnitHealthPercent then
+            local color = UnitHealthPercent(unit, true, curve)
+            local tex = bar:GetStatusBarTexture()
+            if color and tex then
+                tex:SetVertexColor(color:GetRGB())
+                tex:SetAlpha(db.missingHealthGradientAlpha or 0.8)
+                applied = true
+            end
+        end
+        if not applied then
+            r, g, b = 0.5, 0, 0
+            a = db.missingHealthGradientAlpha or 0.8
+        end
     elseif colorMode == "CLASS" and unit and UnitExists(unit) then
         -- Use class color
         local _, class = UnitClass(unit)
@@ -178,14 +202,9 @@ local function SetMissingHealthBarValue(bar, unit, frame)
         local missingColor = db and db.missingHealthColor or {r = 0.5, g = 0, b = 0, a = 0.8}
         r, g, b, a = missingColor.r, missingColor.g, missingColor.b, missingColor.a or 0.8
     end
-    bar:SetStatusBarColor(r, g, b, a)
-    
-    -- Update texture - use missingHealthTexture if set, otherwise fall back to healthTexture
-    local texture = db and db.missingHealthTexture
-    if not texture or texture == "" then
-        texture = db and db.healthTexture or "Interface\\TargetingFrame\\UI-StatusBar"
+    if r then
+        bar:SetStatusBarColor(r, g, b, a)
     end
-    bar:SetStatusBarTexture(texture)
     
     bar:Show()
 end

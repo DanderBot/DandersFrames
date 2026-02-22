@@ -364,7 +364,15 @@ function DF:UpdateTestFrameHealthOnly(frame, index)
             -- Handle color mode
             local colorMode = db.missingHealthColorMode or "CUSTOM"
             local r, g, b, a
-            if colorMode == "CLASS" and testData.class then
+            if colorMode == "PERCENT" then
+                local color = DF:GetHealthGradientColor(health, db, testData.class, "missingHealthColor")
+                if color then
+                    r, g, b = color.r, color.g, color.b
+                else
+                    r, g, b = 0.5, 0, 0
+                end
+                a = db.missingHealthGradientAlpha or 0.8
+            elseif colorMode == "CLASS" and testData.class then
                 local classColor = DF:GetClassColor(testData.class)
                 if classColor then
                     r, g, b = classColor.r, classColor.g, classColor.b
@@ -523,6 +531,14 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
                 local c = db.fadeDeadBackgroundColor or {r = 0.3, g = 0, b = 0}
                 r, g, b = c.r, c.g, c.b
                 a = db.fadeDeadBackground or 0.4
+            elseif colorMode == "PERCENT" then
+                local color = DF:GetHealthGradientColor(healthValue, db, testData.class, "missingHealthColor")
+                if color then
+                    r, g, b = color.r, color.g, color.b
+                else
+                    r, g, b = 0.5, 0, 0
+                end
+                a = db.missingHealthGradientAlpha or 0.8
             elseif colorMode == "CLASS" and testData.class then
                 local classColor = DF:GetClassColor(testData.class)
                 if classColor then

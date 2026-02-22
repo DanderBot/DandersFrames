@@ -4299,7 +4299,8 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
 end
 
 -- Gradient Preview Bar
-function GUI:CreateGradientBar(parent, width, height, db)
+function GUI:CreateGradientBar(parent, width, height, db, prefix)
+    prefix = prefix or "healthColor"
     local f = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     f:SetSize(width or 360, height or 24)
     CreateElementBackdrop(f)
@@ -4325,10 +4326,10 @@ function GUI:CreateGradientBar(parent, width, height, db)
         local classCol = DF:GetClassColor(pClass)
         
         local function GetC(stage)
-            if db["healthColor" .. stage .. "UseClass"] then
+            if db[prefix .. stage .. "UseClass"] then
                 return CreateColor(classCol.r, classCol.g, classCol.b, 1)
             end
-            local c = db["healthColor" .. stage]
+            local c = db[prefix .. stage]
             if not c or not c.r then return CreateColor(1, 1, 1, 1) end
             return CreateColor(c.r, c.g, c.b, 1)
         end
@@ -4337,9 +4338,9 @@ function GUI:CreateGradientBar(parent, width, height, db)
         local mCol = GetC("Medium")
         local hCol = GetC("High")
         
-        local lowW = math.max(1, math.floor(db.healthColorLowWeight or 1))
-        local medW = math.max(1, math.floor(db.healthColorMediumWeight or 1))
-        local highW = math.max(1, math.floor(db.healthColorHighWeight or 1))
+        local lowW = math.max(1, math.floor(db[prefix .. "LowWeight"] or 1))
+        local medW = math.max(1, math.floor(db[prefix .. "MediumWeight"] or 1))
+        local highW = math.max(1, math.floor(db[prefix .. "HighWeight"] or 1))
         
         local points = {}
         for i = 1, lowW do table.insert(points, lCol) end
