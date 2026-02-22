@@ -193,7 +193,7 @@ local function EnsureTypeConfig(auraName, typeKey)
                 -- Bar color by time
                 barColorByTime = false,
                 -- Expiring color
-                expiringEnabled = false, expiringThreshold = 5,
+                expiringEnabled = false, expiringThreshold = 30,
                 expiringColor = {r = 1, g = 0.2, b = 0.2, a = 1},
                 -- Duration text
                 showDuration = true, durationFont = "Fonts\\FRIZQT__.TTF",
@@ -1335,7 +1335,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width)
         AddDivider()
         -- Expiring color
         AddWidget(GUI:CreateCheckbox(parent, "Expiring Color Override", proxy, "expiringEnabled"), 28)
-        AddWidget(GUI:CreateSlider(parent, "Expiring Threshold (sec)", 1, 30, 1, proxy, "expiringThreshold"), 54)
+        AddWidget(GUI:CreateSlider(parent, "Expiring Threshold %", 5, 100, 5, proxy, "expiringThreshold"), 54)
         AddWidget(GUI:CreateColorPicker(parent, "Expiring Color", proxy, "expiringColor", true,
             function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
             function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,

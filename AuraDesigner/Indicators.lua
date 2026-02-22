@@ -1003,9 +1003,10 @@ local function CreateADBar(frame, auraName)
             self:SetStatusBarColor(r, g, b, 1)
         end
 
-        -- Expiring color override: when remaining drops below threshold, use the expiring color
+        -- Expiring color override: when remaining % drops below threshold %, use the expiring color
         if self.dfAD_expiringEnabled and self.dfAD_expiringThreshold then
-            if remaining <= self.dfAD_expiringThreshold and remaining > 0 then
+            local thresholdPct = self.dfAD_expiringThreshold / 100
+            if pct <= thresholdPct and pct > 0 then
                 local ec = self.dfAD_expiringColor
                 if ec then
                     self:SetStatusBarColor(ec.r, ec.g, ec.b, 1)
@@ -1119,7 +1120,7 @@ function Indicators:ApplyBar(frame, config, auraData, defaults, auraName)
     local expiringEnabled = config.expiringEnabled
     if expiringEnabled == nil then expiringEnabled = false end
     bar.dfAD_expiringEnabled = expiringEnabled
-    bar.dfAD_expiringThreshold = config.expiringThreshold or 5
+    bar.dfAD_expiringThreshold = config.expiringThreshold or 30
     bar.dfAD_expiringColor = config.expiringColor
 
     -- ========================================
