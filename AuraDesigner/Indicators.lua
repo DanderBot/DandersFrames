@@ -6,9 +6,17 @@ local addonName, DF = ...
 -- hides, and updates indicator elements on unit frames.
 --
 -- Uses a Begin/Apply/End pattern per frame update:
---   BeginFrame(frame)  — reset per-frame state
---   Apply(frame, ...)  — called per active indicator
---   EndFrame(frame)    — revert anything not applied
+--   BeginFrame(frame)  -- reset per-frame state
+--   Apply(frame, ...)  -- called per active indicator
+--   EndFrame(frame)    -- revert anything not applied
+--
+-- Key design decisions:
+--   - Border: Own overlay frame (like highlight system), not
+--     modifying the existing frame.border
+--   - Icons: Created via DF:CreateAuraIcon() for full expiring
+--     indicator, duration text, and stack support
+--   - Placed indicators: One per aura name at its configured
+--     anchor point — no growth/pushing between auras
 -- ============================================================
 
 local pairs, ipairs, type = pairs, ipairs, type
@@ -21,13 +29,29 @@ local Indicators = {}
 DF.AuraDesigner.Indicators = Indicators
 
 -- ============================================================
+-- SAFE HELPERS (match the pattern in Features/Auras.lua)
+-- ============================================================
+
+local function SafeSetTexture(icon, texture)
+    if icon and icon.texture and texture then
+        icon.texture:SetTexture(texture)
+        return true
+    end
+end
+
+local function SafeSetCooldown(cooldown, expirationTime, duration)
+    if cooldown and cooldown.SetCooldownFromExpirationTime then
+        cooldown:SetCooldownFromExpirationTime(expirationTime, duration)
+    elseif cooldown and expirationTime and duration and duration > 0 then
+        cooldown:SetCooldown(expirationTime - duration, duration)
+    end
+end
+
+-- ============================================================
 -- PER-FRAME STATE
 -- Tracks which frame-level indicators were applied this frame
 -- so EndFrame can revert unclaimed ones.
 -- ============================================================
-
--- frame.dfAD = { border = false, healthbar = false, ... }
--- Set to true when an indicator claims it during Apply
 
 local function EnsureFrameState(frame)
     if not frame.dfAD then
@@ -38,12 +62,11 @@ local function EnsureFrameState(frame)
             nametext = false,
             healthtext = false,
             framealpha = false,
-            -- Placed indicator counters
-            iconCount = 0,
-            squareCount = 0,
-            barCount = 0,
+            -- Placed indicator tracking: { [auraName] = true } for active this frame
+            activeIcons = {},
+            activeSquares = {},
+            activeBars = {},
             -- Saved defaults for reverting
-            savedBorderColor = nil,
             savedNameColor = nil,
             savedHealthTextColor = nil,
             savedAlpha = nil,
@@ -64,13 +87,13 @@ function Indicators:BeginFrame(frame)
     state.nametext = false
     state.healthtext = false
     state.framealpha = false
-    state.iconCount = 0
-    state.squareCount = 0
-    state.barCount = 0
+    table.wipe(state.activeIcons)
+    table.wipe(state.activeSquares)
+    table.wipe(state.activeBars)
 end
 
 -- ============================================================
--- APPLY — DISPATCH TO TYPE HANDLERS
+-- APPLY -- DISPATCH TO TYPE HANDLERS
 -- ============================================================
 
 function Indicators:Apply(frame, typeKey, config, auraData, defaults, auraName, priority)
@@ -127,14 +150,14 @@ function Indicators:EndFrame(frame)
         self:RevertFrameAlpha(frame)
     end
 
-    -- Hide unused placed indicators
-    self:HideUnusedIcons(frame, state.iconCount)
-    self:HideUnusedSquares(frame, state.squareCount)
-    self:HideUnusedBars(frame, state.barCount)
+    -- Hide placed indicators not active this frame
+    self:HideUnusedIcons(frame, state.activeIcons)
+    self:HideUnusedSquares(frame, state.activeSquares)
+    self:HideUnusedBars(frame, state.activeBars)
 end
 
 -- ============================================================
--- HIDE ALL — Clear everything (used when AD disabled or no unit)
+-- HIDE ALL -- Clear everything (used when AD disabled or no unit)
 -- ============================================================
 
 function Indicators:HideAll(frame)
@@ -143,9 +166,9 @@ function Indicators:HideAll(frame)
     self:RevertNameText(frame)
     self:RevertHealthText(frame)
     self:RevertFrameAlpha(frame)
-    self:HideUnusedIcons(frame, 0)
-    self:HideUnusedSquares(frame, 0)
-    self:HideUnusedBars(frame, 0)
+    self:HideUnusedIcons(frame, {})
+    self:HideUnusedSquares(frame, {})
+    self:HideUnusedBars(frame, {})
 end
 
 -- ============================================================
@@ -155,71 +178,96 @@ end
 -- ============================================================
 
 -- ============================================================
--- BORDER
+-- BORDER (own overlay frame, like the highlight system)
+-- Creates a separate frame parented to UIParent with 4 edge
+-- textures. Does NOT modify the existing frame.border.
 -- ============================================================
+
+local function GetOrCreateADBorder(frame)
+    if frame.dfAD_border then
+        -- Update points (frame may have moved)
+        frame.dfAD_border:ClearAllPoints()
+        frame.dfAD_border:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 0)
+        frame.dfAD_border:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
+        return frame.dfAD_border
+    end
+
+    -- Create overlay frame parented to UIParent (avoids clipping)
+    local ch = CreateFrame("Frame", nil, UIParent)
+    ch:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 0)
+    ch:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
+    ch:SetFrameStrata(frame:GetFrameStrata())
+    ch:SetFrameLevel(frame:GetFrameLevel() + 8)  -- Below aggro(+9) highlight
+    ch:Hide()
+
+    -- 4 edge textures
+    ch.top = ch:CreateTexture(nil, "OVERLAY")
+    ch.bottom = ch:CreateTexture(nil, "OVERLAY")
+    ch.left = ch:CreateTexture(nil, "OVERLAY")
+    ch.right = ch:CreateTexture(nil, "OVERLAY")
+
+    -- Hook owner OnHide to hide border
+    frame:HookScript("OnHide", function()
+        if frame.dfAD_border then
+            frame.dfAD_border:Hide()
+        end
+    end)
+
+    frame.dfAD_border = ch
+    return ch
+end
 
 function Indicators:ApplyBorder(frame, config, auraData)
     local state = EnsureFrameState(frame)
     if state.border then return end  -- Already claimed by higher priority
     state.border = true
 
-    local border = frame.border
-    if not border then return end
-
-    -- Save original border color on first use
-    if not state.savedBorderColor and border.top then
-        local r, g, b, a = border.top:GetVertexColor()
-        state.savedBorderColor = { r = r, g = g, b = b, a = a }
-    end
-
     local color = config.color
-    if color then
-        local r, g, b = color[1] or color.r or 1, color[2] or color.g or 1, color[3] or color.b or 1
-        if border.top then border.top:SetVertexColor(r, g, b, 1) end
-        if border.bottom then border.bottom:SetVertexColor(r, g, b, 1) end
-        if border.left then border.left:SetVertexColor(r, g, b, 1) end
-        if border.right then border.right:SetVertexColor(r, g, b, 1) end
-    end
+    if not color then return end
 
-    -- Border thickness
-    local thickness = config.thickness or 1
-    if border.top then
-        border.top:SetHeight(thickness)
-        border.bottom:SetHeight(thickness)
-        border.left:SetWidth(thickness)
-        border.right:SetWidth(thickness)
-    end
+    local ch = GetOrCreateADBorder(frame)
+    local r, g, b = color[1] or color.r or 1, color[2] or color.g or 1, color[3] or color.b or 1
+    local thickness = config.thickness or 2
+    local inset = config.inset or 0
 
-    -- Show border
-    if border.top then
-        border.top:Show()
-        border.bottom:Show()
-        border.left:Show()
-        border.right:Show()
-    end
+    -- Top edge
+    ch.top:ClearAllPoints()
+    ch.top:SetPoint("TOPLEFT", ch, "TOPLEFT", inset, -inset)
+    ch.top:SetPoint("TOPRIGHT", ch, "TOPRIGHT", -inset, -inset)
+    ch.top:SetHeight(thickness)
+    ch.top:SetColorTexture(r, g, b, 1)
+    ch.top:Show()
+
+    -- Bottom edge
+    ch.bottom:ClearAllPoints()
+    ch.bottom:SetPoint("BOTTOMLEFT", ch, "BOTTOMLEFT", inset, inset)
+    ch.bottom:SetPoint("BOTTOMRIGHT", ch, "BOTTOMRIGHT", -inset, inset)
+    ch.bottom:SetHeight(thickness)
+    ch.bottom:SetColorTexture(r, g, b, 1)
+    ch.bottom:Show()
+
+    -- Left edge
+    ch.left:ClearAllPoints()
+    ch.left:SetPoint("TOPLEFT", ch, "TOPLEFT", inset, -inset)
+    ch.left:SetPoint("BOTTOMLEFT", ch, "BOTTOMLEFT", inset, inset)
+    ch.left:SetWidth(thickness)
+    ch.left:SetColorTexture(r, g, b, 1)
+    ch.left:Show()
+
+    -- Right edge
+    ch.right:ClearAllPoints()
+    ch.right:SetPoint("TOPRIGHT", ch, "TOPRIGHT", -inset, -inset)
+    ch.right:SetPoint("BOTTOMRIGHT", ch, "BOTTOMRIGHT", -inset, inset)
+    ch.right:SetWidth(thickness)
+    ch.right:SetColorTexture(r, g, b, 1)
+    ch.right:Show()
+
+    ch:Show()
 end
 
 function Indicators:RevertBorder(frame)
-    local state = frame and frame.dfAD
-    if not state or not state.savedBorderColor then return end
-
-    local border = frame.border
-    if not border or not border.top then return end
-
-    local c = state.savedBorderColor
-    border.top:SetVertexColor(c.r, c.g, c.b, c.a)
-    border.bottom:SetVertexColor(c.r, c.g, c.b, c.a)
-    border.left:SetVertexColor(c.r, c.g, c.b, c.a)
-    border.right:SetVertexColor(c.r, c.g, c.b, c.a)
-
-    -- Restore thickness from settings
-    local db = DF:GetFrameDB(frame)
-    if db then
-        local t = db.borderThickness or 1
-        border.top:SetHeight(t)
-        border.bottom:SetHeight(t)
-        border.left:SetWidth(t)
-        border.right:SetWidth(t)
+    if frame and frame.dfAD_border then
+        frame.dfAD_border:Hide()
     end
 end
 
@@ -257,8 +305,7 @@ end
 function Indicators:RevertHealthBar(frame)
     -- The normal frame update cycle will restore health bar color
     -- on the next UpdateUnitFrame call, so we don't need to do
-    -- anything special here. The color will be recalculated from
-    -- the unit's actual health/class color settings.
+    -- anything special here.
 end
 
 -- ============================================================
@@ -364,69 +411,58 @@ function Indicators:RevertFrameAlpha(frame)
 end
 
 -- ============================================================
--- PLACED INDICATORS — ICON
--- Creates icon frames lazily and positions at configured anchor
+-- PLACED INDICATORS -- ICON
+-- One icon per aura at its configured anchor point.
+-- Uses DF:CreateAuraIcon() for full expiring indicator,
+-- duration text, stack count, and cooldown swipe support.
 -- ============================================================
 
--- Get or create the icon pool for a frame
-local function GetIconPool(frame)
+-- Get or create the icon map for a frame: { [auraName] = icon }
+local function GetIconMap(frame)
     if not frame.dfAD_icons then
         frame.dfAD_icons = {}
     end
     return frame.dfAD_icons
 end
 
-local function CreateIndicatorIcon(frame, index)
-    local icon = CreateFrame("Frame", nil, frame.contentOverlay or frame)
-    icon:SetSize(24, 24)
-    icon:SetFrameLevel((frame.contentOverlay or frame):GetFrameLevel() + 10)
+local function GetOrCreateADIcon(frame, auraName)
+    local map = GetIconMap(frame)
+    if map[auraName] then return map[auraName] end
 
-    -- Border background
-    icon.border = icon:CreateTexture(nil, "BACKGROUND")
-    icon.border:SetAllPoints()
-    icon.border:SetColorTexture(0, 0, 0, 1)
+    -- Use the same icon creation as the rest of the addon
+    local icon = DF:CreateAuraIcon(frame, 0, "BUFF")
+    icon.dfAD_auraName = auraName
 
-    -- Spell texture
-    icon.texture = icon:CreateTexture(nil, "ARTWORK")
-    icon.texture:SetPoint("TOPLEFT", 1, -1)
-    icon.texture:SetPoint("BOTTOMRIGHT", -1, 1)
-    icon.texture:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    -- Store default settings for the aura timer system
+    icon.showDuration = true
+    icon.durationColorByTime = true
+    icon.durationAnchor = "CENTER"
+    icon.durationX = 0
+    icon.durationY = 0
+    icon.stackMinimum = 2
+    icon.expiringEnabled = true
+    icon.expiringThreshold = 30
+    icon.expiringBorderEnabled = true
+    icon.expiringBorderColorByTime = true
+    icon.expiringBorderPulsate = true
+    icon.expiringBorderThickness = 2
+    icon.expiringBorderInset = -1
+    icon.expiringTintEnabled = false
 
-    -- Cooldown swipe
-    icon.cooldown = CreateFrame("Cooldown", nil, icon, "CooldownFrameTemplate")
-    icon.cooldown:SetAllPoints(icon.texture)
-    icon.cooldown:SetDrawEdge(false)
-    icon.cooldown:SetDrawSwipe(true)
-    icon.cooldown:SetReverse(true)
-    icon.cooldown:SetHideCountdownNumbers(true)
+    -- Register with the shared aura timer for duration color + expiring
+    if DF.RegisterIconForAuraTimer then
+        DF:RegisterIconForAuraTimer(icon)
+    end
 
-    -- Stack count
-    icon.count = icon:CreateFontString(nil, "OVERLAY")
-    icon.count:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
-    icon.count:SetPoint("BOTTOMRIGHT", -1, 1)
-    icon.count:SetTextColor(1, 1, 1)
-
-    -- Duration text
-    icon.duration = icon:CreateFontString(nil, "OVERLAY")
-    icon.duration:SetFont("Fonts\\FRIZQT__.TTF", 9, "OUTLINE")
-    icon.duration:SetPoint("TOP", icon, "BOTTOM", 0, -1)
-    icon.duration:SetTextColor(1, 1, 1)
-
-    icon:Hide()
+    map[auraName] = icon
     return icon
 end
 
 function Indicators:ApplyIcon(frame, config, auraData, defaults, auraName)
     local state = EnsureFrameState(frame)
-    state.iconCount = state.iconCount + 1
-    local index = state.iconCount
+    state.activeIcons[auraName] = true
 
-    local pool = GetIconPool(frame)
-    local icon = pool[index]
-    if not icon then
-        icon = CreateIndicatorIcon(frame, index)
-        pool[index] = icon
-    end
+    local icon = GetOrCreateADIcon(frame, auraName)
 
     -- Size
     local size = config.size or (defaults and defaults.iconSize) or 24
@@ -437,36 +473,24 @@ function Indicators:ApplyIcon(frame, config, auraData, defaults, auraName)
     -- Alpha
     icon:SetAlpha(config.alpha or 1.0)
 
-    -- Position
+    -- Position — each aura has its own anchor, no growth
     local anchor = config.anchor or "TOPLEFT"
     local offsetX = config.offsetX or 0
     local offsetY = config.offsetY or 0
     icon:ClearAllPoints()
-
-    -- Growth direction for multiple icons at same anchor
-    local growth = config.growth or "RIGHT"
-    local spacing = config.spacing or 2
-    local growOffset = (index - 1) * (size * scale + spacing)
-    local gx, gy = 0, 0
-    if growth == "RIGHT" then gx = growOffset
-    elseif growth == "LEFT" then gx = -growOffset
-    elseif growth == "UP" then gy = growOffset
-    elseif growth == "DOWN" then gy = -growOffset
-    end
-
-    icon:SetPoint(anchor, frame, anchor, offsetX + gx, offsetY + gy)
+    icon:SetPoint(anchor, frame, anchor, offsetX, offsetY)
 
     -- Texture
     if auraData.icon then
-        icon.texture:SetTexture(auraData.icon)
+        SafeSetTexture(icon, auraData.icon)
     elseif auraData.spellId and C_Spell and C_Spell.GetSpellTexture then
-        icon.texture:SetTexture(C_Spell.GetSpellTexture(auraData.spellId))
+        SafeSetTexture(icon, C_Spell.GetSpellTexture(auraData.spellId))
     end
 
     -- Cooldown swipe
     local hideSwipe = config.hideSwipe
     if not hideSwipe and auraData.duration and auraData.duration > 0 and auraData.expirationTime and auraData.expirationTime > 0 then
-        icon.cooldown:SetCooldown(auraData.expirationTime - auraData.duration, auraData.duration)
+        SafeSetCooldown(icon.cooldown, auraData.expirationTime, auraData.duration)
         icon.cooldown:Show()
     else
         icon.cooldown:Hide()
@@ -474,73 +498,70 @@ function Indicators:ApplyIcon(frame, config, auraData, defaults, auraName)
 
     -- Stack count
     local showStacks = config.showStacks
-    if showStacks == nil and defaults then showStacks = defaults.showStacks end
+    if showStacks == nil then showStacks = true end
     local stackMin = config.stackMinimum or (defaults and defaults.stackMinimum) or 2
+    icon.stackMinimum = stackMin
     if showStacks and auraData.stacks and auraData.stacks >= stackMin then
         icon.count:SetText(auraData.stacks)
-        local stackScale = config.stackScale or (defaults and defaults.stackScale) or 1.0
-        local stackFont = config.stackFont or (defaults and defaults.stackFont) or "Fonts\\FRIZQT__.TTF"
-        icon.count:SetFont(stackFont, 10 * stackScale, "OUTLINE")
         icon.count:Show()
     else
+        icon.count:SetText("")
         icon.count:Hide()
     end
 
-    -- Duration text
+    -- Duration settings (handled by shared aura timer)
     local showDuration = config.showDuration
-    if showDuration == nil and defaults then showDuration = defaults.showDuration end
-    if showDuration and auraData.duration and auraData.duration > 0 then
-        local remaining = auraData.expirationTime - GetTime()
-        if remaining > 0 then
-            if remaining >= 60 then
-                icon.duration:SetText(string.format("%dm", remaining / 60))
-            else
-                icon.duration:SetText(string.format("%.0f", remaining))
-            end
-            icon.duration:Show()
+    if showDuration == nil then showDuration = true end
+    icon.showDuration = showDuration
+    icon.cooldown:SetHideCountdownNumbers(not showDuration)
+
+    -- Icon border (the black background behind the icon texture)
+    local showBorder = config.showBorder
+    if showBorder == nil then showBorder = true end
+    if icon.border then
+        if showBorder then
+            icon.border:SetColorTexture(0, 0, 0, 0.8)
+            icon.border:Show()
         else
-            icon.duration:Hide()
+            icon.border:Hide()
         end
-    else
-        icon.duration:Hide()
     end
 
-    -- Border
-    local showBorder = config.showBorder
-    if showBorder == nil and defaults then showBorder = defaults.iconBorderEnabled end
-    if showBorder then
-        icon.border:Show()
-    else
-        icon.border:Hide()
+    -- Ensure mouse doesn't block clicks on the unit frame
+    if not InCombatLockdown() and icon.SetMouseClickEnabled then
+        icon:SetMouseClickEnabled(false)
     end
 
     icon:Show()
 end
 
-function Indicators:HideUnusedIcons(frame, usedCount)
-    local pool = frame and frame.dfAD_icons
-    if not pool then return end
-    for i = usedCount + 1, #pool do
-        pool[i]:Hide()
+function Indicators:HideUnusedIcons(frame, activeMap)
+    local map = frame and frame.dfAD_icons
+    if not map then return end
+    for auraName, icon in pairs(map) do
+        if not activeMap[auraName] then
+            icon:Hide()
+        end
     end
 end
 
 -- ============================================================
--- PLACED INDICATORS — SQUARE
--- Small colored square indicators
+-- PLACED INDICATORS -- SQUARE
+-- One colored square per aura at its configured anchor point.
 -- ============================================================
 
-local function GetSquarePool(frame)
+local function GetSquareMap(frame)
     if not frame.dfAD_squares then
         frame.dfAD_squares = {}
     end
     return frame.dfAD_squares
 end
 
-local function CreateIndicatorSquare(frame)
+local function CreateADSquare(frame, auraName)
     local sq = CreateFrame("Frame", nil, frame.contentOverlay or frame)
     sq:SetSize(8, 8)
     sq:SetFrameLevel((frame.contentOverlay or frame):GetFrameLevel() + 10)
+    sq.dfAD_auraName = auraName
 
     sq.border = sq:CreateTexture(nil, "BACKGROUND")
     sq.border:SetAllPoints()
@@ -560,17 +581,19 @@ local function CreateIndicatorSquare(frame)
     return sq
 end
 
+local function GetOrCreateADSquare(frame, auraName)
+    local map = GetSquareMap(frame)
+    if map[auraName] then return map[auraName] end
+    local sq = CreateADSquare(frame, auraName)
+    map[auraName] = sq
+    return sq
+end
+
 function Indicators:ApplySquare(frame, config, auraData, defaults, auraName)
     local state = EnsureFrameState(frame)
-    state.squareCount = state.squareCount + 1
-    local index = state.squareCount
+    state.activeSquares[auraName] = true
 
-    local pool = GetSquarePool(frame)
-    local sq = pool[index]
-    if not sq then
-        sq = CreateIndicatorSquare(frame)
-        pool[index] = sq
-    end
+    local sq = GetOrCreateADSquare(frame, auraName)
 
     -- Size
     local size = config.size or 8
@@ -587,23 +610,12 @@ function Indicators:ApplySquare(frame, config, auraData, defaults, auraName)
         sq.texture:SetColorTexture(1, 1, 1, 1)
     end
 
-    -- Position
+    -- Position — each aura has its own anchor, no growth
     local anchor = config.anchor or "BOTTOMLEFT"
     local offsetX = config.offsetX or 0
     local offsetY = config.offsetY or 0
     sq:ClearAllPoints()
-
-    local growth = config.growth or "RIGHT"
-    local spacing = config.spacing or 1
-    local growOffset = (index - 1) * (size + spacing)
-    local gx, gy = 0, 0
-    if growth == "RIGHT" then gx = growOffset
-    elseif growth == "LEFT" then gx = -growOffset
-    elseif growth == "UP" then gy = growOffset
-    elseif growth == "DOWN" then gy = -growOffset
-    end
-
-    sq:SetPoint(anchor, frame, anchor, offsetX + gx, offsetY + gy)
+    sq:SetPoint(anchor, frame, anchor, offsetX, offsetY)
 
     -- Border
     local showBorder = config.showBorder
@@ -627,42 +639,45 @@ function Indicators:ApplySquare(frame, config, auraData, defaults, auraName)
     sq:Show()
 end
 
-function Indicators:HideUnusedSquares(frame, usedCount)
-    local pool = frame and frame.dfAD_squares
-    if not pool then return end
-    for i = usedCount + 1, #pool do
-        pool[i]:Hide()
+function Indicators:HideUnusedSquares(frame, activeMap)
+    local map = frame and frame.dfAD_squares
+    if not map then return end
+    for auraName, sq in pairs(map) do
+        if not activeMap[auraName] then
+            sq:Hide()
+        end
     end
 end
 
 -- ============================================================
--- PLACED INDICATORS — BAR
--- Progress bars showing remaining aura duration
+-- PLACED INDICATORS -- BAR
+-- One progress bar per aura at its configured anchor point.
 -- ============================================================
 
-local function GetBarPool(frame)
+local function GetBarMap(frame)
     if not frame.dfAD_bars then
         frame.dfAD_bars = {}
     end
     return frame.dfAD_bars
 end
 
-local function CreateIndicatorBar(frame)
+local function CreateADBar(frame, auraName)
     local bar = CreateFrame("StatusBar", nil, frame.contentOverlay or frame)
     bar:SetSize(60, 6)
     bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
     bar:SetMinMaxValues(0, 1)
     bar:SetFrameLevel((frame.contentOverlay or frame):GetFrameLevel() + 10)
+    bar.dfAD_auraName = auraName
 
-    bar.border = CreateFrame("Frame", nil, bar, "BackdropTemplate")
-    bar.border:SetPoint("TOPLEFT", -1, 1)
-    bar.border:SetPoint("BOTTOMRIGHT", 1, -1)
-    if bar.border.SetBackdrop then
-        bar.border:SetBackdrop({
+    bar.borderFrame = CreateFrame("Frame", nil, bar, "BackdropTemplate")
+    bar.borderFrame:SetPoint("TOPLEFT", -1, 1)
+    bar.borderFrame:SetPoint("BOTTOMRIGHT", 1, -1)
+    if bar.borderFrame.SetBackdrop then
+        bar.borderFrame:SetBackdrop({
             edgeFile = "Interface\\Buttons\\WHITE8x8",
             edgeSize = 1,
         })
-        bar.border:SetBackdropBorderColor(0, 0, 0, 1)
+        bar.borderFrame:SetBackdropBorderColor(0, 0, 0, 1)
     end
 
     bar.bg = bar:CreateTexture(nil, "BACKGROUND")
@@ -674,17 +689,19 @@ local function CreateIndicatorBar(frame)
     return bar
 end
 
+local function GetOrCreateADBar(frame, auraName)
+    local map = GetBarMap(frame)
+    if map[auraName] then return map[auraName] end
+    local bar = CreateADBar(frame, auraName)
+    map[auraName] = bar
+    return bar
+end
+
 function Indicators:ApplyBar(frame, config, auraData, defaults, auraName)
     local state = EnsureFrameState(frame)
-    state.barCount = state.barCount + 1
-    local index = state.barCount
+    state.activeBars[auraName] = true
 
-    local pool = GetBarPool(frame)
-    local bar = pool[index]
-    if not bar then
-        bar = CreateIndicatorBar(frame)
-        pool[index] = bar
-    end
+    local bar = GetOrCreateADBar(frame, auraName)
 
     -- Size
     local width = config.width or 60
@@ -716,35 +733,20 @@ function Indicators:ApplyBar(frame, config, auraData, defaults, auraName)
     -- Border
     local showBorder = config.showBorder
     if showBorder == nil then showBorder = true end
-    if bar.border then
+    if bar.borderFrame then
         if showBorder then
-            bar.border:Show()
-            local borderColor = config.borderColor
-            if borderColor and bar.border.SetBackdropBorderColor then
-                bar.border:SetBackdropBorderColor(borderColor[1] or borderColor.r or 0, borderColor[2] or borderColor.g or 0, borderColor[3] or borderColor.b or 0, 1)
-            end
+            bar.borderFrame:Show()
         else
-            bar.border:Hide()
+            bar.borderFrame:Hide()
         end
     end
 
-    -- Position
+    -- Position — each aura has its own anchor, no growth
     local anchor = config.anchor or "BOTTOM"
     local offsetX = config.offsetX or 0
     local offsetY = config.offsetY or 0
     bar:ClearAllPoints()
-
-    local growth = config.growth or "DOWN"
-    local spacing = config.spacing or 2
-    local growOffset = (index - 1) * (height + spacing)
-    local gx, gy = 0, 0
-    if growth == "RIGHT" then gx = growOffset
-    elseif growth == "LEFT" then gx = -growOffset
-    elseif growth == "UP" then gy = growOffset
-    elseif growth == "DOWN" then gy = -growOffset
-    end
-
-    bar:SetPoint(anchor, frame, anchor, offsetX + gx, offsetY + gy)
+    bar:SetPoint(anchor, frame, anchor, offsetX, offsetY)
 
     -- Fill based on remaining duration
     if auraData.duration and auraData.duration > 0 and auraData.expirationTime then
@@ -758,10 +760,12 @@ function Indicators:ApplyBar(frame, config, auraData, defaults, auraName)
     bar:Show()
 end
 
-function Indicators:HideUnusedBars(frame, usedCount)
-    local pool = frame and frame.dfAD_bars
-    if not pool then return end
-    for i = usedCount + 1, #pool do
-        pool[i]:Hide()
+function Indicators:HideUnusedBars(frame, activeMap)
+    local map = frame and frame.dfAD_bars
+    if not map then return end
+    for auraName, bar in pairs(map) do
+        if not activeMap[auraName] then
+            bar:Hide()
+        end
     end
 end
