@@ -5,6 +5,169 @@ local addonName, DF = ...
 -- Contains frame creation functions
 -- ============================================================
 
+-- Binding tooltip (separate frame showing click-cast bindings on unit hover)
+local issecretvalue = issecretvalue or function() return false end
+local bindingTooltip = CreateFrame("GameTooltip", "DFBindingTooltip", UIParent, "GameTooltipTemplate")
+bindingTooltip:SetFrameStrata("TOOLTIP")
+if bindingTooltip.NineSlice then
+    for _, piece in pairs({"TopLeftCorner", "TopRightCorner", "BottomLeftCorner", "BottomRightCorner", "TopEdge", "BottomEdge", "LeftEdge", "RightEdge"}) do
+        if bindingTooltip.NineSlice[piece] then bindingTooltip.NineSlice[piece]:SetAlpha(0) end
+    end
+end
+DFBindingTooltipTextLeft1:SetFontObject(GameTooltipText)
+
+local BINDING_SHORT_NAMES = {
+    LeftButton = "Left", RightButton = "Right", MiddleButton = "Middle",
+}
+local BINDING_SORT_ORDER = {
+    LeftButton = 1, MiddleButton = 2, RightButton = 3,
+    Button4 = 4, Button5 = 5, Button6 = 6, Button7 = 7, Button8 = 8,
+    Button9 = 9, Button10 = 10, Button11 = 11, Button12 = 12,
+    Button13 = 13, Button14 = 14, Button15 = 15, Button16 = 16,
+}
+
+local function GetActiveModifier()
+    if IsShiftKeyDown() then return "SHIFT"
+    elseif IsControlKeyDown() then return "CTRL"
+    elseif IsAltKeyDown() then return "ALT"
+    else return "" end
+end
+
+local function BindingMatchesMod(binding, activeMod)
+    local mods = binding.modifiers and binding.modifiers:upper() or ""
+    if activeMod == "" then return mods == "" end
+    return mods:find(activeMod) ~= nil
+end
+
+function DF:ShowBindingTooltip(anchorFrame)
+    local CC = DF.ClickCast
+    if not CC or not CC.db or not CC.db.bindings then return end
+    if not CC.db.options or not CC.db.options.showBindingTooltip then return end
+    local activeMod = GetActiveModifier()
+    bindingTooltip:ClearLines()
+    bindingTooltip:SetOwner(anchorFrame, "ANCHOR_NONE")
+    bindingTooltip:ClearAllPoints()
+    bindingTooltip:SetPoint("TOPLEFT", anchorFrame, "TOPRIGHT", 4, 0)
+    local lines = {}
+    local inCombat = InCombatLockdown()
+    local unit = anchorFrame.unit
+    local isDead = false
+    if anchorFrame.dfIsTestFrame then
+        local testData = DF.GetTestUnitData and DF:GetTestUnitData(anchorFrame.index, anchorFrame.isRaidFrame)
+        isDead = testData and testData.status == "Dead"
+    elseif unit and UnitExists(unit) then
+        isDead = UnitIsDeadOrGhost(unit)
+        if issecretvalue(isDead) then isDead = false end
+    end
+    local smartResMode = CC.db.options and CC.db.options.smartResurrection or "disabled"
+    local resSpells = smartResMode ~= "disabled" and CC.GetPlayerResurrectionSpells and CC:GetPlayerResurrectionSpells() or nil
+    for _, binding in ipairs(CC.db.bindings) do
+        if binding.enabled ~= false and BindingMatchesMod(binding, activeMod) then
+            local keyName
+            local sortKey = 99
+            if binding.bindType == "mouse" then
+                keyName = BINDING_SHORT_NAMES[binding.button] or (binding.button and binding.button:match("Button(%d+)") and "Mouse " .. binding.button:match("Button(%d+)")) or binding.button
+                sortKey = BINDING_SORT_ORDER[binding.button] or 99
+            else
+                keyName = binding.key or "?"
+            end
+            local action = binding.spellName or binding.actionType or "?"
+            local r, g, b = 1, 1, 1
+            local suffix = ""
+            -- Smart Res: override action when target is dead
+            local smartResApplied = false
+            if isDead and resSpells and not CC:IsResurrectionSpell(binding.spellName) and binding.targetType ~= "hostile" then
+                if inCombat and smartResMode == "normal+combat" and resSpells.combat then
+                    action = resSpells.combat
+                    smartResApplied = true
+                elseif not inCombat then
+                    action = resSpells.mass or resSpells.normal or action
+                    smartResApplied = true
+                end
+            end
+            -- Resolve override spell name (safe in combat)
+            local spellRef = binding.spellId
+            if not smartResApplied then
+                if spellRef and C_Spell.GetOverrideSpell then
+                    spellRef = C_Spell.GetOverrideSpell(spellRef) or spellRef
+                end
+                local ref = spellRef or binding.spellName
+                if ref and C_Spell.GetSpellName then
+                    action = C_Spell.GetSpellName(ref) or action
+                end
+            end
+            if not inCombat and not smartResApplied then
+                spellRef = spellRef or binding.spellName
+                if spellRef and C_Spell.IsSpellUsable then
+                    local usable = C_Spell.IsSpellUsable(spellRef)
+                    if issecretvalue(usable) then usable = nil end
+                    local cdLeft = 0
+                    local hasSecretCD = false
+                    if usable and C_Spell.GetSpellCharges then
+                        local charges = C_Spell.GetSpellCharges(spellRef)
+                        if charges then
+                            if issecretvalue(charges.currentCharges) then
+                                hasSecretCD = true
+                            elseif charges.currentCharges == 0 then
+                                usable = false
+                                if not issecretvalue(charges.cooldownStartTime) then
+                                    cdLeft = charges.cooldownStartTime + charges.cooldownDuration - GetTime()
+                                end
+                            end
+                        end
+                    end
+                    if usable and C_Spell.GetSpellCooldown then
+                        local cd = C_Spell.GetSpellCooldown(spellRef)
+                        if cd and cd.duration then
+                            if issecretvalue(cd.duration) then
+                                hasSecretCD = true
+                            elseif cd.duration > 1.5 then
+                                usable = false
+                                if not issecretvalue(cd.startTime) then
+                                    cdLeft = cd.startTime + cd.duration - GetTime()
+                                end
+                            end
+                        end
+                    end
+                    if usable ~= nil and not hasSecretCD then
+                        r, g, b = usable and 0 or 1, usable and 1 or 0, 0
+                    end
+                    if cdLeft > 0 then
+                        suffix = " (" .. math.ceil(cdLeft) .. "s)"
+                    end
+                end
+            end
+            -- OOR check (works in and out of combat)
+            if unit and binding.spellId and C_Spell.IsSpellInRange then
+                local inRange = C_Spell.IsSpellInRange(binding.spellId, unit)
+                if not issecretvalue(inRange) and inRange == false then r, g, b = 1, 0, 0; suffix = " (OOR)" end
+            end
+            -- Dead check (works in and out of combat, skip if Smart Res overrode)
+            if isDead and not smartResApplied then r, g, b = 1, 0, 0; suffix = " (DEAD)" end
+            local hex = string.format("|cff%02x%02x%02x", r * 255, g * 255, b * 255)
+            table.insert(lines, {text = keyName .. ": " .. hex .. action .. suffix .. "|r", sort = sortKey, smartRes = smartResApplied})
+        end
+    end
+    table.sort(lines, function(a, b) return a.sort < b.sort end)
+    local smartResShown = false
+    for _, line in ipairs(lines) do
+        if line.smartRes and smartResShown then
+            -- skip duplicate Smart Res lines
+        else
+            if line.smartRes then smartResShown = true end
+            bindingTooltip:AddLine(line.text, 0.7, 0.7, 0.7)
+        end
+    end
+    if #lines > 0 then bindingTooltip:Show() else bindingTooltip:Hide() end
+    bindingTooltip.anchorFrame = anchorFrame
+end
+
+bindingTooltip:RegisterEvent("MODIFIER_STATE_CHANGED")
+bindingTooltip:RegisterEvent("SPELL_UPDATE_COOLDOWN")
+bindingTooltip:SetScript("OnEvent", function(self)
+    if self.anchorFrame then DF:ShowBindingTooltip(self.anchorFrame) end
+end)
+
 -- Debug flag for duration API troubleshooting
 -- Set to true to enable debug output: /run DandersFrames.debugDurationAPI = true
 DF.debugDurationAPI = false
@@ -1825,6 +1988,7 @@ function DF:CreateUnitFrame(unit, index, isRaid)
             PositionFrameTooltip(self)
             GameTooltip:SetUnit(self.unit)
         end
+        DF:ShowBindingTooltip(self)
     end)
     
     frame:HookScript("OnLeave", function(self)
@@ -1841,8 +2005,9 @@ function DF:CreateUnitFrame(unit, index, isRaid)
             return
         end
         GameTooltip:Hide()
+        if DFBindingTooltip then DFBindingTooltip:Hide(); DFBindingTooltip.anchorFrame = nil end
     end)
-    
+
     -- ========================================
     -- CLICK-CAST REGISTRATION
     -- ========================================
