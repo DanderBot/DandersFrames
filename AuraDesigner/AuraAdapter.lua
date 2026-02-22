@@ -290,8 +290,10 @@ end
 local function SelectProvider()
     if HarrekProvider:IsAvailable() then
         activeProvider = HarrekProvider
+        DF:Debug("AD", "Provider selected: Harrek's Advanced Raid Frames (HARF API available)")
     else
         activeProvider = FallbackProvider
+        DF:Debug("AD", "Provider selected: FallbackProvider (HARF API not available)")
     end
 end
 
@@ -362,6 +364,13 @@ end
 -- Format: { [auraName] = { spellId, icon, duration, expirationTime, stacks, caster } }
 function AuraAdapter:GetUnitAuras(unit, spec)
     if not activeProvider then SelectProvider() end
+
+    -- Re-check: if we're on FallbackProvider but HARF is now available, switch
+    if activeProvider == FallbackProvider and HarrekProvider:IsAvailable() then
+        DF:Debug("AD", "HARF became available — switching from FallbackProvider to HarrekProvider")
+        SelectProvider()
+    end
+
     if not spec then spec = self:GetPlayerSpec() end
     if not spec then return {} end
     return activeProvider:GetUnitAuras(unit, spec)
