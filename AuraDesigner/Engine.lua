@@ -14,7 +14,6 @@ local tinsert = table.insert
 local sort = table.sort
 local wipe = table.wipe
 local GetTime = GetTime
-local pcall = pcall
 
 -- Debug throttle: only log once per N seconds to avoid spam
 local debugLastLog = 0
@@ -257,14 +256,11 @@ function Engine:UpdateFrame(frame)
         end
     end
 
-    -- Dispatch to indicator renderers (pcall protects against secret value errors in combat)
+    -- Dispatch to indicator renderers
     Indicators:BeginFrame(frame)
 
     for _, ind in ipairs(activeIndicators) do
-        local ok, err = pcall(Indicators.Apply, Indicators, frame, ind.typeKey, ind.config, ind.auraData, adDB.defaults, ind.auraName, ind.priority)
-        if not ok then
-            DF:DebugWarn("AD", "Indicator error: type=%s aura=%s err=%s", ind.typeKey, ind.auraName, tostring(err))
-        end
+        Indicators:Apply(frame, ind.typeKey, ind.config, ind.auraData, adDB.defaults, ind.auraName, ind.priority)
     end
 
     -- Hide/revert anything not applied this frame
