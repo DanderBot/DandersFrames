@@ -830,9 +830,9 @@ function Indicators:ApplySquare(frame, config, auraData, defaults, auraName)
 
     local sq = GetOrCreateADSquare(frame, auraName)
 
-    -- Size & scale
-    local size = config.size or 10
-    local scale = config.scale or 1.0
+    -- Size & scale (fall back to global defaults, same as icon)
+    local size = config.size or (defaults and defaults.iconSize) or 24
+    local scale = config.scale or (defaults and defaults.iconScale) or 1.0
     sq:SetSize(size, size)
     sq:SetScale(scale)
 
