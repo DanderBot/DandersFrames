@@ -23,6 +23,8 @@ local pairs, ipairs, type = pairs, ipairs, type
 local format = string.format
 local GetTime = GetTime
 local max, min = math.max, math.min
+local issecretvalue = issecretvalue or function() return false end
+local GetAuraDataByAuraInstanceID = C_UnitAuras and C_UnitAuras.GetAuraDataByAuraInstanceID
 
 DF.AuraDesigner = DF.AuraDesigner or {}
 
@@ -40,12 +42,42 @@ local function SafeSetTexture(icon, texture)
     end
 end
 
+-- Secret-safe cooldown setter: SetCooldownFromExpirationTime accepts
+-- secret duration/expirationTime values. The fallback SetCooldown path
+-- requires arithmetic (expirationTime - duration) which is NOT secret-safe.
 local function SafeSetCooldown(cooldown, expirationTime, duration)
-    if cooldown and cooldown.SetCooldownFromExpirationTime then
+    if not cooldown then return end
+    if cooldown.SetCooldownFromExpirationTime then
+        -- Preferred: handles secret values natively
         cooldown:SetCooldownFromExpirationTime(expirationTime, duration)
-    elseif cooldown and expirationTime and duration and duration > 0 then
-        cooldown:SetCooldown(expirationTime - duration, duration)
+    elseif expirationTime and duration then
+        -- Fallback: only safe when values are not secret
+        if not issecretvalue(expirationTime) and not issecretvalue(duration) and duration > 0 then
+            cooldown:SetCooldown(expirationTime - duration, duration)
+        end
     end
+end
+
+-- Secret-safe check for whether an aura has a timer.
+-- Uses C_UnitAuras.DoesAuraHaveExpirationTime when available (handles secrets).
+-- Falls back to direct comparison when values are non-secret (e.g., preview).
+local function HasAuraDuration(auraData, unit)
+    -- If we have unit + auraInstanceID, use the secret-safe API
+    if unit and auraData.auraInstanceID
+       and C_UnitAuras and C_UnitAuras.DoesAuraHaveExpirationTime then
+        return C_UnitAuras.DoesAuraHaveExpirationTime(unit, auraData.auraInstanceID)
+    end
+    -- Fallback for preview (non-secret mock data) or old clients
+    local dur = auraData.duration
+    local exp = auraData.expirationTime
+    if dur and exp then
+        if issecretvalue(dur) or issecretvalue(exp) then
+            -- Secret values exist = aura is active, assume has duration
+            return true
+        end
+        return dur > 0 and exp > 0
+    end
+    return false
 end
 
 -- ============================================================
@@ -490,9 +522,8 @@ function Indicators:ApplyIcon(frame, config, auraData, defaults, auraName)
     end
 
     -- Cooldown — always set if we have duration data (needed for countdown text)
-    -- Swipe drawing is independent of showing the cooldown frame
-    local hasDuration = auraData.duration and auraData.duration > 0
-                        and auraData.expirationTime and auraData.expirationTime > 0
+    -- Uses HasAuraDuration() which is secret-safe (calls DoesAuraHaveExpirationTime API)
+    local hasDuration = HasAuraDuration(auraData, frame.unit)
     if hasDuration then
         SafeSetCooldown(icon.cooldown, auraData.expirationTime, auraData.duration)
         icon.cooldown:SetDrawSwipe(not config.hideSwipe)
@@ -554,12 +585,26 @@ function Indicators:ApplyIcon(frame, config, auraData, defaults, auraName)
         icon.count:ClearAllPoints()
         icon.count:SetPoint(stackAnchor, icon, stackAnchor, stackX, stackY)
 
-        if showStacks and auraData.stacks and auraData.stacks >= stackMin then
-            icon.count:SetText(auraData.stacks)
-            icon.count:Show()
-        else
-            icon.count:SetText("")
-            icon.count:Hide()
+        -- Secret-safe stack display: use Blizzard API when available
+        icon.count:SetText("")
+        icon.count:Hide()
+        if showStacks then
+            local unit = frame.unit
+            local auraInstanceID = auraData.auraInstanceID
+            if unit and auraInstanceID and C_UnitAuras and C_UnitAuras.GetAuraApplicationDisplayCount then
+                -- Blizzard API: returns pre-formatted display text, handles secrets
+                local stackText = C_UnitAuras.GetAuraApplicationDisplayCount(unit, auraInstanceID, stackMin, 99)
+                if stackText then
+                    icon.count:SetText(stackText)
+                    icon.count:Show()
+                end
+            elseif auraData.stacks then
+                -- Fallback for preview (no unit/auraInstanceID)
+                if not issecretvalue(auraData.stacks) and auraData.stacks >= stackMin then
+                    icon.count:SetText(auraData.stacks)
+                    icon.count:Show()
+                end
+            end
         end
     end
 
@@ -616,24 +661,28 @@ function Indicators:ApplyIcon(frame, config, auraData, defaults, auraName)
             icon.nativeCooldownText:Show()
 
             -- Color by remaining time (green → yellow → orange → red)
+            -- Only safe when expirationTime/duration are non-secret (preview, out of combat)
+            -- In combat, the CooldownFrame's native text handles its own coloring via the shared timer
             if durationColorByTime and hasDuration then
-                local remaining = auraData.expirationTime - GetTime()
-                local pct = max(0, min(1, remaining / auraData.duration))
-                local r, g, b
-                if pct < 0.3 then
-                    -- Red to orange
-                    local t = pct / 0.3
-                    r, g, b = 1, 0.5 * t, 0
-                elseif pct < 0.5 then
-                    -- Orange to yellow
-                    local t = (pct - 0.3) / 0.2
-                    r, g, b = 1, 0.5 + 0.5 * t, 0
-                else
-                    -- Yellow to green
-                    local t = (pct - 0.5) / 0.5
-                    r, g, b = 1 - t, 1, 0
+                local exp = auraData.expirationTime
+                local dur = auraData.duration
+                if exp and dur and not issecretvalue(exp) and not issecretvalue(dur) and dur > 0 then
+                    local remaining = exp - GetTime()
+                    local pct = max(0, min(1, remaining / dur))
+                    local r, g, b
+                    if pct < 0.3 then
+                        local t = pct / 0.3
+                        r, g, b = 1, 0.5 * t, 0
+                    elseif pct < 0.5 then
+                        local t = (pct - 0.3) / 0.2
+                        r, g, b = 1, 0.5 + 0.5 * t, 0
+                    else
+                        local t = (pct - 0.5) / 0.5
+                        r, g, b = 1 - t, 1, 0
+                    end
+                    icon.nativeCooldownText:SetTextColor(r, g, b, 1)
                 end
-                icon.nativeCooldownText:SetTextColor(r, g, b, 1)
+                -- When secret: let CooldownFrame handle text color natively
             else
                 icon.nativeCooldownText:SetTextColor(1, 1, 1, 1)
             end
@@ -785,10 +834,9 @@ function Indicators:ApplySquare(frame, config, auraData, defaults, auraName)
     sq.texture:SetPoint("BOTTOMRIGHT", -texInset, texInset)
 
     -- ========================================
-    -- COOLDOWN SWIPE
+    -- COOLDOWN SWIPE (secret-safe via HasAuraDuration + SafeSetCooldown)
     -- ========================================
-    local hasDuration = auraData.duration and auraData.duration > 0
-                        and auraData.expirationTime and auraData.expirationTime > 0
+    local hasDuration = HasAuraDuration(auraData, frame.unit)
     if sq.cooldown then
         if hasDuration then
             SafeSetCooldown(sq.cooldown, auraData.expirationTime, auraData.duration)
@@ -801,7 +849,7 @@ function Indicators:ApplySquare(frame, config, auraData, defaults, auraName)
     end
 
     -- ========================================
-    -- STACK COUNT
+    -- STACK COUNT (secret-safe via Blizzard API)
     -- ========================================
     local showStacks = config.showStacks
     if showStacks == nil then showStacks = true end
@@ -820,12 +868,23 @@ function Indicators:ApplySquare(frame, config, auraData, defaults, auraName)
         sq.count:ClearAllPoints()
         sq.count:SetPoint(stackAnchor, sq, stackAnchor, stackX, stackY)
 
-        if showStacks and auraData.stacks and auraData.stacks >= stackMin then
-            sq.count:SetText(auraData.stacks)
-            sq.count:Show()
-        else
-            sq.count:SetText("")
-            sq.count:Hide()
+        sq.count:SetText("")
+        sq.count:Hide()
+        if showStacks then
+            local unit = frame.unit
+            local auraInstanceID = auraData.auraInstanceID
+            if unit and auraInstanceID and C_UnitAuras and C_UnitAuras.GetAuraApplicationDisplayCount then
+                local stackText = C_UnitAuras.GetAuraApplicationDisplayCount(unit, auraInstanceID, stackMin, 99)
+                if stackText then
+                    sq.count:SetText(stackText)
+                    sq.count:Show()
+                end
+            elseif auraData.stacks then
+                if not issecretvalue(auraData.stacks) and auraData.stacks >= stackMin then
+                    sq.count:SetText(auraData.stacks)
+                    sq.count:Show()
+                end
+            end
         end
     end
 
@@ -863,35 +922,36 @@ function Indicators:ApplySquare(frame, config, auraData, defaults, auraName)
     -- Reparent, style, and position the native countdown text
     if sq.nativeCooldownText then
         if showDuration and hasDuration then
-            -- Reparent to textOverlay so it draws above cooldown swipe
             if not sq.nativeTextReparented and sq.textOverlay then
                 sq.nativeCooldownText:SetParent(sq.textOverlay)
                 sq.nativeTextReparented = true
             end
-            -- Style
             local durationSize = 10 * durationScale
             DF:SafeSetFont(sq.nativeCooldownText, durationFont, durationSize, durationOutline)
-            -- Position
             sq.nativeCooldownText:ClearAllPoints()
             sq.nativeCooldownText:SetPoint(durationAnchor, sq, durationAnchor, durationX, durationY)
             sq.nativeCooldownText:Show()
 
-            -- Color by remaining time (green → yellow → orange → red)
+            -- Color by remaining time — only when values are non-secret
             if durationColorByTime then
-                local remaining = max(0, auraData.expirationTime - GetTime())
-                local pct = max(0, min(1, remaining / auraData.duration))
-                local r, g, b
-                if pct < 0.3 then
-                    local t = pct / 0.3
-                    r, g, b = 1, 0.5 * t, 0
-                elseif pct < 0.5 then
-                    local t = (pct - 0.3) / 0.2
-                    r, g, b = 1, 0.5 + 0.5 * t, 0
-                else
-                    local t = (pct - 0.5) / 0.5
-                    r, g, b = 1 - t, 1, 0
+                local exp = auraData.expirationTime
+                local dur = auraData.duration
+                if exp and dur and not issecretvalue(exp) and not issecretvalue(dur) and dur > 0 then
+                    local remaining = max(0, exp - GetTime())
+                    local pct = max(0, min(1, remaining / dur))
+                    local r, g, b
+                    if pct < 0.3 then
+                        local t = pct / 0.3
+                        r, g, b = 1, 0.5 * t, 0
+                    elseif pct < 0.5 then
+                        local t = (pct - 0.3) / 0.2
+                        r, g, b = 1, 0.5 + 0.5 * t, 0
+                    else
+                        local t = (pct - 0.5) / 0.5
+                        r, g, b = 1 - t, 1, 0
+                    end
+                    sq.nativeCooldownText:SetTextColor(r, g, b, 1)
                 end
-                sq.nativeCooldownText:SetTextColor(r, g, b, 1)
             else
                 sq.nativeCooldownText:SetTextColor(1, 1, 1, 1)
             end
@@ -977,25 +1037,79 @@ local function CreateADBar(frame, auraName)
     bar.duration:SetTextColor(1, 1, 1)
 
     -- OnUpdate for continuous countdown
+    -- Secret-safe: when duration/expirationTime are secret (combat),
+    -- skips manual arithmetic for bar value/text/spark. Color updates
+    -- still work via C_UnitAuras.GetAuraDuration API.
     bar.dfAD_duration = 0
     bar.dfAD_expirationTime = 0
     bar.dfAD_elapsed = 0
     bar.dfAD_colorElapsed = 0
+    bar.dfAD_secretValues = false
     bar:SetScript("OnUpdate", function(self, elapsed)
         self.dfAD_elapsed = self.dfAD_elapsed + elapsed
         if self.dfAD_elapsed < 0.03 then return end  -- ~30 fps
         self.dfAD_elapsed = 0
 
-        if self.dfAD_duration <= 0 or self.dfAD_expirationTime <= 0 then return end
+        local pct = nil
+        local remaining = nil
 
-        local remaining = self.dfAD_expirationTime - GetTime()
-        if remaining < 0 then remaining = 0 end
-        local pct = min(1, remaining / self.dfAD_duration)
-        self:SetValue(pct)
+        -- ============================================
+        -- BAR VALUE + TEXT + SPARK (only when values are non-secret)
+        -- ============================================
+        if not self.dfAD_secretValues then
+            local dur = self.dfAD_duration
+            local exp = self.dfAD_expirationTime
+            if not dur or dur <= 0 or not exp or exp <= 0 then return end
+
+            remaining = exp - GetTime()
+            if remaining < 0 then remaining = 0 end
+            pct = min(1, remaining / dur)
+            self:SetValue(pct)
+
+            -- Update spark position
+            if self.spark and self.spark:IsShown() then
+                local orient = self:GetOrientation()
+                if orient == "HORIZONTAL" then
+                    local barWidth = self:GetWidth()
+                    self.spark:ClearAllPoints()
+                    self.spark:SetPoint("CENTER", self, "LEFT", barWidth * pct, 0)
+                else
+                    local barHeight = self:GetHeight()
+                    self.spark:ClearAllPoints()
+                    self.spark:SetPoint("CENTER", self, "BOTTOM", 0, barHeight * pct)
+                end
+            end
+
+            -- Update duration text
+            if self.duration and self.duration:IsShown() then
+                if remaining >= 60 then
+                    self.duration:SetText(format("%dm", remaining / 60))
+                else
+                    self.duration:SetText(format("%.1f", remaining))
+                end
+
+                if self.dfAD_durationColorByTime then
+                    local colorPct = max(0, min(1, remaining / dur))
+                    local r, g, b
+                    if colorPct < 0.3 then
+                        local t = colorPct / 0.3
+                        r, g, b = 1, 0.5 * t, 0
+                    elseif colorPct < 0.5 then
+                        local t = (colorPct - 0.3) / 0.2
+                        r, g, b = 1, 0.5 + 0.5 * t, 0
+                    else
+                        local t = (colorPct - 0.5) / 0.5
+                        r, g, b = 1 - t, 1, 0
+                    end
+                    self.duration:SetTextColor(r, g, b, 1)
+                end
+            end
+        end
 
         -- ============================================
         -- BAR COLOR (API-driven when available, manual fallback otherwise)
         -- Throttled to ~1 FPS for performance
+        -- Works in both secret and non-secret modes
         -- ============================================
         self.dfAD_colorElapsed = self.dfAD_colorElapsed + 0.03
         if self.dfAD_colorElapsed >= 1.0 then
@@ -1011,6 +1125,7 @@ local function CreateADBar(frame, auraName)
                 local usedAPI = false
 
                 -- Try API-based color evaluation (requires valid unit + auraInstanceID)
+                -- This is the secret-safe path — works in combat
                 if unit and auraInstanceID
                    and C_UnitAuras and C_UnitAuras.GetAuraDuration
                    and C_CurveUtil and C_CurveUtil.CreateColorCurve then
@@ -1072,9 +1187,8 @@ local function CreateADBar(frame, auraName)
                 end
 
                 -- Manual fallback (preview frames or when API unavailable)
-                if not usedAPI then
+                if not usedAPI and pct then
                     if self.dfAD_barColorByTime then
-                        -- Manual green → yellow → orange → red based on pct
                         if pct < 0.3 then
                             local t = pct / 0.3
                             barR, barG, barB = 1, 0.5 * t, 0
@@ -1087,7 +1201,6 @@ local function CreateADBar(frame, auraName)
                         end
                     end
 
-                    -- Expiring color override based on pct
                     if self.dfAD_expiringEnabled and self.dfAD_expiringThreshold then
                         local threshold = self.dfAD_expiringThreshold / 100
                         if pct <= threshold then
@@ -1102,46 +1215,6 @@ local function CreateADBar(frame, auraName)
                 end
 
                 self:SetStatusBarColor(barR, barG, barB, 1)
-            end
-        end
-
-        -- Update spark position
-        if self.spark and self.spark:IsShown() then
-            local orient = self:GetOrientation()
-            if orient == "HORIZONTAL" then
-                local barWidth = self:GetWidth()
-                self.spark:ClearAllPoints()
-                self.spark:SetPoint("CENTER", self, "LEFT", barWidth * pct, 0)
-            else
-                local barHeight = self:GetHeight()
-                self.spark:ClearAllPoints()
-                self.spark:SetPoint("CENTER", self, "BOTTOM", 0, barHeight * pct)
-            end
-        end
-
-        -- Update duration text
-        if self.duration and self.duration:IsShown() then
-            if remaining >= 60 then
-                self.duration:SetText(format("%dm", remaining / 60))
-            else
-                self.duration:SetText(format("%.1f", remaining))
-            end
-
-            -- Color by remaining time
-            if self.dfAD_durationColorByTime then
-                local colorPct = max(0, min(1, remaining / self.dfAD_duration))
-                local r, g, b
-                if colorPct < 0.3 then
-                    local t = colorPct / 0.3
-                    r, g, b = 1, 0.5 * t, 0
-                elseif colorPct < 0.5 then
-                    local t = (colorPct - 0.3) / 0.2
-                    r, g, b = 1, 0.5 + 0.5 * t, 0
-                else
-                    local t = (colorPct - 0.5) / 0.5
-                    r, g, b = 1 - t, 1, 0
-                end
-                self.duration:SetTextColor(r, g, b, 1)
             end
         end
     end)
@@ -1216,11 +1289,6 @@ function Indicators:ApplyBar(frame, config, auraData, defaults, auraName)
     bar.dfAD_unit = frame.unit
     bar.dfAD_auraInstanceID = auraData.auraInstanceID
 
-    DF:Debug("AD", "ApplyBar: aura=%s colorByTime=%s expiring=%s threshold=%s unit=%s auraID=%s fill=(%.2f,%.2f,%.2f)",
-        tostring(auraName), tostring(barColorByTime), tostring(expiringEnabled),
-        tostring(config.expiringThreshold), tostring(frame.unit), tostring(auraData.auraInstanceID),
-        fillR, fillG, fillB)
-
     -- Store base fill color for OnUpdate fallback
     bar.dfAD_fillR = fillR
     bar.dfAD_fillG = fillG
@@ -1284,15 +1352,24 @@ function Indicators:ApplyBar(frame, config, auraData, defaults, auraName)
 
     -- ========================================
     -- COUNTDOWN DATA (drives the OnUpdate ticker)
+    -- Secret-safe: uses HasAuraDuration() and issecretvalue() checks
     -- ========================================
-    local hasDuration = auraData.duration and auraData.duration > 0
-                        and auraData.expirationTime and auraData.expirationTime > 0
+    local hasDuration = HasAuraDuration(auraData, frame.unit)
+    bar.dfAD_secretValues = false  -- Track if duration values are secret
     if hasDuration then
-        bar.dfAD_duration = auraData.duration
-        bar.dfAD_expirationTime = auraData.expirationTime
-        local remaining = auraData.expirationTime - GetTime()
-        local pct = max(0, min(1, remaining / auraData.duration))
-        bar:SetValue(pct)
+        local dur = auraData.duration
+        local exp = auraData.expirationTime
+        bar.dfAD_duration = dur
+        bar.dfAD_expirationTime = exp
+        -- Only do arithmetic when values are non-secret (preview, out of combat)
+        if dur and exp and not issecretvalue(dur) and not issecretvalue(exp) and dur > 0 then
+            local remaining = exp - GetTime()
+            local pct = max(0, min(1, remaining / dur))
+            bar:SetValue(pct)
+        else
+            bar.dfAD_secretValues = true
+            bar:SetValue(1)  -- Start full, API-based OnUpdate will adjust
+        end
     else
         bar.dfAD_duration = 0
         bar.dfAD_expirationTime = 0
@@ -1324,12 +1401,18 @@ function Indicators:ApplyBar(frame, config, auraData, defaults, auraName)
             bar.duration:ClearAllPoints()
             bar.duration:SetPoint(durationAnchor, bar, durationAnchor, durationX, durationY)
 
-            -- Set initial text (OnUpdate will keep it updated)
-            local remaining = max(0, auraData.expirationTime - GetTime())
-            if remaining >= 60 then
-                bar.duration:SetText(format("%dm", remaining / 60))
+            -- Set initial text (only when values are non-secret)
+            if not bar.dfAD_secretValues then
+                local dur = auraData.duration
+                local exp = auraData.expirationTime
+                local remaining = max(0, exp - GetTime())
+                if remaining >= 60 then
+                    bar.duration:SetText(format("%dm", remaining / 60))
+                else
+                    bar.duration:SetText(format("%.1f", remaining))
+                end
             else
-                bar.duration:SetText(format("%.1f", remaining))
+                bar.duration:SetText("")  -- OnUpdate will handle via API if possible
             end
 
             if not durationColorByTime then

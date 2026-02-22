@@ -27,6 +27,8 @@ local addonName, DF = ...
 
 local pairs, ipairs, type = pairs, ipairs, type
 local GetTime = GetTime
+local issecretvalue = issecretvalue or function() return false end
+local GetAuraDataByAuraInstanceID = C_UnitAuras and C_UnitAuras.GetAuraDataByAuraInstanceID
 
 DF.AuraDesigner = DF.AuraDesigner or {}
 
@@ -81,23 +83,54 @@ function HarrekProvider:GetUnitAuras(unit, spec)
                 stacks = 0,
                 caster = nil,
             }
-            -- Enrich from Blizzard API using spellId
-            if spellId then
-                AuraUtil.ForEachAura(unit, "HELPFUL", nil, function(auraData)
-                    if auraData.spellId == spellId then
-                        entry.icon = auraData.icon
-                        entry.duration = auraData.duration or 0
-                        entry.expirationTime = auraData.expirationTime or 0
-                        entry.stacks = auraData.applications or 0
-                        entry.caster = auraData.sourceUnit
-                        entry.auraInstanceID = auraData.auraInstanceID
-                        return true  -- stop iteration
+            -- Enrich from Blizzard API
+            -- First try BlizzardAuraCache (secret-safe: uses auraInstanceIDs)
+            local enriched = false
+            local blizzCache = DF.BlizzardAuraCache and DF.BlizzardAuraCache[unit]
+            if blizzCache and spellId then
+                local sources = { blizzCache.buffs, blizzCache.debuffs }
+                for _, sourceSet in ipairs(sources) do
+                    if sourceSet and not enriched then
+                        for auraInstanceID in pairs(sourceSet) do
+                            if not enriched then
+                                local ad = GetAuraDataByAuraInstanceID and GetAuraDataByAuraInstanceID(unit, auraInstanceID)
+                                if ad then
+                                    local sid = ad.spellId
+                                    if sid and not issecretvalue(sid) and sid == spellId then
+                                        entry.icon = ad.icon
+                                        entry.duration = ad.duration
+                                        entry.expirationTime = ad.expirationTime
+                                        entry.stacks = ad.applications
+                                        entry.caster = ad.sourceUnit
+                                        entry.auraInstanceID = auraInstanceID
+                                        enriched = true
+                                    end
+                                end
+                            end
+                        end
                     end
-                end)
-                -- Fallback icon from C_Spell if ForEachAura didn't find it
-                if not entry.icon and C_Spell and C_Spell.GetSpellTexture then
-                    entry.icon = C_Spell.GetSpellTexture(spellId)
                 end
+            end
+            -- Fallback: try ForEachAura with pcall protection (may fail with secret values in combat)
+            if not enriched and spellId then
+                pcall(function()
+                    AuraUtil.ForEachAura(unit, "HELPFUL", nil, function(auraData)
+                        if auraData.spellId == spellId then
+                            entry.icon = auraData.icon
+                            entry.duration = auraData.duration
+                            entry.expirationTime = auraData.expirationTime
+                            entry.stacks = auraData.applications
+                            entry.caster = auraData.sourceUnit
+                            entry.auraInstanceID = auraData.auraInstanceID
+                            enriched = true
+                            return true
+                        end
+                    end)
+                end)
+            end
+            -- Fallback icon from C_Spell if enrichment didn't find it
+            if not entry.icon and spellId and C_Spell and C_Spell.GetSpellTexture then
+                entry.icon = C_Spell.GetSpellTexture(spellId)
             end
             result[auraName] = entry
         end
@@ -128,8 +161,9 @@ end
 
 -- ============================================================
 -- FALLBACK PROVIDER
--- Scans unit buffs directly via C_UnitAuras when HARF is not
--- installed. Slower but fully functional.
+-- Uses DF.BlizzardAuraCache (populated by the Blizzard frame
+-- hook in Features/Auras.lua) for secret-safe aura queries.
+-- Falls back to direct C_UnitAuras scan with pcall protection.
 -- ============================================================
 
 local FallbackProvider = {}
@@ -139,7 +173,7 @@ function FallbackProvider:IsAvailable()
 end
 
 function FallbackProvider:GetSourceName()
-    return "Built-in (direct scan)"
+    return "Built-in (BlizzardAuraCache)"
 end
 
 -- Build a reverse lookup: spellId → auraName for fast matching
@@ -158,61 +192,112 @@ local function GetSpellIdLookup(spec)
     return lookup
 end
 
+-- Persistent cache: auraInstanceID → auraName
+-- Populated when spellId is non-secret, used in combat when spellId is secret.
+-- auraInstanceIDs are monotonically increasing and never reused within a session.
+local instanceIdToAuraName = {}  -- { [auraInstanceID] = auraName }
+
 -- Debug throttle for adapter (shares interval with engine)
 local adapterDebugLast = 0
 local ADAPTER_DEBUG_INTERVAL = 3
 
 function FallbackProvider:GetUnitAuras(unit, spec)
-    local lookup = GetSpellIdLookup(spec)
+    local lookup = GetSpellIdLookup(spec)  -- { [spellId] = auraName }
     if not lookup or not next(lookup) then return {} end
+
+    local forwardLookup = DF.AuraDesigner.SpellIDs[spec]  -- { [auraName] = spellId }
 
     local now = GetTime()
     local shouldLog = (now - adapterDebugLast) >= ADAPTER_DEBUG_INTERVAL
 
-    -- Count lookup entries for debug
-    local lookupSize = 0
-    if shouldLog then
-        for _ in pairs(lookup) do lookupSize = lookupSize + 1 end
-    end
-
     local result = {}
     local scannedCount = 0
+    local matchedCount = 0
+    local cacheHits = 0
 
-    -- Try C_UnitAuras index-based scan (more reliable in modern WoW)
-    local i = 1
-    while true do
-        local auraData = C_UnitAuras.GetBuffDataByIndex(unit, i)
-        if not auraData then break end
-        scannedCount = scannedCount + 1
-        local auraName = lookup[auraData.spellId]
-        if auraName then
-            result[auraName] = {
-                spellId = auraData.spellId,
-                icon = auraData.icon,
-                duration = auraData.duration or 0,
-                expirationTime = auraData.expirationTime or 0,
-                stacks = auraData.applications or 0,
-                caster = auraData.sourceUnit,
-                auraInstanceID = auraData.auraInstanceID,
-            }
+    -- PRIMARY PATH: Use BlizzardAuraCache (secret-safe)
+    -- DF.BlizzardAuraCache is populated by the hooksecurefunc on
+    -- CompactUnitFrame_UpdateAuras in Features/Auras.lua. It stores
+    -- non-secret auraInstanceIDs captured from Blizzard's own frames.
+    local blizzCache = DF.BlizzardAuraCache and DF.BlizzardAuraCache[unit]
+    if blizzCache then
+        local sources = { blizzCache.buffs, blizzCache.debuffs }
+        for _, sourceSet in ipairs(sources) do
+            if sourceSet then
+                for auraInstanceID in pairs(sourceSet) do
+                    scannedCount = scannedCount + 1
+                    local auraData = GetAuraDataByAuraInstanceID and GetAuraDataByAuraInstanceID(unit, auraInstanceID)
+                    if auraData then
+                        local auraName = nil
+
+                        -- Try spellId lookup (works when not secret, i.e. out of combat)
+                        local sid = auraData.spellId
+                        if sid and not issecretvalue(sid) then
+                            auraName = lookup[sid]
+                            -- Update persistent cache for combat use
+                            if auraName then
+                                instanceIdToAuraName[auraInstanceID] = auraName
+                            end
+                        else
+                            -- In combat (secret): use cached mapping
+                            auraName = instanceIdToAuraName[auraInstanceID]
+                            if auraName then cacheHits = cacheHits + 1 end
+                        end
+
+                        if auraName then
+                            matchedCount = matchedCount + 1
+                            result[auraName] = {
+                                spellId = forwardLookup and forwardLookup[auraName] or 0,  -- our known non-secret ID
+                                icon = auraData.icon,              -- might be secret; OK for SetTexture
+                                duration = auraData.duration,       -- might be secret; OK for SetCooldown
+                                expirationTime = auraData.expirationTime,  -- might be secret
+                                stacks = auraData.applications,     -- might be secret
+                                caster = auraData.sourceUnit,
+                                auraInstanceID = auraInstanceID,    -- non-secret
+                            }
+                        end
+                    end
+                end
+            end
         end
-        i = i + 1
+    else
+        -- FALLBACK PATH: No BlizzardAuraCache (e.g., during early init)
+        -- Use direct scan with pcall protection against secret values
+        local i = 1
+        while true do
+            local auraData = C_UnitAuras.GetBuffDataByIndex(unit, i)
+            if not auraData then break end
+            scannedCount = scannedCount + 1
+
+            -- pcall protects against "table index is secret" in combat
+            local ok, auraName = pcall(function()
+                return lookup[auraData.spellId]
+            end)
+
+            if ok and auraName then
+                matchedCount = matchedCount + 1
+                -- Build entry with pcall (other fields might also be secret)
+                pcall(function()
+                    result[auraName] = {
+                        spellId = forwardLookup and forwardLookup[auraName] or 0,
+                        icon = auraData.icon,
+                        duration = auraData.duration,
+                        expirationTime = auraData.expirationTime,
+                        stacks = auraData.applications,
+                        caster = auraData.sourceUnit,
+                        auraInstanceID = auraData.auraInstanceID,
+                    }
+                end)
+            end
+            i = i + 1
+        end
     end
 
     if shouldLog then
         adapterDebugLast = now
-        local foundCount = 0
-        for _ in pairs(result) do foundCount = foundCount + 1 end
-        DF:Debug("AD", "Fallback scan: unit=%s spec=%s lookup=%d scanned=%d found=%d", unit, spec, lookupSize, scannedCount, foundCount)
-        -- Log first few scanned spellIds for verification
-        local j = 1
-        while j <= 5 do
-            local ad = C_UnitAuras.GetBuffDataByIndex(unit, j)
-            if not ad then break end
-            local match = lookup[ad.spellId] and " MATCH" or ""
-            DF:Debug("AD", "  buff[%d]: spellId=%d name=%s%s", j, ad.spellId, ad.name or "?", match)
-            j = j + 1
-        end
+        DF:Debug("AD", "Fallback: unit=%s spec=%s scanned=%d matched=%d cacheHits=%d blizzCache=%s",
+            unit, spec, scannedCount, matchedCount, cacheHits,
+            blizzCache and "yes" or "no")
     end
 
     return result
