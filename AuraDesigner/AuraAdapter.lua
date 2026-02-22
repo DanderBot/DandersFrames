@@ -21,6 +21,7 @@ local addonName, DF = ...
 --     expirationTime = number,   -- GetTime()-based expiry
 --     stacks         = number,   -- stack/application count
 --     caster         = string,   -- who applied it
+--     auraInstanceID = number,   -- unique instance ID for C_UnitAuras API
 --   }
 -- ============================================================
 
@@ -89,6 +90,7 @@ function HarrekProvider:GetUnitAuras(unit, spec)
                         entry.expirationTime = auraData.expirationTime or 0
                         entry.stacks = auraData.applications or 0
                         entry.caster = auraData.sourceUnit
+                        entry.auraInstanceID = auraData.auraInstanceID
                         return true  -- stop iteration
                     end
                 end)
@@ -191,6 +193,7 @@ function FallbackProvider:GetUnitAuras(unit, spec)
                 expirationTime = auraData.expirationTime or 0,
                 stacks = auraData.applications or 0,
                 caster = auraData.sourceUnit,
+                auraInstanceID = auraData.auraInstanceID,
             }
         end
         i = i + 1

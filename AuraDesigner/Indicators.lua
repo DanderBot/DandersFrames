@@ -994,80 +994,114 @@ local function CreateADBar(frame, auraName)
         self:SetValue(pct)
 
         -- ============================================
-        -- BAR COLOR (API-driven, throttled to ~1 FPS)
+        -- BAR COLOR (API-driven when available, manual fallback otherwise)
+        -- Throttled to ~1 FPS for performance
         -- ============================================
         self.dfAD_colorElapsed = self.dfAD_colorElapsed + 0.03
         if self.dfAD_colorElapsed >= 1.0 then
             self.dfAD_colorElapsed = 0
 
-            local unit = self.dfAD_unit
-            local auraInstanceID = self.dfAD_auraInstanceID
             local needsColor = self.dfAD_barColorByTime or self.dfAD_expiringEnabled
+            if needsColor then
+                local unit = self.dfAD_unit
+                local auraInstanceID = self.dfAD_auraInstanceID
+                local barR = self.dfAD_fillR or 1
+                local barG = self.dfAD_fillG or 1
+                local barB = self.dfAD_fillB or 1
+                local usedAPI = false
 
-            if needsColor and unit and auraInstanceID
-               and C_UnitAuras and C_UnitAuras.GetAuraDuration then
+                -- Try API-based color evaluation (requires valid unit + auraInstanceID)
+                if unit and auraInstanceID
+                   and C_UnitAuras and C_UnitAuras.GetAuraDuration
+                   and C_CurveUtil and C_CurveUtil.CreateColorCurve then
 
-                local durationObj = C_UnitAuras.GetAuraDuration(unit, auraInstanceID)
-                local useAPI = durationObj and durationObj.EvaluateRemainingPercent
+                    local durationObj = C_UnitAuras.GetAuraDuration(unit, auraInstanceID)
+                    if durationObj and durationObj.EvaluateRemainingPercent then
+                        usedAPI = true
 
-                if useAPI and C_CurveUtil and C_CurveUtil.CreateColorCurve then
-                    local barR = self.dfAD_fillR or 1
-                    local barG = self.dfAD_fillG or 1
-                    local barB = self.dfAD_fillB or 1
-
-                    -- Color by duration (green → yellow → orange → red)
-                    if self.dfAD_barColorByTime then
-                        if not barDurationColorCurve then
-                            barDurationColorCurve = C_CurveUtil.CreateColorCurve()
-                            barDurationColorCurve:SetType(Enum.LuaCurveType.Linear)
-                            barDurationColorCurve:AddPoint(0, CreateColor(1, 0, 0, 1))
-                            barDurationColorCurve:AddPoint(0.3, CreateColor(1, 0.5, 0, 1))
-                            barDurationColorCurve:AddPoint(0.5, CreateColor(1, 1, 0, 1))
-                            barDurationColorCurve:AddPoint(1, CreateColor(0, 1, 0, 1))
-                        end
-                        local result = durationObj:EvaluateRemainingPercent(barDurationColorCurve)
-                        if result then
-                            if result.GetRGB then
-                                barR, barG, barB = result:GetRGB()
-                            elseif result.r then
-                                barR, barG, barB = result.r, result.g, result.b
+                        -- Color by duration (green → yellow → orange → red)
+                        if self.dfAD_barColorByTime then
+                            if not barDurationColorCurve then
+                                barDurationColorCurve = C_CurveUtil.CreateColorCurve()
+                                barDurationColorCurve:SetType(Enum.LuaCurveType.Linear)
+                                barDurationColorCurve:AddPoint(0, CreateColor(1, 0, 0, 1))
+                                barDurationColorCurve:AddPoint(0.3, CreateColor(1, 0.5, 0, 1))
+                                barDurationColorCurve:AddPoint(0.5, CreateColor(1, 1, 0, 1))
+                                barDurationColorCurve:AddPoint(1, CreateColor(0, 1, 0, 1))
+                            end
+                            local result = durationObj:EvaluateRemainingPercent(barDurationColorCurve)
+                            if result then
+                                if result.GetRGB then
+                                    barR, barG, barB = result:GetRGB()
+                                elseif result.r then
+                                    barR, barG, barB = result.r, result.g, result.b
+                                end
                             end
                         end
-                    end
 
-                    -- Expiring color override: step curve at threshold %
-                    if self.dfAD_expiringEnabled and self.dfAD_expiringThreshold then
-                        local threshold = self.dfAD_expiringThreshold
-                        if not barExpiringCurves[threshold] then
-                            local curve = C_CurveUtil.CreateColorCurve()
-                            curve:SetType(Enum.LuaCurveType.Step)
-                            curve:AddPoint(0, CreateColor(1, 1, 1, 1))
-                            curve:AddPoint(threshold / 100, CreateColor(0, 0, 0, 0))
-                            curve:AddPoint(1, CreateColor(0, 0, 0, 0))
-                            barExpiringCurves[threshold] = curve
-                        end
-                        local expResult = durationObj:EvaluateRemainingPercent(barExpiringCurves[threshold])
-                        if expResult then
-                            local expiringAlpha = 0
-                            if expResult.GetAlpha then
-                                expiringAlpha = expResult:GetAlpha()
-                            elseif expResult.a ~= nil then
-                                expiringAlpha = expResult.a
+                        -- Expiring color override: step curve at threshold %
+                        if self.dfAD_expiringEnabled and self.dfAD_expiringThreshold then
+                            local threshold = self.dfAD_expiringThreshold
+                            if not barExpiringCurves[threshold] then
+                                local curve = C_CurveUtil.CreateColorCurve()
+                                curve:SetType(Enum.LuaCurveType.Step)
+                                curve:AddPoint(0, CreateColor(1, 1, 1, 1))
+                                curve:AddPoint(threshold / 100, CreateColor(0, 0, 0, 0))
+                                curve:AddPoint(1, CreateColor(0, 0, 0, 0))
+                                barExpiringCurves[threshold] = curve
                             end
-                            -- Alpha > 0 means we're in the expiring zone
-                            if expiringAlpha > 0 then
-                                local ec = self.dfAD_expiringColor
-                                if ec then
-                                    barR = ec.r or 1
-                                    barG = ec.g or 0.2
-                                    barB = ec.b or 0.2
+                            local expResult = durationObj:EvaluateRemainingPercent(barExpiringCurves[threshold])
+                            if expResult then
+                                local expiringAlpha = 0
+                                if expResult.GetAlpha then
+                                    expiringAlpha = expResult:GetAlpha()
+                                elseif expResult.a ~= nil then
+                                    expiringAlpha = expResult.a
+                                end
+                                if expiringAlpha > 0 then
+                                    local ec = self.dfAD_expiringColor
+                                    if ec then
+                                        barR = ec.r or 1
+                                        barG = ec.g or 0.2
+                                        barB = ec.b or 0.2
+                                    end
                                 end
                             end
                         end
                     end
-
-                    self:SetStatusBarColor(barR, barG, barB, 1)
                 end
+
+                -- Manual fallback (preview frames or when API unavailable)
+                if not usedAPI then
+                    if self.dfAD_barColorByTime then
+                        -- Manual green → yellow → orange → red based on pct
+                        if pct < 0.3 then
+                            local t = pct / 0.3
+                            barR, barG, barB = 1, 0.5 * t, 0
+                        elseif pct < 0.5 then
+                            local t = (pct - 0.3) / 0.2
+                            barR, barG, barB = 1, 0.5 + 0.5 * t, 0
+                        else
+                            local t = (pct - 0.5) / 0.5
+                            barR, barG, barB = 1 - t, 1, 0
+                        end
+                    end
+
+                    -- Expiring color override based on pct
+                    if self.dfAD_expiringEnabled and self.dfAD_expiringThreshold then
+                        local threshold = self.dfAD_expiringThreshold / 100
+                        if pct <= threshold then
+                            local ec = self.dfAD_expiringColor
+                            if ec then
+                                barR = ec.r or 1
+                                barG = ec.g or 0.2
+                                barB = ec.b or 0.2
+                            end
+                        end
+                    end
+                end
+
+                self:SetStatusBarColor(barR, barG, barB, 1)
             end
         end
 
