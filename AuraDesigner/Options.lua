@@ -1383,7 +1383,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy)
         AddWidget(GUI:CreateSlider(parent, "Offset Y", -50, 50, 1, proxy, "offsetY"), 54)
         AddDivider()
         -- Sizing & appearance
-        AddWidget(GUI:CreateSlider(parent, "Size", 4, 32, 1, proxy, "size"), 54)
+        AddWidget(GUI:CreateSlider(parent, "Size", 4, 64, 1, proxy, "size"), 54)
         AddWidget(GUI:CreateSlider(parent, "Scale", 0.5, 3.0, 0.05, proxy, "scale"), 54)
         AddWidget(GUI:CreateColorPicker(parent, "Color", proxy, "color", true,
             function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
