@@ -181,6 +181,10 @@ local function EnsureTypeConfig(auraName, typeKey)
     return auraCfg[typeKey]
 end
 
+-- Forward declaration: lightweight preview refresh (defined after RefreshPreviewEffects)
+-- Called from proxy __newindex so every setting change updates the preview in real-time
+local RefreshPreviewLightweight
+
 -- Create a proxy table that maps flat key access to nested aura config
 local function CreateProxy(auraName, typeKey)
     return setmetatable({}, {
@@ -195,6 +199,7 @@ local function CreateProxy(auraName, typeKey)
         __newindex = function(_, k, v)
             local typeCfg = EnsureTypeConfig(auraName, typeKey)
             typeCfg[k] = v
+            if RefreshPreviewLightweight then RefreshPreviewLightweight() end
         end,
     })
 end
@@ -211,6 +216,7 @@ local function CreateAuraProxy(auraName)
         __newindex = function(_, k, v)
             local auraCfg = EnsureAuraConfig(auraName)
             auraCfg[k] = v
+            if RefreshPreviewLightweight then RefreshPreviewLightweight() end
         end,
     })
 end
@@ -237,6 +243,7 @@ local function CreateExpiringProxy(auraName)
                 }
             end
             auraCfg.expiring[k] = v
+            if RefreshPreviewLightweight then RefreshPreviewLightweight() end
         end,
     })
 end
@@ -712,6 +719,69 @@ local function RefreshPreviewEffects()
     if auraCfg.framealpha then
         mockFrame:SetAlpha(auraCfg.framealpha.alpha or 0.5)
     end
+end
+
+-- ============================================================
+-- LIGHTWEIGHT PREVIEW REFRESH
+-- Re-applies indicator settings to existing preview frames without
+-- destroying/recreating them. Called from proxy __newindex so every
+-- slider drag tick, checkbox toggle, or dropdown change is live.
+-- ============================================================
+
+RefreshPreviewLightweight = function()
+    if not framePreview or not framePreview.mockFrame then return end
+    local mockFrame = framePreview.mockFrame
+    local Indicators = DF.AuraDesigner and DF.AuraDesigner.Indicators
+    if not Indicators then return end
+
+    local adDB = GetAuraDesignerDB()
+    local spec = ResolveSpec()
+    if not spec then return end
+
+    -- Re-apply placed indicators using current settings (frames already exist)
+    if mockFrame.dfAD_icons then
+        for auraName, icon in pairs(mockFrame.dfAD_icons) do
+            local auraCfg = adDB.auras and adDB.auras[auraName]
+            if auraCfg and auraCfg.icon then
+                local tex = GetAuraIcon(spec, auraName)
+                local mockAuraData = {
+                    spellId = 0, icon = tex,
+                    duration = 15, expirationTime = GetTime() + 10,
+                    stacks = 3,
+                }
+                Indicators:ApplyIcon(mockFrame, auraCfg.icon, mockAuraData, adDB.defaults, auraName)
+            end
+        end
+    end
+
+    if mockFrame.dfAD_squares then
+        for auraName, sq in pairs(mockFrame.dfAD_squares) do
+            local auraCfg = adDB.auras and adDB.auras[auraName]
+            if auraCfg and auraCfg.square then
+                local mockAuraData = {
+                    spellId = 0, icon = nil, duration = 0, stacks = 3,
+                }
+                Indicators:ApplySquare(mockFrame, auraCfg.square, mockAuraData, adDB.defaults, auraName)
+            end
+        end
+    end
+
+    if mockFrame.dfAD_bars then
+        for auraName, bar in pairs(mockFrame.dfAD_bars) do
+            local auraCfg = adDB.auras and adDB.auras[auraName]
+            if auraCfg and auraCfg.bar then
+                local mockAuraData = {
+                    spellId = 0, icon = nil,
+                    duration = 15, expirationTime = GetTime() + 10,
+                    stacks = 0,
+                }
+                Indicators:ApplyBar(mockFrame, auraCfg.bar, mockAuraData, adDB.defaults, auraName)
+            end
+        end
+    end
+
+    -- Also refresh frame-level preview effects (border, healthbar color, text colors, alpha)
+    RefreshPreviewEffects()
 end
 
 -- ============================================================
