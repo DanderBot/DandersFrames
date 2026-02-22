@@ -245,7 +245,7 @@ local TYPE_DEFAULTS = {
     },
     square = {
         anchor = "TOPLEFT", offsetX = 0, offsetY = 0,
-        size = 10, scale = 1.0, alpha = 1.0,
+        size = 24, scale = 1.0, alpha = 1.0,
         color = {r = 1, g = 1, b = 1, a = 1},
         showBorder = true, borderThickness = 1, borderInset = 1,
         hideSwipe = false,
