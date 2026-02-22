@@ -697,17 +697,25 @@ local function CreateADSquare(frame, auraName)
     sq.texture:SetPoint("TOPLEFT", 1, -1)
     sq.texture:SetPoint("BOTTOMRIGHT", -1, 1)
 
-    -- Stack count
-    sq.count = sq:CreateFontString(nil, "OVERLAY")
+    -- Cooldown (swipe effect) — same setup as DF:CreateAuraIcon
+    sq.cooldown = CreateFrame("Cooldown", nil, sq, "CooldownFrameTemplate")
+    sq.cooldown:SetAllPoints(sq.texture)
+    sq.cooldown:SetDrawEdge(false)
+    sq.cooldown:SetDrawSwipe(true)
+    sq.cooldown:SetReverse(true)
+    sq.cooldown:SetHideCountdownNumbers(false)
+
+    -- Text overlay above the cooldown swipe for stacks + duration
+    sq.textOverlay = CreateFrame("Frame", nil, sq)
+    sq.textOverlay:SetAllPoints(sq)
+    sq.textOverlay:SetFrameLevel(sq.cooldown:GetFrameLevel() + 5)
+    sq.textOverlay:EnableMouse(false)
+
+    -- Stack count (on textOverlay so it draws above swipe)
+    sq.count = sq.textOverlay:CreateFontString(nil, "OVERLAY")
     sq.count:SetFont("Fonts\\FRIZQT__.TTF", 8, "OUTLINE")
     sq.count:SetPoint("CENTER", 0, 0)
     sq.count:SetTextColor(1, 1, 1)
-
-    -- Duration text
-    sq.duration = sq:CreateFontString(nil, "OVERLAY")
-    sq.duration:SetFont("Fonts\\FRIZQT__.TTF", 8, "OUTLINE")
-    sq.duration:SetPoint("CENTER", 0, 0)
-    sq.duration:SetTextColor(1, 1, 1)
 
     sq:Hide()
     return sq
@@ -776,15 +784,32 @@ function Indicators:ApplySquare(frame, config, auraData, defaults, auraName)
     sq.texture:SetPoint("BOTTOMRIGHT", -texInset, texInset)
 
     -- ========================================
+    -- COOLDOWN SWIPE
+    -- ========================================
+    local hasDuration = auraData.duration and auraData.duration > 0
+                        and auraData.expirationTime and auraData.expirationTime > 0
+    if sq.cooldown then
+        if hasDuration then
+            SafeSetCooldown(sq.cooldown, auraData.expirationTime, auraData.duration)
+            sq.cooldown:SetDrawSwipe(not config.hideSwipe)
+            sq.cooldown:Show()
+        else
+            sq.cooldown:SetDrawSwipe(false)
+            sq.cooldown:Hide()
+        end
+    end
+
+    -- ========================================
     -- STACK COUNT
     -- ========================================
     local showStacks = config.showStacks
+    if showStacks == nil then showStacks = true end
     local stackMin = config.stackMinimum or 2
     local stackFont = config.stackFont or "Fonts\\FRIZQT__.TTF"
     local stackScale = config.stackScale or 1.0
     local stackOutline = config.stackOutline or "OUTLINE"
     if stackOutline == "NONE" then stackOutline = "" end
-    local stackAnchor = config.stackAnchor or "CENTER"
+    local stackAnchor = config.stackAnchor or "BOTTOMRIGHT"
     local stackX = config.stackX or 0
     local stackY = config.stackY or 0
 
@@ -804,9 +829,10 @@ function Indicators:ApplySquare(frame, config, auraData, defaults, auraName)
     end
 
     -- ========================================
-    -- DURATION TEXT
+    -- DURATION TEXT (via native cooldown text, same approach as icons)
     -- ========================================
     local showDuration = config.showDuration
+    if showDuration == nil then showDuration = true end
     local durationFont = config.durationFont or "Fonts\\FRIZQT__.TTF"
     local durationScale = config.durationScale or 1.0
     local durationOutline = config.durationOutline or "OUTLINE"
@@ -817,26 +843,41 @@ function Indicators:ApplySquare(frame, config, auraData, defaults, auraName)
     local durationColorByTime = config.durationColorByTime
     if durationColorByTime == nil then durationColorByTime = true end
 
-    local hasDuration = auraData.duration and auraData.duration > 0
-                        and auraData.expirationTime and auraData.expirationTime > 0
+    if sq.cooldown then
+        sq.cooldown:SetHideCountdownNumbers(not showDuration)
+    end
 
-    if sq.duration then
-        if showDuration and hasDuration then
-            local durationSize = 10 * durationScale
-            DF:SafeSetFont(sq.duration, durationFont, durationSize, durationOutline)
-            sq.duration:ClearAllPoints()
-            sq.duration:SetPoint(durationAnchor, sq, durationAnchor, durationX, durationY)
-
-            -- Format remaining time
-            local remaining = max(0, auraData.expirationTime - GetTime())
-            if remaining >= 60 then
-                sq.duration:SetText(format("%dm", remaining / 60))
-            else
-                sq.duration:SetText(format("%d", remaining))
+    -- Find native cooldown text if not yet cached (same region scan as icons)
+    if not sq.nativeCooldownText and sq.cooldown then
+        local regions = { sq.cooldown:GetRegions() }
+        for _, region in pairs(regions) do
+            if region and region.GetObjectType and region:GetObjectType() == "FontString" then
+                sq.nativeCooldownText = region
+                sq.nativeTextReparented = false
+                break
             end
+        end
+    end
 
-            -- Color by remaining time
+    -- Reparent, style, and position the native countdown text
+    if sq.nativeCooldownText then
+        if showDuration and hasDuration then
+            -- Reparent to textOverlay so it draws above cooldown swipe
+            if not sq.nativeTextReparented and sq.textOverlay then
+                sq.nativeCooldownText:SetParent(sq.textOverlay)
+                sq.nativeTextReparented = true
+            end
+            -- Style
+            local durationSize = 10 * durationScale
+            DF:SafeSetFont(sq.nativeCooldownText, durationFont, durationSize, durationOutline)
+            -- Position
+            sq.nativeCooldownText:ClearAllPoints()
+            sq.nativeCooldownText:SetPoint(durationAnchor, sq, durationAnchor, durationX, durationY)
+            sq.nativeCooldownText:Show()
+
+            -- Color by remaining time (green → yellow → orange → red)
             if durationColorByTime then
+                local remaining = max(0, auraData.expirationTime - GetTime())
                 local pct = max(0, min(1, remaining / auraData.duration))
                 local r, g, b
                 if pct < 0.3 then
@@ -849,13 +890,12 @@ function Indicators:ApplySquare(frame, config, auraData, defaults, auraName)
                     local t = (pct - 0.5) / 0.5
                     r, g, b = 1 - t, 1, 0
                 end
-                sq.duration:SetTextColor(r, g, b, 1)
+                sq.nativeCooldownText:SetTextColor(r, g, b, 1)
             else
-                sq.duration:SetTextColor(1, 1, 1, 1)
+                sq.nativeCooldownText:SetTextColor(1, 1, 1, 1)
             end
-            sq.duration:Show()
         else
-            sq.duration:Hide()
+            sq.nativeCooldownText:Hide()
         end
     end
 

@@ -156,6 +156,7 @@ local function EnsureTypeConfig(auraName, typeKey)
                 color = {r = 1, g = 1, b = 1, a = 1},
                 -- Border
                 showBorder = true, borderThickness = 1, borderInset = 1,
+                hideSwipe = false,
                 -- Duration text
                 showDuration = true, durationFont = "Fonts\\FRIZQT__.TTF",
                 durationScale = 1.0, durationOutline = "OUTLINE",
@@ -1189,6 +1190,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width)
         AddWidget(GUI:CreateCheckbox(parent, "Show Border", proxy, "showBorder"), 28)
         AddWidget(GUI:CreateSlider(parent, "Border Thickness", 1, 5, 1, proxy, "borderThickness"), 54)
         AddWidget(GUI:CreateSlider(parent, "Border Inset", -3, 5, 1, proxy, "borderInset"), 54)
+        AddWidget(GUI:CreateCheckbox(parent, "Hide Cooldown Swipe", proxy, "hideSwipe"), 28)
         AddDivider()
         -- Duration text
         AddWidget(GUI:CreateCheckbox(parent, "Show Duration Text", proxy, "showDuration"), 28)
