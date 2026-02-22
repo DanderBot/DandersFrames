@@ -20,6 +20,7 @@ local addonName, DF = ...
 -- ============================================================
 
 local pairs, ipairs, type = pairs, ipairs, type
+local format = string.format
 local GetTime = GetTime
 local max, min = math.max, math.min
 
