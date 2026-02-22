@@ -450,7 +450,8 @@ local function GetOrCreateADIcon(frame, auraName)
     icon.expiringTintEnabled = false
 
     -- Register with the shared aura timer for duration color + expiring
-    if DF.RegisterIconForAuraTimer then
+    -- Only for real unit frames (not the preview mockFrame)
+    if frame.unit and DF.RegisterIconForAuraTimer then
         DF:RegisterIconForAuraTimer(icon)
     end
 

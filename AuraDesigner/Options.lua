@@ -483,9 +483,26 @@ local placedIndicators = {}
 local function ClearPlacedIndicators()
     for _, ind in ipairs(placedIndicators) do
         ind:Hide()
-        ind:SetParent(nil)
     end
     wipe(placedIndicators)
+
+    -- Clean up AD indicator maps on the mockFrame
+    if framePreview and framePreview.mockFrame then
+        local mock = framePreview.mockFrame
+        if mock.dfAD_icons then
+            for _, icon in pairs(mock.dfAD_icons) do icon:Hide() end
+            wipe(mock.dfAD_icons)
+        end
+        if mock.dfAD_squares then
+            for _, sq in pairs(mock.dfAD_squares) do sq:Hide() end
+            wipe(mock.dfAD_squares)
+        end
+        if mock.dfAD_bars then
+            for _, bar in pairs(mock.dfAD_bars) do bar:Hide() end
+            wipe(mock.dfAD_bars)
+        end
+        mock.dfAD = nil
+    end
 end
 
 local function RefreshPlacedIndicators()
@@ -499,7 +516,6 @@ local function RefreshPlacedIndicators()
     local spec = ResolveSpec()
     if not spec then return end
 
-    local tc = GetThemeColor()
     local auraList = Adapter and Adapter:GetTrackableAuras(spec)
     if not auraList then return end
 
@@ -516,122 +532,100 @@ local function RefreshPlacedIndicators()
             for _, typeDef in ipairs(INDICATOR_TYPES) do
                 if typeDef.placed and auraCfg[typeDef.key] then
                     local typeCfg = auraCfg[typeDef.key]
-                    local anchor = typeCfg.anchor
-                    local anchorPos = anchor and ANCHOR_POSITIONS[anchor]
-                    if anchorPos then
-                        local isSelected = (auraName == selectedAura)
+                    local Indicators = DF.AuraDesigner and DF.AuraDesigner.Indicators
+                    local capturedAura = auraName
 
-                        if typeDef.key == "icon" then
-                            -- Render a small icon at the anchor
-                            local ind = CreateFrame("Button", nil, mockFrame, "BackdropTemplate")
-                            local sz = typeCfg.size or 16
-                            ind:SetSize(sz, sz)
-                            ind:SetFrameLevel(mockFrame:GetFrameLevel() + 8)
-                            ind:SetPoint(anchorPos.ax, mockFrame, anchorPos.ay,
-                                typeCfg.offsetX or 0, -(typeCfg.offsetY or 0))
+                    if typeDef.key == "icon" and Indicators then
+                        -- Build mock aura data with the spell's texture
+                        local tex = GetAuraIcon(spec, auraName)
+                        local mockAuraData = {
+                            spellId = info.spellIds and info.spellIds[1] or 0,
+                            icon = tex,
+                            duration = 15,
+                            expirationTime = GetTime() + 10,
+                            stacks = 3,
+                        }
+                        -- Use the real indicator renderer (identical to runtime)
+                        Indicators:ApplyIcon(mockFrame, typeCfg, mockAuraData, adDB.defaults, auraName)
 
-                            ApplyBackdrop(ind, {r = 0, g = 0, b = 0, a = 0.6},
-                                isSelected and {r = tc.r, g = tc.g, b = tc.b, a = 1}
-                                or {r = 0.3, g = 0.3, b = 0.3, a = 0.8})
-
-                            local iconTex = ind:CreateTexture(nil, "ARTWORK")
-                            iconTex:SetPoint("TOPLEFT", 1, -1)
-                            iconTex:SetPoint("BOTTOMRIGHT", -1, 1)
-                            local tex = GetAuraIcon(spec, auraName)
-                            if tex then
-                                iconTex:SetTexture(tex)
-                                iconTex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-                            else
-                                iconTex:SetColorTexture(info.color[1] * 0.5, info.color[2] * 0.5, info.color[3] * 0.5, 1)
+                        -- Retrieve the icon to set up preview interactivity
+                        local iconMap = mockFrame.dfAD_icons
+                        local icon = iconMap and iconMap[auraName]
+                        if icon then
+                            icon:SetFrameLevel(mockFrame:GetFrameLevel() + 8)
+                            -- Re-enable mouse for preview click handlers
+                            icon:EnableMouse(true)
+                            if icon.SetMouseClickEnabled then
+                                icon:SetMouseClickEnabled(true)
                             end
-
-                            -- Duration text
-                            local dur = ind:CreateFontString(nil, "OVERLAY")
-                            dur:SetFont("Fonts\\FRIZQT__.TTF", max(sz * 0.45, 7), "OUTLINE")
-                            dur:SetPoint("BOTTOM", 0, -1)
-                            dur:SetText("12s")
-                            dur:SetTextColor(1, 1, 1, 0.8)
-
-                            -- Right-click to remove
-                            ind:RegisterForClicks("RightButtonUp")
-                            local capturedAura = auraName
-                            ind:SetScript("OnClick", function(_, button)
+                            icon:SetScript("OnMouseUp", function(_, button)
                                 if button == "RightButton" then
                                     local cfg = adDB.auras[capturedAura]
                                     if cfg then cfg.icon = nil end
                                     DF:AuraDesigner_RefreshPage()
-                                end
-                            end)
-                            -- Left-click to select
-                            ind:SetScript("OnMouseUp", function(_, button)
-                                if button == "LeftButton" then
+                                elseif button == "LeftButton" then
                                     selectedAura = capturedAura
                                     DF:AuraDesigner_RefreshPage()
                                 end
                             end)
+                            tinsert(placedIndicators, icon)
+                        end
 
-                            tinsert(placedIndicators, ind)
+                    elseif typeDef.key == "square" and Indicators then
+                        -- Build mock aura data for square
+                        local mockAuraData = {
+                            spellId = info.spellIds and info.spellIds[1] or 0,
+                            icon = GetAuraIcon(spec, auraName),
+                            duration = 0,
+                            stacks = 3,
+                        }
+                        Indicators:ApplySquare(mockFrame, typeCfg, mockAuraData, adDB.defaults, auraName)
 
-                        elseif typeDef.key == "square" then
-                            local ind = CreateFrame("Button", nil, mockFrame, "BackdropTemplate")
-                            local sz = typeCfg.size or 10
-                            ind:SetSize(sz, sz)
-                            ind:SetFrameLevel(mockFrame:GetFrameLevel() + 8)
-                            ind:SetPoint(anchorPos.ax, mockFrame, anchorPos.ay,
-                                typeCfg.offsetX or 0, -(typeCfg.offsetY or 0))
-
-                            local clr = typeCfg.color or {r = 1, g = 1, b = 1, a = 1}
-                            ApplyBackdrop(ind, clr,
-                                isSelected and {r = tc.r, g = tc.g, b = tc.b, a = 1}
-                                or {r = 0.3, g = 0.3, b = 0.3, a = 0.5})
-
-                            -- Right-click to remove
-                            ind:RegisterForClicks("RightButtonUp")
-                            local capturedAura = auraName
-                            ind:SetScript("OnClick", function(_, button)
+                        local sqMap = mockFrame.dfAD_squares
+                        local sq = sqMap and sqMap[auraName]
+                        if sq then
+                            sq:SetFrameLevel(mockFrame:GetFrameLevel() + 8)
+                            sq:EnableMouse(true)
+                            sq:SetScript("OnMouseUp", function(_, button)
                                 if button == "RightButton" then
                                     local cfg = adDB.auras[capturedAura]
                                     if cfg then cfg.square = nil end
                                     DF:AuraDesigner_RefreshPage()
+                                elseif button == "LeftButton" then
+                                    selectedAura = capturedAura
+                                    DF:AuraDesigner_RefreshPage()
                                 end
                             end)
+                            tinsert(placedIndicators, sq)
+                        end
 
-                            tinsert(placedIndicators, ind)
+                    elseif typeDef.key == "bar" and Indicators then
+                        -- Build mock aura data for bar
+                        local mockAuraData = {
+                            spellId = info.spellIds and info.spellIds[1] or 0,
+                            icon = GetAuraIcon(spec, auraName),
+                            duration = 15,
+                            expirationTime = GetTime() + 10,
+                            stacks = 0,
+                        }
+                        Indicators:ApplyBar(mockFrame, typeCfg, mockAuraData, adDB.defaults, auraName)
 
-                        elseif typeDef.key == "bar" then
-                            local ind = CreateFrame("Button", nil, mockFrame, "BackdropTemplate")
-                            local bw = typeCfg.matchFrameWidth and (mockFrame:GetWidth() - 2) or (typeCfg.width or 40)
-                            local bh = typeCfg.height or 4
-                            ind:SetSize(bw, bh)
-                            ind:SetFrameLevel(mockFrame:GetFrameLevel() + 7)
-                            ind:SetPoint(anchorPos.ax, mockFrame, anchorPos.ay,
-                                typeCfg.offsetX or 0, -(typeCfg.offsetY or 0))
-
-                            local fillClr = typeCfg.fillColor or {r = 1, g = 1, b = 1, a = 1}
-                            ApplyBackdrop(ind,
-                                {r = fillClr.r * 0.7, g = fillClr.g * 0.7, b = fillClr.b * 0.7, a = fillClr.a or 1},
-                                isSelected and {r = tc.r, g = tc.g, b = tc.b, a = 1}
-                                or {r = 0, g = 0, b = 0, a = 0})
-
-                            -- Fill bar at 60%
-                            local fill = ind:CreateTexture(nil, "ARTWORK")
-                            fill:SetPoint("TOPLEFT", 1, -1)
-                            fill:SetPoint("BOTTOMLEFT", 1, 1)
-                            fill:SetWidth(max(1, bw * 0.6))
-                            fill:SetColorTexture(fillClr.r, fillClr.g, fillClr.b, fillClr.a or 1)
-
-                            -- Right-click to remove
-                            ind:RegisterForClicks("RightButtonUp")
-                            local capturedAura = auraName
-                            ind:SetScript("OnClick", function(_, button)
+                        local barMap = mockFrame.dfAD_bars
+                        local bar = barMap and barMap[auraName]
+                        if bar then
+                            bar:SetFrameLevel(mockFrame:GetFrameLevel() + 7)
+                            bar:EnableMouse(true)
+                            bar:SetScript("OnMouseUp", function(_, button)
                                 if button == "RightButton" then
                                     local cfg = adDB.auras[capturedAura]
                                     if cfg then cfg.bar = nil end
                                     DF:AuraDesigner_RefreshPage()
+                                elseif button == "LeftButton" then
+                                    selectedAura = capturedAura
+                                    DF:AuraDesigner_RefreshPage()
                                 end
                             end)
-
-                            tinsert(placedIndicators, ind)
+                            tinsert(placedIndicators, bar)
                         end
                     end
                 end

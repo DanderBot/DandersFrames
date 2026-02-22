@@ -1640,6 +1640,14 @@ function DF:UpdateAuras_Enhanced(frame)
 
     -- Aura Designer takes over aura display when enabled
     if DF:IsAuraDesignerEnabled(frame) then
+        -- Hide standard buff/debuff icons — AD replaces them
+        if frame.buffIcons then
+            for _, icon in ipairs(frame.buffIcons) do icon:Hide() end
+        end
+        if frame.debuffIcons then
+            for _, icon in ipairs(frame.debuffIcons) do icon:Hide() end
+        end
+
         if DF.AuraDesigner and DF.AuraDesigner.Engine then
             DF.AuraDesigner.Engine:UpdateFrame(frame)
         end
