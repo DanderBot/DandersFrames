@@ -1229,7 +1229,10 @@ local function BuildTypeContent(parent, typeKey, auraName, width)
         -- Sizing & appearance
         AddWidget(GUI:CreateSlider(parent, "Size", 4, 32, 1, proxy, "size"), 54)
         AddWidget(GUI:CreateSlider(parent, "Scale", 0.5, 3.0, 0.05, proxy, "scale"), 54)
-        AddWidget(GUI:CreateColorPicker(parent, "Color", proxy, "color", true), 28)
+        AddWidget(GUI:CreateColorPicker(parent, "Color", proxy, "color", true,
+            function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
+            function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
+            true), 28)
         AddWidget(GUI:CreateSlider(parent, "Alpha", 0, 1, 0.05, proxy, "alpha"), 54)
         AddDivider()
         -- Border
@@ -1272,16 +1275,28 @@ local function BuildTypeContent(parent, typeKey, auraName, width)
         AddWidget(GUI:CreateCheckbox(parent, "Match Frame Height", proxy, "matchFrameHeight"), 28)
         AddDivider()
         -- Colors & border
-        AddWidget(GUI:CreateColorPicker(parent, "Fill Color", proxy, "fillColor", true), 28)
-        AddWidget(GUI:CreateColorPicker(parent, "Background Color", proxy, "bgColor", true), 28)
+        AddWidget(GUI:CreateColorPicker(parent, "Fill Color", proxy, "fillColor", true,
+            function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
+            function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
+            true), 28)
+        AddWidget(GUI:CreateColorPicker(parent, "Background Color", proxy, "bgColor", true,
+            function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
+            function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
+            true), 28)
         AddWidget(GUI:CreateCheckbox(parent, "Show Border", proxy, "showBorder"), 28)
         AddWidget(GUI:CreateSlider(parent, "Border Thickness", 1, 4, 1, proxy, "borderThickness"), 54)
-        AddWidget(GUI:CreateColorPicker(parent, "Border Color", proxy, "borderColor", true), 28)
+        AddWidget(GUI:CreateColorPicker(parent, "Border Color", proxy, "borderColor", true,
+            function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
+            function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
+            true), 28)
         AddWidget(GUI:CreateSlider(parent, "Alpha", 0, 1, 0.05, proxy, "alpha"), 54)
 
     elseif typeKey == "border" then
         AddWidget(GUI:CreateDropdown(parent, "Style", BORDER_STYLE_OPTIONS, proxy, "style"), 54)
-        AddWidget(GUI:CreateColorPicker(parent, "Color", proxy, "color", true), 28)
+        AddWidget(GUI:CreateColorPicker(parent, "Color", proxy, "color", true,
+            function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
+            function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
+            true), 28)
         AddWidget(GUI:CreateSlider(parent, "Thickness", 1, 8, 1, proxy, "thickness"), 54)
         AddDivider()
         AddWidget(GUI:CreateCheckbox(parent, "Pulsate", proxy, "pulsate"), 28)
@@ -1289,14 +1304,23 @@ local function BuildTypeContent(parent, typeKey, auraName, width)
 
     elseif typeKey == "healthbar" then
         AddWidget(GUI:CreateDropdown(parent, "Mode", HEALTHBAR_MODE_OPTIONS, proxy, "mode"), 54)
-        AddWidget(GUI:CreateColorPicker(parent, "Color", proxy, "color", true), 28)
+        AddWidget(GUI:CreateColorPicker(parent, "Color", proxy, "color", true,
+            function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
+            function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
+            true), 28)
         AddWidget(GUI:CreateSlider(parent, "Blend %", 0, 1, 0.05, proxy, "blend"), 54)
 
     elseif typeKey == "nametext" then
-        AddWidget(GUI:CreateColorPicker(parent, "Color", proxy, "color", true), 28)
+        AddWidget(GUI:CreateColorPicker(parent, "Color", proxy, "color", true,
+            function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
+            function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
+            true), 28)
 
     elseif typeKey == "healthtext" then
-        AddWidget(GUI:CreateColorPicker(parent, "Color", proxy, "color", true), 28)
+        AddWidget(GUI:CreateColorPicker(parent, "Color", proxy, "color", true,
+            function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
+            function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
+            true), 28)
 
     elseif typeKey == "framealpha" then
         AddWidget(GUI:CreateSlider(parent, "Alpha", 0, 1, 0.05, proxy, "alpha"), 54)
