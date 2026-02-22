@@ -351,29 +351,14 @@ local function ChangeInstanceType(auraName, indicatorID, newType)
     local savedOffX = inst.offsetX
     local savedOffY = inst.offsetY
 
-    -- Wipe everything
+    -- Wipe everything, keep minimal: id + type + placement
+    -- All other settings fall through to global defaults → TYPE_DEFAULTS via proxy
     wipe(inst)
-
-    -- Apply new type defaults
-    local defaults = TYPE_DEFAULTS[newType]
-    if defaults then
-        for k, v in pairs(defaults) do
-            if type(v) == "table" then
-                local copy = {}
-                for ck, cv in pairs(v) do copy[ck] = cv end
-                inst[k] = copy
-            else
-                inst[k] = v
-            end
-        end
-    end
-
-    -- Restore identity and placement
     inst.id = savedID
     inst.type = newType
-    if savedAnchor then inst.anchor = savedAnchor end
-    if savedOffX then inst.offsetX = savedOffX end
-    if savedOffY then inst.offsetY = savedOffY end
+    inst.anchor = savedAnchor or (TYPE_DEFAULTS[newType] and TYPE_DEFAULTS[newType].anchor) or "TOPLEFT"
+    inst.offsetX = savedOffX or 0
+    inst.offsetY = savedOffY or 0
 end
 
 -- Forward declaration: lightweight preview refresh (defined after RefreshPreviewEffects)
