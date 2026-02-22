@@ -5,8 +5,27 @@ local addonName, DF = ...
 -- Contains frame creation functions
 -- ============================================================
 
--- Binding tooltip (separate frame showing click-cast bindings on unit hover)
+-- ============================================================
+-- BINDING TOOLTIP
+-- Separate tooltip showing click-cast bindings on unit frame hover.
+-- Spell usability / cooldown shown out of combat only (secret values).
+-- ============================================================
+
 local issecretvalue = issecretvalue or function() return false end
+local pairs, ipairs = pairs, ipairs
+local wipe = wipe
+local format = string.format
+local tinsert = table.insert
+local tsort = table.sort
+local ceil = math.ceil
+local InCombatLockdown = InCombatLockdown
+local UnitExists = UnitExists
+local UnitIsDeadOrGhost = UnitIsDeadOrGhost
+local GetTime = GetTime
+local IsShiftKeyDown = IsShiftKeyDown
+local IsControlKeyDown = IsControlKeyDown
+local IsAltKeyDown = IsAltKeyDown
+
 local bindingTooltip = CreateFrame("GameTooltip", "DFBindingTooltip", UIParent, "GameTooltipTemplate")
 bindingTooltip:SetFrameStrata("TOOLTIP")
 if bindingTooltip.NineSlice then
@@ -26,30 +45,72 @@ local BINDING_SORT_ORDER = {
     Button13 = 13, Button14 = 14, Button15 = 15, Button16 = 16,
 }
 
-local function GetActiveModifier()
+-- Pre-allocated table for tooltip lines (wiped each call)
+local lines = {}
+
+local function getActiveModifier()
     if IsShiftKeyDown() then return "SHIFT"
     elseif IsControlKeyDown() then return "CTRL"
     elseif IsAltKeyDown() then return "ALT"
     else return "" end
 end
 
-local function BindingMatchesMod(binding, activeMod)
+local function bindingMatchesMod(binding, activeMod)
     local mods = binding.modifiers and binding.modifiers:upper() or ""
     if activeMod == "" then return mods == "" end
     return mods:find(activeMod) ~= nil
 end
 
+-- Position the binding tooltip based on settings (mirrors PositionFrameTooltip pattern)
+local function positionBindingTooltip(anchorFrame, db)
+    local anchor = db.tooltipBindingAnchor or "FRAME"
+    local anchorPos = db.tooltipBindingAnchorPos or "TOPRIGHT"
+    local offsetX = db.tooltipBindingX or 4
+    local offsetY = db.tooltipBindingY or 0
+
+    bindingTooltip:ClearAllPoints()
+    if anchor == "CURSOR" then
+        -- Approximate cursor-follow by anchoring to cursor position
+        local cursorX, cursorY = GetCursorPosition()
+        local scale = UIParent:GetEffectiveScale()
+        bindingTooltip:SetOwner(anchorFrame, "ANCHOR_NONE")
+        bindingTooltip:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", cursorX / scale + offsetX, cursorY / scale + offsetY)
+    elseif anchor == "FRAME" then
+        bindingTooltip:SetOwner(anchorFrame, "ANCHOR_NONE")
+        -- Use opposite anchor so tooltip appears on the correct side
+        local opposites = {
+            TOPLEFT = "BOTTOMRIGHT", TOP = "BOTTOM", TOPRIGHT = "BOTTOMLEFT",
+            LEFT = "RIGHT", CENTER = "CENTER", RIGHT = "LEFT",
+            BOTTOMLEFT = "TOPRIGHT", BOTTOM = "TOP", BOTTOMRIGHT = "TOPLEFT",
+        }
+        local tooltipAnchor = opposites[anchorPos] or "BOTTOMLEFT"
+        bindingTooltip:SetPoint(tooltipAnchor, anchorFrame, anchorPos, offsetX, offsetY)
+    else
+        -- DEFAULT — anchor to top-right of frame
+        bindingTooltip:SetOwner(anchorFrame, "ANCHOR_NONE")
+        bindingTooltip:SetPoint("TOPLEFT", anchorFrame, "TOPRIGHT", 4, 0)
+    end
+end
+
 function DF:ShowBindingTooltip(anchorFrame)
     local CC = DF.ClickCast
     if not CC or not CC.db or not CC.db.bindings then return end
-    if not CC.db.options or not CC.db.options.showBindingTooltip then return end
-    local activeMod = GetActiveModifier()
-    bindingTooltip:ClearLines()
-    bindingTooltip:SetOwner(anchorFrame, "ANCHOR_NONE")
-    bindingTooltip:ClearAllPoints()
-    bindingTooltip:SetPoint("TOPLEFT", anchorFrame, "TOPRIGHT", 4, 0)
-    local lines = {}
+
+    -- Read settings from frame db (party/raid independent)
+    local db = DF.GetFrameDB and DF:GetFrameDB(anchorFrame) or (anchorFrame.isRaidFrame and DF:GetRaidDB() or DF:GetDB())
+    if not db.tooltipBindingEnabled then return end
+
     local inCombat = InCombatLockdown()
+    if db.tooltipBindingDisableInCombat and inCombat then
+        bindingTooltip:Hide()
+        bindingTooltip.anchorFrame = nil
+        return
+    end
+
+    local activeMod = getActiveModifier()
+    bindingTooltip:ClearLines()
+    positionBindingTooltip(anchorFrame, db)
+    wipe(lines)
     local unit = anchorFrame.unit
     local isDead = false
     if anchorFrame.dfIsTestFrame then
@@ -62,7 +123,7 @@ function DF:ShowBindingTooltip(anchorFrame)
     local smartResMode = CC.db.options and CC.db.options.smartResurrection or "disabled"
     local resSpells = smartResMode ~= "disabled" and CC.GetPlayerResurrectionSpells and CC:GetPlayerResurrectionSpells() or nil
     for _, binding in ipairs(CC.db.bindings) do
-        if binding.enabled ~= false and BindingMatchesMod(binding, activeMod) then
+        if binding.enabled ~= false and bindingMatchesMod(binding, activeMod) then
             local keyName
             local sortKey = 99
             if binding.bindType == "mouse" then
@@ -133,7 +194,7 @@ function DF:ShowBindingTooltip(anchorFrame)
                         r, g, b = usable and 0 or 1, usable and 1 or 0, 0
                     end
                     if cdLeft > 0 then
-                        suffix = " (" .. math.ceil(cdLeft) .. "s)"
+                        suffix = " (" .. ceil(cdLeft) .. "s)"
                     end
                 end
             end
@@ -144,11 +205,11 @@ function DF:ShowBindingTooltip(anchorFrame)
             end
             -- Dead check (works in and out of combat, skip if Smart Res overrode)
             if isDead and not smartResApplied then r, g, b = 1, 0, 0; suffix = " (DEAD)" end
-            local hex = string.format("|cff%02x%02x%02x", r * 255, g * 255, b * 255)
-            table.insert(lines, {text = keyName .. ": " .. hex .. action .. suffix .. "|r", sort = sortKey, smartRes = smartResApplied})
+            local hex = format("|cff%02x%02x%02x", r * 255, g * 255, b * 255)
+            tinsert(lines, {text = keyName .. ": " .. hex .. action .. suffix .. "|r", sort = sortKey, smartRes = smartResApplied})
         end
     end
-    table.sort(lines, function(a, b) return a.sort < b.sort end)
+    tsort(lines, function(a, b) return a.sort < b.sort end)
     local smartResShown = false
     for _, line in ipairs(lines) do
         if line.smartRes and smartResShown then

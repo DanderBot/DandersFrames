@@ -439,11 +439,40 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         defOffsetY.disableOn = function(d) return d.tooltipDefensiveAnchor ~= "FRAME" end
         
         Add(defTooltipGroup, nil, 2)
-        
+
+        -- Sync point: align row 3
+        AddSyncPoint()
+
+        -- ===== ROW 3: Binding Tooltips =====
+
+        -- Binding Tooltips (Column 1)
+        local bindTooltipGroup = GUI:CreateSettingsGroup(self.child, 280)
+        bindTooltipGroup:AddWidget(GUI:CreateHeader(self.child, "Binding Tooltips"), 40)
+        bindTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, "Enable Binding Tooltips", db, "tooltipBindingEnabled", nil), 30)
+        bindTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, "Disable in Combat", db, "tooltipBindingDisableInCombat", function() end), 30)
+
+        local bindAnchorValues = {
+            DEFAULT = "Game Default",
+            CURSOR = "Cursor",
+            FRAME = "Unit Frame",
+        }
+        bindTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, "Anchor To", bindAnchorValues, db, "tooltipBindingAnchor", function() GUI:RefreshCurrentPage() end), 55)
+
+        local bindAnchorPos = bindTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, "Anchor Position", anchorPositionValues, db, "tooltipBindingAnchorPos", function() end), 55)
+        bindAnchorPos.disableOn = function(d) return d.tooltipBindingAnchor == "DEFAULT" end
+
+        local bindOffsetX = bindTooltipGroup:AddWidget(GUI:CreateSlider(self.child, "X Offset", -100, 100, 1, db, "tooltipBindingX", function() end), 55)
+        bindOffsetX.disableOn = function(d) return d.tooltipBindingAnchor ~= "FRAME" end
+
+        local bindOffsetY = bindTooltipGroup:AddWidget(GUI:CreateSlider(self.child, "Y Offset", -100, 100, 1, db, "tooltipBindingY", function() end), 55)
+        bindOffsetY.disableOn = function(d) return d.tooltipBindingAnchor ~= "FRAME" end
+
+        Add(bindTooltipGroup, nil, 1)
+
         -- Sync point before See Also
         AddSyncPoint()
         AddSpace(20, "both")
-        
+
         -- See Also links
         Add(GUI:CreateSeeAlso(self.child, {
             {pageId = "auras_buffs", label = "Buffs"},
