@@ -190,6 +190,11 @@ local function EnsureTypeConfig(auraName, typeKey)
                 showSpark = true,
                 -- Alpha
                 alpha = 1.0,
+                -- Bar color by time
+                barColorByTime = false,
+                -- Expiring color
+                expiringEnabled = false, expiringThreshold = 5,
+                expiringColor = {r = 1, g = 0.2, b = 0.2, a = 1},
                 -- Duration text
                 showDuration = true, durationFont = "Fonts\\FRIZQT__.TTF",
                 durationScale = 1.0, durationOutline = "OUTLINE",
@@ -268,6 +273,9 @@ local TYPE_DEFAULTS = {
         borderColor = {r = 0, g = 0, b = 0, a = 1},
         showSpark = true,
         alpha = 1.0,
+        barColorByTime = false,
+        expiringEnabled = false, expiringThreshold = 5,
+        expiringColor = {r = 1, g = 0.2, b = 0.2, a = 1},
         showDuration = true, durationFont = "Fonts\\FRIZQT__.TTF",
         durationScale = 1.0, durationOutline = "OUTLINE",
         durationAnchor = "CENTER", durationX = 0, durationY = 0,
@@ -1321,6 +1329,17 @@ local function BuildTypeContent(parent, typeKey, auraName, width)
         AddDivider()
         -- Spark
         AddWidget(GUI:CreateCheckbox(parent, "Show Spark", proxy, "showSpark"), 28)
+        AddDivider()
+        -- Bar color by time
+        AddWidget(GUI:CreateCheckbox(parent, "Color Bar by Duration", proxy, "barColorByTime"), 28)
+        AddDivider()
+        -- Expiring color
+        AddWidget(GUI:CreateCheckbox(parent, "Expiring Color Override", proxy, "expiringEnabled"), 28)
+        AddWidget(GUI:CreateSlider(parent, "Expiring Threshold (sec)", 1, 30, 1, proxy, "expiringThreshold"), 54)
+        AddWidget(GUI:CreateColorPicker(parent, "Expiring Color", proxy, "expiringColor", true,
+            function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
+            function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
+            true), 28)
         AddDivider()
         -- Duration text
         AddWidget(GUI:CreateCheckbox(parent, "Show Duration Text", proxy, "showDuration"), 28)

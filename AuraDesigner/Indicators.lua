@@ -987,6 +987,32 @@ local function CreateADBar(frame, auraName)
         local pct = min(1, remaining / self.dfAD_duration)
         self:SetValue(pct)
 
+        -- Color the bar fill by remaining time (green → yellow → orange → red)
+        if self.dfAD_barColorByTime then
+            local r, g, b
+            if pct < 0.3 then
+                local t = pct / 0.3
+                r, g, b = 1, 0.5 * t, 0
+            elseif pct < 0.5 then
+                local t = (pct - 0.3) / 0.2
+                r, g, b = 1, 0.5 + 0.5 * t, 0
+            else
+                local t = (pct - 0.5) / 0.5
+                r, g, b = 1 - t, 1, 0
+            end
+            self:SetStatusBarColor(r, g, b, 1)
+        end
+
+        -- Expiring color override: when remaining drops below threshold, use the expiring color
+        if self.dfAD_expiringEnabled and self.dfAD_expiringThreshold then
+            if remaining <= self.dfAD_expiringThreshold and remaining > 0 then
+                local ec = self.dfAD_expiringColor
+                if ec then
+                    self:SetStatusBarColor(ec.r, ec.g, ec.b, 1)
+                end
+            end
+        end
+
         -- Update spark position
         if self.spark and self.spark:IsShown() then
             local orient = self:GetOrientation()
@@ -1083,6 +1109,18 @@ function Indicators:ApplyBar(frame, config, auraData, defaults, auraName)
     if bgColor and bar.bg then
         bar.bg:SetVertexColor(bgColor[1] or bgColor.r or 0, bgColor[2] or bgColor.g or 0, bgColor[3] or bgColor.b or 0, bgColor[4] or bgColor.a or 0.5)
     end
+
+    -- Bar color by time (stored for OnUpdate to read)
+    local barColorByTime = config.barColorByTime
+    if barColorByTime == nil then barColorByTime = false end
+    bar.dfAD_barColorByTime = barColorByTime
+
+    -- Expiring color (stored for OnUpdate to read)
+    local expiringEnabled = config.expiringEnabled
+    if expiringEnabled == nil then expiringEnabled = false end
+    bar.dfAD_expiringEnabled = expiringEnabled
+    bar.dfAD_expiringThreshold = config.expiringThreshold or 5
+    bar.dfAD_expiringColor = config.expiringColor
 
     -- ========================================
     -- BORDER
