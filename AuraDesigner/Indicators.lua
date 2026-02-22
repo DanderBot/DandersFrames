@@ -488,11 +488,13 @@ function Indicators:ApplyIcon(frame, config, auraData, defaults, auraName)
         SafeSetTexture(icon, C_Spell.GetSpellTexture(auraData.spellId))
     end
 
-    -- Cooldown swipe
-    local hideSwipe = config.hideSwipe
-    if not hideSwipe and auraData.duration and auraData.duration > 0 and auraData.expirationTime and auraData.expirationTime > 0 then
+    -- Cooldown — always set if we have duration data (needed for countdown text)
+    -- Swipe drawing is independent of showing the cooldown frame
+    local hasDuration = auraData.duration and auraData.duration > 0
+                        and auraData.expirationTime and auraData.expirationTime > 0
+    if hasDuration then
         SafeSetCooldown(icon.cooldown, auraData.expirationTime, auraData.duration)
-        icon.cooldown:SetDrawSwipe(true)
+        icon.cooldown:SetDrawSwipe(not config.hideSwipe)
         icon.cooldown:Show()
     else
         icon.cooldown:SetDrawSwipe(false)
@@ -575,7 +577,7 @@ function Indicators:ApplyIcon(frame, config, auraData, defaults, auraName)
     local durationColorByTime = config.durationColorByTime
     if durationColorByTime == nil then durationColorByTime = true end
 
-    -- Wire settings to icon properties (read by shared aura timer)
+    -- Wire settings to icon properties (read by shared aura timer if registered)
     icon.showDuration = showDuration
     icon.durationColorByTime = durationColorByTime
     icon.durationAnchor = durationAnchor
@@ -583,15 +585,60 @@ function Indicators:ApplyIcon(frame, config, auraData, defaults, auraName)
     icon.durationY = durationY
     icon.cooldown:SetHideCountdownNumbers(not showDuration)
 
-    -- Reset reparent flag so the shared timer can reparent the native text
-    icon.nativeTextReparented = false
+    -- Find native cooldown text if not yet cached (same scan as the shared timer)
+    if not icon.nativeCooldownText and icon.cooldown then
+        local regions = { icon.cooldown:GetRegions() }
+        for _, region in pairs(regions) do
+            if region and region.GetObjectType and region:GetObjectType() == "FontString" then
+                icon.nativeCooldownText = region
+                icon.nativeTextReparented = false
+                break
+            end
+        end
+    end
 
-    -- Style native cooldown text if it exists
+    -- Reparent, style, and position the native countdown text directly
+    -- (AD icons may not be registered with the shared timer, so we do it here)
     if icon.nativeCooldownText then
-        local durationSize = 10 * durationScale
-        DF:SafeSetFont(icon.nativeCooldownText, durationFont, durationSize, durationOutline)
-        icon.nativeCooldownText:ClearAllPoints()
-        icon.nativeCooldownText:SetPoint(durationAnchor, icon, durationAnchor, durationX, durationY)
+        if showDuration then
+            -- Reparent to textOverlay so it draws above cooldown swipe
+            if not icon.nativeTextReparented and icon.textOverlay then
+                icon.nativeCooldownText:SetParent(icon.textOverlay)
+                icon.nativeTextReparented = true
+            end
+            -- Style
+            local durationSize = 10 * durationScale
+            DF:SafeSetFont(icon.nativeCooldownText, durationFont, durationSize, durationOutline)
+            -- Position
+            icon.nativeCooldownText:ClearAllPoints()
+            icon.nativeCooldownText:SetPoint(durationAnchor, icon, durationAnchor, durationX, durationY)
+            icon.nativeCooldownText:Show()
+
+            -- Color by remaining time (green → yellow → orange → red)
+            if durationColorByTime and hasDuration then
+                local remaining = auraData.expirationTime - GetTime()
+                local pct = max(0, min(1, remaining / auraData.duration))
+                local r, g, b
+                if pct < 0.3 then
+                    -- Red to orange
+                    local t = pct / 0.3
+                    r, g, b = 1, 0.5 * t, 0
+                elseif pct < 0.5 then
+                    -- Orange to yellow
+                    local t = (pct - 0.3) / 0.2
+                    r, g, b = 1, 0.5 + 0.5 * t, 0
+                else
+                    -- Yellow to green
+                    local t = (pct - 0.5) / 0.5
+                    r, g, b = 1 - t, 1, 0
+                end
+                icon.nativeCooldownText:SetTextColor(r, g, b, 1)
+            else
+                icon.nativeCooldownText:SetTextColor(1, 1, 1, 1)
+            end
+        else
+            icon.nativeCooldownText:Hide()
+        end
     end
 
     -- ========================================

@@ -2871,6 +2871,23 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
         scrollBar:SetPoint("BOTTOMLEFT", rightScrollFrame, "BOTTOMRIGHT", 2, 16)
     end
 
+    -- Smooth scroll — override default scroll step for smaller increments
+    local SCROLL_STEP = 30
+    rightScrollFrame:SetScript("OnMouseWheel", function(self, delta)
+        local current = self:GetVerticalScroll()
+        local maxScroll = max(0, self:GetVerticalScrollRange())
+        local newScroll = max(0, min(maxScroll, current - (delta * SCROLL_STEP)))
+        self:SetVerticalScroll(newScroll)
+    end)
+    -- Also propagate mouse wheel from the scroll child
+    rightScrollChild:EnableMouseWheel(true)
+    rightScrollChild:SetScript("OnMouseWheel", function(self, delta)
+        local parent = self:GetParent()
+        if parent and parent:GetScript("OnMouseWheel") then
+            parent:GetScript("OnMouseWheel")(parent, delta)
+        end
+    end)
+
     -- ========================================
     -- LEFT CONTENT: TILE STRIP
     -- All left content anchors TOPRIGHT to rightPanel's TOPLEFT
