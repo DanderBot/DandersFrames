@@ -126,23 +126,27 @@ end
 local function EnsureTypeConfig(auraName, typeKey)
     local auraCfg = EnsureAuraConfig(auraName)
     if not auraCfg[typeKey] then
+        -- Read global defaults so new configs inherit user-configured values
+        local adDB = GetAuraDesignerDB()
+        local gd = adDB and adDB.defaults or {}
+
         -- Create default config for each type
         if typeKey == "icon" then
             auraCfg[typeKey] = {
                 -- Placement
                 anchor = "TOPLEFT", offsetX = 0, offsetY = 0,
-                -- Size & appearance
-                size = 24, scale = 1.0, alpha = 1.0,
+                -- Size & appearance (from global defaults)
+                size = gd.iconSize or 24, scale = gd.iconScale or 1.0, alpha = 1.0,
                 -- Border
                 borderEnabled = true, borderThickness = 1, borderInset = 1,
                 hideSwipe = false,
                 -- Duration text
-                showDuration = true, durationFont = "Fonts\\FRIZQT__.TTF",
+                showDuration = gd.showDuration ~= false, durationFont = "Fonts\\FRIZQT__.TTF",
                 durationScale = 1.0, durationOutline = "OUTLINE",
                 durationAnchor = "CENTER", durationX = 0, durationY = 0,
                 durationColorByTime = true,
                 -- Stack count
-                showStacks = true, stackMinimum = 2,
+                showStacks = gd.showStacks ~= false, stackMinimum = 2,
                 stackFont = "Fonts\\FRIZQT__.TTF", stackScale = 1.0,
                 stackOutline = "OUTLINE", stackAnchor = "BOTTOMRIGHT",
                 stackX = 0, stackY = 0,
@@ -151,19 +155,19 @@ local function EnsureTypeConfig(auraName, typeKey)
             auraCfg[typeKey] = {
                 -- Placement
                 anchor = "TOPLEFT", offsetX = 0, offsetY = 0,
-                -- Appearance
-                size = 10, scale = 1.0, alpha = 1.0,
+                -- Appearance (from global defaults)
+                size = gd.iconSize or 24, scale = gd.iconScale or 1.0, alpha = 1.0,
                 color = {r = 1, g = 1, b = 1, a = 1},
                 -- Border
                 showBorder = true, borderThickness = 1, borderInset = 1,
                 hideSwipe = false,
                 -- Duration text
-                showDuration = true, durationFont = "Fonts\\FRIZQT__.TTF",
+                showDuration = gd.showDuration ~= false, durationFont = "Fonts\\FRIZQT__.TTF",
                 durationScale = 1.0, durationOutline = "OUTLINE",
                 durationAnchor = "CENTER", durationX = 0, durationY = 0,
                 durationColorByTime = true,
                 -- Stack count
-                showStacks = true, stackMinimum = 2,
+                showStacks = gd.showStacks ~= false, stackMinimum = 2,
                 stackFont = "Fonts\\FRIZQT__.TTF", stackScale = 1.0,
                 stackOutline = "OUTLINE", stackAnchor = "BOTTOMRIGHT",
                 stackX = 0, stackY = 0,
