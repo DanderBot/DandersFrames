@@ -41,7 +41,11 @@ trim_to_first_section() {
 # ============================================================
 # DETERMINE VERSION AND CHANGELOG CONTENT
 # ============================================================
-CURRENT_TAG=$(git describe --exact-match --tags HEAD 2>/dev/null || echo "")
+if [ -n "${OVERRIDE_TAG:-}" ]; then
+    CURRENT_TAG="$OVERRIDE_TAG"
+else
+    CURRENT_TAG=$(git describe --exact-match --tags HEAD 2>/dev/null || echo "")
+fi
 LAST_TAG=$(git describe --tags --abbrev=0 HEAD 2>/dev/null || echo "v0.0.0")
 
 # Branch pushes must always produce alpha builds, even if a tag exists on HEAD
