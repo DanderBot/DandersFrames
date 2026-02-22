@@ -156,12 +156,32 @@ local function GetSpellIdLookup(spec)
     return lookup
 end
 
+-- Debug throttle for adapter (shares interval with engine)
+local adapterDebugLast = 0
+local ADAPTER_DEBUG_INTERVAL = 3
+
 function FallbackProvider:GetUnitAuras(unit, spec)
     local lookup = GetSpellIdLookup(spec)
     if not lookup or not next(lookup) then return {} end
 
+    local now = GetTime()
+    local shouldLog = (now - adapterDebugLast) >= ADAPTER_DEBUG_INTERVAL
+
+    -- Count lookup entries for debug
+    local lookupSize = 0
+    if shouldLog then
+        for _ in pairs(lookup) do lookupSize = lookupSize + 1 end
+    end
+
     local result = {}
-    AuraUtil.ForEachAura(unit, "HELPFUL", nil, function(auraData)
+    local scannedCount = 0
+
+    -- Try C_UnitAuras index-based scan (more reliable in modern WoW)
+    local i = 1
+    while true do
+        local auraData = C_UnitAuras.GetBuffDataByIndex(unit, i)
+        if not auraData then break end
+        scannedCount = scannedCount + 1
         local auraName = lookup[auraData.spellId]
         if auraName then
             result[auraName] = {
@@ -173,7 +193,24 @@ function FallbackProvider:GetUnitAuras(unit, spec)
                 caster = auraData.sourceUnit,
             }
         end
-    end)
+        i = i + 1
+    end
+
+    if shouldLog then
+        adapterDebugLast = now
+        local foundCount = 0
+        for _ in pairs(result) do foundCount = foundCount + 1 end
+        DF:Debug("AD", "Fallback scan: unit=%s spec=%s lookup=%d scanned=%d found=%d", unit, spec, lookupSize, scannedCount, foundCount)
+        -- Log first few scanned spellIds for verification
+        local j = 1
+        while j <= 5 do
+            local ad = C_UnitAuras.GetBuffDataByIndex(unit, j)
+            if not ad then break end
+            local match = lookup[ad.spellId] and " MATCH" or ""
+            DF:Debug("AD", "  buff[%d]: spellId=%d name=%s%s", j, ad.spellId, ad.name or "?", match)
+            j = j + 1
+        end
+    end
 
     return result
 end

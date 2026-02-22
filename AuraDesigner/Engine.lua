@@ -108,7 +108,7 @@ function Engine:UpdateFrame(frame)
         -- Count active auras from adapter
         local activeCount = 0
         for k in pairs(activeAuras) do activeCount = activeCount + 1 end
-        -- Count configured auras
+        -- Count configured auras and indicator types
         local configCount = 0
         local configTypes = 0
         if adDB.auras then
@@ -119,19 +119,20 @@ function Engine:UpdateFrame(frame)
                 end
             end
         end
-        DF:Debug("AD Engine:", unit, "| spec:", spec, "| active auras:", activeCount, "| configured:", configCount, "| indicator types:", configTypes)
+        local providerName = Adapter:GetSourceName() or "none"
+        DF:Debug("AD", "Engine: unit=%s spec=%s provider=%s active=%d configured=%d types=%d", unit, tostring(spec), providerName, activeCount, configCount, configTypes)
         -- Log active aura names
         for auraName in pairs(activeAuras) do
-            DF:Debug("  active:", auraName)
+            DF:Debug("AD", "  active: %s", auraName)
         end
-        -- Log configured aura names and their types
+        -- Log configured aura names and their indicator types
         if adDB.auras then
             for auraName, auraCfg in pairs(adDB.auras) do
                 local types = {}
                 for _, typeDef in ipairs(INDICATOR_TYPES) do
                     if auraCfg[typeDef.key] then types[#types+1] = typeDef.key end
                 end
-                DF:Debug("  config:", auraName, "→", table.concat(types, ", "))
+                DF:Debug("AD", "  config: %s -> %s", auraName, #types > 0 and table.concat(types, ", ") or "(no types)")
             end
         end
     end
@@ -167,7 +168,7 @@ function Engine:UpdateFrame(frame)
     end
 
     if shouldLog and #activeIndicators > 0 then
-        DF:Debug("AD Engine: dispatching", #activeIndicators, "indicators for", unit)
+        DF:Debug("AD", "Dispatching %d indicators for %s", #activeIndicators, unit)
     end
 
     -- Dispatch to indicator renderers
