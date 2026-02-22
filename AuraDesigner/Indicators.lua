@@ -927,6 +927,10 @@ end
 
 local DEFAULT_BAR_TEXTURE = "Interface\\TargetingFrame\\UI-StatusBar"
 
+-- Cached color curves for bar color-by-time (same approach as Auras.lua expiring system)
+local barDurationColorCurve     -- Linear: red(0%) → orange(30%) → yellow(50%) → green(100%)
+local barExpiringCurves = {}    -- Step curves keyed by threshold %: { [threshold] = curve }
+
 local function CreateADBar(frame, auraName)
     local bar = CreateFrame("StatusBar", nil, frame.contentOverlay or frame)
     bar:SetSize(60, 6)
@@ -976,7 +980,7 @@ local function CreateADBar(frame, auraName)
     bar.dfAD_duration = 0
     bar.dfAD_expirationTime = 0
     bar.dfAD_elapsed = 0
-    bar.dfAD_debugElapsed = 0
+    bar.dfAD_colorElapsed = 0
     bar:SetScript("OnUpdate", function(self, elapsed)
         self.dfAD_elapsed = self.dfAD_elapsed + elapsed
         if self.dfAD_elapsed < 0.03 then return end  -- ~30 fps
@@ -989,49 +993,82 @@ local function CreateADBar(frame, auraName)
         local pct = min(1, remaining / self.dfAD_duration)
         self:SetValue(pct)
 
-        -- Determine bar fill color each tick
-        -- Priority: expiring color > color-by-time > static fill
-        local barR = self.dfAD_fillR or 1
-        local barG = self.dfAD_fillG or 1
-        local barB = self.dfAD_fillB or 1
+        -- ============================================
+        -- BAR COLOR (API-driven, throttled to ~1 FPS)
+        -- ============================================
+        self.dfAD_colorElapsed = self.dfAD_colorElapsed + 0.03
+        if self.dfAD_colorElapsed >= 1.0 then
+            self.dfAD_colorElapsed = 0
 
-        if self.dfAD_barColorByTime then
-            if pct < 0.3 then
-                local t = pct / 0.3
-                barR, barG, barB = 1, 0.5 * t, 0
-            elseif pct < 0.5 then
-                local t = (pct - 0.3) / 0.2
-                barR, barG, barB = 1, 0.5 + 0.5 * t, 0
-            else
-                local t = (pct - 0.5) / 0.5
-                barR, barG, barB = 1 - t, 1, 0
-            end
-        end
+            local unit = self.dfAD_unit
+            local auraInstanceID = self.dfAD_auraInstanceID
+            local needsColor = self.dfAD_barColorByTime or self.dfAD_expiringEnabled
 
-        -- Expiring color override takes highest priority
-        if self.dfAD_expiringEnabled and self.dfAD_expiringThreshold then
-            local thresholdPct = self.dfAD_expiringThreshold / 100
-            if pct <= thresholdPct and pct > 0 then
-                local ec = self.dfAD_expiringColor
-                if ec then
-                    barR, barG, barB = ec.r or 1, ec.g or 0.2, ec.b or 0.2
+            if needsColor and unit and auraInstanceID
+               and C_UnitAuras and C_UnitAuras.GetAuraDuration then
+
+                local durationObj = C_UnitAuras.GetAuraDuration(unit, auraInstanceID)
+                local useAPI = durationObj and durationObj.EvaluateRemainingPercent
+
+                if useAPI and C_CurveUtil and C_CurveUtil.CreateColorCurve then
+                    local barR = self.dfAD_fillR or 1
+                    local barG = self.dfAD_fillG or 1
+                    local barB = self.dfAD_fillB or 1
+
+                    -- Color by duration (green → yellow → orange → red)
+                    if self.dfAD_barColorByTime then
+                        if not barDurationColorCurve then
+                            barDurationColorCurve = C_CurveUtil.CreateColorCurve()
+                            barDurationColorCurve:SetType(Enum.LuaCurveType.Linear)
+                            barDurationColorCurve:AddPoint(0, CreateColor(1, 0, 0, 1))
+                            barDurationColorCurve:AddPoint(0.3, CreateColor(1, 0.5, 0, 1))
+                            barDurationColorCurve:AddPoint(0.5, CreateColor(1, 1, 0, 1))
+                            barDurationColorCurve:AddPoint(1, CreateColor(0, 1, 0, 1))
+                        end
+                        local result = durationObj:EvaluateRemainingPercent(barDurationColorCurve)
+                        if result then
+                            if result.GetRGB then
+                                barR, barG, barB = result:GetRGB()
+                            elseif result.r then
+                                barR, barG, barB = result.r, result.g, result.b
+                            end
+                        end
+                    end
+
+                    -- Expiring color override: step curve at threshold %
+                    if self.dfAD_expiringEnabled and self.dfAD_expiringThreshold then
+                        local threshold = self.dfAD_expiringThreshold
+                        if not barExpiringCurves[threshold] then
+                            local curve = C_CurveUtil.CreateColorCurve()
+                            curve:SetType(Enum.LuaCurveType.Step)
+                            curve:AddPoint(0, CreateColor(1, 1, 1, 1))
+                            curve:AddPoint(threshold / 100, CreateColor(0, 0, 0, 0))
+                            curve:AddPoint(1, CreateColor(0, 0, 0, 0))
+                            barExpiringCurves[threshold] = curve
+                        end
+                        local expResult = durationObj:EvaluateRemainingPercent(barExpiringCurves[threshold])
+                        if expResult then
+                            local expiringAlpha = 0
+                            if expResult.GetAlpha then
+                                expiringAlpha = expResult:GetAlpha()
+                            elseif expResult.a ~= nil then
+                                expiringAlpha = expResult.a
+                            end
+                            -- Alpha > 0 means we're in the expiring zone
+                            if expiringAlpha > 0 then
+                                local ec = self.dfAD_expiringColor
+                                if ec then
+                                    barR = ec.r or 1
+                                    barG = ec.g or 0.2
+                                    barB = ec.b or 0.2
+                                end
+                            end
+                        end
+                    end
+
+                    self:SetStatusBarColor(barR, barG, barB, 1)
                 end
             end
-        end
-
-        self:SetStatusBarColor(barR, barG, barB, 1)
-
-        -- Throttled debug: log every 2 seconds
-        self.dfAD_debugElapsed = (self.dfAD_debugElapsed or 0) + 0.03
-        if self.dfAD_debugElapsed >= 2 then
-            self.dfAD_debugElapsed = 0
-            DF:Debug("AD", "Bar OnUpdate: pct=%.2f rem=%.1f dur=%.0f colorByTime=%s expiring=%s threshold=%s fill=(%.2f,%.2f,%.2f) setColor=(%.2f,%.2f,%.2f)",
-                pct, remaining, self.dfAD_duration,
-                tostring(self.dfAD_barColorByTime),
-                tostring(self.dfAD_expiringEnabled),
-                tostring(self.dfAD_expiringThreshold),
-                self.dfAD_fillR or -1, self.dfAD_fillG or -1, self.dfAD_fillB or -1,
-                barR, barG, barB)
         end
 
         -- Update spark position
@@ -1139,12 +1176,16 @@ function Indicators:ApplyBar(frame, config, auraData, defaults, auraName)
     if expiringEnabled == nil then expiringEnabled = false end
     bar.dfAD_expiringEnabled = expiringEnabled
     bar.dfAD_expiringThreshold = config.expiringThreshold or 30
-    bar.dfAD_expiringColor = config.expiringColor
+    bar.dfAD_expiringColor = config.expiringColor or { r = 1, g = 0.2, b = 0.2 }
 
-    DF:Debug("AD", "ApplyBar: aura=%s barColorByTime=%s expiring=%s threshold=%s fill=(%.2f,%.2f,%.2f) dur=%.1f exp=%.1f",
+    -- Store unit + auraInstanceID for API-based color evaluation
+    bar.dfAD_unit = frame.unit
+    bar.dfAD_auraInstanceID = auraData.auraInstanceID
+
+    DF:Debug("AD", "ApplyBar: aura=%s colorByTime=%s expiring=%s threshold=%s unit=%s auraID=%s fill=(%.2f,%.2f,%.2f)",
         tostring(auraName), tostring(barColorByTime), tostring(expiringEnabled),
-        tostring(config.expiringThreshold), fillR, fillG, fillB,
-        auraData.duration or 0, auraData.expirationTime or 0)
+        tostring(config.expiringThreshold), tostring(frame.unit), tostring(auraData.auraInstanceID),
+        fillR, fillG, fillB)
 
     -- Store base fill color for OnUpdate fallback
     bar.dfAD_fillR = fillR
