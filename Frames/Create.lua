@@ -2184,15 +2184,18 @@ function DF:CreateAuraIcon(parent, index, auraType)
     -- SetMouseClickEnabled(false): This frame itself does not consume clicks
     -- Together these allow tooltips on hover while the PARENT receives all clicks for bindings
     -- This matches Grid2's approach (IndicatorMidnightTooltip.lua:EnableFrameTooltips)
-    icon:EnableMouse(true)
-    if icon.SetPropagateMouseMotion then
-        icon:SetPropagateMouseMotion(true)
-    end
-    if icon.SetPropagateMouseClicks then
-        icon:SetPropagateMouseClicks(true)
-    end
-    if icon.SetMouseClickEnabled then
-        icon:SetMouseClickEnabled(false)
+    -- Guarded: these are protected functions that can't be called in combat
+    if not InCombatLockdown() then
+        icon:EnableMouse(true)
+        if icon.SetPropagateMouseMotion then
+            icon:SetPropagateMouseMotion(true)
+        end
+        if icon.SetPropagateMouseClicks then
+            icon:SetPropagateMouseClicks(true)
+        end
+        if icon.SetMouseClickEnabled then
+            icon:SetMouseClickEnabled(false)
+        end
     end
     
     -- Store parent frame name for secure binding setup
