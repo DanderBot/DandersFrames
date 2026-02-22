@@ -1097,11 +1097,21 @@ local function CreateADBar(frame, auraName)
     bar.textOverlay:SetFrameLevel(bar:GetFrameLevel() + 5)
     bar.textOverlay:EnableMouse(false)
 
-    -- Duration text
+    -- Duration text (manual, for preview)
     bar.duration = bar.textOverlay:CreateFontString(nil, "OVERLAY")
     bar.duration:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
     bar.duration:SetPoint("CENTER", 0, 0)
     bar.duration:SetTextColor(1, 1, 1)
+
+    -- Cooldown frame for native countdown text in combat (secret-safe)
+    -- Invisible swipe — we only use its built-in countdown FontString
+    bar.durationCooldown = CreateFrame("Cooldown", nil, bar.textOverlay, "CooldownFrameTemplate")
+    bar.durationCooldown:SetAllPoints(bar)
+    bar.durationCooldown:SetDrawSwipe(false)
+    bar.durationCooldown:SetDrawEdge(false)
+    bar.durationCooldown:SetDrawBling(false)
+    bar.durationCooldown:SetHideCountdownNumbers(false)
+    bar.durationCooldown:Hide()
 
     -- OnUpdate: handles bar color + preview-only value/text/spark
     -- Real unit bars use SetTimerDuration for fill (no manual arithmetic needed).
@@ -1366,8 +1376,26 @@ function Indicators:ApplyBar(frame, config, auraData, defaults, auraName)
         bar.dfAD_colorCurve = nil
     end
 
-    -- Set initial bar color (applying color-by-time / expiring right away)
-    bar:SetStatusBarColor(fillR, fillG, fillB, 1)
+    -- Set initial bar color
+    -- When a color curve exists, evaluate it immediately to avoid flicker
+    -- (ApplyBar runs on every HARF callback; without this, the fill color
+    -- would flash briefly until the throttled OnUpdate re-evaluates the curve)
+    if bar.dfAD_colorCurve and frame.unit and auraData.auraInstanceID
+       and C_UnitAuras and C_UnitAuras.GetAuraDuration then
+        local durationObj = C_UnitAuras.GetAuraDuration(frame.unit, auraData.auraInstanceID)
+        if durationObj and durationObj.EvaluateRemainingPercent then
+            local result = durationObj:EvaluateRemainingPercent(bar.dfAD_colorCurve)
+            if result and result.GetRGB then
+                bar:SetStatusBarColor(result:GetRGB())
+            else
+                bar:SetStatusBarColor(fillR, fillG, fillB, 1)
+            end
+        else
+            bar:SetStatusBarColor(fillR, fillG, fillB, 1)
+        end
+    else
+        bar:SetStatusBarColor(fillR, fillG, fillB, 1)
+    end
 
     -- ========================================
     -- BORDER
@@ -1487,11 +1515,71 @@ function Indicators:ApplyBar(frame, config, auraData, defaults, auraName)
     -- Store color-by-time flag for OnUpdate to read
     bar.dfAD_durationColorByTime = durationColorByTime
 
-    if bar.duration then
-        if showDuration and hasDuration and not usedTimerDuration then
-            -- Duration text only works in preview (manual arithmetic on non-secret values)
-            -- When SetTimerDuration is active (real unit), text formatting would fail with secrets
-            local durationSize = 10 * durationScale
+    if showDuration and hasDuration then
+        local durationSize = 10 * durationScale
+
+        if usedTimerDuration and bar.durationCooldown then
+            -- COMBAT PATH: Use native cooldown countdown text (secret-safe)
+            -- The cooldown frame handles formatting and updating automatically
+            bar.duration:Hide()
+
+            -- Set the cooldown with the same Duration object
+            local durationObj = C_UnitAuras.GetAuraDuration(frame.unit, auraData.auraInstanceID)
+            if durationObj then
+                bar.durationCooldown:SetCooldownFromDurationObject(durationObj)
+                bar.durationCooldown:Show()
+            end
+
+            -- Find native cooldown text if not yet cached
+            if not bar.nativeCooldownText then
+                local regions = { bar.durationCooldown:GetRegions() }
+                for _, region in pairs(regions) do
+                    if region and region.GetObjectType and region:GetObjectType() == "FontString" then
+                        bar.nativeCooldownText = region
+                        bar.nativeTextReparented = false
+                        break
+                    end
+                end
+            end
+
+            -- Style and position the native countdown text
+            if bar.nativeCooldownText then
+                if not bar.nativeTextReparented and bar.textOverlay then
+                    bar.nativeCooldownText:SetParent(bar.textOverlay)
+                    bar.nativeTextReparented = true
+                end
+                DF:SafeSetFont(bar.nativeCooldownText, durationFont, durationSize, durationOutline)
+                bar.nativeCooldownText:ClearAllPoints()
+                bar.nativeCooldownText:SetPoint(durationAnchor, bar, durationAnchor, durationX, durationY)
+                bar.nativeCooldownText:Show()
+
+                if not durationColorByTime then
+                    bar.nativeCooldownText:SetTextColor(1, 1, 1, 1)
+                elseif durationObj and durationObj.EvaluateRemainingPercent then
+                    if not DF.durationColorCurve then
+                        DF.durationColorCurve = C_CurveUtil.CreateColorCurve()
+                        DF.durationColorCurve:SetType(Enum.LuaCurveType.Linear)
+                        DF.durationColorCurve:AddPoint(0, CreateColor(1, 0, 0, 1))
+                        DF.durationColorCurve:AddPoint(0.3, CreateColor(1, 0.5, 0, 1))
+                        DF.durationColorCurve:AddPoint(0.5, CreateColor(1, 1, 0, 1))
+                        DF.durationColorCurve:AddPoint(1, CreateColor(0, 1, 0, 1))
+                    end
+                    local result = durationObj:EvaluateRemainingPercent(DF.durationColorCurve)
+                    if result and result.GetRGB then
+                        bar.nativeCooldownText:SetTextColor(result:GetRGB())
+                    end
+                end
+            end
+
+        elseif bar.duration then
+            -- PREVIEW PATH: Manual FontString (non-secret values)
+            if bar.durationCooldown then
+                bar.durationCooldown:Hide()
+            end
+            if bar.nativeCooldownText then
+                bar.nativeCooldownText:Hide()
+            end
+
             DF:SafeSetFont(bar.duration, durationFont, durationSize, durationOutline)
             bar.duration:ClearAllPoints()
             bar.duration:SetPoint(durationAnchor, bar, durationAnchor, durationX, durationY)
@@ -1513,9 +1601,11 @@ function Indicators:ApplyBar(frame, config, auraData, defaults, auraName)
                 bar.duration:SetTextColor(1, 1, 1, 1)
             end
             bar.duration:Show()
-        else
-            bar.duration:Hide()
         end
+    else
+        if bar.duration then bar.duration:Hide() end
+        if bar.durationCooldown then bar.durationCooldown:Hide() end
+        if bar.nativeCooldownText then bar.nativeCooldownText:Hide() end
     end
 
     -- Ensure mouse doesn't block clicks on the unit frame
