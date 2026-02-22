@@ -295,32 +295,16 @@ local function CreateIndicatorInstance(auraName, typeKey)
         auraCfg.nextIndicatorID = 1
     end
 
-    -- Read global defaults so new instances inherit user-configured values
-    local adDB = GetAuraDesignerDB()
-    local gd = adDB and adDB.defaults or {}
+    -- Only store id, type, and anchor — all other settings fall through
+    -- to global defaults then TYPE_DEFAULTS via CreateInstanceProxy
     local defaults = TYPE_DEFAULTS[typeKey]
 
-    -- Create instance: id + type + all type-specific settings flat
-    local instance = {}
-    if defaults then
-        for k, v in pairs(defaults) do
-            if type(v) == "table" then
-                local copy = {}
-                for ck, cv in pairs(v) do copy[ck] = cv end
-                instance[k] = copy
-            else
-                instance[k] = v
-            end
-        end
-    end
-
-    -- Apply global defaults overrides
-    if typeKey == "icon" or typeKey == "square" then
-        if gd.iconSize then instance.size = gd.iconSize end
-        if gd.iconScale then instance.scale = gd.iconScale end
-        if gd.showDuration ~= nil then instance.showDuration = gd.showDuration end
-        if gd.showStacks ~= nil then instance.showStacks = gd.showStacks end
-    end
+    -- Create minimal instance: just id + type + anchor placement
+    local instance = {
+        anchor = defaults and defaults.anchor or "TOPLEFT",
+        offsetX = 0,
+        offsetY = 0,
+    }
 
     instance.id = auraCfg.nextIndicatorID
     instance.type = typeKey
@@ -396,7 +380,15 @@ end
 -- Called from proxy __newindex so every setting change updates the preview in real-time
 local RefreshPreviewLightweight
 
+-- Global-default key mapping: which global default keys apply to placed types
+local GLOBAL_DEFAULT_MAP = {
+    icon   = { size = "iconSize", scale = "iconScale", showDuration = "showDuration", showStacks = "showStacks" },
+    square = { size = "iconSize", scale = "iconScale", showDuration = "showDuration", showStacks = "showStacks" },
+    bar    = {},
+}
+
 -- Create a proxy table that maps flat key access to an indicator instance
+-- Fallback chain: instance value → global defaults → TYPE_DEFAULTS
 local function CreateInstanceProxy(auraName, indicatorID)
     return setmetatable({}, {
         __index = function(_, k)
@@ -405,8 +397,18 @@ local function CreateInstanceProxy(auraName, indicatorID)
                 local val = inst[k]
                 if val ~= nil then return val end
             end
-            -- Fall back to type defaults
+            -- Fall back to global defaults for applicable keys
             if inst and inst.type then
+                local gdMap = GLOBAL_DEFAULT_MAP[inst.type]
+                if gdMap then
+                    local gdKey = gdMap[k]
+                    if gdKey then
+                        local adDB = GetAuraDesignerDB()
+                        local gd = adDB and adDB.defaults
+                        if gd and gd[gdKey] ~= nil then return gd[gdKey] end
+                    end
+                end
+                -- Then fall back to TYPE_DEFAULTS
                 local defaults = TYPE_DEFAULTS[inst.type]
                 if defaults then return defaults[k] end
             end
