@@ -3458,6 +3458,52 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
             end
         end
 
+        -- Migrate Aura Designer from type-keyed to instance-based format (v4.1.x)
+        -- Old format: auraCfg.icon = { anchor = ..., size = ... }
+        -- New format: auraCfg.indicators = { { id = 1, type = "icon", anchor = ..., size = ... } }
+        local AD_PLACED_TYPE_KEYS = { "icon", "square", "bar" }
+
+        local function MigrateAuraDesignerToInstances(modeDb)
+            local adDB = modeDb and modeDb.auraDesigner
+            if not adDB or not adDB.auras then return end
+
+            for auraName, auraCfg in pairs(adDB.auras) do
+                if not auraCfg.indicators then
+                    local indicators = {}
+                    local nextID = 1
+                    for _, typeKey in ipairs(AD_PLACED_TYPE_KEYS) do
+                        if auraCfg[typeKey] then
+                            local instance = DF:DeepCopy(auraCfg[typeKey])
+                            instance.id = nextID
+                            instance.type = typeKey
+                            indicators[#indicators + 1] = instance
+                            nextID = nextID + 1
+                            auraCfg[typeKey] = nil
+                        end
+                    end
+                    if #indicators > 0 then
+                        auraCfg.indicators = indicators
+                    end
+                    auraCfg.nextIndicatorID = nextID
+                end
+            end
+        end
+
+        -- Expose for use after profile imports
+        DF.MigrateAuraDesignerToInstances = MigrateAuraDesignerToInstances
+
+        -- Migrate current profile
+        MigrateAuraDesignerToInstances(DF.db.party)
+        MigrateAuraDesignerToInstances(DF.db.raid)
+
+        -- Migrate all profiles
+        if DandersFramesDB_v2 and DandersFramesDB_v2.profiles then
+            for profileName, profile in pairs(DandersFramesDB_v2.profiles) do
+                MigrateAuraDesignerToInstances(profile.party)
+                MigrateAuraDesignerToInstances(profile.raid)
+            end
+        end
+
         -- Recover from crash/disconnect during auto layout editing.
         -- If the recovery flag exists, the previous session was editing an auto layout
         -- when it crashed — _realRaidDB may still contain override values baked in.

@@ -46,6 +46,14 @@ local INDICATOR_TYPES = {
     { key = "framealpha", placed = false },
 }
 
+-- Frame-level types only (for gathering loop — placed types come from indicators array)
+local FRAME_LEVEL_TYPES = {}
+for _, typeDef in ipairs(INDICATOR_TYPES) do
+    if not typeDef.placed then
+        FRAME_LEVEL_TYPES[#FRAME_LEVEL_TYPES + 1] = typeDef
+    end
+end
+
 -- ============================================================
 -- REUSABLE TABLES (avoid per-frame allocation)
 -- ============================================================
@@ -188,31 +196,39 @@ function Engine:UpdateFrame(frame)
         -- Count active auras from adapter
         local activeCount = 0
         for k in pairs(activeAuras) do activeCount = activeCount + 1 end
-        -- Count configured auras and indicator types
+        -- Count configured auras and indicators
         local configCount = 0
-        local configTypes = 0
+        local configIndicators = 0
         if adDB.auras then
             for auraName, auraCfg in pairs(adDB.auras) do
                 configCount = configCount + 1
-                for _, typeDef in ipairs(INDICATOR_TYPES) do
-                    if auraCfg[typeDef.key] then configTypes = configTypes + 1 end
+                if auraCfg.indicators then
+                    configIndicators = configIndicators + #auraCfg.indicators
+                end
+                for _, typeDef in ipairs(FRAME_LEVEL_TYPES) do
+                    if auraCfg[typeDef.key] then configIndicators = configIndicators + 1 end
                 end
             end
         end
         local providerName = Adapter:GetSourceName() or "none"
-        DF:Debug("AD", "Engine: unit=%s spec=%s provider=%s active=%d configured=%d types=%d", unit, tostring(spec), providerName, activeCount, configCount, configTypes)
+        DF:Debug("AD", "Engine: unit=%s spec=%s provider=%s active=%d configured=%d indicators=%d", unit, tostring(spec), providerName, activeCount, configCount, configIndicators)
         -- Log active aura names
         for auraName in pairs(activeAuras) do
             DF:Debug("AD", "  active: %s", auraName)
         end
-        -- Log configured aura names and their indicator types
+        -- Log configured auras with their indicators
         if adDB.auras then
             for auraName, auraCfg in pairs(adDB.auras) do
                 local types = {}
-                for _, typeDef in ipairs(INDICATOR_TYPES) do
+                if auraCfg.indicators then
+                    for _, ind in ipairs(auraCfg.indicators) do
+                        types[#types+1] = ind.type .. "#" .. ind.id
+                    end
+                end
+                for _, typeDef in ipairs(FRAME_LEVEL_TYPES) do
                     if auraCfg[typeDef.key] then types[#types+1] = typeDef.key end
                 end
-                DF:Debug("AD", "  config: %s -> %s", auraName, #types > 0 and table.concat(types, ", ") or "(no types)")
+                DF:Debug("AD", "  config: %s -> %s", auraName, #types > 0 and table.concat(types, ", ") or "(no indicators)")
             end
         end
     end
@@ -225,13 +241,30 @@ function Engine:UpdateFrame(frame)
             local auraData = activeAuras[auraName]
             if auraData then
                 local priority = auraCfg.priority or 5
-                for _, typeDef in ipairs(INDICATOR_TYPES) do
+
+                -- Placed indicators from instances array
+                if auraCfg.indicators then
+                    for _, indicator in ipairs(auraCfg.indicators) do
+                        tinsert(activeIndicators, {
+                            auraName    = auraName,
+                            instanceKey = auraName .. "#" .. indicator.id,
+                            typeKey     = indicator.type,
+                            placed      = true,
+                            config      = indicator,
+                            auraData    = auraData,
+                            priority    = priority,
+                        })
+                    end
+                end
+
+                -- Frame-level indicators (unchanged keys)
+                for _, typeDef in ipairs(FRAME_LEVEL_TYPES) do
                     local typeCfg = auraCfg[typeDef.key]
                     if typeCfg then
                         tinsert(activeIndicators, {
                             auraName = auraName,
                             typeKey  = typeDef.key,
-                            placed   = typeDef.placed,
+                            placed   = false,
                             config   = typeCfg,
                             auraData = auraData,
                             priority = priority,
@@ -260,7 +293,10 @@ function Engine:UpdateFrame(frame)
     Indicators:BeginFrame(frame)
 
     for _, ind in ipairs(activeIndicators) do
-        Indicators:Apply(frame, ind.typeKey, ind.config, ind.auraData, adDB.defaults, ind.auraName, ind.priority)
+        -- Placed indicators use instanceKey (e.g., "Rejuvenation#1") for pool lookup
+        -- Frame-level indicators use auraName
+        local key = ind.placed and ind.instanceKey or ind.auraName
+        Indicators:Apply(frame, ind.typeKey, ind.config, ind.auraData, adDB.defaults, key, ind.priority)
     end
 
     -- Hide/revert anything not applied this frame

@@ -227,10 +227,6 @@ local function EnsureTypeConfig(auraName, typeKey)
     return auraCfg[typeKey]
 end
 
--- Forward declaration: lightweight preview refresh (defined after RefreshPreviewEffects)
--- Called from proxy __newindex so every setting change updates the preview in real-time
-local RefreshPreviewLightweight
-
 -- Default values per type key, used as fallback when a saved config is missing new keys
 local TYPE_DEFAULTS = {
     icon = {
@@ -282,6 +278,148 @@ local TYPE_DEFAULTS = {
         durationColorByTime = true,
     },
 }
+
+-- ============================================================
+-- INSTANCE-BASED INDICATOR HELPERS
+-- Placed indicators (icon/square/bar) are stored as instances
+-- in auraCfg.indicators[] with stable IDs.
+-- ============================================================
+
+-- Create a new indicator instance for an aura, returns the instance table
+local function CreateIndicatorInstance(auraName, typeKey)
+    local auraCfg = EnsureAuraConfig(auraName)
+    if not auraCfg.indicators then
+        auraCfg.indicators = {}
+    end
+    if not auraCfg.nextIndicatorID then
+        auraCfg.nextIndicatorID = 1
+    end
+
+    -- Read global defaults so new instances inherit user-configured values
+    local adDB = GetAuraDesignerDB()
+    local gd = adDB and adDB.defaults or {}
+    local defaults = TYPE_DEFAULTS[typeKey]
+
+    -- Create instance: id + type + all type-specific settings flat
+    local instance = {}
+    if defaults then
+        for k, v in pairs(defaults) do
+            if type(v) == "table" then
+                local copy = {}
+                for ck, cv in pairs(v) do copy[ck] = cv end
+                instance[k] = copy
+            else
+                instance[k] = v
+            end
+        end
+    end
+
+    -- Apply global defaults overrides
+    if typeKey == "icon" or typeKey == "square" then
+        if gd.iconSize then instance.size = gd.iconSize end
+        if gd.iconScale then instance.scale = gd.iconScale end
+        if gd.showDuration ~= nil then instance.showDuration = gd.showDuration end
+        if gd.showStacks ~= nil then instance.showStacks = gd.showStacks end
+    end
+
+    instance.id = auraCfg.nextIndicatorID
+    instance.type = typeKey
+    auraCfg.nextIndicatorID = auraCfg.nextIndicatorID + 1
+
+    tinsert(auraCfg.indicators, instance)
+    return instance
+end
+
+-- Find an indicator instance by its stable ID
+local function GetIndicatorByID(auraName, indicatorID)
+    local adDB = GetAuraDesignerDB()
+    local auraCfg = adDB.auras[auraName]
+    if not auraCfg or not auraCfg.indicators then return nil end
+    for _, inst in ipairs(auraCfg.indicators) do
+        if inst.id == indicatorID then
+            return inst
+        end
+    end
+    return nil
+end
+
+-- Remove an indicator instance by its stable ID
+local function RemoveIndicatorInstance(auraName, indicatorID)
+    local adDB = GetAuraDesignerDB()
+    local auraCfg = adDB.auras[auraName]
+    if not auraCfg or not auraCfg.indicators then return end
+    for i, inst in ipairs(auraCfg.indicators) do
+        if inst.id == indicatorID then
+            table.remove(auraCfg.indicators, i)
+            return
+        end
+    end
+end
+
+-- Change an instance's type (icon/square/bar), keeping anchor/offset
+local function ChangeInstanceType(auraName, indicatorID, newType)
+    local inst = GetIndicatorByID(auraName, indicatorID)
+    if not inst then return end
+
+    -- Preserve placement
+    local savedID = inst.id
+    local savedAnchor = inst.anchor
+    local savedOffX = inst.offsetX
+    local savedOffY = inst.offsetY
+
+    -- Wipe everything
+    wipe(inst)
+
+    -- Apply new type defaults
+    local defaults = TYPE_DEFAULTS[newType]
+    if defaults then
+        for k, v in pairs(defaults) do
+            if type(v) == "table" then
+                local copy = {}
+                for ck, cv in pairs(v) do copy[ck] = cv end
+                inst[k] = copy
+            else
+                inst[k] = v
+            end
+        end
+    end
+
+    -- Restore identity and placement
+    inst.id = savedID
+    inst.type = newType
+    if savedAnchor then inst.anchor = savedAnchor end
+    if savedOffX then inst.offsetX = savedOffX end
+    if savedOffY then inst.offsetY = savedOffY end
+end
+
+-- Forward declaration: lightweight preview refresh (defined after RefreshPreviewEffects)
+-- Called from proxy __newindex so every setting change updates the preview in real-time
+local RefreshPreviewLightweight
+
+-- Create a proxy table that maps flat key access to an indicator instance
+local function CreateInstanceProxy(auraName, indicatorID)
+    return setmetatable({}, {
+        __index = function(_, k)
+            local inst = GetIndicatorByID(auraName, indicatorID)
+            if inst then
+                local val = inst[k]
+                if val ~= nil then return val end
+            end
+            -- Fall back to type defaults
+            if inst and inst.type then
+                local defaults = TYPE_DEFAULTS[inst.type]
+                if defaults then return defaults[k] end
+            end
+            return nil
+        end,
+        __newindex = function(_, k, v)
+            local inst = GetIndicatorByID(auraName, indicatorID)
+            if not inst then return end
+            inst[k] = v
+            if RefreshPreviewLightweight then RefreshPreviewLightweight() end
+        end,
+    })
+end
 
 -- Create a proxy table that maps flat key access to nested aura config
 local function CreateProxy(auraName, typeKey)
@@ -367,14 +505,21 @@ local function GetAuraIcon(specKey, auraName)
     return nil
 end
 
--- Count active effects for an aura
+-- Count active effects for an aura (instances + frame-level types)
 local function CountActiveEffects(auraName)
     local adDB = GetAuraDesignerDB()
     local auraCfg = adDB.auras[auraName]
     if not auraCfg then return 0 end
     local count = 0
+    -- Count placed indicator instances
+    if auraCfg.indicators then
+        count = count + #auraCfg.indicators
+    end
+    -- Count frame-level types
     for _, typeDef in ipairs(INDICATOR_TYPES) do
-        if auraCfg[typeDef.key] then count = count + 1 end
+        if not typeDef.placed and auraCfg[typeDef.key] then
+            count = count + 1
+        end
     end
     return count
 end
@@ -570,9 +715,9 @@ EndDrag = function()
 
     -- Process the drop
     if auraName and dropAnchor then
-        -- Enable Icon type at this anchor (or update existing)
-        local typeCfg = EnsureTypeConfig(auraName, "icon")
-        typeCfg.anchor = dropAnchor
+        -- Create a new icon indicator instance at the dropped anchor
+        local inst = CreateIndicatorInstance(auraName, "icon")
+        inst.anchor = dropAnchor
 
         -- Select the aura
         selectedAura = auraName
@@ -634,109 +779,101 @@ local function RefreshPlacedIndicators()
         infoLookup[info.name] = info
     end
 
-    -- Iterate all configured auras, find placed types with anchors
+    local Indicators = DF.AuraDesigner and DF.AuraDesigner.Indicators
+    if not Indicators then return end
+
+    -- Iterate all configured auras, find placed indicator instances
     for auraName, auraCfg in pairs(adDB.auras) do
         local info = infoLookup[auraName]
-        if info then
-            for _, typeDef in ipairs(INDICATOR_TYPES) do
-                if typeDef.placed and auraCfg[typeDef.key] then
-                    local typeCfg = auraCfg[typeDef.key]
-                    local Indicators = DF.AuraDesigner and DF.AuraDesigner.Indicators
-                    local capturedAura = auraName
+        if info and auraCfg.indicators then
+            for _, indicator in ipairs(auraCfg.indicators) do
+                local instanceKey = auraName .. "#" .. indicator.id
+                local capturedAura = auraName
+                local capturedID = indicator.id
 
-                    if typeDef.key == "icon" and Indicators then
-                        -- Build mock aura data with the spell's texture
-                        local tex = GetAuraIcon(spec, auraName)
-                        local mockAuraData = {
-                            spellId = info.spellIds and info.spellIds[1] or 0,
-                            icon = tex,
-                            duration = 15,
-                            expirationTime = GetTime() + 10,
-                            stacks = 3,
-                        }
-                        -- Use the real indicator renderer (identical to runtime)
-                        Indicators:ApplyIcon(mockFrame, typeCfg, mockAuraData, adDB.defaults, auraName)
+                if indicator.type == "icon" then
+                    local tex = GetAuraIcon(spec, auraName)
+                    local mockAuraData = {
+                        spellId = info.spellIds and info.spellIds[1] or 0,
+                        icon = tex,
+                        duration = 15,
+                        expirationTime = GetTime() + 10,
+                        stacks = 3,
+                    }
+                    Indicators:ApplyIcon(mockFrame, indicator, mockAuraData, adDB.defaults, instanceKey)
 
-                        -- Retrieve the icon to set up preview interactivity
-                        local iconMap = mockFrame.dfAD_icons
-                        local icon = iconMap and iconMap[auraName]
-                        if icon then
-                            icon:SetFrameLevel(mockFrame:GetFrameLevel() + 8)
-                            -- Re-enable mouse for preview click handlers
-                            icon:EnableMouse(true)
-                            if icon.SetMouseClickEnabled then
-                                icon:SetMouseClickEnabled(true)
+                    local iconMap = mockFrame.dfAD_icons
+                    local icon = iconMap and iconMap[instanceKey]
+                    if icon then
+                        icon:SetFrameLevel(mockFrame:GetFrameLevel() + 8)
+                        icon:EnableMouse(true)
+                        if icon.SetMouseClickEnabled then
+                            icon:SetMouseClickEnabled(true)
+                        end
+                        icon:SetScript("OnMouseUp", function(_, button)
+                            if button == "RightButton" then
+                                RemoveIndicatorInstance(capturedAura, capturedID)
+                                DF:AuraDesigner_RefreshPage()
+                            elseif button == "LeftButton" then
+                                selectedAura = capturedAura
+                                DF:AuraDesigner_RefreshPage()
                             end
-                            icon:SetScript("OnMouseUp", function(_, button)
-                                if button == "RightButton" then
-                                    local cfg = adDB.auras[capturedAura]
-                                    if cfg then cfg.icon = nil end
-                                    DF:AuraDesigner_RefreshPage()
-                                elseif button == "LeftButton" then
-                                    selectedAura = capturedAura
-                                    DF:AuraDesigner_RefreshPage()
-                                end
-                            end)
-                            tinsert(placedIndicators, icon)
-                        end
+                        end)
+                        tinsert(placedIndicators, icon)
+                    end
 
-                    elseif typeDef.key == "square" and Indicators then
-                        -- Build mock aura data for square
-                        local mockAuraData = {
-                            spellId = info.spellIds and info.spellIds[1] or 0,
-                            icon = GetAuraIcon(spec, auraName),
-                            duration = 15,
-                            expirationTime = GetTime() + 10,
-                            stacks = 3,
-                        }
-                        Indicators:ApplySquare(mockFrame, typeCfg, mockAuraData, adDB.defaults, auraName)
+                elseif indicator.type == "square" then
+                    local mockAuraData = {
+                        spellId = info.spellIds and info.spellIds[1] or 0,
+                        icon = GetAuraIcon(spec, auraName),
+                        duration = 15,
+                        expirationTime = GetTime() + 10,
+                        stacks = 3,
+                    }
+                    Indicators:ApplySquare(mockFrame, indicator, mockAuraData, adDB.defaults, instanceKey)
 
-                        local sqMap = mockFrame.dfAD_squares
-                        local sq = sqMap and sqMap[auraName]
-                        if sq then
-                            sq:SetFrameLevel(mockFrame:GetFrameLevel() + 8)
-                            sq:EnableMouse(true)
-                            sq:SetScript("OnMouseUp", function(_, button)
-                                if button == "RightButton" then
-                                    local cfg = adDB.auras[capturedAura]
-                                    if cfg then cfg.square = nil end
-                                    DF:AuraDesigner_RefreshPage()
-                                elseif button == "LeftButton" then
-                                    selectedAura = capturedAura
-                                    DF:AuraDesigner_RefreshPage()
-                                end
-                            end)
-                            tinsert(placedIndicators, sq)
-                        end
+                    local sqMap = mockFrame.dfAD_squares
+                    local sq = sqMap and sqMap[instanceKey]
+                    if sq then
+                        sq:SetFrameLevel(mockFrame:GetFrameLevel() + 8)
+                        sq:EnableMouse(true)
+                        sq:SetScript("OnMouseUp", function(_, button)
+                            if button == "RightButton" then
+                                RemoveIndicatorInstance(capturedAura, capturedID)
+                                DF:AuraDesigner_RefreshPage()
+                            elseif button == "LeftButton" then
+                                selectedAura = capturedAura
+                                DF:AuraDesigner_RefreshPage()
+                            end
+                        end)
+                        tinsert(placedIndicators, sq)
+                    end
 
-                    elseif typeDef.key == "bar" and Indicators then
-                        -- Build mock aura data for bar
-                        local mockAuraData = {
-                            spellId = info.spellIds and info.spellIds[1] or 0,
-                            icon = GetAuraIcon(spec, auraName),
-                            duration = 15,
-                            expirationTime = GetTime() + 10,
-                            stacks = 0,
-                        }
-                        Indicators:ApplyBar(mockFrame, typeCfg, mockAuraData, adDB.defaults, auraName)
+                elseif indicator.type == "bar" then
+                    local mockAuraData = {
+                        spellId = info.spellIds and info.spellIds[1] or 0,
+                        icon = GetAuraIcon(spec, auraName),
+                        duration = 15,
+                        expirationTime = GetTime() + 10,
+                        stacks = 0,
+                    }
+                    Indicators:ApplyBar(mockFrame, indicator, mockAuraData, adDB.defaults, instanceKey)
 
-                        local barMap = mockFrame.dfAD_bars
-                        local bar = barMap and barMap[auraName]
-                        if bar then
-                            bar:SetFrameLevel(mockFrame:GetFrameLevel() + 7)
-                            bar:EnableMouse(true)
-                            bar:SetScript("OnMouseUp", function(_, button)
-                                if button == "RightButton" then
-                                    local cfg = adDB.auras[capturedAura]
-                                    if cfg then cfg.bar = nil end
-                                    DF:AuraDesigner_RefreshPage()
-                                elseif button == "LeftButton" then
-                                    selectedAura = capturedAura
-                                    DF:AuraDesigner_RefreshPage()
-                                end
-                            end)
-                            tinsert(placedIndicators, bar)
-                        end
+                    local barMap = mockFrame.dfAD_bars
+                    local bar = barMap and barMap[instanceKey]
+                    if bar then
+                        bar:SetFrameLevel(mockFrame:GetFrameLevel() + 7)
+                        bar:EnableMouse(true)
+                        bar:SetScript("OnMouseUp", function(_, button)
+                            if button == "RightButton" then
+                                RemoveIndicatorInstance(capturedAura, capturedID)
+                                DF:AuraDesigner_RefreshPage()
+                            elseif button == "LeftButton" then
+                                selectedAura = capturedAura
+                                DF:AuraDesigner_RefreshPage()
+                            end
+                        end)
+                        tinsert(placedIndicators, bar)
                     end
                 end
             end
@@ -841,44 +978,44 @@ RefreshPreviewLightweight = function()
     local spec = ResolveSpec()
     if not spec then return end
 
-    -- Re-apply placed indicators using current settings (frames already exist)
-    if mockFrame.dfAD_icons then
-        for auraName, icon in pairs(mockFrame.dfAD_icons) do
-            local auraCfg = adDB.auras and adDB.auras[auraName]
-            if auraCfg and auraCfg.icon then
-                local tex = GetAuraIcon(spec, auraName)
-                local mockAuraData = {
-                    spellId = 0, icon = tex,
-                    duration = 15, expirationTime = GetTime() + 10,
-                    stacks = 3,
-                }
-                Indicators:ApplyIcon(mockFrame, auraCfg.icon, mockAuraData, adDB.defaults, auraName)
-            end
-        end
-    end
+    -- Re-apply placed indicator instances using current settings
+    for auraName, auraCfg in pairs(adDB.auras) do
+        if auraCfg.indicators then
+            for _, indicator in ipairs(auraCfg.indicators) do
+                local instanceKey = auraName .. "#" .. indicator.id
 
-    if mockFrame.dfAD_squares then
-        for auraName, sq in pairs(mockFrame.dfAD_squares) do
-            local auraCfg = adDB.auras and adDB.auras[auraName]
-            if auraCfg and auraCfg.square then
-                local mockAuraData = {
-                    spellId = 0, icon = nil, duration = 15, expirationTime = GetTime() + 10, stacks = 3,
-                }
-                Indicators:ApplySquare(mockFrame, auraCfg.square, mockAuraData, adDB.defaults, auraName)
-            end
-        end
-    end
-
-    if mockFrame.dfAD_bars then
-        for auraName, bar in pairs(mockFrame.dfAD_bars) do
-            local auraCfg = adDB.auras and adDB.auras[auraName]
-            if auraCfg and auraCfg.bar then
-                local mockAuraData = {
-                    spellId = 0, icon = nil,
-                    duration = 15, expirationTime = GetTime() + 10,
-                    stacks = 0,
-                }
-                Indicators:ApplyBar(mockFrame, auraCfg.bar, mockAuraData, adDB.defaults, auraName)
+                if indicator.type == "icon" then
+                    local iconMap = mockFrame.dfAD_icons
+                    if iconMap and iconMap[instanceKey] then
+                        local tex = GetAuraIcon(spec, auraName)
+                        local mockAuraData = {
+                            spellId = 0, icon = tex,
+                            duration = 15, expirationTime = GetTime() + 10,
+                            stacks = 3,
+                        }
+                        Indicators:ApplyIcon(mockFrame, indicator, mockAuraData, adDB.defaults, instanceKey)
+                    end
+                elseif indicator.type == "square" then
+                    local sqMap = mockFrame.dfAD_squares
+                    if sqMap and sqMap[instanceKey] then
+                        local mockAuraData = {
+                            spellId = 0, icon = nil,
+                            duration = 15, expirationTime = GetTime() + 10,
+                            stacks = 3,
+                        }
+                        Indicators:ApplySquare(mockFrame, indicator, mockAuraData, adDB.defaults, instanceKey)
+                    end
+                elseif indicator.type == "bar" then
+                    local barMap = mockFrame.dfAD_bars
+                    if barMap and barMap[instanceKey] then
+                        local mockAuraData = {
+                            spellId = 0, icon = nil,
+                            duration = 15, expirationTime = GetTime() + 10,
+                            stacks = 0,
+                        }
+                        Indicators:ApplyBar(mockFrame, indicator, mockAuraData, adDB.defaults, instanceKey)
+                    end
+                end
             end
         end
     end
@@ -1192,8 +1329,9 @@ local function AddSectionHeader(parent, yOffset, label, typeKey, auraName, width
 end
 
 -- Build the widget content for a given indicator type
-local function BuildTypeContent(parent, typeKey, auraName, width)
-    local proxy = CreateProxy(auraName, typeKey)
+-- optProxy: optional proxy table; if nil, creates one via CreateProxy (frame-level types)
+local function BuildTypeContent(parent, typeKey, auraName, width, optProxy)
+    local proxy = optProxy or CreateProxy(auraName, typeKey)
     local contentWidth = width or 248
     local widgets = {}
     local totalHeight = 8  -- top padding
@@ -1641,88 +1779,118 @@ local function BuildPerAuraView(parent, auraName)
     div1:SetColorTexture(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
     yPos = yPos - 8
 
-    -- ===== 8 INDICATOR TYPE SECTIONS =====
-    -- Each section: collapsible header with enable checkbox + content
-    -- Placed types (icon/square/bar) first, then frame-level types
-    local sectionStates = {}
-    local placedCount = 0
+    -- ===== PLACED INDICATOR INSTANCES =====
+    -- Each instance is a card with type toggle, collapsible settings, and delete button
+    local indicators = auraCfg and auraCfg.indicators or {}
 
-    for _, typeDef in ipairs(INDICATOR_TYPES) do
-        -- Insert separator between placed types and frame-level types
-        if not typeDef.placed and placedCount > 0 then
-            yPos = yPos - 2
-            local sepLine = parent:CreateTexture(nil, "ARTWORK")
-            sepLine:SetPoint("TOPLEFT", 0, yPos)
-            sepLine:SetSize(contentWidth, 1)
-            sepLine:SetColorTexture(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-            yPos = yPos - 4
-            placedCount = -1  -- only insert once
-        end
-        if typeDef.placed then placedCount = placedCount + 1 end
-        local typeKey = typeDef.key
-        local typeLabel = typeDef.label
-        local isEnabled = auraCfg and auraCfg[typeKey] ~= nil
+    -- Type toggle button labels
+    local PLACED_TYPES = {
+        { key = "icon",   label = "Icon"   },
+        { key = "square", label = "Square" },
+        { key = "bar",    label = "Bar"    },
+    }
 
-        -- Section header (mockup .fx-ghdr style: element bg, border, clear visibility)
-        local header = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-        header:SetHeight(26)
-        header:SetPoint("TOPLEFT", 0, yPos)
-        header:SetPoint("RIGHT", parent, "RIGHT", 0, 0)
-        ApplyBackdrop(header, C_ELEMENT, C_BORDER)
+    for instIdx, indicator in ipairs(indicators) do
+        local capturedID = indicator.id
+        local capturedIdx = instIdx
 
-        -- Chevron arrow (text-based, left side)
-        local chevron = header:CreateFontString(nil, "OVERLAY")
+        -- Instance card header
+        local cardHeader = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+        cardHeader:SetHeight(26)
+        cardHeader:SetPoint("TOPLEFT", 0, yPos)
+        cardHeader:SetPoint("RIGHT", parent, "RIGHT", 0, 0)
+        local tc = GetThemeColor()
+        ApplyBackdrop(cardHeader, C_ELEMENT, {r = tc.r * 0.5, g = tc.g * 0.5, b = tc.b * 0.5, a = 0.6})
+
+        -- Chevron (left side)
+        local chevron = cardHeader:CreateFontString(nil, "OVERLAY")
         chevron:SetFont("Fonts\\FRIZQT__.TTF", 8, "OUTLINE")
         chevron:SetPoint("LEFT", 8, 0)
         chevron:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
-        -- Title label (after chevron)
-        local title = header:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        title:SetPoint("LEFT", chevron, "RIGHT", 6, 0)
-        title:SetText(typeLabel)
+        -- Type toggle buttons (radio-style)
+        local toggleBtns = {}
+        local toggleX = 24
+        for _, pt in ipairs(PLACED_TYPES) do
+            local btn = CreateFrame("Button", nil, cardHeader, "BackdropTemplate")
+            btn:SetSize(46, 18)
+            btn:SetPoint("LEFT", toggleX, 0)
+            btn:SetFrameLevel(cardHeader:GetFrameLevel() + 3)
 
-        -- Enable checkbox (13x13, right side — matches mockup layout)
-        local cb = CreateFrame("CheckButton", nil, header, "BackdropTemplate")
-        cb:SetSize(13, 13)
-        cb:SetPoint("RIGHT", -8, 0)
-        cb:SetFrameLevel(header:GetFrameLevel() + 5)
-        ApplyBackdrop(cb, C_ELEMENT, C_BORDER)
+            local btnLabel = btn:CreateFontString(nil, "OVERLAY")
+            btnLabel:SetFont("Fonts\\FRIZQT__.TTF", 9, "")
+            btnLabel:SetPoint("CENTER", 0, 0)
+            btnLabel:SetText(pt.label)
 
-        cb.Check = cb:CreateTexture(nil, "OVERLAY")
-        cb.Check:SetTexture("Interface\\Buttons\\WHITE8x8")
-        cb.Check:SetVertexColor(1, 1, 1)  -- white checkmark
-        cb.Check:SetPoint("CENTER")
-        cb.Check:SetSize(7, 7)
-        cb:SetCheckedTexture(cb.Check)
-        cb:SetChecked(isEnabled)
+            btn.typeKey = pt.key
+            btn.label = btnLabel
+            toggleBtns[#toggleBtns + 1] = btn
+            toggleX = toggleX + 50
+        end
 
-        -- Update checkbox + title appearance based on state
-        local function UpdateSectionStyle()
-            local tc = GetThemeColor()
-            if cb:GetChecked() then
-                cb:SetBackdropColor(tc.r, tc.g, tc.b, 1)
-                cb:SetBackdropBorderColor(tc.r, tc.g, tc.b, 1)
-                title:SetTextColor(tc.r, tc.g, tc.b)  -- accent color when enabled
-            else
-                cb:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-                cb:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
-                title:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+        -- Style toggle buttons based on current type
+        local function UpdateToggleStyles()
+            local currentType = indicator.type
+            for _, btn in ipairs(toggleBtns) do
+                local tc = GetThemeColor()
+                if btn.typeKey == currentType then
+                    ApplyBackdrop(btn, {r = tc.r * 0.25, g = tc.g * 0.25, b = tc.b * 0.25, a = 1}, {r = tc.r, g = tc.g, b = tc.b, a = 1})
+                    btn.label:SetTextColor(tc.r, tc.g, tc.b)
+                else
+                    ApplyBackdrop(btn, {r = 0.1, g = 0.1, b = 0.1, a = 0.5}, {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5})
+                    btn.label:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+                end
             end
         end
-        UpdateSectionStyle()
+        UpdateToggleStyles()
 
-        -- Content container (below header, hidden by default)
+        -- Toggle button clicks
+        for _, btn in ipairs(toggleBtns) do
+            btn:SetScript("OnClick", function(self)
+                if indicator.type ~= self.typeKey then
+                    ChangeInstanceType(auraName, capturedID, self.typeKey)
+                    DF:AuraDesigner_RefreshPage()
+                end
+            end)
+        end
+
+        -- Delete button (X, right side)
+        local delBtn = CreateFrame("Button", nil, cardHeader, "BackdropTemplate")
+        delBtn:SetSize(18, 18)
+        delBtn:SetPoint("RIGHT", -4, 0)
+        delBtn:SetFrameLevel(cardHeader:GetFrameLevel() + 5)
+        ApplyBackdrop(delBtn, {r = 0, g = 0, b = 0, a = 0}, {r = 0, g = 0, b = 0, a = 0})
+        local delText = delBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        delText:SetPoint("CENTER", 0, 0)
+        delText:SetText("\195\151")  -- ×
+        delText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+        delBtn:SetScript("OnEnter", function(self)
+            delText:SetTextColor(0.9, 0.25, 0.25)
+            self:SetBackdropColor(0.8, 0.27, 0.27, 0.2)
+        end)
+        delBtn:SetScript("OnLeave", function(self)
+            delText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+            self:SetBackdropColor(0, 0, 0, 0)
+        end)
+        delBtn:SetScript("OnClick", function()
+            RemoveIndicatorInstance(auraName, capturedID)
+            DF:AuraDesigner_RefreshPage()
+        end)
+
+        yPos = yPos - 28
+
+        -- Content container (collapsible settings)
         local content = CreateFrame("Frame", nil, parent)
-        content:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -2)
+        content:SetPoint("TOPLEFT", cardHeader, "BOTTOMLEFT", 0, -2)
         content:SetWidth(contentWidth)
         content:Hide()
 
-        -- Expand/collapse state (persisted across rebuilds)
-        local stateKey = auraName .. ":" .. typeKey
+        -- Expand/collapse state
+        local stateKey = auraName .. ":inst#" .. capturedID
         local expanded = expandedSections[stateKey] or false
 
         local function UpdateChevron()
-            if expanded and isEnabled then
+            if expanded then
                 chevron:SetText("\226\150\188")  -- ▼
             else
                 chevron:SetText("\226\150\182")  -- ▶
@@ -1730,41 +1898,24 @@ local function BuildPerAuraView(parent, auraName)
         end
         UpdateChevron()
 
-        -- Build content if enabled
-        local contentHeight = 0
-        if isEnabled then
-            local _, h = BuildTypeContent(content, typeKey, auraName, contentWidth)
-            contentHeight = h
-        end
+        -- Build content using instance proxy
+        local instProxy = CreateInstanceProxy(auraName, capturedID)
+        local _, contentHeight = BuildTypeContent(content, indicator.type, auraName, contentWidth, instProxy)
 
-        -- Store section state for layout calculation
-        local sectionData = {
-            header = header,
-            content = content,
-            contentHeight = contentHeight,
-            expanded = expanded,
-            enabled = isEnabled,
-        }
-        tinsert(sectionStates, sectionData)
-
-        yPos = yPos - 28  -- header height + gap
-
-        -- Click header to toggle expand (with hover highlight)
-        local headerClick = CreateFrame("Button", nil, header)
+        -- Click header to toggle expand
+        local headerClick = CreateFrame("Button", nil, cardHeader)
         headerClick:SetAllPoints()
-        headerClick:SetFrameLevel(header:GetFrameLevel() + 2)
+        headerClick:SetFrameLevel(cardHeader:GetFrameLevel() + 1)
         headerClick:RegisterForClicks("LeftButtonUp")
         headerClick:SetScript("OnEnter", function()
-            header:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
+            cardHeader:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
         end)
         headerClick:SetScript("OnLeave", function()
-            header:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
+            cardHeader:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
         end)
         headerClick:SetScript("OnClick", function()
-            if not isEnabled then return end
             expanded = not expanded
             expandedSections[stateKey] = expanded
-            sectionData.expanded = expanded
             if expanded then
                 content:Show()
             else
@@ -1774,44 +1925,178 @@ local function BuildPerAuraView(parent, auraName)
             DF:AuraDesigner_RefreshPage()
         end)
 
-        -- Checkbox click to enable/disable type
-        cb:SetScript("OnClick", function(self)
-            local checked = self:GetChecked()
-            UpdateSectionStyle()
-            local cfg = EnsureAuraConfig(auraName)
-            if checked then
-                EnsureTypeConfig(auraName, typeKey)
-                isEnabled = true
-                sectionData.enabled = true
-                -- Auto-expand when enabling
-                expanded = true
-                expandedSections[stateKey] = true
-                sectionData.expanded = true
-                -- Rebuild content
-                local _, h = BuildTypeContent(content, typeKey, auraName, contentWidth)
-                contentHeight = h
-                sectionData.contentHeight = h
-                content:Show()
-            else
-                cfg[typeKey] = nil
-                isEnabled = false
-                sectionData.enabled = false
-                expanded = false
-                expandedSections[stateKey] = false
-                sectionData.expanded = false
-                content:Hide()
-            end
-            UpdateChevron()
-            DF:AuraDesigner_RefreshPage()
-        end)
-
-        -- If expanded, show content and adjust yPos
-        if expanded and isEnabled then
+        if expanded then
             content:Show()
             yPos = yPos - contentHeight - 2
         end
     end
 
+    -- ===== ADD INDICATOR BUTTON =====
+    yPos = yPos - 4
+    local addBtn = CreateFrame("Button", nil, parent, "BackdropTemplate")
+    addBtn:SetHeight(24)
+    addBtn:SetPoint("TOPLEFT", 0, yPos)
+    addBtn:SetPoint("RIGHT", parent, "RIGHT", 0, 0)
+    local tc = GetThemeColor()
+    ApplyBackdrop(addBtn, {r = tc.r * 0.08, g = tc.g * 0.08, b = tc.b * 0.08, a = 1}, {r = tc.r * 0.3, g = tc.g * 0.3, b = tc.b * 0.3, a = 0.6})
+
+    local addLabel = addBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    addLabel:SetPoint("CENTER", 0, 0)
+    addLabel:SetText("+ Add Indicator")
+    addLabel:SetTextColor(tc.r, tc.g, tc.b, 0.8)
+
+    addBtn:SetScript("OnEnter", function(self)
+        self:SetBackdropColor(tc.r * 0.15, tc.g * 0.15, tc.b * 0.15, 1)
+        addLabel:SetTextColor(tc.r, tc.g, tc.b, 1)
+    end)
+    addBtn:SetScript("OnLeave", function(self)
+        self:SetBackdropColor(tc.r * 0.08, tc.g * 0.08, tc.b * 0.08, 1)
+        addLabel:SetTextColor(tc.r, tc.g, tc.b, 0.8)
+    end)
+    addBtn:SetScript("OnClick", function()
+        local inst = CreateIndicatorInstance(auraName, "icon")
+        -- Auto-expand the new instance
+        expandedSections[auraName .. ":inst#" .. inst.id] = true
+        DF:AuraDesigner_RefreshPage()
+    end)
+    yPos = yPos - 30
+
+    -- ===== SEPARATOR: placed vs frame-level =====
+    yPos = yPos - 2
+    local sepLine = parent:CreateTexture(nil, "ARTWORK")
+    sepLine:SetPoint("TOPLEFT", 0, yPos)
+    sepLine:SetSize(contentWidth, 1)
+    sepLine:SetColorTexture(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
+    yPos = yPos - 6
+
+    -- ===== FRAME-LEVEL INDICATOR SECTIONS =====
+    -- 5 collapsible sections: border, healthbar, nametext, healthtext, framealpha
+    for _, typeDef in ipairs(INDICATOR_TYPES) do
+        if not typeDef.placed then
+            local typeKey = typeDef.key
+            local typeLabel = typeDef.label
+            local isEnabled = auraCfg and auraCfg[typeKey] ~= nil
+
+            local header = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+            header:SetHeight(26)
+            header:SetPoint("TOPLEFT", 0, yPos)
+            header:SetPoint("RIGHT", parent, "RIGHT", 0, 0)
+            ApplyBackdrop(header, C_ELEMENT, C_BORDER)
+
+            local chevron = header:CreateFontString(nil, "OVERLAY")
+            chevron:SetFont("Fonts\\FRIZQT__.TTF", 8, "OUTLINE")
+            chevron:SetPoint("LEFT", 8, 0)
+            chevron:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+
+            local title = header:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            title:SetPoint("LEFT", chevron, "RIGHT", 6, 0)
+            title:SetText(typeLabel)
+
+            local cb = CreateFrame("CheckButton", nil, header, "BackdropTemplate")
+            cb:SetSize(13, 13)
+            cb:SetPoint("RIGHT", -8, 0)
+            cb:SetFrameLevel(header:GetFrameLevel() + 5)
+            ApplyBackdrop(cb, C_ELEMENT, C_BORDER)
+
+            cb.Check = cb:CreateTexture(nil, "OVERLAY")
+            cb.Check:SetTexture("Interface\\Buttons\\WHITE8x8")
+            cb.Check:SetVertexColor(1, 1, 1)
+            cb.Check:SetPoint("CENTER")
+            cb.Check:SetSize(7, 7)
+            cb:SetCheckedTexture(cb.Check)
+            cb:SetChecked(isEnabled)
+
+            local function UpdateSectionStyle()
+                local tc = GetThemeColor()
+                if cb:GetChecked() then
+                    cb:SetBackdropColor(tc.r, tc.g, tc.b, 1)
+                    cb:SetBackdropBorderColor(tc.r, tc.g, tc.b, 1)
+                    title:SetTextColor(tc.r, tc.g, tc.b)
+                else
+                    cb:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
+                    cb:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
+                    title:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+                end
+            end
+            UpdateSectionStyle()
+
+            local content = CreateFrame("Frame", nil, parent)
+            content:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -2)
+            content:SetWidth(contentWidth)
+            content:Hide()
+
+            local stateKey = auraName .. ":" .. typeKey
+            local expanded = expandedSections[stateKey] or false
+
+            local function UpdateChevron()
+                if expanded and isEnabled then
+                    chevron:SetText("\226\150\188")  -- ▼
+                else
+                    chevron:SetText("\226\150\182")  -- ▶
+                end
+            end
+            UpdateChevron()
+
+            local contentHeight = 0
+            if isEnabled then
+                local _, h = BuildTypeContent(content, typeKey, auraName, contentWidth)
+                contentHeight = h
+            end
+
+            yPos = yPos - 28
+
+            local headerClick = CreateFrame("Button", nil, header)
+            headerClick:SetAllPoints()
+            headerClick:SetFrameLevel(header:GetFrameLevel() + 2)
+            headerClick:RegisterForClicks("LeftButtonUp")
+            headerClick:SetScript("OnEnter", function()
+                header:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
+            end)
+            headerClick:SetScript("OnLeave", function()
+                header:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
+            end)
+            headerClick:SetScript("OnClick", function()
+                if not isEnabled then return end
+                expanded = not expanded
+                expandedSections[stateKey] = expanded
+                if expanded then
+                    content:Show()
+                else
+                    content:Hide()
+                end
+                UpdateChevron()
+                DF:AuraDesigner_RefreshPage()
+            end)
+
+            cb:SetScript("OnClick", function(self)
+                local checked = self:GetChecked()
+                UpdateSectionStyle()
+                local cfg = EnsureAuraConfig(auraName)
+                if checked then
+                    EnsureTypeConfig(auraName, typeKey)
+                    isEnabled = true
+                    expanded = true
+                    expandedSections[stateKey] = true
+                    local _, h = BuildTypeContent(content, typeKey, auraName, contentWidth)
+                    contentHeight = h
+                    content:Show()
+                else
+                    cfg[typeKey] = nil
+                    isEnabled = false
+                    expanded = false
+                    expandedSections[stateKey] = false
+                    content:Hide()
+                end
+                UpdateChevron()
+                DF:AuraDesigner_RefreshPage()
+            end)
+
+            if expanded and isEnabled then
+                content:Show()
+                yPos = yPos - contentHeight - 2
+            end
+        end
+    end
 
     -- ===== DIVIDER =====
     yPos = yPos - 4
@@ -1821,7 +2106,7 @@ local function BuildPerAuraView(parent, auraName)
     div2:SetColorTexture(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
     yPos = yPos - 12
 
-    -- ===== PRIORITY SLIDER (after type sections) =====
+    -- ===== PRIORITY SLIDER =====
     local auraProxy = CreateAuraProxy(auraName)
     if not auraCfg or auraCfg.priority == nil then
         EnsureAuraConfig(auraName)
@@ -1841,9 +2126,8 @@ local function BuildPerAuraView(parent, auraName)
 
     -- ===== EXPIRING INDICATOR SECTION (Collapsible Accordion) =====
     local c = GetThemeColor()
-    local expCollapsed = true  -- Start collapsed
+    local expCollapsed = true
 
-    -- Accordion header button
     local expHeader = CreateFrame("Button", nil, parent, "BackdropTemplate")
     expHeader:SetHeight(22)
     expHeader:SetPoint("TOPLEFT", 0, yPos)
@@ -1853,7 +2137,7 @@ local function BuildPerAuraView(parent, auraName)
     local expChevron = expHeader:CreateFontString(nil, "OVERLAY")
     expChevron:SetFont("Fonts\\FRIZQT__.TTF", 9, "OUTLINE")
     expChevron:SetPoint("LEFT", 10, 0)
-    expChevron:SetText("\226\150\182")  -- ▶ right-pointing triangle (collapsed)
+    expChevron:SetText("\226\150\182")
     expChevron:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
     local expTitleText = expHeader:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -1869,11 +2153,10 @@ local function BuildPerAuraView(parent, auraName)
     end)
     yPos = yPos - 24
 
-    -- Container for all expiring controls
     local expBody = CreateFrame("Frame", nil, parent)
     expBody:SetPoint("TOPLEFT", 0, yPos)
     expBody:SetPoint("RIGHT", parent, "RIGHT", 0, 0)
-    expBody:Hide()  -- Start collapsed
+    expBody:Hide()
 
     local expYPos = 0
     local expProxy = CreateExpiringProxy(auraName)
@@ -1917,15 +2200,14 @@ local function BuildPerAuraView(parent, auraName)
     local EXP_BODY_HEIGHT = -expYPos
     expBody:SetHeight(EXP_BODY_HEIGHT)
 
-    -- Toggle accordion
     local function UpdateExpCollapse()
         if expCollapsed then
             expBody:Hide()
-            expChevron:SetText("\226\150\182")  -- ▶
+            expChevron:SetText("\226\150\182")
             parent:SetHeight(-yPos + 10)
         else
             expBody:Show()
-            expChevron:SetText("\226\150\188")  -- ▼
+            expChevron:SetText("\226\150\188")
             parent:SetHeight(-(yPos - EXP_BODY_HEIGHT) + 10)
         end
     end
@@ -1935,7 +2217,7 @@ local function BuildPerAuraView(parent, auraName)
         UpdateExpCollapse()
     end)
 
-    UpdateExpCollapse()  -- Apply initial collapsed state
+    UpdateExpCollapse()
 end
 
 local function RefreshRightPanel()
@@ -2576,19 +2858,36 @@ local function RefreshActiveEffectsStrip()
         auraInfoLookup[info.name] = info
     end
 
-    -- Collect all active effects
+    -- Collect all active effects (instances + frame-level)
     local effects = {}
     for auraName, auraCfg in pairs(adDB.auras) do
         local info = auraInfoLookup[auraName]
         if info then
+            -- Placed indicator instances
+            if auraCfg.indicators then
+                for _, indicator in ipairs(auraCfg.indicators) do
+                    local typeLabel = indicator.type:sub(1,1):upper() .. indicator.type:sub(2)
+                    tinsert(effects, {
+                        auraName = auraName,
+                        display = info.display,
+                        color = info.color,
+                        typeKey = indicator.type,
+                        typeLabel = typeLabel,
+                        isInstance = true,
+                        indicatorID = indicator.id,
+                    })
+                end
+            end
+            -- Frame-level types
             for _, typeDef in ipairs(INDICATOR_TYPES) do
-                if auraCfg[typeDef.key] then
+                if not typeDef.placed and auraCfg[typeDef.key] then
                     tinsert(effects, {
                         auraName = auraName,
                         display = info.display,
                         color = info.color,
                         typeKey = typeDef.key,
                         typeLabel = typeDef.label,
+                        isInstance = false,
                     })
                 end
             end
@@ -2636,11 +2935,17 @@ local function RefreshActiveEffectsStrip()
             self:SetBackdropBorderColor(0, 0, 0, 0)
         end)
         xBtn:SetScript("OnClick", function()
-            local cfg = adDB.auras[effect.auraName]
-            if cfg then
-                cfg[effect.typeKey] = nil
-                DF:AuraDesigner_RefreshPage()
+            if effect.isInstance then
+                -- Remove placed indicator instance
+                RemoveIndicatorInstance(effect.auraName, effect.indicatorID)
+            else
+                -- Remove frame-level type
+                local cfg = adDB.auras[effect.auraName]
+                if cfg then
+                    cfg[effect.typeKey] = nil
+                end
             end
+            DF:AuraDesigner_RefreshPage()
         end)
 
         -- Spell name
@@ -3005,7 +3310,17 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
             return copy
         end
 
-        adDB.auras[selectedAura] = deepCopy(sourceCfg)
+        local newCfg = deepCopy(sourceCfg)
+        -- Re-assign instance IDs to avoid stale references
+        if newCfg.indicators then
+            local nextID = 1
+            for _, inst in ipairs(newCfg.indicators) do
+                inst.id = nextID
+                nextID = nextID + 1
+            end
+            newCfg.nextIndicatorID = nextID
+        end
+        adDB.auras[selectedAura] = newCfg
         DF:AuraDesigner_RefreshPage()
     end)
 
