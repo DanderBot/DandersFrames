@@ -1254,10 +1254,14 @@ function Indicators:ApplyBar(frame, config, auraData, defaults, auraName)
     -- ========================================
     -- SIZE & ORIENTATION
     -- ========================================
+    local matchW = config.matchFrameWidth
+    local matchH = config.matchFrameHeight
+    if matchW == nil then matchW = true end   -- default: match frame width
+    if matchH == nil then matchH = false end  -- default: don't match height
     local width = config.width or 60
     local height = config.height or 6
-    if config.matchFrameWidth then width = frame:GetWidth() end
-    if config.matchFrameHeight then height = frame:GetHeight() end
+    if matchW then width = frame:GetWidth() end
+    if matchH then height = frame:GetHeight() end
     bar:SetSize(width, height)
 
     bar:SetAlpha(config.alpha or 1.0)
