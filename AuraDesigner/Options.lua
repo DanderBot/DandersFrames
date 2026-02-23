@@ -2612,26 +2612,6 @@ end
 -- the HTML mockup design with logo, description, and links.
 -- ============================================================
 
--- Static popup for displaying a copyable URL
-StaticPopupDialogs["DANDERSFRAMES_COPY_URL"] = {
-    text = "%s",
-    button1 = CLOSE,
-    hasEditBox = true,
-    editBoxWidth = 320,
-    OnShow = function(self, data)
-        self.editBox:SetText(data)
-        self.editBox:SetFocus()
-        self.editBox:HighlightText()
-    end,
-    EditBoxOnEscapePressed = function(self)
-        self:GetParent():Hide()
-    end,
-    timeout = 0,
-    whileDead = true,
-    hideOnEscape = true,
-    preferredIndex = 3,
-}
-
 local C_HARREK = { r = 1, g = 0.45, b = 0 }     -- #ff7300
 local C_DISCORD = { r = 0.45, g = 0.54, b = 0.85 } -- #7389d9
 
@@ -2699,10 +2679,7 @@ local function CreateNotInstalledOverlay(parent, yOffset)
         self:SetBackdropColor(C_HARREK.r, C_HARREK.g, C_HARREK.b, 1)
     end)
     cfBtn:SetScript("OnClick", function()
-        StaticPopup_Show("DANDERSFRAMES_COPY_URL",
-            "Copy the CurseForge URL below:",
-            nil,
-            "https://www.curseforge.com/wow/addons/harreks-advanced-raid-frames")
+        GUI.ShowURLPopup("https://www.curseforge.com/wow/addons/harreks-advanced-raid-frames", "Copy the CurseForge URL")
     end)
 
     -- Discord button (blue outline)
@@ -2724,10 +2701,7 @@ local function CreateNotInstalledOverlay(parent, yOffset)
         self:SetBackdropColor(0, 0, 0, 0)
     end)
     dcBtn:SetScript("OnClick", function()
-        StaticPopup_Show("DANDERSFRAMES_COPY_URL",
-            "Copy the Discord invite URL below:",
-            nil,
-            "https://discord.gg/MMjNrUTxQe")
+        GUI.ShowURLPopup("https://discord.gg/MMjNrUTxQe", "Join Harrek's Discord")
     end)
 
     overlay:Hide()

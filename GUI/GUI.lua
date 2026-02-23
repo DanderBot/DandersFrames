@@ -5353,7 +5353,8 @@ function DF:CreateGUI()
         popup.editBox:SetFocus()
         popup.editBox:HighlightText()
     end
-    
+    GUI.ShowURLPopup = ShowURLPopup
+
     -- Create a footer link button
     local function CreateFooterLink(parent, text, color, url, popupLabel)
         local btn = CreateFrame("Button", nil, parent)
