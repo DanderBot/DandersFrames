@@ -1080,7 +1080,8 @@ RefreshPreviewLightweight = function()
 
                 if indicator.type == "icon" then
                     local iconMap = mockFrame.dfAD_icons
-                    if iconMap and iconMap[instanceKey] then
+                    local icon = iconMap and iconMap[instanceKey]
+                    if icon then
                         local tex = GetAuraIcon(spec, auraName)
                         local mockAuraData = {
                             spellId = 0, icon = tex,
@@ -1088,26 +1089,35 @@ RefreshPreviewLightweight = function()
                             stacks = 3,
                         }
                         Indicators:ApplyIcon(mockFrame, indicator, mockAuraData, adDB.defaults, instanceKey)
+                        -- Re-enable mouse (ApplyIcon disables it for real unit frames)
+                        icon:EnableMouse(true)
+                        if icon.SetMouseClickEnabled then icon:SetMouseClickEnabled(true) end
                     end
                 elseif indicator.type == "square" then
                     local sqMap = mockFrame.dfAD_squares
-                    if sqMap and sqMap[instanceKey] then
+                    local sq = sqMap and sqMap[instanceKey]
+                    if sq then
                         local mockAuraData = {
                             spellId = 0, icon = nil,
                             duration = 15, expirationTime = GetTime() + 10,
                             stacks = 3,
                         }
                         Indicators:ApplySquare(mockFrame, indicator, mockAuraData, adDB.defaults, instanceKey)
+                        sq:EnableMouse(true)
                     end
                 elseif indicator.type == "bar" then
                     local barMap = mockFrame.dfAD_bars
-                    if barMap and barMap[instanceKey] then
+                    local bar = barMap and barMap[instanceKey]
+                    if bar then
                         local mockAuraData = {
                             spellId = 0, icon = nil,
                             duration = 15, expirationTime = GetTime() + 10,
                             stacks = 0,
                         }
                         Indicators:ApplyBar(mockFrame, indicator, mockAuraData, adDB.defaults, instanceKey)
+                        -- Re-enable mouse (ApplyBar disables it for real unit frames)
+                        bar:EnableMouse(true)
+                        if bar.SetMouseClickEnabled then bar:SetMouseClickEnabled(true) end
                     end
                 end
             end
