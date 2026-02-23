@@ -57,8 +57,8 @@ local GROWTH_OPTIONS = {
 
 local BORDER_STYLE_OPTIONS = {
     SOLID = "Solid Border", ANIMATED = "Animated Border", DASHED = "Dashed Border",
-    GLOW = "Glow", CORNERS = "Corners Only", NONE = "Hidden",
-    _order = {"SOLID", "ANIMATED", "DASHED", "GLOW", "CORNERS", "NONE"},
+    GLOW = "Glow", CORNERS = "Corners Only",
+    _order = {"SOLID", "ANIMATED", "DASHED", "GLOW", "CORNERS"},
 }
 
 local HEALTHBAR_MODE_OPTIONS = {
