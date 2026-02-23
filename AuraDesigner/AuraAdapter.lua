@@ -308,6 +308,11 @@ function AuraAdapter:IsAvailable()
     return activeProvider:IsAvailable()
 end
 
+-- Returns true specifically when HARF is loaded (not just fallback)
+function AuraAdapter:IsHARFAvailable()
+    return HarrekProvider:IsAvailable()
+end
+
 -- Returns a display name for the current data source
 function AuraAdapter:GetSourceName()
     if not activeProvider then SelectProvider() end
