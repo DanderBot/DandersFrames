@@ -240,6 +240,9 @@ end
 -- textures. Does NOT modify the existing frame.border.
 -- ============================================================
 
+-- Map old border style names to highlight-compatible uppercase keys
+local BORDER_STYLE_MIGRATION = { Solid = "SOLID", Glow = "GLOW", Pulse = "SOLID" }
+
 local function GetOrCreateADBorder(frame)
     if frame.dfAD_border then
         -- Update points (frame may have moved)
@@ -250,6 +253,8 @@ local function GetOrCreateADBorder(frame)
     end
 
     -- Create overlay frame parented to UIParent (avoids clipping)
+    -- Uses same structure as the highlight system so we can reuse
+    -- DF.ApplyHighlightStyle for all 6 border modes.
     local ch = CreateFrame("Frame", nil, UIParent)
     ch:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 0)
     ch:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
@@ -257,11 +262,11 @@ local function GetOrCreateADBorder(frame)
     ch:SetFrameLevel(frame:GetFrameLevel() + 8)  -- Below aggro(+9) highlight
     ch:Hide()
 
-    -- 4 edge textures
-    ch.top = ch:CreateTexture(nil, "OVERLAY")
-    ch.bottom = ch:CreateTexture(nil, "OVERLAY")
-    ch.left = ch:CreateTexture(nil, "OVERLAY")
-    ch.right = ch:CreateTexture(nil, "OVERLAY")
+    -- 4 edge textures (named to match highlight system)
+    ch.topLine = ch:CreateTexture(nil, "OVERLAY")
+    ch.bottomLine = ch:CreateTexture(nil, "OVERLAY")
+    ch.leftLine = ch:CreateTexture(nil, "OVERLAY")
+    ch.rightLine = ch:CreateTexture(nil, "OVERLAY")
 
     -- Hook owner OnHide to hide border
     frame:HookScript("OnHide", function()
@@ -284,47 +289,21 @@ function Indicators:ApplyBorder(frame, config, auraData)
 
     local ch = GetOrCreateADBorder(frame)
     local r, g, b = color[1] or color.r or 1, color[2] or color.g or 1, color[3] or color.b or 1
+    local alpha = color[4] or color.a or 1
     local thickness = config.thickness or 2
     local inset = config.inset or 0
 
-    -- Top edge
-    ch.top:ClearAllPoints()
-    ch.top:SetPoint("TOPLEFT", ch, "TOPLEFT", inset, -inset)
-    ch.top:SetPoint("TOPRIGHT", ch, "TOPRIGHT", -inset, -inset)
-    ch.top:SetHeight(thickness)
-    ch.top:SetColorTexture(r, g, b, 1)
-    ch.top:Show()
+    -- Migrate old style names (Solid→SOLID, Glow→GLOW, Pulse→SOLID)
+    local style = BORDER_STYLE_MIGRATION[config.style] or config.style or "SOLID"
 
-    -- Bottom edge
-    ch.bottom:ClearAllPoints()
-    ch.bottom:SetPoint("BOTTOMLEFT", ch, "BOTTOMLEFT", inset, inset)
-    ch.bottom:SetPoint("BOTTOMRIGHT", ch, "BOTTOMRIGHT", -inset, inset)
-    ch.bottom:SetHeight(thickness)
-    ch.bottom:SetColorTexture(r, g, b, 1)
-    ch.bottom:Show()
-
-    -- Left edge
-    ch.left:ClearAllPoints()
-    ch.left:SetPoint("TOPLEFT", ch, "TOPLEFT", inset, -inset)
-    ch.left:SetPoint("BOTTOMLEFT", ch, "BOTTOMLEFT", inset, inset)
-    ch.left:SetWidth(thickness)
-    ch.left:SetColorTexture(r, g, b, 1)
-    ch.left:Show()
-
-    -- Right edge
-    ch.right:ClearAllPoints()
-    ch.right:SetPoint("TOPRIGHT", ch, "TOPRIGHT", -inset, -inset)
-    ch.right:SetPoint("BOTTOMRIGHT", ch, "BOTTOMRIGHT", -inset, inset)
-    ch.right:SetWidth(thickness)
-    ch.right:SetColorTexture(r, g, b, 1)
-    ch.right:Show()
-
-    ch:Show()
+    -- Reuse the highlight system's rendering for all 6 border modes
+    DF.ApplyHighlightStyle(ch, style, thickness, inset, r, g, b, alpha)
 end
 
 function Indicators:RevertBorder(frame)
     if frame and frame.dfAD_border then
-        frame.dfAD_border:Hide()
+        -- Use NONE mode to properly clean up all styles (animated, glow, corners, etc.)
+        DF.ApplyHighlightStyle(frame.dfAD_border, "NONE", 2, 0, 1, 1, 1, 1)
     end
 end
 
@@ -344,7 +323,7 @@ function Indicators:ApplyHealthBar(frame, config, auraData)
     if not color then return end
 
     local r, g, b = color[1] or color.r or 1, color[2] or color.g or 1, color[3] or color.b or 1
-    local mode = config.mode or "replace"
+    local mode = string.lower(config.mode or "replace")
 
     if mode == "replace" then
         healthBar:SetStatusBarColor(r, g, b, 1)

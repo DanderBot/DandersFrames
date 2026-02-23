@@ -382,6 +382,9 @@ local function ApplyHighlightStyle(ch, mode, thickness, inset, r, g, b, alpha, d
     ch:Show()
 end
 
+-- Expose for reuse by the Aura Designer border indicator
+DF.ApplyHighlightStyle = ApplyHighlightStyle
+
 -- ============================================================
 -- UPDATE HIGHLIGHTS FOR A FRAME
 -- ============================================================
