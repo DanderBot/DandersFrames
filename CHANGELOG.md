@@ -1,6 +1,6 @@
 # DandersFrames Changelog
 
-## [4.0.7] - 2026-02-22
+## [4.0.7] - 2026-02-23
 
 ### Bug Fixes
 * Fix health fade errors with secret numbers — rewritten to use curve-based engine-side resolution, no Lua comparison of protected values
@@ -31,6 +31,9 @@
 * Fix double beta release and wrong release channel detection in CI (contributed by riyuk)
 * Fix Aura Designer indicators not displaying in combat — switched to Duration object pipeline for secret value compatibility
 * Fix Aura Designer bar duration text and expiring color flicker in combat
+* Fix Aura Designer health bar color tint mode not working — blend value was divided by 100 twice
+* Fix Aura Designer health bar color not reverting to original when aura expires
+* Fix Aura Designer square indicator not inheriting global icon size defaults
 * Various auto layout stability fixes
 * Fix auto layout settings contamination between party and raid modes
 * Fix auto layout override values getting stuck on test mode frames after profile switch
@@ -48,6 +51,8 @@
 * Rename "Auto Profiles" to "Auto Layouts" throughout the UI
 * Debug Console — in-game debug log viewer (`/df debug` to toggle, `/df console` to view)
 * Aura Designer — icon, square, and bar indicators with instance-based placement; drag to place, toggle type per-instance, global defaults inheritance
+* Aura Designer border indicator now supports all highlight styles — Solid Border, Animated Border, Dashed Border, Glow, and Corners Only
+* Aura Designer border and health bar color indicators render live in the options preview
 
 ## [4.0.6] - 2026-02-15
 
