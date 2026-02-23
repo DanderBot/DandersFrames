@@ -1292,11 +1292,11 @@ local function CreateGlobalSettingsTile(parent)
     tile.iconBg:SetBackdropBorderColor(0.40, 0.40, 0.40, 1)
 
     -- Gear/cog icon
-    tile.letter = tile.iconBg:CreateFontString(nil, "OVERLAY")
-    tile.letter:SetFont("Fonts\\FRIZQT__.TTF", 22, "")
+    tile.letter = tile.iconBg:CreateTexture(nil, "OVERLAY")
+    tile.letter:SetSize(22, 22)
     tile.letter:SetPoint("CENTER", 0, 0)
-    tile.letter:SetText("\226\154\153")  -- UTF-8 gear icon ⚙
-    tile.letter:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    tile.letter:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\settings")
+    tile.letter:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
     tile.nameLabel = tile:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     tile.nameLabel:SetPoint("TOP", tile.iconBg, "BOTTOM", 0, -3)
@@ -1718,9 +1718,9 @@ local function BuildGlobalView(parent)
         local itemLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         itemLabel:SetPoint("TOPLEFT", 18, yPos)
         if isCompat then
-            itemLabel:SetText("|cff55cc55\226\156\147|r  " .. item[2])
+            itemLabel:SetText("|TInterface\\AddOns\\DandersFrames\\Media\\Icons\\check:12:12|t  " .. item[2])
         else
-            itemLabel:SetText("|cffcc5555\195\151|r  " .. item[2])
+            itemLabel:SetText("|TInterface\\AddOns\\DandersFrames\\Media\\Icons\\close:12:12|t  " .. item[2])
         end
         itemLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
         yPos = yPos - 16
@@ -1906,10 +1906,10 @@ local function BuildPerAuraView(parent, auraName)
         ApplyBackdrop(cardHeader, C_ELEMENT, {r = tc.r * 0.5, g = tc.g * 0.5, b = tc.b * 0.5, a = 0.6})
 
         -- Chevron (left side)
-        local chevron = cardHeader:CreateFontString(nil, "OVERLAY")
-        chevron:SetFont("Fonts\\FRIZQT__.TTF", 8, "OUTLINE")
+        local chevron = cardHeader:CreateTexture(nil, "OVERLAY")
+        chevron:SetSize(10, 10)
         chevron:SetPoint("LEFT", 8, 0)
-        chevron:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+        chevron:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
         -- Type toggle buttons (radio-style)
         local toggleBtns = {}
@@ -1963,16 +1963,17 @@ local function BuildPerAuraView(parent, auraName)
         delBtn:SetPoint("RIGHT", -4, 0)
         delBtn:SetFrameLevel(cardHeader:GetFrameLevel() + 5)
         ApplyBackdrop(delBtn, {r = 0, g = 0, b = 0, a = 0}, {r = 0, g = 0, b = 0, a = 0})
-        local delText = delBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        delText:SetPoint("CENTER", 0, 0)
-        delText:SetText("\195\151")  -- ×
-        delText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+        local delIcon = delBtn:CreateTexture(nil, "OVERLAY")
+        delIcon:SetSize(12, 12)
+        delIcon:SetPoint("CENTER", 0, 0)
+        delIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close")
+        delIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
         delBtn:SetScript("OnEnter", function(self)
-            delText:SetTextColor(0.9, 0.25, 0.25)
+            delIcon:SetVertexColor(0.9, 0.25, 0.25)
             self:SetBackdropColor(0.8, 0.27, 0.27, 0.2)
         end)
         delBtn:SetScript("OnLeave", function(self)
-            delText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+            delIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
             self:SetBackdropColor(0, 0, 0, 0)
         end)
         delBtn:SetScript("OnClick", function()
@@ -1994,9 +1995,9 @@ local function BuildPerAuraView(parent, auraName)
 
         local function UpdateChevron()
             if expanded then
-                chevron:SetText("\226\150\188")  -- ▼
+                chevron:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
             else
-                chevron:SetText("\226\150\182")  -- ▶
+                chevron:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
             end
         end
         UpdateChevron()
@@ -2086,10 +2087,10 @@ local function BuildPerAuraView(parent, auraName)
             header:SetPoint("RIGHT", parent, "RIGHT", 0, 0)
             ApplyBackdrop(header, C_ELEMENT, C_BORDER)
 
-            local chevron = header:CreateFontString(nil, "OVERLAY")
-            chevron:SetFont("Fonts\\FRIZQT__.TTF", 8, "OUTLINE")
+            local chevron = header:CreateTexture(nil, "OVERLAY")
+            chevron:SetSize(10, 10)
             chevron:SetPoint("LEFT", 8, 0)
-            chevron:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+            chevron:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
             local title = header:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
             title:SetPoint("LEFT", chevron, "RIGHT", 6, 0)
@@ -2133,9 +2134,9 @@ local function BuildPerAuraView(parent, auraName)
 
             local function UpdateChevron()
                 if expanded and isEnabled then
-                    chevron:SetText("\226\150\188")  -- ▼
+                    chevron:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
                 else
-                    chevron:SetText("\226\150\182")  -- ▶
+                    chevron:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
                 end
             end
             UpdateChevron()
@@ -2237,11 +2238,11 @@ local function BuildPerAuraView(parent, auraName)
     expHeader:SetPoint("RIGHT", parent, "RIGHT", 0, 0)
     ApplyBackdrop(expHeader, {r = C_ELEMENT.r * 0.8, g = C_ELEMENT.g * 0.8, b = C_ELEMENT.b * 0.8, a = 1}, {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.3})
 
-    local expChevron = expHeader:CreateFontString(nil, "OVERLAY")
-    expChevron:SetFont("Fonts\\FRIZQT__.TTF", 9, "OUTLINE")
+    local expChevron = expHeader:CreateTexture(nil, "OVERLAY")
+    expChevron:SetSize(10, 10)
     expChevron:SetPoint("LEFT", 10, 0)
-    expChevron:SetText("\226\150\182")
-    expChevron:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    expChevron:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
+    expChevron:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
     local expTitleText = expHeader:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     expTitleText:SetPoint("LEFT", expChevron, "RIGHT", 6, 0)
@@ -2306,11 +2307,11 @@ local function BuildPerAuraView(parent, auraName)
     local function UpdateExpCollapse()
         if expCollapsed then
             expBody:Hide()
-            expChevron:SetText("\226\150\182")
+            expChevron:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
             parent:SetHeight(-yPos + 10)
         else
             expBody:Show()
-            expChevron:SetText("\226\150\188")
+            expChevron:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
             parent:SetHeight(-(yPos - EXP_BODY_HEIGHT) + 10)
         end
     end
@@ -3123,17 +3124,18 @@ local function RefreshActiveEffectsStrip()
         xBtn:SetPoint("TOPRIGHT", -1, -1)
         xBtn:SetFrameLevel(entry:GetFrameLevel() + 5)
         ApplyBackdrop(xBtn, {r = 0, g = 0, b = 0, a = 0}, {r = 0, g = 0, b = 0, a = 0})
-        local xText = xBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        xText:SetPoint("CENTER", 0, 0)
-        xText:SetText("\195\151")  -- × multiplication sign
-        xText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+        local xIcon = xBtn:CreateTexture(nil, "OVERLAY")
+        xIcon:SetSize(10, 10)
+        xIcon:SetPoint("CENTER", 0, 0)
+        xIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close")
+        xIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
         xBtn:SetScript("OnEnter", function(self)
-            xText:SetTextColor(0.9, 0.25, 0.25)
+            xIcon:SetVertexColor(0.9, 0.25, 0.25)
             self:SetBackdropColor(0.8, 0.27, 0.27, 0.2)
             self:SetBackdropBorderColor(0.8, 0.27, 0.27, 0.4)
         end)
         xBtn:SetScript("OnLeave", function(self)
-            xText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+            xIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
             self:SetBackdropColor(0, 0, 0, 0)
             self:SetBackdropBorderColor(0, 0, 0, 0)
         end)
@@ -3387,10 +3389,11 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     rightPanel.copyDropdownText:SetText("Select aura...")
     rightPanel.copyDropdownText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
-    local copyArrow = rightPanel.copyDropdown:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    local copyArrow = rightPanel.copyDropdown:CreateTexture(nil, "OVERLAY")
+    copyArrow:SetSize(10, 10)
     copyArrow:SetPoint("RIGHT", -3, 0)
-    copyArrow:SetText("\226\150\188") -- small down triangle
-    copyArrow:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    copyArrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
+    copyArrow:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
     -- Copy button
     rightPanel.copyBtn = CreateFrame("Button", nil, rightPanel.copyRow, "BackdropTemplate")
