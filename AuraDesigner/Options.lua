@@ -2564,6 +2564,9 @@ end
 -- ATTRIBUTION ROW
 -- ============================================================
 
+local C_HARREK = { r = 1, g = 0.45, b = 0 }     -- #ff7300
+local C_DISCORD = { r = 0.45, g = 0.54, b = 0.85 } -- #7389d9
+
 local function CreateAttributionRow(parent, yOffset)
     local row = CreateFrame("Frame", nil, parent)
     row:SetHeight(20)
@@ -2572,33 +2575,25 @@ local function CreateAttributionRow(parent, yOffset)
 
     local available = Adapter:IsHARFAvailable()
 
-    -- Circle icon (H for Harrek)
-    local icon = CreateFrame("Frame", nil, row, "BackdropTemplate")
-    icon:SetPoint("LEFT", 4, 0)
-    icon:SetSize(16, 16)
-    ApplyBackdrop(icon, {r = 0.15, g = 0.15, b = 0.15, a = 1}, {r = 0.35, g = 0.35, b = 0.35, a = 1})
-
-    local iconLetter = icon:CreateFontString(nil, "OVERLAY")
-    iconLetter:SetFont("Fonts\\FRIZQT__.TTF", 9, "OUTLINE")
-    iconLetter:SetPoint("CENTER", 0, 0)
-    iconLetter:SetText("H")
+    -- Harrek's logo
+    local logo = row:CreateTexture(nil, "ARTWORK")
+    logo:SetPoint("LEFT", 4, 0)
+    logo:SetSize(16, 16)
+    logo:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\harrek-logo")
 
     if available then
-        iconLetter:SetTextColor(0.3, 0.8, 0.3)
         local poweredLabel = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        poweredLabel:SetPoint("LEFT", icon, "RIGHT", 6, 0)
+        poweredLabel:SetPoint("LEFT", logo, "RIGHT", 6, 0)
         poweredLabel:SetText("Powered by")
         poweredLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
         local nameLabel = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         nameLabel:SetPoint("LEFT", poweredLabel, "RIGHT", 4, 0)
-        nameLabel:SetText("Advanced Raid Frames")
-        local tc = GetThemeColor()
-        nameLabel:SetTextColor(tc.r, tc.g, tc.b)
+        nameLabel:SetText("Harrek's Advanced Raid Frames")
+        nameLabel:SetTextColor(C_HARREK.r, C_HARREK.g, C_HARREK.b)
     else
-        iconLetter:SetTextColor(0.8, 0.3, 0.3)
         local label = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        label:SetPoint("LEFT", icon, "RIGHT", 6, 0)
+        label:SetPoint("LEFT", logo, "RIGHT", 6, 0)
         label:SetText("Harrek's Advanced Raid Frames not detected")
         label:SetTextColor(0.8, 0.6, 0.3, 1)
     end
@@ -2611,9 +2606,6 @@ end
 -- Full-page overlay shown when HARF is not detected, matching
 -- the HTML mockup design with logo, description, and links.
 -- ============================================================
-
-local C_HARREK = { r = 1, g = 0.45, b = 0 }     -- #ff7300
-local C_DISCORD = { r = 0.45, g = 0.54, b = 0.85 } -- #7389d9
 
 local function CreateNotInstalledOverlay(parent, yOffset)
     local overlay = CreateFrame("Frame", nil, parent)
