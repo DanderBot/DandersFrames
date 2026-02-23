@@ -2570,7 +2570,7 @@ local function CreateAttributionRow(parent, yOffset)
     row:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, yOffset)
     row:SetPoint("TOPRIGHT", parent, "TOPRIGHT", 0, yOffset)
 
-    local available = Adapter:IsAvailable()
+    local available = Adapter:IsHARFAvailable()
 
     -- Circle icon (H for Harrek)
     local icon = CreateFrame("Frame", nil, row, "BackdropTemplate")
@@ -3653,7 +3653,7 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     -- ========================================
     -- POPULATE (or show not-installed overlay)
     -- ========================================
-    local harfAvailable = Adapter and Adapter:IsAvailable()
+    local harfAvailable = Adapter and Adapter:IsHARFAvailable()
     if harfAvailable then
         notInstalledOverlay:Hide()
         PopulateTileStrip()
