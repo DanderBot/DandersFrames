@@ -538,6 +538,7 @@ local rightPanel          -- Right settings panel (280px fixed)
 local tileStripHeader     -- Header bar for tile strip (stores countLabel)
 local enableBanner        -- Enable toggle banner
 local attributionRow      -- HARF attribution row
+local notInstalledOverlay -- Full overlay shown when HARF not detected
 local tileStrip           -- Horizontal scrolling aura tile palette
 local tileStripContent    -- ScrollChild for tile strip
 local framePreview        -- Mock unit frame preview
@@ -2606,6 +2607,134 @@ local function CreateAttributionRow(parent, yOffset)
 end
 
 -- ============================================================
+-- NOT-INSTALLED OVERLAY
+-- Full-page overlay shown when HARF is not detected, matching
+-- the HTML mockup design with logo, description, and links.
+-- ============================================================
+
+-- Static popup for displaying a copyable URL
+StaticPopupDialogs["DANDERSFRAMES_COPY_URL"] = {
+    text = "%s",
+    button1 = CLOSE,
+    hasEditBox = true,
+    editBoxWidth = 320,
+    OnShow = function(self, data)
+        self.editBox:SetText(data)
+        self.editBox:SetFocus()
+        self.editBox:HighlightText()
+    end,
+    EditBoxOnEscapePressed = function(self)
+        self:GetParent():Hide()
+    end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+    preferredIndex = 3,
+}
+
+local C_HARREK = { r = 1, g = 0.45, b = 0 }     -- #ff7300
+local C_DISCORD = { r = 0.45, g = 0.54, b = 0.85 } -- #7389d9
+
+local function CreateNotInstalledOverlay(parent, yOffset)
+    local overlay = CreateFrame("Frame", nil, parent)
+    overlay:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, yOffset)
+    overlay:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", 0, 0)
+
+    -- Center container for vertical centering
+    local center = CreateFrame("Frame", nil, overlay)
+    center:SetSize(400, 240)
+    center:SetPoint("CENTER", overlay, "CENTER", 0, 20)
+
+    -- Logo (Harrek's H in orange circle — use actual logo texture)
+    local logo = center:CreateTexture(nil, "ARTWORK")
+    logo:SetSize(56, 56)
+    logo:SetPoint("TOP", center, "TOP", 0, 0)
+    logo:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\harrek-logo")
+
+    -- Title
+    local title = center:CreateFontString(nil, "OVERLAY")
+    title:SetFont("Fonts\\FRIZQT__.TTF", 15, "")
+    title:SetPoint("TOP", logo, "BOTTOM", 0, -14)
+    title:SetText("Advanced Raid Frames Required")
+    title:SetTextColor(1, 1, 1)
+
+    -- Description
+    local desc = center:CreateFontString(nil, "OVERLAY")
+    desc:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
+    desc:SetPoint("TOP", title, "BOTTOM", 0, -10)
+    desc:SetWidth(380)
+    desc:SetJustifyH("CENTER")
+    desc:SetSpacing(3)
+    desc:SetText("The Aura Designer integrates with |cffff7300Harrek's Advanced Raid Frames|r to provide accurate aura tracking with secret value support for all healer and augmentation specs.")
+    desc:SetTextColor(0.6, 0.6, 0.6)
+
+    -- Sub-description
+    local sub = center:CreateFontString(nil, "OVERLAY")
+    sub:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
+    sub:SetPoint("TOP", desc, "BOTTOM", 0, -6)
+    sub:SetText("Install the addon and reload your UI to enable this feature.")
+    sub:SetTextColor(0.5, 0.5, 0.5)
+
+    -- Button container
+    local btnRow = CreateFrame("Frame", nil, center)
+    btnRow:SetSize(300, 28)
+    btnRow:SetPoint("TOP", sub, "BOTTOM", 0, -16)
+
+    -- CurseForge button (orange filled)
+    local cfBtn = CreateFrame("Button", nil, btnRow, "BackdropTemplate")
+    cfBtn:SetSize(160, 28)
+    cfBtn:SetPoint("RIGHT", btnRow, "CENTER", -4, 0)
+    ApplyBackdrop(cfBtn,
+        { r = C_HARREK.r, g = C_HARREK.g, b = C_HARREK.b, a = 1 },
+        { r = C_HARREK.r * 0.8, g = C_HARREK.g * 0.8, b = C_HARREK.b * 0.8, a = 1 })
+    local cfText = cfBtn:CreateFontString(nil, "OVERLAY")
+    cfText:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
+    cfText:SetPoint("CENTER", 0, 0)
+    cfText:SetText("Download on CurseForge")
+    cfText:SetTextColor(0.07, 0.07, 0.07)
+    cfBtn:SetScript("OnEnter", function(self)
+        self:SetBackdropColor(C_HARREK.r * 1.15, C_HARREK.g * 1.15, C_HARREK.b * 1.15, 1)
+    end)
+    cfBtn:SetScript("OnLeave", function(self)
+        self:SetBackdropColor(C_HARREK.r, C_HARREK.g, C_HARREK.b, 1)
+    end)
+    cfBtn:SetScript("OnClick", function()
+        StaticPopup_Show("DANDERSFRAMES_COPY_URL",
+            "Copy the CurseForge URL below:",
+            nil,
+            "https://www.curseforge.com/wow/addons/harreks-advanced-raid-frames")
+    end)
+
+    -- Discord button (blue outline)
+    local dcBtn = CreateFrame("Button", nil, btnRow, "BackdropTemplate")
+    dcBtn:SetSize(140, 28)
+    dcBtn:SetPoint("LEFT", btnRow, "CENTER", 4, 0)
+    ApplyBackdrop(dcBtn,
+        { r = 0, g = 0, b = 0, a = 0 },
+        { r = C_DISCORD.r, g = C_DISCORD.g, b = C_DISCORD.b, a = 1 })
+    local dcText = dcBtn:CreateFontString(nil, "OVERLAY")
+    dcText:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
+    dcText:SetPoint("CENTER", 0, 0)
+    dcText:SetText("Join Harrek's Discord")
+    dcText:SetTextColor(C_DISCORD.r, C_DISCORD.g, C_DISCORD.b)
+    dcBtn:SetScript("OnEnter", function(self)
+        self:SetBackdropColor(C_DISCORD.r * 0.12, C_DISCORD.g * 0.12, C_DISCORD.b * 0.12, 1)
+    end)
+    dcBtn:SetScript("OnLeave", function(self)
+        self:SetBackdropColor(0, 0, 0, 0)
+    end)
+    dcBtn:SetScript("OnClick", function()
+        StaticPopup_Show("DANDERSFRAMES_COPY_URL",
+            "Copy the Discord invite URL below:",
+            nil,
+            "https://discord.gg/MMjNrUTxQe")
+    end)
+
+    overlay:Hide()
+    return overlay
+end
+
+-- ============================================================
 -- STRIP HEADER HELPER
 -- Creates a small header bar (TRACKABLE AURAS, ACTIVE EFFECTS, etc.)
 -- ============================================================
@@ -3213,6 +3342,11 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     yPos = yPos - (ATTRIB_H + 4)
 
     -- ========================================
+    -- NOT-INSTALLED OVERLAY (shown when HARF missing)
+    -- ========================================
+    notInstalledOverlay = CreateNotInstalledOverlay(mainFrame, yPos)
+
+    -- ========================================
     -- RIGHT PANEL (fixed 280px, starts here)
     -- Built BEFORE left content so left content can anchor to it
     -- ========================================
@@ -3471,7 +3605,9 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     -- LEFT CONTENT: TILE STRIP
     -- All left content anchors TOPRIGHT to rightPanel's TOPLEFT
     -- ========================================
+    -- Store tileWrap at file scope so we can show/hide it based on HARF availability
     local tileWrap = CreateFrame("Frame", nil, mainFrame, "BackdropTemplate")
+    mainFrame.tileWrap = tileWrap
     tileWrap:SetHeight(TILE_HEADER_H + TILE_STRIP_H)
     tileWrap:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 0, yPos)
     tileWrap:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", -(RIGHT_PANEL_W + RIGHT_GAP), yPos)
@@ -3515,13 +3651,24 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     activeEffectsStrip = CreateActiveEffectsStrip(mainFrame, yPos, rightPanel)
 
     -- ========================================
-    -- POPULATE
+    -- POPULATE (or show not-installed overlay)
     -- ========================================
-    PopulateTileStrip()
-    RefreshRightPanel()
-    RefreshActiveEffectsStrip()
-    RefreshPlacedIndicators()
-    RefreshPreviewEffects()
+    local harfAvailable = Adapter and Adapter:IsAvailable()
+    if harfAvailable then
+        notInstalledOverlay:Hide()
+        PopulateTileStrip()
+        RefreshRightPanel()
+        RefreshActiveEffectsStrip()
+        RefreshPlacedIndicators()
+        RefreshPreviewEffects()
+    else
+        -- Hide all normal content, show overlay
+        mainFrame.tileWrap:Hide()
+        framePreview:Hide()
+        activeEffectsStrip:Hide()
+        rightPanel:Hide()
+        notInstalledOverlay:Show()
+    end
 end
 
 -- ============================================================
