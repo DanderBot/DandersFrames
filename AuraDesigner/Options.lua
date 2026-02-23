@@ -384,6 +384,7 @@ local function CreateInstanceProxy(auraName, indicatorID)
                 if val ~= nil then return val end
             end
             -- Fall back to global defaults for applicable keys
+            local fallback
             if inst and inst.type then
                 local gdMap = GLOBAL_DEFAULT_MAP[inst.type]
                 if gdMap then
@@ -391,14 +392,24 @@ local function CreateInstanceProxy(auraName, indicatorID)
                     if gdKey then
                         local adDB = GetAuraDesignerDB()
                         local gd = adDB and adDB.defaults
-                        if gd and gd[gdKey] ~= nil then return gd[gdKey] end
+                        if gd and gd[gdKey] ~= nil then fallback = gd[gdKey] end
                     end
                 end
                 -- Then fall back to TYPE_DEFAULTS
-                local defaults = TYPE_DEFAULTS[inst.type]
-                if defaults then return defaults[k] end
+                if fallback == nil then
+                    local defaults = TYPE_DEFAULTS[inst.type]
+                    if defaults then fallback = defaults[k] end
+                end
             end
-            return nil
+            -- Copy-on-read: if fallback is a table, copy it into the instance
+            -- so that sub-key mutations (e.g. proxy.color.r = 1) persist
+            if type(fallback) == "table" and inst then
+                local copy = {}
+                for fk, fv in pairs(fallback) do copy[fk] = fv end
+                inst[k] = copy
+                return copy
+            end
+            return fallback
         end,
         __newindex = function(_, k, v)
             local inst = GetIndicatorByID(auraName, indicatorID)
@@ -421,8 +432,17 @@ local function CreateProxy(auraName, typeKey)
                 if val ~= nil then return val end
             end
             -- Fall back to defaults for missing keys
-            if defaults then return defaults[k] end
-            return nil
+            local fallback = defaults and defaults[k] or nil
+            -- Copy-on-read: if fallback is a table, copy it into the config
+            -- so that sub-key mutations (e.g. proxy.color.r = 1) persist
+            if type(fallback) == "table" then
+                local typeCfg = EnsureTypeConfig(auraName, typeKey)
+                local copy = {}
+                for fk, fv in pairs(fallback) do copy[fk] = fv end
+                typeCfg[k] = copy
+                return copy
+            end
+            return fallback
         end,
         __newindex = function(_, k, v)
             local typeCfg = EnsureTypeConfig(auraName, typeKey)
