@@ -564,6 +564,7 @@ local dragState = {
     auraInfo = nil,         -- Full aura info table
     specKey = nil,          -- Spec key for icon lookup
     dropAnchor = nil,       -- Currently hovered anchor name
+    moveIndicatorID = nil,  -- Set when re-dragging an existing placed indicator
 }
 
 local dragGhost = nil
@@ -636,8 +637,9 @@ local function StartDrag(auraName, auraInfo, specKey)
         dragHintText:SetTextColor(tc.r, tc.g, tc.b, 0.9)
     end
 
-    -- Enlarge all anchor dots to signal they are drop targets
+    -- Show and enlarge all anchor dots to signal they are drop targets
     for _, dotFrame in pairs(anchorDots) do
+        dotFrame:Show()
         dotFrame.dot:SetSize(10, 10)
         dotFrame.dot:SetColorTexture(0.45, 0.45, 0.95, 0.5)
     end
@@ -668,11 +670,88 @@ local function StartDrag(auraName, auraInfo, specKey)
     dragUpdateFrame:Show()
 end
 
+-- Start a move-drag for an existing placed indicator.
+-- Reuses the same ghost + cursor-following + anchor-dot system as StartDrag.
+local function StartMoveDrag(auraName, indicatorID, specKey)
+    if dragState.isDragging then return end
+
+    dragState.isDragging = true
+    dragState.auraName = auraName
+    dragState.moveIndicatorID = indicatorID
+    dragState.specKey = specKey
+    dragState.dropAnchor = nil
+
+    -- Build minimal auraInfo for hints
+    local adDB = GetAuraDesignerDB()
+    local auraList = Adapter and Adapter:GetTrackableAuras(ResolveSpec())
+    local displayName = auraName
+    if auraList then
+        for _, info in ipairs(auraList) do
+            if info.name == auraName then
+                dragState.auraInfo = info
+                displayName = info.display or auraName
+                break
+            end
+        end
+    end
+
+    -- Setup ghost
+    local ghost = CreateDragGhost()
+    local tc = GetThemeColor()
+    ghost:SetBackdropBorderColor(tc.r, tc.g, tc.b, 1)
+
+    local iconTex = GetAuraIcon(specKey, auraName)
+    if iconTex then
+        ghost.icon:SetTexture(iconTex)
+    else
+        ghost.icon:SetColorTexture(0.3, 0.3, 0.3, 1)
+    end
+    ghost.label:SetText(displayName)
+    ghost:Show()
+
+    -- Show drag hint
+    if dragHintText then
+        dragHintText:SetText("Drop on an anchor point to move " .. displayName)
+        dragHintText:SetTextColor(tc.r, tc.g, tc.b, 0.9)
+    end
+
+    -- Show and enlarge all anchor dots
+    for _, dotFrame in pairs(anchorDots) do
+        dotFrame:Show()
+        dotFrame.dot:SetSize(10, 10)
+        dotFrame.dot:SetColorTexture(0.45, 0.45, 0.95, 0.5)
+    end
+
+    -- Start cursor following
+    if not dragUpdateFrame then
+        dragUpdateFrame = CreateFrame("Frame")
+    end
+    dragUpdateFrame:SetScript("OnUpdate", function()
+        if not dragState.isDragging then
+            dragUpdateFrame:Hide()
+            return
+        end
+
+        local x, y = GetCursorPosition()
+        local scale = UIParent:GetEffectiveScale()
+        local cursorX, cursorY = x / scale, y / scale
+
+        ghost:ClearAllPoints()
+        ghost:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", cursorX + 10, cursorY - 10)
+
+        if not IsMouseButtonDown("LeftButton") then
+            EndDrag()
+        end
+    end)
+    dragUpdateFrame:Show()
+end
+
 EndDrag = function()
     if not dragState.isDragging then return end
 
     local auraName = dragState.auraName
     local dropAnchor = dragState.dropAnchor
+    local moveID = dragState.moveIndicatorID
 
     -- Clear state
     dragState.isDragging = false
@@ -680,6 +759,7 @@ EndDrag = function()
     dragState.auraInfo = nil
     dragState.specKey = nil
     dragState.dropAnchor = nil
+    dragState.moveIndicatorID = nil
 
     -- Hide ghost
     if dragGhost then dragGhost:Hide() end
@@ -695,17 +775,28 @@ EndDrag = function()
         dragHintText:SetText("")
     end
 
-    -- Reset anchor dots to default
+    -- Hide anchor dots (only visible during drag)
     for _, dotFrame in pairs(anchorDots) do
+        dotFrame:Hide()
         dotFrame.dot:SetSize(6, 6)
         dotFrame.dot:SetColorTexture(0.45, 0.45, 0.95, 0.3)
     end
 
     -- Process the drop
     if auraName and dropAnchor then
-        -- Create a new icon indicator instance at the dropped anchor
-        local inst = CreateIndicatorInstance(auraName, "icon")
-        inst.anchor = dropAnchor
+        if moveID then
+            -- Move existing indicator to the new anchor
+            local inst = GetIndicatorByID(auraName, moveID)
+            if inst then
+                inst.anchor = dropAnchor
+                inst.offsetX = 0
+                inst.offsetY = 0
+            end
+        else
+            -- Create a new icon indicator instance at the dropped anchor
+            local inst = CreateIndicatorInstance(auraName, "icon")
+            inst.anchor = dropAnchor
+        end
 
         -- Select the aura
         selectedAura = auraName
@@ -799,6 +890,7 @@ local function RefreshPlacedIndicators()
                             icon:SetMouseClickEnabled(true)
                         end
                         icon:SetScript("OnMouseUp", function(_, button)
+                            if dragState.isDragging then return end
                             if button == "RightButton" then
                                 RemoveIndicatorInstance(capturedAura, capturedID)
                                 DF:AuraDesigner_RefreshPage()
@@ -806,6 +898,10 @@ local function RefreshPlacedIndicators()
                                 selectedAura = capturedAura
                                 DF:AuraDesigner_RefreshPage()
                             end
+                        end)
+                        icon:RegisterForDrag("LeftButton")
+                        icon:SetScript("OnDragStart", function()
+                            StartMoveDrag(capturedAura, capturedID, spec)
                         end)
                         tinsert(placedIndicators, icon)
                     end
@@ -826,6 +922,7 @@ local function RefreshPlacedIndicators()
                         sq:SetFrameLevel(mockFrame:GetFrameLevel() + 8)
                         sq:EnableMouse(true)
                         sq:SetScript("OnMouseUp", function(_, button)
+                            if dragState.isDragging then return end
                             if button == "RightButton" then
                                 RemoveIndicatorInstance(capturedAura, capturedID)
                                 DF:AuraDesigner_RefreshPage()
@@ -833,6 +930,10 @@ local function RefreshPlacedIndicators()
                                 selectedAura = capturedAura
                                 DF:AuraDesigner_RefreshPage()
                             end
+                        end)
+                        sq:RegisterForDrag("LeftButton")
+                        sq:SetScript("OnDragStart", function()
+                            StartMoveDrag(capturedAura, capturedID, spec)
                         end)
                         tinsert(placedIndicators, sq)
                     end
@@ -853,6 +954,7 @@ local function RefreshPlacedIndicators()
                         bar:SetFrameLevel(mockFrame:GetFrameLevel() + 7)
                         bar:EnableMouse(true)
                         bar:SetScript("OnMouseUp", function(_, button)
+                            if dragState.isDragging then return end
                             if button == "RightButton" then
                                 RemoveIndicatorInstance(capturedAura, capturedID)
                                 DF:AuraDesigner_RefreshPage()
@@ -860,6 +962,10 @@ local function RefreshPlacedIndicators()
                                 selectedAura = capturedAura
                                 DF:AuraDesigner_RefreshPage()
                             end
+                        end)
+                        bar:RegisterForDrag("LeftButton")
+                        bar:SetScript("OnDragStart", function()
+                            StartMoveDrag(capturedAura, capturedID, spec)
                         end)
                         tinsert(placedIndicators, bar)
                     end
@@ -2726,13 +2832,14 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef)
         end)
 
         dotFrame.anchorName = anchorName
+        dotFrame:Hide()  -- Only visible during active drags
         anchorDots[anchorName] = dotFrame
     end
 
     -- Instructions with keyboard badge styling
     local instrRows = {
         { key = "Click",       desc = "an aura tile to configure its display settings" },
-        { key = "Drag",        desc = "an aura tile onto the frame to place at a specific anchor" },
+        { key = "Drag",        desc = "an aura tile onto the frame to place, or drag a placed indicator to move it" },
         { key = "Right-click", desc = "a placed indicator to remove it from the frame" },
     }
 
