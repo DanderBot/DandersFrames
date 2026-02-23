@@ -1,5 +1,24 @@
 # DandersFrames Changelog
 
+## [4.0.8] - 2026-02-23
+
+### Bug Fixes
+* Fix Aura Designer square/bar color settings not saving across reloads (proxy copy-on-read for table defaults)
+* Fix Aura Designer placed indicators becoming non-interactive after changing settings like size or scale
+* Fix Aura Designer anchor dots consuming right-clicks intended for indicator deletion
+* Fix Aura Designer not-installed overlay not showing when HARF is installed but disabled
+* Fix Aura Designer URL copy popup error (use existing GUI popup system)
+* Fix Harrek's logo not rendering (convert from non-power-of-2 PNG to 64x64 TGA)
+
+### New Features
+* Aura Designer placed indicators can now be picked up and dragged to a different anchor point
+* Aura Designer not-installed overlay with Harrek's logo, description, and CurseForge/Discord links
+* Aura Designer attribution row shows Harrek's logo and orange-branded addon name
+
+### Improvements
+* Replace all font-based Unicode icons with TGA textures (gear, checkmarks, close buttons, chevrons, dropdown arrows)
+* Anchor dots only visible during drag operations for cleaner UI
+
 ## [4.0.7] - 2026-02-23
 
 ### Bug Fixes
