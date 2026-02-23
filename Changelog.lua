@@ -1,36 +1,28 @@
 local addonName, DF = ...
-DF.ADDON_VERSION = "v4.0.7-alpha.20"
-DF.BUILD_DATE = "2026-02-21T19:46:48Z"
+DF.ADDON_VERSION = "v4.0.7-alpha.21"
+DF.BUILD_DATE = "2026-02-22T22:35:19Z"
 DF.RELEASE_CHANNEL = "alpha"
 DF.CHANGELOG_TEXT = [===[
 # DandersFrames Changelog
 
-## Unreleased (v4.0.7-alpha.20)
+## Unreleased (v4.0.7-alpha.21)
 
-- Fix auto layout override values stuck on test mode frames
-- Fix auto layout settings contamination bugs
-- Fix right panel scroll frame having zero height
-- Add debug logging to per-aura view to diagnose invisible settings
-- Restyle per-aura right panel: remove duplicate header, visible type sections
-- Add missing defaults for square and bar type configs
-- Add UI polish: selected highlight, drag hints, icon border, collapsible expiring, copy mode fix
-- Move ANCHOR_POSITIONS declaration before placed indicators code
-- Fix placed indicators, add missing controls, reorder per-aura view
-- Fix EndDrag nil error: forward-declare before StartDrag
-- Fix anchorDots nil error: move declaration before drag system
-- Add drag-and-drop, placed indicators, and preview effects
-- Polish Aura Designer UI: SETTINGS header, tile glow, section styling
-- Fix copy-from dropdown: replace removed EasyMenu with custom popup
-- Add copy-from dropdown, instruction badges, global settings panel
-- Fix Aura Designer UI: themed checkbox, layout, spell icons, preview settings
-- Improve Aura Designer UI visual fidelity
-- Add Aura Designer UI skeleton (Options GUI, config defaults, adapter stub)
-- Add debug logging to auto layouts system
+- Update 4.0.7 changelog with merged PRs and AD combat fixes
+- Fix ApplyBar: default matchFrameWidth to true when nil
+- Fix ApplySquare falling back to global defaults for size and scale
+- Match square size slider max (64) to icon slider max
+- Fix ChangeInstanceType baking TYPE_DEFAULTS instead of falling through to globals
+- Instance proxies fall through to global defaults for size/scale/duration/stacks
+- Fix square default size to 24 (was 10 in TYPE_DEFAULTS)
+- Refactor AD to instance-based placed indicators
+- Fix double beta release and wrong release channel detection
+- Add click-cast binding tooltip on unit frame hover
+- feat(options): add health gradient color mode for missing health bar
 
 ---
 
 
-## [4.0.7] - 2026-02-18
+## [4.0.7] - 2026-02-22
 
 ### Bug Fixes
 * Fix health fade errors with secret numbers — rewritten to use curve-based engine-side resolution, no Lua comparison of protected values
@@ -57,6 +49,10 @@ DF.CHANGELOG_TEXT = [===[
 * Fix aura click-through not updating safely on login
 * Fix leader icon not updating on first leader change (contributed by riyuk)
 * Fix forbidden table iteration in FindHealthManaBars (contributed by riyuk)
+* Fix forbidden table iteration in click-casting Blizzard frame registration (contributed by riyuk)
+* Fix double beta release and wrong release channel detection in CI (contributed by riyuk)
+* Fix Aura Designer indicators not displaying in combat — switched to Duration object pipeline for secret value compatibility
+* Fix Aura Designer bar duration text and expiring color flicker in combat
 * Various auto layout stability fixes
 * Fix auto layout settings contamination between party and raid modes
 * Fix auto layout override values getting stuck on test mode frames after profile switch
@@ -67,11 +63,13 @@ DF.CHANGELOG_TEXT = [===[
 * Add class power pip color, vertical layout, and role filter options
 * Add "Sync with Raid/Party" toggle per settings page (contributed by Enf0)
 * Add per-class resource bar filter toggles
+* Add click-cast binding tooltip on unit frame hover — shows active bindings with usability status (contributed by riyuk)
+* Add health gradient color mode for missing health bar, with collapsible Health Bar / Missing Health sections (contributed by Enf0)
 * Auto-reload UI when toggling click-casting enable/disable
 * Auto-show changelog when opening settings after an update
 * Rename "Auto Profiles" to "Auto Layouts" throughout the UI
 * Debug Console — in-game debug log viewer (`/df debug` to toggle, `/df console` to view)
-* Aura Designer UI (work in progress — not yet functional)
+* Aura Designer — icon, square, and bar indicators with instance-based placement; drag to place, toggle type per-instance, global defaults inheritance
 
 ## [4.0.6] - 2026-02-15
 
