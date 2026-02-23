@@ -319,6 +319,12 @@ function Indicators:ApplyHealthBar(frame, config, auraData)
     local healthBar = frame.healthBar
     if not healthBar then return end
 
+    -- Save original color on first use so we can restore it later
+    if not state.savedHealthBarColor then
+        local r, g, b, a = healthBar:GetStatusBarColor()
+        state.savedHealthBarColor = { r = r, g = g, b = b, a = a or 1 }
+    end
+
     local color = config.color
     if not color then return end
 
@@ -328,20 +334,26 @@ function Indicators:ApplyHealthBar(frame, config, auraData)
     if mode == "replace" then
         healthBar:SetStatusBarColor(r, g, b, 1)
     elseif mode == "tint" then
-        -- Blend with current color
-        local blend = (config.blend or 50) / 100
-        local cr, cg, cb = healthBar:GetStatusBarColor()
-        local nr = cr + (r - cr) * blend
-        local ng = cg + (g - cg) * blend
-        local nb = cb + (b - cb) * blend
+        -- Blend with current color (blend is already 0-1 from the slider)
+        local blend = config.blend or 0.5
+        local saved = state.savedHealthBarColor
+        local nr = saved.r + (r - saved.r) * blend
+        local ng = saved.g + (g - saved.g) * blend
+        local nb = saved.b + (b - saved.b) * blend
         healthBar:SetStatusBarColor(nr, ng, nb, 1)
     end
 end
 
 function Indicators:RevertHealthBar(frame)
-    -- The normal frame update cycle will restore health bar color
-    -- on the next UpdateUnitFrame call, so we don't need to do
-    -- anything special here.
+    local state = frame and frame.dfAD
+    if not state or not state.savedHealthBarColor then return end
+
+    local healthBar = frame.healthBar
+    if not healthBar then return end
+
+    local c = state.savedHealthBarColor
+    healthBar:SetStatusBarColor(c.r, c.g, c.b, c.a)
+    state.savedHealthBarColor = nil  -- Re-capture next time
 end
 
 -- ============================================================

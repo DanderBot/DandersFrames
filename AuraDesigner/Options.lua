@@ -881,8 +881,8 @@ local function RefreshPreviewEffects()
     if not mockFrame then return end
 
     -- Reset to defaults
-    if framePreview.borderOverlay then
-        framePreview.borderOverlay:Hide()
+    if framePreview.borderOverlay and DF.ApplyHighlightStyle then
+        DF.ApplyHighlightStyle(framePreview.borderOverlay, "NONE", 2, 0, 1, 1, 1, 1)
     end
     if framePreview.healthFill then
         framePreview.healthFill:SetVertexColor(0.18, 0.80, 0.44, 0.85)
@@ -902,18 +902,18 @@ local function RefreshPreviewEffects()
     local auraCfg = adDB.auras[selectedAura]
     if not auraCfg then return end
 
-    -- Border effect
-    if auraCfg.border then
+    -- Border effect (uses highlight system for all 6 styles)
+    if auraCfg.border and framePreview.borderOverlay and DF.ApplyHighlightStyle then
         local clr = auraCfg.border.color or {r = 1, g = 1, b = 1, a = 1}
         local thickness = auraCfg.border.thickness or 2
-        local overlay = framePreview.borderOverlay
-        if not overlay.SetBackdrop then Mixin(overlay, BackdropTemplateMixin) end
-        overlay:SetBackdrop({
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = thickness,
-        })
-        overlay:SetBackdropBorderColor(clr.r, clr.g, clr.b, clr.a or 1)
-        overlay:Show()
+        local inset = auraCfg.border.inset or 0
+        -- Migrate old style names (Solid→SOLID, Glow→GLOW, Pulse→SOLID)
+        local style = auraCfg.border.style or "SOLID"
+        if style == "Solid" then style = "SOLID"
+        elseif style == "Glow" then style = "GLOW"
+        elseif style == "Pulse" then style = "SOLID" end
+        DF.ApplyHighlightStyle(framePreview.borderOverlay, style, thickness, inset,
+            clr.r or 1, clr.g or 1, clr.b or 1, clr.a or 1)
     end
 
     -- Health bar color
@@ -2646,9 +2646,14 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef)
     container.hpText = hpText
 
     -- Border overlay (used when border effect is active)
-    container.borderOverlay = CreateFrame("Frame", nil, mockFrame, "BackdropTemplate")
+    -- Uses highlight-compatible structure so DF.ApplyHighlightStyle can render all 6 modes
+    container.borderOverlay = CreateFrame("Frame", nil, mockFrame)
     container.borderOverlay:SetAllPoints()
     container.borderOverlay:SetFrameLevel(mockFrame:GetFrameLevel() + 5)
+    container.borderOverlay.topLine = container.borderOverlay:CreateTexture(nil, "OVERLAY")
+    container.borderOverlay.bottomLine = container.borderOverlay:CreateTexture(nil, "OVERLAY")
+    container.borderOverlay.leftLine = container.borderOverlay:CreateTexture(nil, "OVERLAY")
+    container.borderOverlay.rightLine = container.borderOverlay:CreateTexture(nil, "OVERLAY")
     container.borderOverlay:Hide()
 
     -- Click background to deselect aura (return to Global view)
