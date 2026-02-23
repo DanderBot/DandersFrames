@@ -56,8 +56,9 @@ local GROWTH_OPTIONS = {
 }
 
 local BORDER_STYLE_OPTIONS = {
-    Solid = "Solid", Glow = "Glow", Pulse = "Pulse",
-    _order = {"Solid", "Glow", "Pulse"},
+    SOLID = "Solid Border", ANIMATED = "Animated Border", DASHED = "Dashed Border",
+    GLOW = "Glow", CORNERS = "Corners Only", NONE = "Hidden",
+    _order = {"SOLID", "ANIMATED", "DASHED", "GLOW", "CORNERS", "NONE"},
 }
 
 local HEALTHBAR_MODE_OPTIONS = {
@@ -203,8 +204,8 @@ local function EnsureTypeConfig(auraName, typeKey)
             }
         elseif typeKey == "border" then
             auraCfg[typeKey] = {
-                style = "Solid", color = {r = 1, g = 1, b = 1, a = 1},
-                thickness = 2, pulsate = false, speed = 0.5,
+                style = "SOLID", color = {r = 1, g = 1, b = 1, a = 1},
+                thickness = 2, inset = 0,
             }
         elseif typeKey == "healthbar" then
             auraCfg[typeKey] = {
@@ -1483,9 +1484,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy)
             function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
             true), 28)
         AddWidget(GUI:CreateSlider(parent, "Thickness", 1, 8, 1, proxy, "thickness"), 54)
-        AddDivider()
-        AddWidget(GUI:CreateCheckbox(parent, "Pulsate", proxy, "pulsate"), 28)
-        AddWidget(GUI:CreateSlider(parent, "Pulse Speed", 0.1, 2.0, 0.1, proxy, "speed"), 54)
+        AddWidget(GUI:CreateSlider(parent, "Inset", 0, 8, 1, proxy, "inset"), 54)
 
     elseif typeKey == "healthbar" then
         AddWidget(GUI:CreateDropdown(parent, "Mode", HEALTHBAR_MODE_OPTIONS, proxy, "mode"), 54)
