@@ -67,7 +67,6 @@ Automatically switches your raid frame layout based on content type and raid siz
 * Fix aura click-through not updating safely on login
 * Fix leader icon not updating on first leader change (contributed by riyuk)
 * Fix forbidden table iteration in FindHealthManaBars and click-casting registration (contributed by riyuk)
-* Fix double beta release and wrong release channel detection in CI (contributed by riyuk)
 
 ## [4.0.6] - 2026-02-15
 
