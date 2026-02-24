@@ -34,6 +34,7 @@
 * Fix Aura Designer bar duration text and expiring color flicker in combat
 * Fix Aura Designer health bar color tint mode not working — blend value was divided by 100 twice
 * Fix Aura Designer health bar color not reverting to original when aura expires
+* Fix Aura Designer health bar color flickering on health updates and form shifts
 * Fix Aura Designer square indicator not inheriting global icon size defaults
 * Fix Aura Designer square/bar color settings not saving across reloads (proxy copy-on-read for table defaults)
 * Fix Aura Designer placed indicators becoming non-interactive after changing settings like size or scale
