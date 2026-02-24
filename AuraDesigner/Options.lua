@@ -3845,29 +3845,35 @@ end
 -- ============================================================
 
 function DF:ApplyAuraDesignerTabState()
-    if not GUI or not GUI.Tabs then return end
+    local guiRef = DF.GUI
+    if not guiRef or not guiRef.Tabs then return end
     if not DF.db then return end
 
-    local mode = (GUI and GUI.SelectedMode) or "party"
+    local mode = (guiRef.SelectedMode) or "party"
     local modeDB = DF:GetDB(mode)
     local adEnabled = modeDB and modeDB.auraDesigner and modeDB.auraDesigner.enabled
 
     local disableTabs = { "auras_buffs", "auras_mybuffindicators" }
     for _, tabKey in ipairs(disableTabs) do
-        local tab = GUI.Tabs[tabKey]
+        local tab = guiRef.Tabs[tabKey]
         if tab then
             tab.disabled = adEnabled or false
             if adEnabled then
-                -- Add strikethrough if not already present
+                -- Dim text and add strikethrough
+                tab.Text:SetTextColor(0.4, 0.4, 0.4)
+                tab.Text:SetAlpha(1)
                 if not tab._strikethrough then
                     tab._strikethrough = tab:CreateTexture(nil, "OVERLAY")
-                    tab._strikethrough:SetColorTexture(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.6)
+                    tab._strikethrough:SetColorTexture(0.6, 0.6, 0.6, 0.6)
                     tab._strikethrough:SetHeight(1)
                     tab._strikethrough:SetPoint("LEFT", tab.Text or tab, "LEFT", 0, 0)
                     tab._strikethrough:SetPoint("RIGHT", tab.Text or tab, "RIGHT", 0, 0)
                 end
                 tab._strikethrough:Show()
             else
+                -- Restore normal text
+                tab.Text:SetTextColor(0.9, 0.9, 0.9)
+                tab.Text:SetAlpha(1)
                 if tab._strikethrough then
                     tab._strikethrough:Hide()
                 end
