@@ -1897,25 +1897,25 @@ local function BuildPerAuraView(parent, auraName)
     -- ===== INDICATORS SECTION HEADER =====
     local tc0 = GetThemeColor()
     local indHeader = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    indHeader:SetHeight(22)
+    indHeader:SetHeight(34)
     indHeader:SetPoint("TOPLEFT", 0, yPos)
     indHeader:SetPoint("RIGHT", parent, "RIGHT", 0, 0)
     ApplyBackdrop(indHeader, {r = tc0.r * 0.06, g = tc0.g * 0.06, b = tc0.b * 0.06, a = 1}, {r = tc0.r * 0.25, g = tc0.g * 0.25, b = tc0.b * 0.25, a = 0.8})
 
     local indLabel = indHeader:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    indLabel:SetPoint("LEFT", 10, 0)
+    indLabel:SetPoint("TOPLEFT", 10, -4)
     indLabel:SetText("INDICATORS")
-    indLabel:SetTextColor(tc0.r, tc0.g, tc0.b, 0.8)
+    indLabel:SetTextColor(tc0.r, tc0.g, tc0.b, 0.9)
 
     local indSubLabel = indHeader:CreateFontString(nil, "OVERLAY")
     indSubLabel:SetFont("Fonts\\FRIZQT__.TTF", 9, "")
-    indSubLabel:SetPoint("LEFT", indLabel, "RIGHT", 8, 0)
+    indSubLabel:SetPoint("TOPLEFT", indLabel, "BOTTOMLEFT", 0, -1)
     indSubLabel:SetPoint("RIGHT", indHeader, "RIGHT", -8, 0)
-    indSubLabel:SetText("placed on the frame — add as many as you need")
-    indSubLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.5)
+    indSubLabel:SetText("Placed on the frame — add as many as you need")
+    indSubLabel:SetTextColor(0.6, 0.6, 0.6)
     indSubLabel:SetJustifyH("LEFT")
-    indSubLabel:SetWordWrap(false)
-    yPos = yPos - 26
+    indSubLabel:SetWordWrap(true)
+    yPos = yPos - 38
 
     -- ===== PLACED INDICATOR INSTANCES =====
     -- Each instance is a card with type toggle, collapsible settings, and delete button
@@ -2073,24 +2073,23 @@ local function BuildPerAuraView(parent, auraName)
     -- ===== ADD INDICATOR BUTTON =====
     yPos = yPos - 4
     local addBtn = CreateFrame("Button", nil, parent, "BackdropTemplate")
-    addBtn:SetHeight(24)
+    addBtn:SetSize(160, 24)
     addBtn:SetPoint("TOPLEFT", 0, yPos)
-    addBtn:SetPoint("RIGHT", parent, "RIGHT", 0, 0)
     local tc = GetThemeColor()
-    ApplyBackdrop(addBtn, {r = tc.r * 0.08, g = tc.g * 0.08, b = tc.b * 0.08, a = 1}, {r = tc.r * 0.3, g = tc.g * 0.3, b = tc.b * 0.3, a = 0.6})
+    ApplyBackdrop(addBtn, {r = tc.r * 0.12, g = tc.g * 0.12, b = tc.b * 0.12, a = 1}, {r = tc.r * 0.4, g = tc.g * 0.4, b = tc.b * 0.4, a = 0.8})
 
     local addLabel = addBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     addLabel:SetPoint("CENTER", 0, 0)
     addLabel:SetText("+ Add Indicator")
-    addLabel:SetTextColor(tc.r, tc.g, tc.b, 0.8)
+    addLabel:SetTextColor(0.9, 0.9, 0.9)
 
     addBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(tc.r * 0.15, tc.g * 0.15, tc.b * 0.15, 1)
-        addLabel:SetTextColor(tc.r, tc.g, tc.b, 1)
+        self:SetBackdropColor(tc.r * 0.2, tc.g * 0.2, tc.b * 0.2, 1)
+        addLabel:SetTextColor(1, 1, 1)
     end)
     addBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(tc.r * 0.08, tc.g * 0.08, tc.b * 0.08, 1)
-        addLabel:SetTextColor(tc.r, tc.g, tc.b, 0.8)
+        self:SetBackdropColor(tc.r * 0.12, tc.g * 0.12, tc.b * 0.12, 1)
+        addLabel:SetTextColor(0.9, 0.9, 0.9)
     end)
     addBtn:SetScript("OnClick", function()
         local inst = CreateIndicatorInstance(auraName, "icon")
@@ -2105,27 +2104,27 @@ local function BuildPerAuraView(parent, auraName)
 
     -- Section header for frame-level (global) effects
     local globalHeader = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    globalHeader:SetHeight(22)
+    globalHeader:SetHeight(34)
     globalHeader:SetPoint("TOPLEFT", 0, yPos)
     globalHeader:SetPoint("RIGHT", parent, "RIGHT", 0, 0)
     local tc2 = GetThemeColor()
     ApplyBackdrop(globalHeader, {r = tc2.r * 0.06, g = tc2.g * 0.06, b = tc2.b * 0.06, a = 1}, {r = tc2.r * 0.25, g = tc2.g * 0.25, b = tc2.b * 0.25, a = 0.8})
 
     local globalLabel = globalHeader:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    globalLabel:SetPoint("LEFT", 10, 0)
+    globalLabel:SetPoint("TOPLEFT", 10, -4)
     globalLabel:SetText("FRAME EFFECTS")
-    globalLabel:SetTextColor(tc2.r, tc2.g, tc2.b, 0.8)
+    globalLabel:SetTextColor(tc2.r, tc2.g, tc2.b, 0.9)
 
     local globalSubLabel = globalHeader:CreateFontString(nil, "OVERLAY")
     globalSubLabel:SetFont("Fonts\\FRIZQT__.TTF", 9, "")
-    globalSubLabel:SetPoint("LEFT", globalLabel, "RIGHT", 8, 0)
+    globalSubLabel:SetPoint("TOPLEFT", globalLabel, "BOTTOMLEFT", 0, -1)
     globalSubLabel:SetPoint("RIGHT", globalHeader, "RIGHT", -8, 0)
-    globalSubLabel:SetText("global — one per aura, modifies the frame itself")
-    globalSubLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.5)
+    globalSubLabel:SetText("Global — one per aura, modifies the frame itself")
+    globalSubLabel:SetTextColor(0.6, 0.6, 0.6)
     globalSubLabel:SetJustifyH("LEFT")
-    globalSubLabel:SetWordWrap(false)
+    globalSubLabel:SetWordWrap(true)
 
-    yPos = yPos - 26
+    yPos = yPos - 38
 
     -- ===== FRAME-LEVEL INDICATOR SECTIONS =====
     -- 5 collapsible sections: border, healthbar, nametext, healthtext, framealpha
