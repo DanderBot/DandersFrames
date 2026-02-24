@@ -202,7 +202,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         
         return btn
     end
-    
+
+    -- Expose for use by sub-pages (e.g. Aura Designer)
+    GUI.CreateCopyButton = CreateCopyButton
+
     -- Define category order (updated structure)
     GUI.CategoryOrder = {"general", "clickcast", "display", "bars", "text", "auras", "indicators", "profiles", "debug"}
     
@@ -3579,7 +3582,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     -- Auras > Aura Designer
     local pageAuraDesigner = CreateSubTab("auras", "auras_auradesigner", "Aura Designer")
     BuildPage(pageAuraDesigner, function(self, db, Add, AddSpace, AddSyncPoint)
-        Add(CreateCopyButton(self.child, {"auraDesigner"}, "Aura Designer", "auras_auradesigner"), 25, 2)
         if DF.BuildAuraDesignerPage then
             DF.BuildAuraDesignerPage(GUI, self, db)
         end

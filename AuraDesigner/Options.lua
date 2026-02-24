@@ -2230,15 +2230,110 @@ local function BuildPerAuraView(parent, auraName)
     div2:SetColorTexture(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
     yPos = yPos - 12
 
-    -- ===== PRIORITY SLIDER =====
+    -- ===== PRIORITY SLIDER (reversed: 10=Low on left, 1=High on right) =====
     local auraProxy = CreateAuraProxy(auraName)
     if not auraCfg or auraCfg.priority == nil then
         EnsureAuraConfig(auraName)
     end
 
-    local priority = GUI:CreateSlider(parent, "Priority", 1, 10, 1, auraProxy, "priority")
-    priority:SetPoint("TOPLEFT", 5, yPos)
-    priority:SetWidth(contentWidth - 10)
+    local prioContainer = CreateFrame("Frame", nil, parent)
+    prioContainer:SetSize(contentWidth - 10, 50)
+    prioContainer:SetPoint("TOPLEFT", 5, yPos)
+
+    local prioLabel = prioContainer:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    prioLabel:SetPoint("TOPLEFT", 0, 0)
+    prioLabel:SetText("Priority")
+    prioLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+
+    local prioLowLabel = prioContainer:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    prioLowLabel:SetPoint("BOTTOMLEFT", 0, 0)
+    prioLowLabel:SetText("Low")
+    prioLowLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    prioLowLabel:SetFont(prioLowLabel:GetFont(), 9)
+
+    local prioHighLabel = prioContainer:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    prioHighLabel:SetPoint("BOTTOM", 180, 0)
+    prioHighLabel:SetText("High")
+    prioHighLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    prioHighLabel:SetFont(prioHighLabel:GetFont(), 9)
+
+    -- Track
+    local prioTrack = CreateFrame("Frame", nil, prioContainer, "BackdropTemplate")
+    prioTrack:SetPoint("TOPLEFT", 0, -18)
+    prioTrack:SetSize(180, 8)
+    ApplyBackdrop(prioTrack, C_ELEMENT, C_BORDER)
+
+    -- Fill from RIGHT (more fill = higher priority)
+    local tc = GetThemeColor()
+    local prioFill = prioTrack:CreateTexture(nil, "ARTWORK")
+    prioFill:SetPoint("RIGHT", -1, 0)
+    prioFill:SetHeight(6)
+    prioFill:SetColorTexture(tc.r, tc.g, tc.b, 0.8)
+
+    -- Slider
+    local prioSlider = CreateFrame("Slider", nil, prioContainer)
+    prioSlider:SetPoint("TOPLEFT", 0, -18)
+    prioSlider:SetSize(180, 8)
+    prioSlider:SetOrientation("HORIZONTAL")
+    prioSlider:SetMinMaxValues(1, 10)
+    prioSlider:SetValueStep(1)
+    prioSlider:SetObeyStepOnDrag(true)
+    prioSlider:SetHitRectInsets(-4, -4, -8, -8)
+
+    local prioThumb = prioSlider:CreateTexture(nil, "OVERLAY")
+    prioThumb:SetSize(12, 16)
+    prioThumb:SetColorTexture(tc.r, tc.g, tc.b, 1)
+    prioSlider:SetThumbTexture(prioThumb)
+
+    -- Input box
+    local prioInput = CreateFrame("EditBox", nil, prioContainer, "BackdropTemplate")
+    prioInput:SetPoint("LEFT", prioTrack, "RIGHT", 8, 0)
+    prioInput:SetSize(50, 20)
+    ApplyBackdrop(prioInput, C_ELEMENT, C_BORDER)
+    prioInput:SetFontObject(GameFontHighlightSmall)
+    prioInput:SetJustifyH("CENTER")
+    prioInput:SetAutoFocus(false)
+    prioInput:SetTextInsets(2, 2, 0, 0)
+
+    -- Transform: slider value 1 (left) = stored 10 (low), slider value 10 (right) = stored 1 (high)
+    local function StoredToSlider(stored) return 11 - (stored or 5) end
+    local function SliderToStored(slider) return 11 - slider end
+
+    local function UpdatePrioFill()
+        local val = prioSlider:GetValue()
+        local pct = (val - 1) / 9
+        prioFill:SetWidth(max(1, pct * 178))
+    end
+
+    local storedPriority = auraProxy.priority or 5
+    prioSlider:SetValue(StoredToSlider(storedPriority))
+    prioInput:SetText(tostring(storedPriority))
+    UpdatePrioFill()
+
+    prioSlider:SetScript("OnValueChanged", function(_, value)
+        local rounded = math.floor(value + 0.5)
+        local stored = SliderToStored(rounded)
+        auraProxy.priority = stored
+        prioInput:SetText(tostring(stored))
+        UpdatePrioFill()
+    end)
+
+    prioInput:SetScript("OnEnterPressed", function(self)
+        local val = tonumber(self:GetText())
+        if val then
+            val = max(1, min(10, math.floor(val + 0.5)))
+            auraProxy.priority = val
+            prioSlider:SetValue(StoredToSlider(val))
+            self:SetText(tostring(val))
+            UpdatePrioFill()
+        end
+        self:ClearFocus()
+    end)
+    prioInput:SetScript("OnEscapePressed", function(self)
+        self:SetText(tostring(auraProxy.priority or 5))
+        self:ClearFocus()
+    end)
+
     yPos = yPos - 58
 
     -- ===== DIVIDER =====
@@ -2578,6 +2673,8 @@ local function CreateEnableBanner(parent)
 
     banner.UpdateSpecText = UpdateSpecText
     banner.checkbox = cb
+    banner.specLabel = specLabel
+    banner.specBtn = specBtn
     return banner
 end
 
@@ -3321,6 +3418,22 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     enableBanner:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 0, yPos)
     enableBanner:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", 0, yPos)
     enableBanner.UpdateSpecText()
+
+    -- Add sync/copy buttons to the banner (reuses the standard copy button system)
+    if GUI.CreateCopyButton then
+        local copyBtn = GUI.CreateCopyButton(enableBanner, {"auraDesigner"}, "Aura Designer", "auras_auradesigner")
+        copyBtn:ClearAllPoints()
+        copyBtn:SetPoint("RIGHT", enableBanner, "RIGHT", -5, 0)
+
+        -- Reposition spec dropdown to make room for sync + copy buttons
+        -- Copy btn = 115px, sync btn = 120px, gaps = ~12px total → need ~252px from right
+        enableBanner.specBtn:SetSize(110, 22)
+        enableBanner.specBtn:ClearAllPoints()
+        enableBanner.specBtn:SetPoint("RIGHT", enableBanner, "RIGHT", -252, 0)
+        enableBanner.specLabel:ClearAllPoints()
+        enableBanner.specLabel:SetPoint("RIGHT", enableBanner.specBtn, "LEFT", -4, 0)
+    end
+
     yPos = yPos - (BANNER_H + 4)
 
     -- ========================================
@@ -3545,15 +3658,31 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
             return copy
         end
 
+        -- Save current aura's indicator positions before overwriting
+        local currentCfg = adDB.auras[selectedAura]
+        local currentPositions = {}
+        if currentCfg and currentCfg.indicators then
+            for i, inst in ipairs(currentCfg.indicators) do
+                currentPositions[i] = {
+                    anchor = inst.anchor,
+                    offsetX = inst.offsetX,
+                    offsetY = inst.offsetY,
+                }
+            end
+        end
+
         local newCfg = deepCopy(sourceCfg)
-        -- Re-assign instance IDs and strip position settings
+        -- Re-assign instance IDs and preserve current positions
         if newCfg.indicators then
             local nextID = 1
-            for _, inst in ipairs(newCfg.indicators) do
+            for i, inst in ipairs(newCfg.indicators) do
                 inst.id = nextID
-                inst.anchor = nil
-                inst.offsetX = nil
-                inst.offsetY = nil
+                -- Keep the target aura's current positions when available
+                if currentPositions[i] then
+                    inst.anchor = currentPositions[i].anchor
+                    inst.offsetX = currentPositions[i].offsetX
+                    inst.offsetY = currentPositions[i].offsetY
+                end
                 nextID = nextID + 1
             end
             newCfg.nextIndicatorID = nextID
