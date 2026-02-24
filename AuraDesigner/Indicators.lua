@@ -1453,7 +1453,15 @@ function Indicators:ApplyBar(frame, config, auraData, defaults, auraName, priori
     if showSpark == nil then showSpark = true end
     if bar.spark then
         if showSpark then
-            bar.spark:SetSize(12, max(height * 3, 12))
+            if orientation == "VERTICAL" then
+                -- Horizontal spark for vertical bar — rotate 90°
+                bar.spark:SetSize(max(width * 3, 12), 12)
+                bar.spark:SetTexCoord(0, 1, 1, 1, 0, 0, 1, 0)
+            else
+                -- Vertical spark for horizontal bar (default)
+                bar.spark:SetSize(12, max(height * 3, 12))
+                bar.spark:SetTexCoord(0, 0, 0, 1, 1, 0, 1, 1)
+            end
             bar.spark:Show()
         else
             bar.spark:Hide()

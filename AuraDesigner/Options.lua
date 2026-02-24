@@ -1562,7 +1562,18 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy)
         AddWidget(GUI:CreateSlider(parent, "Offset Y", -50, 50, 1, proxy, "offsetY"), 54)
         AddDivider()
         -- Size & orientation
-        AddWidget(GUI:CreateDropdown(parent, "Orientation", BAR_ORIENT_OPTIONS, proxy, "orientation"), 54)
+        AddWidget(GUI:CreateDropdown(parent, "Orientation", BAR_ORIENT_OPTIONS, proxy, "orientation", function()
+            -- Swap width/height and matchFrame settings when orientation changes
+            local w = proxy.width
+            local h = proxy.height
+            proxy.width = h
+            proxy.height = w
+            local mw = proxy.matchFrameWidth
+            local mh = proxy.matchFrameHeight
+            proxy.matchFrameWidth = mh
+            proxy.matchFrameHeight = mw
+            DF:AuraDesigner_RefreshPage()
+        end), 54)
         AddWidget(GUI:CreateSlider(parent, "Width", 0, 200, 1, proxy, "width"), 54)
         AddWidget(GUI:CreateSlider(parent, "Height", 1, 30, 1, proxy, "height"), 54)
         AddWidget(GUI:CreateCheckbox(parent, "Match Frame Width", proxy, "matchFrameWidth"), 28)
