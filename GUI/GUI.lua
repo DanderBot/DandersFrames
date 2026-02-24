@@ -5625,7 +5625,8 @@ function DF:CreateGUI()
                 self:SetBackdropColor(0, 0, 0, 0)
             end
         end)
-        btn:SetScript("OnClick", function()
+        btn:SetScript("OnClick", function(self)
+            if self.disabled then return end
             SelectTab(name)
             PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
         end)
@@ -5966,11 +5967,16 @@ function DF:CreateGUI()
         DF.AutoProfilesUI:SetupEditingBanner()
     end
     
+    -- Apply Aura Designer tab disabled state before first SelectTab
+    if DF.ApplyAuraDesignerTabState then
+        DF:ApplyAuraDesignerTabState()
+    end
+
     -- Update tab layout after all tabs created
     GUI:UpdateTabLayout()
-    
+
     UpdateThemeColors()
-    
+
     -- Select first subtab
     if GUI.CategoryOrder[1] then
         local firstCat = GUI.Categories[GUI.CategoryOrder[1]]
