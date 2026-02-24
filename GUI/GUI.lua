@@ -5017,8 +5017,8 @@ function DF:CreateGUI()
                 btn.Text:SetTextColor(nc.r, nc.g, nc.b)
                 btn.Text:SetAlpha(1)
             elseif btn.disabled then
-                btn.Text:SetTextColor(0.2, 0.2, 0.2)
-                btn.Text:SetAlpha(0.8)
+                btn.Text:SetTextColor(0.4, 0.4, 0.4)
+                btn.Text:SetAlpha(1)
                 if btn.accent then btn.accent:Hide() end
             end
         end
@@ -5467,8 +5467,8 @@ function DF:CreateGUI()
             if btn.accent then btn.accent:Hide() end
             -- Check if tab is disabled (e.g., during Auto Profile editing)
             if btn.disabled then
-                btn.Text:SetTextColor(0.2, 0.2, 0.2)
-                btn.Text:SetAlpha(0.8)
+                btn.Text:SetTextColor(0.4, 0.4, 0.4)
+                btn.Text:SetAlpha(1)
             else
                 btn.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
                 btn.Text:SetAlpha(1)
