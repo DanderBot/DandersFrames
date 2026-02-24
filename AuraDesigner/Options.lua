@@ -2263,10 +2263,10 @@ local function BuildPerAuraView(parent, auraName)
     prioTrack:SetSize(180, 8)
     ApplyBackdrop(prioTrack, C_ELEMENT, C_BORDER)
 
-    -- Fill from RIGHT (more fill = higher priority)
+    -- Fill tracks the thumb position (left to right)
     local tc = GetThemeColor()
     local prioFill = prioTrack:CreateTexture(nil, "ARTWORK")
-    prioFill:SetPoint("RIGHT", -1, 0)
+    prioFill:SetPoint("LEFT", 1, 0)
     prioFill:SetHeight(6)
     prioFill:SetColorTexture(tc.r, tc.g, tc.b, 0.8)
 
@@ -2614,7 +2614,7 @@ local function CreateEnableBanner(parent)
     end
 
     local specMenu = CreateFrame("Frame", nil, specBtn, "BackdropTemplate")
-    specMenu:SetFrameStrata("DIALOG")
+    specMenu:SetFrameStrata("FULLSCREEN_DIALOG")
     specMenu:SetPoint("TOPLEFT", specBtn, "BOTTOMLEFT", 0, -1)
     specMenu:SetWidth(200)
     ApplyBackdrop(specMenu, C_PANEL, {r = 0.35, g = 0.35, b = 0.35, a = 1})
@@ -3427,9 +3427,9 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
 
         -- Reposition spec dropdown to make room for sync + copy buttons
         -- Copy btn = 115px, sync btn = 120px, gaps = ~12px total → need ~252px from right
-        enableBanner.specBtn:SetSize(110, 22)
+        enableBanner.specBtn:SetSize(135, 22)
         enableBanner.specBtn:ClearAllPoints()
-        enableBanner.specBtn:SetPoint("RIGHT", enableBanner, "RIGHT", -252, 0)
+        enableBanner.specBtn:SetPoint("RIGHT", enableBanner, "RIGHT", -256, 0)
         enableBanner.specLabel:ClearAllPoints()
         enableBanner.specLabel:SetPoint("RIGHT", enableBanner.specBtn, "LEFT", -4, 0)
     end
