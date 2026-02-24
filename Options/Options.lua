@@ -1347,7 +1347,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             if db.groupLabelFont ~= nil then
                 db.groupLabelFont = font; db.groupLabelOutline = outline
             end
-            
+            -- Aura Designer global defaults
+            if db.auraDesigner and db.auraDesigner.defaults then
+                local adDefaults = db.auraDesigner.defaults
+                adDefaults.durationFont = font; adDefaults.durationOutline = outline
+                adDefaults.stackFont = font; adDefaults.stackOutline = outline
+            end
+
             DF:UpdateAllFrames()
             if GUI.SelectedMode == "raid" and DF.UpdateRaidLayout then DF:UpdateRaidLayout() end
             if DF.ApplyPetSettings then DF:ApplyPetSettings() end
