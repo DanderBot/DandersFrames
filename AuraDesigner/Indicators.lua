@@ -105,6 +105,111 @@ local function HasAuraDuration(auraData, unit)
 end
 
 -- ============================================================
+-- BORDER OFFSET COMPENSATION
+-- Adjusts indicator position so borders don't hang off the frame
+-- edge when anchored at a boundary (e.g. TOPLEFT offset 0,0).
+-- ============================================================
+
+local function AdjustOffsetForBorder(anchor, offsetX, offsetY, borderSize, borderEnabled)
+    if not borderEnabled or not borderSize or borderSize <= 0 then
+        return offsetX, offsetY
+    end
+    local a = anchor or "CENTER"
+    if a:find("LEFT") then
+        offsetX = offsetX + borderSize
+    elseif a:find("RIGHT") then
+        offsetX = offsetX - borderSize
+    end
+    if a:find("TOP") then
+        offsetY = offsetY - borderSize
+    elseif a:find("BOTTOM") then
+        offsetY = offsetY + borderSize
+    end
+    return offsetX, offsetY
+end
+
+-- ============================================================
+-- SHARED EXPIRING TICKER
+-- Processes all registered indicators with expiring settings
+-- at ~3 FPS. Uses LuaCurve + Duration API for live frames
+-- (secret-safe), manual calculation for preview.
+-- ============================================================
+
+local expiringRegistry = {}
+
+local function RegisterExpiring(element, entryData)
+    expiringRegistry[element] = entryData
+end
+
+local function UnregisterExpiring(element)
+    if element then
+        expiringRegistry[element] = nil
+    end
+end
+
+-- Cache step curves by threshold to avoid re-creating each tick
+local expiringCurveCache = {}
+
+local function GetExpiringCurve(threshold)
+    if expiringCurveCache[threshold] then return expiringCurveCache[threshold] end
+    if not C_CurveUtil or not C_CurveUtil.CreateColorCurve then return nil end
+    local curve = C_CurveUtil.CreateColorCurve()
+    curve:SetType(Enum.LuaCurveType.Step)
+    -- Below threshold → white (alpha 1 = expiring), above → transparent (alpha 0 = normal)
+    curve:AddPoint(0, CreateColor(1, 1, 1, 1))
+    curve:AddPoint(threshold / 100, CreateColor(0, 0, 0, 0))
+    curve:AddPoint(1, CreateColor(0, 0, 0, 0))
+    expiringCurveCache[threshold] = curve
+    return curve
+end
+
+local expiringFrame = CreateFrame("Frame")
+local expiringElapsed = 0
+
+expiringFrame:SetScript("OnUpdate", function(_, elapsed)
+    expiringElapsed = expiringElapsed + elapsed
+    if expiringElapsed < 0.33 then return end  -- ~3 FPS
+    expiringElapsed = 0
+
+    for element, entry in pairs(expiringRegistry) do
+        if not element:IsShown() then
+            expiringRegistry[element] = nil
+        else
+            local isExpiring = false
+
+            if entry.unit and entry.auraInstanceID
+               and C_UnitAuras and C_UnitAuras.GetAuraDuration then
+                -- Live path: secret-safe via Duration API
+                local curve = GetExpiringCurve(entry.threshold or 30)
+                if curve then
+                    local durationObj = C_UnitAuras.GetAuraDuration(entry.unit, entry.auraInstanceID)
+                    if durationObj and durationObj.EvaluateRemainingPercent then
+                        local result = durationObj:EvaluateRemainingPercent(curve)
+                        if result then
+                            local a = result.GetAlpha and result:GetAlpha() or 0
+                            isExpiring = a > 0.5
+                        end
+                    end
+                end
+            else
+                -- Preview path: manual calculation
+                local dur = entry.duration
+                local exp = entry.expirationTime
+                if dur and exp and not issecretvalue(dur) and not issecretvalue(exp) and dur > 0 then
+                    local remaining = max(0, exp - GetTime())
+                    local pct = remaining / dur
+                    isExpiring = pct <= ((entry.threshold or 30) / 100)
+                end
+            end
+
+            if entry.applyExpiring then
+                entry.applyExpiring(element, isExpiring, entry)
+            end
+        end
+    end
+end)
+
+-- ============================================================
 -- PER-FRAME STATE
 -- Tracks which frame-level indicators were applied this frame
 -- so EndFrame can revert unclaimed ones.
@@ -298,10 +403,44 @@ function Indicators:ApplyBorder(frame, config, auraData)
 
     -- Reuse the highlight system's rendering for all 6 border modes
     DF.ApplyHighlightStyle(ch, style, thickness, inset, r, g, b, alpha)
+
+    -- ========================================
+    -- EXPIRING: register with shared ticker
+    -- ========================================
+    local expiringEnabled = config.expiringEnabled
+    if expiringEnabled == nil then expiringEnabled = false end
+    if expiringEnabled then
+        RegisterExpiring(ch, {
+            type = "border",
+            unit = frame.unit,
+            auraInstanceID = auraData and auraData.auraInstanceID,
+            threshold = config.expiringThreshold or 30,
+            duration = auraData and auraData.duration,
+            expirationTime = auraData and auraData.expirationTime,
+            color = config.expiringColor or {r = 1, g = 0.2, b = 0.2},
+            originalColor = {r = r, g = g, b = b},
+            originalAlpha = alpha,
+            style = style,
+            thickness = thickness,
+            inset = inset,
+            applyExpiring = function(el, isExp, entry)
+                if isExp then
+                    local ec = entry.color
+                    DF.ApplyHighlightStyle(el, entry.style, entry.thickness, entry.inset, ec.r or 1, ec.g or 0.2, ec.b or 0.2, entry.originalAlpha)
+                else
+                    local oc = entry.originalColor
+                    DF.ApplyHighlightStyle(el, entry.style, entry.thickness, entry.inset, oc.r, oc.g, oc.b, entry.originalAlpha)
+                end
+            end,
+        })
+    else
+        UnregisterExpiring(ch)
+    end
 end
 
 function Indicators:RevertBorder(frame)
     if frame and frame.dfAD_border then
+        UnregisterExpiring(frame.dfAD_border)
         -- Use NONE mode to properly clean up all styles (animated, glow, corners, etc.)
         DF.ApplyHighlightStyle(frame.dfAD_border, "NONE", 2, 0, 1, 1, 1, 1)
     end
@@ -342,6 +481,35 @@ function Indicators:ApplyHealthBar(frame, config, auraData)
         local nb = saved.b + (b - saved.b) * blend
         healthBar:SetStatusBarColor(nr, ng, nb, 1)
     end
+
+    -- ========================================
+    -- EXPIRING: register with shared ticker
+    -- ========================================
+    local expiringEnabled = config.expiringEnabled
+    if expiringEnabled == nil then expiringEnabled = false end
+    if expiringEnabled then
+        RegisterExpiring(healthBar, {
+            type = "healthbar",
+            unit = frame.unit,
+            auraInstanceID = auraData and auraData.auraInstanceID,
+            threshold = config.expiringThreshold or 30,
+            duration = auraData and auraData.duration,
+            expirationTime = auraData and auraData.expirationTime,
+            color = config.expiringColor or {r = 1, g = 0.2, b = 0.2},
+            originalColor = {r = r, g = g, b = b},
+            applyExpiring = function(el, isExp, entry)
+                if isExp then
+                    local ec = entry.color
+                    el:SetStatusBarColor(ec.r or 1, ec.g or 0.2, ec.b or 0.2, 1)
+                else
+                    local oc = entry.originalColor
+                    el:SetStatusBarColor(oc.r, oc.g, oc.b, 1)
+                end
+            end,
+        })
+    else
+        UnregisterExpiring(healthBar)
+    end
 end
 
 function Indicators:RevertHealthBar(frame)
@@ -351,6 +519,7 @@ function Indicators:RevertHealthBar(frame)
     local healthBar = frame.healthBar
     if not healthBar then return end
 
+    UnregisterExpiring(healthBar)
     local c = state.savedHealthBarColor
     healthBar:SetStatusBarColor(c.r, c.g, c.b, c.a)
     state.savedHealthBarColor = nil  -- Re-capture next time
@@ -378,6 +547,35 @@ function Indicators:ApplyNameText(frame, config, auraData)
     if color then
         local r, g, b = color[1] or color.r or 1, color[2] or color.g or 1, color[3] or color.b or 1
         nameText:SetTextColor(r, g, b, 1)
+
+        -- ========================================
+        -- EXPIRING: register with shared ticker
+        -- ========================================
+        local expiringEnabled = config.expiringEnabled
+        if expiringEnabled == nil then expiringEnabled = false end
+        if expiringEnabled then
+            RegisterExpiring(nameText, {
+                type = "nametext",
+                unit = frame.unit,
+                auraInstanceID = auraData and auraData.auraInstanceID,
+                threshold = config.expiringThreshold or 30,
+                duration = auraData and auraData.duration,
+                expirationTime = auraData and auraData.expirationTime,
+                color = config.expiringColor or {r = 1, g = 0.2, b = 0.2},
+                originalColor = {r = r, g = g, b = b},
+                applyExpiring = function(el, isExp, entry)
+                    if isExp then
+                        local ec = entry.color
+                        el:SetTextColor(ec.r or 1, ec.g or 0.2, ec.b or 0.2, 1)
+                    else
+                        local oc = entry.originalColor
+                        el:SetTextColor(oc.r, oc.g, oc.b, 1)
+                    end
+                end,
+            })
+        else
+            UnregisterExpiring(nameText)
+        end
     end
 end
 
@@ -388,6 +586,7 @@ function Indicators:RevertNameText(frame)
     local nameText = frame.nameText
     if not nameText then return end
 
+    UnregisterExpiring(nameText)
     local c = state.savedNameColor
     nameText:SetTextColor(c.r, c.g, c.b, c.a)
     state.savedNameColor = nil  -- Re-capture next time
@@ -415,6 +614,35 @@ function Indicators:ApplyHealthText(frame, config, auraData)
     if color then
         local r, g, b = color[1] or color.r or 1, color[2] or color.g or 1, color[3] or color.b or 1
         healthText:SetTextColor(r, g, b, 1)
+
+        -- ========================================
+        -- EXPIRING: register with shared ticker
+        -- ========================================
+        local expiringEnabled = config.expiringEnabled
+        if expiringEnabled == nil then expiringEnabled = false end
+        if expiringEnabled then
+            RegisterExpiring(healthText, {
+                type = "healthtext",
+                unit = frame.unit,
+                auraInstanceID = auraData and auraData.auraInstanceID,
+                threshold = config.expiringThreshold or 30,
+                duration = auraData and auraData.duration,
+                expirationTime = auraData and auraData.expirationTime,
+                color = config.expiringColor or {r = 1, g = 0.2, b = 0.2},
+                originalColor = {r = r, g = g, b = b},
+                applyExpiring = function(el, isExp, entry)
+                    if isExp then
+                        local ec = entry.color
+                        el:SetTextColor(ec.r or 1, ec.g or 0.2, ec.b or 0.2, 1)
+                    else
+                        local oc = entry.originalColor
+                        el:SetTextColor(oc.r, oc.g, oc.b, 1)
+                    end
+                end,
+            })
+        else
+            UnregisterExpiring(healthText)
+        end
     end
 end
 
@@ -425,6 +653,7 @@ function Indicators:RevertHealthText(frame)
     local healthText = frame.healthText
     if not healthText then return end
 
+    UnregisterExpiring(healthText)
     local c = state.savedHealthTextColor
     healthText:SetTextColor(c.r, c.g, c.b, c.a)
     state.savedHealthTextColor = nil
@@ -448,12 +677,40 @@ function Indicators:ApplyFrameAlpha(frame, config, auraData)
     if alpha then
         frame:SetAlpha(alpha)
     end
+
+    -- ========================================
+    -- EXPIRING: register with shared ticker
+    -- ========================================
+    local expiringEnabled = config.expiringEnabled
+    if expiringEnabled == nil then expiringEnabled = false end
+    if expiringEnabled then
+        RegisterExpiring(frame, {
+            type = "framealpha",
+            unit = frame.unit,
+            auraInstanceID = auraData and auraData.auraInstanceID,
+            threshold = config.expiringThreshold or 30,
+            duration = auraData and auraData.duration,
+            expirationTime = auraData and auraData.expirationTime,
+            expiringAlpha = config.expiringAlpha or 1.0,
+            originalAlpha = alpha or (state.savedAlpha or 1.0),
+            applyExpiring = function(el, isExp, entry)
+                if isExp then
+                    el:SetAlpha(entry.expiringAlpha)
+                else
+                    el:SetAlpha(entry.originalAlpha)
+                end
+            end,
+        })
+    else
+        UnregisterExpiring(frame)
+    end
 end
 
 function Indicators:RevertFrameAlpha(frame)
     local state = frame and frame.dfAD
     if not state or not state.savedAlpha then return end
 
+    UnregisterExpiring(frame)
     frame:SetAlpha(state.savedAlpha)
     state.savedAlpha = nil
 end
@@ -488,20 +745,6 @@ local function GetOrCreateADIcon(frame, auraName)
     icon.durationX = 0
     icon.durationY = 0
     icon.stackMinimum = 2
-    icon.expiringEnabled = true
-    icon.expiringThreshold = 30
-    icon.expiringBorderEnabled = true
-    icon.expiringBorderColorByTime = true
-    icon.expiringBorderPulsate = true
-    icon.expiringBorderThickness = 2
-    icon.expiringBorderInset = -1
-    icon.expiringTintEnabled = false
-
-    -- Register with the shared aura timer for duration color + expiring
-    -- Only for real unit frames (not the preview mockFrame)
-    if frame.unit and DF.RegisterIconForAuraTimer then
-        DF:RegisterIconForAuraTimer(icon)
-    end
 
     map[auraName] = icon
     return icon
@@ -526,6 +769,10 @@ function Indicators:ApplyIcon(frame, config, auraData, defaults, auraName, prior
     local anchor = config.anchor or "TOPLEFT"
     local offsetX = config.offsetX or 0
     local offsetY = config.offsetY or 0
+    -- Compensate for border overhang at frame edges
+    local borderEnabledForPos = config.borderEnabled
+    if borderEnabledForPos == nil then borderEnabledForPos = true end
+    offsetX, offsetY = AdjustOffsetForBorder(anchor, offsetX, offsetY, config.borderInset or 1, borderEnabledForPos)
     icon:ClearAllPoints()
     icon:SetPoint(anchor, frame, anchor, offsetX, offsetY)
 
@@ -733,16 +980,33 @@ function Indicators:ApplyIcon(frame, config, auraData, defaults, auraName, prior
     end
 
     -- ========================================
-    -- EXPIRING INDICATORS (read settings, applied by shared timer)
+    -- EXPIRING: register with shared ticker
     -- ========================================
-    icon.expiringEnabled = true
-    icon.expiringThreshold = config.expiringThreshold or 30
-    icon.expiringBorderEnabled = true
-    icon.expiringBorderColorByTime = true
-    icon.expiringBorderPulsate = true
-    icon.expiringBorderThickness = 2
-    icon.expiringBorderInset = -1
-    icon.expiringTintEnabled = false
+    local expiringEnabled = config.expiringEnabled
+    if expiringEnabled == nil then expiringEnabled = false end
+    if expiringEnabled then
+        RegisterExpiring(icon, {
+            type = "icon",
+            unit = frame.unit,
+            auraInstanceID = auraData and auraData.auraInstanceID,
+            threshold = config.expiringThreshold or 30,
+            duration = auraData and auraData.duration,
+            expirationTime = auraData and auraData.expirationTime,
+            color = config.expiringColor or {r = 1, g = 0.2, b = 0.2},
+            applyExpiring = function(el, isExp, entry)
+                if el.border then
+                    if isExp then
+                        local ec = entry.color
+                        el.border:SetColorTexture(ec.r or 1, ec.g or 0.2, ec.b or 0.2, 1)
+                    else
+                        el.border:SetColorTexture(0, 0, 0, 0.8)
+                    end
+                end
+            end,
+        })
+    else
+        UnregisterExpiring(icon)
+    end
 
     -- Ensure mouse doesn't block clicks on the unit frame
     if not InCombatLockdown() and icon.SetMouseClickEnabled then
@@ -757,6 +1021,7 @@ function Indicators:HideUnusedIcons(frame, activeMap)
     if not map then return end
     for auraName, icon in pairs(map) do
         if not activeMap[auraName] then
+            UnregisterExpiring(icon)
             icon:Hide()
         end
     end
@@ -847,6 +1112,10 @@ function Indicators:ApplySquare(frame, config, auraData, defaults, auraName, pri
     local anchor = config.anchor or "TOPLEFT"
     local offsetX = config.offsetX or 0
     local offsetY = config.offsetY or 0
+    -- Compensate for border overhang at frame edges
+    local showBorderForPos = config.showBorder
+    if showBorderForPos == nil then showBorderForPos = true end
+    offsetX, offsetY = AdjustOffsetForBorder(anchor, offsetX, offsetY, config.borderInset or 1, showBorderForPos)
     sq:ClearAllPoints()
     sq:SetPoint(anchor, frame, anchor, offsetX, offsetY)
 
@@ -1029,6 +1298,37 @@ function Indicators:ApplySquare(frame, config, auraData, defaults, auraName, pri
         end
     end
 
+    -- ========================================
+    -- EXPIRING: register with shared ticker
+    -- ========================================
+    local expiringEnabled = config.expiringEnabled
+    if expiringEnabled == nil then expiringEnabled = false end
+    if expiringEnabled then
+        RegisterExpiring(sq, {
+            type = "square",
+            unit = frame.unit,
+            auraInstanceID = auraData and auraData.auraInstanceID,
+            threshold = config.expiringThreshold or 30,
+            duration = auraData and auraData.duration,
+            expirationTime = auraData and auraData.expirationTime,
+            color = config.expiringColor or {r = 1, g = 0.2, b = 0.2},
+            originalColor = {r = color and (color[1] or color.r) or 1, g = color and (color[2] or color.g) or 1, b = color and (color[3] or color.b) or 1},
+            applyExpiring = function(el, isExp, entry)
+                if el.texture then
+                    if isExp then
+                        local ec = entry.color
+                        el.texture:SetColorTexture(ec.r or 1, ec.g or 0.2, ec.b or 0.2, 1)
+                    else
+                        local oc = entry.originalColor
+                        el.texture:SetColorTexture(oc.r or 1, oc.g or 1, oc.b or 1, 1)
+                    end
+                end
+            end,
+        })
+    else
+        UnregisterExpiring(sq)
+    end
+
     sq:Show()
 end
 
@@ -1037,6 +1337,7 @@ function Indicators:HideUnusedSquares(frame, activeMap)
     if not map then return end
     for auraName, sq in pairs(map) do
         if not activeMap[auraName] then
+            UnregisterExpiring(sq)
             sq:Hide()
         end
     end
@@ -1419,6 +1720,10 @@ function Indicators:ApplyBar(frame, config, auraData, defaults, auraName, priori
     local anchor = config.anchor or "BOTTOM"
     local offsetX = config.offsetX or 0
     local offsetY = config.offsetY or 0
+    -- Compensate for border overhang at frame edges
+    local showBorderForPos = config.showBorder
+    if showBorderForPos == nil then showBorderForPos = true end
+    offsetX, offsetY = AdjustOffsetForBorder(anchor, offsetX, offsetY, config.borderThickness or 1, showBorderForPos)
     bar:ClearAllPoints()
     bar:SetPoint(anchor, frame, anchor, offsetX, offsetY)
 
