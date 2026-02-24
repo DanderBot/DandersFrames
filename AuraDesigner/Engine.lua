@@ -61,7 +61,7 @@ end
 local activeIndicators = {}  -- Reused each frame: { { auraName, typeKey, config, auraData, priority } }
 
 local function prioritySort(a, b)
-    return a.priority > b.priority  -- Higher priority first (wins conflicts)
+    return a.priority < b.priority  -- Lower number = higher priority (1 wins over 10)
 end
 
 -- ============================================================

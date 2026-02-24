@@ -3500,7 +3500,11 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
             end
         end
 
-        if idx == 0 then return end
+        if idx == 0 then
+            rightPanel.copyDropdownText:SetText("No other auras")
+            rightPanel.copyDropdownText:SetTextColor(0.5, 0.5, 0.5)
+            return
+        end
 
         copyMenuFrame:SetPoint("TOPLEFT", rightPanel.copyDropdown, "BOTTOMLEFT", 0, -2)
         copyMenuFrame:SetPoint("TOPRIGHT", rightPanel.copyDropdown, "BOTTOMRIGHT", 0, -2)
@@ -3542,11 +3546,14 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
         end
 
         local newCfg = deepCopy(sourceCfg)
-        -- Re-assign instance IDs to avoid stale references
+        -- Re-assign instance IDs and strip position settings
         if newCfg.indicators then
             local nextID = 1
             for _, inst in ipairs(newCfg.indicators) do
                 inst.id = nextID
+                inst.anchor = nil
+                inst.offsetX = nil
+                inst.offsetY = nil
                 nextID = nextID + 1
             end
             newCfg.nextIndicatorID = nextID

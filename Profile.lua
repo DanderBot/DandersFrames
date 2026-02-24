@@ -362,6 +362,10 @@ function DF:ExportProfile(categories, frameTypes, profileName)
         if DF.db.powerColors and next(DF.db.powerColors) then
             exportData.powerColors = DF:DeepCopy(DF.db.powerColors)
         end
+        -- Include auto layout profiles
+        if DF.db.raidAutoProfiles then
+            exportData.raidAutoProfiles = DF:DeepCopy(DF.db.raidAutoProfiles)
+        end
         exportData.categories = nil
     else
         -- Selective category export
@@ -372,8 +376,14 @@ function DF:ExportProfile(categories, frameTypes, profileName)
         if frameTypes.raid and DF.db.raid then
             exportData.raid = self:ExtractCategorySettings(DF.db.raid, categories)
         end
+        -- Auto layouts: top-level key, needs special handling
+        local categorySet = {}
+        for _, cat in ipairs(categories) do categorySet[cat] = true end
+        if categorySet.autoLayout and DF.db.raidAutoProfiles then
+            exportData.raidAutoProfiles = DF:DeepCopy(DF.db.raidAutoProfiles)
+        end
     end
-    
+
     if not exportData.party and not exportData.raid then
         print("|cffff0000DandersFrames:|r No data to export")
         return nil
@@ -513,7 +523,7 @@ function DF:GetImportInfo(importData)
     -- Detect categories if not explicitly stored (legacy imports)
     if info.isFullExport then
         -- Full export contains all categories
-        info.detectedCategories = {"position", "layout", "bars", "auras", "text", "icons", "other"}
+        info.detectedCategories = {"position", "layout", "bars", "auras", "text", "icons", "other", "pinnedFrames", "auraDesigner", "autoLayout"}
     else
         info.detectedCategories = importData.categories
     end
@@ -596,6 +606,10 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
         if importData.powerColors then
             DF.db.powerColors = importData.powerColors
         end
+        -- Import auto layout profiles if present
+        if importData.raidAutoProfiles then
+            DF.db.raidAutoProfiles = importData.raidAutoProfiles
+        end
     else
         -- Selective import: merge only selected categories
         local categoriesToImport = selectedCategories or importInfo.detectedCategories
@@ -605,6 +619,12 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
         end
         if importData.raid and selectedFrameTypes.raid then
             self:MergeCategorySettings(DF.db.raid, importData.raid, categoriesToImport)
+        end
+        -- Auto layouts: top-level key, needs special handling
+        local importCategorySet = {}
+        for _, cat in ipairs(categoriesToImport) do importCategorySet[cat] = true end
+        if importCategorySet.autoLayout and importData.raidAutoProfiles then
+            DF.db.raidAutoProfiles = importData.raidAutoProfiles
         end
     end
     

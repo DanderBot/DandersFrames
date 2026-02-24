@@ -148,6 +148,7 @@ local OVERRIDE_TAB_MAP = {
     {"debuff",              "auras_debuffs",        "Debuffs"},
     {"buff",                "auras_buffs",          "Buffs"},
     {"dispel",              "auras_dispel",         "Dispel Overlay"},
+    {"auraDesigner",        "auras_auradesigner",   "Aura Designer"},
     -- Indicators (specific before generic)
     {"personalTargeted",    "indicators_personal_targeted", "Personal Targeted"},
     {"targetedSpell",       "indicators_targetedspells", "Targeted Spells"},
