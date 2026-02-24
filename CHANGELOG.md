@@ -4,22 +4,36 @@
 
 ### New: Aura Designer
 Visual indicator system for tracking buffs, debuffs, and auras on your frames. Requires the Harrek's Aura and Raid Filter (HARF) companion addon.
-* Five indicator types — Icon, Square, Bar, Border, and Health Bar Color
-* Drag-to-place workflow — drag auras onto frame anchor points to position indicators visually
-* Border indicator supports all highlight styles — Solid, Animated, Dashed, Glow, and Corners Only
-* Expiring color system — highlights auras about to expire with a configurable time threshold
-* Global defaults with per-indicator overrides for fonts, size, scale, and colors
-* "Apply to All" in Global Fonts cascades to all indicator duration and stack text
-* Searchable font picker with live preview
-* Indicators render live in the options preview
-* Not-installed overlay with setup instructions when HARF is missing
+* **8 indicator types** — 3 placed indicators (Icon, Square, Bar) that occupy anchor points on the frame, plus 5 frame effects (Border, Health Bar Color, Name Text Color, Health Text Color, Frame Alpha) that affect the entire frame
+* **Drag-to-place** — drag auras from the spell list onto any of 9 anchor points (corners, edges, center) with X/Y offset adjustment
+* **Icon indicators** — spell icon with cooldown swipe, duration text, and stack count display
+* **Square indicators** — colored square with cooldown swipe, duration text, and stack count
+* **Bar indicators** — progress bar showing remaining duration with horizontal/vertical orientation, match-frame-width option, fill color, background color, and bar-color-by-time gradient
+* **Border frame effect** — 5 styles: Solid, Animated, Dashed, Glow, and Corners Only with configurable thickness and color
+* **Health Bar Color frame effect** — Replace or Tint mode with adjustable blend strength
+* **Name/Health Text Color frame effects** — override unit name or health text color when an aura is active
+* **Frame Alpha frame effect** — adjust entire frame transparency based on aura presence
+* **Expiring system** — all 8 indicator types support an expiring color that activates below a configurable remaining-duration threshold, fully combat-safe using Blizzard's Duration object API
+* **Priority stacking** — configurable priority per aura (1-20); frame effects only show the highest-priority active aura, placed indicators coexist on separate anchors
+* **Global defaults** — configure default icon size, scale, duration/stack font, font scale, and outline style; new indicators inherit these automatically with per-indicator overrides available
+* **Searchable font picker** with live font preview text
+* **Live preview** — indicators render on the frame preview in the options panel with mock aura data
+* **Per-spec aura lists** — curated aura lists for 8 healer and augmentation specs
+* **Not-installed overlay** — setup instructions with CurseForge and Discord links when HARF is missing
 
-### New: Auto Layouts
-Automatically switches your raid frame profile based on content type and group size.
-* Per-content profiles — configure different layouts for instanced raids, Mythic raids (fixed 20), and open world
-* Automatic switching — frames update when you join a raid or change content type
-* Edit overrides — tweak settings while in a specific content type without affecting your base profile
-* Independent party and raid settings — no contamination between modes
+### New: Auto Layouts (Raid Only)
+Automatically switches your raid frame layout based on content type and raid size. Does not apply to party, solo, or arena.
+* **Three content categories** — Instanced/PvP (raids, dungeons, battlegrounds), Mythic (fixed 20-player), and Open World (world bosses, outdoor groups)
+* **Per-size-range profiles** — create multiple layouts per content type, each covering a custom player range (e.g., 1-10, 11-20, 21-40). Mythic is a single fixed layout for 20 players
+* **Automatic switching** — monitors group roster, zone changes, and instance type; applies the matching layout on-the-fly when content or raid size changes
+* **Override-only storage** — each layout stores only the settings that differ from your global profile; everything else is inherited automatically
+* **Full settings coverage** — overrides can include frame size, growth direction, groups per row, group visibility, bar colors, text settings, aura filters, icon toggles, pinned frame configuration, and more
+* **Live editing** — click "Edit Settings" to enter editing mode with live frame preview; every change is tracked as an override with visual indicators showing which settings are modified vs global
+* **Override indicators** — green checkmark for global values, orange star with reset button for modified values, per-tab override counts
+* **Non-destructive** — uses a read-through overlay system so your global profile is never mutated; exiting editing mode restores your base settings cleanly
+* **Crash recovery** — if editing is interrupted, the next login detects and restores your base settings
+* **Status display** — shows current content type, instance name, raid size, active layout, and override count
+* **Export/import support** — auto layout configurations included in profile exports
 
 ### New Features
 * Health fade system — fades frames above a configurable health threshold, with dispel cancel override (contributed by X-Steeve)
