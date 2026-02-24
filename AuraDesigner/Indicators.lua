@@ -1085,13 +1085,6 @@ local function CreateADBar(frame, auraName)
         bar.borderFrame:SetBackdropBorderColor(0, 0, 0, 1)
     end
 
-    -- Spark (bright line at the bar's leading edge)
-    bar.spark = bar:CreateTexture(nil, "OVERLAY")
-    bar.spark:SetTexture("Interface\\CastingBar\\UI-CastingBar-Spark")
-    bar.spark:SetBlendMode("ADD")
-    bar.spark:SetSize(12, 24)
-    bar.spark:Hide()
-
     -- Text overlay (above everything for duration text)
     bar.textOverlay = CreateFrame("Frame", nil, bar)
     bar.textOverlay:SetAllPoints(bar)
@@ -1114,9 +1107,9 @@ local function CreateADBar(frame, auraName)
     bar.durationCooldown:SetHideCountdownNumbers(false)
     bar.durationCooldown:Hide()
 
-    -- OnUpdate: handles bar color + preview-only value/text/spark
+    -- OnUpdate: handles bar color + preview-only value/text
     -- Real unit bars use SetTimerDuration for fill (no manual arithmetic needed).
-    -- Preview bars use manual OnUpdate for fill, spark, and text.
+    -- Preview bars use manual OnUpdate for fill and text.
     bar.dfAD_duration = 0
     bar.dfAD_expirationTime = 0
     bar.dfAD_colorElapsed = 0
@@ -1125,7 +1118,7 @@ local function CreateADBar(frame, auraName)
         self.dfAD_colorElapsed = (self.dfAD_colorElapsed or 0) + elapsed
 
         -- ============================================
-        -- PREVIEW: Manual bar value + text + spark (~30 fps)
+        -- PREVIEW: Manual bar value + text (~30 fps)
         -- Only runs when SetTimerDuration is NOT driving the bar
         -- ============================================
         if not self.dfAD_usedTimerDuration then
@@ -1135,18 +1128,6 @@ local function CreateADBar(frame, auraName)
                 local remaining = max(0, exp - GetTime())
                 local pct = min(1, remaining / dur)
                 self:SetValue(pct)
-
-                -- Spark position
-                if self.spark and self.spark:IsShown() then
-                    local orient = self:GetOrientation()
-                    if orient == "HORIZONTAL" then
-                        self.spark:ClearAllPoints()
-                        self.spark:SetPoint("CENTER", self, "LEFT", self:GetWidth() * pct, 0)
-                    else
-                        self.spark:ClearAllPoints()
-                        self.spark:SetPoint("CENTER", self, "BOTTOM", 0, self:GetHeight() * pct)
-                    end
-                end
 
                 -- Duration text
                 if self.duration and self.duration:IsShown() then
@@ -1170,22 +1151,6 @@ local function CreateADBar(frame, auraName)
                         self.duration:SetTextColor(r, g, b, 1)
                     end
                 end
-            end
-        end
-
-        -- ============================================
-        -- SPARK POSITION (timer-driven live bars)
-        -- Reads bar:GetValue() which SetTimerDuration updates
-        -- ============================================
-        if self.dfAD_usedTimerDuration and self.spark and self.spark:IsShown() then
-            local pct = self:GetValue()
-            local orient = self:GetOrientation()
-            if orient == "HORIZONTAL" then
-                self.spark:ClearAllPoints()
-                self.spark:SetPoint("CENTER", self, "LEFT", self:GetWidth() * pct, 0)
-            else
-                self.spark:ClearAllPoints()
-                self.spark:SetPoint("CENTER", self, "BOTTOM", 0, self:GetHeight() * pct)
             end
         end
 
@@ -1463,28 +1428,6 @@ function Indicators:ApplyBar(frame, config, auraData, defaults, auraName, priori
     bar:SetFrameLevel(baseLevel + priorityBoost)
 
     -- ========================================
-    -- SPARK
-    -- ========================================
-    local showSpark = config.showSpark
-    if showSpark == nil then showSpark = true end
-    if bar.spark then
-        if showSpark then
-            if orientation == "VERTICAL" then
-                -- Horizontal spark for vertical bar — rotate 90°
-                bar.spark:SetSize(max(width * 3, 12), 12)
-                bar.spark:SetTexCoord(0, 1, 1, 1, 0, 0, 1, 0)
-            else
-                -- Vertical spark for horizontal bar (default)
-                bar.spark:SetSize(12, max(height * 3, 12))
-                bar.spark:SetTexCoord(0, 0, 0, 1, 1, 0, 1, 1)
-            end
-            bar.spark:Show()
-        else
-            bar.spark:Hide()
-        end
-    end
-
-    -- ========================================
     -- COUNTDOWN DATA (drives bar fill)
     -- Real unit: SetTimerDuration handles fill natively (secret-safe)
     -- Preview:   Manual SetValue in OnUpdate
@@ -1525,8 +1468,6 @@ function Indicators:ApplyBar(frame, config, auraData, defaults, auraName, priori
     end
 
     bar.dfAD_usedTimerDuration = usedTimerDuration
-
-    -- Spark positioning for live (timer-driven) bars is handled in OnUpdate via GetValue()
 
     -- ========================================
     -- DURATION TEXT

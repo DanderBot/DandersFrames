@@ -187,8 +187,6 @@ local function EnsureTypeConfig(auraName, typeKey)
                 -- Border
                 showBorder = true, borderThickness = 1,
                 borderColor = {r = 0, g = 0, b = 0, a = 1},
-                -- Spark
-                showSpark = true,
                 -- Alpha
                 alpha = 1.0,
                 -- Bar color by time
@@ -268,7 +266,6 @@ local TYPE_DEFAULTS = {
         bgColor = {r = 0, g = 0, b = 0, a = 0.5},
         showBorder = true, borderThickness = 1,
         borderColor = {r = 0, g = 0, b = 0, a = 1},
-        showSpark = true,
         alpha = 1.0,
         barColorByTime = false,
         expiringEnabled = false, expiringThreshold = 5,
@@ -1600,9 +1597,6 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy)
             function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
             function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
             true), 28)
-        AddDivider()
-        -- Spark
-        AddWidget(GUI:CreateCheckbox(parent, "Show Spark", proxy, "showSpark"), 28)
         AddDivider()
         -- Bar color by time
         AddWidget(GUI:CreateCheckbox(parent, "Color Bar by Duration", proxy, "barColorByTime"), 28)
