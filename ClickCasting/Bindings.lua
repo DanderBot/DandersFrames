@@ -406,10 +406,10 @@ function CC:ApplyBindings()
         return
     end
     
-    -- Cancel any pending deferred highlight binding pass from a previous call
-    if self.pinnedBindingTimer then
-        self.pinnedBindingTimer:Cancel()
-        self.pinnedBindingTimer = nil
+    -- Cancel any pending batch binding pass from a previous call
+    if self.batchBindingTimer then
+        self.batchBindingTimer:Cancel()
+        self.batchBindingTimer = nil
     end
     
     -- Migrate existing macro bindings to have no fallbacks
@@ -438,61 +438,54 @@ function CC:ApplyBindings()
         self:RefreshBlizzardClickCastClearing()
     end
 
-    -- Apply bindings in two passes to avoid "script ran too long":
-    -- Pass 1 (immediate): Non-pinned frames (~50-90 frames)
-    -- Pass 2 (deferred):  Pinned frames (~80 frames), batched after a short delay
+    -- Apply bindings to all registered frames in batches to avoid "script ran too long".
+    -- With ElvUI or other addons, 100-150+ frames can be registered. Each frame requires
+    -- ~300+ SetAttribute calls, so processing them all synchronously exceeds Lua's time limit.
+    -- Frames are processed in batches of 10 with a yield between each batch.
     if self.registeredFrames then
-        local deferredFrames = {}
-
+        local allFrames = {}
         for frame in pairs(self.registeredFrames) do
-            if frame.isPinnedFrame then
-                deferredFrames[#deferredFrames + 1] = frame
-            else
-                self:ApplyBindingsToFrameUnified(frame)
-            end
+            allFrames[#allFrames + 1] = frame
         end
 
-        -- Defer pinned frames if any exist
-        if #deferredFrames > 0 then
+        if #allFrames > 0 then
             local BATCH_SIZE = 10
             local batchIndex = 0
-            
+
             local function ProcessNextBatch()
                 if InCombatLockdown() then
-                    -- Combat started during deferred pass - flag for retry after combat
+                    -- Combat started during batch - flag for retry after combat
                     CC.needsBindingRefresh = true
-                    CC.pinnedBindingTimer = nil
+                    CC.batchBindingTimer = nil
                     return
                 end
-                
+
                 local startIdx = batchIndex * BATCH_SIZE + 1
-                local endIdx = math.min(startIdx + BATCH_SIZE - 1, #deferredFrames)
-                
+                local endIdx = math.min(startIdx + BATCH_SIZE - 1, #allFrames)
+
                 for i = startIdx, endIdx do
-                    CC:ApplyBindingsToFrameUnified(deferredFrames[i])
+                    CC:ApplyBindingsToFrameUnified(allFrames[i], true)
                 end
-                
+
                 batchIndex = batchIndex + 1
-                
-                if endIdx < #deferredFrames then
+
+                if endIdx < #allFrames then
                     -- More batches to process
-                    CC.pinnedBindingTimer = C_Timer.NewTimer(0, ProcessNextBatch)
+                    CC.batchBindingTimer = C_Timer.NewTimer(0, ProcessNextBatch)
                 else
-                    -- All done
-                    CC.pinnedBindingTimer = nil
+                    -- All frames processed - refresh keyboard bindings once for all frames
+                    CC.batchBindingTimer = nil
+                    CC:RefreshKeyboardBindings()
                 end
             end
-            
-            -- Start first batch on next frame
-            self.pinnedBindingTimer = C_Timer.NewTimer(0, ProcessNextBatch)
+
+            -- Process first batch immediately (synchronous), defer the rest
+            ProcessNextBatch()
         end
     end
-    
+
     -- Apply global bindings (hovercast and global scopes)
     self:ApplyGlobalBindings()
-    
-    -- Refresh keyboard bindings (re-wrap frames with updated snippets)
-    self:RefreshKeyboardBindings()
 end
 
 -- ============================================================
@@ -2372,7 +2365,8 @@ end
 -- ============================================================
 
 -- Apply all bindings to a frame using unified macro approach
-function CC:ApplyBindingsToFrameUnified(frame)
+-- skipKeyboardUpdate: when true, skip UpdateFrameBindingAttributes (caller will batch it)
+function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate)
     if not frame then return end
     if InCombatLockdown() then return end
     
@@ -2600,7 +2594,10 @@ function CC:ApplyBindingsToFrameUnified(frame)
     frame.dfBindingsEverApplied = true
     
     -- Update keyboard binding snippet for WrapScript to use
-    self:UpdateFrameBindingAttributes(frame)
+    -- Skip when caller will batch-refresh all frames (e.g. ApplyBindings)
+    if not skipKeyboardUpdate then
+        self:UpdateFrameBindingAttributes(frame)
+    end
 end
 
 -- ============================================================

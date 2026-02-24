@@ -1,8 +1,9 @@
 # DandersFrames Changelog
 
-## [4.0.8] - 2026-02-23
+## [4.0.8] - 2026-02-24
 
 ### Bug Fixes
+* Fix click-casting "script ran too long" error when many frames are registered (ElvUI, etc.) — batch all frames in groups of 10 with yields between batches
 * Fix Aura Designer square/bar color settings not saving across reloads (proxy copy-on-read for table defaults)
 * Fix Aura Designer placed indicators becoming non-interactive after changing settings like size or scale
 * Fix Aura Designer anchor dots consuming right-clicks intended for indicator deletion
