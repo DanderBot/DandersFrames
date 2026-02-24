@@ -1732,12 +1732,14 @@ local rightPanelChildren = {}
 local function BuildGlobalView(parent)
     local adDB = GetAuraDesignerDB()
     local rawDefaults = adDB.defaults
-    -- Proxy so every write triggers a preview refresh
+    -- Proxy so every write triggers a full preview rebuild
+    -- (global defaults affect ALL indicators, need full teardown/rebuild)
     local defaults = setmetatable({}, {
         __index = rawDefaults,
         __newindex = function(_, k, v)
             rawDefaults[k] = v
-            if RefreshPreviewLightweight then RefreshPreviewLightweight() end
+            RefreshPlacedIndicators()
+            RefreshPreviewEffects()
         end,
     })
     local yPos = -8

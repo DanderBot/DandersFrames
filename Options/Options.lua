@@ -1369,6 +1369,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             if DF.AuraDesigner and DF.AuraDesigner.Engine and DF.AuraDesigner.Engine.ForceRefreshAllFrames then
                 DF.AuraDesigner.Engine:ForceRefreshAllFrames()
             end
+            -- Also refresh the AD options preview if visible
+            if DF.AuraDesigner_RefreshPage then DF:AuraDesigner_RefreshPage() end
 
             print("|cff00ff00DandersFrames:|r Applied global font settings to all text elements.")
         end)
