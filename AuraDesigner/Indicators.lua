@@ -456,8 +456,7 @@ function Indicators:ApplyBorder(frame, config, auraData)
             color = ec, originalColor = oc,
             originalAlpha = alpha, style = style, thickness = thickness, inset = inset,
             applyResult = function(el, result, entry)
-                local rr, gg, bb = result:GetRGB()
-                DF.ApplyHighlightStyle(el, entry.style, entry.thickness, entry.inset, rr, gg, bb, entry.originalAlpha)
+                DF.ApplyHighlightStyle(el, entry.style, entry.thickness, entry.inset, result.r, result.g, result.b, entry.originalAlpha)
             end,
             applyManual = function(el, isExp, entry)
                 if isExp then
@@ -535,7 +534,7 @@ function Indicators:ApplyHealthBar(frame, config, auraData)
             colorCurve = BuildExpiringColorCurve(config.expiringThreshold or 30, ec, oc),
             color = ec, originalColor = oc,
             applyResult = function(el, result, entry)
-                el:SetStatusBarColor(result:GetRGB())
+                el:SetStatusBarColor(result.r, result.g, result.b)
             end,
             applyManual = function(el, isExp, entry)
                 if isExp then
@@ -605,7 +604,7 @@ function Indicators:ApplyNameText(frame, config, auraData)
                 colorCurve = BuildExpiringColorCurve(config.expiringThreshold or 30, ec, oc),
                 color = ec, originalColor = oc,
                 applyResult = function(el, result, entry)
-                    el:SetTextColor(result:GetRGBA())
+                    el:SetTextColor(result.r, result.g, result.b, result.a or 1)
                 end,
                 applyManual = function(el, isExp, entry)
                     if isExp then
@@ -676,7 +675,7 @@ function Indicators:ApplyHealthText(frame, config, auraData)
                 colorCurve = BuildExpiringColorCurve(config.expiringThreshold or 30, ec, oc),
                 color = ec, originalColor = oc,
                 applyResult = function(el, result, entry)
-                    el:SetTextColor(result:GetRGBA())
+                    el:SetTextColor(result.r, result.g, result.b, result.a or 1)
                 end,
                 applyManual = function(el, isExp, entry)
                     if isExp then
@@ -748,7 +747,7 @@ function Indicators:ApplyFrameAlpha(frame, config, auraData)
             originalAlpha = originalAlpha,
             applyResult = function(el, result, entry)
                 -- Alpha encoded in R channel of the curve
-                el:SetAlpha(result:GetRed())
+                el:SetAlpha(result.r)
             end,
             applyManual = function(el, isExp, entry)
                 if isExp then
@@ -1001,8 +1000,8 @@ function Indicators:ApplyIcon(frame, config, auraData, defaults, auraName, prior
                             DF.durationColorCurve:AddPoint(1, CreateColor(0, 1, 0, 1))
                         end
                         local result = durationObj:EvaluateRemainingPercent(DF.durationColorCurve)
-                        if result and result.GetRGB then
-                            icon.nativeCooldownText:SetTextColor(result:GetRGB())
+                        if result and result.r then
+                            icon.nativeCooldownText:SetTextColor(result.r, result.g, result.b)
                         end
                         usedAPI = true
                     end
@@ -1054,7 +1053,7 @@ function Indicators:ApplyIcon(frame, config, auraData, defaults, auraName, prior
             color = ec,
             applyResult = function(el, result, entry)
                 if el.border then
-                    el.border:SetColorTexture(result:GetRGBA())
+                    el.border:SetColorTexture(result.r, result.g, result.b, result.a or 1)
                 end
             end,
             applyManual = function(el, isExp, entry)
@@ -1328,8 +1327,8 @@ function Indicators:ApplySquare(frame, config, auraData, defaults, auraName, pri
                             DF.durationColorCurve:AddPoint(1, CreateColor(0, 1, 0, 1))
                         end
                         local result = durationObj:EvaluateRemainingPercent(DF.durationColorCurve)
-                        if result and result.GetRGB then
-                            sq.nativeCooldownText:SetTextColor(result:GetRGB())
+                        if result and result.r then
+                            sq.nativeCooldownText:SetTextColor(result.r, result.g, result.b)
                         end
                         usedAPI = true
                     end
@@ -1380,7 +1379,7 @@ function Indicators:ApplySquare(frame, config, auraData, defaults, auraName, pri
             color = ec, originalColor = oc,
             applyResult = function(el, result, entry)
                 if el.texture then
-                    el.texture:SetColorTexture(result:GetRGBA())
+                    el.texture:SetColorTexture(result.r, result.g, result.b, result.a or 1)
                 end
             end,
             applyManual = function(el, isExp, entry)
@@ -1542,8 +1541,8 @@ local function CreateADBar(frame, auraName)
                 local durationObj = C_UnitAuras.GetAuraDuration(unit, auraInstanceID)
                 if durationObj and durationObj.EvaluateRemainingPercent then
                     local result = durationObj:EvaluateRemainingPercent(self.dfAD_colorCurve)
-                    if result and result.GetRGB then
-                        self:SetStatusBarColor(result:GetRGB())
+                    if result and result.r then
+                        self:SetStatusBarColor(result.r, result.g, result.b)
                         return
                     end
                 end
@@ -1742,8 +1741,8 @@ function Indicators:ApplyBar(frame, config, auraData, defaults, auraName, priori
         local durationObj = C_UnitAuras.GetAuraDuration(frame.unit, auraData.auraInstanceID)
         if durationObj and durationObj.EvaluateRemainingPercent then
             local result = durationObj:EvaluateRemainingPercent(bar.dfAD_colorCurve)
-            if result and result.GetRGB then
-                bar:SetStatusBarColor(result:GetRGB())
+            if result and result.r then
+                bar:SetStatusBarColor(result.r, result.g, result.b)
             else
                 bar:SetStatusBarColor(fillR, fillG, fillB, 1)
             end
@@ -1912,8 +1911,8 @@ function Indicators:ApplyBar(frame, config, auraData, defaults, auraName, priori
                         DF.durationColorCurve:AddPoint(1, CreateColor(0, 1, 0, 1))
                     end
                     local result = durationObj:EvaluateRemainingPercent(DF.durationColorCurve)
-                    if result and result.GetRGB then
-                        bar.nativeCooldownText:SetTextColor(result:GetRGB())
+                    if result and result.r then
+                        bar.nativeCooldownText:SetTextColor(result.r, result.g, result.b)
                     end
                 end
             end
