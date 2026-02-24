@@ -3241,26 +3241,26 @@ local function RefreshActiveEffectsStrip()
             ApplyBackdrop(entry, {r = 0, g = 0, b = 0, a = 0}, {r = 0, g = 0, b = 0, a = 0})
         end
 
-        -- X button to disable (circular with danger hover)
+        -- X button to disable (with dark pill background for visibility over spell name)
         local xBtn = CreateFrame("Button", nil, entry, "BackdropTemplate")
-        xBtn:SetSize(14, 14)
+        xBtn:SetSize(16, 16)
         xBtn:SetPoint("TOPRIGHT", -1, -1)
         xBtn:SetFrameLevel(entry:GetFrameLevel() + 5)
-        ApplyBackdrop(xBtn, {r = 0, g = 0, b = 0, a = 0}, {r = 0, g = 0, b = 0, a = 0})
+        ApplyBackdrop(xBtn, {r = 0.05, g = 0.05, b = 0.05, a = 0.85}, {r = 0.4, g = 0.12, b = 0.12, a = 0.8})
         local xIcon = xBtn:CreateTexture(nil, "OVERLAY")
         xIcon:SetSize(10, 10)
         xIcon:SetPoint("CENTER", 0, 0)
         xIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close")
-        xIcon:SetVertexColor(0.85, 0.2, 0.2)
+        xIcon:SetVertexColor(0.9, 0.25, 0.25)
         xBtn:SetScript("OnEnter", function(self)
-            xIcon:SetVertexColor(1, 0.3, 0.3)
-            self:SetBackdropColor(0.8, 0.27, 0.27, 0.2)
-            self:SetBackdropBorderColor(0.8, 0.27, 0.27, 0.4)
+            xIcon:SetVertexColor(1, 0.35, 0.35)
+            self:SetBackdropColor(0.6, 0.12, 0.12, 0.9)
+            self:SetBackdropBorderColor(0.9, 0.25, 0.25, 1)
         end)
         xBtn:SetScript("OnLeave", function(self)
-            xIcon:SetVertexColor(0.85, 0.2, 0.2)
-            self:SetBackdropColor(0, 0, 0, 0)
-            self:SetBackdropBorderColor(0, 0, 0, 0)
+            xIcon:SetVertexColor(0.9, 0.25, 0.25)
+            self:SetBackdropColor(0.05, 0.05, 0.05, 0.85)
+            self:SetBackdropBorderColor(0.4, 0.12, 0.12, 0.8)
         end)
         xBtn:SetScript("OnClick", function()
             if effect.isInstance then
@@ -3834,30 +3834,42 @@ function DF:AuraDesigner_RefreshPage()
         enableBanner.UpdateSpecText()
     end
 
-    -- Tab disable logic: strikethrough + 0.3 opacity when Aura Designer is enabled
-    if GUI and GUI.Tabs then
-        local adEnabled = GetAuraDesignerDB().enabled
-        local disableTabs = { "auras_buffs", "auras_mybuffindicators" }
-        for _, tabKey in ipairs(disableTabs) do
-            local tab = GUI.Tabs[tabKey]
-            if tab then
-                tab.disabled = adEnabled
-                if adEnabled then
-                    tab:SetAlpha(0.3)
-                    -- Add strikethrough if not already present
-                    if not tab._strikethrough then
-                        tab._strikethrough = tab:CreateTexture(nil, "OVERLAY")
-                        tab._strikethrough:SetColorTexture(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.6)
-                        tab._strikethrough:SetHeight(1)
-                        tab._strikethrough:SetPoint("LEFT", tab.Text or tab, "LEFT", 0, 0)
-                        tab._strikethrough:SetPoint("RIGHT", tab.Text or tab, "RIGHT", 0, 0)
-                    end
-                    tab._strikethrough:Show()
-                else
-                    tab:SetAlpha(1)
-                    if tab._strikethrough then
-                        tab._strikethrough:Hide()
-                    end
+    -- Apply tab disable state (delegates to the standalone function)
+    DF:ApplyAuraDesignerTabState()
+end
+
+-- ============================================================
+-- TAB DISABLE STATE
+-- Standalone function so it can be called from GUI.lua on open
+-- and from RefreshPage when the enable checkbox toggles.
+-- ============================================================
+
+function DF:ApplyAuraDesignerTabState()
+    if not GUI or not GUI.Tabs then return end
+    if not DF.db then return end
+
+    local mode = (GUI and GUI.SelectedMode) or "party"
+    local modeDB = DF:GetDB(mode)
+    local adEnabled = modeDB and modeDB.auraDesigner and modeDB.auraDesigner.enabled
+
+    local disableTabs = { "auras_buffs", "auras_mybuffindicators" }
+    for _, tabKey in ipairs(disableTabs) do
+        local tab = GUI.Tabs[tabKey]
+        if tab then
+            tab.disabled = adEnabled or false
+            if adEnabled then
+                -- Add strikethrough if not already present
+                if not tab._strikethrough then
+                    tab._strikethrough = tab:CreateTexture(nil, "OVERLAY")
+                    tab._strikethrough:SetColorTexture(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.6)
+                    tab._strikethrough:SetHeight(1)
+                    tab._strikethrough:SetPoint("LEFT", tab.Text or tab, "LEFT", 0, 0)
+                    tab._strikethrough:SetPoint("RIGHT", tab.Text or tab, "RIGHT", 0, 0)
+                end
+                tab._strikethrough:Show()
+            else
+                if tab._strikethrough then
+                    tab._strikethrough:Hide()
                 end
             end
         end
