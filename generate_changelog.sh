@@ -38,6 +38,24 @@ trim_to_first_section() {
     echo "$1" | awk '/^## \[/ { count++; if (count > 1) exit } { print }'
 }
 
+# Check if CHANGELOG.md has a curated section for an unreleased version.
+# Returns 0 (true) if the first ## [x.y.z] section has no matching stable tag,
+# meaning the user wrote a changelog entry for a version that hasn't shipped yet.
+# When true, we skip auto-prepending raw commit messages.
+has_curated_changelog() {
+    local first_ver
+    first_ver=$(grep -m1 '^## \[' "$CHANGELOG_FILE" | sed 's/^## \[\([0-9.]*\)\].*/\1/' || echo "")
+    if [ -z "$first_ver" ]; then
+        return 1
+    fi
+    # If a stable release tag (no pre-release suffix) exists for this version,
+    # it's a released section — not curated for an upcoming build
+    if git tag -l "v${first_ver}" 2>/dev/null | grep -q "^v${first_ver}$"; then
+        return 1
+    fi
+    return 0
+}
+
 # ============================================================
 # DETERMINE VERSION AND CHANGELOG CONTENT
 # ============================================================
@@ -77,21 +95,26 @@ if [ -n "$CURRENT_TAG" ]; then
     fi
 
     # Beta builds: prepend unreleased commits since the base release
+    # Skip if CHANGELOG.md already has a curated section for this version
     if [ "$RELEASE_CHANNEL" = "beta" ] && [ -n "$PREV_RELEASE" ]; then
-        UNRELEASED_COMMITS=$(git log "${PREV_RELEASE}..HEAD" --oneline --no-merges 2>/dev/null | grep -v '\[skip ci\]' || echo "")
-        if [ -n "$UNRELEASED_COMMITS" ]; then
-            UNRELEASED_SECTION="## Unreleased (${VERSION})
+        if has_curated_changelog; then
+            echo "Curated changelog found — skipping commit prepend for beta"
+        else
+            UNRELEASED_COMMITS=$(git log "${PREV_RELEASE}..HEAD" --oneline --no-merges 2>/dev/null | grep -v '\[skip ci\]' || echo "")
+            if [ -n "$UNRELEASED_COMMITS" ]; then
+                UNRELEASED_SECTION="## Unreleased (${VERSION})
 
 $(echo "$UNRELEASED_COMMITS" | sed 's/^[a-f0-9]* /- /')
 
 ---
 "
-            HEADER=$(echo "$CHANGELOG_CONTENT" | head -n 1)
-            BODY=$(echo "$CHANGELOG_CONTENT" | tail -n +2)
-            CHANGELOG_CONTENT="${HEADER}
+                HEADER=$(echo "$CHANGELOG_CONTENT" | head -n 1)
+                BODY=$(echo "$CHANGELOG_CONTENT" | tail -n +2)
+                CHANGELOG_CONTENT="${HEADER}
 
 ${UNRELEASED_SECTION}
 ${BODY}"
+            fi
         fi
     fi
 else
@@ -102,23 +125,29 @@ else
     BASE_VERSION=$(echo "$LAST_TAG" | sed 's/-[a-zA-Z].*$//')
     VERSION="${BASE_VERSION}-alpha.${COMMIT_COUNT}"
 
-    UNRELEASED_COMMITS=$(git log "${LAST_TAG}..HEAD" --oneline --no-merges 2>/dev/null | grep -v '\[skip ci\]' || echo "")
+    # Skip commit prepend if CHANGELOG.md already has a curated section
+    if has_curated_changelog; then
+        echo "Curated changelog found — skipping commit prepend for alpha"
+        CHANGELOG_CONTENT=$(cat "$CHANGELOG_FILE")
+    else
+        UNRELEASED_COMMITS=$(git log "${LAST_TAG}..HEAD" --oneline --no-merges 2>/dev/null | grep -v '\[skip ci\]' || echo "")
 
-    if [ -n "$UNRELEASED_COMMITS" ]; then
-        UNRELEASED_SECTION="## Unreleased (${VERSION})
+        if [ -n "$UNRELEASED_COMMITS" ]; then
+            UNRELEASED_SECTION="## Unreleased (${VERSION})
 
 $(echo "$UNRELEASED_COMMITS" | sed 's/^[a-f0-9]* /- /')
 
 ---
 "
-        HEADER=$(head -n 1 "$CHANGELOG_FILE")
-        BODY=$(tail -n +2 "$CHANGELOG_FILE")
-        CHANGELOG_CONTENT="${HEADER}
+            HEADER=$(head -n 1 "$CHANGELOG_FILE")
+            BODY=$(tail -n +2 "$CHANGELOG_FILE")
+            CHANGELOG_CONTENT="${HEADER}
 
 ${UNRELEASED_SECTION}
 ${BODY}"
-    else
-        CHANGELOG_CONTENT=$(cat "$CHANGELOG_FILE")
+        else
+            CHANGELOG_CONTENT=$(cat "$CHANGELOG_FILE")
+        fi
     fi
 fi
 
