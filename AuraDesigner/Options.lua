@@ -1506,7 +1506,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy)
         AddDivider()
         -- Duration text
         AddWidget(GUI:CreateCheckbox(parent, "Show Duration Text", proxy, "showDuration"), 28)
-        AddWidget(GUI:CreateDropdown(parent, "Duration Font", DF:GetFontList(), proxy, "durationFont"), 54)
+        AddWidget(GUI:CreateFontDropdown(parent, "Duration Font", proxy, "durationFont"), 54)
         AddWidget(GUI:CreateSlider(parent, "Duration Scale", 0.5, 2.0, 0.1, proxy, "durationScale"), 54)
         AddWidget(GUI:CreateDropdown(parent, "Duration Outline", OUTLINE_OPTIONS, proxy, "durationOutline"), 54)
         AddWidget(GUI:CreateDropdown(parent, "Duration Anchor", ANCHOR_OPTIONS, proxy, "durationAnchor"), 54)
@@ -1517,7 +1517,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy)
         -- Stack count
         AddWidget(GUI:CreateCheckbox(parent, "Show Stacks", proxy, "showStacks"), 28)
         AddWidget(GUI:CreateSlider(parent, "Stack Minimum", 1, 10, 1, proxy, "stackMinimum"), 54)
-        AddWidget(GUI:CreateDropdown(parent, "Stack Font", DF:GetFontList(), proxy, "stackFont"), 54)
+        AddWidget(GUI:CreateFontDropdown(parent, "Stack Font", proxy, "stackFont"), 54)
         AddWidget(GUI:CreateSlider(parent, "Stack Scale", 0.5, 2.0, 0.1, proxy, "stackScale"), 54)
         AddWidget(GUI:CreateDropdown(parent, "Stack Outline", OUTLINE_OPTIONS, proxy, "stackOutline"), 54)
         AddWidget(GUI:CreateDropdown(parent, "Stack Anchor", ANCHOR_OPTIONS, proxy, "stackAnchor"), 54)
@@ -1555,7 +1555,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy)
         AddDivider()
         -- Duration text
         AddWidget(GUI:CreateCheckbox(parent, "Show Duration Text", proxy, "showDuration"), 28)
-        AddWidget(GUI:CreateDropdown(parent, "Duration Font", DF:GetFontList(), proxy, "durationFont"), 54)
+        AddWidget(GUI:CreateFontDropdown(parent, "Duration Font", proxy, "durationFont"), 54)
         AddWidget(GUI:CreateSlider(parent, "Duration Scale", 0.5, 2.0, 0.1, proxy, "durationScale"), 54)
         AddWidget(GUI:CreateDropdown(parent, "Duration Outline", OUTLINE_OPTIONS, proxy, "durationOutline"), 54)
         AddWidget(GUI:CreateDropdown(parent, "Duration Anchor", ANCHOR_OPTIONS, proxy, "durationAnchor"), 54)
@@ -1566,7 +1566,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy)
         -- Stack count
         AddWidget(GUI:CreateCheckbox(parent, "Show Stacks", proxy, "showStacks"), 28)
         AddWidget(GUI:CreateSlider(parent, "Stack Minimum", 1, 10, 1, proxy, "stackMinimum"), 54)
-        AddWidget(GUI:CreateDropdown(parent, "Stack Font", DF:GetFontList(), proxy, "stackFont"), 54)
+        AddWidget(GUI:CreateFontDropdown(parent, "Stack Font", proxy, "stackFont"), 54)
         AddWidget(GUI:CreateSlider(parent, "Stack Scale", 0.5, 2.0, 0.1, proxy, "stackScale"), 54)
         AddWidget(GUI:CreateDropdown(parent, "Stack Outline", OUTLINE_OPTIONS, proxy, "stackOutline"), 54)
         AddWidget(GUI:CreateDropdown(parent, "Stack Anchor", ANCHOR_OPTIONS, proxy, "stackAnchor"), 54)
@@ -1640,7 +1640,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy)
         AddDivider()
         -- Duration text
         AddWidget(GUI:CreateCheckbox(parent, "Show Duration Text", proxy, "showDuration"), 28)
-        AddWidget(GUI:CreateDropdown(parent, "Duration Font", DF:GetFontList(), proxy, "durationFont"), 54)
+        AddWidget(GUI:CreateFontDropdown(parent, "Duration Font", proxy, "durationFont"), 54)
         AddWidget(GUI:CreateSlider(parent, "Duration Scale", 0.5, 2.0, 0.1, proxy, "durationScale"), 54)
         AddWidget(GUI:CreateDropdown(parent, "Duration Outline", OUTLINE_OPTIONS, proxy, "durationOutline"), 54)
         AddWidget(GUI:CreateDropdown(parent, "Duration Anchor", ANCHOR_OPTIONS, proxy, "durationAnchor"), 54)
@@ -1731,7 +1731,15 @@ local rightPanelChildren = {}
 
 local function BuildGlobalView(parent)
     local adDB = GetAuraDesignerDB()
-    local defaults = adDB.defaults
+    local rawDefaults = adDB.defaults
+    -- Proxy so every write triggers a preview refresh
+    local defaults = setmetatable({}, {
+        __index = rawDefaults,
+        __newindex = function(_, k, v)
+            rawDefaults[k] = v
+            if RefreshPreviewLightweight then RefreshPreviewLightweight() end
+        end,
+    })
     local yPos = -8
     local contentWidth = 258
     local c = GetThemeColor()
@@ -1780,7 +1788,7 @@ local function BuildGlobalView(parent)
     durFontLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     yPos = yPos - 14
 
-    local durFont = GUI:CreateDropdown(parent, "Font", DF:GetFontList(), defaults, "durationFont")
+    local durFont = GUI:CreateFontDropdown(parent, "Font", defaults, "durationFont")
     durFont:SetPoint("TOPLEFT", 5, yPos)
     durFont:SetWidth(contentWidth - 10)
     yPos = yPos - 50
@@ -1801,7 +1809,7 @@ local function BuildGlobalView(parent)
     stackFontLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     yPos = yPos - 14
 
-    local stkFont = GUI:CreateDropdown(parent, "Font", DF:GetFontList(), defaults, "stackFont")
+    local stkFont = GUI:CreateFontDropdown(parent, "Font", defaults, "stackFont")
     stkFont:SetPoint("TOPLEFT", 5, yPos)
     stkFont:SetWidth(contentWidth - 10)
     yPos = yPos - 50
