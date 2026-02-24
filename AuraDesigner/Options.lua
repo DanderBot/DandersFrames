@@ -151,6 +151,9 @@ local function EnsureTypeConfig(auraName, typeKey)
                 stackFont = "Fonts\\FRIZQT__.TTF", stackScale = 1.0,
                 stackOutline = "OUTLINE", stackAnchor = "BOTTOMRIGHT",
                 stackX = 0, stackY = 0,
+                -- Expiring
+                expiringEnabled = false, expiringThreshold = 30,
+                expiringColor = {r = 1, g = 0.2, b = 0.2, a = 1},
             }
         elseif typeKey == "square" then
             auraCfg[typeKey] = {
@@ -172,6 +175,9 @@ local function EnsureTypeConfig(auraName, typeKey)
                 stackFont = "Fonts\\FRIZQT__.TTF", stackScale = 1.0,
                 stackOutline = "OUTLINE", stackAnchor = "BOTTOMRIGHT",
                 stackX = 0, stackY = 0,
+                -- Expiring
+                expiringEnabled = false, expiringThreshold = 30,
+                expiringColor = {r = 1, g = 0.2, b = 0.2, a = 1},
             }
         elseif typeKey == "bar" then
             auraCfg[typeKey] = {
@@ -204,22 +210,32 @@ local function EnsureTypeConfig(auraName, typeKey)
             auraCfg[typeKey] = {
                 style = "SOLID", color = {r = 1, g = 1, b = 1, a = 1},
                 thickness = 2, inset = 0,
+                expiringEnabled = false, expiringThreshold = 30,
+                expiringColor = {r = 1, g = 0.2, b = 0.2, a = 1},
             }
         elseif typeKey == "healthbar" then
             auraCfg[typeKey] = {
                 mode = "Replace", color = {r = 1, g = 1, b = 1, a = 1}, blend = 0.5,
+                expiringEnabled = false, expiringThreshold = 30,
+                expiringColor = {r = 1, g = 0.2, b = 0.2, a = 1},
             }
         elseif typeKey == "nametext" then
             auraCfg[typeKey] = {
                 color = {r = 1, g = 1, b = 1, a = 1},
+                expiringEnabled = false, expiringThreshold = 30,
+                expiringColor = {r = 1, g = 0.2, b = 0.2, a = 1},
             }
         elseif typeKey == "healthtext" then
             auraCfg[typeKey] = {
                 color = {r = 1, g = 1, b = 1, a = 1},
+                expiringEnabled = false, expiringThreshold = 30,
+                expiringColor = {r = 1, g = 0.2, b = 0.2, a = 1},
             }
         elseif typeKey == "framealpha" then
             auraCfg[typeKey] = {
                 alpha = 0.5,
+                expiringEnabled = false, expiringThreshold = 30,
+                expiringAlpha = 1.0,
             }
         end
     end
@@ -241,6 +257,8 @@ local TYPE_DEFAULTS = {
         stackFont = "Fonts\\FRIZQT__.TTF", stackScale = 1.0,
         stackOutline = "OUTLINE", stackAnchor = "BOTTOMRIGHT",
         stackX = 0, stackY = 0,
+        expiringEnabled = false, expiringThreshold = 30,
+        expiringColor = {r = 1, g = 0.2, b = 0.2, a = 1},
     },
     square = {
         anchor = "TOPLEFT", offsetX = 0, offsetY = 0,
@@ -256,6 +274,8 @@ local TYPE_DEFAULTS = {
         stackFont = "Fonts\\FRIZQT__.TTF", stackScale = 1.0,
         stackOutline = "OUTLINE", stackAnchor = "BOTTOMRIGHT",
         stackX = 0, stackY = 0,
+        expiringEnabled = false, expiringThreshold = 30,
+        expiringColor = {r = 1, g = 0.2, b = 0.2, a = 1},
     },
     bar = {
         anchor = "BOTTOM", offsetX = 0, offsetY = 0,
@@ -461,33 +481,6 @@ local function CreateAuraProxy(auraName)
         __newindex = function(_, k, v)
             local auraCfg = EnsureAuraConfig(auraName)
             auraCfg[k] = v
-            if RefreshPreviewLightweight then RefreshPreviewLightweight() end
-        end,
-    })
-end
-
--- Create a proxy for the expiring sub-table
-local function CreateExpiringProxy(auraName)
-    return setmetatable({}, {
-        __index = function(_, k)
-            local adDB = GetAuraDesignerDB()
-            local auraCfg = adDB.auras[auraName]
-            if auraCfg and auraCfg.expiring then
-                return auraCfg.expiring[k]
-            end
-            return nil
-        end,
-        __newindex = function(_, k, v)
-            local auraCfg = EnsureAuraConfig(auraName)
-            if not auraCfg.expiring then
-                auraCfg.expiring = {
-                    enabled = false, threshold = 30,
-                    borderEnabled = false, borderColor = {r = 1, g = 0.53, b = 0, a = 1},
-                    borderThickness = 1, pulsate = false,
-                    tintEnabled = false, tintColor = {r = 1, g = 0.3, b = 0.3, a = 0.5},
-                }
-            end
-            auraCfg.expiring[k] = v
             if RefreshPreviewLightweight then RefreshPreviewLightweight() end
         end,
     })
@@ -1551,6 +1544,14 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy)
         AddWidget(GUI:CreateDropdown(parent, "Stack Anchor", ANCHOR_OPTIONS, proxy, "stackAnchor"), 54)
         AddWidget(GUI:CreateSlider(parent, "Stack Offset X", -20, 20, 1, proxy, "stackX"), 54)
         AddWidget(GUI:CreateSlider(parent, "Stack Offset Y", -20, 20, 1, proxy, "stackY"), 54)
+        AddDivider()
+        -- Expiring
+        AddWidget(GUI:CreateCheckbox(parent, "Expiring Color Override", proxy, "expiringEnabled"), 28)
+        AddWidget(GUI:CreateSlider(parent, "Expiring Threshold %", 5, 100, 5, proxy, "expiringThreshold"), 54)
+        AddWidget(GUI:CreateColorPicker(parent, "Expiring Color", proxy, "expiringColor", true,
+            function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
+            function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
+            true), 28)
 
     elseif typeKey == "bar" then
         -- Placement
@@ -1627,6 +1628,14 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy)
             true), 28)
         AddWidget(GUI:CreateSlider(parent, "Thickness", 1, 8, 1, proxy, "thickness"), 54)
         AddWidget(GUI:CreateSlider(parent, "Inset", 0, 8, 1, proxy, "inset"), 54)
+        AddDivider()
+        -- Expiring
+        AddWidget(GUI:CreateCheckbox(parent, "Expiring Color Override", proxy, "expiringEnabled"), 28)
+        AddWidget(GUI:CreateSlider(parent, "Expiring Threshold %", 5, 100, 5, proxy, "expiringThreshold"), 54)
+        AddWidget(GUI:CreateColorPicker(parent, "Expiring Color", proxy, "expiringColor", true,
+            function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
+            function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
+            true), 28)
 
     elseif typeKey == "healthbar" then
         AddWidget(GUI:CreateDropdown(parent, "Mode", HEALTHBAR_MODE_OPTIONS, proxy, "mode"), 54)
@@ -1635,9 +1644,25 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy)
             function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
             true), 28)
         AddWidget(GUI:CreateSlider(parent, "Blend %", 0, 1, 0.05, proxy, "blend"), 54)
+        AddDivider()
+        -- Expiring
+        AddWidget(GUI:CreateCheckbox(parent, "Expiring Color Override", proxy, "expiringEnabled"), 28)
+        AddWidget(GUI:CreateSlider(parent, "Expiring Threshold %", 5, 100, 5, proxy, "expiringThreshold"), 54)
+        AddWidget(GUI:CreateColorPicker(parent, "Expiring Color", proxy, "expiringColor", true,
+            function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
+            function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
+            true), 28)
 
     elseif typeKey == "nametext" then
         AddWidget(GUI:CreateColorPicker(parent, "Color", proxy, "color", true,
+            function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
+            function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
+            true), 28)
+        AddDivider()
+        -- Expiring
+        AddWidget(GUI:CreateCheckbox(parent, "Expiring Color Override", proxy, "expiringEnabled"), 28)
+        AddWidget(GUI:CreateSlider(parent, "Expiring Threshold %", 5, 100, 5, proxy, "expiringThreshold"), 54)
+        AddWidget(GUI:CreateColorPicker(parent, "Expiring Color", proxy, "expiringColor", true,
             function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
             function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
             true), 28)
@@ -1647,9 +1672,22 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy)
             function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
             function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
             true), 28)
+        AddDivider()
+        -- Expiring
+        AddWidget(GUI:CreateCheckbox(parent, "Expiring Color Override", proxy, "expiringEnabled"), 28)
+        AddWidget(GUI:CreateSlider(parent, "Expiring Threshold %", 5, 100, 5, proxy, "expiringThreshold"), 54)
+        AddWidget(GUI:CreateColorPicker(parent, "Expiring Color", proxy, "expiringColor", true,
+            function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
+            function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
+            true), 28)
 
     elseif typeKey == "framealpha" then
         AddWidget(GUI:CreateSlider(parent, "Alpha", 0, 1, 0.05, proxy, "alpha"), 54)
+        AddDivider()
+        -- Expiring
+        AddWidget(GUI:CreateCheckbox(parent, "Expiring Alpha Override", proxy, "expiringEnabled"), 28)
+        AddWidget(GUI:CreateSlider(parent, "Expiring Threshold %", 5, 100, 5, proxy, "expiringThreshold"), 54)
+        AddWidget(GUI:CreateSlider(parent, "Expiring Alpha", 0, 1, 0.05, proxy, "expiringAlpha"), 54)
     end
 
     totalHeight = totalHeight + 4  -- bottom padding
@@ -2369,107 +2407,7 @@ local function BuildPerAuraView(parent, auraName)
 
     yPos = yPos - 58
 
-    -- ===== DIVIDER =====
-    local div3 = parent:CreateTexture(nil, "ARTWORK")
-    div3:SetPoint("TOPLEFT", 10, yPos)
-    div3:SetSize(238, 1)
-    div3:SetColorTexture(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-    yPos = yPos - 12
-
-    -- ===== EXPIRING INDICATOR SECTION (Collapsible Accordion) =====
-    local c = GetThemeColor()
-    local expCollapsed = true
-
-    local expHeader = CreateFrame("Button", nil, parent, "BackdropTemplate")
-    expHeader:SetHeight(22)
-    expHeader:SetPoint("TOPLEFT", 0, yPos)
-    expHeader:SetPoint("RIGHT", parent, "RIGHT", 0, 0)
-    ApplyBackdrop(expHeader, {r = C_ELEMENT.r * 0.8, g = C_ELEMENT.g * 0.8, b = C_ELEMENT.b * 0.8, a = 1}, {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.3})
-
-    local expChevron = expHeader:CreateTexture(nil, "OVERLAY")
-    expChevron:SetSize(10, 10)
-    expChevron:SetPoint("LEFT", 10, 0)
-    expChevron:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
-    expChevron:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-
-    local expTitleText = expHeader:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    expTitleText:SetPoint("LEFT", expChevron, "RIGHT", 6, 0)
-    expTitleText:SetText("Expiring Indicator")
-    expTitleText:SetTextColor(c.r, c.g, c.b)
-
-    expHeader:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
-    end)
-    expHeader:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(C_ELEMENT.r * 0.8, C_ELEMENT.g * 0.8, C_ELEMENT.b * 0.8, 1)
-    end)
-    yPos = yPos - 24
-
-    local expBody = CreateFrame("Frame", nil, parent)
-    expBody:SetPoint("TOPLEFT", 0, yPos)
-    expBody:SetPoint("RIGHT", parent, "RIGHT", 0, 0)
-    expBody:Hide()
-
-    local expYPos = 0
-    local expProxy = CreateExpiringProxy(auraName)
-
-    local expEnabled = GUI:CreateCheckbox(expBody, "Enable Expiring Effects", expProxy, "enabled")
-    expEnabled:SetPoint("TOPLEFT", 5, expYPos)
-    expYPos = expYPos - 28
-
-    local expThreshold = GUI:CreateSlider(expBody, "Threshold (%)", 1, 100, 1, expProxy, "threshold")
-    expThreshold:SetPoint("TOPLEFT", 5, expYPos)
-    expThreshold:SetWidth(contentWidth - 10)
-    expYPos = expYPos - 54
-
-    local expBorder = GUI:CreateCheckbox(expBody, "Border on Expiring", expProxy, "borderEnabled")
-    expBorder:SetPoint("TOPLEFT", 5, expYPos)
-    expYPos = expYPos - 28
-
-    local expBorderThickness = GUI:CreateSlider(expBody, "Border Thickness", 1, 5, 1, expProxy, "borderThickness")
-    expBorderThickness:SetPoint("TOPLEFT", 5, expYPos)
-    expBorderThickness:SetWidth(contentWidth - 10)
-    expYPos = expYPos - 54
-
-    local expBorderColor = GUI:CreateColorPicker(expBody, "Expiring Border Color", expProxy, "borderColor", true)
-    expBorderColor:SetPoint("TOPLEFT", 5, expYPos)
-    expBorderColor:SetWidth(contentWidth - 10)
-    expYPos = expYPos - 28
-
-    local expPulsate = GUI:CreateCheckbox(expBody, "Pulsate on Expiring", expProxy, "pulsate")
-    expPulsate:SetPoint("TOPLEFT", 5, expYPos)
-    expYPos = expYPos - 28
-
-    local expTint = GUI:CreateCheckbox(expBody, "Tint on Expiring", expProxy, "tintEnabled")
-    expTint:SetPoint("TOPLEFT", 5, expYPos)
-    expYPos = expYPos - 28
-
-    local expTintColor = GUI:CreateColorPicker(expBody, "Expiring Tint Color", expProxy, "tintColor", true)
-    expTintColor:SetPoint("TOPLEFT", 5, expYPos)
-    expTintColor:SetWidth(contentWidth - 10)
-    expYPos = expYPos - 34
-
-    local EXP_BODY_HEIGHT = -expYPos
-    expBody:SetHeight(EXP_BODY_HEIGHT)
-
-    local function UpdateExpCollapse()
-        if expCollapsed then
-            expBody:Hide()
-            expChevron:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
-            parent:SetHeight(-yPos + 10)
-        else
-            expBody:Show()
-            expChevron:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
-            parent:SetHeight(-(yPos - EXP_BODY_HEIGHT) + 10)
-        end
-    end
-
-    expHeader:SetScript("OnClick", function()
-        expCollapsed = not expCollapsed
-        UpdateExpCollapse()
-    end)
-
-    UpdateExpCollapse()
+    parent:SetHeight(-yPos + 10)
 end
 
 local function RefreshRightPanel()
