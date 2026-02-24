@@ -1174,6 +1174,22 @@ local function CreateADBar(frame, auraName)
         end
 
         -- ============================================
+        -- SPARK POSITION (timer-driven live bars)
+        -- Reads bar:GetValue() which SetTimerDuration updates
+        -- ============================================
+        if self.dfAD_usedTimerDuration and self.spark and self.spark:IsShown() then
+            local pct = self:GetValue()
+            local orient = self:GetOrientation()
+            if orient == "HORIZONTAL" then
+                self.spark:ClearAllPoints()
+                self.spark:SetPoint("CENTER", self, "LEFT", self:GetWidth() * pct, 0)
+            else
+                self.spark:ClearAllPoints()
+                self.spark:SetPoint("CENTER", self, "BOTTOM", 0, self:GetHeight() * pct)
+            end
+        end
+
+        -- ============================================
         -- BAR COLOR (API-driven when available, manual fallback)
         -- Throttled to ~1 FPS for performance
         -- ============================================
@@ -1510,10 +1526,7 @@ function Indicators:ApplyBar(frame, config, auraData, defaults, auraName, priori
 
     bar.dfAD_usedTimerDuration = usedTimerDuration
 
-    -- Hide spark when SetTimerDuration is active (can't position without manual arithmetic)
-    if usedTimerDuration and bar.spark then
-        bar.spark:Hide()
-    end
+    -- Spark positioning for live (timer-driven) bars is handled in OnUpdate via GetValue()
 
     -- ========================================
     -- DURATION TEXT

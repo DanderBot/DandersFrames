@@ -209,7 +209,7 @@ local function EnsureTypeConfig(auraName, typeKey)
             }
         elseif typeKey == "healthbar" then
             auraCfg[typeKey] = {
-                mode = "Tint", color = {r = 1, g = 1, b = 1, a = 1}, blend = 0.5,
+                mode = "Replace", color = {r = 1, g = 1, b = 1, a = 1}, blend = 0.5,
             }
         elseif typeKey == "nametext" then
             auraCfg[typeKey] = {
@@ -3288,12 +3288,14 @@ local function RefreshActiveEffectsStrip()
         end)
 
         -- Spell name
-        local name = entry:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        name:SetPoint("TOP", 0, -3)
-        name:SetWidth(60)
-        name:SetMaxLines(1)
+        local name = entry:CreateFontString(nil, "OVERLAY")
+        name:SetFont("Fonts\\FRIZQT__.TTF", 8, "OUTLINE")
+        name:SetPoint("TOP", 0, -2)
+        name:SetWidth(64)
+        name:SetMaxLines(2)
+        name:SetWordWrap(true)
         name:SetText(effect.display)
-        name:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+        name:SetTextColor(1, 1, 1)
         name:SetJustifyH("CENTER")
 
         -- Icon with accent border
@@ -3337,7 +3339,7 @@ local function RefreshActiveEffectsStrip()
         typeLabel:SetWidth(64)
         typeLabel:SetMaxLines(1)
         typeLabel:SetText(effect.typeLabel:upper())
-        typeLabel:SetTextColor(tc.r, tc.g, tc.b)
+        typeLabel:SetTextColor(0.7, 0.7, 0.7)
 
         -- Click to select aura
         entry:SetScript("OnClick", function()
