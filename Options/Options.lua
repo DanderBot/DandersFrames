@@ -1364,7 +1364,12 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             
             -- Refresh test frames to apply new fonts
             if DF.RefreshTestFrames then DF:RefreshTestFrames() end
-            
+
+            -- Force Aura Designer to re-apply indicators with new fonts
+            if DF.AuraDesigner and DF.AuraDesigner.Engine and DF.AuraDesigner.Engine.ForceRefreshAllFrames then
+                DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+            end
+
             print("|cff00ff00DandersFrames:|r Applied global font settings to all text elements.")
         end)
         fontSelectGroup:AddWidget(applyBtn, 35)
