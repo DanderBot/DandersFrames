@@ -4,32 +4,6 @@
 
 ### Bug Fixes
 * Fix click-casting "script ran too long" error when many frames are registered (ElvUI, etc.) — batch all frames in groups of 10 with yields between batches
-* Fix Aura Designer square/bar color settings not saving across reloads (proxy copy-on-read for table defaults)
-* Fix Aura Designer placed indicators becoming non-interactive after changing settings like size or scale
-* Fix Aura Designer anchor dots consuming right-clicks intended for indicator deletion
-* Fix Aura Designer not-installed overlay not showing when HARF is installed but disabled
-* Fix Aura Designer URL copy popup error (use existing GUI popup system)
-* Fix Harrek's logo not rendering (convert from non-power-of-2 PNG to 64x64 TGA)
-* Fix Aura Designer expiring indicator errors — EvaluateRemainingPercent returns plain tables, not Color objects; all callbacks now use field access
-* Fix "Apply to All" global fonts not reaching Aura Designer indicators — per-instance font overrides blocked global defaults inheritance
-
-### New Features
-* Aura Designer placed indicators can now be picked up and dragged to a different anchor point
-* Aura Designer not-installed overlay with Harrek's logo, description, and CurseForge/Discord links
-* Aura Designer attribution row shows Harrek's logo and orange-branded addon name
-* Aura Designer global font settings now cascade to all indicator duration and stack text (icon, square, bar)
-* "Apply to All" in Global Fonts page now updates Aura Designer defaults and clears per-instance font overrides
-* Added Font Settings section to Aura Designer Global Defaults panel (duration/stack font, scale, outline)
-
-### Improvements
-* Replace all font-based Unicode icons with TGA textures (gear, checkmarks, close buttons, chevrons, dropdown arrows)
-* Anchor dots only visible during drag operations for cleaner UI
-* Aura Designer font dropdowns now use searchable font picker with font preview text
-* Aura Designer global defaults changes now trigger full indicator refresh for immediate visual feedback
-
-## [4.0.7] - 2026-02-23
-
-### Bug Fixes
 * Fix health fade errors with secret numbers — rewritten to use curve-based engine-side resolution, no Lua comparison of protected values
 * Fix health fade not working correctly on pet frames
 * Fix health fade not working in test mode and not updating during health animation
@@ -61,6 +35,14 @@
 * Fix Aura Designer health bar color tint mode not working — blend value was divided by 100 twice
 * Fix Aura Designer health bar color not reverting to original when aura expires
 * Fix Aura Designer square indicator not inheriting global icon size defaults
+* Fix Aura Designer square/bar color settings not saving across reloads (proxy copy-on-read for table defaults)
+* Fix Aura Designer placed indicators becoming non-interactive after changing settings like size or scale
+* Fix Aura Designer anchor dots consuming right-clicks intended for indicator deletion
+* Fix Aura Designer not-installed overlay not showing when HARF is installed but disabled
+* Fix Aura Designer URL copy popup error (use existing GUI popup system)
+* Fix Harrek's logo not rendering (convert from non-power-of-2 PNG to 64x64 TGA)
+* Fix Aura Designer expiring indicator errors — EvaluateRemainingPercent returns plain tables, not Color objects; all callbacks now use field access
+* Fix "Apply to All" global fonts not reaching Aura Designer indicators — per-instance font overrides blocked global defaults inheritance
 * Various auto layout stability fixes
 * Fix auto layout settings contamination between party and raid modes
 * Fix auto layout override values getting stuck on test mode frames after profile switch
@@ -80,6 +62,18 @@
 * Aura Designer — icon, square, and bar indicators with instance-based placement; drag to place, toggle type per-instance, global defaults inheritance
 * Aura Designer border indicator now supports all highlight styles — Solid Border, Animated Border, Dashed Border, Glow, and Corners Only
 * Aura Designer border and health bar color indicators render live in the options preview
+* Aura Designer placed indicators can now be picked up and dragged to a different anchor point
+* Aura Designer not-installed overlay with Harrek's logo, description, and CurseForge/Discord links
+* Aura Designer attribution row shows Harrek's logo and orange-branded addon name
+* Aura Designer global font settings now cascade to all indicator duration and stack text (icon, square, bar)
+* "Apply to All" in Global Fonts page now updates Aura Designer defaults and clears per-instance font overrides
+* Added Font Settings section to Aura Designer Global Defaults panel (duration/stack font, scale, outline)
+
+### Improvements
+* Replace all font-based Unicode icons with TGA textures (gear, checkmarks, close buttons, chevrons, dropdown arrows)
+* Anchor dots only visible during drag operations for cleaner UI
+* Aura Designer font dropdowns now use searchable font picker with font preview text
+* Aura Designer global defaults changes now trigger full indicator refresh for immediate visual feedback
 
 ## [4.0.6] - 2026-02-15
 
