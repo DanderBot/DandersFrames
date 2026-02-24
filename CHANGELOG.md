@@ -13,7 +13,7 @@ Visual indicator system for tracking buffs, debuffs, and auras on your frames. R
 * **Health Bar Color frame effect** — Replace or Tint mode with adjustable blend strength
 * **Name/Health Text Color frame effects** — override unit name or health text color when an aura is active
 * **Frame Alpha frame effect** — adjust entire frame transparency based on aura presence
-* **Expiring system** — all 8 indicator types support an expiring color that activates below a configurable remaining-duration threshold, fully combat-safe using Blizzard's Duration object API
+* **Expiring system** — all 8 indicator types support an expiring color that activates below a configurable remaining-duration threshold, fully combat-safe
 * **Priority stacking** — configurable priority per aura (1-20); frame effects only show the highest-priority active aura, placed indicators coexist on separate anchors
 * **Global defaults** — configure default icon size, scale, duration/stack font, font scale, and outline style; new indicators inherit these automatically with per-indicator overrides available
 * **Live preview** — indicators render on the frame preview in the options panel with mock aura data
@@ -29,26 +29,23 @@ Automatically switches your raid frame layout based on content type and raid siz
 * **Full settings coverage** — overrides can include frame size, growth direction, groups per row, group visibility, bar colors, text settings, aura filters, icon toggles, pinned frame configuration, and more
 * **Live editing** — click "Edit Settings" to enter editing mode with live frame preview; every change is tracked as an override with visual indicators showing which settings are modified vs global
 * **Override indicators** — green checkmark for global values, orange star with reset button for modified values, per-tab override counts
-* **Non-destructive** — uses a read-through overlay system so your global profile is never mutated; exiting editing mode restores your base settings cleanly
+* **Non-destructive** — your global profile is never modified; exiting editing mode restores your base settings cleanly
 * **Crash recovery** — if editing is interrupted, the next login detects and restores your base settings
 * **Status display** — shows current content type, instance name, raid size, active layout, and override count
 * **Export/import support** — auto layout configurations included in profile exports
 
 ### New Features
 * Health fade system — fades frames above a configurable health threshold, with dispel cancel override (contributed by X-Steeve)
-* Class power pips — Holy Power, Chi, Combo Points, etc. displayed on the player frame as colored pips with configurable size, position, and anchor (contributed by X-Steeve)
-* Class power pip color, vertical layout, and role filter options
+* Class power pips — Holy Power, Chi, Combo Points, etc. displayed on the player frame as colored pips with configurable size, position, anchor, color, vertical layout, and role filter options (contributed by X-Steeve)
 * "Sync with Raid/Party" toggle per settings page (contributed by Enf0)
 * Per-class resource bar filter toggles
 * Click-cast binding tooltip on unit frame hover — shows active bindings with usability status (contributed by riyuk)
 * Health gradient color mode for missing health bar (contributed by Enf0)
 * Debug Console — in-game debug log viewer (`/df debug` to toggle, `/df console` to view)
-* Auto-reload UI when toggling click-casting enable/disable
-* Auto-show changelog when opening settings after an update
 
 ### Bug Fixes
 * Fix click-casting "script ran too long" error when many frames are registered (ElvUI, etc.)
-* Fix health fade errors with secret numbers — rewritten to use curve-based engine-side resolution
+* Fix health fade errors caused by Blizzard's protected health values
 * Fix health fade not working correctly on pet frames, in test mode, and during health animation
 * Fix profiles not persisting per character — each character now remembers their own active profile
 * Fix pet frames vanishing after reload
@@ -66,7 +63,7 @@ Automatically switches your raid frame layout based on content type and raid siz
 * Fix Clique compatibility — prevent duplicate registration, defer writes, commit all header children
 * Fix aura click-through not updating safely on login
 * Fix leader icon not updating on first leader change (contributed by riyuk)
-* Fix forbidden table iteration in FindHealthManaBars and click-casting registration (contributed by riyuk)
+* Fix Lua errors during Blizzard frame registration (contributed by riyuk)
 
 ## [4.0.6] - 2026-02-15
 
