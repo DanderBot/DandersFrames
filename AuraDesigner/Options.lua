@@ -1434,7 +1434,7 @@ local function AddSectionHeader(parent, yOffset, label, typeKey, auraName, width
     -- Collapse/expand arrow
     header.arrow = header:CreateTexture(nil, "OVERLAY")
     header.arrow:SetPoint("LEFT", cb, "RIGHT", 4, 0)
-    header.arrow:SetSize(10, 10)
+    header.arrow:SetSize(14, 14)
     header.arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
     header.arrow:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
@@ -1672,25 +1672,12 @@ local function BuildGlobalView(parent)
     title:SetTextColor(c.r, c.g, c.b)
     yPos = yPos - 18
 
-    -- Sliders section label
-    local defaultIconLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    defaultIconLabel:SetPoint("TOPLEFT", 10, yPos)
-    defaultIconLabel:SetText("Default Icon Size")
-    defaultIconLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    yPos = yPos - 4
-
-    local iconSize = GUI:CreateSlider(parent, "Icon Size", 8, 64, 1, defaults, "iconSize")
+    local iconSize = GUI:CreateSlider(parent, "Default Icon Size", 8, 64, 1, defaults, "iconSize")
     iconSize:SetPoint("TOPLEFT", 5, yPos)
     iconSize:SetWidth(contentWidth - 10)
     yPos = yPos - 50
 
-    local defaultScaleLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    defaultScaleLabel:SetPoint("TOPLEFT", 10, yPos)
-    defaultScaleLabel:SetText("Default Scale")
-    defaultScaleLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    yPos = yPos - 4
-
-    local iconScale = GUI:CreateSlider(parent, "Scale", 0.5, 3.0, 0.05, defaults, "iconScale")
+    local iconScale = GUI:CreateSlider(parent, "Default Scale", 0.5, 3.0, 0.05, defaults, "iconScale")
     iconScale:SetPoint("TOPLEFT", 5, yPos)
     iconScale:SetWidth(contentWidth - 10)
     yPos = yPos - 50
@@ -1927,7 +1914,7 @@ local function BuildPerAuraView(parent, auraName)
 
         -- Chevron (left side)
         local chevron = cardHeader:CreateTexture(nil, "OVERLAY")
-        chevron:SetSize(10, 10)
+        chevron:SetSize(14, 14)
         chevron:SetPoint("LEFT", 8, 0)
         chevron:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
@@ -2086,12 +2073,28 @@ local function BuildPerAuraView(parent, auraName)
     yPos = yPos - 30
 
     -- ===== SEPARATOR: placed vs frame-level =====
-    yPos = yPos - 2
-    local sepLine = parent:CreateTexture(nil, "ARTWORK")
-    sepLine:SetPoint("TOPLEFT", 0, yPos)
-    sepLine:SetSize(contentWidth, 1)
-    sepLine:SetColorTexture(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-    yPos = yPos - 6
+    yPos = yPos - 8
+
+    -- Section header for frame-level (global) effects
+    local globalHeader = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    globalHeader:SetHeight(22)
+    globalHeader:SetPoint("TOPLEFT", 0, yPos)
+    globalHeader:SetPoint("RIGHT", parent, "RIGHT", 0, 0)
+    local tc2 = GetThemeColor()
+    ApplyBackdrop(globalHeader, {r = tc2.r * 0.06, g = tc2.g * 0.06, b = tc2.b * 0.06, a = 1}, {r = tc2.r * 0.25, g = tc2.g * 0.25, b = tc2.b * 0.25, a = 0.8})
+
+    local globalLabel = globalHeader:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    globalLabel:SetPoint("LEFT", 10, 0)
+    globalLabel:SetText("FRAME EFFECTS")
+    globalLabel:SetTextColor(tc2.r, tc2.g, tc2.b, 0.8)
+
+    local globalSubLabel = globalHeader:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    globalSubLabel:SetPoint("LEFT", globalLabel, "RIGHT", 8, 0)
+    globalSubLabel:SetText("applies to the entire frame")
+    globalSubLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.5)
+    globalSubLabel:SetFont(globalSubLabel:GetFont(), 9)
+
+    yPos = yPos - 26
 
     -- ===== FRAME-LEVEL INDICATOR SECTIONS =====
     -- 5 collapsible sections: border, healthbar, nametext, healthtext, framealpha
@@ -2108,7 +2111,7 @@ local function BuildPerAuraView(parent, auraName)
             ApplyBackdrop(header, C_ELEMENT, C_BORDER)
 
             local chevron = header:CreateTexture(nil, "OVERLAY")
-            chevron:SetSize(10, 10)
+            chevron:SetSize(14, 14)
             chevron:SetPoint("LEFT", 8, 0)
             chevron:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
@@ -2866,7 +2869,7 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef)
 
     -- Outer container with label
     local container = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    container:SetHeight(max(FRAME_H + 60, 130))  -- room for label + frame + instructions
+    container:SetHeight(max(FRAME_H + 80, 150))  -- room for label + frame + instructions
     local rightInset = rightPanelRef and (rightPanelRef:GetWidth() + 6) or 290
     container:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, yOffset)
     container:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -rightInset, yOffset)
@@ -3083,15 +3086,18 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef)
         local keyWidth = keyText:GetStringWidth()
         badge:SetWidth(max(keyWidth + 10, 20))
 
-        -- Description text
+        -- Description text (word-wrapped within container bounds)
         local descText = container:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         descText:SetPoint("LEFT", badge, "RIGHT", 5, 0)
+        descText:SetPoint("RIGHT", container, "RIGHT", -8, 0)
+        descText:SetWordWrap(true)
+        descText:SetJustifyH("LEFT")
         descText:SetText(row.desc)
         descText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.7)
     end
 
     -- Adjust container height to accommodate instructions
-    container:SetHeight(max(FRAME_H + 60 + #instrRows * 14, 130 + #instrRows * 14))
+    container:SetHeight(max(FRAME_H + 80 + #instrRows * 14, 150 + #instrRows * 14))
 
     -- Drag-state hint text (shows contextual guidance during drag operations)
     dragHintText = container:CreateFontString(nil, "OVERLAY")
