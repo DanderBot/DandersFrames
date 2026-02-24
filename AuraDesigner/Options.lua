@@ -1503,6 +1503,14 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy)
         AddWidget(GUI:CreateDropdown(parent, "Stack Anchor", ANCHOR_OPTIONS, proxy, "stackAnchor"), 54)
         AddWidget(GUI:CreateSlider(parent, "Stack Offset X", -20, 20, 1, proxy, "stackX"), 54)
         AddWidget(GUI:CreateSlider(parent, "Stack Offset Y", -20, 20, 1, proxy, "stackY"), 54)
+        AddDivider()
+        -- Expiring (changes icon border color when aura is about to expire)
+        AddWidget(GUI:CreateCheckbox(parent, "Expiring Color Override", proxy, "expiringEnabled"), 28)
+        AddWidget(GUI:CreateSlider(parent, "Expiring Threshold %", 5, 100, 5, proxy, "expiringThreshold"), 54)
+        AddWidget(GUI:CreateColorPicker(parent, "Expiring Color", proxy, "expiringColor", true,
+            function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
+            function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
+            true), 28)
 
     elseif typeKey == "square" then
         -- Placement
