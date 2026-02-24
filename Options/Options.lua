@@ -1347,11 +1347,24 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             if db.groupLabelFont ~= nil then
                 db.groupLabelFont = font; db.groupLabelOutline = outline
             end
-            -- Aura Designer global defaults
-            if db.auraDesigner and db.auraDesigner.defaults then
-                local adDefaults = db.auraDesigner.defaults
-                adDefaults.durationFont = font; adDefaults.durationOutline = outline
-                adDefaults.stackFont = font; adDefaults.stackOutline = outline
+            -- Aura Designer global defaults + clear per-instance overrides
+            if db.auraDesigner then
+                if db.auraDesigner.defaults then
+                    local adDefaults = db.auraDesigner.defaults
+                    adDefaults.durationFont = font; adDefaults.durationOutline = outline
+                    adDefaults.stackFont = font; adDefaults.stackOutline = outline
+                end
+                -- Clear per-instance font overrides so all indicators inherit global
+                if db.auraDesigner.auras then
+                    for _, auraCfg in pairs(db.auraDesigner.auras) do
+                        if auraCfg.indicators then
+                            for _, inst in ipairs(auraCfg.indicators) do
+                                inst.durationFont = nil; inst.durationOutline = nil
+                                inst.stackFont = nil; inst.stackOutline = nil
+                            end
+                        end
+                    end
+                end
             end
 
             DF:UpdateAllFrames()
