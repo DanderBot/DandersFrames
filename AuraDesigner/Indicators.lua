@@ -131,8 +131,10 @@ end
 -- ============================================================
 -- SHARED EXPIRING TICKER
 -- Processes all registered indicators with expiring settings
--- at ~3 FPS. Uses LuaCurve + Duration API for live frames
--- (secret-safe), manual calculation for preview.
+-- at ~3 FPS. Same dual-path approach as bar's OnUpdate:
+--   API path:     Build a Step color curve per element, evaluate
+--                 via durationObj:EvaluateRemainingPercent → apply
+--   Preview path: Manual pct calculation, compare to threshold
 -- ============================================================
 
 local expiringRegistry = {}
@@ -147,24 +149,29 @@ local function UnregisterExpiring(element)
     end
 end
 
--- Cache step curves by threshold to avoid re-creating each tick
-local expiringCurveCache = {}
-
-local function GetExpiringCurve(threshold)
-    if expiringCurveCache[threshold] then return expiringCurveCache[threshold] end
+-- Build a Step color curve encoding two states:
+--   Below threshold → expiring color
+--   At/above threshold → original color
+-- Same pattern as bar's dfAD_colorCurve for expiring-only mode.
+local function BuildExpiringColorCurve(threshold, expiringColor, originalColor)
     if not C_CurveUtil or not C_CurveUtil.CreateColorCurve then return nil end
     local curve = C_CurveUtil.CreateColorCurve()
     curve:SetType(Enum.LuaCurveType.Step)
-    -- Below threshold → white (alpha 1 = expiring), above → transparent (alpha 0 = normal)
-    curve:AddPoint(0, CreateColor(1, 1, 1, 1))
-    curve:AddPoint(threshold / 100, CreateColor(0, 0, 0, 0))
-    curve:AddPoint(1, CreateColor(0, 0, 0, 0))
-    expiringCurveCache[threshold] = curve
+    local ecR = expiringColor.r or 1
+    local ecG = expiringColor.g or 0.2
+    local ecB = expiringColor.b or 0.2
+    local ocR = originalColor.r or 1
+    local ocG = originalColor.g or 1
+    local ocB = originalColor.b or 1
+    curve:AddPoint(0, CreateColor(ecR, ecG, ecB, 1))
+    curve:AddPoint(threshold / 100, CreateColor(ocR, ocG, ocB, 1))
+    curve:AddPoint(1, CreateColor(ocR, ocG, ocB, 1))
     return curve
 end
 
 local expiringFrame = CreateFrame("Frame")
 local expiringElapsed = 0
+expiringFrame:Show()  -- CRITICAL: OnUpdate only fires on visible frames
 
 expiringFrame:SetScript("OnUpdate", function(_, elapsed)
     expiringElapsed = expiringElapsed + elapsed
@@ -175,35 +182,33 @@ expiringFrame:SetScript("OnUpdate", function(_, elapsed)
         if not element:IsShown() then
             expiringRegistry[element] = nil
         else
-            local isExpiring = false
+            local applied = false
 
-            if entry.unit and entry.auraInstanceID
+            -- API path: evaluate color curve (same as bar's OnUpdate)
+            if entry.colorCurve and entry.unit and entry.auraInstanceID
                and C_UnitAuras and C_UnitAuras.GetAuraDuration then
-                -- Live path: secret-safe via Duration API
-                local curve = GetExpiringCurve(entry.threshold or 30)
-                if curve then
-                    local durationObj = C_UnitAuras.GetAuraDuration(entry.unit, entry.auraInstanceID)
-                    if durationObj and durationObj.EvaluateRemainingPercent then
-                        local result = durationObj:EvaluateRemainingPercent(curve)
-                        if result then
-                            local a = result.GetAlpha and result:GetAlpha() or 0
-                            isExpiring = a > 0.5
-                        end
+                local durationObj = C_UnitAuras.GetAuraDuration(entry.unit, entry.auraInstanceID)
+                if durationObj and durationObj.EvaluateRemainingPercent then
+                    local result = durationObj:EvaluateRemainingPercent(entry.colorCurve)
+                    if result and entry.applyResult then
+                        entry.applyResult(element, result, entry)
+                        applied = true
                     end
                 end
-            else
-                -- Preview path: manual calculation
+            end
+
+            -- Preview fallback: manual pct comparison (same as bar's preview path)
+            if not applied then
                 local dur = entry.duration
                 local exp = entry.expirationTime
                 if dur and exp and not issecretvalue(dur) and not issecretvalue(exp) and dur > 0 then
                     local remaining = max(0, exp - GetTime())
                     local pct = remaining / dur
-                    isExpiring = pct <= ((entry.threshold or 30) / 100)
+                    local isExpiring = pct <= ((entry.threshold or 30) / 100)
+                    if entry.applyManual then
+                        entry.applyManual(element, isExpiring, entry)
+                    end
                 end
-            end
-
-            if entry.applyExpiring then
-                entry.applyExpiring(element, isExpiring, entry)
             end
         end
     end
@@ -410,26 +415,28 @@ function Indicators:ApplyBorder(frame, config, auraData)
     local expiringEnabled = config.expiringEnabled
     if expiringEnabled == nil then expiringEnabled = false end
     if expiringEnabled then
+        local ec = config.expiringColor or {r = 1, g = 0.2, b = 0.2}
+        local oc = {r = r, g = g, b = b}
         RegisterExpiring(ch, {
-            type = "border",
             unit = frame.unit,
             auraInstanceID = auraData and auraData.auraInstanceID,
             threshold = config.expiringThreshold or 30,
             duration = auraData and auraData.duration,
             expirationTime = auraData and auraData.expirationTime,
-            color = config.expiringColor or {r = 1, g = 0.2, b = 0.2},
-            originalColor = {r = r, g = g, b = b},
-            originalAlpha = alpha,
-            style = style,
-            thickness = thickness,
-            inset = inset,
-            applyExpiring = function(el, isExp, entry)
+            colorCurve = BuildExpiringColorCurve(config.expiringThreshold or 30, ec, oc),
+            color = ec, originalColor = oc,
+            originalAlpha = alpha, style = style, thickness = thickness, inset = inset,
+            applyResult = function(el, result, entry)
+                local rr, gg, bb = result:GetRGB()
+                DF.ApplyHighlightStyle(el, entry.style, entry.thickness, entry.inset, rr, gg, bb, entry.originalAlpha)
+            end,
+            applyManual = function(el, isExp, entry)
                 if isExp then
-                    local ec = entry.color
-                    DF.ApplyHighlightStyle(el, entry.style, entry.thickness, entry.inset, ec.r or 1, ec.g or 0.2, ec.b or 0.2, entry.originalAlpha)
+                    local c = entry.color
+                    DF.ApplyHighlightStyle(el, entry.style, entry.thickness, entry.inset, c.r or 1, c.g or 0.2, c.b or 0.2, entry.originalAlpha)
                 else
-                    local oc = entry.originalColor
-                    DF.ApplyHighlightStyle(el, entry.style, entry.thickness, entry.inset, oc.r, oc.g, oc.b, entry.originalAlpha)
+                    local c = entry.originalColor
+                    DF.ApplyHighlightStyle(el, entry.style, entry.thickness, entry.inset, c.r, c.g, c.b, entry.originalAlpha)
                 end
             end,
         })
@@ -488,22 +495,26 @@ function Indicators:ApplyHealthBar(frame, config, auraData)
     local expiringEnabled = config.expiringEnabled
     if expiringEnabled == nil then expiringEnabled = false end
     if expiringEnabled then
+        local ec = config.expiringColor or {r = 1, g = 0.2, b = 0.2}
+        local oc = {r = r, g = g, b = b}
         RegisterExpiring(healthBar, {
-            type = "healthbar",
             unit = frame.unit,
             auraInstanceID = auraData and auraData.auraInstanceID,
             threshold = config.expiringThreshold or 30,
             duration = auraData and auraData.duration,
             expirationTime = auraData and auraData.expirationTime,
-            color = config.expiringColor or {r = 1, g = 0.2, b = 0.2},
-            originalColor = {r = r, g = g, b = b},
-            applyExpiring = function(el, isExp, entry)
+            colorCurve = BuildExpiringColorCurve(config.expiringThreshold or 30, ec, oc),
+            color = ec, originalColor = oc,
+            applyResult = function(el, result, entry)
+                el:SetStatusBarColor(result:GetRGB())
+            end,
+            applyManual = function(el, isExp, entry)
                 if isExp then
-                    local ec = entry.color
-                    el:SetStatusBarColor(ec.r or 1, ec.g or 0.2, ec.b or 0.2, 1)
+                    local c = entry.color
+                    el:SetStatusBarColor(c.r or 1, c.g or 0.2, c.b or 0.2, 1)
                 else
-                    local oc = entry.originalColor
-                    el:SetStatusBarColor(oc.r, oc.g, oc.b, 1)
+                    local c = entry.originalColor
+                    el:SetStatusBarColor(c.r, c.g, c.b, 1)
                 end
             end,
         })
@@ -554,22 +565,26 @@ function Indicators:ApplyNameText(frame, config, auraData)
         local expiringEnabled = config.expiringEnabled
         if expiringEnabled == nil then expiringEnabled = false end
         if expiringEnabled then
+            local ec = config.expiringColor or {r = 1, g = 0.2, b = 0.2}
+            local oc = {r = r, g = g, b = b}
             RegisterExpiring(nameText, {
-                type = "nametext",
                 unit = frame.unit,
                 auraInstanceID = auraData and auraData.auraInstanceID,
                 threshold = config.expiringThreshold or 30,
                 duration = auraData and auraData.duration,
                 expirationTime = auraData and auraData.expirationTime,
-                color = config.expiringColor or {r = 1, g = 0.2, b = 0.2},
-                originalColor = {r = r, g = g, b = b},
-                applyExpiring = function(el, isExp, entry)
+                colorCurve = BuildExpiringColorCurve(config.expiringThreshold or 30, ec, oc),
+                color = ec, originalColor = oc,
+                applyResult = function(el, result, entry)
+                    el:SetTextColor(result:GetRGBA())
+                end,
+                applyManual = function(el, isExp, entry)
                     if isExp then
-                        local ec = entry.color
-                        el:SetTextColor(ec.r or 1, ec.g or 0.2, ec.b or 0.2, 1)
+                        local c = entry.color
+                        el:SetTextColor(c.r or 1, c.g or 0.2, c.b or 0.2, 1)
                     else
-                        local oc = entry.originalColor
-                        el:SetTextColor(oc.r, oc.g, oc.b, 1)
+                        local c = entry.originalColor
+                        el:SetTextColor(c.r, c.g, c.b, 1)
                     end
                 end,
             })
@@ -621,22 +636,26 @@ function Indicators:ApplyHealthText(frame, config, auraData)
         local expiringEnabled = config.expiringEnabled
         if expiringEnabled == nil then expiringEnabled = false end
         if expiringEnabled then
+            local ec = config.expiringColor or {r = 1, g = 0.2, b = 0.2}
+            local oc = {r = r, g = g, b = b}
             RegisterExpiring(healthText, {
-                type = "healthtext",
                 unit = frame.unit,
                 auraInstanceID = auraData and auraData.auraInstanceID,
                 threshold = config.expiringThreshold or 30,
                 duration = auraData and auraData.duration,
                 expirationTime = auraData and auraData.expirationTime,
-                color = config.expiringColor or {r = 1, g = 0.2, b = 0.2},
-                originalColor = {r = r, g = g, b = b},
-                applyExpiring = function(el, isExp, entry)
+                colorCurve = BuildExpiringColorCurve(config.expiringThreshold or 30, ec, oc),
+                color = ec, originalColor = oc,
+                applyResult = function(el, result, entry)
+                    el:SetTextColor(result:GetRGBA())
+                end,
+                applyManual = function(el, isExp, entry)
                     if isExp then
-                        local ec = entry.color
-                        el:SetTextColor(ec.r or 1, ec.g or 0.2, ec.b or 0.2, 1)
+                        local c = entry.color
+                        el:SetTextColor(c.r or 1, c.g or 0.2, c.b or 0.2, 1)
                     else
-                        local oc = entry.originalColor
-                        el:SetTextColor(oc.r, oc.g, oc.b, 1)
+                        local c = entry.originalColor
+                        el:SetTextColor(c.r, c.g, c.b, 1)
                     end
                 end,
             })
@@ -684,16 +703,25 @@ function Indicators:ApplyFrameAlpha(frame, config, auraData)
     local expiringEnabled = config.expiringEnabled
     if expiringEnabled == nil then expiringEnabled = false end
     if expiringEnabled then
+        local expiringAlpha = config.expiringAlpha or 1.0
+        local originalAlpha = alpha or (state.savedAlpha or 1.0)
+        -- Encode alpha values in the R channel of a color curve
+        local ec = {r = expiringAlpha, g = 0, b = 0}
+        local oc = {r = originalAlpha, g = 0, b = 0}
         RegisterExpiring(frame, {
-            type = "framealpha",
             unit = frame.unit,
             auraInstanceID = auraData and auraData.auraInstanceID,
             threshold = config.expiringThreshold or 30,
             duration = auraData and auraData.duration,
             expirationTime = auraData and auraData.expirationTime,
-            expiringAlpha = config.expiringAlpha or 1.0,
-            originalAlpha = alpha or (state.savedAlpha or 1.0),
-            applyExpiring = function(el, isExp, entry)
+            colorCurve = BuildExpiringColorCurve(config.expiringThreshold or 30, ec, oc),
+            expiringAlpha = expiringAlpha,
+            originalAlpha = originalAlpha,
+            applyResult = function(el, result, entry)
+                -- Alpha encoded in R channel of the curve
+                el:SetAlpha(result:GetRed())
+            end,
+            applyManual = function(el, isExp, entry)
                 if isExp then
                     el:SetAlpha(entry.expiringAlpha)
                 else
@@ -985,19 +1013,26 @@ function Indicators:ApplyIcon(frame, config, auraData, defaults, auraName, prior
     local expiringEnabled = config.expiringEnabled
     if expiringEnabled == nil then expiringEnabled = false end
     if expiringEnabled then
+        local ec = config.expiringColor or {r = 1, g = 0.2, b = 0.2}
+        local oc = {r = 0, g = 0, b = 0}  -- icon border default = black
         RegisterExpiring(icon, {
-            type = "icon",
             unit = frame.unit,
             auraInstanceID = auraData and auraData.auraInstanceID,
             threshold = config.expiringThreshold or 30,
             duration = auraData and auraData.duration,
             expirationTime = auraData and auraData.expirationTime,
-            color = config.expiringColor or {r = 1, g = 0.2, b = 0.2},
-            applyExpiring = function(el, isExp, entry)
+            colorCurve = BuildExpiringColorCurve(config.expiringThreshold or 30, ec, oc),
+            color = ec,
+            applyResult = function(el, result, entry)
+                if el.border then
+                    el.border:SetColorTexture(result:GetRGBA())
+                end
+            end,
+            applyManual = function(el, isExp, entry)
                 if el.border then
                     if isExp then
-                        local ec = entry.color
-                        el.border:SetColorTexture(ec.r or 1, ec.g or 0.2, ec.b or 0.2, 1)
+                        local c = entry.color
+                        el.border:SetColorTexture(c.r or 1, c.g or 0.2, c.b or 0.2, 1)
                     else
                         el.border:SetColorTexture(0, 0, 0, 0.8)
                     end
@@ -1304,23 +1339,29 @@ function Indicators:ApplySquare(frame, config, auraData, defaults, auraName, pri
     local expiringEnabled = config.expiringEnabled
     if expiringEnabled == nil then expiringEnabled = false end
     if expiringEnabled then
+        local ec = config.expiringColor or {r = 1, g = 0.2, b = 0.2}
+        local oc = {r = color and (color[1] or color.r) or 1, g = color and (color[2] or color.g) or 1, b = color and (color[3] or color.b) or 1}
         RegisterExpiring(sq, {
-            type = "square",
             unit = frame.unit,
             auraInstanceID = auraData and auraData.auraInstanceID,
             threshold = config.expiringThreshold or 30,
             duration = auraData and auraData.duration,
             expirationTime = auraData and auraData.expirationTime,
-            color = config.expiringColor or {r = 1, g = 0.2, b = 0.2},
-            originalColor = {r = color and (color[1] or color.r) or 1, g = color and (color[2] or color.g) or 1, b = color and (color[3] or color.b) or 1},
-            applyExpiring = function(el, isExp, entry)
+            colorCurve = BuildExpiringColorCurve(config.expiringThreshold or 30, ec, oc),
+            color = ec, originalColor = oc,
+            applyResult = function(el, result, entry)
+                if el.texture then
+                    el.texture:SetColorTexture(result:GetRGBA())
+                end
+            end,
+            applyManual = function(el, isExp, entry)
                 if el.texture then
                     if isExp then
-                        local ec = entry.color
-                        el.texture:SetColorTexture(ec.r or 1, ec.g or 0.2, ec.b or 0.2, 1)
+                        local c = entry.color
+                        el.texture:SetColorTexture(c.r or 1, c.g or 0.2, c.b or 0.2, 1)
                     else
-                        local oc = entry.originalColor
-                        el.texture:SetColorTexture(oc.r or 1, oc.g or 1, oc.b or 1, 1)
+                        local c = entry.originalColor
+                        el.texture:SetColorTexture(c.r or 1, c.g or 1, c.b or 1, 1)
                     end
                 end
             end,
