@@ -3,7 +3,7 @@
 ## [4.0.8] - 2026-02-24
 
 ### New: Aura Designer
-Visual indicator system for tracking buffs, debuffs, and auras on your frames. Requires the Harrek's Aura and Raid Filter (HARF) companion addon.
+Visual indicator system for tracking buffs, debuffs, and auras on your frames. Requires the Harrek's Advanced Raid Frames (HARF) companion addon.
 * **8 indicator types** — 3 placed indicators (Icon, Square, Bar) that occupy anchor points on the frame, plus 5 frame effects (Border, Health Bar Color, Name Text Color, Health Text Color, Frame Alpha) that affect the entire frame
 * **Drag-to-place** — drag auras from the spell list onto any of 9 anchor points (corners, edges, center) with X/Y offset adjustment
 * **Icon indicators** — spell icon with cooldown swipe, duration text, and stack count display
@@ -16,7 +16,6 @@ Visual indicator system for tracking buffs, debuffs, and auras on your frames. R
 * **Expiring system** — all 8 indicator types support an expiring color that activates below a configurable remaining-duration threshold, fully combat-safe using Blizzard's Duration object API
 * **Priority stacking** — configurable priority per aura (1-20); frame effects only show the highest-priority active aura, placed indicators coexist on separate anchors
 * **Global defaults** — configure default icon size, scale, duration/stack font, font scale, and outline style; new indicators inherit these automatically with per-indicator overrides available
-* **Searchable font picker** with live font preview text
 * **Live preview** — indicators render on the frame preview in the options panel with mock aura data
 * **Per-spec aura lists** — curated aura lists for 8 healer and augmentation specs
 * **Not-installed overlay** — setup instructions with CurseForge and Discord links when HARF is missing
@@ -37,7 +36,7 @@ Automatically switches your raid frame layout based on content type and raid siz
 
 ### New Features
 * Health fade system — fades frames above a configurable health threshold, with dispel cancel override (contributed by X-Steeve)
-* Class power pips — Holy Power, Chi, Combo Points, etc. displayed as colored pips with configurable size, position, and anchor (contributed by X-Steeve)
+* Class power pips — Holy Power, Chi, Combo Points, etc. displayed on the player frame as colored pips with configurable size, position, and anchor (contributed by X-Steeve)
 * Class power pip color, vertical layout, and role filter options
 * "Sync with Raid/Party" toggle per settings page (contributed by Enf0)
 * Per-class resource bar filter toggles
@@ -69,9 +68,6 @@ Automatically switches your raid frame layout based on content type and raid siz
 * Fix leader icon not updating on first leader change (contributed by riyuk)
 * Fix forbidden table iteration in FindHealthManaBars and click-casting registration (contributed by riyuk)
 * Fix double beta release and wrong release channel detection in CI (contributed by riyuk)
-
-### Improvements
-* Replace all font-based Unicode icons with TGA textures (gear, checkmarks, close buttons, chevrons, dropdown arrows)
 
 ## [4.0.6] - 2026-02-15
 
