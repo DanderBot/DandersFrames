@@ -1021,6 +1021,13 @@ DF.ExportCategories = {
     auraDesigner = {
         "auraDesigner",  -- The entire auraDesigner table is treated as one setting
     },
+
+    -- ===========================================
+    -- AUTO LAYOUTS - Raid size auto-layout profiles
+    -- ===========================================
+    autoLayout = {
+        "raidAutoProfiles",  -- Top-level key, handled specially in export/import
+    },
 }
 
 -- ===========================================
@@ -1072,6 +1079,11 @@ DF.ExportCategoryInfo = {
         description = "Spec-specific aura indicators and effects",
         order = 9,
     },
+    autoLayout = {
+        name = "Auto Layouts",
+        description = "Raid size auto-layout profiles",
+        order = 10,
+    },
 }
 
 -- ===========================================
@@ -1080,7 +1092,7 @@ DF.ExportCategoryInfo = {
 DF.ExportPresets = {
     all = {
         name = "All",
-        categories = {"position", "layout", "bars", "auras", "text", "icons", "other", "pinnedFrames", "auraDesigner"},
+        categories = {"position", "layout", "bars", "auras", "text", "icons", "other", "pinnedFrames", "auraDesigner", "autoLayout"},
     },
     appearance = {
         name = "Appearance",

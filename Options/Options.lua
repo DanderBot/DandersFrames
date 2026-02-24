@@ -3521,6 +3521,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     -- Auras > Aura Designer
     local pageAuraDesigner = CreateSubTab("auras", "auras_auradesigner", "Aura Designer")
     BuildPage(pageAuraDesigner, function(self, db, Add, AddSpace, AddSyncPoint)
+        Add(CreateCopyButton(self.child, {"auraDesigner"}, "Aura Designer", "auras_auradesigner"), 25, 2)
         if DF.BuildAuraDesignerPage then
             DF.BuildAuraDesignerPage(GUI, self, db)
         end
@@ -6017,7 +6018,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         self.exportFrameTypes = {party = true, raid = true}
         self.importFrameTypes = {party = true, raid = true}
         
-        local categoryOrder = {"position", "layout", "bars", "auras", "text", "icons", "other"}
+        local categoryOrder = {"position", "layout", "bars", "auras", "text", "icons", "other", "pinnedFrames", "auraDesigner", "autoLayout"}
         
         -- Helper to add to section
         local function AddToSection(widget, col, colNum)

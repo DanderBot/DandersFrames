@@ -165,11 +165,11 @@ function Indicators:Apply(frame, typeKey, config, auraData, defaults, auraName, 
     elseif typeKey == "framealpha" then
         self:ApplyFrameAlpha(frame, config, auraData)
     elseif typeKey == "icon" then
-        self:ApplyIcon(frame, config, auraData, defaults, auraName)
+        self:ApplyIcon(frame, config, auraData, defaults, auraName, priority)
     elseif typeKey == "square" then
-        self:ApplySquare(frame, config, auraData, defaults, auraName)
+        self:ApplySquare(frame, config, auraData, defaults, auraName, priority)
     elseif typeKey == "bar" then
-        self:ApplyBar(frame, config, auraData, defaults, auraName)
+        self:ApplyBar(frame, config, auraData, defaults, auraName, priority)
     end
 end
 
@@ -507,7 +507,7 @@ local function GetOrCreateADIcon(frame, auraName)
     return icon
 end
 
-function Indicators:ApplyIcon(frame, config, auraData, defaults, auraName)
+function Indicators:ApplyIcon(frame, config, auraData, defaults, auraName, priority)
     local state = EnsureFrameState(frame)
     state.activeIcons[auraName] = true
 
@@ -528,6 +528,11 @@ function Indicators:ApplyIcon(frame, config, auraData, defaults, auraName)
     local offsetY = config.offsetY or 0
     icon:ClearAllPoints()
     icon:SetPoint(anchor, frame, anchor, offsetX, offsetY)
+
+    -- Frame level: higher priority (lower number) = higher frame level
+    local baseLevel = (frame.contentOverlay or frame):GetFrameLevel() + 10
+    local priorityBoost = 20 - (priority or 5)
+    icon:SetFrameLevel(baseLevel + priorityBoost)
 
     -- Texture
     if auraData.icon then
@@ -815,7 +820,7 @@ local function GetOrCreateADSquare(frame, auraName)
     return sq
 end
 
-function Indicators:ApplySquare(frame, config, auraData, defaults, auraName)
+function Indicators:ApplySquare(frame, config, auraData, defaults, auraName, priority)
     local state = EnsureFrameState(frame)
     state.activeSquares[auraName] = true
 
@@ -844,6 +849,11 @@ function Indicators:ApplySquare(frame, config, auraData, defaults, auraName)
     local offsetY = config.offsetY or 0
     sq:ClearAllPoints()
     sq:SetPoint(anchor, frame, anchor, offsetX, offsetY)
+
+    -- Frame level: higher priority (lower number) = higher frame level
+    local baseLevel = (frame.contentOverlay or frame):GetFrameLevel() + 10
+    local priorityBoost = 20 - (priority or 5)
+    sq:SetFrameLevel(baseLevel + priorityBoost)
 
     -- ========================================
     -- BORDER
@@ -1236,7 +1246,7 @@ local function GetOrCreateADBar(frame, auraName)
     return bar
 end
 
-function Indicators:ApplyBar(frame, config, auraData, defaults, auraName)
+function Indicators:ApplyBar(frame, config, auraData, defaults, auraName, priority)
     local state = EnsureFrameState(frame)
     state.activeBars[auraName] = true
 
@@ -1430,6 +1440,11 @@ function Indicators:ApplyBar(frame, config, auraData, defaults, auraName)
     local offsetY = config.offsetY or 0
     bar:ClearAllPoints()
     bar:SetPoint(anchor, frame, anchor, offsetX, offsetY)
+
+    -- Frame level: higher priority (lower number) = higher frame level
+    local baseLevel = (frame.contentOverlay or frame):GetFrameLevel() + 10
+    local priorityBoost = 20 - (priority or 5)
+    bar:SetFrameLevel(baseLevel + priorityBoost)
 
     -- ========================================
     -- SPARK
