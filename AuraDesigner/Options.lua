@@ -142,14 +142,18 @@ local function EnsureTypeConfig(auraName, typeKey)
                 borderEnabled = true, borderThickness = 1, borderInset = 1,
                 hideSwipe = false,
                 -- Duration text
-                showDuration = gd.showDuration ~= false, durationFont = "Fonts\\FRIZQT__.TTF",
-                durationScale = 1.0, durationOutline = "OUTLINE",
+                showDuration = gd.showDuration ~= false,
+                durationFont = gd.durationFont or "Fonts\\FRIZQT__.TTF",
+                durationScale = gd.durationScale or 1.0,
+                durationOutline = gd.durationOutline or "OUTLINE",
                 durationAnchor = "CENTER", durationX = 0, durationY = 0,
                 durationColorByTime = true,
                 -- Stack count
                 showStacks = gd.showStacks ~= false, stackMinimum = 2,
-                stackFont = "Fonts\\FRIZQT__.TTF", stackScale = 1.0,
-                stackOutline = "OUTLINE", stackAnchor = "BOTTOMRIGHT",
+                stackFont = gd.stackFont or "Fonts\\FRIZQT__.TTF",
+                stackScale = gd.stackScale or 1.0,
+                stackOutline = gd.stackOutline or "OUTLINE",
+                stackAnchor = "BOTTOMRIGHT",
                 stackX = 0, stackY = 0,
                 -- Expiring
                 expiringEnabled = false, expiringThreshold = 30,
@@ -166,14 +170,18 @@ local function EnsureTypeConfig(auraName, typeKey)
                 showBorder = true, borderThickness = 1, borderInset = 1,
                 hideSwipe = false,
                 -- Duration text
-                showDuration = gd.showDuration ~= false, durationFont = "Fonts\\FRIZQT__.TTF",
-                durationScale = 1.0, durationOutline = "OUTLINE",
+                showDuration = gd.showDuration ~= false,
+                durationFont = gd.durationFont or "Fonts\\FRIZQT__.TTF",
+                durationScale = gd.durationScale or 1.0,
+                durationOutline = gd.durationOutline or "OUTLINE",
                 durationAnchor = "CENTER", durationX = 0, durationY = 0,
                 durationColorByTime = true,
                 -- Stack count
                 showStacks = gd.showStacks ~= false, stackMinimum = 2,
-                stackFont = "Fonts\\FRIZQT__.TTF", stackScale = 1.0,
-                stackOutline = "OUTLINE", stackAnchor = "BOTTOMRIGHT",
+                stackFont = gd.stackFont or "Fonts\\FRIZQT__.TTF",
+                stackScale = gd.stackScale or 1.0,
+                stackOutline = gd.stackOutline or "OUTLINE",
+                stackAnchor = "BOTTOMRIGHT",
                 stackX = 0, stackY = 0,
                 -- Expiring
                 expiringEnabled = false, expiringThreshold = 30,
@@ -201,8 +209,10 @@ local function EnsureTypeConfig(auraName, typeKey)
                 expiringEnabled = false, expiringThreshold = 30,
                 expiringColor = {r = 1, g = 0.2, b = 0.2, a = 1},
                 -- Duration text
-                showDuration = true, durationFont = "Fonts\\FRIZQT__.TTF",
-                durationScale = 1.0, durationOutline = "OUTLINE",
+                showDuration = true,
+                durationFont = gd.durationFont or "Fonts\\FRIZQT__.TTF",
+                durationScale = gd.durationScale or 1.0,
+                durationOutline = gd.durationOutline or "OUTLINE",
                 durationAnchor = "CENTER", durationX = 0, durationY = 0,
                 durationColorByTime = true,
             }
@@ -385,9 +395,19 @@ local RefreshPreviewLightweight
 
 -- Global-default key mapping: which global default keys apply to placed types
 local GLOBAL_DEFAULT_MAP = {
-    icon   = { size = "iconSize", scale = "iconScale", showDuration = "showDuration", showStacks = "showStacks" },
-    square = { size = "iconSize", scale = "iconScale", showDuration = "showDuration", showStacks = "showStacks" },
-    bar    = {},
+    icon   = {
+        size = "iconSize", scale = "iconScale", showDuration = "showDuration", showStacks = "showStacks",
+        durationFont = "durationFont", durationScale = "durationScale", durationOutline = "durationOutline",
+        stackFont = "stackFont", stackScale = "stackScale", stackOutline = "stackOutline",
+    },
+    square = {
+        size = "iconSize", scale = "iconScale", showDuration = "showDuration", showStacks = "showStacks",
+        durationFont = "durationFont", durationScale = "durationScale", durationOutline = "durationOutline",
+        stackFont = "stackFont", stackScale = "stackScale", stackOutline = "stackOutline",
+    },
+    bar    = {
+        durationFont = "durationFont", durationScale = "durationScale", durationOutline = "durationOutline",
+    },
 }
 
 -- Create a proxy table that maps flat key access to an indicator instance
@@ -1741,6 +1761,61 @@ local function BuildGlobalView(parent)
     showStacks:SetPoint("TOPLEFT", 5, yPos)
     yPos = yPos - 28
 
+    -- ===== FONT SETTINGS =====
+    local fontDiv = parent:CreateTexture(nil, "ARTWORK")
+    fontDiv:SetPoint("TOPLEFT", 10, yPos)
+    fontDiv:SetSize(238, 1)
+    fontDiv:SetColorTexture(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
+    yPos = yPos - 10
+
+    local fontTitle = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    fontTitle:SetPoint("TOPLEFT", 10, yPos)
+    fontTitle:SetText("Font Settings")
+    fontTitle:SetTextColor(c.r, c.g, c.b)
+    yPos = yPos - 20
+
+    local durFontLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    durFontLabel:SetPoint("TOPLEFT", 10, yPos)
+    durFontLabel:SetText("Duration Text")
+    durFontLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    yPos = yPos - 14
+
+    local durFont = GUI:CreateDropdown(parent, "Font", DF:GetFontList(), defaults, "durationFont")
+    durFont:SetPoint("TOPLEFT", 5, yPos)
+    durFont:SetWidth(contentWidth - 10)
+    yPos = yPos - 50
+
+    local durScale = GUI:CreateSlider(parent, "Scale", 0.5, 2.0, 0.1, defaults, "durationScale")
+    durScale:SetPoint("TOPLEFT", 5, yPos)
+    durScale:SetWidth(contentWidth - 10)
+    yPos = yPos - 50
+
+    local durOutline = GUI:CreateDropdown(parent, "Outline", OUTLINE_OPTIONS, defaults, "durationOutline")
+    durOutline:SetPoint("TOPLEFT", 5, yPos)
+    durOutline:SetWidth(contentWidth - 10)
+    yPos = yPos - 54
+
+    local stackFontLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    stackFontLabel:SetPoint("TOPLEFT", 10, yPos)
+    stackFontLabel:SetText("Stack Text")
+    stackFontLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    yPos = yPos - 14
+
+    local stkFont = GUI:CreateDropdown(parent, "Font", DF:GetFontList(), defaults, "stackFont")
+    stkFont:SetPoint("TOPLEFT", 5, yPos)
+    stkFont:SetWidth(contentWidth - 10)
+    yPos = yPos - 50
+
+    local stkScale = GUI:CreateSlider(parent, "Scale", 0.5, 2.0, 0.1, defaults, "stackScale")
+    stkScale:SetPoint("TOPLEFT", 5, yPos)
+    stkScale:SetWidth(contentWidth - 10)
+    yPos = yPos - 50
+
+    local stkOutline = GUI:CreateDropdown(parent, "Outline", OUTLINE_OPTIONS, defaults, "stackOutline")
+    stkOutline:SetPoint("TOPLEFT", 5, yPos)
+    stkOutline:SetWidth(contentWidth - 10)
+    yPos = yPos - 54
+
     -- ===== IMPORT FROM BUFFS TAB =====
     local div0 = parent:CreateTexture(nil, "ARTWORK")
     div0:SetPoint("TOPLEFT", 10, yPos)
@@ -1815,6 +1890,14 @@ local function BuildGlobalView(parent)
             if buffsDB.buffShowStacks ~= nil then defaults.showStacks = buffsDB.buffShowStacks end
             -- Border
             if buffsDB.buffBorder ~= nil then defaults.iconBorderEnabled = buffsDB.buffBorder end
+            -- Duration font
+            if buffsDB.buffDurationFont then defaults.durationFont = buffsDB.buffDurationFont end
+            if buffsDB.buffDurationScale then defaults.durationScale = buffsDB.buffDurationScale end
+            if buffsDB.buffDurationOutline then defaults.durationOutline = buffsDB.buffDurationOutline end
+            -- Stack font
+            if buffsDB.buffStackFont then defaults.stackFont = buffsDB.buffStackFont end
+            if buffsDB.buffStackScale then defaults.stackScale = buffsDB.buffStackScale end
+            if buffsDB.buffStackOutline then defaults.stackOutline = buffsDB.buffStackOutline end
             DF:Debug("Aura Designer: Imported Buffs tab defaults")
             importBtnText:SetText("Imported!")
             C_Timer.After(1.5, function()
