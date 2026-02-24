@@ -316,3 +316,37 @@ function Engine:ClearFrame(frame)
         Indicators:HideAll(frame)
     end
 end
+
+-- ============================================================
+-- FORCE REFRESH ALL AD-ENABLED FRAMES
+-- Re-runs UpdateFrame on every visible AD frame so changed
+-- global defaults (fonts, sizes, etc.) take effect immediately.
+-- ============================================================
+
+function Engine:ForceRefreshAllFrames()
+    local function TryUpdate(frame)
+        if frame and frame:IsVisible() and DF:IsAuraDesignerEnabled(frame) then
+            Engine:UpdateFrame(frame)
+        end
+    end
+
+    if DF.IteratePartyFrames then
+        DF:IteratePartyFrames(TryUpdate)
+    end
+    if DF.IterateRaidFrames then
+        DF:IterateRaidFrames(TryUpdate)
+    end
+
+    -- Also refresh pinned frames
+    if DF.PinnedFrames and DF.PinnedFrames.initialized and DF.PinnedFrames.headers then
+        for setIndex = 1, 2 do
+            local header = DF.PinnedFrames.headers[setIndex]
+            if header and header:IsShown() then
+                for i = 1, 40 do
+                    local child = header:GetAttribute("child" .. i)
+                    if child then TryUpdate(child) end
+                end
+            end
+        end
+    end
+end

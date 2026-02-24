@@ -892,10 +892,10 @@ function Indicators:ApplyIcon(frame, config, auraData, defaults, auraName, prior
     local stackMin = config.stackMinimum or 2
     icon.stackMinimum = stackMin
 
-    -- Stack font/style
-    local stackFont = config.stackFont or "Fonts\\FRIZQT__.TTF"
-    local stackScale = config.stackScale or 1.0
-    local stackOutline = config.stackOutline or "OUTLINE"
+    -- Stack font/style (instance → global defaults → hardcoded)
+    local stackFont = config.stackFont or (defaults and defaults.stackFont) or "Fonts\\FRIZQT__.TTF"
+    local stackScale = config.stackScale or (defaults and defaults.stackScale) or 1.0
+    local stackOutline = config.stackOutline or (defaults and defaults.stackOutline) or "OUTLINE"
     if stackOutline == "NONE" then stackOutline = "" end
     local stackAnchor = config.stackAnchor or "BOTTOMRIGHT"
     local stackX = config.stackX or 0
@@ -935,9 +935,9 @@ function Indicators:ApplyIcon(frame, config, auraData, defaults, auraName, prior
     -- ========================================
     local showDuration = config.showDuration
     if showDuration == nil then showDuration = true end
-    local durationFont = config.durationFont or "Fonts\\FRIZQT__.TTF"
-    local durationScale = config.durationScale or 1.0
-    local durationOutline = config.durationOutline or "OUTLINE"
+    local durationFont = config.durationFont or (defaults and defaults.durationFont) or "Fonts\\FRIZQT__.TTF"
+    local durationScale = config.durationScale or (defaults and defaults.durationScale) or 1.0
+    local durationOutline = config.durationOutline or (defaults and defaults.durationOutline) or "OUTLINE"
     if durationOutline == "NONE" then durationOutline = "" end
     local durationAnchor = config.durationAnchor or "CENTER"
     local durationX = config.durationX or 0
@@ -1232,9 +1232,9 @@ function Indicators:ApplySquare(frame, config, auraData, defaults, auraName, pri
     local showStacks = config.showStacks
     if showStacks == nil then showStacks = true end
     local stackMin = config.stackMinimum or 2
-    local stackFont = config.stackFont or "Fonts\\FRIZQT__.TTF"
-    local stackScale = config.stackScale or 1.0
-    local stackOutline = config.stackOutline or "OUTLINE"
+    local stackFont = config.stackFont or (defaults and defaults.stackFont) or "Fonts\\FRIZQT__.TTF"
+    local stackScale = config.stackScale or (defaults and defaults.stackScale) or 1.0
+    local stackOutline = config.stackOutline or (defaults and defaults.stackOutline) or "OUTLINE"
     if stackOutline == "NONE" then stackOutline = "" end
     local stackAnchor = config.stackAnchor or "BOTTOMRIGHT"
     local stackX = config.stackX or 0
@@ -1271,9 +1271,9 @@ function Indicators:ApplySquare(frame, config, auraData, defaults, auraName, pri
     -- ========================================
     local showDuration = config.showDuration
     if showDuration == nil then showDuration = true end
-    local durationFont = config.durationFont or "Fonts\\FRIZQT__.TTF"
-    local durationScale = config.durationScale or 1.0
-    local durationOutline = config.durationOutline or "OUTLINE"
+    local durationFont = config.durationFont or (defaults and defaults.durationFont) or "Fonts\\FRIZQT__.TTF"
+    local durationScale = config.durationScale or (defaults and defaults.durationScale) or 1.0
+    local durationOutline = config.durationOutline or (defaults and defaults.durationOutline) or "OUTLINE"
     if durationOutline == "NONE" then durationOutline = "" end
     local durationAnchor = config.durationAnchor or "CENTER"
     local durationX = config.durationX or 0
@@ -1848,9 +1848,9 @@ function Indicators:ApplyBar(frame, config, auraData, defaults, auraName, priori
     -- ========================================
     local showDuration = config.showDuration
     if showDuration == nil then showDuration = false end
-    local durationFont = config.durationFont or "Fonts\\FRIZQT__.TTF"
-    local durationScale = config.durationScale or 1.0
-    local durationOutline = config.durationOutline or "OUTLINE"
+    local durationFont = config.durationFont or (defaults and defaults.durationFont) or "Fonts\\FRIZQT__.TTF"
+    local durationScale = config.durationScale or (defaults and defaults.durationScale) or 1.0
+    local durationOutline = config.durationOutline or (defaults and defaults.durationOutline) or "OUTLINE"
     if durationOutline == "NONE" then durationOutline = "" end
     local durationAnchor = config.durationAnchor or "CENTER"
     local durationX = config.durationX or 0
