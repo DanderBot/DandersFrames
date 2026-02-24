@@ -149,17 +149,17 @@ function DF:UpdateHealthBarAppearance(frame)
     
     -- Skip during test mode (test mode handles its own appearance)
     if DF.testMode or DF.raidTestMode then return end
-    
+
     local unit = frame.unit
     local deadOrOffline = IsDeadOrOffline(frame)
     local offline = IsOffline(frame)
     local inRange = GetInRange(frame)
     local aggroActive = frame.dfAggroActive and frame.dfAggroColor
-    
+
     -- Get the texture - this is what we apply colors to
     local tex = frame.healthBar:GetStatusBarTexture()
     if not tex then return end
-    
+
     -- ========================================
     -- DETERMINE ALPHA
     -- ========================================
@@ -171,16 +171,24 @@ function DF:UpdateHealthBarAppearance(frame)
     else
         alpha = db.classColorAlpha or 1.0
     end
-    
+
     if deadOrOffline and db.fadeDeadFrames then
         alpha = db.fadeDeadHealthBar or 1
     end
-    
+
     -- ========================================
     -- APPLY COLOR
+    -- Skip when Aura Designer health bar color indicator is active.
+    -- AD owns the bar color while its indicator is applied; normal
+    -- color updates (UNIT_HEALTH, form shifts, etc.) must not
+    -- overwrite it.  Alpha is still applied below so OOR/dead fade
+    -- continues to work.
     -- ========================================
-    
-    if aggroActive then
+    local adHealthBarActive = frame.dfAD and frame.dfAD.healthbar
+
+    if adHealthBarActive then
+        -- AD owns the color — don't touch it
+    elseif aggroActive then
         -- Priority 1: Aggro override
         local c = frame.dfAggroColor
         tex:SetVertexColor(c.r, c.g, c.b)
@@ -221,7 +229,7 @@ function DF:UpdateHealthBarAppearance(frame)
             tex:SetVertexColor(0, 0.8, 0)
         end
     end
-    
+
     -- ========================================
     -- APPLY ALPHA
     -- ========================================

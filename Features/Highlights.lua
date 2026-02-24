@@ -646,7 +646,9 @@ function DF:UpdateHighlights(frame, forceSelection, forceAggro)
     if frame.dfAggroActive then
         frame.dfAggroColor = {r = aggroR, g = aggroG, b = aggroB}
         -- Immediately update health color (both bar and texture for gradient mode)
-        if frame.healthBar then
+        -- Skip if Aura Designer health bar color is active — AD owns the bar color
+        local adOwnsColor = frame.dfAD and frame.dfAD.healthbar
+        if frame.healthBar and not adOwnsColor then
             frame.healthBar:SetStatusBarColor(aggroR, aggroG, aggroB)
             local tex = frame.healthBar:GetStatusBarTexture()
             if tex then

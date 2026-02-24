@@ -225,7 +225,11 @@ end
 -- Apply health bar colors based on settings
 function DF:ApplyHealthColors(frame)
     if not frame or not frame.healthBar then return end
-    
+
+    -- Skip if Aura Designer health bar color indicator is active
+    local adState = frame.dfAD
+    if adState and adState.healthbar then return end
+
     local unit = frame.unit
     -- Use raid DB for raid frames, party DB for party frames
     local db = frame.isRaidFrame and DF:GetRaidDB() or DF:GetDB()
