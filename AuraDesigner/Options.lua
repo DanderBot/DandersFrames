@@ -1303,7 +1303,7 @@ local function CreateGlobalSettingsTile(parent)
 
     -- Gear/cog icon
     tile.letter = tile.iconBg:CreateTexture(nil, "OVERLAY")
-    tile.letter:SetSize(22, 22)
+    tile.letter:SetSize(36, 36)
     tile.letter:SetPoint("CENTER", 0, 0)
     tile.letter:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\settings")
     tile.letter:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
@@ -2432,14 +2432,18 @@ local function RefreshRightPanel()
     -- ========================================
     if rightPanel and rightPanel.selHeader then
         if selectedAura == nil then
-            -- Global view header
+            -- Global view header — show cog icon
             rightPanel.selIcon:SetColorTexture(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
+            rightPanel.selIcon:SetTexCoord(0, 1, 0, 1)
+            if rightPanel.selCog then rightPanel.selCog:Show() end
+            if rightPanel.selLetter then rightPanel.selLetter:Hide() end
             rightPanel.selName:SetText("Global Defaults")
             local tc = GetThemeColor()
             rightPanel.selName:SetTextColor(tc.r, tc.g, tc.b)
             rightPanel.selSub:SetText("Default values for all auras")
         else
             -- Per-aura header
+            if rightPanel.selCog then rightPanel.selCog:Hide() end
             local spec = ResolveSpec()
             local auraInfo
             if spec then
@@ -2455,9 +2459,16 @@ local function RefreshRightPanel()
                 if selIconTex then
                     rightPanel.selIcon:SetTexture(selIconTex)
                     rightPanel.selIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+                    if rightPanel.selLetter then rightPanel.selLetter:Hide() end
                 else
                     rightPanel.selIcon:SetTexCoord(0, 1, 0, 1)
                     rightPanel.selIcon:SetColorTexture(auraInfo.color[1] * 0.4, auraInfo.color[2] * 0.4, auraInfo.color[3] * 0.4, 1)
+                    -- Show first-letter fallback
+                    if rightPanel.selLetter then
+                        rightPanel.selLetter:SetText(auraInfo.display:sub(1, 1))
+                        rightPanel.selLetter:SetTextColor(auraInfo.color[1], auraInfo.color[2], auraInfo.color[3])
+                        rightPanel.selLetter:Show()
+                    end
                 end
                 rightPanel.selName:SetText(auraInfo.display)
                 rightPanel.selName:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
@@ -2471,6 +2482,8 @@ local function RefreshRightPanel()
                 end
             else
                 rightPanel.selIcon:SetColorTexture(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
+                rightPanel.selIcon:SetTexCoord(0, 1, 0, 1)
+                if rightPanel.selLetter then rightPanel.selLetter:Hide() end
                 rightPanel.selName:SetText(selectedAura)
                 rightPanel.selName:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
                 rightPanel.selSub:SetText("")
@@ -3468,6 +3481,19 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     rightPanel.selIcon = rightPanel.selIconFrame:CreateTexture(nil, "ARTWORK")
     rightPanel.selIcon:SetPoint("TOPLEFT", 1, -1)
     rightPanel.selIcon:SetPoint("BOTTOMRIGHT", -1, 1)
+
+    -- Cog overlay for global defaults view
+    rightPanel.selCog = rightPanel.selIconFrame:CreateTexture(nil, "OVERLAY")
+    rightPanel.selCog:SetSize(20, 20)
+    rightPanel.selCog:SetPoint("CENTER", 0, 0)
+    rightPanel.selCog:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\settings")
+    rightPanel.selCog:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    rightPanel.selCog:Hide()
+
+    -- Letter fallback for auras without a spell icon
+    rightPanel.selLetter = rightPanel.selIconFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    rightPanel.selLetter:SetPoint("CENTER", 0, 0)
+    rightPanel.selLetter:Hide()
 
     rightPanel.selName = rightPanel.selHeader:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     rightPanel.selName:SetPoint("TOPLEFT", rightPanel.selIconFrame, "TOPRIGHT", 8, -2)
