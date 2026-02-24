@@ -2869,7 +2869,7 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef)
 
     -- Outer container with label
     local container = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    container:SetHeight(max(FRAME_H + 80, 150))  -- room for label + frame + instructions
+    container:SetHeight(max(FRAME_H + 100, 170))  -- room for label + frame + instructions
     local rightInset = rightPanelRef and (rightPanelRef:GetWidth() + 6) or 290
     container:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, yOffset)
     container:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -rightInset, yOffset)
@@ -3071,7 +3071,7 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef)
 
     local instrCount = #instrRows
     for i, row in ipairs(instrRows) do
-        local rowBottomOffset = 4 + (instrCount - i) * 14
+        local rowBottomOffset = 4 + (instrCount - i) * 18
 
         -- Key badge background
         local badge = CreateFrame("Frame", nil, container, "BackdropTemplate")
@@ -3097,7 +3097,7 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef)
     end
 
     -- Adjust container height to accommodate instructions
-    container:SetHeight(max(FRAME_H + 80 + #instrRows * 14, 150 + #instrRows * 14))
+    container:SetHeight(max(FRAME_H + 100 + #instrRows * 18, 170 + #instrRows * 18))
 
     -- Drag-state hint text (shows contextual guidance during drag operations)
     dragHintText = container:CreateFontString(nil, "OVERLAY")
@@ -3251,14 +3251,14 @@ local function RefreshActiveEffectsStrip()
         xIcon:SetSize(10, 10)
         xIcon:SetPoint("CENTER", 0, 0)
         xIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close")
-        xIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+        xIcon:SetVertexColor(0.85, 0.2, 0.2)
         xBtn:SetScript("OnEnter", function(self)
-            xIcon:SetVertexColor(0.9, 0.25, 0.25)
+            xIcon:SetVertexColor(1, 0.3, 0.3)
             self:SetBackdropColor(0.8, 0.27, 0.27, 0.2)
             self:SetBackdropBorderColor(0.8, 0.27, 0.27, 0.4)
         end)
         xBtn:SetScript("OnLeave", function(self)
-            xIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+            xIcon:SetVertexColor(0.85, 0.2, 0.2)
             self:SetBackdropColor(0, 0, 0, 0)
             self:SetBackdropBorderColor(0, 0, 0, 0)
         end)
