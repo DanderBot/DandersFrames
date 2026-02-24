@@ -1885,7 +1885,7 @@ local function BuildPerAuraView(parent, auraName)
     introText:SetText("Configure how this aura appears when active on a unit frame.")
     introText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     introText:SetJustifyH("LEFT")
-    yPos = yPos - 18
+    yPos = yPos - (introText:GetStringHeight() + 6)
 
     -- ===== DIVIDER =====
     local div1 = parent:CreateTexture(nil, "ARTWORK")
@@ -2074,7 +2074,7 @@ local function BuildPerAuraView(parent, auraName)
     yPos = yPos - 4
     local addBtn = CreateFrame("Button", nil, parent, "BackdropTemplate")
     addBtn:SetSize(160, 24)
-    addBtn:SetPoint("TOPLEFT", 0, yPos)
+    addBtn:SetPoint("TOP", parent, "TOP", 0, yPos)
     local tc = GetThemeColor()
     ApplyBackdrop(addBtn, {r = tc.r * 0.12, g = tc.g * 0.12, b = tc.b * 0.12, a = 1}, {r = tc.r * 0.4, g = tc.g * 0.4, b = tc.b * 0.4, a = 0.8})
 
@@ -2100,7 +2100,7 @@ local function BuildPerAuraView(parent, auraName)
     yPos = yPos - 30
 
     -- ===== SEPARATOR: placed vs frame-level =====
-    yPos = yPos - 8
+    yPos = yPos - 14
 
     -- Section header for frame-level (global) effects
     local globalHeader = CreateFrame("Frame", nil, parent, "BackdropTemplate")
