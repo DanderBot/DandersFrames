@@ -141,6 +141,35 @@ local expiringRegistry = {}
 
 local function RegisterExpiring(element, entryData)
     expiringRegistry[element] = entryData
+
+    -- Evaluate immediately so the Apply function ends with the correct
+    -- color.  Without this the Apply sets the *original* color, then the
+    -- ticker (3 FPS) overrides it later → visible flicker.
+    -- Same approach as bar's "Set initial bar color" block in ApplyBar.
+    local applied = false
+    if entryData.colorCurve and entryData.unit and entryData.auraInstanceID
+       and C_UnitAuras and C_UnitAuras.GetAuraDuration then
+        local durationObj = C_UnitAuras.GetAuraDuration(entryData.unit, entryData.auraInstanceID)
+        if durationObj and durationObj.EvaluateRemainingPercent then
+            local result = durationObj:EvaluateRemainingPercent(entryData.colorCurve)
+            if result and entryData.applyResult then
+                entryData.applyResult(element, result, entryData)
+                applied = true
+            end
+        end
+    end
+    if not applied then
+        local dur = entryData.duration
+        local exp = entryData.expirationTime
+        if dur and exp and not issecretvalue(dur) and not issecretvalue(exp) and dur > 0 then
+            local remaining = max(0, exp - GetTime())
+            local pct = remaining / dur
+            local isExpiring = pct <= ((entryData.threshold or 30) / 100)
+            if entryData.applyManual then
+                entryData.applyManual(element, isExpiring, entryData)
+            end
+        end
+    end
 end
 
 local function UnregisterExpiring(element)
