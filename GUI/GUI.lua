@@ -277,7 +277,7 @@ function GUI:CreateSettingsGroup(parent, width)
     group.RefreshChildStates = function(self)
         local db = DF.db[GUI.SelectedMode]
         if not db then return end
-        
+
         for _, entry in ipairs(self.groupChildren) do
             local widget = entry.widget
             if widget.disableOn then
@@ -285,6 +285,9 @@ function GUI:CreateSettingsGroup(parent, width)
                 if widget.SetEnabled then
                     widget:SetEnabled(not shouldDisable)
                 end
+            end
+            if widget.refreshContent and widget:IsShown() then
+                widget:refreshContent(db)
             end
         end
     end

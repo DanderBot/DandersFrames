@@ -3731,10 +3731,15 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Settings Group (col1)
         local settingsGroup = GUI:CreateSettingsGroup(self.child, 260)
         settingsGroup:AddWidget(GUI:CreateHeader(self.child, "Settings"), 40)
-        settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, "Show Buffs", db, "showBuffs", function()
+        local showBuffsCb = settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, "Show Buffs", db, "showBuffs", function()
             self:RefreshStates()
             DF:UpdateAllFrames()
         end), 30)
+        -- Re-sync checked state when value changes externally (e.g. AD banner click)
+        showBuffsCb.refreshContent = function(self)
+            local onShow = self:GetScript("OnShow")
+            if onShow then onShow(self) end
+        end
         local buffMax = settingsGroup:AddWidget(GUI:CreateSlider(self.child, "Max Buffs", 0, 5, 1, db, "buffMax", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
         buffMax.disableOn = function(d) return not d.showBuffs end
         local buffSize = settingsGroup:AddWidget(GUI:CreateSlider(self.child, "Icon Size", 10, 40, 1, db, "buffSize", nil, function() DF:LightweightUpdateAuraPosition("buff") end, true), 55)
