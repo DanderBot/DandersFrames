@@ -1071,6 +1071,11 @@ StaticPopupDialogs["DANDERSFRAMES_CLICKCAST_RELOAD"] = {
 }
 
 function CC:SetEnabled(enabled)
+    -- Track whether the state is actually changing (callers may set db.enabled
+    -- before calling this, so compare against the profile copy which is the
+    -- last value committed by this function)
+    local wasEnabled = self.profile and self.profile.options and self.profile.options.enabled
+
     self.db.enabled = enabled
     if self.profile and self.profile.options then
         self.profile.options.enabled = enabled
@@ -1084,10 +1089,12 @@ function CC:SetEnabled(enabled)
         end
     end
 
-    -- Click-casting toggle requires a reload for WrapScript bindings and
-    -- secure frame state to initialize (or tear down) cleanly.
-    -- The enabled state is already saved to SavedVariables above.
-    StaticPopup_Show("DANDERSFRAMES_CLICKCAST_RELOAD")
+    -- Only prompt for reload when the state actually changes.
+    -- Prevents a spurious reload popup on every login when the user has
+    -- ignored the conflict warning (Clicked coexistence).
+    if enabled ~= wasEnabled then
+        StaticPopup_Show("DANDERSFRAMES_CLICKCAST_RELOAD")
+    end
 end
 
 -- Check if click-casting is enabled
