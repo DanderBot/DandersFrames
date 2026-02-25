@@ -4,6 +4,8 @@
 
 ### Aura Designer
 * **Buff coexistence** — standard buff icons can now display alongside Aura Designer indicators. When enabling AD a popup asks whether to keep or replace standard buffs, with info banners in both tabs for quick toggling
+* **Health Bar Color tint mode rework** — uses a StatusBar overlay instead of color blending, fixing tint not working reliably with Blizzard's protected health values
+* Aura Designer now refreshes when switching specs so per-spec aura lists update immediately
 
 ### Bug Fixes
 * Fix debuffs being hidden when Aura Designer is enabled — debuffs now always display regardless of AD state
