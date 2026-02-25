@@ -5838,6 +5838,10 @@ function DF:CreateGUI()
                         widget:Hide()
                     else
                         widget:Show()
+                        -- Call refreshContent hook for dynamic content updates
+                        if widget.refreshContent then
+                            widget:refreshContent(db)
+                        end
                     end
                 end
             end

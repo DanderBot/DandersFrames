@@ -1638,22 +1638,22 @@ function DF:UpdateAuras_Enhanced(frame)
     -- PERF TEST: Skip if disabled
     if DF.PerfTest and not DF.PerfTest.enableAuras then return end
 
-    -- Aura Designer takes over BUFF display when enabled; debuffs
-    -- continue through the normal path below since AD doesn't manage them yet.
+    -- Use raid DB for raid frames, party DB for party frames
+    local db = frame.isRaidFrame and DF:GetRaidDB() or DF:GetDB()
+
+    -- Aura Designer runs when enabled; standard buffs can coexist if showBuffs is on.
     local adEnabled = DF:IsAuraDesignerEnabled(frame)
     if adEnabled then
-        -- Hide standard buff icons — AD replaces them
-        if frame.buffIcons then
-            for _, icon in ipairs(frame.buffIcons) do icon:Hide() end
-        end
-
+        -- Run AD engine (indicators, frame effects, etc.)
         if DF.AuraDesigner and DF.AuraDesigner.Engine then
             DF.AuraDesigner.Engine:UpdateFrame(frame)
         end
-    end
 
-    -- Use raid DB for raid frames, party DB for party frames
-    local db = frame.isRaidFrame and DF:GetRaidDB() or DF:GetDB()
+        -- If standard buffs are NOT coexisting, hide their icons
+        if not db.showBuffs and frame.buffIcons then
+            for _, icon in ipairs(frame.buffIcons) do icon:Hide() end
+        end
+    end
 
     -- PERFORMANCE: Only re-apply layout when settings have changed (version mismatch).
     -- Layout (icon positioning, sizing, fonts, borders) is expensive and rarely changes.
@@ -1667,12 +1667,15 @@ function DF:UpdateAuras_Enhanced(frame)
         -- Note: dfAuraLayoutVersion is set inside ApplyAuraLayout
     end
 
-    -- Buff display (skipped when AD is active — AD owns buffs)
-    if not adEnabled then
+    -- Buff display (standard buff icons)
+    -- Shown when: AD is off, OR AD is on with showBuffs enabled (coexistence)
+    if not adEnabled or db.showBuffs then
         if db.showBuffs then
             DF:UpdateAuraIconsDirect(frame, frame.buffIcons, "BUFF", db.buffMax or 4)
         else
-            for _, icon in ipairs(frame.buffIcons) do icon:Hide() end
+            if frame.buffIcons then
+                for _, icon in ipairs(frame.buffIcons) do icon:Hide() end
+            end
         end
     end
 

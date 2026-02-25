@@ -103,6 +103,86 @@ local function ApplyBackdrop(frame, bgColor, borderColor)
     end
 end
 
+-- ============================================================
+-- BUFF COEXISTENCE POPUP
+-- Shown once when the user enables Aura Designer, asking whether
+-- to keep standard buff icons or let AD fully replace them.
+-- ============================================================
+
+local buffCoexistPopup
+
+local function ShowBuffCoexistPopup(onConfirm, onCancel)
+    if not buffCoexistPopup then
+        local f = CreateFrame("Frame", "DFADBuffPopup", UIParent, "BackdropTemplate")
+        f:SetSize(420, 130)
+        f:SetPoint("CENTER")
+        f:SetFrameStrata("FULLSCREEN_DIALOG")
+        f:SetFrameLevel(250)
+        f:EnableMouse(true)
+        ApplyBackdrop(f, {r = 0.10, g = 0.10, b = 0.10, a = 0.98}, {r = 0.30, g = 0.30, b = 0.30, a = 1})
+
+        local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        title:SetPoint("TOP", 0, -12)
+        title:SetText("Aura Designer")
+        title:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+
+        local desc = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        desc:SetPoint("TOP", title, "BOTTOM", 0, -6)
+        desc:SetWidth(390)
+        desc:SetText("Would you like to keep standard buff icons alongside\nAura Designer, or let it fully replace them?")
+        desc:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+        desc:SetJustifyH("CENTER")
+
+        local function MakeButton(parent, text, xOff)
+            local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
+            btn:SetSize(170, 28)
+            btn:SetPoint("BOTTOM", parent, "BOTTOM", xOff, 14)
+            ApplyBackdrop(btn, C_ELEMENT, C_BORDER)
+            btn.text = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            btn.text:SetPoint("CENTER")
+            btn.text:SetText(text)
+            btn:SetScript("OnEnter", function(self)
+                local tc = GetThemeColor()
+                self:SetBackdropBorderColor(tc.r, tc.g, tc.b, 1)
+            end)
+            btn:SetScript("OnLeave", function(self)
+                self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, C_BORDER.a)
+            end)
+            return btn
+        end
+
+        f.keepBtn = MakeButton(f, "Keep Buffs", -95)
+        f.replaceBtn = MakeButton(f, "Replace Buffs", 95)
+
+        -- Close on Escape
+        f:SetScript("OnKeyDown", function(self, key)
+            if key == "ESCAPE" then
+                self:SetPropagateKeyboardInput(false)
+                self:Hide()
+                if self._onCancel then self._onCancel() end
+            else
+                self:SetPropagateKeyboardInput(true)
+            end
+        end)
+
+        buffCoexistPopup = f
+    end
+
+    local f = buffCoexistPopup
+    f._onCancel = onCancel
+
+    f.keepBtn:SetScript("OnClick", function()
+        f:Hide()
+        if onConfirm then onConfirm(true) end
+    end)
+    f.replaceBtn:SetScript("OnClick", function()
+        f:Hide()
+        if onConfirm then onConfirm(false) end
+    end)
+
+    f:Show()
+end
+
 -- Get or resolve the active spec key from settings
 local function ResolveSpec()
     local adDB = GetAuraDesignerDB()
@@ -567,6 +647,7 @@ local leftPanel           -- Left content area (flexible width)
 local rightPanel          -- Right settings panel (280px fixed)
 local tileStripHeader     -- Header bar for tile strip (stores countLabel)
 local enableBanner        -- Enable toggle banner
+local coexistBanner       -- "Buffs are also visible" info strip
 local attributionRow      -- HARF attribution row
 local notInstalledOverlay -- Full overlay shown when HARF not detected
 local tileStrip           -- Horizontal scrolling aura tile palette
@@ -2649,8 +2730,24 @@ local function CreateEnableBanner(parent)
     cb:SetChecked(adDB.enabled)
     cb:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
-        GetAuraDesignerDB().enabled = checked
-        DF:AuraDesigner_RefreshPage()
+        if checked then
+            -- Show popup asking about buff coexistence
+            ShowBuffCoexistPopup(function(keepBuffs)
+                GetAuraDesignerDB().enabled = true
+                db.showBuffs = keepBuffs
+                DF:AuraDesigner_RefreshPage()
+                DF:InvalidateAuraLayout()
+                DF:UpdateAllFrames()
+            end, function()
+                -- Cancelled — revert checkbox
+                self:SetChecked(false)
+            end)
+        else
+            GetAuraDesignerDB().enabled = false
+            DF:AuraDesigner_RefreshPage()
+            DF:InvalidateAuraLayout()
+            DF:UpdateAllFrames()
+        end
     end)
 
     local cbLabel = banner:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -2660,7 +2757,7 @@ local function CreateEnableBanner(parent)
 
     local cbSubLabel = banner:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     cbSubLabel:SetPoint("TOPLEFT", cbLabel, "BOTTOMLEFT", 0, -1)
-    cbSubLabel:SetText("(replaces Buffs tab)")
+    cbSubLabel:SetText("Custom buff and frame effect indicators")
     cbSubLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
     local specLabel = banner:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -3533,6 +3630,52 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     yPos = yPos - (ATTRIB_H + 4)
 
     -- ========================================
+    -- COEXISTENCE INFO BANNER
+    -- Shown when AD is enabled and standard Buffs are also visible.
+    -- ========================================
+    local COEXIST_H = 24
+    coexistBanner = CreateFrame("Frame", nil, mainFrame, "BackdropTemplate")
+    coexistBanner:SetHeight(COEXIST_H)
+    coexistBanner:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 0, yPos)
+    coexistBanner:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", 0, yPos)
+    ApplyBackdrop(coexistBanner, {r = 0.14, g = 0.14, b = 0.14, a = 1}, {r = 0.30, g = 0.30, b = 0.30, a = 0.5})
+
+    local coexistText = coexistBanner:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    coexistText:SetPoint("LEFT", 10, 0)
+    coexistText:SetText("Standard Buffs are also visible on frames.")
+    coexistText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+
+    local tc = GetThemeColor()
+    local disableBuffsBtn = CreateFrame("Button", nil, coexistBanner)
+    disableBuffsBtn:SetSize(90, 18)
+    disableBuffsBtn:SetPoint("LEFT", coexistText, "RIGHT", 8, 0)
+    disableBuffsBtn.text = disableBuffsBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    disableBuffsBtn.text:SetAllPoints()
+    disableBuffsBtn.text:SetText("Disable Buffs")
+    disableBuffsBtn.text:SetTextColor(tc.r, tc.g, tc.b)
+    disableBuffsBtn:SetScript("OnEnter", function(self)
+        self.text:SetTextColor(1, 1, 1)
+    end)
+    disableBuffsBtn:SetScript("OnLeave", function(self)
+        local tc2 = GetThemeColor()
+        self.text:SetTextColor(tc2.r, tc2.g, tc2.b)
+    end)
+    disableBuffsBtn:SetScript("OnClick", function()
+        db.showBuffs = false
+        DF:AuraDesigner_RefreshPage()
+        DF:InvalidateAuraLayout()
+        DF:UpdateAllFrames()
+        -- Refresh buffs tab if it has RefreshStates
+        local buffsPage = GUI and GUI.Pages and GUI.Pages["auras_buffs"]
+        if buffsPage and buffsPage.RefreshStates then
+            buffsPage:RefreshStates()
+        end
+    end)
+
+    coexistBanner:Hide()  -- Visibility managed by RefreshPage
+    -- Don't subtract yPos here — managed dynamically in RefreshPage
+
+    -- ========================================
     -- NOT-INSTALLED OVERLAY (shown when HARF missing)
     -- ========================================
     notInstalledOverlay = CreateNotInstalledOverlay(mainFrame, yPos)
@@ -3931,8 +4074,22 @@ function DF:AuraDesigner_RefreshPage()
         enableBanner.UpdateSpecText()
     end
 
-    -- Apply tab disable state (delegates to the standalone function)
-    DF:ApplyAuraDesignerTabState()
+    -- Show/hide coexistence banner
+    if coexistBanner then
+        local adEnabled = GetAuraDesignerDB().enabled
+        local showBuffs = db and db.showBuffs
+        if adEnabled and showBuffs then
+            coexistBanner:Show()
+        else
+            coexistBanner:Hide()
+        end
+    end
+
+    -- Refresh buffs tab banner state if visible
+    local buffsPage = GUI and GUI.Pages and GUI.Pages["auras_buffs"]
+    if buffsPage and buffsPage.RefreshStates then
+        buffsPage:RefreshStates()
+    end
 end
 
 -- ============================================================
@@ -3941,40 +4098,7 @@ end
 -- and from RefreshPage when the enable checkbox toggles.
 -- ============================================================
 
+-- No-op: tabs are no longer disabled when AD is enabled.
+-- Buffs and AD can coexist; info banners in each tab communicate state.
 function DF:ApplyAuraDesignerTabState()
-    local guiRef = DF.GUI
-    if not guiRef or not guiRef.Tabs then return end
-    if not DF.db then return end
-
-    local mode = (guiRef.SelectedMode) or "party"
-    local modeDB = DF:GetDB(mode)
-    local adEnabled = modeDB and modeDB.auraDesigner and modeDB.auraDesigner.enabled
-
-    local disableTabs = { "auras_buffs", "auras_mybuffindicators" }
-    for _, tabKey in ipairs(disableTabs) do
-        local tab = guiRef.Tabs[tabKey]
-        if tab then
-            tab.disabled = adEnabled or false
-            if adEnabled then
-                -- Dim text and add strikethrough
-                tab.Text:SetTextColor(0.4, 0.4, 0.4)
-                tab.Text:SetAlpha(1)
-                if not tab._strikethrough then
-                    tab._strikethrough = tab:CreateTexture(nil, "OVERLAY")
-                    tab._strikethrough:SetColorTexture(0.6, 0.6, 0.6, 0.6)
-                    tab._strikethrough:SetHeight(1)
-                    tab._strikethrough:SetPoint("LEFT", tab.Text or tab, "LEFT", 0, 0)
-                    tab._strikethrough:SetPoint("RIGHT", tab.Text or tab, "RIGHT", 0, 0)
-                end
-                tab._strikethrough:Show()
-            else
-                -- Restore normal text
-                tab.Text:SetTextColor(0.9, 0.9, 0.9)
-                tab.Text:SetAlpha(1)
-                if tab._strikethrough then
-                    tab._strikethrough:Hide()
-                end
-            end
-        end
-    end
 end

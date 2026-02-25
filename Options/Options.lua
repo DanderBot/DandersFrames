@@ -3616,9 +3616,90 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     -- Auras > Buffs (combined Layout + Appearance with collapsible sections)
     local pageBuffs = CreateSubTab("auras", "auras_buffs", "Buffs")
     BuildPage(pageBuffs, function(self, db, Add, AddSpace, AddSyncPoint)
+        -- ========================================
+        -- AD COEXISTENCE INFO BANNER
+        -- Shows when Aura Designer is active (with or without buffs).
+        -- ========================================
+        local adBanner = CreateFrame("Frame", nil, self.child, "BackdropTemplate")
+        adBanner:SetHeight(28)
+        adBanner:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8x8",
+            edgeFile = "Interface\\Buttons\\WHITE8x8",
+            edgeSize = 1,
+        })
+        adBanner:SetBackdropColor(0.14, 0.14, 0.14, 1)
+        adBanner:SetBackdropBorderColor(0.30, 0.30, 0.30, 0.5)
+
+        local adBannerText = adBanner:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        adBannerText:SetPoint("LEFT", 10, 0)
+        adBannerText:SetTextColor(0.6, 0.6, 0.6)
+
+        local adBannerLinkBtn = CreateFrame("Button", nil, adBanner)
+        adBannerLinkBtn:SetSize(120, 18)
+        adBannerLinkBtn:SetPoint("LEFT", adBannerText, "RIGHT", 8, 0)
+        local adBannerLinkText = adBannerLinkBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        adBannerLinkText:SetAllPoints()
+        adBannerLinkText:SetText("Open Aura Designer")
+        local tc = GUI.GetThemeColor()
+        adBannerLinkText:SetTextColor(tc.r, tc.g, tc.b)
+        adBannerLinkBtn:SetScript("OnEnter", function() adBannerLinkText:SetTextColor(1, 1, 1) end)
+        adBannerLinkBtn:SetScript("OnLeave", function()
+            local c = GUI.GetThemeColor()
+            adBannerLinkText:SetTextColor(c.r, c.g, c.b)
+        end)
+        adBannerLinkBtn:SetScript("OnClick", function()
+            if GUI.SelectTab then GUI.SelectTab("auras_auradesigner") end
+        end)
+
+        -- Second link: "Enable Buffs" (only shown when showBuffs is false)
+        local enableBuffsBtn = CreateFrame("Button", nil, adBanner)
+        enableBuffsBtn:SetSize(85, 18)
+        enableBuffsBtn:SetPoint("LEFT", adBannerText, "RIGHT", 8, 0)
+        local enableBuffsText = enableBuffsBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        enableBuffsText:SetAllPoints()
+        enableBuffsText:SetText("Enable Buffs")
+        enableBuffsText:SetTextColor(tc.r, tc.g, tc.b)
+        enableBuffsBtn:SetScript("OnEnter", function() enableBuffsText:SetTextColor(1, 1, 1) end)
+        enableBuffsBtn:SetScript("OnLeave", function()
+            local c = GUI.GetThemeColor()
+            enableBuffsText:SetTextColor(c.r, c.g, c.b)
+        end)
+        enableBuffsBtn:SetScript("OnClick", function()
+            db.showBuffs = true
+            self:RefreshStates()
+            DF:InvalidateAuraLayout()
+            DF:UpdateAllFrames()
+        end)
+
+        -- Refresh banner content based on current state
+        adBanner.refreshContent = function(_, d)
+            local adEnabled = d.auraDesigner and d.auraDesigner.enabled
+            if adEnabled and d.showBuffs then
+                adBannerText:SetText("Aura Designer is active alongside Buffs.")
+                enableBuffsBtn:Hide()
+                adBannerLinkBtn:ClearAllPoints()
+                adBannerLinkBtn:SetPoint("LEFT", adBannerText, "RIGHT", 8, 0)
+                adBannerLinkBtn:Show()
+            elseif adEnabled and not d.showBuffs then
+                adBannerText:SetText("Buffs are disabled. Aura Designer is managing your auras.")
+                enableBuffsBtn:ClearAllPoints()
+                enableBuffsBtn:SetPoint("LEFT", adBannerText, "RIGHT", 8, 0)
+                enableBuffsBtn:Show()
+                adBannerLinkBtn:ClearAllPoints()
+                adBannerLinkBtn:SetPoint("LEFT", enableBuffsBtn, "RIGHT", 8, 0)
+                adBannerLinkBtn:Show()
+            end
+        end
+
+        adBanner.hideOn = function(d)
+            return not (d.auraDesigner and d.auraDesigner.enabled)
+        end
+
+        Add(adBanner, 32, "both")
+
         -- Copy button at top right
         Add(CreateCopyButton(self.child, {"buff"}, "Buffs", "auras_buffs"), 25, 2)
-        
+
         AddSpace(10, "both")
         
         local currentSection = nil
