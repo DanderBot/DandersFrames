@@ -9,6 +9,9 @@
 
 ### Bug Fixes
 * Fix debuffs being hidden when Aura Designer is enabled — debuffs now always display regardless of AD state
+* Fix Health Bar Color replace mode not reverting when the aura drops off
+* Fix blend slider still showing when Health Bar Color mode is set to Replace
+* Fix click-casting reload popup appearing on every login when the Clicked conflict warning is set to Ignore
 
 ## [4.0.6] - 2026-02-15
 
