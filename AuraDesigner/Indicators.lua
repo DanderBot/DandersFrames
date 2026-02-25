@@ -525,91 +525,46 @@ function Indicators:ApplyHealthBar(frame, config, auraData)
 
     local r, g, b = color[1] or color.r or 1, color[2] or color.g or 1, color[3] or color.b or 1
     local mode = string.lower(config.mode or "replace")
-    local blend = config.blend or 0.5
+    -- Both modes use the overlay — replace forces full opacity, tint uses blend slider
+    local blend = (mode == "replace") and 1 or (config.blend or 0.5)
 
-    if mode == "tint" then
-        -- StatusBar overlay approach — fill tracks current health,
-        -- color + alpha produce a tint without arithmetic on bar colors
-        local overlay = GetOrCreateTintOverlay(frame)
-        if overlay then
-            overlay:SetStatusBarColor(r, g, b, blend)
-            overlay:Show()
-            -- Sync fill with current health
-            if DF.UpdateADTintHealth then
-                DF:UpdateADTintHealth(frame)
-            end
+    local overlay = GetOrCreateTintOverlay(frame)
+    if overlay then
+        overlay:SetStatusBarColor(r, g, b, blend)
+        overlay:Show()
+        -- Sync fill with current health
+        if DF.UpdateADTintHealth then
+            DF:UpdateADTintHealth(frame)
         end
+    end
 
-        -- ========================================
-        -- EXPIRING: register overlay with ticker
-        -- ========================================
-        local expiringEnabled = config.expiringEnabled
-        if expiringEnabled == nil then expiringEnabled = false end
-        if expiringEnabled and overlay then
-            local ec = config.expiringColor or {r = 1, g = 0.2, b = 0.2}
-            local oc = {r = r, g = g, b = b}
-            RegisterExpiring(overlay, {
-                unit = frame.unit,
-                auraInstanceID = auraData and auraData.auraInstanceID,
-                threshold = config.expiringThreshold or 30,
-                duration = auraData and auraData.duration,
-                expirationTime = auraData and auraData.expirationTime,
-                blend = blend,
-                colorCurve = BuildExpiringColorCurve(config.expiringThreshold or 30, ec, oc),
-                color = ec, originalColor = oc,
-                applyResult = function(el, result, entry)
-                    el:SetStatusBarColor(result.r, result.g, result.b, entry.blend)
-                end,
-                applyManual = function(el, isExp, entry)
-                    local c = isExp and entry.color or entry.originalColor
-                    el:SetStatusBarColor(c.r or 1, c.g or 1, c.b or 1, entry.blend)
-                end,
-            })
-        elseif overlay then
-            UnregisterExpiring(overlay)
-        end
-    else
-        -- Replace mode — set bar color directly with known config values
-        healthBar:SetStatusBarColor(r, g, b, 1)
-
-        -- Hide tint overlay if switching from tint to replace
-        if state.tintOverlay then
-            UnregisterExpiring(state.tintOverlay)
-            state.tintOverlay:Hide()
-        end
-
-        -- ========================================
-        -- EXPIRING: register health bar with ticker
-        -- ========================================
-        local expiringEnabled = config.expiringEnabled
-        if expiringEnabled == nil then expiringEnabled = false end
-        if expiringEnabled then
-            local ec = config.expiringColor or {r = 1, g = 0.2, b = 0.2}
-            local oc = {r = r, g = g, b = b}
-            RegisterExpiring(healthBar, {
-                unit = frame.unit,
-                auraInstanceID = auraData and auraData.auraInstanceID,
-                threshold = config.expiringThreshold or 30,
-                duration = auraData and auraData.duration,
-                expirationTime = auraData and auraData.expirationTime,
-                colorCurve = BuildExpiringColorCurve(config.expiringThreshold or 30, ec, oc),
-                color = ec, originalColor = oc,
-                applyResult = function(el, result, entry)
-                    el:SetStatusBarColor(result.r, result.g, result.b)
-                end,
-                applyManual = function(el, isExp, entry)
-                    if isExp then
-                        local c = entry.color
-                        el:SetStatusBarColor(c.r or 1, c.g or 0.2, c.b or 0.2, 1)
-                    else
-                        local c = entry.originalColor
-                        el:SetStatusBarColor(c.r, c.g, c.b, 1)
-                    end
-                end,
-            })
-        else
-            UnregisterExpiring(healthBar)
-        end
+    -- ========================================
+    -- EXPIRING: register overlay with ticker
+    -- ========================================
+    local expiringEnabled = config.expiringEnabled
+    if expiringEnabled == nil then expiringEnabled = false end
+    if expiringEnabled and overlay then
+        local ec = config.expiringColor or {r = 1, g = 0.2, b = 0.2}
+        local oc = {r = r, g = g, b = b}
+        RegisterExpiring(overlay, {
+            unit = frame.unit,
+            auraInstanceID = auraData and auraData.auraInstanceID,
+            threshold = config.expiringThreshold or 30,
+            duration = auraData and auraData.duration,
+            expirationTime = auraData and auraData.expirationTime,
+            blend = blend,
+            colorCurve = BuildExpiringColorCurve(config.expiringThreshold or 30, ec, oc),
+            color = ec, originalColor = oc,
+            applyResult = function(el, result, entry)
+                el:SetStatusBarColor(result.r, result.g, result.b, entry.blend)
+            end,
+            applyManual = function(el, isExp, entry)
+                local c = isExp and entry.color or entry.originalColor
+                el:SetStatusBarColor(c.r or 1, c.g or 1, c.b or 1, entry.blend)
+            end,
+        })
+    elseif overlay then
+        UnregisterExpiring(overlay)
     end
 end
 
@@ -617,12 +572,7 @@ function Indicators:RevertHealthBar(frame)
     local state = frame and frame.dfAD
     if not state then return end
 
-    local healthBar = frame.healthBar
-    if healthBar then
-        UnregisterExpiring(healthBar)
-    end
-
-    -- Hide tint overlay and unregister its expiring ticker
+    -- Hide overlay and unregister its expiring ticker
     if state.tintOverlay then
         UnregisterExpiring(state.tintOverlay)
         state.tintOverlay:Hide()
