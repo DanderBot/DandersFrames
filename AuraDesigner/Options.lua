@@ -3615,6 +3615,8 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
         if self.child and GUI.contentFrame then
             self.child:SetWidth(GUI.contentFrame:GetWidth() - 30)
         end
+        -- Refresh AD-specific UI (coexist banner, enable state, etc.)
+        DF:AuraDesigner_RefreshPage()
     end
 
     local yPos = 0
