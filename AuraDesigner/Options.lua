@@ -1768,12 +1768,21 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy)
             true), 28)
 
     elseif typeKey == "healthbar" then
-        AddWidget(GUI:CreateDropdown(parent, "Mode", HEALTHBAR_MODE_OPTIONS, proxy, "mode"), 54)
+        local blendSlider
+        AddWidget(GUI:CreateDropdown(parent, "Mode", HEALTHBAR_MODE_OPTIONS, proxy, "mode", function()
+            if blendSlider then
+                local isReplace = (proxy.mode or "Replace") == "Replace"
+                if isReplace then blendSlider:Hide() else blendSlider:Show() end
+            end
+        end), 54)
         AddWidget(GUI:CreateColorPicker(parent, "Color", proxy, "color", true,
             function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
             function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
             true), 28)
-        AddWidget(GUI:CreateSlider(parent, "Blend %", 0, 1, 0.05, proxy, "blend"), 54)
+        blendSlider = GUI:CreateSlider(parent, "Blend %", 0, 1, 0.05, proxy, "blend")
+        AddWidget(blendSlider, 54)
+        -- Hide blend slider when Replace mode is selected (overlay is forced to full opacity)
+        if (proxy.mode or "Replace") == "Replace" then blendSlider:Hide() end
         AddDivider()
         -- Expiring
         AddWidget(GUI:CreateCheckbox(parent, "Expiring Color Override", proxy, "expiringEnabled"), 28)
