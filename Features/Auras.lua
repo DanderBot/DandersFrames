@@ -1638,25 +1638,23 @@ function DF:UpdateAuras_Enhanced(frame)
     -- PERF TEST: Skip if disabled
     if DF.PerfTest and not DF.PerfTest.enableAuras then return end
 
-    -- Aura Designer takes over aura display when enabled
-    if DF:IsAuraDesignerEnabled(frame) then
-        -- Hide standard buff/debuff icons — AD replaces them
+    -- Aura Designer takes over BUFF display when enabled; debuffs
+    -- continue through the normal path below since AD doesn't manage them yet.
+    local adEnabled = DF:IsAuraDesignerEnabled(frame)
+    if adEnabled then
+        -- Hide standard buff icons — AD replaces them
         if frame.buffIcons then
             for _, icon in ipairs(frame.buffIcons) do icon:Hide() end
-        end
-        if frame.debuffIcons then
-            for _, icon in ipairs(frame.debuffIcons) do icon:Hide() end
         end
 
         if DF.AuraDesigner and DF.AuraDesigner.Engine then
             DF.AuraDesigner.Engine:UpdateFrame(frame)
         end
-        return
     end
 
     -- Use raid DB for raid frames, party DB for party frames
     local db = frame.isRaidFrame and DF:GetRaidDB() or DF:GetDB()
-    
+
     -- PERFORMANCE: Only re-apply layout when settings have changed (version mismatch).
     -- Layout (icon positioning, sizing, fonts, borders) is expensive and rarely changes.
     -- It gets invalidated by DF:InvalidateAuraLayout() when GUI/profile settings change.
@@ -1668,13 +1666,17 @@ function DF:UpdateAuras_Enhanced(frame)
         end
         -- Note: dfAuraLayoutVersion is set inside ApplyAuraLayout
     end
-    
-    if db.showBuffs then
-        DF:UpdateAuraIconsDirect(frame, frame.buffIcons, "BUFF", db.buffMax or 4)
-    else
-        for _, icon in ipairs(frame.buffIcons) do icon:Hide() end
+
+    -- Buff display (skipped when AD is active — AD owns buffs)
+    if not adEnabled then
+        if db.showBuffs then
+            DF:UpdateAuraIconsDirect(frame, frame.buffIcons, "BUFF", db.buffMax or 4)
+        else
+            for _, icon in ipairs(frame.buffIcons) do icon:Hide() end
+        end
     end
-    
+
+    -- Debuff display (always runs — AD doesn't manage debuffs)
     if db.showDebuffs then
         DF:UpdateAuraIconsDirect(frame, frame.debuffIcons, "DEBUFF", db.debuffMax or 4)
     else

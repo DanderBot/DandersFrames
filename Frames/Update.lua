@@ -1302,7 +1302,8 @@ end
 -- Apply layout settings to buff or debuff icons
 function DF:ApplyAuraLayout(frame, auraType)
     if not frame then return end
-    if DF.IsAuraDesignerEnabled and DF:IsAuraDesignerEnabled(frame) then return end
+    -- AD replaces buffs but not debuffs — only skip buff layout
+    if auraType == "BUFF" and DF.IsAuraDesignerEnabled and DF:IsAuraDesignerEnabled(frame) then return end
 
     local db = DF:GetFrameDB(frame)
     local icons, prefix
