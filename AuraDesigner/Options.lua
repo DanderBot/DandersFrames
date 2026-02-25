@@ -119,12 +119,21 @@ local function ShowBuffCoexistPopup(onConfirm, onCancel)
         f:SetFrameStrata("FULLSCREEN_DIALOG")
         f:SetFrameLevel(250)
         f:EnableMouse(true)
-        ApplyBackdrop(f, {r = 0.10, g = 0.10, b = 0.10, a = 0.98}, {r = 0.30, g = 0.30, b = 0.30, a = 1})
+        local tc = GetThemeColor()
+        ApplyBackdrop(f, {r = 0.10, g = 0.10, b = 0.10, a = 0.98}, {r = tc.r, g = tc.g, b = tc.b, a = 1})
+
+        -- Thin accent stripe along the top
+        local stripe = f:CreateTexture(nil, "OVERLAY")
+        stripe:SetColorTexture(tc.r, tc.g, tc.b, 0.8)
+        stripe:SetHeight(2)
+        stripe:SetPoint("TOPLEFT", 1, -1)
+        stripe:SetPoint("TOPRIGHT", -1, -1)
+        f._stripe = stripe
 
         local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         title:SetPoint("TOP", 0, -12)
         title:SetText("Aura Designer")
-        title:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+        title:SetTextColor(tc.r, tc.g, tc.b)
 
         local desc = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         desc:SetPoint("TOP", title, "BOTTOM", 0, -6)
@@ -4098,7 +4107,37 @@ end
 -- and from RefreshPage when the enable checkbox toggles.
 -- ============================================================
 
--- No-op: tabs are no longer disabled when AD is enabled.
--- Buffs and AD can coexist; info banners in each tab communicate state.
+-- Disable the My Buff Indicators tab when AD is enabled (never compatible).
+-- Buffs tab is always accessible — it can coexist with AD.
 function DF:ApplyAuraDesignerTabState()
+    local guiRef = DF.GUI
+    if not guiRef or not guiRef.Tabs then return end
+    if not DF.db then return end
+
+    local mode = (guiRef.SelectedMode) or "party"
+    local modeDB = DF:GetDB(mode)
+    local adEnabled = modeDB and modeDB.auraDesigner and modeDB.auraDesigner.enabled
+
+    local tab = guiRef.Tabs["auras_mybuffindicators"]
+    if tab then
+        tab.disabled = adEnabled or false
+        if adEnabled then
+            tab.Text:SetTextColor(0.4, 0.4, 0.4)
+            tab.Text:SetAlpha(1)
+            if not tab._strikethrough then
+                tab._strikethrough = tab:CreateTexture(nil, "OVERLAY")
+                tab._strikethrough:SetColorTexture(0.6, 0.6, 0.6, 0.6)
+                tab._strikethrough:SetHeight(1)
+                tab._strikethrough:SetPoint("LEFT", tab.Text or tab, "LEFT", 0, 0)
+                tab._strikethrough:SetPoint("RIGHT", tab.Text or tab, "RIGHT", 0, 0)
+            end
+            tab._strikethrough:Show()
+        else
+            tab.Text:SetTextColor(0.9, 0.9, 0.9)
+            tab.Text:SetAlpha(1)
+            if tab._strikethrough then
+                tab._strikethrough:Hide()
+            end
+        end
+    end
 end
