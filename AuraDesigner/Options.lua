@@ -667,6 +667,18 @@ local dragHintText        -- Dynamic hint text below frame preview
 local rightScrollFrame    -- Scroll frame for right panel content
 local rightScrollChild    -- ScrollChild for right panel
 
+-- Layout anchors — stored during build so RefreshPage can shift content
+-- when the coexistence banner is shown/hidden
+local COEXIST_BANNER_H = 24
+local COEXIST_GAP       = 4
+local contentBaseY          -- yPos after attribution row (where content starts)
+local tileWrapRef           -- reference to tileWrap frame
+local contentRightInset     -- RIGHT_PANEL_W + RIGHT_GAP for left-side panels
+local origY_tileWrap        -- original yPos of tileWrap
+local origY_framePreview    -- original yPos of framePreview
+local origY_effectsStrip    -- original yPos of activeEffectsStrip
+local currentBannerShift = 0 -- tracks current coexist banner offset
+
 -- Tile button pool
 local tilePool = {}
 local activeTiles = {}
@@ -3642,9 +3654,9 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     -- COEXISTENCE INFO BANNER
     -- Shown when AD is enabled and standard Buffs are also visible.
     -- ========================================
-    local COEXIST_H = 24
+    contentBaseY = yPos  -- store for dynamic repositioning in RefreshPage
     coexistBanner = CreateFrame("Frame", nil, mainFrame, "BackdropTemplate")
-    coexistBanner:SetHeight(COEXIST_H)
+    coexistBanner:SetHeight(COEXIST_BANNER_H)
     coexistBanner:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 0, yPos)
     coexistBanner:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", 0, yPos)
     ApplyBackdrop(coexistBanner, {r = 0.14, g = 0.14, b = 0.14, a = 1}, {r = 0.30, g = 0.30, b = 0.30, a = 0.5})
@@ -3985,12 +3997,16 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     -- LEFT CONTENT: TILE STRIP
     -- All left content anchors TOPRIGHT to rightPanel's TOPLEFT
     -- ========================================
-    -- Store tileWrap at file scope so we can show/hide it based on HARF availability
+    -- Store layout info for dynamic repositioning (coexist banner)
+    contentRightInset = RIGHT_PANEL_W + RIGHT_GAP
+    origY_tileWrap = yPos
+
     local tileWrap = CreateFrame("Frame", nil, mainFrame, "BackdropTemplate")
+    tileWrapRef = tileWrap
     mainFrame.tileWrap = tileWrap
     tileWrap:SetHeight(TILE_HEADER_H + TILE_STRIP_H)
     tileWrap:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 0, yPos)
-    tileWrap:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", -(RIGHT_PANEL_W + RIGHT_GAP), yPos)
+    tileWrap:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", -contentRightInset, yPos)
     ApplyBackdrop(tileWrap, C_PANEL, C_BORDER)
 
     -- Header bar
@@ -4021,6 +4037,7 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     -- ========================================
     -- LEFT CONTENT: FRAME PREVIEW
     -- ========================================
+    origY_framePreview = yPos
     framePreview = CreateFramePreview(mainFrame, yPos, rightPanel)
     local previewH = framePreview:GetHeight()
     yPos = yPos - (previewH + SECTION_GAP)
@@ -4028,6 +4045,7 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     -- ========================================
     -- LEFT CONTENT: ACTIVE EFFECTS STRIP
     -- ========================================
+    origY_effectsStrip = yPos
     activeEffectsStrip = CreateActiveEffectsStrip(mainFrame, yPos, rightPanel)
 
     -- ========================================
@@ -4083,14 +4101,47 @@ function DF:AuraDesigner_RefreshPage()
         enableBanner.UpdateSpecText()
     end
 
-    -- Show/hide coexistence banner
-    if coexistBanner then
+    -- Show/hide coexistence banner and reposition content panels
+    if coexistBanner and contentBaseY then
         local adEnabled = GetAuraDesignerDB().enabled
         local showBuffs = db and db.showBuffs
-        if adEnabled and showBuffs then
+        local bannerVisible = adEnabled and showBuffs
+        if bannerVisible then
             coexistBanner:Show()
         else
             coexistBanner:Hide()
+        end
+
+        -- Shift content panels down when banner is visible
+        local newShift = bannerVisible and (COEXIST_BANNER_H + COEXIST_GAP) or 0
+        if newShift ~= currentBannerShift then
+            currentBannerShift = newShift
+            local delta = -newShift  -- negative = shift down
+            if rightPanel then
+                rightPanel:ClearAllPoints()
+                rightPanel:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", 0, contentBaseY + delta)
+                rightPanel:SetPoint("BOTTOMRIGHT", mainFrame, "BOTTOMRIGHT", 0, 0)
+            end
+            if notInstalledOverlay then
+                notInstalledOverlay:ClearAllPoints()
+                notInstalledOverlay:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 0, contentBaseY + delta)
+                notInstalledOverlay:SetPoint("BOTTOMRIGHT", mainFrame, "BOTTOMRIGHT", 0, 0)
+            end
+            if tileWrapRef and origY_tileWrap then
+                tileWrapRef:ClearAllPoints()
+                tileWrapRef:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 0, origY_tileWrap + delta)
+                tileWrapRef:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", -contentRightInset, origY_tileWrap + delta)
+            end
+            if framePreview and origY_framePreview then
+                framePreview:ClearAllPoints()
+                framePreview:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 0, origY_framePreview + delta)
+                framePreview:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", -contentRightInset, origY_framePreview + delta)
+            end
+            if activeEffectsStrip and origY_effectsStrip then
+                activeEffectsStrip:ClearAllPoints()
+                activeEffectsStrip:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 0, origY_effectsStrip + delta)
+                activeEffectsStrip:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", -contentRightInset, origY_effectsStrip + delta)
+            end
         end
     end
 
