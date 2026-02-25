@@ -891,7 +891,12 @@ function DF:UpdateUnitFrame(frame, source)
     if DF.UpdateMyBuffGradientHealth then
         DF:UpdateMyBuffGradientHealth(frame)
     end
-    
+
+    -- Update AD tint overlay if it's tracking current health
+    if DF.UpdateADTintHealth then
+        DF:UpdateADTintHealth(frame)
+    end
+
     -- ========================================
     -- RANGE CHECK
     -- ========================================
@@ -1097,6 +1102,11 @@ function DF:UpdateHealthFast(frame)
     if DF.UpdateMyBuffGradientHealth then
         DF:UpdateMyBuffGradientHealth(frame)
     end
+
+    -- Update AD tint overlay if it's tracking current health
+    if DF.UpdateADTintHealth then
+        DF:UpdateADTintHealth(frame)
+    end
 end
 
 -- ============================================================
@@ -1285,7 +1295,12 @@ function DF:UpdateHealth(frame)
     if DF.UpdateMyBuffGradientHealth then
         DF:UpdateMyBuffGradientHealth(frame)
     end
-    
+
+    -- Update AD tint overlay if it's tracking current health
+    if DF.UpdateADTintHealth then
+        DF:UpdateADTintHealth(frame)
+    end
+
     -- Apply colors
     DF:ApplyHealthColors(frame)
 end

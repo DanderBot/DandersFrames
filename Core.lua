@@ -4118,6 +4118,10 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         if DF.UpdateAllFrames then
             DF:UpdateAllFrames()
         end
+        -- Refresh Aura Designer (per-spec aura lists may differ)
+        if DF.AuraDesigner and DF.AuraDesigner.Engine and DF.AuraDesigner.Engine.ForceRefreshAllFrames then
+            DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+        end
         
     elseif event == "UNIT_PET" then
         -- Pet summoned or dismissed - update pet frames
