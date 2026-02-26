@@ -434,37 +434,9 @@ function CC:CreateClickCastUI(parent)
         CC.db.options.quickBindEnabled = self:GetChecked()
     end)
 
-    -- Show Binding Tooltip toggle
-    local bindTipCb = CreateFrame("CheckButton", nil, row2, "BackdropTemplate")
-    bindTipCb:SetPoint("LEFT", quickBindLabel, "RIGHT", 15, 0)
-    bindTipCb:SetSize(14, 14)
-    bindTipCb:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    bindTipCb:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    bindTipCb:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-
-    local bindTipCheck = bindTipCb:CreateTexture(nil, "OVERLAY")
-    bindTipCheck:SetTexture("Interface\\Buttons\\WHITE8x8")
-    bindTipCheck:SetVertexColor(themeColor.r, themeColor.g, themeColor.b)
-    bindTipCheck:SetPoint("CENTER")
-    bindTipCheck:SetSize(8, 8)
-    bindTipCb:SetCheckedTexture(bindTipCheck)
-
-    local bindTipLabel = row2:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    bindTipLabel:SetPoint("LEFT", bindTipCb, "RIGHT", 3, 0)
-    bindTipLabel:SetText("Show Tooltips")
-    bindTipLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-
-    bindTipCb:SetScript("OnClick", function(self)
-        CC.db.options.showBindingTooltip = self:GetChecked()
-    end)
-
     -- Smart Resurrection dropdown
     local smartResLabel = row2:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    smartResLabel:SetPoint("LEFT", bindTipLabel, "RIGHT", 15, 0)
+    smartResLabel:SetPoint("LEFT", quickBindLabel, "RIGHT", 15, 0)
     smartResLabel:SetText("Smart Res:")
     smartResLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
     
@@ -660,7 +632,6 @@ function CC:CreateClickCastUI(parent)
     CC.enableCb = enableCb
     CC.downCb = downCb
     CC.quickBindCb = quickBindCb
-    CC.bindTipCb = bindTipCb
     
     -- =========================================================================
     -- MAIN CONTENT: Side-by-side layout

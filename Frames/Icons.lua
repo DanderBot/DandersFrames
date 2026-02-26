@@ -8,6 +8,8 @@ local addonName, DF = ...
 -- Local caching of frequently used globals and WoW API for performance
 local pairs, ipairs, type, wipe = pairs, ipairs, type, wipe
 local tinsert = table.insert
+local floor = math.floor
+local strsplit = strsplit
 local UnitBuff, UnitDebuff = UnitBuff, UnitDebuff
 local GetTime = GetTime
 local C_Spell = C_Spell
@@ -60,6 +62,20 @@ end
 -- ============================================================
 local DEFAULT_DEFENSIVE_BORDER_COLOR = {r = 0, g = 0.8, b = 0, a = 1}
 local DEFAULT_DEFENSIVE_DURATION_COLOR = {r = 1, g = 1, b = 1}
+
+-- Growth direction helper for defensive bar (mirrors Update.lua pattern)
+local function GetDefensiveGrowthOffset(direction, iconSize, pad)
+    if direction == "LEFT" then
+        return -(iconSize + pad), 0
+    elseif direction == "RIGHT" then
+        return iconSize + pad, 0
+    elseif direction == "UP" then
+        return 0, iconSize + pad
+    elseif direction == "DOWN" then
+        return 0, -(iconSize + pad)
+    end
+    return 0, 0
+end
 
 -- ============================================================
 -- PERFORMANCE FIX: Module-level state for UpdateDefensiveBar pcalls
@@ -188,6 +204,11 @@ local function GetOrCreateDefensiveBarIcon(frame, index)
 
     frame.defensiveBarIcons[index] = icon
     return icon
+end
+
+-- Expose for use by TestMode
+function DF:GetOrCreateDefensiveBarIcon(frame, index)
+    return GetOrCreateDefensiveBarIcon(frame, index)
 end
 
 -- Render a single defensive icon at a position in the bar
@@ -823,12 +844,23 @@ function DF:UpdateDefensiveBar(frame)
         local baseY = db.defensiveIconY or 0
         local scale = db.defensiveIconScale or 1.0
         local spacing = db.defensiveBarSpacing or 2
-        local growth = db.defensiveBarGrowth or "RIGHT"
+        local growth = db.defensiveBarGrowth or "RIGHT_DOWN"
+        local wrap = db.defensiveBarWrap or 5
 
         if db.pixelPerfect then
             borderSize = DF:PixelPerfect(borderSize)
             iconSize = DF:PixelPerfect(iconSize)
         end
+
+        -- Parse compound growth direction (PRIMARY_SECONDARY)
+        local primary, secondary = strsplit("_", growth)
+        primary = primary or "RIGHT"
+        secondary = secondary or "DOWN"
+
+        -- Calculate growth offsets using scaled size (same pattern as buff/debuff icons)
+        local scaledSize = iconSize * scale
+        local primaryX, primaryY = GetDefensiveGrowthOffset(primary, scaledSize, spacing)
+        local secondaryX, secondaryY = GetDefensiveGrowthOffset(secondary, scaledSize, spacing)
 
         local count = 0
         if cache and cache.defensives then
@@ -838,18 +870,13 @@ function DF:UpdateDefensiveBar(frame)
                 local icon = GetOrCreateDefensiveBarIcon(frame, count)
                 RenderDefensiveBarIcon(icon, unit, id, db, iconSize, borderSize, borderColor, showBorder, showDuration, durationScale, durationFont, durationOutline, durationX, durationY, durationColor)
 
-                -- Position the icon relative to the anchor
-                local offsetX, offsetY = 0, 0
+                -- Position the icon using wrap grid layout (same as buff/debuff icons)
                 local idx = count - 1  -- 0-based for offset calculation
-                if growth == "RIGHT" then
-                    offsetX = idx * (iconSize + spacing)
-                elseif growth == "LEFT" then
-                    offsetX = -idx * (iconSize + spacing)
-                elseif growth == "UP" then
-                    offsetY = idx * (iconSize + spacing)
-                elseif growth == "DOWN" then
-                    offsetY = -idx * (iconSize + spacing)
-                end
+                local row = floor(idx / wrap)
+                local col = idx % wrap
+
+                local offsetX = (col * primaryX) + (row * secondaryX)
+                local offsetY = (col * primaryY) + (row * secondaryY)
 
                 icon:SetScale(scale)
                 icon:ClearAllPoints()
@@ -861,6 +888,44 @@ function DF:UpdateDefensiveBar(frame)
                     icon:SetFrameLevel(frame.contentOverlay:GetFrameLevel() + 15)
                 else
                     icon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
+                end
+            end
+        end
+
+        -- CENTER growth: second pass to center icons within each row/column
+        -- Mirrors DF:RepositionCenterGrowthIcons from Features/Auras.lua
+        if primary == "CENTER" and count > 0 then
+            local isHorizontalGrowth = (secondary == "LEFT" or secondary == "RIGHT")
+
+            if isHorizontalGrowth then
+                -- Vertical stacking (centered), horizontal column growth
+                local secX = secondaryX
+                for i = 1, count do
+                    local icon = GetOrCreateDefensiveBarIcon(frame, i)
+                    local idx = i - 1
+                    local col = floor(idx / wrap)
+                    local row = idx % wrap
+                    local iconsInCol = math.min(wrap, count - (col * wrap))
+                    local centerOffset = (iconsInCol - 1) * (scaledSize + spacing) / 2
+                    local x = baseX + (col * secX)
+                    local y = baseY - (row * (scaledSize + spacing)) + centerOffset
+                    icon:ClearAllPoints()
+                    icon:SetPoint(anchor, frame, anchor, x, y)
+                end
+            else
+                -- Horizontal stacking (centered), vertical row growth
+                local secY = secondaryY
+                for i = 1, count do
+                    local icon = GetOrCreateDefensiveBarIcon(frame, i)
+                    local idx = i - 1
+                    local row = floor(idx / wrap)
+                    local col = idx % wrap
+                    local iconsInRow = math.min(wrap, count - (row * wrap))
+                    local centerOffset = (iconsInRow - 1) * (scaledSize + spacing) / 2
+                    local x = baseX + (col * (scaledSize + spacing)) - centerOffset
+                    local y = baseY + (row * secY)
+                    icon:ClearAllPoints()
+                    icon:SetPoint(anchor, frame, anchor, x, y)
                 end
             end
         end

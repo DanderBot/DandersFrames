@@ -1,13 +1,25 @@
 # DandersFrames Changelog
 
-## [4.0.8] - 2026-02-25
+## [4.0.8] - 2026-02-26
+
+### Auras
+* **Buff deduplication** — buffs already displayed by the Defensive Bar or Aura Designer placed indicators are automatically hidden from the buff bar. Enabled by default, toggle in Buffs tab
+* **Direct Aura API mode** — optional mode that queries C_UnitAuras directly with configurable filter strings (PLAYER, RAID, BIG_DEFENSIVE, etc.), giving full control over which auras appear. Configure in Auras > Aura Filters
+* **Multi-defensive icons** — Defensive Bar now shows all active big defensives simultaneously (up to configured max), not just one
+* **Defensive bar compound growth** — growth direction now supports two-axis layouts (e.g., RIGHT_DOWN, LEFT_UP) with configurable wrap count, matching the buff/debuff icon grid system
+* Max buff and debuff icon count increased from 5 to 8
 
 ### Aura Designer
 * **Buff coexistence** — standard buff icons can now display alongside Aura Designer indicators. When enabling AD a popup asks whether to keep or replace standard buffs, with info banners in both tabs for quick toggling
 * **Health Bar Color tint mode rework** — uses a StatusBar overlay instead of color blending, fixing tint not working reliably with Blizzard's protected health values
 * Aura Designer now refreshes when switching specs so per-spec aura lists update immediately
 
+### Click Casting
+* Binding tooltip moved to main Tooltip settings with full anchor and position controls
+* Removed "Show Tooltips" toggle from click-cast panel (now in Tooltip settings)
+
 ### Bug Fixes
+* Fix permanent buff duration text showing on non-expiring auras — native countdown text now stays as child of cooldown frame for proper auto-hiding when auras shift
 * Fix debuffs being hidden when Aura Designer is enabled — debuffs now always display regardless of AD state
 * Fix Health Bar Color replace mode not reverting when the aura drops off
 * Fix blend slider still showing when Health Bar Color mode is set to Replace

@@ -145,32 +145,21 @@ auraTimerGroup:SetScript("OnLoop", function()
                     end
                     
                     if hasExpiration ~= nil then
-                        -- Find native cooldown text if needed
+                        -- Find native cooldown text if needed (safety net — rendering function usually discovers first)
                         if not icon.nativeCooldownText and icon.cooldown then
                             local regions = {icon.cooldown:GetRegions()}
                             for _, region in pairs(regions) do
                                 if region and region.GetObjectType and region:GetObjectType() == "FontString" then
                                     icon.nativeCooldownText = region
-                                    icon.nativeTextReparented = false
                                     break
                                 end
                             end
                         end
-                        
-                        -- Reparent text
-                        if icon.showDuration and icon.nativeCooldownText and not icon.nativeTextReparented then
-                            icon.nativeCooldownText:SetParent(icon.textOverlay)
-                            icon.nativeCooldownText:ClearAllPoints()
-                            icon.nativeCooldownText:SetPoint(icon.durationAnchor or "CENTER", icon, icon.durationAnchor or "CENTER", icon.durationX or 0, icon.durationY or 0)
-                            icon.nativeCooldownText:Show()
-                            icon.nativeTextReparented = true
-                        end
-                        
-                        -- Control visibility
-                        if icon.showDuration and icon.nativeCooldownText and icon.nativeCooldownText.SetAlphaFromBoolean then
-                            icon.nativeCooldownText:SetAlphaFromBoolean(hasExpiration, 1, 0)
-                        end
-                        
+
+                        -- Native text visibility is controlled by the cooldown frame's own Show/Hide
+                        -- (SetShownFromBoolean on cooldown hides both swipe and text for permanent buffs)
+                        -- No manual Show/Hide on nativeCooldownText needed here
+
                         -- Throttle expensive APIs to 1 FPS
                         local now = GetTime()
                         local auraChanged = icon.lastColorAuraID ~= auraInstanceID
@@ -1294,24 +1283,51 @@ function DF:UpdateAuraIcons_Enhanced(frame, icons, auraType, maxAuras)
     if shouldFilterRaidBuffs then
         raidBuffIcons = DF:GetRaidBuffIcons()
     end
-    
+
+    -- Defensive/AD deduplication: skip buffs already shown in defensive bar or Aura Designer
+    local dedupSet = nil
+    local cache = DF.BlizzardAuraCache[unit]
+    if auraType == "BUFF" and db.buffDeduplicateDefensives then
+        if cache and cache.defensives and next(cache.defensives) then
+            dedupSet = cache.defensives
+        end
+        local adIDs = frame.dfAD_activeInstanceIDs
+        if adIDs and next(adIDs) then
+            if dedupSet then
+                if not frame.dfDedup then frame.dfDedup = {} end
+                wipe(frame.dfDedup)
+                for id in pairs(dedupSet) do frame.dfDedup[id] = true end
+                for id in pairs(adIDs) do frame.dfDedup[id] = true end
+                dedupSet = frame.dfDedup
+            else
+                dedupSet = adIDs
+            end
+        end
+    end
+
     local displayedCount = 0
     for i, auraInfo in ipairs(auras) do
         if displayedCount >= maxAuras then break end
-        
+
+        -- Dedup: skip buffs already shown in defensive bar or Aura Designer
+        local auraInstanceID = auraInfo.data and auraInfo.data.auraInstanceID
+        if dedupSet and auraInstanceID and dedupSet[auraInstanceID] then
+            -- skip this aura entirely
+        else
+
         local icon = icons[displayedCount + 1]
         if not icon then break end
-        
+
         local auraData = auraInfo.data
         local canDisplay = false
         local skipAura = false
-        
+
         -- Set icon texture
         local auraIconTexture = auraData.icon
         if auraIconTexture then
             canDisplay = SafeSetTexture(icon, auraIconTexture)
         end
-        
+
         -- Check if this is a raid buff we should skip
         -- Note: auraIconTexture may be a secret value - can't use secrets as table keys
         if canDisplay and shouldFilterRaidBuffs and raidBuffIcons and auraIconTexture then
@@ -1320,7 +1336,7 @@ function DF:UpdateAuraIcons_Enhanced(frame, icons, auraType, maxAuras)
                 skipAura = true
             end
         end
-        
+
         if canDisplay and not skipAura then
             displayedCount = displayedCount + 1
             
@@ -1333,7 +1349,27 @@ function DF:UpdateAuraIcons_Enhanced(frame, icons, auraType, maxAuras)
             
             local auraInstanceID = auraData.auraInstanceID
             icon.auraData.auraInstanceID = auraInstanceID
-            
+
+            -- Compute hasExpiration BEFORE SafeSetCooldown so we can pre-hide native text
+            -- This prevents flickering when a timed aura's icon slot gets reassigned to a permanent aura
+            icon.expirationTime = nil
+            icon.auraDuration = nil
+            icon.hasExpiration = false
+
+            if auraInstanceID and C_UnitAuras and C_UnitAuras.DoesAuraHaveExpirationTime then
+                icon.hasExpiration = C_UnitAuras.DoesAuraHaveExpirationTime(unit, auraInstanceID)
+                icon.expirationTime = auraData.expirationTime
+                icon.auraDuration = auraData.duration
+            else
+                if auraData.expirationTime and auraData.expirationTime > 0 then
+                    icon.expirationTime = auraData.expirationTime
+                    icon.hasExpiration = true
+                end
+                if auraData.duration and auraData.duration > 0 then
+                    icon.auraDuration = auraData.duration
+                end
+            end
+
             -- Set cooldown
             SafeSetCooldown(icon.cooldown, auraData.expirationTime, auraData.duration)
             
@@ -1351,55 +1387,30 @@ function DF:UpdateAuraIcons_Enhanced(frame, icons, auraType, maxAuras)
                 end
             end
             
-            -- Store expiration data for OnUpdate to use for duration text and expiring indicators
-            -- Use DoesAuraHaveExpirationTime to check if aura expires (handles secret values)
-            icon.expirationTime = nil
-            icon.auraDuration = nil
-            icon.hasExpiration = false
-            
-            if auraInstanceID and C_UnitAuras and C_UnitAuras.DoesAuraHaveExpirationTime then
-                icon.hasExpiration = C_UnitAuras.DoesAuraHaveExpirationTime(unit, auraInstanceID)
-                -- Always store the values - they'll be used by SetCooldownFromExpirationTime
-                icon.expirationTime = auraData.expirationTime
-                icon.auraDuration = auraData.duration
-            else
-                -- Fallback for pre-11.1 (no secret values to worry about)
-                if auraData.expirationTime and auraData.expirationTime > 0 then
-                    icon.expirationTime = auraData.expirationTime
-                    icon.hasExpiration = true
-                end
-                if auraData.duration and auraData.duration > 0 then
-                    icon.auraDuration = auraData.duration
-                end
-            end
-            
-            -- Show/hide cooldown swipe based on whether aura expires
-            -- icon.hasExpiration may be a secret boolean - use SetShownFromBoolean when available
+            -- Show/hide cooldown (swipe + native countdown text) based on whether aura expires
+            -- Hiding the cooldown frame also hides the native countdown text (as its child)
+            -- This is the primary mechanism for hiding duration text on permanent buffs
             if icon.cooldown then
                 if icon.cooldown.SetShownFromBoolean then
-                    -- Use API to show/hide cooldown swipe (handles secret booleans)
                     icon.cooldown:SetShownFromBoolean(icon.hasExpiration, true, false)
                 else
-                    -- Fallback: always show cooldown if we can't check expiration properly
                     icon.cooldown:Show()
                 end
             end
-            
-            -- Show/hide duration text using SetShownFromBoolean for secret boolean handling
+
+            -- Our custom duration FontString (separate from native text) — show/hide based on hasExpiration
             if icon.duration then
                 if icon.showDuration then
                     if icon.duration.SetShownFromBoolean then
-                        -- Use API to show/hide (handles secret booleans)
                         icon.duration:SetShownFromBoolean(icon.hasExpiration, true, false)
                     else
-                        -- Fallback: always show duration if we can't check expiration properly
                         icon.duration:Show()
                     end
                 else
                     icon.duration:Hide()
                 end
             end
-            
+
             -- Note: Expiring indicators are managed by the icon's OnUpdate script
             -- We don't hide/reset them here to avoid flickering when auras refresh
             
@@ -1479,9 +1490,7 @@ function DF:UpdateAuraIcons_Enhanced(frame, icons, auraType, maxAuras)
                 for _, region in ipairs(regions) do
                     if region and region.GetObjectType and region:GetObjectType() == "FontString" then
                         icon.nativeCooldownText = region
-                        -- Mark for reparenting in OnUpdate (to move above swipe)
-                        icon.nativeTextReparented = false
-                        
+
                         -- IMMEDIATELY apply font settings to prevent large default font flash
                         -- This fixes the "big numbers" issue on first buff application
                         local prefix = auraType == "BUFF" and "buff" or "debuff"
@@ -1493,13 +1502,23 @@ function DF:UpdateAuraIcons_Enhanced(frame, icons, auraType, maxAuras)
                         local durationX = db[prefix .. "DurationX"] or 0
                         local durationY = db[prefix .. "DurationY"] or 0
                         local durationAnchor = db[prefix .. "DurationAnchor"] or "CENTER"
-                        
+
                         if DF.SafeSetFont then
                             DF:SafeSetFont(region, durationFont, durationSize, durationOutline)
                         end
+
+                        -- Keep native text as child of cooldown (NOT reparented)
+                        -- When cooldown is hidden for permanent buffs, the text hides automatically as a child
+                        -- Position it where the user configured (ClearAllPoints works across parents)
                         region:ClearAllPoints()
                         region:SetPoint(durationAnchor, icon, durationAnchor, durationX, durationY)
-                        
+
+                        -- Tell Blizzard's cooldown to show/hide countdown numbers based on user setting
+                        -- This prevents Blizzard's C code from overriding our visibility control
+                        if icon.cooldown.SetHideCountdownNumbers then
+                            icon.cooldown:SetHideCountdownNumbers(not icon.showDuration)
+                        end
+
                         break
                     end
                 end
@@ -1510,8 +1529,9 @@ function DF:UpdateAuraIcons_Enhanced(frame, icons, auraType, maxAuras)
             -- Register for shared timer updates
             DF:RegisterIconForAuraTimer(icon)
         end
+        end -- dedup else
     end
-    
+
     -- Hide remaining icons
     for i = displayedCount + 1, #icons do
         local icon = icons[i]
@@ -1594,18 +1614,41 @@ function DF:UpdateAuraIconsDirect(frame, icons, auraType, maxAuras)
     if shouldFilterRaidBuffs then
         raidBuffIcons = DF:GetRaidBuffIcons()
     end
-    
+
+    -- Defensive/AD deduplication: skip buffs already shown in defensive bar or Aura Designer
+    local dedupSet = nil
+    if auraType == "BUFF" and db.buffDeduplicateDefensives then
+        -- Defensive bar auraInstanceIDs
+        if cache and cache.defensives and next(cache.defensives) then
+            dedupSet = cache.defensives
+        end
+        -- Aura Designer active auraInstanceIDs
+        local adIDs = frame.dfAD_activeInstanceIDs
+        if adIDs and next(adIDs) then
+            if dedupSet then
+                -- Merge: build a combined set (defensive + AD)
+                if not frame.dfDedup then frame.dfDedup = {} end
+                wipe(frame.dfDedup)
+                for id in pairs(dedupSet) do frame.dfDedup[id] = true end
+                for id in pairs(adIDs) do frame.dfDedup[id] = true end
+                dedupSet = frame.dfDedup
+            else
+                dedupSet = adIDs
+            end
+        end
+    end
+
     -- Pre-fetch: Masque state (once per call, not per icon)
     local masqueGroup = auraType == "BUFF" and DF.MasqueGroup_Buffs or DF.MasqueGroup_Debuffs
     local masqueActive = masqueGroup and masqueGroup.IsDisabled and not masqueGroup:IsDisabled()
     local masqueBorderControl = db.masqueBorderControl and DF.Masque and masqueActive
-    
+
     -- Pre-fetch: border enabled (once per call)
     local borderEnabled = auraType == "DEBUFF" and db.debuffBorderEnabled ~= false or db.buffBorderEnabled ~= false
-    
+
     -- Pre-fetch: dead/offline state (once per call, not per icon)
     local unitDeadOrOffline = UnitIsDeadOrGhost(unit) or not UnitIsConnected(unit)
-    
+
     -- Pre-fetch: duration font settings for nativeCooldownText first-time setup
     local prefix = auraType == "BUFF" and "buff" or "debuff"
     local durationScale = db[prefix .. "DurationScale"] or 1.0
@@ -1627,6 +1670,11 @@ function DF:UpdateAuraIconsDirect(frame, icons, auraType, maxAuras)
             if displayedCount >= maxAuras then break end
 
             local auraInstanceID = orderList[i]
+
+            -- Dedup: skip buffs already shown in defensive bar or Aura Designer
+            if dedupSet and dedupSet[auraInstanceID] then
+                -- skip this aura entirely
+            else
 
             -- Fetch aura data by instance ID (secret-safe: we only use the ID for lookup)
             local auraData = GetAuraDataByAuraInstanceID and GetAuraDataByAuraInstanceID(unit, auraInstanceID)
@@ -1662,6 +1710,26 @@ function DF:UpdateAuraIconsDirect(frame, icons, auraType, maxAuras)
                     icon.auraData.index = i
                     icon.auraData.auraInstanceID = auraInstanceID
 
+                    -- Compute hasExpiration BEFORE SafeSetCooldown so we can pre-hide native text
+                    -- This prevents flickering when a timed aura's icon slot gets reassigned to a permanent aura
+                    icon.expirationTime = nil
+                    icon.auraDuration = nil
+                    icon.hasExpiration = false
+
+                    if C_UnitAuras.DoesAuraHaveExpirationTime then
+                        icon.hasExpiration = C_UnitAuras.DoesAuraHaveExpirationTime(unit, auraInstanceID)
+                        icon.expirationTime = auraData.expirationTime
+                        icon.auraDuration = auraData.duration
+                    else
+                        if auraData.expirationTime and auraData.expirationTime > 0 then
+                            icon.expirationTime = auraData.expirationTime
+                            icon.hasExpiration = true
+                        end
+                        if auraData.duration and auraData.duration > 0 then
+                            icon.auraDuration = auraData.duration
+                        end
+                    end
+
                     -- Set cooldown
                     SafeSetCooldown(icon.cooldown, auraData.expirationTime, auraData.duration)
 
@@ -1675,27 +1743,8 @@ function DF:UpdateAuraIconsDirect(frame, icons, auraType, maxAuras)
                         end
                     end
 
-                    -- Expiration data
-                    icon.expirationTime = nil
-                    icon.auraDuration = nil
-                    icon.hasExpiration = false
-
-                    if C_UnitAuras.DoesAuraHaveExpirationTime then
-                        icon.hasExpiration = C_UnitAuras.DoesAuraHaveExpirationTime(unit, auraInstanceID)
-                        icon.expirationTime = auraData.expirationTime
-                        icon.auraDuration = auraData.duration
-                    else
-                        -- Fallback for pre-11.1 (no secret values to worry about)
-                        if auraData.expirationTime and auraData.expirationTime > 0 then
-                            icon.expirationTime = auraData.expirationTime
-                            icon.hasExpiration = true
-                        end
-                        if auraData.duration and auraData.duration > 0 then
-                            icon.auraDuration = auraData.duration
-                        end
-                    end
-
-                    -- Cooldown swipe visibility
+                    -- Show/hide cooldown (swipe + native countdown text) based on whether aura expires
+                    -- Hiding the cooldown frame also hides the native countdown text (as its child)
                     if icon.cooldown then
                         if icon.cooldown.SetShownFromBoolean then
                             icon.cooldown:SetShownFromBoolean(icon.hasExpiration, true, false)
@@ -1704,7 +1753,7 @@ function DF:UpdateAuraIconsDirect(frame, icons, auraType, maxAuras)
                         end
                     end
 
-                    -- Duration text visibility
+                    -- Our custom duration FontString — show/hide based on hasExpiration
                     if icon.duration then
                         if icon.showDuration then
                             if icon.duration.SetShownFromBoolean then
@@ -1773,14 +1822,21 @@ function DF:UpdateAuraIconsDirect(frame, icons, auraType, maxAuras)
                         for _, region in ipairs(regions) do
                             if region and region.GetObjectType and region:GetObjectType() == "FontString" then
                                 icon.nativeCooldownText = region
-                                icon.nativeTextReparented = false
 
                                 -- Immediately apply font settings to prevent large default font flash
                                 if DF.SafeSetFont then
                                     DF:SafeSetFont(region, durationFont, durationSize, durationOutline)
                                 end
+
+                                -- Keep native text as child of cooldown (NOT reparented)
+                                -- When cooldown is hidden for permanent buffs, the text hides automatically
                                 region:ClearAllPoints()
                                 region:SetPoint(durationAnchor, icon, durationAnchor, durationX, durationY)
+
+                                -- Tell Blizzard's cooldown to show/hide countdown numbers based on user setting
+                                if icon.cooldown.SetHideCountdownNumbers then
+                                    icon.cooldown:SetHideCountdownNumbers(not icon.showDuration)
+                                end
 
                                 break
                             end
@@ -1793,6 +1849,7 @@ function DF:UpdateAuraIconsDirect(frame, icons, auraType, maxAuras)
                     DF:RegisterIconForAuraTimer(icon)
                 end
             end
+            end -- dedup else
         end
     end
 
@@ -2886,5 +2943,129 @@ SlashCmdList["DFAURASDEBUG"] = function(msg)
         print("  /dfaurasdebug live - Enable live monitoring (prints on every aura update)")
         print("  /dfaurasdebug off - Disable live monitoring")
         print("  /dfaurasdebug now - Print current snapshot of all Blizzard frame data")
+    end
+end
+
+-- ============================================================
+-- DEFENSIVE / BUFF DEDUPLICATION DEBUG
+-- Dumps auraInstanceIDs from both caches to check for overlap
+-- Usage: /dfdefdup
+-- ============================================================
+
+SLASH_DFDEFDUP1 = "/dfdefdup"
+SlashCmdList["DFDEFDUP"] = function()
+    local issecret = issecretvalue or function() return false end
+    local header = "|cff00ff00DandersFrames|r |cff00ccff[Defensive/Buff Dedup Debug]|r"
+    print(header)
+
+    local anyUnit = false
+    for unit, cache in pairs(DF.BlizzardAuraCache) do
+        if cache and (next(cache.defensives) or next(cache.buffs)) then
+            anyUnit = true
+            local unitName = UnitName(unit) or unit
+            print("|cffffcc00--- " .. unit .. " (" .. unitName .. ") ---|r")
+
+            -- Defensive IDs
+            local defCount = 0
+            local defIDs = {}
+            for id in pairs(cache.defensives) do
+                defCount = defCount + 1
+                local isSecret = issecret(id)
+                defIDs[defCount] = { id = id, secret = isSecret }
+            end
+
+            if defCount > 0 then
+                print("  |cff00ff00Defensives (" .. defCount .. "):|r")
+                for i, entry in ipairs(defIDs) do
+                    if entry.secret then
+                        print("    [" .. i .. "] SECRET (cannot read)")
+                    else
+                        -- Try to get aura data for extra info
+                        local info = ""
+                        local ok, data = pcall(C_UnitAuras.GetAuraDataByAuraInstanceID, unit, entry.id)
+                        if ok and data then
+                            local iconStr = data.icon
+                            if iconStr and not issecret(iconStr) then
+                                info = " icon=" .. tostring(iconStr)
+                            end
+                            local nameStr = data.name
+                            if nameStr and not issecret(nameStr) then
+                                info = info .. " name=" .. tostring(nameStr)
+                            end
+                            local spellStr = data.spellId
+                            if spellStr and not issecret(spellStr) then
+                                info = info .. " spellId=" .. tostring(spellStr)
+                            end
+                        end
+                        print("    [" .. i .. "] ID=" .. tostring(entry.id) .. info)
+                    end
+                end
+            else
+                print("  |cff888888Defensives: (none)|r")
+            end
+
+            -- Buff IDs
+            local buffCount = #(cache.buffOrder or {})
+            if buffCount > 0 then
+                print("  |cff3399ffBuffs (" .. buffCount .. "):|r")
+                for i, id in ipairs(cache.buffOrder) do
+                    local isSecret = issecret(id)
+                    if isSecret then
+                        print("    [" .. i .. "] SECRET (cannot read)")
+                    else
+                        local info = ""
+                        local ok, data = pcall(C_UnitAuras.GetAuraDataByAuraInstanceID, unit, id)
+                        if ok and data then
+                            local iconStr = data.icon
+                            if iconStr and not issecret(iconStr) then
+                                info = " icon=" .. tostring(iconStr)
+                            end
+                            local nameStr = data.name
+                            if nameStr and not issecret(nameStr) then
+                                info = info .. " name=" .. tostring(nameStr)
+                            end
+                            local spellStr = data.spellId
+                            if spellStr and not issecret(spellStr) then
+                                info = info .. " spellId=" .. tostring(spellStr)
+                            end
+                        end
+                        print("    [" .. i .. "] ID=" .. tostring(id) .. info)
+                    end
+                end
+            else
+                print("  |cff888888Buffs: (none)|r")
+            end
+
+            -- Check for overlaps
+            local overlapCount = 0
+            local overlaps = {}
+            for id in pairs(cache.defensives) do
+                if not issecret(id) and cache.buffs[id] then
+                    overlapCount = overlapCount + 1
+                    overlaps[overlapCount] = id
+                end
+            end
+
+            if overlapCount > 0 then
+                print("  |cffff3333DUPLICATES FOUND (" .. overlapCount .. "):|r")
+                for i, id in ipairs(overlaps) do
+                    local info = ""
+                    local ok, data = pcall(C_UnitAuras.GetAuraDataByAuraInstanceID, unit, id)
+                    if ok and data then
+                        local nameStr = data.name
+                        if nameStr and not issecret(nameStr) then
+                            info = " name=" .. tostring(nameStr)
+                        end
+                    end
+                    print("    |cffff3333" .. tostring(id) .. info .. "|r")
+                end
+            else
+                print("  |cff00ff00No duplicates between defensive and buff caches|r")
+            end
+        end
+    end
+
+    if not anyUnit then
+        print("  |cffff8800No cached aura data found. Are you in a group?|r")
     end
 end

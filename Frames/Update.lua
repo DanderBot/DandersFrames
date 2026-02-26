@@ -1475,17 +1475,19 @@ function DF:ApplyAuraLayout(frame, auraType)
         icon.expiringTintEnabled = expiringTintEnabled
         icon.expiringTintColor = expiringTintColor
         
-        -- Duration text settings - we use the native cooldown text, reparented above swipe
-        -- Reset reparent flag so OnUpdate can reparent if needed
-        icon.nativeTextReparented = false
-        
-        -- Style native cooldown text if it exists
+        -- Duration text settings - native cooldown text stays as child of cooldown frame
+        -- Cooldown Show/Hide controls both swipe and text visibility for permanent vs timed buffs
         if icon.nativeCooldownText then
             local durationSize = 10 * durationScale
             DF:SafeSetFont(icon.nativeCooldownText, durationFont, durationSize, durationOutline)
             -- Update position with current offsets
             icon.nativeCooldownText:ClearAllPoints()
             icon.nativeCooldownText:SetPoint(durationAnchor, icon, durationAnchor, durationX, durationY)
+        end
+
+        -- Tell Blizzard to show/hide countdown numbers based on user setting
+        if icon.cooldown and icon.cooldown.SetHideCountdownNumbers then
+            icon.cooldown:SetHideCountdownNumbers(not icon.showDuration)
         end
         
         if i > maxIcons then

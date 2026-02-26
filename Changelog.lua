@@ -1,75 +1,34 @@
 local addonName, DF = ...
-DF.ADDON_VERSION = "v4.0.7-alpha.21"
-DF.BUILD_DATE = "2026-02-22T22:35:19Z"
+DF.ADDON_VERSION = "v4.0.8-alpha.5"
+DF.BUILD_DATE = "2026-02-26T00:00:00Z"
 DF.RELEASE_CHANNEL = "alpha"
 DF.CHANGELOG_TEXT = [===[
 # DandersFrames Changelog
 
-## Unreleased (v4.0.7-alpha.21)
+## [4.0.8] - 2026-02-26
 
-- Update 4.0.7 changelog with merged PRs and AD combat fixes
-- Fix ApplyBar: default matchFrameWidth to true when nil
-- Fix ApplySquare falling back to global defaults for size and scale
-- Match square size slider max (64) to icon slider max
-- Fix ChangeInstanceType baking TYPE_DEFAULTS instead of falling through to globals
-- Instance proxies fall through to global defaults for size/scale/duration/stacks
-- Fix square default size to 24 (was 10 in TYPE_DEFAULTS)
-- Refactor AD to instance-based placed indicators
-- Fix double beta release and wrong release channel detection
-- Add click-cast binding tooltip on unit frame hover
-- feat(options): add health gradient color mode for missing health bar
+### Auras
+* **Buff deduplication** — buffs already displayed by the Defensive Bar or Aura Designer placed indicators are automatically hidden from the buff bar. Enabled by default, toggle in Buffs tab
+* **Direct Aura API mode** — optional mode that queries C_UnitAuras directly with configurable filter strings (PLAYER, RAID, BIG_DEFENSIVE, etc.), giving full control over which auras appear. Configure in Auras > Aura Filters
+* **Multi-defensive icons** — Defensive Bar now shows all active big defensives simultaneously (up to configured max), not just one
+* **Defensive bar compound growth** — growth direction now supports two-axis layouts (e.g., RIGHT_DOWN, LEFT_UP) with configurable wrap count, matching the buff/debuff icon grid system
+* Max buff and debuff icon count increased from 5 to 8
 
----
+### Aura Designer
+* **Buff coexistence** — standard buff icons can now display alongside Aura Designer indicators. When enabling AD a popup asks whether to keep or replace standard buffs, with info banners in both tabs for quick toggling
+* **Health Bar Color tint mode rework** — uses a StatusBar overlay instead of color blending, fixing tint not working reliably with Blizzard's protected health values
+* Aura Designer now refreshes when switching specs so per-spec aura lists update immediately
 
-
-## [4.0.7] - 2026-02-22
+### Click Casting
+* Binding tooltip moved to main Tooltip settings with full anchor and position controls
+* Removed "Show Tooltips" toggle from click-cast panel (now in Tooltip settings)
 
 ### Bug Fixes
-* Fix health fade errors with secret numbers — rewritten to use curve-based engine-side resolution, no Lua comparison of protected values
-* Fix health fade not working correctly on pet frames
-* Fix health fade not working in test mode and not updating during health animation
-* Fix health fade threshold slider causing lag during drag
-* Fix profiles not persisting per character — each character now remembers their own active profile
-* Fix pet frames vanishing after reload
-* Fix pet frame font crash on non-English clients
-* Fix party frame container not repositioning when dragging width or height sliders
-* Fix profile direction switch not applying when switching profiles
-* Fix resource bar border not showing after login/reload
-* Fix resource bar showing white when first made visible
-* Fix resource bar not matching frame width on resize and test mode
-* Fix heal absorb bar showing smaller than actual absorb amount
-* Fix absorb bar not fading when unit is out of range
-* Fix name text truncation not applied to offline players
-* Fix summon icon permanently stuck on frames after M+ start or group leave
-* Fix icon alpha settings (role, leader, raid target, ready check) reverting to 100% after releasing slider
-* Fix click-casting not working when clicking on aura/defensive icons
-* Fix click-casting "Spell not learned" when queuing as different spec
-* Fix DF click-casting not working until reload when first enabled
-* Fix Clique compatibility — prevent duplicate registration, defer writes, commit all header children
-* Fix aura click-through not updating safely on login
-* Fix leader icon not updating on first leader change (contributed by riyuk)
-* Fix forbidden table iteration in FindHealthManaBars (contributed by riyuk)
-* Fix forbidden table iteration in click-casting Blizzard frame registration (contributed by riyuk)
-* Fix double beta release and wrong release channel detection in CI (contributed by riyuk)
-* Fix Aura Designer indicators not displaying in combat — switched to Duration object pipeline for secret value compatibility
-* Fix Aura Designer bar duration text and expiring color flicker in combat
-* Various auto layout stability fixes
-* Fix auto layout settings contamination between party and raid modes
-* Fix auto layout override values getting stuck on test mode frames after profile switch
-
-### New Features
-* Add health fade system — fades frames when a unit's health is above a configurable threshold, with dispel cancel override and test mode support (contributed by X-Steeve)
-* Add class power pips — displays class-specific resources (Holy Power, Chi, Combo Points, etc.) on the player's frame as colored pips with configurable size, position, and anchor (contributed by X-Steeve)
-* Add class power pip color, vertical layout, and role filter options
-* Add "Sync with Raid/Party" toggle per settings page (contributed by Enf0)
-* Add per-class resource bar filter toggles
-* Add click-cast binding tooltip on unit frame hover — shows active bindings with usability status (contributed by riyuk)
-* Add health gradient color mode for missing health bar, with collapsible Health Bar / Missing Health sections (contributed by Enf0)
-* Auto-reload UI when toggling click-casting enable/disable
-* Auto-show changelog when opening settings after an update
-* Rename "Auto Profiles" to "Auto Layouts" throughout the UI
-* Debug Console — in-game debug log viewer (`/df debug` to toggle, `/df console` to view)
-* Aura Designer — icon, square, and bar indicators with instance-based placement; drag to place, toggle type per-instance, global defaults inheritance
+* Fix permanent buff duration text showing on non-expiring auras — native countdown text now stays as child of cooldown frame for proper auto-hiding when auras shift
+* Fix debuffs being hidden when Aura Designer is enabled — debuffs now always display regardless of AD state
+* Fix Health Bar Color replace mode not reverting when the aura drops off
+* Fix blend slider still showing when Health Bar Color mode is set to Replace
+* Fix click-casting reload popup appearing on every login when the Clicked conflict warning is set to Ignore
 
 ## [4.0.6] - 2026-02-15
 

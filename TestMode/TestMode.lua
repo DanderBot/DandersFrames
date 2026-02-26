@@ -4955,30 +4955,169 @@ function DF:UpdateAllTestMissingBuff()
     end
 end
 
--- Test defensive icon
+-- Test defensive spell textures (variety for multi-icon display)
+local TEST_DEFENSIVE_SPELLS = {
+    135936,   -- Pain Suppression
+    102342,   -- Ironbark
+    6940,     -- Blessing of Sacrifice
+    116849,   -- Life Cocoon
+}
+
+-- Render a single test defensive icon with all styling
+local function RenderTestDefensiveIcon(icon, db, textureID, iconSize, borderSize, borderColor, showBorder, showDuration, durationScale, durationFont, durationOutline, durationX, durationY, durationColor, elapsed, duration)
+    -- Set texture
+    local texture = nil
+    if C_Spell and C_Spell.GetSpellTexture then
+        texture = C_Spell.GetSpellTexture(textureID)
+    end
+    if not texture then
+        texture = textureID
+    end
+    icon.texture:SetTexture(texture)
+
+    -- Set a looping cooldown
+    local startTime = GetTime() - elapsed
+    icon.cooldown:SetCooldown(startTime, duration)
+    icon.cooldown:Show()
+    icon.cooldown:SetHideCountdownNumbers(not showDuration)
+
+    -- Swipe toggle
+    local showSwipe = not db.defensiveIconHideSwipe
+    icon.cooldown:SetDrawSwipe(showSwipe)
+
+    -- Find and style the native cooldown text
+    if not icon.nativeCooldownText then
+        local regions = {icon.cooldown:GetRegions()}
+        for _, region in ipairs(regions) do
+            if region and region.GetObjectType and region:GetObjectType() == "FontString" then
+                icon.nativeCooldownText = region
+                break
+            end
+        end
+    end
+
+    -- Apply duration text styling
+    if icon.nativeCooldownText then
+        local durationSize = 10 * durationScale
+        DF:SafeSetFont(icon.nativeCooldownText, durationFont, durationSize, durationOutline)
+        icon.nativeCooldownText:ClearAllPoints()
+        icon.nativeCooldownText:SetPoint("CENTER", icon, "CENTER", durationX, durationY)
+
+        -- Color by time remaining
+        if db.defensiveIconDurationColorByTime then
+            local percentRemaining = 1 - (elapsed / duration)
+            local r, g, b = DF:GetDurationColorByPercent(percentRemaining)
+            icon.nativeCooldownText:SetTextColor(r, g, b, 1)
+        else
+            icon.nativeCooldownText:SetTextColor(durationColor.r, durationColor.g, durationColor.b, 1)
+        end
+    end
+
+    -- Apply border if enabled
+    if showBorder then
+        if icon.borderLeft then
+            icon.borderLeft:SetColorTexture(borderColor.r, borderColor.g, borderColor.b, borderColor.a or 1)
+            icon.borderLeft:SetWidth(borderSize)
+            icon.borderLeft:Show()
+        end
+        if icon.borderRight then
+            icon.borderRight:SetColorTexture(borderColor.r, borderColor.g, borderColor.b, borderColor.a or 1)
+            icon.borderRight:SetWidth(borderSize)
+            icon.borderRight:Show()
+        end
+        if icon.borderTop then
+            icon.borderTop:SetColorTexture(borderColor.r, borderColor.g, borderColor.b, borderColor.a or 1)
+            icon.borderTop:SetHeight(borderSize)
+            icon.borderTop:ClearAllPoints()
+            icon.borderTop:SetPoint("TOPLEFT", borderSize, 0)
+            icon.borderTop:SetPoint("TOPRIGHT", -borderSize, 0)
+            icon.borderTop:Show()
+        end
+        if icon.borderBottom then
+            icon.borderBottom:SetColorTexture(borderColor.r, borderColor.g, borderColor.b, borderColor.a or 1)
+            icon.borderBottom:SetHeight(borderSize)
+            icon.borderBottom:ClearAllPoints()
+            icon.borderBottom:SetPoint("BOTTOMLEFT", borderSize, 0)
+            icon.borderBottom:SetPoint("BOTTOMRIGHT", -borderSize, 0)
+            icon.borderBottom:Show()
+        end
+        icon.texture:ClearAllPoints()
+        icon.texture:SetPoint("TOPLEFT", borderSize, -borderSize)
+        icon.texture:SetPoint("BOTTOMRIGHT", -borderSize, borderSize)
+    else
+        if icon.borderLeft then icon.borderLeft:Hide() end
+        if icon.borderRight then icon.borderRight:Hide() end
+        if icon.borderTop then icon.borderTop:Hide() end
+        if icon.borderBottom then icon.borderBottom:Hide() end
+        icon.texture:ClearAllPoints()
+        icon.texture:SetPoint("TOPLEFT", 0, 0)
+        icon.texture:SetPoint("BOTTOMRIGHT", 0, 0)
+    end
+
+    -- Size
+    icon:SetSize(iconSize, iconSize)
+
+    -- Clear stack count (ensure font is set first)
+    if icon.count then
+        local hasFont = false
+        local success, result = pcall(function() return icon.count:GetFont() end)
+        if success and result then hasFont = true end
+        if not hasFont then
+            DF:SafeSetFont(icon.count, "Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
+        end
+        icon.count:SetText("")
+    end
+
+    -- Disable clicks
+    if not InCombatLockdown() then
+        if icon.SetMouseClickEnabled then
+            icon:SetMouseClickEnabled(false)
+        end
+    end
+
+    icon:Show()
+end
+
+-- Growth direction helper for test defensive bar positioning
+local function GetTestDefGrowthOffset(direction, iconSize, pad)
+    if direction == "LEFT" then
+        return -(iconSize + pad), 0
+    elseif direction == "RIGHT" then
+        return iconSize + pad, 0
+    elseif direction == "UP" then
+        return 0, iconSize + pad
+    elseif direction == "DOWN" then
+        return 0, -(iconSize + pad)
+    end
+    return 0, 0
+end
+
+-- Test defensive icon — supports multiple icons with growth/wrap layout
 function DF:UpdateTestDefensiveBar(frame, testData)
     if not frame or not frame.defensiveIcon then return end
-    
+
     local db = DF:GetFrameDB(frame)
-    
+
     -- Show on specific test frames (e.g. tank and healer)
     local showIcon = testData and (testData.role == "TANK" or testData.role == "HEALER")
-    
+
     if db.defensiveIconEnabled and showIcon then
         local iconSize = db.defensiveIconSize or 24
         local borderSize = db.defensiveIconBorderSize or 2
         local borderColor = db.defensiveIconBorderColor or {r = 0, g = 0.8, b = 0, a = 1}
         local anchor = db.defensiveIconAnchor or "CENTER"
-        local x = db.defensiveIconX or 0
-        local y = db.defensiveIconY or 0
+        local baseX = db.defensiveIconX or 0
+        local baseY = db.defensiveIconY or 0
         local scale = db.defensiveIconScale or 1.0
         local showDuration = db.defensiveIconShowDuration ~= false
-        
-        -- Apply pixel perfect to border size 
+        local showBorder = db.defensiveIconShowBorder ~= false
+
+        -- Apply pixel perfect to border size
         if db.pixelPerfect then
             borderSize = DF:PixelPerfect(borderSize)
+            iconSize = DF:PixelPerfect(iconSize)
         end
-        
+
         -- Duration text settings
         local durationScale = db.defensiveIconDurationScale or 1.0
         local durationFont = db.defensiveIconDurationFont or "Fonts\\FRIZQT__.TTF"
@@ -4987,142 +5126,122 @@ function DF:UpdateTestDefensiveBar(frame, testData)
         local durationX = db.defensiveIconDurationX or 0
         local durationY = db.defensiveIconDurationY or 0
         local durationColor = db.defensiveIconDurationColor or {r = 1, g = 1, b = 1}
-        
-        -- Use Pain Suppression icon for test
-        local texture = nil
-        if C_Spell and C_Spell.GetSpellTexture then
-            texture = C_Spell.GetSpellTexture(135936)  -- Pain Suppression
+
+        -- Layout settings for multi-icon
+        local maxDefs = db.defensiveBarMax or 4
+        local spacing = db.defensiveBarSpacing or 2
+        local growth = db.defensiveBarGrowth or "RIGHT_DOWN"
+        local wrap = db.defensiveBarWrap or 5
+
+        -- Determine how many defensives to show based on role
+        -- Tanks show more defensives, healers show fewer
+        local numDefs
+        if testData.role == "TANK" then
+            numDefs = math.min(3, maxDefs)
+        else
+            numDefs = math.min(1, maxDefs)
         end
-        if not texture then
-            texture = 135936
-        end
-        
-        frame.defensiveIcon.texture:SetTexture(texture)
-        
-        -- Set a looping cooldown
-        local duration = 8
-        local elapsed = GetTime() % duration
-        local startTime = GetTime() - elapsed
-        frame.defensiveIcon.cooldown:SetCooldown(startTime, duration)
-        frame.defensiveIcon.cooldown:Show()
-        frame.defensiveIcon.cooldown:SetHideCountdownNumbers(not showDuration)
-        
-        -- Swipe toggle (hideSwipe = true means no swipe)
-        local showSwipe = not db.defensiveIconHideSwipe
-        frame.defensiveIcon.cooldown:SetDrawSwipe(showSwipe)
-        
-        -- Find and style the native cooldown text
-        if not frame.defensiveIcon.nativeCooldownText then
-            local regions = {frame.defensiveIcon.cooldown:GetRegions()}
-            for _, region in ipairs(regions) do
-                if region and region.GetObjectType and region:GetObjectType() == "FontString" then
-                    frame.defensiveIcon.nativeCooldownText = region
-                    break
+
+        -- Parse compound growth direction
+        local primary, secondary = strsplit("_", growth)
+        primary = primary or "RIGHT"
+        secondary = secondary or "DOWN"
+
+        local scaledSize = iconSize * scale
+        local primaryX, primaryY = GetTestDefGrowthOffset(primary, scaledSize, spacing)
+        local secondaryX, secondaryY = GetTestDefGrowthOffset(secondary, scaledSize, spacing)
+
+        -- Render each test defensive icon
+        for i = 1, numDefs do
+            local icon = DF:GetOrCreateDefensiveBarIcon(frame, i)
+            if icon then
+                -- Each icon gets a different spell texture and staggered cooldown timing
+                local spellIndex = ((i - 1) % #TEST_DEFENSIVE_SPELLS) + 1
+                local duration = 6 + (i * 2)  -- Stagger durations: 8, 10, 12, 14
+                local elapsed = GetTime() % duration
+
+                RenderTestDefensiveIcon(icon, db, TEST_DEFENSIVE_SPELLS[spellIndex], iconSize, borderSize, borderColor, showBorder, showDuration, durationScale, durationFont, durationOutline, durationX, durationY, durationColor, elapsed, duration)
+
+                -- Position the icon using wrap grid layout
+                local idx = i - 1  -- 0-based
+                local row = math.floor(idx / wrap)
+                local col = idx % wrap
+
+                local offsetX = (col * primaryX) + (row * secondaryX)
+                local offsetY = (col * primaryY) + (row * secondaryY)
+
+                icon:SetScale(scale)
+                icon:ClearAllPoints()
+                icon:SetPoint(anchor, frame, anchor, baseX + offsetX, baseY + offsetY)
+
+                -- Frame level
+                local frameLevel = db.defensiveIconFrameLevel or 0
+                if frameLevel == 0 then
+                    icon:SetFrameLevel(frame.contentOverlay:GetFrameLevel() + 15)
+                else
+                    icon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
                 end
             end
         end
-        
-        -- Apply duration text styling
-        if frame.defensiveIcon.nativeCooldownText then
-            local durationSize = 10 * durationScale
-            DF:SafeSetFont(frame.defensiveIcon.nativeCooldownText, durationFont, durationSize, durationOutline)
-            frame.defensiveIcon.nativeCooldownText:ClearAllPoints()
-            frame.defensiveIcon.nativeCooldownText:SetPoint("CENTER", frame.defensiveIcon, "CENTER", durationX, durationY)
-            
-            -- Color by time remaining
-            if db.defensiveIconDurationColorByTime then
-                local percentRemaining = 1 - (elapsed / duration)
-                local r, g, b = DF:GetDurationColorByPercent(percentRemaining)
-                frame.defensiveIcon.nativeCooldownText:SetTextColor(r, g, b, 1)
+
+        -- CENTER growth: second pass to center icons within each row/column
+        -- Mirrors DF:RepositionCenterGrowthIcons from Features/Auras.lua
+        if primary == "CENTER" and numDefs > 0 then
+            local isHorizontalGrowth = (secondary == "LEFT" or secondary == "RIGHT")
+
+            if isHorizontalGrowth then
+                -- Vertical stacking (centered), horizontal column growth
+                local secX = secondaryX
+                for i = 1, numDefs do
+                    local icon = DF:GetOrCreateDefensiveBarIcon(frame, i)
+                    if icon then
+                        local idx = i - 1
+                        local col = math.floor(idx / wrap)
+                        local row = idx % wrap
+                        local iconsInCol = math.min(wrap, numDefs - (col * wrap))
+                        local centerOffset = (iconsInCol - 1) * (scaledSize + spacing) / 2
+                        local x = baseX + (col * secX)
+                        local y = baseY - (row * (scaledSize + spacing)) + centerOffset
+                        icon:ClearAllPoints()
+                        icon:SetPoint(anchor, frame, anchor, x, y)
+                    end
+                end
             else
-                frame.defensiveIcon.nativeCooldownText:SetTextColor(durationColor.r, durationColor.g, durationColor.b, 1)
+                -- Horizontal stacking (centered), vertical row growth
+                local secY = secondaryY
+                for i = 1, numDefs do
+                    local icon = DF:GetOrCreateDefensiveBarIcon(frame, i)
+                    if icon then
+                        local idx = i - 1
+                        local row = math.floor(idx / wrap)
+                        local col = idx % wrap
+                        local iconsInRow = math.min(wrap, numDefs - (row * wrap))
+                        local centerOffset = (iconsInRow - 1) * (scaledSize + spacing) / 2
+                        local x = baseX + (col * (scaledSize + spacing)) - centerOffset
+                        local y = baseY + (row * secY)
+                        icon:ClearAllPoints()
+                        icon:SetPoint(anchor, frame, anchor, x, y)
+                    end
+                end
             end
         end
-        
-        -- Apply border if enabled
-        local showBorder = db.defensiveIconShowBorder ~= false
-        if showBorder then
-            -- Set color on all border edges
-            if frame.defensiveIcon.borderLeft then
-                frame.defensiveIcon.borderLeft:SetColorTexture(borderColor.r, borderColor.g, borderColor.b, borderColor.a or 1)
-                frame.defensiveIcon.borderLeft:SetWidth(borderSize)
-                frame.defensiveIcon.borderLeft:Show()
-            end
-            if frame.defensiveIcon.borderRight then
-                frame.defensiveIcon.borderRight:SetColorTexture(borderColor.r, borderColor.g, borderColor.b, borderColor.a or 1)
-                frame.defensiveIcon.borderRight:SetWidth(borderSize)
-                frame.defensiveIcon.borderRight:Show()
-            end
-            if frame.defensiveIcon.borderTop then
-                frame.defensiveIcon.borderTop:SetColorTexture(borderColor.r, borderColor.g, borderColor.b, borderColor.a or 1)
-                frame.defensiveIcon.borderTop:SetHeight(borderSize)
-                frame.defensiveIcon.borderTop:ClearAllPoints()
-                frame.defensiveIcon.borderTop:SetPoint("TOPLEFT", borderSize, 0)
-                frame.defensiveIcon.borderTop:SetPoint("TOPRIGHT", -borderSize, 0)
-                frame.defensiveIcon.borderTop:Show()
-            end
-            if frame.defensiveIcon.borderBottom then
-                frame.defensiveIcon.borderBottom:SetColorTexture(borderColor.r, borderColor.g, borderColor.b, borderColor.a or 1)
-                frame.defensiveIcon.borderBottom:SetHeight(borderSize)
-                frame.defensiveIcon.borderBottom:ClearAllPoints()
-                frame.defensiveIcon.borderBottom:SetPoint("BOTTOMLEFT", borderSize, 0)
-                frame.defensiveIcon.borderBottom:SetPoint("BOTTOMRIGHT", -borderSize, 0)
-                frame.defensiveIcon.borderBottom:Show()
-            end
-            
-            frame.defensiveIcon.texture:ClearAllPoints()
-            frame.defensiveIcon.texture:SetPoint("TOPLEFT", borderSize, -borderSize)
-            frame.defensiveIcon.texture:SetPoint("BOTTOMRIGHT", -borderSize, borderSize)
-        else
-            -- Hide all border edges
-            if frame.defensiveIcon.borderLeft then frame.defensiveIcon.borderLeft:Hide() end
-            if frame.defensiveIcon.borderRight then frame.defensiveIcon.borderRight:Hide() end
-            if frame.defensiveIcon.borderTop then frame.defensiveIcon.borderTop:Hide() end
-            if frame.defensiveIcon.borderBottom then frame.defensiveIcon.borderBottom:Hide() end
-            frame.defensiveIcon.texture:ClearAllPoints()
-            frame.defensiveIcon.texture:SetPoint("TOPLEFT", 0, 0)
-            frame.defensiveIcon.texture:SetPoint("BOTTOMRIGHT", 0, 0)
-        end
-        
-        -- Size, scale, and position
-        local adjustedIconSize = iconSize
-        if db.pixelPerfect then
-            adjustedIconSize = DF:PixelPerfect(iconSize)
-        end
-        frame.defensiveIcon:SetSize(adjustedIconSize, adjustedIconSize)
-        frame.defensiveIcon:SetScale(scale)
-        frame.defensiveIcon:ClearAllPoints()
-        frame.defensiveIcon:SetPoint(anchor, frame, anchor, x, y)
-        
-        -- Clear stack count for test (ensure font is set first)
-        if frame.defensiveIcon.count then
-            local hasFont = false
-            local success, result = pcall(function() return frame.defensiveIcon.count:GetFont() end)
-            if success and result then hasFont = true end
-            if not hasFont then
-                DF:SafeSetFont(frame.defensiveIcon.count, "Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
-            end
-            frame.defensiveIcon.count:SetText("")
-        end
-        
-        -- Frame level
-        local frameLevel = db.defensiveIconFrameLevel or 0
-        if frameLevel == 0 then
-            frame.defensiveIcon:SetFrameLevel(frame.contentOverlay:GetFrameLevel() + 15)
-        else
-            frame.defensiveIcon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
-        end
-        
-        -- Use SetMouseClickEnabled(false) to allow tooltips while passing clicks through
-        if not InCombatLockdown() then
-            if frame.defensiveIcon.SetMouseClickEnabled then
-                frame.defensiveIcon:SetMouseClickEnabled(false)
+
+        -- Hide remaining icons beyond what we're showing
+        for i = numDefs + 1, maxDefs do
+            if i == 1 then
+                frame.defensiveIcon:Hide()
+            elseif frame.defensiveBarIcons and frame.defensiveBarIcons[i] then
+                frame.defensiveBarIcons[i]:Hide()
             end
         end
-        
-        frame.defensiveIcon:Show()
     else
+        -- Hide all defensive icons
         frame.defensiveIcon:Hide()
+        if frame.defensiveBarIcons then
+            for _, icon in pairs(frame.defensiveBarIcons) do
+                icon:Hide()
+            end
+        end
     end
 end
 
@@ -5144,6 +5263,13 @@ function DF:UpdateAllTestDefensiveBar()
                 -- Clear cooldown
                 if frame.defensiveIcon.cooldown then
                     frame.defensiveIcon.cooldown:Clear()
+                end
+            end
+            -- Also hide multi-defensive bar icons
+            if frame.defensiveBarIcons then
+                for _, icon in pairs(frame.defensiveBarIcons) do
+                    icon:Hide()
+                    if icon.cooldown then icon.cooldown:Clear() end
                 end
             end
         end

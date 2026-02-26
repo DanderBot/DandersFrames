@@ -442,11 +442,40 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         defOffsetY.disableOn = function(d) return d.tooltipDefensiveAnchor ~= "FRAME" end
         
         Add(defTooltipGroup, nil, 2)
-        
+
+        -- Sync point: align row 3
+        AddSyncPoint()
+
+        -- ===== ROW 3: Binding Tooltips =====
+
+        -- Binding Tooltips (Column 1)
+        local bindTooltipGroup = GUI:CreateSettingsGroup(self.child, 280)
+        bindTooltipGroup:AddWidget(GUI:CreateHeader(self.child, "Binding Tooltips"), 40)
+        bindTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, "Enable Binding Tooltips", db, "tooltipBindingEnabled", nil), 30)
+        bindTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, "Disable in Combat", db, "tooltipBindingDisableInCombat", function() end), 30)
+
+        local bindAnchorValues = {
+            DEFAULT = "Game Default",
+            CURSOR = "Cursor",
+            FRAME = "Unit Frame",
+        }
+        bindTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, "Anchor To", bindAnchorValues, db, "tooltipBindingAnchor", function() GUI:RefreshCurrentPage() end), 55)
+
+        local bindAnchorPos = bindTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, "Anchor Position", anchorPositionValues, db, "tooltipBindingAnchorPos", function() end), 55)
+        bindAnchorPos.disableOn = function(d) return d.tooltipBindingAnchor == "DEFAULT" end
+
+        local bindOffsetX = bindTooltipGroup:AddWidget(GUI:CreateSlider(self.child, "X Offset", -100, 100, 1, db, "tooltipBindingX", function() end), 55)
+        bindOffsetX.disableOn = function(d) return d.tooltipBindingAnchor ~= "FRAME" end
+
+        local bindOffsetY = bindTooltipGroup:AddWidget(GUI:CreateSlider(self.child, "Y Offset", -100, 100, 1, db, "tooltipBindingY", function() end), 55)
+        bindOffsetY.disableOn = function(d) return d.tooltipBindingAnchor ~= "FRAME" end
+
+        Add(bindTooltipGroup, nil, 1)
+
         -- Sync point before See Also
         AddSyncPoint()
         AddSpace(20, "both")
-        
+
         -- See Also links
         Add(GUI:CreateSeeAlso(self.child, {
             {pageId = "auras_buffs", label = "Buffs"},
@@ -3817,8 +3846,18 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Copy button at top right
         Add(CreateCopyButton(self.child, {"buff"}, "Buffs", "auras_buffs"), 25, 2)
 
+        -- ===== DEDUPLICATION =====
         AddSpace(10, "both")
-        
+        local dedupGroup = GUI:CreateSettingsGroup(self.child, 280)
+        dedupGroup:AddWidget(GUI:CreateHeader(self.child, "Deduplication"), 40)
+        dedupGroup:AddWidget(GUI:CreateLabel(self.child, "Hide buffs from the buff bar when they are already displayed by the Defensive Bar or Aura Designer.", 250), 45)
+        dedupGroup:AddWidget(GUI:CreateCheckbox(self.child, "Hide duplicate buffs", db, "buffDeduplicateDefensives", function()
+            DF:UpdateAllAuras()
+        end), 30)
+        Add(dedupGroup, nil, 1)
+
+        AddSpace(10, "both")
+
         local currentSection = nil
         
         local function AddToSection(widget, height, col)
@@ -3857,7 +3896,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             local onShow = self:GetScript("OnShow")
             if onShow then onShow(self) end
         end
-        local buffMax = settingsGroup:AddWidget(GUI:CreateSlider(self.child, "Max Buffs", 0, 5, 1, db, "buffMax", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
+        local buffMax = settingsGroup:AddWidget(GUI:CreateSlider(self.child, "Max Buffs", 0, 8, 1, db, "buffMax", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
         buffMax.disableOn = function(d) return not d.showBuffs end
         local buffSize = settingsGroup:AddWidget(GUI:CreateSlider(self.child, "Icon Size", 10, 40, 1, db, "buffSize", nil, function() DF:LightweightUpdateAuraPosition("buff") end, true), 55)
         buffSize.disableOn = function(d) return not d.showBuffs end
@@ -3988,9 +4027,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local tintColor = expiringGroup:AddWidget(GUI:CreateColorPicker(self.child, "Tint Color", db, "buffExpiringTintColor", true, nil, function() DF:LightweightUpdateExpiringTintColor() end, true), 35)
         tintColor.disableOn = function(d) return not d.buffExpiringEnabled or not d.buffExpiringTintEnabled end
         AddToSection(expiringGroup, nil, 2)
-        
+
         currentSection = nil
-        
+
         -- See Also links
         AddSpace(20, "both")
         Add(GUI:CreateSeeAlso(self.child, {
@@ -3998,6 +4037,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             {pageId = "general_integrations", label = "Integrations"},
             {pageId = "auras_missingbuffs", label = "Missing Buffs"},
             {pageId = "auras_mybuffindicators", label = "My Buff Indicators"},
+            {pageId = "auras_defensiveicon", label = "Defensive Icon"},
         }), 30, "both")
     end)
     
@@ -4154,7 +4194,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end), 30)
         local dispelHighlight = settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, "Highlight Dispellable", db, "dispellableHighlight", nil), 30)
         dispelHighlight.disableOn = function(d) return not d.showDebuffs end
-        local debuffMax = settingsGroup:AddWidget(GUI:CreateSlider(self.child, "Max Debuffs", 0, 5, 1, db, "debuffMax", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
+        local debuffMax = settingsGroup:AddWidget(GUI:CreateSlider(self.child, "Max Debuffs", 0, 8, 1, db, "debuffMax", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
         debuffMax.disableOn = function(d) return not d.showDebuffs end
         local debuffSize = settingsGroup:AddWidget(GUI:CreateSlider(self.child, "Icon Size", 10, 40, 1, db, "debuffSize", nil, function() DF:LightweightUpdateAuraPosition("debuff") end, true), 55)
         debuffSize.disableOn = function(d) return not d.showDebuffs end
@@ -4728,12 +4768,49 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         
         durPosGroup.hideOn = HideDefensiveIconOptions
         Add(durPosGroup, nil, 2)
-        
+
+        -- ===== LAYOUT GROUP - DIRECT MODE (Column 1) =====
+        local layoutGroup = GUI:CreateSettingsGroup(self.child, 280)
+        layoutGroup:AddWidget(GUI:CreateHeader(self.child, "Layout (Direct Mode)"), 40)
+        layoutGroup:AddWidget(GUI:CreateLabel(self.child, "Controls how multiple defensive icons are arranged when using Direct aura mode.", 250), 45)
+
+        local defGrowthOptions = {
+            LEFT_UP = "Left, then Up", LEFT_DOWN = "Left, then Down",
+            RIGHT_UP = "Right, then Up", RIGHT_DOWN = "Right, then Down",
+            UP_LEFT = "Up, then Left", UP_RIGHT = "Up, then Right",
+            DOWN_LEFT = "Down, then Left", DOWN_RIGHT = "Down, then Right",
+            CENTER_UP = "Center, then Up", CENTER_DOWN = "Center, then Down",
+            CENTER_LEFT = "Center, then Left", CENTER_RIGHT = "Center, then Right",
+        }
+        local defGrowth = layoutGroup:AddWidget(GUI:CreateDropdown(self.child, "Growth Direction", defGrowthOptions, db, "defensiveBarGrowth", function()
+            if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
+        end), 55)
+        defGrowth.hideOn = HideDefensiveIconOptions
+
+        local defMax = layoutGroup:AddWidget(GUI:CreateSlider(self.child, "Max Icons", 1, 5, 1, db, "defensiveBarMax", function()
+            if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
+        end, nil, true), 55)
+        defMax.hideOn = HideDefensiveIconOptions
+
+        local defWrap = layoutGroup:AddWidget(GUI:CreateSlider(self.child, "Icons Per Row", 1, 5, 1, db, "defensiveBarWrap", function()
+            if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
+        end, nil, true), 55)
+        defWrap.hideOn = HideDefensiveIconOptions
+
+        local defSpacing = layoutGroup:AddWidget(GUI:CreateSlider(self.child, "Icon Spacing", 0, 10, 1, db, "defensiveBarSpacing", function()
+            if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
+        end, function() DF:LightweightUpdateDefensiveIcons() end, true), 55)
+        defSpacing.hideOn = HideDefensiveIconOptions
+
+        layoutGroup.hideOn = HideDefensiveIconOptions
+        Add(layoutGroup, nil, 1)
+
         -- See Also links
         AddSpace(20, "both")
         Add(GUI:CreateSeeAlso(self.child, {
             {pageId = "auras_buffs", label = "Buffs"},
             {pageId = "auras_debuffs", label = "Debuffs"},
+            {pageId = "auras_filters", label = "Aura Filters"},
             {pageId = "general_integrations", label = "Integrations"},
         }), 30, "both")
     end)
