@@ -435,8 +435,28 @@ function Indicators:ApplyBorder(frame, config, auraData)
     -- Migrate old style names (Solid→SOLID, Glow→GLOW, Pulse→SOLID)
     local style = BORDER_STYLE_MIGRATION[config.style] or config.style or "SOLID"
 
+    -- Skip redundant re-apply when the border is already showing with the
+    -- same settings.  ApplyHighlightStyle hides everything then rebuilds,
+    -- which causes a one-frame flicker for animated borders.
+    local auraID = auraData and auraData.auraInstanceID
+    if ch:IsShown()
+        and ch.dfAD_style == style
+        and ch.dfAD_r == r and ch.dfAD_g == g and ch.dfAD_b == b and ch.dfAD_a == alpha
+        and ch.dfAD_thickness == thickness and ch.dfAD_inset == inset
+        and ch.dfAD_auraID == auraID then
+        -- Nothing changed — leave border as-is (animation continues uninterrupted)
+        return
+    end
+
     -- Reuse the highlight system's rendering for all 6 border modes
     DF.ApplyHighlightStyle(ch, style, thickness, inset, r, g, b, alpha)
+
+    -- Cache current state for change detection
+    ch.dfAD_style = style
+    ch.dfAD_r, ch.dfAD_g, ch.dfAD_b, ch.dfAD_a = r, g, b, alpha
+    ch.dfAD_thickness = thickness
+    ch.dfAD_inset = inset
+    ch.dfAD_auraID = auraID
 
     -- ========================================
     -- EXPIRING: register with shared ticker
@@ -448,7 +468,7 @@ function Indicators:ApplyBorder(frame, config, auraData)
         local oc = {r = r, g = g, b = b}
         RegisterExpiring(ch, {
             unit = frame.unit,
-            auraInstanceID = auraData and auraData.auraInstanceID,
+            auraInstanceID = auraID,
             threshold = config.expiringThreshold or 30,
             duration = auraData and auraData.duration,
             expirationTime = auraData and auraData.expirationTime,
@@ -478,6 +498,9 @@ function Indicators:RevertBorder(frame)
         UnregisterExpiring(frame.dfAD_border)
         -- Use NONE mode to properly clean up all styles (animated, glow, corners, etc.)
         DF.ApplyHighlightStyle(frame.dfAD_border, "NONE", 2, 0, 1, 1, 1, 1)
+        -- Clear cached state so next ApplyBorder won't skip via change detection
+        frame.dfAD_border.dfAD_style = nil
+        frame.dfAD_border.dfAD_auraID = nil
     end
 end
 

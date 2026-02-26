@@ -285,6 +285,11 @@ local function ApplyHighlightStyle(ch, mode, thickness, inset, r, g, b, alpha, d
         
         if mode == "ANIMATED" then
             SelectionAnimator_Add(ch)
+            -- Draw immediately so dashes are visible this frame.
+            -- Without this, HideAnimatedBorder (called above) leaves a
+            -- one-frame gap until the next OnUpdate tick redraws them.
+            local offset = (SelectionAnimator.elapsed * ANIMATION_SPEED) % PATTERN_LENGTH
+            DF:UpdateAnimatedBorder(ch, offset)
         else
             DF:UpdateAnimatedBorder(ch, 0)
         end

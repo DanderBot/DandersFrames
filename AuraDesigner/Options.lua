@@ -2935,9 +2935,17 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef)
     local POWER_H = frameDB.powerBarHeight or 4
     local showPower = frameDB.showPowerBar
 
+    -- Preview scale from AD settings
+    local adDB = GetAuraDesignerDB()
+    local previewScale = adDB.previewScale or 1.0
+
     -- Outer container with label
     local container = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    container:SetHeight(max(FRAME_H + 100, 170))  -- room for label + frame + instructions
+    local INSTR_COUNT = 3  -- number of instruction rows (stored for height recalc)
+    local INSTR_ROW_H = 18
+    local SLIDER_AREA_H = 30  -- extra vertical space for the scale slider row
+    local scaledH = FRAME_H * previewScale
+    container:SetHeight(max(scaledH + 100 + SLIDER_AREA_H + INSTR_COUNT * INSTR_ROW_H, 170 + SLIDER_AREA_H + INSTR_COUNT * INSTR_ROW_H))
     local rightInset = rightPanelRef and (rightPanelRef:GetWidth() + 6) or 290
     container:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, yOffset)
     container:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -rightInset, yOffset)
@@ -2953,6 +2961,7 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef)
     local mockFrame = CreateFrame("Frame", nil, container, "BackdropTemplate")
     mockFrame:SetSize(FRAME_W, FRAME_H)
     mockFrame:SetPoint("CENTER", container, "CENTER", 0, -4)
+    mockFrame:SetScale(previewScale)
     ApplyBackdrop(mockFrame, {r = 0.07, g = 0.07, b = 0.07, a = 1}, {r = 0.27, g = 0.27, b = 0.27, a = 1})
     container.mockFrame = mockFrame
 
@@ -3164,8 +3173,44 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef)
         descText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.7)
     end
 
-    -- Adjust container height to accommodate instructions
-    container:SetHeight(max(FRAME_H + 100 + #instrRows * 18, 170 + #instrRows * 18))
+    -- ========================================
+    -- PREVIEW SCALE SLIDER
+    -- ========================================
+    local function RecalcContainerHeight(scale)
+        local sh = FRAME_H * scale
+        local instrH = INSTR_COUNT * INSTR_ROW_H
+        container:SetHeight(max(sh + 100 + SLIDER_AREA_H + instrH, 170 + SLIDER_AREA_H + instrH))
+    end
+
+    local function RepositionEffectsStrip()
+        if activeEffectsStrip and origY_framePreview then
+            local SECTION_GAP = 8
+            origY_effectsStrip = origY_framePreview - (container:GetHeight() + SECTION_GAP)
+            local delta = -currentBannerShift
+            activeEffectsStrip:ClearAllPoints()
+            activeEffectsStrip:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, origY_effectsStrip + delta)
+            activeEffectsStrip:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -(contentRightInset or 286), origY_effectsStrip + delta)
+        end
+    end
+
+    local scaleSlider = GUI:CreateSlider(container, "Preview Scale", 0.75, 2.5, 0.05, adDB, "previewScale",
+        -- callback (on release)
+        function()
+            local s = adDB.previewScale or 1.0
+            mockFrame:SetScale(s)
+            RecalcContainerHeight(s)
+            RepositionEffectsStrip()
+        end,
+        -- lightweightUpdate (during drag)
+        function()
+            local s = adDB.previewScale or 1.0
+            mockFrame:SetScale(s)
+            RecalcContainerHeight(s)
+            RepositionEffectsStrip()
+        end
+    )
+    scaleSlider:SetPoint("TOPLEFT", previewLabel, "BOTTOMLEFT", -4, -4)
+    scaleSlider:SetSize(220, 30)
 
     -- Drag-state hint text (shows contextual guidance during drag operations)
     dragHintText = container:CreateFontString(nil, "OVERLAY")

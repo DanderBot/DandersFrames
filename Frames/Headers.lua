@@ -6841,7 +6841,18 @@ function DF:FinalizeHeaderInit()
     
     -- Apply settings from DB
     DF:ApplyHeaderSettings()
-    
+
+    -- ============================================================
+    -- CRITICAL: Set up header visibility during the ADDON_LOADED
+    -- grace window (InCombatLockdown() is still false).
+    -- Without this, combat reloads never call UpdateHeaderVisibility
+    -- because PLAYER_ENTERING_WORLD fires AFTER combat lockdown
+    -- kicks in, causing UpdateHeaderVisibility to bail and defer
+    -- to PLAYER_REGEN_ENABLED — leaving raid groups missing until
+    -- combat ends.
+    -- ============================================================
+    DF:UpdateHeaderVisibility()
+
     DF.headersInitialized = true
     
     -- ============================================================

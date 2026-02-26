@@ -912,12 +912,11 @@ function DF:EnableDirectAuraMode()
 
     directModeFrame:SetScript("OnEvent", OnDirectModeUnitAura)
 
-    -- Register UNIT_AURA for all active units
-    if DF.unitFrameMap then
-        for unit in pairs(DF.unitFrameMap) do
-            directModeFrame:RegisterUnitEvent("UNIT_AURA", unit)
-        end
-    end
+    -- Register UNIT_AURA globally — handler filters via unitFrameMap.
+    -- RegisterUnitEvent only supports 2 units per call and each call
+    -- replaces the previous registration, so a per-unit loop silently
+    -- drops all but the last unit.
+    directModeFrame:RegisterEvent("UNIT_AURA")
 
     -- Rebuild filter strings from current settings
     DF:RebuildDirectFilterStrings()
@@ -943,17 +942,13 @@ function DF:DirectScanAllUnits()
     end
 end
 
--- Re-register when roster changes (units may change)
+-- Re-scan when roster changes (units may change)
 function DF:DirectModeRosterUpdate()
     if not directModeActive then return end
     if not DF.unitFrameMap then return end
 
-    directModeFrame:UnregisterAllEvents()
-    for unit in pairs(DF.unitFrameMap) do
-        directModeFrame:RegisterUnitEvent("UNIT_AURA", unit)
-    end
-
-    -- Full scan after roster change
+    -- UNIT_AURA is already registered globally (RegisterEvent, not
+    -- RegisterUnitEvent), so no re-registration needed — just rescan.
     DF:DirectScanAllUnits()
 end
 
