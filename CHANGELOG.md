@@ -12,6 +12,7 @@
 ### Aura Designer
 * **Buff coexistence** — standard buff icons can now display alongside Aura Designer indicators. When enabling AD a popup asks whether to keep or replace standard buffs, with info banners in both tabs for quick toggling
 * **Health Bar Color tint mode rework** — uses a StatusBar overlay instead of color blending, fixing tint not working reliably with Blizzard's protected health values
+* **Preview scale slider** — adjustable zoom (0.75×–2.5×) for the frame preview window, making it easier to place indicators on small frames like raid frames
 * Aura Designer now refreshes when switching specs so per-spec aura lists update immediately
 
 ### Click Casting
@@ -19,6 +20,9 @@
 * Removed "Show Tooltips" toggle from click-cast panel (now in Tooltip settings)
 
 ### Bug Fixes
+* Fix Direct Aura API only tracking one player's auras — RegisterUnitEvent in a loop silently dropped all but the last unit
+* Fix animated border flickering in Aura Designer border mode
+* Fix missing raid groups when reloading UI during combat — header visibility is now set up during the ADDON_LOADED grace window
 * Fix permanent buff duration text showing on non-expiring auras — native countdown text now stays as child of cooldown frame for proper auto-hiding when auras shift
 * Fix debuffs being hidden when Aura Designer is enabled — debuffs now always display regardless of AD state
 * Fix Health Bar Color replace mode not reverting when the aura drops off
