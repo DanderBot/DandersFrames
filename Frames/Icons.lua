@@ -96,6 +96,239 @@ local function SetDefensiveCooldown()
     end
 end
 
+-- ============================================================
+-- MULTI-DEFENSIVE BAR (Direct API mode)
+-- Creates additional defensive icon frames on-demand for showing
+-- multiple big defensives simultaneously
+-- ============================================================
+
+-- Create or get a defensive bar icon at the given index (1-based)
+-- Index 1 reuses the existing frame.defensiveIcon
+local function GetOrCreateDefensiveBarIcon(frame, index)
+    if index == 1 then return frame.defensiveIcon end
+
+    -- Lazy-init the array
+    if not frame.defensiveBarIcons then
+        frame.defensiveBarIcons = {}
+    end
+
+    local icon = frame.defensiveBarIcons[index]
+    if icon then return icon end
+
+    -- Create a new icon frame cloned from the same pattern as Create.lua
+    icon = CreateFrame("Frame", nil, frame.contentOverlay)
+    icon:SetSize(24, 24)
+    icon:SetFrameLevel(frame.contentOverlay:GetFrameLevel() + 15)
+    icon:Hide()
+
+    local borderSize = 2
+    icon.borderLeft = icon:CreateTexture(nil, "BACKGROUND")
+    icon.borderLeft:SetPoint("TOPLEFT", 0, 0)
+    icon.borderLeft:SetPoint("BOTTOMLEFT", 0, 0)
+    icon.borderLeft:SetWidth(borderSize)
+    icon.borderLeft:SetColorTexture(0, 0.8, 0, 1)
+
+    icon.borderRight = icon:CreateTexture(nil, "BACKGROUND")
+    icon.borderRight:SetPoint("TOPRIGHT", 0, 0)
+    icon.borderRight:SetPoint("BOTTOMRIGHT", 0, 0)
+    icon.borderRight:SetWidth(borderSize)
+    icon.borderRight:SetColorTexture(0, 0.8, 0, 1)
+
+    icon.borderTop = icon:CreateTexture(nil, "BACKGROUND")
+    icon.borderTop:SetPoint("TOPLEFT", borderSize, 0)
+    icon.borderTop:SetPoint("TOPRIGHT", -borderSize, 0)
+    icon.borderTop:SetHeight(borderSize)
+    icon.borderTop:SetColorTexture(0, 0.8, 0, 1)
+
+    icon.borderBottom = icon:CreateTexture(nil, "BACKGROUND")
+    icon.borderBottom:SetPoint("BOTTOMLEFT", borderSize, 0)
+    icon.borderBottom:SetPoint("BOTTOMRIGHT", -borderSize, 0)
+    icon.borderBottom:SetHeight(borderSize)
+    icon.borderBottom:SetColorTexture(0, 0.8, 0, 1)
+
+    icon.texture = icon:CreateTexture(nil, "ARTWORK")
+    icon.texture:SetPoint("TOPLEFT", borderSize, -borderSize)
+    icon.texture:SetPoint("BOTTOMRIGHT", -borderSize, borderSize)
+    icon.texture:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+    icon.cooldown = CreateFrame("Cooldown", nil, icon, "CooldownFrameTemplate")
+    icon.cooldown:SetAllPoints(icon.texture)
+    icon.cooldown:SetDrawEdge(false)
+    icon.cooldown:SetDrawSwipe(true)
+    icon.cooldown:SetReverse(true)
+    icon.cooldown:SetHideCountdownNumbers(false)
+
+    icon.count = icon:CreateFontString(nil, "OVERLAY")
+    DF:SafeSetFont(icon.count, "Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
+    icon.count:SetPoint("BOTTOMRIGHT", -1, 1)
+    icon.count:SetTextColor(1, 1, 1, 1)
+
+    icon.unitFrame = frame
+    icon.auraType = "DEFENSIVE"
+
+    -- Tooltip handling
+    icon:SetScript("OnEnter", function(self)
+        if not self:IsShown() then return end
+        if self.auraData and self.auraData.auraInstanceID and self.unitFrame then
+            local unit = self.unitFrame.unit
+            if unit then
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:SetUnitAura(unit, self.auraData.auraInstanceID)
+                GameTooltip:Show()
+            end
+        end
+    end)
+    icon:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
+
+    if icon.SetMouseClickEnabled then
+        icon:SetMouseClickEnabled(false)
+    end
+
+    frame.defensiveBarIcons[index] = icon
+    return icon
+end
+
+-- Render a single defensive icon at a position in the bar
+local function RenderDefensiveBarIcon(icon, unit, auraInstanceID, db, iconSize, borderSize, borderColor, showBorder, showDuration, durationScale, durationFont, durationOutline, durationX, durationY, durationColor)
+    -- Get aura data
+    local auraData = nil
+    pcall(function()
+        auraData = C_UnitAuras.GetAuraDataByAuraInstanceID(unit, auraInstanceID)
+    end)
+
+    if not auraData then
+        icon:Hide()
+        return false
+    end
+
+    -- Set texture
+    local textureSet = false
+    pcall(function()
+        icon.texture:SetTexture(auraData.icon)
+        textureSet = true
+    end)
+
+    if not textureSet then
+        icon:Hide()
+        return false
+    end
+
+    -- Store aura data for tooltip
+    if not icon.auraData then
+        icon.auraData = { auraInstanceID = nil }
+    end
+    icon.auraData.auraInstanceID = auraInstanceID
+
+    -- Cooldown
+    pcall(function()
+        if icon.cooldown.SetCooldownFromExpirationTime and auraData.expirationTime and auraData.duration then
+            icon.cooldown:SetCooldownFromExpirationTime(auraData.expirationTime, auraData.duration)
+        end
+    end)
+
+    -- Expiration check
+    local hasExpiration = nil
+    if C_UnitAuras.DoesAuraHaveExpirationTime then
+        hasExpiration = C_UnitAuras.DoesAuraHaveExpirationTime(unit, auraInstanceID)
+    end
+    if icon.cooldown.SetShownFromBoolean then
+        icon.cooldown:SetShownFromBoolean(hasExpiration, true, false)
+    else
+        icon.cooldown:Show()
+    end
+
+    -- Swipe
+    icon.cooldown:SetDrawSwipe(not db.defensiveIconHideSwipe)
+
+    -- Duration text
+    icon.cooldown:SetHideCountdownNumbers(not showDuration)
+
+    -- Style native cooldown text
+    if not icon.nativeCooldownText then
+        local regions = {icon.cooldown:GetRegions()}
+        for _, region in ipairs(regions) do
+            if region and region.GetObjectType and region:GetObjectType() == "FontString" then
+                icon.nativeCooldownText = region
+                break
+            end
+        end
+    end
+    if icon.nativeCooldownText then
+        local dSize = 10 * durationScale
+        DF:SafeSetFont(icon.nativeCooldownText, durationFont, dSize, durationOutline)
+        icon.nativeCooldownText:ClearAllPoints()
+        icon.nativeCooldownText:SetPoint("CENTER", icon, "CENTER", durationX, durationY)
+        icon.nativeCooldownText:SetTextColor(durationColor.r, durationColor.g, durationColor.b, 1)
+    end
+
+    -- Stack count
+    icon.count:SetText("")
+    if C_UnitAuras.GetAuraApplicationDisplayCount then
+        local stackText = C_UnitAuras.GetAuraApplicationDisplayCount(unit, auraInstanceID, 2, 99)
+        if stackText then
+            icon.count:SetText(stackText)
+        end
+    end
+
+    -- Border
+    if showBorder then
+        if icon.borderLeft then
+            icon.borderLeft:SetColorTexture(borderColor.r, borderColor.g, borderColor.b, borderColor.a)
+            icon.borderLeft:SetWidth(borderSize)
+            icon.borderLeft:Show()
+        end
+        if icon.borderRight then
+            icon.borderRight:SetColorTexture(borderColor.r, borderColor.g, borderColor.b, borderColor.a)
+            icon.borderRight:SetWidth(borderSize)
+            icon.borderRight:Show()
+        end
+        if icon.borderTop then
+            icon.borderTop:SetColorTexture(borderColor.r, borderColor.g, borderColor.b, borderColor.a)
+            icon.borderTop:SetHeight(borderSize)
+            icon.borderTop:ClearAllPoints()
+            icon.borderTop:SetPoint("TOPLEFT", borderSize, 0)
+            icon.borderTop:SetPoint("TOPRIGHT", -borderSize, 0)
+            icon.borderTop:Show()
+        end
+        if icon.borderBottom then
+            icon.borderBottom:SetColorTexture(borderColor.r, borderColor.g, borderColor.b, borderColor.a)
+            icon.borderBottom:SetHeight(borderSize)
+            icon.borderBottom:ClearAllPoints()
+            icon.borderBottom:SetPoint("BOTTOMLEFT", borderSize, 0)
+            icon.borderBottom:SetPoint("BOTTOMRIGHT", -borderSize, 0)
+            icon.borderBottom:Show()
+        end
+        icon.texture:ClearAllPoints()
+        icon.texture:SetPoint("TOPLEFT", borderSize, -borderSize)
+        icon.texture:SetPoint("BOTTOMRIGHT", -borderSize, borderSize)
+    else
+        if icon.borderLeft then icon.borderLeft:Hide() end
+        if icon.borderRight then icon.borderRight:Hide() end
+        if icon.borderTop then icon.borderTop:Hide() end
+        if icon.borderBottom then icon.borderBottom:Hide() end
+        icon.texture:ClearAllPoints()
+        icon.texture:SetPoint("TOPLEFT", 0, 0)
+        icon.texture:SetPoint("BOTTOMRIGHT", 0, 0)
+    end
+
+    icon:SetSize(iconSize, iconSize)
+    icon:Show()
+    return true
+end
+
+-- Hide a defensive bar icon at the given index
+local function HideDefensiveBarIcon(frame, index)
+    if index == 1 then
+        frame.defensiveIcon:Hide()
+        return
+    end
+    if frame.defensiveBarIcons and frame.defensiveBarIcons[index] then
+        frame.defensiveBarIcons[index]:Hide()
+    end
+end
+
 -- Get raid buff icons for fallback filtering (when spellId is secret)
 -- This is cached after first call
 function DF:GetRaidBuffIcons()
@@ -568,10 +801,86 @@ function DF:UpdateDefensiveBar(frame)
         return
     end
     
-    -- Check Blizzard's cached defensive from CenterDefensiveBuff
+    -- Check for Direct mode multi-defensive
     local cache = DF.BlizzardAuraCache and DF.BlizzardAuraCache[unit]
+    if db.auraSourceMode == "DIRECT" then
+        -- DIRECT MODE: Show multiple big defensives
+        local maxDefs = db.defensiveBarMax or 4
+        local iconSize = db.defensiveBarIconSize or db.defensiveIconSize or 24
+        local borderSize = db.defensiveIconBorderSize or 2
+        local borderColor = db.defensiveIconBorderColor or DEFAULT_DEFENSIVE_BORDER_COLOR
+        local showBorder = db.defensiveIconShowBorder ~= false
+        local showDuration = db.defensiveIconShowDuration ~= false
+        local durationScale = db.defensiveIconDurationScale or 1.0
+        local durationFont = db.defensiveIconDurationFont or "Fonts\\FRIZQT__.TTF"
+        local durationOutline = db.defensiveIconDurationOutline or "OUTLINE"
+        if durationOutline == "NONE" then durationOutline = "" end
+        local durationX = db.defensiveIconDurationX or 0
+        local durationY = db.defensiveIconDurationY or 0
+        local durationColor = db.defensiveIconDurationColor or DEFAULT_DEFENSIVE_DURATION_COLOR
+        local anchor = db.defensiveIconAnchor or "CENTER"
+        local baseX = db.defensiveIconX or 0
+        local baseY = db.defensiveIconY or 0
+        local scale = db.defensiveIconScale or 1.0
+        local spacing = db.defensiveBarSpacing or 2
+        local growth = db.defensiveBarGrowth or "RIGHT"
+
+        if db.pixelPerfect then
+            borderSize = DF:PixelPerfect(borderSize)
+            iconSize = DF:PixelPerfect(iconSize)
+        end
+
+        local count = 0
+        if cache and cache.defensives then
+            for id in pairs(cache.defensives) do
+                if count >= maxDefs then break end
+                count = count + 1
+                local icon = GetOrCreateDefensiveBarIcon(frame, count)
+                RenderDefensiveBarIcon(icon, unit, id, db, iconSize, borderSize, borderColor, showBorder, showDuration, durationScale, durationFont, durationOutline, durationX, durationY, durationColor)
+
+                -- Position the icon relative to the anchor
+                local offsetX, offsetY = 0, 0
+                local idx = count - 1  -- 0-based for offset calculation
+                if growth == "RIGHT" then
+                    offsetX = idx * (iconSize + spacing)
+                elseif growth == "LEFT" then
+                    offsetX = -idx * (iconSize + spacing)
+                elseif growth == "UP" then
+                    offsetY = idx * (iconSize + spacing)
+                elseif growth == "DOWN" then
+                    offsetY = -idx * (iconSize + spacing)
+                end
+
+                icon:SetScale(scale)
+                icon:ClearAllPoints()
+                icon:SetPoint(anchor, frame, anchor, baseX + offsetX, baseY + offsetY)
+
+                -- Frame level
+                local frameLevel = db.defensiveIconFrameLevel or 0
+                if frameLevel == 0 then
+                    icon:SetFrameLevel(frame.contentOverlay:GetFrameLevel() + 15)
+                else
+                    icon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
+                end
+            end
+        end
+
+        -- Hide remaining icons
+        for i = count + 1, maxDefs do
+            HideDefensiveBarIcon(frame, i)
+        end
+
+        -- If no defensives found, hide the primary icon too
+        if count == 0 then
+            frame.defensiveIcon:Hide()
+        end
+
+        return
+    end
+
+    -- BLIZZARD MODE: Single defensive from CenterDefensiveBuff (existing behavior)
     local auraInstanceID = nil
-    
+
     if cache and cache.defensives then
         -- Get the first (and only) defensive from cache
         for id in pairs(cache.defensives) do
@@ -579,7 +888,7 @@ function DF:UpdateDefensiveBar(frame)
             break
         end
     end
-    
+
     if not auraInstanceID then
         frame.defensiveIcon:Hide()
         return
@@ -825,6 +1134,12 @@ function DF:HideAllDefensiveBars()
     local function hideFrame(frame)
         if frame and frame.defensiveIcon then
             frame.defensiveIcon:Hide()
+        end
+        -- Also hide multi-defensive bar icons
+        if frame and frame.defensiveBarIcons then
+            for _, icon in pairs(frame.defensiveBarIcons) do
+                icon:Hide()
+            end
         end
     end
     

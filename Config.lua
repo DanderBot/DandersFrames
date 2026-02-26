@@ -846,6 +846,22 @@ DF.PartyDefaults = {
     buffFilterMode = "BLIZZARD",
     buffFilterPlayer = true,
     buffFilterRaid = false,
+
+    -- Aura Source Mode
+    auraSourceMode = "BLIZZARD",              -- "BLIZZARD" or "DIRECT"
+
+    -- Direct Mode: Buff Filters
+    directBuffFilterPlayer = true,            -- PLAYER filter
+    directBuffFilterRaid = false,             -- RAID filter
+    directBuffFilterRaidInCombat = false,     -- RAID_IN_COMBAT filter
+    directBuffFilterCancelable = false,       -- CANCELABLE filter
+    directBuffSortOrder = "DEFAULT",          -- "DEFAULT" / "TIME" / "NAME"
+
+    -- Direct Mode: Debuff Filters
+    directDebuffFilterRaid = false,           -- RAID filter
+    directDebuffFilterCrowdControl = false,   -- CROWD_CONTROL filter
+    directDebuffSortOrder = "DEFAULT",        -- "DEFAULT" / "TIME" / "NAME"
+
     buffGrowth = "LEFT_UP",
     buffHideSwipe = false,
     buffMax = 5,
@@ -1978,6 +1994,22 @@ DF.RaidDefaults = {
     buffFilterMode = "BLIZZARD",
     buffFilterPlayer = true,
     buffFilterRaid = false,
+
+    -- Aura Source Mode
+    auraSourceMode = "BLIZZARD",              -- "BLIZZARD" or "DIRECT"
+
+    -- Direct Mode: Buff Filters
+    directBuffFilterPlayer = true,            -- PLAYER filter
+    directBuffFilterRaid = false,             -- RAID filter
+    directBuffFilterRaidInCombat = false,     -- RAID_IN_COMBAT filter
+    directBuffFilterCancelable = false,       -- CANCELABLE filter
+    directBuffSortOrder = "DEFAULT",          -- "DEFAULT" / "TIME" / "NAME"
+
+    -- Direct Mode: Debuff Filters
+    directDebuffFilterRaid = false,           -- RAID filter
+    directDebuffFilterCrowdControl = false,   -- CROWD_CONTROL filter
+    directDebuffSortOrder = "DEFAULT",        -- "DEFAULT" / "TIME" / "NAME"
+
     buffGrowth = "LEFT_UP",
     buffHideSwipe = false,
     buffMax = 5,
