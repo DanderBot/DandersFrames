@@ -1793,7 +1793,7 @@ function Indicators:ApplyBar(frame, config, auraData, defaults, auraName, priori
 
     -- Set initial bar color
     -- When a color curve exists, evaluate it immediately to avoid flicker
-    -- (ApplyBar runs on every HARF callback; without this, the fill color
+    -- (ApplyBar runs on every aura update; without this, the fill color
     -- would flash briefly until the throttled OnUpdate re-evaluates the curve)
     if bar.dfAD_colorCurve and frame.unit and auraData.auraInstanceID
        and C_UnitAuras and C_UnitAuras.GetAuraDuration then

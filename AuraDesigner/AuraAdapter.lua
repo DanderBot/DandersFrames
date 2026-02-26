@@ -2,16 +2,10 @@ local addonName, DF = ...
 
 -- ============================================================
 -- AURA DESIGNER - DATA SOURCE ADAPTER
--- Abstraction layer between the Aura Designer and the aura data
--- source. This is the ONLY file that knows about the external
--- data provider (currently Harrek's Advanced Raid Frames).
---
--- Any future provider must implement:
---   :IsAvailable()              → boolean
---   :GetSourceName()            → string
---   :GetUnitAuras(unit)         → { [auraName] = normalizedData }
---   :RegisterCallback(owner, cb)
---   :UnregisterCallback(owner)
+-- Bridges the Aura Designer to Blizzard's C_UnitAuras API.
+-- Uses DF.BlizzardAuraCache (populated by the Blizzard frame
+-- hook in Features/Auras.lua) for secret-safe aura queries,
+-- with a direct C_UnitAuras scan fallback for early init.
 --
 -- Normalized aura data format:
 --   {
@@ -36,98 +30,21 @@ local AuraAdapter = {}
 DF.AuraDesigner.Adapter = AuraAdapter
 
 -- ============================================================
--- PROVIDER ABSTRACTION
--- The adapter auto-selects the best available provider:
---   1. Harrek's Advanced Raid Frames (if installed)
---   2. Fallback: direct C_UnitAuras scanning
+-- BLIZZARD AURA PROVIDER
+-- Uses DF.BlizzardAuraCache (populated by the hooksecurefunc on
+-- CompactUnitFrame_UpdateAuras in Features/Auras.lua) for
+-- secret-safe queries. Falls back to direct C_UnitAuras scan
+-- with pcall protection during early init.
 -- ============================================================
 
-local activeProvider = nil  -- Set during initialization
+local Provider = {}
 
--- ============================================================
--- HARREK'S PROVIDER
--- Uses AdvancedRaidFramesAPI which handles all aura identification
--- and tracking internally. We just read its data directly.
--- HARF returns C_UnitAuras.GetAuraDataByAuraInstanceID() results
--- which contain all display fields (may be secret — that's fine).
--- ============================================================
-
-local HarrekProvider = {}
-
-function HarrekProvider:IsAvailable()
-    return AdvancedRaidFramesAPI ~= nil
-end
-
-function HarrekProvider:GetSourceName()
-    return "Harrek's Advanced Raid Frames"
-end
-
-function HarrekProvider:GetUnitAuras(unit, spec)
-    local API = AdvancedRaidFramesAPI
-    if not API then return {} end
-
-    local spellIDs = DF.AuraDesigner.SpellIDs[spec]
-    if not spellIDs then return {} end
-
-    local result = {}
-    for _, auraInfo in ipairs(DF.AuraDesigner.TrackableAuras[spec] or {}) do
-        local auraName = auraInfo.name
-        -- HARF tracks this aura — check if it's active on the unit
-        -- API.GetUnitAura returns C_UnitAuras.GetAuraDataByAuraInstanceID() data
-        -- which already has all fields (icon, duration, etc. may be secret — that's OK,
-        -- Blizzard display APIs like SetTexture, SetCooldownFromExpirationTime accept them)
-        local harfData = API.GetUnitAura(unit, auraName)
-        if harfData then
-            result[auraName] = {
-                spellId = spellIDs[auraName] or 0,    -- our known non-secret ID
-                icon = harfData.icon,                   -- may be secret; OK for SetTexture
-                duration = harfData.duration,            -- may be secret; OK for SetCooldownFromExpirationTime
-                expirationTime = harfData.expirationTime, -- may be secret
-                stacks = harfData.applications,          -- may be secret; OK for GetAuraApplicationDisplayCount
-                caster = harfData.sourceUnit,
-                auraInstanceID = harfData.auraInstanceID, -- always non-secret
-            }
-        end
-    end
-
-    return result
-end
-
--- Callback registry for Harrek provider
-local harrekCallbacks = {}
-
-function HarrekProvider:RegisterCallback(owner, callback)
-    harrekCallbacks[owner] = callback
-    -- Wire to HARF's callback system
-    if AdvancedRaidFramesAPI and AdvancedRaidFramesAPI.RegisterCallback then
-        AdvancedRaidFramesAPI.RegisterCallback(owner, "HARF_UNIT_AURA", function(_, unit, auraData)
-            if callback then callback(unit) end
-        end)
-    end
-end
-
-function HarrekProvider:UnregisterCallback(owner)
-    harrekCallbacks[owner] = nil
-    if AdvancedRaidFramesAPI and AdvancedRaidFramesAPI.UnregisterCallback then
-        AdvancedRaidFramesAPI.UnregisterCallback(owner, "HARF_UNIT_AURA")
-    end
-end
-
--- ============================================================
--- FALLBACK PROVIDER
--- Uses DF.BlizzardAuraCache (populated by the Blizzard frame
--- hook in Features/Auras.lua) for secret-safe aura queries.
--- Falls back to direct C_UnitAuras scan with pcall protection.
--- ============================================================
-
-local FallbackProvider = {}
-
-function FallbackProvider:IsAvailable()
+function Provider:IsAvailable()
     return true  -- Always available
 end
 
-function FallbackProvider:GetSourceName()
-    return "Built-in (BlizzardAuraCache)"
+function Provider:GetSourceName()
+    return "Blizzard Aura API"
 end
 
 -- Build a reverse lookup: spellId → auraName for fast matching
@@ -140,6 +57,13 @@ local function GetSpellIdLookup(spec)
     if ids then
         for auraName, spellId in pairs(ids) do
             lookup[spellId] = auraName
+        end
+    end
+    -- Merge alternate spell IDs (e.g., Earth Shield 974 → "EarthShield")
+    local alts = DF.AuraDesigner.AlternateSpellIDs and DF.AuraDesigner.AlternateSpellIDs[spec]
+    if alts then
+        for altSpellId, auraName in pairs(alts) do
+            lookup[altSpellId] = auraName
         end
     end
     spellIdLookup[spec] = lookup
@@ -155,7 +79,7 @@ local instanceIdToAuraName = {}  -- { [auraInstanceID] = auraName }
 local adapterDebugLast = 0
 local ADAPTER_DEBUG_INTERVAL = 3
 
-function FallbackProvider:GetUnitAuras(unit, spec)
+function Provider:GetUnitAuras(unit, spec)
     local lookup = GetSpellIdLookup(spec)  -- { [spellId] = auraName }
     if not lookup or not next(lookup) then return {} end
 
@@ -249,7 +173,7 @@ function FallbackProvider:GetUnitAuras(unit, spec)
 
     if shouldLog then
         adapterDebugLast = now
-        DF:Debug("AD", "Fallback: unit=%s spec=%s scanned=%d matched=%d cacheHits=%d blizzCache=%s",
+        DF:Debug("AD", "unit=%s spec=%s scanned=%d matched=%d cacheHits=%d blizzCache=%s",
             unit, spec, scannedCount, matchedCount, cacheHits,
             blizzCache and "yes" or "no")
     end
@@ -257,66 +181,45 @@ function FallbackProvider:GetUnitAuras(unit, spec)
     return result
 end
 
--- Fallback uses a simple event frame for UNIT_AURA
-local fallbackCallbacks = {}
-local fallbackEventFrame
+-- Uses a simple event frame for UNIT_AURA
+local callbacks = {}
+local eventFrame
 
-function FallbackProvider:RegisterCallback(owner, callback)
-    fallbackCallbacks[owner] = callback
-    if not fallbackEventFrame then
-        fallbackEventFrame = CreateFrame("Frame")
-        fallbackEventFrame:RegisterEvent("UNIT_AURA")
-        fallbackEventFrame:SetScript("OnEvent", function(_, _, unit)
-            for _, cb in pairs(fallbackCallbacks) do
+function Provider:RegisterCallback(owner, callback)
+    callbacks[owner] = callback
+    if not eventFrame then
+        eventFrame = CreateFrame("Frame")
+        eventFrame:RegisterEvent("UNIT_AURA")
+        eventFrame:SetScript("OnEvent", function(_, _, unit)
+            for _, cb in pairs(callbacks) do
                 cb(unit)
             end
         end)
     end
 end
 
-function FallbackProvider:UnregisterCallback(owner)
-    fallbackCallbacks[owner] = nil
+function Provider:UnregisterCallback(owner)
+    callbacks[owner] = nil
     -- Clean up event frame if no callbacks remain
-    if fallbackEventFrame and not next(fallbackCallbacks) then
-        fallbackEventFrame:UnregisterAllEvents()
-        fallbackEventFrame = nil
-    end
-end
-
--- ============================================================
--- PROVIDER SELECTION
--- ============================================================
-
-local function SelectProvider()
-    if HarrekProvider:IsAvailable() then
-        activeProvider = HarrekProvider
-        DF:Debug("AD", "Provider selected: Harrek's Advanced Raid Frames (HARF API available)")
-    else
-        activeProvider = FallbackProvider
-        DF:Debug("AD", "Provider selected: FallbackProvider (HARF API not available)")
+    if eventFrame and not next(callbacks) then
+        eventFrame:UnregisterAllEvents()
+        eventFrame = nil
     end
 end
 
 -- ============================================================
 -- PUBLIC ADAPTER API
--- These methods delegate to the active provider.
+-- These methods delegate to the provider.
 -- ============================================================
 
 -- Returns true if a data source is available
 function AuraAdapter:IsAvailable()
-    if not activeProvider then SelectProvider() end
-    return activeProvider:IsAvailable()
-end
-
--- Returns true specifically when HARF is loaded (not just fallback)
-function AuraAdapter:IsHARFAvailable()
-    return HarrekProvider:IsAvailable()
+    return Provider:IsAvailable()
 end
 
 -- Returns a display name for the current data source
 function AuraAdapter:GetSourceName()
-    if not activeProvider then SelectProvider() end
-    return activeProvider:GetSourceName()
+    return Provider:GetSourceName()
 end
 
 -- ============================================================
@@ -362,41 +265,25 @@ end
 
 -- ============================================================
 -- RUNTIME DATA
--- Delegates to the active provider for live aura queries.
+-- Delegates to the provider for live aura queries.
 -- ============================================================
 
 -- Returns a table of currently active tracked auras for a unit
 -- Format: { [auraName] = { spellId, icon, duration, expirationTime, stacks, caster } }
 function AuraAdapter:GetUnitAuras(unit, spec)
-    if not activeProvider then SelectProvider() end
-
-    -- Re-check: if we're on FallbackProvider but HARF is now available, switch
-    if activeProvider == FallbackProvider and HarrekProvider:IsAvailable() then
-        DF:Debug("AD", "HARF became available — switching from FallbackProvider to HarrekProvider")
-        SelectProvider()
-    end
-
     if not spec then spec = self:GetPlayerSpec() end
     if not spec then return {} end
-    return activeProvider:GetUnitAuras(unit, spec)
+    return Provider:GetUnitAuras(unit, spec)
 end
 
 -- Registers a callback for when a unit's auras change
 -- callback(unit) is called whenever unit auras may have changed
 function AuraAdapter:RegisterCallback(owner, callback)
-    if not activeProvider then SelectProvider() end
-    activeProvider:RegisterCallback(owner, callback)
+    Provider:RegisterCallback(owner, callback)
 end
 
 function AuraAdapter:UnregisterCallback(owner)
-    if not activeProvider then SelectProvider() end
-    activeProvider:UnregisterCallback(owner)
-end
-
--- Force re-selection of provider (e.g., after addon load order settles)
-function AuraAdapter:RefreshProvider()
-    activeProvider = nil
-    SelectProvider()
+    Provider:UnregisterCallback(owner)
 end
 
 -- ============================================================

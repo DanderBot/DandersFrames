@@ -3542,6 +3542,28 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
             DF.db.raidAutoEditingRecovery = nil
         end
 
+        -- Clean up Aura Designer entries for spells removed in the HARF→native transition.
+        -- These spells remain secret and can no longer be tracked without HARF.
+        local removedAuras = {
+            "TimeDilation", "Rewind", "VerdantEmbrace", "SensePower",
+            "IronBark", "PainSuppression", "PowerInfusion", "GuardianSpirit",
+            "LifeCocoon", "StrengthOfTheBlackOx",
+            "BlessingOfProtection", "HolyBulwark", "SacredWeapon",
+            "BlessingOfSacrifice", "BeaconOfVirtue",
+        }
+        if DandersFramesDB_v2 and DandersFramesDB_v2.profiles then
+            for _, profile in pairs(DandersFramesDB_v2.profiles) do
+                for _, mode in ipairs({"party", "raid"}) do
+                    local ad = profile[mode] and profile[mode].auraDesigner
+                    if ad and ad.auras then
+                        for _, auraName in ipairs(removedAuras) do
+                            ad.auras[auraName] = nil
+                        end
+                    end
+                end
+            end
+        end
+
         -- Wrap DF.db with overlay proxy (must happen AFTER all migrations,
         -- BEFORE anything that reads through the proxy)
         DF:WrapDB()
@@ -4298,10 +4320,6 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         -- Debug (use /df debugrole to enable)
         if DF.debugRoleIcons then
             print("|cff00ffffDF ROLE:|r PLAYER_REGEN_DISABLED (entering combat)")
-        end
-        -- Entering combat - hide all missing buff icons immediately
-        if DF.HideAllMissingBuffIcons then
-            DF:HideAllMissingBuffIcons()
         end
         -- Update role icons (in case hideInCombat is enabled)
         if DF.UpdateAllRoleIcons then

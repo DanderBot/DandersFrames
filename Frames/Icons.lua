@@ -346,36 +346,6 @@ function DF:UpdateMissingBuffIcon(frame)
         return
     end
     
-    -- ========================================
-    -- PRIORITY HIDE CHECKS
-    -- These conditions ALWAYS hide the icon, regardless of buff state
-    -- ========================================
-    
-    -- Hide during combat - aura data may be protected/secret
-    if InCombatLockdown() then
-        frame.missingBuffFrame:Hide()
-        return
-    end
-    
-    -- Hide during encounter (boss fights) - same protection as combat
-    if IsEncounterInProgress and IsEncounterInProgress() then
-        frame.missingBuffFrame:Hide()
-        return
-    end
-    
-    -- Hide in M+ keys - aura data is fully protected/secret during keystones
-    if C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive and C_ChallengeMode.IsChallengeModeActive() then
-        frame.missingBuffFrame:Hide()
-        return
-    end
-    
-    -- Hide in PvP (arenas and battlegrounds) - same aura protection as M+
-    local contentType = DF:GetContentType()
-    if contentType == "arena" or contentType == "battleground" then
-        frame.missingBuffFrame:Hide()
-        return
-    end
-    
     local unit = frame.unit
     
     -- Hide for dead or offline units
@@ -543,20 +513,6 @@ function DF:UpdateAllMissingBuffIcons()
         return
     end
     
-    -- Disable in M+ keys - aura data is fully protected/secret during keystones
-    if C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive and C_ChallengeMode.IsChallengeModeActive() then
-        return
-    end
-    
-    -- Disable in PvP (arenas and battlegrounds) - same aura protection as M+
-    local contentType = DF:GetContentType()
-    if contentType == "arena" or contentType == "battleground" then
-        return
-    end
-    
-    -- Safety check - only run out of combat
-    if InCombatLockdown() then return end
-    
     -- Throttle updates to avoid spam (0.1 second minimum between updates)
     local now = GetTime()
     if DF.lastMissingBuffUpdate and (now - DF.lastMissingBuffUpdate) < 0.1 then
@@ -581,27 +537,6 @@ function DF:UpdateAllMissingBuffIcons()
     end
 end
 
--- Hide all missing buff icons (called when entering combat)
-function DF:HideAllMissingBuffIcons()
-    -- Clear caches
-    wipe(missingBuffCache)
-    wipe(missingBuffThrottle)
-    
-    local function hideFrame(frame)
-        if frame and frame.missingBuffFrame then
-            frame.missingBuffFrame:Hide()
-        end
-    end
-    
-    -- Party frames via iterator
-    if DF.IteratePartyFrames then
-        DF:IteratePartyFrames(hideFrame)
-    end
-    
-    -- Raid frames via iterator
-    if DF.IterateRaidFrames then
-        DF:IterateRaidFrames(hideFrame)
-    end
 end
 
 -- ========================================
