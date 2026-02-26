@@ -3605,6 +3605,123 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     -- ========================================
     CreateCategory("auras", "Auras")
 
+    -- Auras > Aura Filters (master switch for Blizzard vs Direct API mode)
+    local pageAuraFilters = CreateSubTab("auras", "auras_filters", "Aura Filters")
+    BuildPage(pageAuraFilters, function(self, db, Add, AddSpace, AddSyncPoint)
+        -- Copy button at top
+        Add(CreateCopyButton(self.child, {"auraSourceMode", "directBuff", "directDebuff"}, "Aura Filters", "auras_filters"), 25, 2)
+
+        -- hideOn helper: only show Direct mode options when Direct is selected
+        local function HideDirectOptions(d)
+            return d.auraSourceMode ~= "DIRECT"
+        end
+
+        -- Callback that rebuilds filter strings and rescans
+        local function DirectFilterChanged()
+            if DF.RebuildDirectFilterStrings then
+                DF:RebuildDirectFilterStrings()
+            end
+            if DF.DirectScanAllUnits then
+                DF:DirectScanAllUnits()
+            end
+        end
+
+        -- ===== MODE SELECTION (Column 1) =====
+        local modeGroup = GUI:CreateSettingsGroup(self.child, 280)
+        modeGroup:AddWidget(GUI:CreateHeader(self.child, "Aura Data Source"), 40)
+        modeGroup:AddWidget(GUI:CreateLabel(self.child, "Choose how DandersFrames reads aura data for buffs, debuffs, defensives, and dispel detection.", 250), 45)
+
+        local modeOptions = {
+            BLIZZARD = "Blizzard (Default)",
+            DIRECT = "Direct API",
+        }
+        modeGroup:AddWidget(GUI:CreateDropdown(self.child, "Source Mode", modeOptions, db, "auraSourceMode", function()
+            if DF.SetAuraSourceMode then
+                DF:SetAuraSourceMode(db.auraSourceMode)
+            end
+            self:RefreshStates()
+        end), 55)
+
+        modeGroup:AddWidget(GUI:CreateLabel(self.child, "|cff888888Blizzard: Uses Blizzard's built-in aura filtering. No customisation available.\n\nDirect API: Queries the aura API directly. Full control over which buffs and debuffs appear.|r", 250), 80)
+        Add(modeGroup, nil, 1)
+
+        -- ===== BUFF FILTERS (Column 2, Direct mode only) =====
+        local buffGroup = GUI:CreateSettingsGroup(self.child, 280)
+        local buffHeader = buffGroup:AddWidget(GUI:CreateHeader(self.child, "Buff Filters"), 40)
+        buffHeader.hideOn = HideDirectOptions
+
+        local buffInfo = buffGroup:AddWidget(GUI:CreateLabel(self.child, "Select which buffs to display. Combine filters to narrow results.", 250), 35)
+        buffInfo.hideOn = HideDirectOptions
+
+        local bfPlayer = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, "My Buffs Only", db, "directBuffFilterPlayer", DirectFilterChanged), 30)
+        bfPlayer.hideOn = HideDirectOptions
+
+        local bfRaid = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, "Raid Buffs", db, "directBuffFilterRaid", DirectFilterChanged), 30)
+        bfRaid.hideOn = HideDirectOptions
+
+        local bfRaidIC = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, "Raid In Combat", db, "directBuffFilterRaidInCombat", DirectFilterChanged), 30)
+        bfRaidIC.hideOn = HideDirectOptions
+
+        local bfCancel = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, "Cancelable Only", db, "directBuffFilterCancelable", DirectFilterChanged), 30)
+        bfCancel.hideOn = HideDirectOptions
+
+        local buffSortOptions = {
+            DEFAULT = "Default (Slot Order)",
+            TIME = "Time Remaining",
+            NAME = "Alphabetical",
+        }
+        local bfSort = buffGroup:AddWidget(GUI:CreateDropdown(self.child, "Sort Order", buffSortOptions, db, "directBuffSortOrder", DirectFilterChanged), 55)
+        bfSort.hideOn = HideDirectOptions
+        Add(buffGroup, nil, 2)
+
+        -- ===== DEBUFF FILTERS (Column 1, Direct mode only) =====
+        local debuffGroup = GUI:CreateSettingsGroup(self.child, 280)
+        local debuffHeader = debuffGroup:AddWidget(GUI:CreateHeader(self.child, "Debuff Filters"), 40)
+        debuffHeader.hideOn = HideDirectOptions
+
+        local debuffInfo = debuffGroup:AddWidget(GUI:CreateLabel(self.child, "Select which debuffs to display.", 250), 25)
+        debuffInfo.hideOn = HideDirectOptions
+
+        local dfRaid = debuffGroup:AddWidget(GUI:CreateCheckbox(self.child, "Raid Debuffs", db, "directDebuffFilterRaid", DirectFilterChanged), 30)
+        dfRaid.hideOn = HideDirectOptions
+
+        local dfCC = debuffGroup:AddWidget(GUI:CreateCheckbox(self.child, "Crowd Control", db, "directDebuffFilterCrowdControl", DirectFilterChanged), 30)
+        dfCC.hideOn = HideDirectOptions
+
+        local debuffSortOptions = {
+            DEFAULT = "Default (Slot Order)",
+            TIME = "Time Remaining",
+            NAME = "Alphabetical",
+        }
+        local dfSort = debuffGroup:AddWidget(GUI:CreateDropdown(self.child, "Sort Order", debuffSortOptions, db, "directDebuffSortOrder", DirectFilterChanged), 55)
+        dfSort.hideOn = HideDirectOptions
+        Add(debuffGroup, nil, 1)
+
+        -- ===== DEFENSIVES INFO (Column 2, Direct mode only) =====
+        local defGroup = GUI:CreateSettingsGroup(self.child, 280)
+        local defHeader = defGroup:AddWidget(GUI:CreateHeader(self.child, "Defensives"), 40)
+        defHeader.hideOn = HideDirectOptions
+
+        local defInfo = defGroup:AddWidget(GUI:CreateLabel(self.child, "In Direct mode, all active big defensives are shown per unit (not just one). Adjust max count and layout on the Defensive Icon page.", 250), 60)
+        defInfo.hideOn = HideDirectOptions
+
+        -- ===== DISPEL INFO =====
+        local dispelHeader = defGroup:AddWidget(GUI:CreateHeader(self.child, "Dispel Detection"), 40)
+        dispelHeader.hideOn = HideDirectOptions
+
+        local dispelInfo = defGroup:AddWidget(GUI:CreateLabel(self.child, "Automatically detects player-dispellable debuffs via the RAID_PLAYER_DISPELLABLE filter. Configure the overlay on the Dispel Overlay page.", 250), 60)
+        dispelInfo.hideOn = HideDirectOptions
+        Add(defGroup, nil, 2)
+
+        -- ===== SEE ALSO =====
+        Add(GUI:CreateSeeAlso(self.child, {
+            {pageId = "auras_buffs", label = "Buff Icons"},
+            {pageId = "auras_debuffs", label = "Debuff Icons"},
+            {pageId = "auras_defensiveicon", label = "Defensive Icon"},
+            {pageId = "auras_dispel", label = "Dispel Overlay"},
+        }), 30, "both")
+    end)
+
     -- Auras > Aura Designer
     local pageAuraDesigner = CreateSubTab("auras", "auras_auradesigner", "Aura Designer")
     BuildPage(pageAuraDesigner, function(self, db, Add, AddSpace, AddSyncPoint)

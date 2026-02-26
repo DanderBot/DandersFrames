@@ -13,6 +13,7 @@ local UnitIsUnit = UnitIsUnit
 local GetTime = GetTime
 
 -- Additional cached API for direct aura update (Tier 1 optimization)
+local UnitExists = UnitExists
 local UnitIsDeadOrGhost = UnitIsDeadOrGhost
 local UnitIsConnected = UnitIsConnected
 local InCombatLockdown = InCombatLockdown
@@ -413,6 +414,96 @@ DF.BlizzardHookActive = false
 -- SCAN BLIZZARD FRAMES FOR APPROVED AURAS
 -- ============================================================
 
+-- ============================================================
+-- TRIGGER AURA UPDATES FOR ALL DF FRAMES SHOWING A UNIT
+-- Shared by both Blizzard hook and Direct UNIT_AURA handler
+-- ============================================================
+
+local function TriggerAuraUpdateForUnit(unit)
+    -- Fast unit→frame lookup via exposed unitFrameMap
+    local ourFrame = DF.unitFrameMap and DF.unitFrameMap[unit]
+
+    -- Fallback: iterate if unitFrameMap not yet available (early init)
+    if not ourFrame then
+        -- Check arena first (IsInRaid()=true in arena)
+        if DF.IsInArena and DF:IsInArena() then
+            if DF.IterateArenaFrames then
+                DF:IterateArenaFrames(function(f)
+                    if f and f.unit == unit then
+                        ourFrame = f
+                        return true
+                    end
+                end)
+            end
+        else
+            if DF.IteratePartyFrames then
+                DF:IteratePartyFrames(function(f)
+                    if f and f.unit == unit then
+                        ourFrame = f
+                        return true
+                    end
+                end)
+            end
+            if not ourFrame and DF.IterateRaidFrames then
+                DF:IterateRaidFrames(function(f)
+                    if f and f.unit == unit then
+                        ourFrame = f
+                        return true
+                    end
+                end)
+            end
+        end
+    end
+
+    if ourFrame and ourFrame:IsVisible() then
+        if DF.UpdateAuras_Enhanced then
+            DF:UpdateAuras_Enhanced(ourFrame)
+        end
+        if DF.UpdateDefensiveBar then
+            DF:UpdateDefensiveBar(ourFrame)
+        end
+        if DF.UpdateMyBuffIndicator then
+            DF:UpdateMyBuffIndicator(ourFrame)
+        end
+        if DF.UpdateMissingBuffIcon then
+            DF:UpdateMissingBuffIcon(ourFrame)
+        end
+        if DF.UpdateDispelOverlay then
+            DF:UpdateDispelOverlay(ourFrame)
+        end
+    end
+
+    -- Also update pinned frames showing this unit
+    -- (Pinned frames share units with main frames but are excluded from unitFrameMap)
+    if DF.PinnedFrames and DF.PinnedFrames.initialized and DF.PinnedFrames.headers then
+        for setIndex = 1, 2 do
+            local header = DF.PinnedFrames.headers[setIndex]
+            if header and header:IsShown() then
+                for i = 1, 40 do
+                    local child = header:GetAttribute("child" .. i)
+                    if child and child:IsVisible() and child.unit == unit then
+                        if DF.UpdateAuras_Enhanced then
+                            DF:UpdateAuras_Enhanced(child)
+                        end
+                        if DF.UpdateDefensiveBar then
+                            DF:UpdateDefensiveBar(child)
+                        end
+                        if DF.UpdateMyBuffIndicator then
+                            DF:UpdateMyBuffIndicator(child)
+                        end
+                        if DF.UpdateMissingBuffIcon then
+                            DF:UpdateMissingBuffIcon(child)
+                        end
+                        if DF.UpdateDispelOverlay then
+                            DF:UpdateDispelOverlay(child)
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
 local function CaptureAurasFromBlizzardFrame(frame, triggerUpdate)
     -- PERF TEST: Skip if disabled
     if DF.PerfTest and not DF.PerfTest.enableBlizzardAuraCache then return end
@@ -450,7 +541,14 @@ local function CaptureAurasFromBlizzardFrame(frame, triggerUpdate)
             return
         end
     end
-    
+
+    -- Skip Blizzard cache population when Direct mode is active for this unit
+    local modeFrame = DF.unitFrameMap and DF.unitFrameMap[unit]
+    if modeFrame then
+        local modeDb = modeFrame.isRaidFrame and DF:GetRaidDB() or DF:GetDB()
+        if modeDb and modeDb.auraSourceMode == "DIRECT" then return end
+    end
+
     -- Initialize cache for this unit
     if not DF.BlizzardAuraCache[unit] then
         DF.BlizzardAuraCache[unit] = { buffs = {}, debuffs = {}, buffOrder = {}, debuffOrder = {}, playerDispellable = {}, defensives = {} }
@@ -520,96 +618,7 @@ local function CaptureAurasFromBlizzardFrame(frame, triggerUpdate)
     -- UNIT_AURA event handler does NOT call UpdateAuras, avoiding both race
     -- conditions (stale cache reads) and redundant double-updates.
     if triggerUpdate then
-        -- Fast unit→frame lookup via exposed unitFrameMap
-        local ourFrame = DF.unitFrameMap and DF.unitFrameMap[unit]
-        
-        -- Fallback: iterate if unitFrameMap not yet available (early init)
-        if not ourFrame then
-            -- Check arena first (IsInRaid()=true in arena)
-            if DF.IsInArena and DF:IsInArena() then
-                if DF.IterateArenaFrames then
-                    DF:IterateArenaFrames(function(f)
-                        if f and f.unit == unit then
-                            ourFrame = f
-                            return true
-                        end
-                    end)
-                end
-            else
-                if DF.IteratePartyFrames then
-                    DF:IteratePartyFrames(function(f)
-                        if f and f.unit == unit then
-                            ourFrame = f
-                            return true
-                        end
-                    end)
-                end
-                if not ourFrame and DF.IterateRaidFrames then
-                    DF:IterateRaidFrames(function(f)
-                        if f and f.unit == unit then
-                            ourFrame = f
-                            return true
-                        end
-                    end)
-                end
-            end
-        end
-        
-        if ourFrame and ourFrame:IsVisible() then
-            if DF.UpdateAuras_Enhanced then
-                DF:UpdateAuras_Enhanced(ourFrame)
-            end
-            -- Update defensive icon now that cache is populated
-            if DF.UpdateDefensiveBar then
-                DF:UpdateDefensiveBar(ourFrame)
-            end
-            -- Update my buff indicator
-            if DF.UpdateMyBuffIndicator then
-                DF:UpdateMyBuffIndicator(ourFrame)
-            end
-            -- Update missing buff icon (driven by hook instead of UNIT_AURA to avoid throttle issues)
-            if DF.UpdateMissingBuffIcon then
-                DF:UpdateMissingBuffIcon(ourFrame)
-            end
-            -- Update dispel overlay (driven by hook to ensure fresh cache data)
-            if DF.UpdateDispelOverlay then
-                DF:UpdateDispelOverlay(ourFrame)
-            end
-        end
-        
-        -- Also update pinned frames showing this unit
-        -- (Pinned frames share units with main frames but are excluded from unitFrameMap)
-        if DF.PinnedFrames and DF.PinnedFrames.initialized and DF.PinnedFrames.headers then
-            for setIndex = 1, 2 do
-                local header = DF.PinnedFrames.headers[setIndex]
-                if header and header:IsShown() then
-                    for i = 1, 40 do
-                        local child = header:GetAttribute("child" .. i)
-                        if child and child:IsVisible() and child.unit == unit then
-                            if DF.UpdateAuras_Enhanced then
-                                DF:UpdateAuras_Enhanced(child)
-                            end
-                            -- Update defensive icon now that cache is populated
-                            if DF.UpdateDefensiveBar then
-                                DF:UpdateDefensiveBar(child)
-                            end
-                            -- Update my buff indicator
-                            if DF.UpdateMyBuffIndicator then
-                                DF:UpdateMyBuffIndicator(child)
-                            end
-                            -- Update missing buff icon
-                            if DF.UpdateMissingBuffIcon then
-                                DF:UpdateMissingBuffIcon(child)
-                            end
-                            -- Update dispel overlay
-                            if DF.UpdateDispelOverlay then
-                                DF:UpdateDispelOverlay(child)
-                            end
-                        end
-                    end
-                end
-            end
-        end
+        TriggerAuraUpdateForUnit(unit)
     end
 end
 
@@ -676,6 +685,300 @@ local function ScanBlizzardFrameForUnit(unit)
                 return
             end
         end
+    end
+end
+
+-- ============================================================
+-- DIRECT AURA API PROVIDER
+-- Queries C_UnitAuras directly with user-configured filter strings
+-- Writes results to DF.BlizzardAuraCache (same structure as Blizzard provider)
+-- ============================================================
+
+-- Cache AuraUtil filter constants (available in 11.1+)
+local AuraFilters = AuraUtil and AuraUtil.AuraFilters or {}
+
+-- Reusable tables for scan results (allocated once, wiped each scan)
+local directBuffResults = {}
+local directDebuffResults = {}
+
+-- Cached filter strings (rebuilt only when settings change)
+local cachedBuffFilter = nil
+local cachedDebuffFilter = nil
+local cachedDefensiveFilter = nil
+local cachedDispelFilter = nil
+
+-- Build filter string for buffs from Direct mode settings
+local function BuildDirectBuffFilter(db)
+    local parts = { "HELPFUL" }
+    if db.directBuffFilterPlayer then parts[#parts + 1] = "PLAYER" end
+    if db.directBuffFilterRaid then parts[#parts + 1] = "RAID" end
+    if db.directBuffFilterRaidInCombat and AuraFilters.RaidInCombat then
+        parts[#parts + 1] = AuraFilters.RaidInCombat
+    end
+    if db.directBuffFilterCancelable then parts[#parts + 1] = "CANCELABLE" end
+    return table.concat(parts, " ")
+end
+
+-- Build filter string for debuffs from Direct mode settings
+local function BuildDirectDebuffFilter(db)
+    local parts = { "HARMFUL" }
+    if db.directDebuffFilterRaid then parts[#parts + 1] = "RAID" end
+    if db.directDebuffFilterCrowdControl and AuraFilters.CrowdControl then
+        parts[#parts + 1] = AuraFilters.CrowdControl
+    end
+    return table.concat(parts, " ")
+end
+
+-- Build defensive filter (fixed: HELPFUL + BIG_DEFENSIVE)
+local function BuildDirectDefensiveFilter()
+    if cachedDefensiveFilter then return cachedDefensiveFilter end
+    local parts = { "HELPFUL" }
+    if AuraFilters.BigDefensive then
+        parts[#parts + 1] = AuraFilters.BigDefensive
+    end
+    cachedDefensiveFilter = table.concat(parts, " ")
+    return cachedDefensiveFilter
+end
+
+-- Build dispel filter (fixed: HARMFUL + RAID_PLAYER_DISPELLABLE)
+local function BuildDirectDispelFilter()
+    if cachedDispelFilter then return cachedDispelFilter end
+    local parts = { "HARMFUL" }
+    if AuraFilters.RaidPlayerDispellable then
+        parts[#parts + 1] = AuraFilters.RaidPlayerDispellable
+    end
+    cachedDispelFilter = table.concat(parts, " ")
+    return cachedDispelFilter
+end
+
+-- Sort comparators for Direct mode
+local function SortByTimeRemaining(a, b)
+    local ok, result = pcall(function()
+        local aExp = a.expirationTime or 0
+        local bExp = b.expirationTime or 0
+        if aExp == 0 and bExp == 0 then return false end
+        if aExp == 0 then return false end
+        if bExp == 0 then return true end
+        return aExp < bExp
+    end)
+    if ok then return result end
+    return false
+end
+
+local function SortByName(a, b)
+    local ok, result = pcall(function()
+        return (a.name or "") < (b.name or "")
+    end)
+    if ok then return result end
+    return false
+end
+
+-- Rebuild cached filter strings from current settings
+function DF:RebuildDirectFilterStrings()
+    local db = DF:GetDB()
+    if db then
+        cachedBuffFilter = BuildDirectBuffFilter(db)
+        cachedDebuffFilter = BuildDirectDebuffFilter(db)
+    end
+    -- Defensive and dispel are fixed, but clear to rebuild on next use
+    cachedDefensiveFilter = nil
+    cachedDispelFilter = nil
+end
+
+-- Scan a single unit with Direct API and populate DF.BlizzardAuraCache
+local function ScanUnitDirect(unit)
+    if not unit or not UnitExists(unit) then return end
+
+    -- Get settings for this unit's frame type
+    local frame = DF.unitFrameMap and DF.unitFrameMap[unit]
+    local db
+    if frame then
+        db = frame.isRaidFrame and DF:GetRaidDB() or DF:GetDB()
+    else
+        db = DF:GetDB()
+    end
+
+    if not db or db.auraSourceMode ~= "DIRECT" then return end
+
+    -- Initialize cache for this unit
+    if not DF.BlizzardAuraCache[unit] then
+        DF.BlizzardAuraCache[unit] = { buffs = {}, debuffs = {}, buffOrder = {}, debuffOrder = {}, playerDispellable = {}, defensives = {} }
+    end
+    local cache = DF.BlizzardAuraCache[unit]
+    wipe(cache.buffs)
+    wipe(cache.debuffs)
+    wipe(cache.buffOrder)
+    wipe(cache.debuffOrder)
+    wipe(cache.playerDispellable)
+    wipe(cache.defensives)
+
+    local GetAuraDataByIndex = C_UnitAuras and C_UnitAuras.GetAuraDataByIndex
+    if not GetAuraDataByIndex then return end
+
+    -- === BUFFS ===
+    local buffFilter = cachedBuffFilter or BuildDirectBuffFilter(db)
+    wipe(directBuffResults)
+    local slot = 1
+    while slot <= 40 do
+        local auraData = GetAuraDataByIndex(unit, slot, buffFilter)
+        if not auraData then break end
+        directBuffResults[#directBuffResults + 1] = auraData
+        slot = slot + 1
+    end
+
+    -- Apply sort if requested
+    local buffSort = db.directBuffSortOrder or "DEFAULT"
+    if buffSort == "TIME" and #directBuffResults > 1 then
+        table.sort(directBuffResults, SortByTimeRemaining)
+    elseif buffSort == "NAME" and #directBuffResults > 1 then
+        table.sort(directBuffResults, SortByName)
+    end
+
+    -- Populate cache (same structure as Blizzard provider)
+    for _, auraData in ipairs(directBuffResults) do
+        local id = auraData.auraInstanceID
+        if id then
+            cache.buffs[id] = true
+            cache.buffOrder[#cache.buffOrder + 1] = id
+        end
+    end
+
+    -- === DEBUFFS ===
+    local debuffFilter = cachedDebuffFilter or BuildDirectDebuffFilter(db)
+    wipe(directDebuffResults)
+    slot = 1
+    while slot <= 40 do
+        local auraData = GetAuraDataByIndex(unit, slot, debuffFilter)
+        if not auraData then break end
+        directDebuffResults[#directDebuffResults + 1] = auraData
+        slot = slot + 1
+    end
+
+    local debuffSort = db.directDebuffSortOrder or "DEFAULT"
+    if debuffSort == "TIME" and #directDebuffResults > 1 then
+        table.sort(directDebuffResults, SortByTimeRemaining)
+    elseif debuffSort == "NAME" and #directDebuffResults > 1 then
+        table.sort(directDebuffResults, SortByName)
+    end
+
+    for _, auraData in ipairs(directDebuffResults) do
+        local id = auraData.auraInstanceID
+        if id then
+            cache.debuffs[id] = true
+            cache.debuffOrder[#cache.debuffOrder + 1] = id
+        end
+    end
+
+    -- === DEFENSIVES (BIG_DEFENSIVE filter, multiple results) ===
+    local defFilter = BuildDirectDefensiveFilter()
+    slot = 1
+    while slot <= 40 do
+        local auraData = GetAuraDataByIndex(unit, slot, defFilter)
+        if not auraData then break end
+        local id = auraData.auraInstanceID
+        if id then
+            cache.defensives[id] = true
+        end
+        slot = slot + 1
+    end
+
+    -- === PLAYER DISPELLABLE ===
+    local dispelFilter = BuildDirectDispelFilter()
+    slot = 1
+    while slot <= 40 do
+        local auraData = GetAuraDataByIndex(unit, slot, dispelFilter)
+        if not auraData then break end
+        local id = auraData.auraInstanceID
+        if id then
+            cache.playerDispellable[id] = true
+            -- Also add to debuffs if not already present
+            if not cache.debuffs[id] then
+                cache.debuffs[id] = true
+                cache.debuffOrder[#cache.debuffOrder + 1] = id
+            end
+        end
+        slot = slot + 1
+    end
+end
+
+-- ============================================================
+-- DIRECT MODE EVENT HANDLING
+-- ============================================================
+
+local directModeFrame = CreateFrame("Frame")
+local directModeActive = false
+
+local function OnDirectModeUnitAura(self, event, unit, updateInfo)
+    if not unit then return end
+    -- Only process units we care about (party/raid members with DF frames)
+    if not DF.unitFrameMap or not DF.unitFrameMap[unit] then return end
+
+    ScanUnitDirect(unit)
+    TriggerAuraUpdateForUnit(unit)
+end
+
+function DF:EnableDirectAuraMode()
+    if directModeActive then return end
+    directModeActive = true
+
+    directModeFrame:SetScript("OnEvent", OnDirectModeUnitAura)
+
+    -- Register UNIT_AURA for all active units
+    if DF.unitFrameMap then
+        for unit in pairs(DF.unitFrameMap) do
+            directModeFrame:RegisterUnitEvent("UNIT_AURA", unit)
+        end
+    end
+
+    -- Rebuild filter strings from current settings
+    DF:RebuildDirectFilterStrings()
+
+    -- Do an initial full scan
+    DF:DirectScanAllUnits()
+end
+
+function DF:DisableDirectAuraMode()
+    if not directModeActive then return end
+    directModeActive = false
+
+    directModeFrame:UnregisterAllEvents()
+    directModeFrame:SetScript("OnEvent", nil)
+end
+
+-- Full scan of all units currently in the frame map
+function DF:DirectScanAllUnits()
+    if not DF.unitFrameMap then return end
+    for unit in pairs(DF.unitFrameMap) do
+        ScanUnitDirect(unit)
+        TriggerAuraUpdateForUnit(unit)
+    end
+end
+
+-- Re-register when roster changes (units may change)
+function DF:DirectModeRosterUpdate()
+    if not directModeActive then return end
+    if not DF.unitFrameMap then return end
+
+    directModeFrame:UnregisterAllEvents()
+    for unit in pairs(DF.unitFrameMap) do
+        directModeFrame:RegisterUnitEvent("UNIT_AURA", unit)
+    end
+
+    -- Full scan after roster change
+    DF:DirectScanAllUnits()
+end
+
+-- Switch between Blizzard and Direct modes
+function DF:SetAuraSourceMode(mode)
+    -- Clear all caches so stale data doesn't persist
+    wipe(DF.BlizzardAuraCache)
+
+    if mode == "DIRECT" then
+        DF:EnableDirectAuraMode()
+    else
+        DF:DisableDirectAuraMode()
+        -- Re-prime Blizzard cache
+        ScanAllBlizzardFrames()
     end
 end
 
@@ -752,7 +1055,7 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
     if event == "PLAYER_ENTERING_WORLD" or event == "GROUP_ROSTER_UPDATE" then
         -- Mark hooks as initializing (kept for potential future use)
         DF.blizzardHooksFullyActive = false
-        
+
         -- Full scan after delays to let Blizzard frames initialize
         C_Timer.After(0.1, ScanAllBlizzardFrames)
         C_Timer.After(0.5, ScanAllBlizzardFrames)
@@ -760,10 +1063,18 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
             ScanAllBlizzardFrames()
             DF.blizzardHooksFullyActive = true
         end)
-        
+
         -- Also apply our saved Blizzard settings
         C_Timer.After(0.2, ApplyBlizzardFrameSettings)
         C_Timer.After(1.0, ApplyBlizzardFrameSettings)
+
+        -- Direct mode: re-register unit events for new roster
+        local db = DF.db and DF.db.party
+        local raidDb = DF.db and DF.db.raid
+        local isDirectMode = (db and db.auraSourceMode == "DIRECT") or (raidDb and raidDb.auraSourceMode == "DIRECT")
+        if isDirectMode then
+            C_Timer.After(0.2, function() DF:DirectModeRosterUpdate() end)
+        end
     end
 end)
 
@@ -1729,9 +2040,19 @@ local function InitializeEnhancedAuras()
     end
     
     enhancedAurasInitialized = true
-    
+
     -- Do an initial scan
     ScanAllBlizzardFrames()
+
+    -- Check if Direct mode should be active on load
+    -- Delayed slightly to ensure unitFrameMap is populated
+    C_Timer.After(0.5, function()
+        local db = DF.db and DF.db.party
+        local raidDb = DF.db and DF.db.raid
+        if (db and db.auraSourceMode == "DIRECT") or (raidDb and raidDb.auraSourceMode == "DIRECT") then
+            DF:EnableDirectAuraMode()
+        end
+    end)
 end
 
 -- ============================================================
