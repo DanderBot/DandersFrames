@@ -980,6 +980,13 @@ function DF:SetAuraSourceMode(mode)
         -- Re-prime Blizzard cache
         ScanAllBlizzardFrames()
     end
+
+    -- Update Blizzard frame visibility (fully disable in Direct mode, restore in Blizzard mode)
+    C_Timer.After(0.1, function()
+        if DF.UpdateBlizzardFrameVisibility then
+            DF:UpdateBlizzardFrameVisibility()
+        end
+    end)
 end
 
 -- ============================================================
@@ -2130,7 +2137,9 @@ end
 
 -- ============================================================
 -- HIDE/SHOW BLIZZARD RAID FRAMES
--- Hide containers, strip events but keep UNIT_AURA
+-- Blizzard mode: hide containers, strip events but keep UNIT_AURA
+-- Direct mode: fully disable frames (unregister ALL events,
+--   reparent party frames to hidden parent — Grid2 pattern)
 -- ============================================================
 
 -- Track if we've installed hooks (only do once)
@@ -2139,20 +2148,60 @@ local blizzardHooksInstalled = false
 -- Track which frames have been stripped so we can restore them
 local strippedFrames = {}
 
--- Function to strip events but keep UNIT_AURA for aura cache updates
-local function StripUnitFrameEvents(frame)
+-- Track frames that have been reparented to the hidden frame
+local reparentedFrames = {}
+
+-- Hidden parent frame for fully disabling Blizzard frames (Grid2 pattern)
+local blizzardHiddenParent = CreateFrame("Frame")
+blizzardHiddenParent:Hide()
+
+-- Track if Direct-mode full disable is active
+DF.blizzardFramesFullyDisabled = false
+
+-- Function to strip events from a Blizzard unit frame
+-- fullDisable=true: unregister ALL events (Direct mode, no Blizzard aura data needed)
+-- fullDisable=false: keep UNIT_AURA + combat events (Blizzard mode, need aura cache)
+local function StripUnitFrameEvents(frame, fullDisable)
     if not frame then return end
     local unit = frame.unit
     if unit then
         pcall(function()
             frame:UnregisterAllEvents()
-            -- Re-register UNIT_AURA so Blizzard's aura cache keeps updating
-            frame:RegisterUnitEvent("UNIT_AURA", unit)
-            -- Keep combat events for proper updates
-            frame:RegisterEvent("PLAYER_REGEN_ENABLED")
-            frame:RegisterEvent("PLAYER_REGEN_DISABLED")
+            if not fullDisable then
+                -- Re-register UNIT_AURA so Blizzard's aura cache keeps updating
+                frame:RegisterUnitEvent("UNIT_AURA", unit)
+                -- Keep combat events for proper updates
+                frame:RegisterEvent("PLAYER_REGEN_ENABLED")
+                frame:RegisterEvent("PLAYER_REGEN_DISABLED")
+            end
         end)
         strippedFrames[frame] = true
+    end
+end
+
+-- Reparent a frame to the hidden parent (fully removes it from the visual tree)
+local function ReparentToHidden(frame)
+    if not frame then return end
+    if InCombatLockdown() then return end
+    pcall(function()
+        if frame.GetParent then
+            reparentedFrames[frame] = frame:GetParent()
+        end
+        frame:SetParent(blizzardHiddenParent)
+        frame:Hide()
+    end)
+end
+
+-- Restore a reparented frame back to its original parent
+local function RestoreParent(frame)
+    if not frame then return end
+    if InCombatLockdown() then return end
+    local originalParent = reparentedFrames[frame]
+    if originalParent then
+        pcall(function()
+            frame:SetParent(originalParent)
+        end)
+        reparentedFrames[frame] = nil
     end
 end
 
@@ -2160,7 +2209,10 @@ end
 local function RestoreUnitFrameEvents(frame)
     if not frame then return end
     if not strippedFrames[frame] then return end
-    
+
+    -- Restore parent first if it was reparented
+    RestoreParent(frame)
+
     pcall(function()
         -- Call Blizzard's function to restore all events
         if CompactUnitFrame_UpdateUnitEvents then
@@ -2193,21 +2245,35 @@ local function InstallBlizzardHooks()
             end
             
             if shouldStrip then
-                StripUnitFrameEvents(frame)
+                -- In Direct mode, fully disable (no events at all)
+                local isDirectMode = false
+                if frame.unit then
+                    if frame.unit:match("^raid") then
+                        isDirectMode = raidDb.auraSourceMode == "DIRECT"
+                    else
+                        isDirectMode = partyDb.auraSourceMode == "DIRECT"
+                    end
+                end
+                StripUnitFrameEvents(frame, isDirectMode)
             end
         end)
     end
-    
+
     blizzardHooksInstalled = true
 end
 
 function DF:UpdateBlizzardFrameVisibility()
     local partyDb = DF:GetDB()
     local raidDb = DF:GetRaidDB()
-    
+
     -- Separate settings for party and raid frames
     local hidePartyFrames = partyDb.hideBlizzardPartyFrames
     local hideRaidFrames = raidDb.hideBlizzardRaidFrames
+
+    -- Check if Direct mode is active (allows full disable instead of just hiding)
+    local partyDirectMode = partyDb.auraSourceMode == "DIRECT"
+    local raidDirectMode = raidDb.auraSourceMode == "DIRECT"
+    DF.blizzardFramesFullyDisabled = (hidePartyFrames and partyDirectMode) or (hideRaidFrames and raidDirectMode)
     
     -- Side menu visibility - check based on current mode
     local showSideMenu
@@ -2283,30 +2349,41 @@ function DF:UpdateBlizzardFrameVisibility()
     end
     
     -- Handle traditional portrait-style party frames
-    SafeScaleContainer(PartyFrame, hidePartyFrames)
-    
+    if hidePartyFrames and partyDirectMode then
+        -- Direct mode: fully disable (reparent to hidden frame)
+        ReparentToHidden(PartyFrame)
+    else
+        RestoreParent(PartyFrame)
+        SafeScaleContainer(PartyFrame, hidePartyFrames)
+    end
+
     -- Handle individual traditional party member frames (PartyMemberFrame1-4)
     for i = 1, 4 do
         local frame = _G["PartyMemberFrame" .. i]
         if frame then
-            SafeHideFrame(frame, hidePartyFrames)
-            local petFrame = _G["PartyMemberFrame" .. i .. "PetFrame"]
-            SafeSetAlpha(petFrame, hidePartyFrames and 0 or 1)
-            local buffFrame = _G["PartyMemberFrame" .. i .. "BuffFrame"] 
-            SafeSetAlpha(buffFrame, hidePartyFrames and 0 or 1)
-            local debuffFrame = _G["PartyMemberFrame" .. i .. "DebuffFrame"]
-            SafeSetAlpha(debuffFrame, hidePartyFrames and 0 or 1)
+            if hidePartyFrames and partyDirectMode then
+                ReparentToHidden(frame)
+            else
+                RestoreParent(frame)
+                SafeHideFrame(frame, hidePartyFrames)
+                local petFrame = _G["PartyMemberFrame" .. i .. "PetFrame"]
+                SafeSetAlpha(petFrame, hidePartyFrames and 0 or 1)
+                local buffFrame = _G["PartyMemberFrame" .. i .. "BuffFrame"]
+                SafeSetAlpha(buffFrame, hidePartyFrames and 0 or 1)
+                local debuffFrame = _G["PartyMemberFrame" .. i .. "DebuffFrame"]
+                SafeSetAlpha(debuffFrame, hidePartyFrames and 0 or 1)
+            end
         end
     end
-    
+
     -- Handle individual compact party member frames
     for i = 1, 5 do
         local frame = _G["CompactPartyFrameMember" .. i]
         if frame then
-            SafeHideFrame(frame, hidePartyFrames)
-            if hidePartyFrames then 
+            if hidePartyFrames then
+                SafeHideFrame(frame, true)
                 HideSelectionHighlights(frame)
-                StripUnitFrameEvents(frame)
+                StripUnitFrameEvents(frame, partyDirectMode)
             else
                 -- Restore events when showing
                 RestoreUnitFrameEvents(frame)
@@ -2319,24 +2396,24 @@ function DF:UpdateBlizzardFrameVisibility()
         local frame = _G["CompactRaidFrame" .. i]
         if frame then
             SafeHideFrame(frame, hideRaidFrames)
-            if hideRaidFrames then 
+            if hideRaidFrames then
                 HideSelectionHighlights(frame)
-                StripUnitFrameEvents(frame)
+                StripUnitFrameEvents(frame, raidDirectMode)
             else
                 -- Restore events when showing
                 RestoreUnitFrameEvents(frame)
             end
         end
     end
-    
+
     for group = 1, 8 do
         for member = 1, 5 do
             local frame = _G["CompactRaidGroup" .. group .. "Member" .. member]
             if frame then
                 SafeHideFrame(frame, hideRaidFrames)
-                if hideRaidFrames then 
+                if hideRaidFrames then
                     HideSelectionHighlights(frame)
-                    StripUnitFrameEvents(frame)
+                    StripUnitFrameEvents(frame, raidDirectMode)
                 else
                     -- Restore events when showing
                     RestoreUnitFrameEvents(frame)
