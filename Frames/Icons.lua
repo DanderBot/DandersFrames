@@ -537,8 +537,6 @@ function DF:UpdateAllMissingBuffIcons()
     end
 end
 
-end
-
 -- ========================================
 -- DEFENSIVE ICON
 -- ========================================
