@@ -827,7 +827,7 @@ function DF:UpdateDefensiveBar(frame)
     if db.auraSourceMode == "DIRECT" then
         -- DIRECT MODE: Show multiple big defensives
         local maxDefs = db.defensiveBarMax or 4
-        local iconSize = db.defensiveBarIconSize or db.defensiveIconSize or 24
+        local iconSize = db.defensiveIconSize or 24
         local borderSize = db.defensiveIconBorderSize or 2
         local borderColor = db.defensiveIconBorderColor or DEFAULT_DEFENSIVE_BORDER_COLOR
         local showBorder = db.defensiveIconShowBorder ~= false
