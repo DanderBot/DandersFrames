@@ -189,7 +189,7 @@ local function GetOrCreateDefensiveBarIcon(frame, index)
             local unit = self.unitFrame.unit
             if unit then
                 GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:SetUnitAura(unit, self.auraData.auraInstanceID)
+                GameTooltip:SetUnitAuraByAuraInstanceID(unit, self.auraData.auraInstanceID)
                 GameTooltip:Show()
             end
         end

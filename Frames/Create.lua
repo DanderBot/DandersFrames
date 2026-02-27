@@ -976,12 +976,12 @@ function DF:CreateFrameElementsExtended(frame, db)
             GameTooltip:Show()
         elseif self.auraData and self.unitFrame then
             local unit = self.unitFrame.unit
-            if self.auraData.auraInstanceID and GameTooltip.SetUnitBuffByAuraInstanceID then
-                GameTooltip:SetUnitBuffByAuraInstanceID(unit, self.auraData.auraInstanceID)
+            if self.auraData.auraInstanceID and GameTooltip.SetUnitAuraByAuraInstanceID then
+                GameTooltip:SetUnitAuraByAuraInstanceID(unit, self.auraData.auraInstanceID)
             end
         end
     end)
-    
+
     frame.defensiveIcon:SetScript("OnLeave", function(self)
         local parentFrame = self:GetParent()
         local focus = GetMouseFocus and GetMouseFocus() or GetMouseFoci and GetMouseFoci()[1]
@@ -990,7 +990,7 @@ function DF:CreateFrameElementsExtended(frame, db)
         end
         GameTooltip:Hide()
     end)
-    
+
     frame.defensiveIcon:EnableMouse(true)
     if frame.defensiveIcon.SetPropagateMouseMotion then
         frame.defensiveIcon:SetPropagateMouseMotion(true)
@@ -1686,12 +1686,12 @@ function DF:CreateUnitFrame(unit, index, isRaid)
             GameTooltip:Show()
         elseif self.auraData and self.unitFrame then
             local unit = self.unitFrame.unit
-            if self.auraData.auraInstanceID and GameTooltip.SetUnitBuffByAuraInstanceID then
-                GameTooltip:SetUnitBuffByAuraInstanceID(unit, self.auraData.auraInstanceID)
+            if self.auraData.auraInstanceID and GameTooltip.SetUnitAuraByAuraInstanceID then
+                GameTooltip:SetUnitAuraByAuraInstanceID(unit, self.auraData.auraInstanceID)
             end
         end
     end)
-    
+
     frame.defensiveIcon:SetScript("OnLeave", function(self)
         -- Check if we're moving to another child element in the same frame
         local parentFrame = self:GetParent()
@@ -2003,34 +2003,144 @@ function DF:CreateUnitFrame(unit, index, isRaid)
         end
     end
     
+    -- ========================================
+    -- TOOLTIP HELPERS (parent-driven, Grid2 style)
+    -- ========================================
+
+    -- Walk the parent chain to check if a frame is a descendant of a unit frame.
+    -- Used to detect Blizzard-rendered private aura icons and other children.
+    local function IsChildOfUnitFrame(focus, unitFrame)
+        local parent = focus.GetParent and focus:GetParent()
+        for _ = 1, 10 do
+            if not parent then return false end
+            if parent == unitFrame then return true end
+            parent = parent.GetParent and parent:GetParent()
+        end
+        return false
+    end
+
+    -- Show an aura tooltip for one of our icons (buff, debuff, or defensive).
+    -- Called from the PARENT frame's OnEnter so it works with SetPropagateMouseMotion.
+    local function ShowDFAuraTooltip(icon)
+        if not icon or not icon:IsShown() then return end
+
+        local anchorFrame = icon.unitFrame
+        if not anchorFrame then return end
+
+        local db = anchorFrame.isRaidFrame and DF:GetRaidDB() or DF:GetDB()
+        local auraType = icon.auraType  -- "BUFF", "DEBUFF", or "DEFENSIVE"
+
+        -- Per-type tooltip enable + combat checks
+        if auraType == "BUFF" then
+            if not db.tooltipBuffEnabled then return end
+            if db.tooltipBuffDisableInCombat and InCombatLockdown() then return end
+        elseif auraType == "DEBUFF" then
+            if not db.tooltipDebuffEnabled then return end
+            if db.tooltipDebuffDisableInCombat and InCombatLockdown() then return end
+        elseif auraType == "DEFENSIVE" then
+            if not db.tooltipDefensiveEnabled then return end
+            if db.tooltipDefensiveDisableInCombat and InCombatLockdown() then return end
+        end
+
+        -- Position tooltip
+        if auraType == "DEFENSIVE" then
+            local anchorType = db.tooltipDefensiveAnchor or "CURSOR"
+            if anchorType == "CURSOR" then
+                GameTooltip:SetOwner(icon, "ANCHOR_CURSOR")
+            elseif anchorType == "FRAME" then
+                local anchorPos = db.tooltipDefensiveAnchorPos or "BOTTOMRIGHT"
+                local offsetX = db.tooltipDefensiveX or 0
+                local offsetY = db.tooltipDefensiveY or 0
+                GameTooltip:SetOwner(icon, "ANCHOR_NONE")
+                GameTooltip:ClearAllPoints()
+                GameTooltip:SetPoint(anchorPos, icon, anchorPos, offsetX, offsetY)
+            else
+                GameTooltip_SetDefaultAnchor(GameTooltip, icon)
+            end
+        else
+            PositionAuraTooltip(icon, auraType == "BUFF")
+        end
+
+        -- Test mode
+        if DF.testMode or DF.raidTestMode then
+            if auraType == "DEFENSIVE" then
+                GameTooltip:AddLine("Pain Suppression", 1, 1, 1)
+                GameTooltip:AddLine("Defensive Cooldown (Test)", 0.8, 0.8, 0.8)
+            elseif icon.testAuraData then
+                GameTooltip:AddLine(icon.testAuraData.name or "Test Aura", 1, 1, 1)
+                if icon.testAuraData.duration then
+                    GameTooltip:AddLine("Duration: " .. icon.testAuraData.duration .. "s", 0.8, 0.8, 0.8)
+                end
+                if icon.testAuraData.stacks and icon.testAuraData.stacks > 1 then
+                    GameTooltip:AddLine("Stacks: " .. icon.testAuraData.stacks, 0.8, 0.8, 0.8)
+                end
+                if icon.testAuraData.debuffType then
+                    GameTooltip:AddLine("Type: " .. icon.testAuraData.debuffType, 1, 0.5, 0.5)
+                end
+            else
+                GameTooltip:AddLine("Test Aura", 1, 1, 1)
+            end
+            GameTooltip:Show()
+            return
+        end
+
+        -- Live aura data — unified API
+        if icon.auraData and icon.auraData.auraInstanceID then
+            local unit = anchorFrame.unit
+            if unit then
+                if GameTooltip.SetUnitAuraByAuraInstanceID then
+                    GameTooltip:SetUnitAuraByAuraInstanceID(unit, icon.auraData.auraInstanceID)
+                elseif auraType == "BUFF" and GameTooltip.SetUnitBuffByAuraInstanceID then
+                    GameTooltip:SetUnitBuffByAuraInstanceID(unit, icon.auraData.auraInstanceID)
+                elseif auraType == "DEBUFF" and GameTooltip.SetUnitDebuffByAuraInstanceID then
+                    GameTooltip:SetUnitDebuffByAuraInstanceID(unit, icon.auraData.auraInstanceID)
+                elseif icon.auraData.index then
+                    if auraType == "BUFF" then
+                        GameTooltip:SetUnitBuff(unit, icon.auraData.index, "HELPFUL")
+                    else
+                        local filter = db.debuffShowAll and "HARMFUL" or "HARMFUL|RAID"
+                        GameTooltip:SetUnitDebuff(unit, icon.auraData.index, filter)
+                    end
+                end
+            end
+        end
+    end
+
+    -- Expose for tooltip refresh in UpdateAuras_Enhanced
+    DF.ShowDFAuraTooltip = ShowDFAuraTooltip
+
     -- Use HookScript (not SetScript) to preserve SecureHandlerEnterLeaveTemplate's _onenter/_onleave
     -- SetScript would override the template's handler and break click-casting keyboard bindings
     frame:HookScript("OnEnter", function(self)
         local db = self.isRaidFrame and DF:GetRaidDB() or DF:GetDB()
-        
-        -- Set hover state and update highlights
+
+        -- Always: set hover state and update highlights
         self.dfIsHovered = true
         if DF.UpdateHighlights then
             DF:UpdateHighlights(self)
         end
-        
-        -- Check if we're actually hovering a child element (aura) with SetPropagateMouseMotion
-        -- If so, let the child handle the tooltip instead
+
+        -- Check if we're actually hovering a child element with SetPropagateMouseMotion
         local focus = GetMouseFocus and GetMouseFocus() or GetMouseFoci and GetMouseFoci()[1]
-        if focus and focus ~= self and focus.unitFrame == self then
-            -- Mouse is over a child element (aura), skip parent tooltip
-            return
+        if focus and focus ~= self then
+            -- Our aura/defensive icon → show tooltip from parent
+            if focus.auraType and focus.unitFrame == self then
+                ShowDFAuraTooltip(focus)
+                return
+            end
+            -- Any other child (private aura icons, etc.) → don't override native tooltip
+            if IsChildOfUnitFrame(focus, self) then
+                return
+            end
         end
-        
-        -- Check if tooltips are enabled
+
+        -- Unit frame itself → show unit tooltip
         if not db.tooltipFrameEnabled then return end
-        
-        -- Check if tooltips disabled in combat
         if db.tooltipFrameDisableInCombat and InCombatLockdown() then return end
-        
+
         -- Check for test mode (party or raid)
         local inTestMode = (self.isRaidFrame and DF.raidTestMode) or (not self.isRaidFrame and DF.testMode)
-        
+
         if inTestMode then
             local testData = DF:GetTestUnitData(self.unit == "player" and 0 or tonumber(self.unit:match("%d+")))
             if testData then
@@ -2052,17 +2162,17 @@ function DF:CreateUnitFrame(unit, index, isRaid)
     end)
     
     frame:HookScript("OnLeave", function(self)
-        -- Clear hover state and update highlights
+        -- Always: clear hover state and update highlights
         self.dfIsHovered = false
         if DF.UpdateHighlights then
             DF:UpdateHighlights(self)
         end
-        
-        -- Only hide tooltip if we're truly leaving the frame, not moving to a child
+
+        -- Don't hide tooltip if we're moving to a child (our icon or private aura)
         local focus = GetMouseFocus and GetMouseFocus() or GetMouseFoci and GetMouseFoci()[1]
-        if focus and focus.unitFrame == self then
-            -- Moving to a child element (aura), don't hide tooltip yet
-            return
+        if focus then
+            if focus.unitFrame == self then return end           -- still over our icon
+            if IsChildOfUnitFrame(focus, self) then return end   -- still over a child (e.g. private aura)
         end
         GameTooltip:Hide()
         if DFBindingTooltip then DFBindingTooltip:Hide(); DFBindingTooltip.anchorFrame = nil end
@@ -2374,12 +2484,8 @@ function DF:CreateAuraIcon(parent, index, auraType)
         else
             if self.auraData and self.unitFrame then
                 local unit = self.unitFrame.unit
-                if self.auraData.auraInstanceID and GameTooltip.SetUnitBuffByAuraInstanceID then
-                    if self.auraType == "BUFF" then
-                        GameTooltip:SetUnitBuffByAuraInstanceID(unit, self.auraData.auraInstanceID)
-                    else
-                        GameTooltip:SetUnitDebuffByAuraInstanceID(unit, self.auraData.auraInstanceID)
-                    end
+                if self.auraData.auraInstanceID and GameTooltip.SetUnitAuraByAuraInstanceID then
+                    GameTooltip:SetUnitAuraByAuraInstanceID(unit, self.auraData.auraInstanceID)
                 elseif self.auraData.index then
                     if self.auraType == "BUFF" then
                         GameTooltip:SetUnitBuff(unit, self.auraData.index, "HELPFUL")

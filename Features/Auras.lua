@@ -21,6 +21,7 @@ local issecretvalue = issecretvalue
 local strsplit = strsplit
 local C_CurveUtil = C_CurveUtil
 local GetAuraDataByAuraInstanceID = C_UnitAuras and C_UnitAuras.GetAuraDataByAuraInstanceID
+local GetUnitAuras = C_UnitAuras and C_UnitAuras.GetUnitAuras
 
 -- Safe texture setter that handles secret values
 local function SafeSetTexture(icon, texture)
@@ -540,7 +541,7 @@ local function CaptureAurasFromBlizzardFrame(frame, triggerUpdate)
 
     -- Initialize cache for this unit
     if not DF.BlizzardAuraCache[unit] then
-        DF.BlizzardAuraCache[unit] = { buffs = {}, debuffs = {}, buffOrder = {}, debuffOrder = {}, playerDispellable = {}, defensives = {} }
+        DF.BlizzardAuraCache[unit] = { buffs = {}, debuffs = {}, buffOrder = {}, debuffOrder = {}, buffData = {}, debuffData = {}, playerDispellable = {}, defensives = {} }
     end
 
     -- Clear previous cache for this unit (wipe instead of new table to reduce GC)
@@ -686,15 +687,13 @@ end
 -- Cache AuraUtil filter constants (available in 11.1+)
 local AuraFilters = AuraUtil and AuraUtil.AuraFilters or {}
 
--- Reusable tables for scan results (allocated once, wiped each scan)
-local directBuffResults = {}
-local directDebuffResults = {}
-
--- Cached filter strings (rebuilt only when settings change)
-local cachedBuffFilter = nil
-local cachedDebuffFilter = nil
-local cachedDefensiveFilter = nil
-local cachedDispelFilter = nil
+-- Cached filter strings per mode (rebuilt only when settings change)
+local cachedPartyBuffFilter = nil
+local cachedPartyDebuffFilter = nil
+local cachedRaidBuffFilter = nil
+local cachedRaidDebuffFilter = nil
+local cachedDefensiveFilter = nil   -- mode-independent
+local cachedDispelFilter = nil      -- mode-independent
 
 -- Build filter string for buffs from Direct mode settings
 local function BuildDirectBuffFilter(db)
@@ -705,7 +704,7 @@ local function BuildDirectBuffFilter(db)
         parts[#parts + 1] = AuraFilters.RaidInCombat
     end
     if db.directBuffFilterCancelable then parts[#parts + 1] = "CANCELABLE" end
-    return table.concat(parts, " ")
+    return table.concat(parts, "|")
 end
 
 -- Build filter string for debuffs from Direct mode settings
@@ -715,17 +714,14 @@ local function BuildDirectDebuffFilter(db)
     if db.directDebuffFilterCrowdControl and AuraFilters.CrowdControl then
         parts[#parts + 1] = AuraFilters.CrowdControl
     end
-    return table.concat(parts, " ")
+    return table.concat(parts, "|")
 end
 
--- Build defensive filter (fixed: HELPFUL + BIG_DEFENSIVE)
+-- Build defensive filter (HELPFUL + BIG_DEFENSIVE, nil if unavailable)
 local function BuildDirectDefensiveFilter()
     if cachedDefensiveFilter then return cachedDefensiveFilter end
-    local parts = { "HELPFUL" }
-    if AuraFilters.BigDefensive then
-        parts[#parts + 1] = AuraFilters.BigDefensive
-    end
-    cachedDefensiveFilter = table.concat(parts, " ")
+    if not AuraFilters.BigDefensive then return nil end
+    cachedDefensiveFilter = "HELPFUL|" .. AuraFilters.BigDefensive
     return cachedDefensiveFilter
 end
 
@@ -736,7 +732,7 @@ local function BuildDirectDispelFilter()
     if AuraFilters.RaidPlayerDispellable then
         parts[#parts + 1] = AuraFilters.RaidPlayerDispellable
     end
-    cachedDispelFilter = table.concat(parts, " ")
+    cachedDispelFilter = table.concat(parts, "|")
     return cachedDispelFilter
 end
 
@@ -762,14 +758,19 @@ local function SortByName(a, b)
     return false
 end
 
--- Rebuild cached filter strings from current settings
+-- Rebuild cached filter strings from current settings (per mode)
 function DF:RebuildDirectFilterStrings()
-    local db = DF:GetDB()
-    if db then
-        cachedBuffFilter = BuildDirectBuffFilter(db)
-        cachedDebuffFilter = BuildDirectDebuffFilter(db)
+    local partyDb = DF:GetDB("party")
+    local raidDb = DF:GetDB("raid")
+    if partyDb then
+        cachedPartyBuffFilter = BuildDirectBuffFilter(partyDb)
+        cachedPartyDebuffFilter = BuildDirectDebuffFilter(partyDb)
     end
-    -- Defensive and dispel are fixed, but clear to rebuild on next use
+    if raidDb then
+        cachedRaidBuffFilter = BuildDirectBuffFilter(raidDb)
+        cachedRaidDebuffFilter = BuildDirectDebuffFilter(raidDb)
+    end
+    -- Defensive and dispel are mode-independent, clear to rebuild on next use
     cachedDefensiveFilter = nil
     cachedDispelFilter = nil
 end
@@ -780,113 +781,115 @@ local function ScanUnitDirect(unit)
 
     -- Get settings for this unit's frame type
     local frame = DF.unitFrameMap and DF.unitFrameMap[unit]
-    local db
+    local db, isRaid
     if frame then
-        db = frame.isRaidFrame and DF:GetRaidDB() or DF:GetDB()
+        isRaid = frame.isRaidFrame
+        db = isRaid and DF:GetRaidDB() or DF:GetDB()
     else
         db = DF:GetDB()
+        isRaid = false
     end
 
     if not db or db.auraSourceMode ~= "DIRECT" then return end
 
     -- Initialize cache for this unit
     if not DF.BlizzardAuraCache[unit] then
-        DF.BlizzardAuraCache[unit] = { buffs = {}, debuffs = {}, buffOrder = {}, debuffOrder = {}, playerDispellable = {}, defensives = {} }
+        DF.BlizzardAuraCache[unit] = { buffs = {}, debuffs = {}, buffOrder = {}, debuffOrder = {}, buffData = {}, debuffData = {}, playerDispellable = {}, defensives = {} }
     end
     local cache = DF.BlizzardAuraCache[unit]
     wipe(cache.buffs)
     wipe(cache.debuffs)
     wipe(cache.buffOrder)
     wipe(cache.debuffOrder)
+    wipe(cache.buffData)
+    wipe(cache.debuffData)
     wipe(cache.playerDispellable)
     wipe(cache.defensives)
 
-    local GetAuraDataByIndex = C_UnitAuras and C_UnitAuras.GetAuraDataByIndex
-    if not GetAuraDataByIndex then return end
+    if not GetUnitAuras then return end
 
     -- === BUFFS ===
-    local buffFilter = cachedBuffFilter or BuildDirectBuffFilter(db)
-    wipe(directBuffResults)
-    local slot = 1
-    while slot <= 40 do
-        local auraData = GetAuraDataByIndex(unit, slot, buffFilter)
-        if not auraData then break end
-        directBuffResults[#directBuffResults + 1] = auraData
-        slot = slot + 1
-    end
+    local buffFilter = isRaid
+        and (cachedRaidBuffFilter or BuildDirectBuffFilter(db))
+        or (cachedPartyBuffFilter or BuildDirectBuffFilter(db))
 
-    -- Apply sort if requested
-    local buffSort = db.directBuffSortOrder or "DEFAULT"
-    if buffSort == "TIME" and #directBuffResults > 1 then
-        table.sort(directBuffResults, SortByTimeRemaining)
-    elseif buffSort == "NAME" and #directBuffResults > 1 then
-        table.sort(directBuffResults, SortByName)
-    end
+    local buffAuras = GetUnitAuras(unit, buffFilter, 40)
+    if buffAuras then
+        -- Apply sort if requested
+        local buffSort = db.directBuffSortOrder or "DEFAULT"
+        if buffSort == "TIME" and #buffAuras > 1 then
+            table.sort(buffAuras, SortByTimeRemaining)
+        elseif buffSort == "NAME" and #buffAuras > 1 then
+            table.sort(buffAuras, SortByName)
+        end
 
-    -- Populate cache (same structure as Blizzard provider)
-    for _, auraData in ipairs(directBuffResults) do
-        local id = auraData.auraInstanceID
-        if id then
-            cache.buffs[id] = true
-            cache.buffOrder[#cache.buffOrder + 1] = id
+        -- Populate cache with full aura data
+        for _, auraData in ipairs(buffAuras) do
+            local id = auraData.auraInstanceID
+            if id then
+                cache.buffs[id] = true
+                cache.buffOrder[#cache.buffOrder + 1] = id
+                cache.buffData[#cache.buffData + 1] = auraData
+            end
         end
     end
 
     -- === DEBUFFS ===
-    local debuffFilter = cachedDebuffFilter or BuildDirectDebuffFilter(db)
-    wipe(directDebuffResults)
-    slot = 1
-    while slot <= 40 do
-        local auraData = GetAuraDataByIndex(unit, slot, debuffFilter)
-        if not auraData then break end
-        directDebuffResults[#directDebuffResults + 1] = auraData
-        slot = slot + 1
-    end
+    local debuffFilter = isRaid
+        and (cachedRaidDebuffFilter or BuildDirectDebuffFilter(db))
+        or (cachedPartyDebuffFilter or BuildDirectDebuffFilter(db))
 
-    local debuffSort = db.directDebuffSortOrder or "DEFAULT"
-    if debuffSort == "TIME" and #directDebuffResults > 1 then
-        table.sort(directDebuffResults, SortByTimeRemaining)
-    elseif debuffSort == "NAME" and #directDebuffResults > 1 then
-        table.sort(directDebuffResults, SortByName)
-    end
+    local debuffAuras = GetUnitAuras(unit, debuffFilter, 40)
+    if debuffAuras then
+        local debuffSort = db.directDebuffSortOrder or "DEFAULT"
+        if debuffSort == "TIME" and #debuffAuras > 1 then
+            table.sort(debuffAuras, SortByTimeRemaining)
+        elseif debuffSort == "NAME" and #debuffAuras > 1 then
+            table.sort(debuffAuras, SortByName)
+        end
 
-    for _, auraData in ipairs(directDebuffResults) do
-        local id = auraData.auraInstanceID
-        if id then
-            cache.debuffs[id] = true
-            cache.debuffOrder[#cache.debuffOrder + 1] = id
+        for _, auraData in ipairs(debuffAuras) do
+            local id = auraData.auraInstanceID
+            if id then
+                cache.debuffs[id] = true
+                cache.debuffOrder[#cache.debuffOrder + 1] = id
+                cache.debuffData[#cache.debuffData + 1] = auraData
+            end
         end
     end
 
     -- === DEFENSIVES (BIG_DEFENSIVE filter, multiple results) ===
+    -- Only scan if BIG_DEFENSIVE filter is available — never fall back to
+    -- plain HELPFUL which would treat every buff as a defensive.
     local defFilter = BuildDirectDefensiveFilter()
-    slot = 1
-    while slot <= 40 do
-        local auraData = GetAuraDataByIndex(unit, slot, defFilter)
-        if not auraData then break end
-        local id = auraData.auraInstanceID
-        if id then
-            cache.defensives[id] = true
+    if defFilter then
+        local defAuras = GetUnitAuras(unit, defFilter, 40)
+        if defAuras then
+            for _, auraData in ipairs(defAuras) do
+                local id = auraData.auraInstanceID
+                if id then
+                    cache.defensives[id] = true
+                end
+            end
         end
-        slot = slot + 1
     end
 
     -- === PLAYER DISPELLABLE ===
     local dispelFilter = BuildDirectDispelFilter()
-    slot = 1
-    while slot <= 40 do
-        local auraData = GetAuraDataByIndex(unit, slot, dispelFilter)
-        if not auraData then break end
-        local id = auraData.auraInstanceID
-        if id then
-            cache.playerDispellable[id] = true
-            -- Also add to debuffs if not already present
-            if not cache.debuffs[id] then
-                cache.debuffs[id] = true
-                cache.debuffOrder[#cache.debuffOrder + 1] = id
+    local dispelAuras = GetUnitAuras(unit, dispelFilter, 40)
+    if dispelAuras then
+        for _, auraData in ipairs(dispelAuras) do
+            local id = auraData.auraInstanceID
+            if id then
+                cache.playerDispellable[id] = true
+                -- Also add to debuffs if not already present
+                if not cache.debuffs[id] then
+                    cache.debuffs[id] = true
+                    cache.debuffOrder[#cache.debuffOrder + 1] = id
+                    cache.debuffData[#cache.debuffData + 1] = auraData
+                end
             end
         end
-        slot = slot + 1
     end
 end
 
@@ -1655,24 +1658,38 @@ function DF:UpdateAuraIconsDirect(frame, icons, auraType, maxAuras)
     local durationY = db[prefix .. "DurationY"] or 0
     local durationAnchor = db[prefix .. "DurationAnchor"] or "CENTER"
     
-    -- Iterate in Blizzard's display order (captured from buffFrames/debuffFrames)
-    -- This matches how Blizzard sorts auras on their default CompactUnitFrames
+    -- Iterate aura data in display order
+    -- Direct mode: full AuraData stored during scan; Blizzard mode: falls back to ID re-fetch
     local displayedCount = 0
-    local orderList = cache and (auraType == "BUFF" and cache.buffOrder or cache.debuffOrder)
+    local dataList = cache and (auraType == "BUFF" and cache.buffData or cache.debuffData)
+    local useDataList = dataList and #dataList > 0
+    local orderList = not useDataList and cache and (auraType == "BUFF" and cache.buffOrder or cache.debuffOrder) or nil
+    local iterList = useDataList and dataList or orderList
 
-    if orderList then
-        for i = 1, #orderList do
+    if iterList then
+        for i = 1, #iterList do
             if displayedCount >= maxAuras then break end
 
-            local auraInstanceID = orderList[i]
+            -- Resolve auraData: Direct mode has it pre-fetched, Blizzard mode re-fetches by ID
+            local auraData, auraInstanceID
+            if useDataList then
+                auraData = iterList[i]
+                auraInstanceID = auraData and auraData.auraInstanceID
+            else
+                auraInstanceID = iterList[i]
+                auraData = auraInstanceID and GetAuraDataByAuraInstanceID and GetAuraDataByAuraInstanceID(unit, auraInstanceID)
+            end
+
+            if not auraInstanceID then break end
+            if not auraData then
+                -- Blizzard mode: aura may have expired between scan and display, skip it
+            else
 
             -- Dedup: skip buffs already shown in defensive bar or Aura Designer
             if dedupSet and dedupSet[auraInstanceID] then
                 -- skip this aura entirely
             else
 
-            -- Fetch aura data by instance ID (secret-safe: we only use the ID for lookup)
-            local auraData = GetAuraDataByAuraInstanceID and GetAuraDataByAuraInstanceID(unit, auraInstanceID)
             if auraData then
                 -- Guard: ensure we have an icon slot available
                 local nextIcon = icons[displayedCount + 1]
@@ -1845,6 +1862,7 @@ function DF:UpdateAuraIconsDirect(frame, icons, auraType, maxAuras)
                 end
             end
             end -- dedup else
+            end -- auraData nil guard
         end
     end
 
@@ -2064,10 +2082,14 @@ function DF:UpdateAuras_Enhanced(frame)
     if focus and focus.unitFrame == frame and focus.auraType then
         -- Mouse is over one of our aura icons
         if focus:IsShown() and focus.auraData then
-            -- Aura is still visible - refresh tooltip with new data
-            local onEnter = focus:GetScript("OnEnter")
-            if onEnter then
-                onEnter(focus)
+            -- Aura is still visible - refresh tooltip via parent-driven helper
+            if DF.ShowDFAuraTooltip then
+                DF.ShowDFAuraTooltip(focus)
+            else
+                local onEnter = focus:GetScript("OnEnter")
+                if onEnter then
+                    onEnter(focus)
+                end
             end
         else
             -- Aura icon is now hidden - hide tooltip
