@@ -852,13 +852,15 @@ DF.PartyDefaults = {
     auraSourceMode = "BLIZZARD",              -- "BLIZZARD" or "DIRECT"
 
     -- Direct Mode: Buff Filters
-    directBuffFilterPlayer = true,            -- PLAYER filter
+    directBuffShowAll = true,                 -- Show all buffs (ignores sub-filters)
+    directBuffFilterPlayer = false,           -- PLAYER filter
     directBuffFilterRaid = false,             -- RAID filter
     directBuffFilterRaidInCombat = false,     -- RAID_IN_COMBAT filter
     directBuffFilterCancelable = false,       -- CANCELABLE filter
     directBuffSortOrder = "DEFAULT",          -- "DEFAULT" / "TIME" / "NAME"
 
     -- Direct Mode: Debuff Filters
+    directDebuffShowAll = true,               -- Show all debuffs (ignores sub-filters)
     directDebuffFilterRaid = false,           -- RAID filter
     directDebuffFilterCrowdControl = false,   -- CROWD_CONTROL filter
     directDebuffSortOrder = "DEFAULT",        -- "DEFAULT" / "TIME" / "NAME"
@@ -2009,13 +2011,15 @@ DF.RaidDefaults = {
     auraSourceMode = "BLIZZARD",              -- "BLIZZARD" or "DIRECT"
 
     -- Direct Mode: Buff Filters
-    directBuffFilterPlayer = true,            -- PLAYER filter
+    directBuffShowAll = true,                 -- Show all buffs (ignores sub-filters)
+    directBuffFilterPlayer = false,           -- PLAYER filter
     directBuffFilterRaid = false,             -- RAID filter
     directBuffFilterRaidInCombat = false,     -- RAID_IN_COMBAT filter
     directBuffFilterCancelable = false,       -- CANCELABLE filter
     directBuffSortOrder = "DEFAULT",          -- "DEFAULT" / "TIME" / "NAME"
 
     -- Direct Mode: Debuff Filters
+    directDebuffShowAll = true,               -- Show all debuffs (ignores sub-filters)
     directDebuffFilterRaid = false,           -- RAID filter
     directDebuffFilterCrowdControl = false,   -- CROWD_CONTROL filter
     directDebuffSortOrder = "DEFAULT",        -- "DEFAULT" / "TIME" / "NAME"

@@ -697,6 +697,7 @@ local cachedDispelFilter = nil      -- mode-independent
 
 -- Build filter string for buffs from Direct mode settings
 local function BuildDirectBuffFilter(db)
+    if db.directBuffShowAll then return "HELPFUL" end
     local parts = { "HELPFUL" }
     if db.directBuffFilterPlayer then parts[#parts + 1] = "PLAYER" end
     if db.directBuffFilterRaid then parts[#parts + 1] = "RAID" end
@@ -709,6 +710,7 @@ end
 
 -- Build filter string for debuffs from Direct mode settings
 local function BuildDirectDebuffFilter(db)
+    if db.directDebuffShowAll then return "HARMFUL" end
     local parts = { "HARMFUL" }
     if db.directDebuffFilterRaid then parts[#parts + 1] = "RAID" end
     if db.directDebuffFilterCrowdControl and AuraFilters.CrowdControl then
@@ -1659,11 +1661,14 @@ function DF:UpdateAuraIconsDirect(frame, icons, auraType, maxAuras)
     local durationAnchor = db[prefix .. "DurationAnchor"] or "CENTER"
     
     -- Iterate aura data in display order
-    -- Direct mode: full AuraData stored during scan; Blizzard mode: falls back to ID re-fetch
+    -- Direct mode: uses pre-fetched full AuraData (no fallbacks — API returns nothing, we show nothing)
+    -- Blizzard mode: uses ID list and re-fetches per aura
     local displayedCount = 0
+    local isDirect = db.auraSourceMode == "DIRECT"
     local dataList = cache and (auraType == "BUFF" and cache.buffData or cache.debuffData)
     local useDataList = dataList and #dataList > 0
-    local orderList = not useDataList and cache and (auraType == "BUFF" and cache.buffOrder or cache.debuffOrder) or nil
+    -- Blizzard mode only: fall back to ID-based iteration when no pre-fetched data
+    local orderList = (not isDirect and not useDataList) and cache and (auraType == "BUFF" and cache.buffOrder or cache.debuffOrder) or nil
     local iterList = useDataList and dataList or orderList
 
     if iterList then

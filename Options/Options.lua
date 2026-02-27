@@ -3675,24 +3675,34 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         Add(modeGroup, nil, 1)
 
         -- ===== BUFF FILTERS (Column 2, Direct mode only) =====
+        local function HideBuffSubFilters(d)
+            return d.auraSourceMode ~= "DIRECT" or d.directBuffShowAll
+        end
+
         local buffGroup = GUI:CreateSettingsGroup(self.child, 280)
         local buffHeader = buffGroup:AddWidget(GUI:CreateHeader(self.child, "Buff Filters"), 40)
         buffHeader.hideOn = HideDirectOptions
 
-        local buffInfo = buffGroup:AddWidget(GUI:CreateLabel(self.child, "Select which buffs to display. Combine filters to narrow results.", 250), 35)
-        buffInfo.hideOn = HideDirectOptions
+        local bfAll = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, "All Buffs", db, "directBuffShowAll", function()
+            DirectFilterChanged()
+            self:RefreshStates()
+        end), 30)
+        bfAll.hideOn = HideDirectOptions
+
+        local buffSubInfo = buffGroup:AddWidget(GUI:CreateLabel(self.child, "|cff888888Uncheck 'All Buffs' to use specific filters below.|r", 250), 25)
+        buffSubInfo.hideOn = HideBuffSubFilters
 
         local bfPlayer = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, "My Buffs Only", db, "directBuffFilterPlayer", DirectFilterChanged), 30)
-        bfPlayer.hideOn = HideDirectOptions
+        bfPlayer.hideOn = HideBuffSubFilters
 
         local bfRaid = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, "Raid Buffs", db, "directBuffFilterRaid", DirectFilterChanged), 30)
-        bfRaid.hideOn = HideDirectOptions
+        bfRaid.hideOn = HideBuffSubFilters
 
         local bfRaidIC = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, "Raid In Combat", db, "directBuffFilterRaidInCombat", DirectFilterChanged), 30)
-        bfRaidIC.hideOn = HideDirectOptions
+        bfRaidIC.hideOn = HideBuffSubFilters
 
         local bfCancel = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, "Cancelable Only", db, "directBuffFilterCancelable", DirectFilterChanged), 30)
-        bfCancel.hideOn = HideDirectOptions
+        bfCancel.hideOn = HideBuffSubFilters
 
         local buffSortOptions = {
             DEFAULT = "Default (Slot Order)",
@@ -3704,18 +3714,28 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         Add(buffGroup, nil, 2)
 
         -- ===== DEBUFF FILTERS (Column 1, Direct mode only) =====
+        local function HideDebuffSubFilters(d)
+            return d.auraSourceMode ~= "DIRECT" or d.directDebuffShowAll
+        end
+
         local debuffGroup = GUI:CreateSettingsGroup(self.child, 280)
         local debuffHeader = debuffGroup:AddWidget(GUI:CreateHeader(self.child, "Debuff Filters"), 40)
         debuffHeader.hideOn = HideDirectOptions
 
-        local debuffInfo = debuffGroup:AddWidget(GUI:CreateLabel(self.child, "Select which debuffs to display.", 250), 25)
-        debuffInfo.hideOn = HideDirectOptions
+        local dfAll = debuffGroup:AddWidget(GUI:CreateCheckbox(self.child, "All Debuffs", db, "directDebuffShowAll", function()
+            DirectFilterChanged()
+            self:RefreshStates()
+        end), 30)
+        dfAll.hideOn = HideDirectOptions
+
+        local debuffSubInfo = debuffGroup:AddWidget(GUI:CreateLabel(self.child, "|cff888888Uncheck 'All Debuffs' to use specific filters below.|r", 250), 25)
+        debuffSubInfo.hideOn = HideDebuffSubFilters
 
         local dfRaid = debuffGroup:AddWidget(GUI:CreateCheckbox(self.child, "Raid Debuffs", db, "directDebuffFilterRaid", DirectFilterChanged), 30)
-        dfRaid.hideOn = HideDirectOptions
+        dfRaid.hideOn = HideDebuffSubFilters
 
         local dfCC = debuffGroup:AddWidget(GUI:CreateCheckbox(self.child, "Crowd Control", db, "directDebuffFilterCrowdControl", DirectFilterChanged), 30)
-        dfCC.hideOn = HideDirectOptions
+        dfCC.hideOn = HideDebuffSubFilters
 
         local debuffSortOptions = {
             DEFAULT = "Default (Slot Order)",
