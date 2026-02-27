@@ -727,14 +727,11 @@ local function BuildDirectDefensiveFilter()
     return cachedDefensiveFilter
 end
 
--- Build dispel filter (fixed: HARMFUL + RAID_PLAYER_DISPELLABLE)
+-- Build dispel filter (HARMFUL + RAID_PLAYER_DISPELLABLE, nil if unavailable)
 local function BuildDirectDispelFilter()
     if cachedDispelFilter then return cachedDispelFilter end
-    local parts = { "HARMFUL" }
-    if AuraFilters.RaidPlayerDispellable then
-        parts[#parts + 1] = AuraFilters.RaidPlayerDispellable
-    end
-    cachedDispelFilter = table.concat(parts, "|")
+    local dispelConst = AuraFilters.RaidPlayerDispellable or "RAID_PLAYER_DISPELLABLE"
+    cachedDispelFilter = "HARMFUL|" .. dispelConst
     return cachedDispelFilter
 end
 
