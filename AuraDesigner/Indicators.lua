@@ -894,6 +894,14 @@ function Indicators:ApplyIcon(frame, config, auraData, defaults, auraName, prior
 
     local icon = GetOrCreateADIcon(frame, auraName)
 
+    -- Store aura data for tooltip lookups (parent-driven via ShowDFAuraTooltip)
+    if auraData then
+        if not icon.auraData then
+            icon.auraData = { index = 0, auraInstanceID = nil }
+        end
+        icon.auraData.auraInstanceID = auraData.auraInstanceID
+    end
+
     -- Size
     local size = config.size or (defaults and defaults.iconSize) or 24
     local scale = config.scale or (defaults and defaults.iconScale) or 1.0
@@ -1153,9 +1161,17 @@ function Indicators:ApplyIcon(frame, config, auraData, defaults, auraName, prior
         UnregisterExpiring(icon)
     end
 
-    -- Ensure mouse doesn't block clicks on the unit frame
-    if not InCombatLockdown() and icon.SetMouseClickEnabled then
-        icon:SetMouseClickEnabled(false)
+    -- Mouse handling: propagate motion/clicks to parent for tooltips and click-casting
+    if not InCombatLockdown() then
+        if icon.SetPropagateMouseMotion then
+            icon:SetPropagateMouseMotion(true)
+        end
+        if icon.SetPropagateMouseClicks then
+            icon:SetPropagateMouseClicks(true)
+        end
+        if icon.SetMouseClickEnabled then
+            icon:SetMouseClickEnabled(false)
+        end
     end
 
     icon:Show()
