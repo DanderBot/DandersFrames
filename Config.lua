@@ -852,10 +852,10 @@ DF.PartyDefaults = {
     auraSourceMode = "BLIZZARD",              -- "BLIZZARD" or "DIRECT"
 
     -- Direct Mode: Buff Filters
-    directBuffShowAll = true,                 -- Show all buffs (ignores sub-filters)
-    directBuffFilterPlayer = false,           -- PLAYER filter
+    directBuffShowAll = false,                -- Show all buffs (ignores sub-filters)
+    directBuffFilterPlayer = true,            -- PLAYER filter
     directBuffFilterRaid = false,             -- RAID filter
-    directBuffFilterRaidInCombat = false,     -- RAID_IN_COMBAT filter
+    directBuffFilterRaidInCombat = true,      -- RAID_IN_COMBAT filter
     directBuffFilterCancelable = false,       -- CANCELABLE filter
     directBuffSortOrder = "DEFAULT",          -- "DEFAULT" / "TIME" / "NAME"
 
@@ -2011,10 +2011,10 @@ DF.RaidDefaults = {
     auraSourceMode = "BLIZZARD",              -- "BLIZZARD" or "DIRECT"
 
     -- Direct Mode: Buff Filters
-    directBuffShowAll = true,                 -- Show all buffs (ignores sub-filters)
-    directBuffFilterPlayer = false,           -- PLAYER filter
+    directBuffShowAll = false,                -- Show all buffs (ignores sub-filters)
+    directBuffFilterPlayer = true,            -- PLAYER filter
     directBuffFilterRaid = false,             -- RAID filter
-    directBuffFilterRaidInCombat = false,     -- RAID_IN_COMBAT filter
+    directBuffFilterRaidInCombat = true,      -- RAID_IN_COMBAT filter
     directBuffFilterCancelable = false,       -- CANCELABLE filter
     directBuffSortOrder = "DEFAULT",          -- "DEFAULT" / "TIME" / "NAME"
 

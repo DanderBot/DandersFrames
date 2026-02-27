@@ -3292,6 +3292,34 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
             end
         end
         
+        -- Force Direct mode filter defaults (v4.0.9):
+        -- Debuffs: All Debuffs enabled (show everything)
+        -- Buffs: All Buffs disabled, My Buffs + Raid In Combat checked
+        -- One-time forced reset using a migration flag
+        for _, mode in ipairs({"party", "raid"}) do
+            local modeDb = DF.db[mode]
+            if modeDb and not modeDb._directFilterDefaultsV409 then
+                modeDb.directDebuffShowAll = true
+                modeDb.directBuffShowAll = false
+                modeDb.directBuffFilterPlayer = true
+                modeDb.directBuffFilterRaidInCombat = true
+                modeDb._directFilterDefaultsV409 = true
+            end
+        end
+        if DandersFramesDB_v2 and DandersFramesDB_v2.profiles then
+            for profileName, profile in pairs(DandersFramesDB_v2.profiles) do
+                for _, mode in ipairs({"party", "raid"}) do
+                    if profile[mode] and not profile[mode]._directFilterDefaultsV409 then
+                        profile[mode].directDebuffShowAll = true
+                        profile[mode].directBuffShowAll = false
+                        profile[mode].directBuffFilterPlayer = true
+                        profile[mode].directBuffFilterRaidInCombat = true
+                        profile[mode]._directFilterDefaultsV409 = true
+                    end
+                end
+            end
+        end
+
         -- Migrate texture paths from old format to new Media folder format (v3.2.0)
         local function MigrateTexturePath(path)
             if type(path) ~= "string" then return path end
