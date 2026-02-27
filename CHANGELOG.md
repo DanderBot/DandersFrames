@@ -5,9 +5,13 @@
 ### Auras
 * **Buff deduplication** — buffs already displayed by the Defensive Bar or Aura Designer placed indicators are automatically hidden from the buff bar. Enabled by default, toggle in Buffs tab
 * **Direct Aura API mode** — optional mode that queries C_UnitAuras directly with configurable filter strings (PLAYER, RAID, BIG_DEFENSIVE, etc.), giving full control over which auras appear. Configure in Auras > Aura Filters
+* **Modernized Direct API scanning** — replaced slot-by-slot GetAuraDataByIndex loops with C_UnitAuras.GetUnitAuras bulk API for better performance and reliability
+* **All Buffs / All Debuffs toggles** — Direct mode now has master toggles that bypass sub-filters and pass plain HELPFUL/HARMFUL to the API. All Debuffs is on by default
+* **Per-mode filter caching** — party and raid frames now build and cache separate filter strings, fixing raid frames using stale party filters
 * **Multi-defensive icons** — Defensive Bar now shows all active big defensives simultaneously (up to configured max), not just one
 * **Defensive bar compound growth** — growth direction now supports two-axis layouts (e.g., RIGHT_DOWN, LEFT_UP) with configurable wrap count, matching the buff/debuff icon grid system
 * Max buff and debuff icon count increased from 5 to 8
+* Direct mode filter defaults updated — All Debuffs enabled, Buffs set to My Buffs + Raid In Combat (one-time migration for existing profiles)
 
 ### Aura Designer
 * **Buff coexistence** — standard buff icons can now display alongside Aura Designer indicators. When enabling AD a popup asks whether to keep or replace standard buffs, with info banners in both tabs for quick toggling
@@ -20,6 +24,11 @@
 * Removed "Show Tooltips" toggle from click-cast panel (now in Tooltip settings)
 
 ### Bug Fixes
+* Fix aura tooltips not showing — new parent-driven tooltip system handles all aura types (buffs, debuffs, defensives, boss debuffs, private auras)
+* Fix Aura Designer indicator icons not showing tooltips on hover
+* Fix Direct mode defensive icons ignoring the Icon Size slider — was reading an internal bar size (24px) instead of the user-configured setting
+* Fix Direct mode debuffs not appearing on raid frames — raid frames were using stale party filter cache
+* Fix dispel overlay potentially treating all debuffs as dispellable when filter constant is unavailable — hardened with RAID_PLAYER_DISPELLABLE fallback
 * Fix Direct Aura API only tracking one player's auras — RegisterUnitEvent in a loop silently dropped all but the last unit
 * Fix animated border flickering in Aura Designer border mode
 * Fix missing raid groups when reloading UI during combat — header visibility is now set up during the ADDON_LOADED grace window
