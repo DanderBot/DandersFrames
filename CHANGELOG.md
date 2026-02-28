@@ -10,6 +10,7 @@
 * **Per-mode filter caching** — party and raid frames now build and cache separate filter strings, fixing raid frames using stale party filters
 * **Multi-defensive icons** — Defensive Bar now shows all active big defensives simultaneously (up to configured max), not just one
 * **Defensive bar compound growth** — growth direction now supports two-axis layouts (e.g., RIGHT_DOWN, LEFT_UP) with configurable wrap count, matching the buff/debuff icon grid system
+* **Important Spells filter** — Direct mode now has an "Important Spells" checkbox for both buffs and debuffs, using the 12.0.1 IMPORTANT aura filter
 * Max buff and debuff icon count increased from 5 to 8
 * Direct mode filter defaults updated — All Debuffs enabled, Buffs set to My Buffs + Raid In Combat (one-time migration for existing profiles)
 
@@ -36,6 +37,12 @@
 * Fix debuffs being hidden when Aura Designer is enabled — debuffs now always display regardless of AD state
 * Fix Health Bar Color replace mode not reverting when the aura drops off
 * Fix blend slider still showing when Health Bar Color mode is set to Replace
+* Fix defensive icons and aura durations showing stale data after entering/exiting vehicles — aura cache is now invalidated on vehicle swaps
+* Fix unit name getting stuck to the vehicle name after exiting a vehicle
+* Fix Aura Designer bar indicators getting stuck in a corrupted visual state after the tracked aura expires
+* Fix boss debuff (private aura) tooltips not showing — intermediate parent frames now propagate mouse events to the unit frame
+* Fix follower dungeon only showing 2-3 party members until /reload — delayed roster recheck now picks up NPCs that register late
+* Fix SetUnitBuff error when hovering aura icons on recycled frames — added nil unit guard to all tooltip handlers
 * Fix click-casting reload popup appearing on every login when the Clicked conflict warning is set to Ignore
 
 ## [4.0.6] - 2026-02-15
