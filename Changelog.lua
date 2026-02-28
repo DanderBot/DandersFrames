@@ -25,6 +25,9 @@ DF.CHANGELOG_TEXT = [===[
 * Removed "Show Tooltips" toggle from click-cast panel (now in Tooltip settings)
 
 ### Bug Fixes
+* Fix defensive icons and aura durations showing stale data after entering/exiting vehicles — aura cache is now invalidated on vehicle swaps
+* Fix unit name getting stuck to the vehicle name after exiting a vehicle
+* Fix Aura Designer bar indicators getting stuck in a corrupted visual state after the tracked aura expires
 * Fix Direct Aura API only tracking one player's auras — RegisterUnitEvent in a loop silently dropped all but the last unit
 * Fix animated border flickering in Aura Designer border mode
 * Fix missing raid groups when reloading UI during combat — header visibility is now set up during the ADDON_LOADED grace window
