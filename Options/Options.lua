@@ -3704,6 +3704,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local bfCancel = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, "Cancelable Only", db, "directBuffFilterCancelable", DirectFilterChanged), 30)
         bfCancel.hideOn = HideBuffSubFilters
 
+        local bfImportant = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, "Important Spells", db, "directBuffFilterImportant", DirectFilterChanged), 30)
+        bfImportant.hideOn = HideBuffSubFilters
+
         local buffSortOptions = {
             DEFAULT = "Default (Slot Order)",
             TIME = "Time Remaining",
@@ -3736,6 +3739,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         local dfCC = debuffGroup:AddWidget(GUI:CreateCheckbox(self.child, "Crowd Control", db, "directDebuffFilterCrowdControl", DirectFilterChanged), 30)
         dfCC.hideOn = HideDebuffSubFilters
+
+        local dfImportant = debuffGroup:AddWidget(GUI:CreateCheckbox(self.child, "Important Spells", db, "directDebuffFilterImportant", DirectFilterChanged), 30)
+        dfImportant.hideOn = HideDebuffSubFilters
 
         local debuffSortOptions = {
             DEFAULT = "Default (Slot Order)",

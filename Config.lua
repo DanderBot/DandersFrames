@@ -857,12 +857,14 @@ DF.PartyDefaults = {
     directBuffFilterRaid = false,             -- RAID filter
     directBuffFilterRaidInCombat = true,      -- RAID_IN_COMBAT filter
     directBuffFilterCancelable = false,       -- CANCELABLE filter
+    directBuffFilterImportant = false,        -- IMPORTANT filter (12.0.1)
     directBuffSortOrder = "DEFAULT",          -- "DEFAULT" / "TIME" / "NAME"
 
     -- Direct Mode: Debuff Filters
     directDebuffShowAll = true,               -- Show all debuffs (ignores sub-filters)
     directDebuffFilterRaid = false,           -- RAID filter
     directDebuffFilterCrowdControl = false,   -- CROWD_CONTROL filter
+    directDebuffFilterImportant = false,      -- IMPORTANT filter (12.0.1)
     directDebuffSortOrder = "DEFAULT",        -- "DEFAULT" / "TIME" / "NAME"
 
     buffGrowth = "LEFT_UP",
@@ -2016,12 +2018,14 @@ DF.RaidDefaults = {
     directBuffFilterRaid = false,             -- RAID filter
     directBuffFilterRaidInCombat = true,      -- RAID_IN_COMBAT filter
     directBuffFilterCancelable = false,       -- CANCELABLE filter
+    directBuffFilterImportant = false,        -- IMPORTANT filter (12.0.1)
     directBuffSortOrder = "DEFAULT",          -- "DEFAULT" / "TIME" / "NAME"
 
     -- Direct Mode: Debuff Filters
     directDebuffShowAll = true,               -- Show all debuffs (ignores sub-filters)
     directDebuffFilterRaid = false,           -- RAID filter
     directDebuffFilterCrowdControl = false,   -- CROWD_CONTROL filter
+    directDebuffFilterImportant = false,      -- IMPORTANT filter (12.0.1)
     directDebuffSortOrder = "DEFAULT",        -- "DEFAULT" / "TIME" / "NAME"
 
     buffGrowth = "LEFT_UP",

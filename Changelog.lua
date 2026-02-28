@@ -12,6 +12,7 @@ DF.CHANGELOG_TEXT = [===[
 * **Direct Aura API mode** — optional mode that queries C_UnitAuras directly with configurable filter strings (PLAYER, RAID, BIG_DEFENSIVE, etc.), giving full control over which auras appear. Configure in Auras > Aura Filters
 * **Multi-defensive icons** — Defensive Bar now shows all active big defensives simultaneously (up to configured max), not just one
 * **Defensive bar compound growth** — growth direction now supports two-axis layouts (e.g., RIGHT_DOWN, LEFT_UP) with configurable wrap count, matching the buff/debuff icon grid system
+* **Important Spells filter** — Direct mode now has an "Important Spells" checkbox for both buffs and debuffs, using the 12.0.1 IMPORTANT aura filter
 * Max buff and debuff icon count increased from 5 to 8
 
 ### Aura Designer

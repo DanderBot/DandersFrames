@@ -705,6 +705,9 @@ local function BuildDirectBuffFilter(db)
         parts[#parts + 1] = AuraFilters.RaidInCombat
     end
     if db.directBuffFilterCancelable then parts[#parts + 1] = "CANCELABLE" end
+    if db.directBuffFilterImportant then
+        parts[#parts + 1] = AuraFilters.Important or "IMPORTANT"
+    end
     return table.concat(parts, "|")
 end
 
@@ -715,6 +718,9 @@ local function BuildDirectDebuffFilter(db)
     if db.directDebuffFilterRaid then parts[#parts + 1] = "RAID" end
     if db.directDebuffFilterCrowdControl and AuraFilters.CrowdControl then
         parts[#parts + 1] = AuraFilters.CrowdControl
+    end
+    if db.directDebuffFilterImportant then
+        parts[#parts + 1] = AuraFilters.Important or "IMPORTANT"
     end
     return table.concat(parts, "|")
 end
