@@ -89,13 +89,16 @@ for i = 1, POOL_SIZE do
     container:SetSize(30, 30)
     container:Hide()
     container:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
-    
+    -- Propagate mouse events so boss debuff tooltips reach the unit frame
+    if container.SetPropagateMouseMotion then container:SetPropagateMouseMotion(true) end
+    if container.SetPropagateMouseClicks then container:SetPropagateMouseClicks(true) end
+
     -- Debug background
     container.debugBg = container:CreateTexture(nil, "BACKGROUND")
     container.debugBg:SetAllPoints()
     container.debugBg:SetColorTexture(1, 0, 0, 0.4)
     container.debugBg:Hide()
-    
+
     container.poolIndex = i
     container.inUse = false
     containerPool[i] = container
@@ -267,6 +270,10 @@ function DF:SetupPrivateAuraAnchors(frame)
         iconParent:SetFrameLevel(baseLevel + frameLevel)
         iconParent:ClearAllPoints()
         iconParent:SetPoint("CENTER", container, "CENTER", 0, 0)
+        -- Propagate mouse events to parent so boss debuff tooltips work
+        -- (this is our frame, not the protected private aura icon)
+        if iconParent.SetPropagateMouseMotion then iconParent:SetPropagateMouseMotion(true) end
+        if iconParent.SetPropagateMouseClicks then iconParent:SetPropagateMouseClicks(true) end
         iconParent:Show()
         
         -- Register main anchor with Blizzard's system
@@ -314,6 +321,8 @@ function DF:SetupPrivateAuraAnchors(frame)
                 scaleFrame:SetFrameStrata("DIALOG")
                 scaleFrame:ClearAllPoints()
                 scaleFrame:SetPoint("CENTER", container, "CENTER", 0, 0)
+                if scaleFrame.SetPropagateMouseMotion then scaleFrame:SetPropagateMouseMotion(true) end
+                if scaleFrame.SetPropagateMouseClicks then scaleFrame:SetPropagateMouseClicks(true) end
                 scaleFrame:Show()
                 
                 -- Offsets go in the iconAnchor (what Blizzard uses to position content).
