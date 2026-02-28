@@ -22,6 +22,7 @@ local strsplit = strsplit
 local C_CurveUtil = C_CurveUtil
 local GetAuraDataByAuraInstanceID = C_UnitAuras and C_UnitAuras.GetAuraDataByAuraInstanceID
 local GetUnitAuras = C_UnitAuras and C_UnitAuras.GetUnitAuras
+local IsAuraFilteredOut = C_UnitAuras and C_UnitAuras.IsAuraFilteredOutByInstanceID
 
 -- Safe texture setter that handles secret values
 local function SafeSetTexture(icon, texture)
@@ -866,6 +867,9 @@ local function ScanUnitDirect(unit)
     -- === DEFENSIVES (BIG_DEFENSIVE filter, multiple results) ===
     -- Only scan if BIG_DEFENSIVE filter is available — never fall back to
     -- plain HELPFUL which would treat every buff as a defensive.
+    -- Post-validate each aura with IsAuraFilteredOutByInstanceID because
+    -- GetUnitAuras classification filters can break for out-of-range units,
+    -- returning all HELPFUL auras instead of just BIG_DEFENSIVE ones.
     local defFilter = BuildDirectDefensiveFilter()
     if defFilter then
         local defAuras = GetUnitAuras(unit, defFilter, 40)
@@ -873,7 +877,9 @@ local function ScanUnitDirect(unit)
             for _, auraData in ipairs(defAuras) do
                 local id = auraData.auraInstanceID
                 if id then
-                    cache.defensives[id] = true
+                    if not IsAuraFilteredOut or not IsAuraFilteredOut(unit, id, defFilter) then
+                        cache.defensives[id] = true
+                    end
                 end
             end
         end
