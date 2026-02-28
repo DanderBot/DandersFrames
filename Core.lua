@@ -4487,13 +4487,18 @@ function DF:FullProfileRefresh()
     -- === CLEAR CACHES ===
     -- Invalidate aura layout (settings may have changed)
     DF:InvalidateAuraLayout()
-    
+
+    -- Rebuild aura filter strings from the new profile's settings
+    if DF.RebuildDirectFilterStrings then
+        DF:RebuildDirectFilterStrings()
+    end
+
     -- Clear color curves (colors may have changed)
     if DF.UpdateColorCurve then
         DF:UpdateColorCurve()
     end
     DF.expiringCurves = nil
-    
+
     -- Clear category lookup cache (for export/import)
     DF._categoryLookup = nil
     

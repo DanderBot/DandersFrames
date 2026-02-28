@@ -3,10 +3,9 @@ local addonName, DF = ...
 -- ============================================================
 -- AURA DESIGNER - DATA SOURCE ADAPTER
 -- Bridges the Aura Designer to Blizzard's C_UnitAuras API.
--- Scans ALL auras on a unit directly via GetAuraSlots +
--- GetAuraDataBySlot (the ElvUI/oUF pattern), so the designer
--- sees every aura regardless of what Blizzard's compact frames
--- choose to display.
+-- Scans ALL auras on a unit directly via C_UnitAuras.GetUnitAuras,
+-- so the designer sees every aura regardless of what Blizzard's
+-- compact frames choose to display.
 --
 -- Normalized aura data format:
 --   {
@@ -21,12 +20,10 @@ local addonName, DF = ...
 -- ============================================================
 
 local pairs, ipairs, type = pairs, ipairs, type
-local pcall, select = pcall, select
 local GetTime = GetTime
 local issecretvalue = issecretvalue or function() return false end
 local GetAuraDataByAuraInstanceID = C_UnitAuras and C_UnitAuras.GetAuraDataByAuraInstanceID
-local GetAuraSlots = C_UnitAuras and C_UnitAuras.GetAuraSlots
-local GetAuraDataBySlot = C_UnitAuras and C_UnitAuras.GetAuraDataBySlot
+local GetUnitAuras = C_UnitAuras and C_UnitAuras.GetUnitAuras
 
 DF.AuraDesigner = DF.AuraDesigner or {}
 
@@ -35,11 +32,11 @@ DF.AuraDesigner.Adapter = AuraAdapter
 
 -- ============================================================
 -- BLIZZARD AURA PROVIDER
--- Scans all auras on a unit directly via C_UnitAuras.GetAuraSlots
--- + GetAuraDataBySlot. This sees every buff/debuff on the unit,
--- not just what Blizzard's compact frames choose to display.
--- Secret values (health, etc.) are handled via issecretvalue()
--- with a persistent instanceId→auraName cache for combat use.
+-- Scans all auras on a unit directly via C_UnitAuras.GetUnitAuras.
+-- This sees every buff/debuff on the unit, not just what
+-- Blizzard's compact frames choose to display.
+-- Secret values are handled via issecretvalue() with a persistent
+-- instanceId→auraName cache for combat use.
 -- ============================================================
 
 local Provider = {}
@@ -84,51 +81,6 @@ local instanceIdToAuraName = {}  -- { [auraInstanceID] = auraName }
 local adapterDebugLast = 0
 local ADAPTER_DEBUG_INTERVAL = 3
 
--- Helper: processes slot varargs from GetAuraSlots via pcall.
--- GetAuraSlots returns (token, slot1, slot2, ...) and pcall prepends ok,
--- so we receive (result, lookup, forwardLookup, unit, ok, token, slot1, slot2, ...).
-local function ProcessAuraSlots(result, lookup, forwardLookup, unit, ok, token, ...)
-    if not ok then return 0, 0, 0 end
-    local scanned, matched, cached = 0, 0, 0
-    for i = 1, select("#", ...) do
-        local slot = select(i, ...)
-        local auraData = GetAuraDataBySlot(unit, slot)
-        if auraData then
-            scanned = scanned + 1
-            local auraName = nil
-            local auraInstanceID = auraData.auraInstanceID
-
-            -- Try spellId lookup (works when not secret, i.e. out of combat)
-            local sid = auraData.spellId
-            if sid and not issecretvalue(sid) then
-                auraName = lookup[sid]
-                -- Update persistent cache for combat use
-                if auraName and auraInstanceID then
-                    instanceIdToAuraName[auraInstanceID] = auraName
-                end
-            elseif auraInstanceID then
-                -- In combat (secret): use cached mapping
-                auraName = instanceIdToAuraName[auraInstanceID]
-                if auraName then cached = cached + 1 end
-            end
-
-            if auraName then
-                matched = matched + 1
-                result[auraName] = {
-                    spellId = forwardLookup and forwardLookup[auraName] or 0,
-                    icon = auraData.icon,
-                    duration = auraData.duration,
-                    expirationTime = auraData.expirationTime,
-                    stacks = auraData.applications,
-                    caster = auraData.sourceUnit,
-                    auraInstanceID = auraInstanceID,
-                }
-            end
-        end
-    end
-    return scanned, matched, cached
-end
-
 function Provider:GetUnitAuras(unit, spec)
     local lookup = GetSpellIdLookup(spec)  -- { [spellId] = auraName }
     if not lookup or not next(lookup) then return {} end
@@ -143,28 +95,73 @@ function Provider:GetUnitAuras(unit, spec)
     local matchedCount = 0
     local cacheHits = 0
 
-    -- Scan ALL auras directly via GetAuraSlots + GetAuraDataBySlot.
+    -- Scan ALL auras directly via C_UnitAuras.GetUnitAuras.
     -- This sees every buff/debuff on the unit regardless of what
     -- Blizzard's compact frames choose to display (e.g., Symbiotic
     -- Relationship appears on the player but Blizzard's frame hides it).
-    if GetAuraSlots and GetAuraDataBySlot then
-        local s, m, c = ProcessAuraSlots(result, lookup, forwardLookup, unit,
-            pcall(GetAuraSlots, unit, "HELPFUL"))
-        scannedCount = scannedCount + s
-        matchedCount = matchedCount + m
-        cacheHits = cacheHits + c
+    if GetUnitAuras then
+        local filters = { "HELPFUL", "HARMFUL" }
+        for _, filter in ipairs(filters) do
+            local auras = GetUnitAuras(unit, filter, 100)
+            if auras then
+                for _, auraData in ipairs(auras) do
+                    scannedCount = scannedCount + 1
+                    local auraName = nil
+                    local auraInstanceID = auraData.auraInstanceID
 
-        s, m, c = ProcessAuraSlots(result, lookup, forwardLookup, unit,
-            pcall(GetAuraSlots, unit, "HARMFUL"))
-        scannedCount = scannedCount + s
-        matchedCount = matchedCount + m
-        cacheHits = cacheHits + c
+                    -- Try spellId lookup (works when not secret, i.e. out of combat)
+                    local sid = auraData.spellId
+                    if sid and not issecretvalue(sid) then
+                        auraName = lookup[sid]
+                        -- Update persistent cache for combat use
+                        if auraName and auraInstanceID then
+                            instanceIdToAuraName[auraInstanceID] = auraName
+                        end
+                    elseif auraInstanceID then
+                        -- In combat (secret): use cached mapping
+                        auraName = instanceIdToAuraName[auraInstanceID]
+                        if auraName then cacheHits = cacheHits + 1 end
+                    end
+
+                    if auraName then
+                        matchedCount = matchedCount + 1
+                        result[auraName] = {
+                            spellId = forwardLookup and forwardLookup[auraName] or 0,
+                            icon = auraData.icon,
+                            duration = auraData.duration,
+                            expirationTime = auraData.expirationTime,
+                            stacks = auraData.applications,
+                            caster = auraData.sourceUnit,
+                            auraInstanceID = auraInstanceID,
+                        }
+                    end
+                end
+            end
+        end
     end
 
     if shouldLog then
         adapterDebugLast = now
         DF:Debug("AD", "unit=%s spec=%s scanned=%d matched=%d cacheHits=%d",
             unit, spec, scannedCount, matchedCount, cacheHits)
+        -- Log all unmatched spell IDs on this unit (helps identify missing alternates)
+        if GetUnitAuras then
+            local unmatched = {}
+            for _, filter in ipairs({ "HELPFUL", "HARMFUL" }) do
+                local auras = GetUnitAuras(unit, filter, 100)
+                if auras then
+                    for _, ad in ipairs(auras) do
+                        local sid = ad.spellId
+                        if sid and not issecretvalue(sid) and not lookup[sid] then
+                            unmatched[#unmatched + 1] = sid
+                        end
+                    end
+                end
+            end
+            if #unmatched > 0 then
+                DF:Debug("AD", "  unmatched IDs on %s: %s", unit, table.concat(unmatched, ", "))
+            end
+        end
     end
 
     return result

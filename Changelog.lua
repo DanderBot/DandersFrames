@@ -1,6 +1,6 @@
 local addonName, DF = ...
-DF.ADDON_VERSION = "v4.0.8-alpha.7"
-DF.BUILD_DATE = "2026-02-27T20:26:18Z"
+DF.ADDON_VERSION = "v4.0.8-alpha.8"
+DF.BUILD_DATE = "2026-02-28T13:37:30Z"
 DF.RELEASE_CHANNEL = "alpha"
 DF.CHANGELOG_TEXT = [===[
 # DandersFrames Changelog
@@ -30,12 +30,6 @@ DF.CHANGELOG_TEXT = [===[
 * Removed "Show Tooltips" toggle from click-cast panel (now in Tooltip settings)
 
 ### Bug Fixes
-* Fix defensive icons and aura durations showing stale data after entering/exiting vehicles — aura cache is now invalidated on vehicle swaps
-* Fix unit name getting stuck to the vehicle name after exiting a vehicle
-* Fix Aura Designer bar indicators getting stuck in a corrupted visual state after the tracked aura expires
-* Fix boss debuff (private aura) tooltips not showing — intermediate parent frames now propagate mouse events to the unit frame
-* Fix follower dungeon only showing 2-3 party members until /reload — delayed roster recheck now picks up NPCs that register late
-* Fix SetUnitBuff error when hovering aura icons on recycled frames — added nil unit guard to all tooltip handlers
 * Fix aura tooltips not showing — new parent-driven tooltip system handles all aura types (buffs, debuffs, defensives, boss debuffs, private auras)
 * Fix Aura Designer indicator icons not showing tooltips on hover
 * Fix Direct mode defensive icons ignoring the Icon Size slider — was reading an internal bar size (24px) instead of the user-configured setting
@@ -48,7 +42,16 @@ DF.CHANGELOG_TEXT = [===[
 * Fix debuffs being hidden when Aura Designer is enabled — debuffs now always display regardless of AD state
 * Fix Health Bar Color replace mode not reverting when the aura drops off
 * Fix blend slider still showing when Health Bar Color mode is set to Replace
+* Fix defensive icons and aura durations showing stale data after entering/exiting vehicles — aura cache is now invalidated on vehicle swaps
+* Fix unit name getting stuck to the vehicle name after exiting a vehicle
+* Fix Aura Designer bar indicators getting stuck in a corrupted visual state after the tracked aura expires
+* Fix boss debuff (private aura) tooltips not showing — intermediate parent frames now propagate mouse events to the unit frame
+* Fix follower dungeon only showing 2-3 party members until /reload — delayed roster recheck now picks up NPCs that register late
+* Fix SetUnitBuff error when hovering aura icons on recycled frames — added nil unit guard to all tooltip handlers
 * Fix click-casting reload popup appearing on every login when the Clicked conflict warning is set to Ignore
+* Fix Aura Designer not detecting auras hidden by Blizzard's frames (e.g., Symbiotic Relationship) — now scans units directly via C_UnitAuras API instead of reading from Blizzard's aura cache
+* Fix non-defensive buffs appearing in the Defensive Bar when units are out of range — added post-validation to filter out misclassified auras
+* Fix aura filter settings persisting when switching profiles — filter strings are now rebuilt on profile change
 
 ## [4.0.6] - 2026-02-15
 

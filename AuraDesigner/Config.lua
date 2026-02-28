@@ -87,6 +87,10 @@ DF.AuraDesigner.SpellIDs = {
 -- to the same aura name.
 -- ============================================================
 DF.AuraDesigner.AlternateSpellIDs = {
+    RestorationDruid = {
+        [474750] = "SymbioticRelationship",  -- base talent ID (primary is 474754)
+        [474760] = "SymbioticRelationship",  -- target-side buff ID
+    },
     RestorationShaman = {
         [974] = "EarthShield",  -- alternate ID for Earth Shield (primary is 383648)
     },

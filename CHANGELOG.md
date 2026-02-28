@@ -44,6 +44,9 @@
 * Fix follower dungeon only showing 2-3 party members until /reload — delayed roster recheck now picks up NPCs that register late
 * Fix SetUnitBuff error when hovering aura icons on recycled frames — added nil unit guard to all tooltip handlers
 * Fix click-casting reload popup appearing on every login when the Clicked conflict warning is set to Ignore
+* Fix Aura Designer not detecting auras hidden by Blizzard's frames (e.g., Symbiotic Relationship) — now scans units directly via C_UnitAuras API instead of reading from Blizzard's aura cache
+* Fix non-defensive buffs appearing in the Defensive Bar when units are out of range — added post-validation to filter out misclassified auras
+* Fix aura filter settings persisting when switching profiles — filter strings are now rebuilt on profile change
 
 ## [4.0.6] - 2026-02-15
 
