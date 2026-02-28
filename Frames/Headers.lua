@@ -8096,17 +8096,36 @@ headerChildEventFrame:SetScript("OnEvent", function(self, event, arg1)
         return
     end
     
-    -- UNIT_ENTERED_VEHICLE / UNIT_EXITED_VEHICLE: Update vehicle icon
+    -- UNIT_ENTERED_VEHICLE / UNIT_EXITED_VEHICLE: Update vehicle icon + invalidate aura cache
     if event == "UNIT_ENTERED_VEHICLE" or event == "UNIT_EXITED_VEHICLE" then
         local unit = arg1
-        if unit and DF.UpdateVehicleIcon then
-            local frame = unitFrameMap[unit]
-            if frame and frame.dfEventsEnabled ~= false then
-                DF:UpdateVehicleIcon(frame)
+        if unit then
+            -- Invalidate stale aura cache for this unit so defensive icons
+            -- and aura durations don't retain pre-vehicle data (#403, #404)
+            if DF.BlizzardAuraCache then
+                DF.BlizzardAuraCache[unit] = nil
             end
-            local pinnedFrame = FindPinnedFrameForUnit(unit)
-            if pinnedFrame then
-                DF:UpdateVehicleIcon(pinnedFrame)
+
+            if DF.UpdateVehicleIcon then
+                local frame = unitFrameMap[unit]
+                if frame and frame.dfEventsEnabled ~= false then
+                    DF:UpdateVehicleIcon(frame)
+                    -- Re-process auras with fresh cache
+                    if DF.UpdateAuras_Enhanced then DF:UpdateAuras_Enhanced(frame) end
+                    if DF.UpdateDefensiveBar then DF:UpdateDefensiveBar(frame) end
+                    -- Refresh name — UNIT_NAME_UPDATE isn't guaranteed to fire
+                    -- before this handler, so the vehicle name can stick.
+                    -- NOTE: If more frame elements get stuck after vehicle swaps
+                    -- (role icon, power bar type, etc.), consider a broader refresh here.
+                    if DF.UpdateName then DF:UpdateName(frame) end
+                end
+                local pinnedFrame = FindPinnedFrameForUnit(unit)
+                if pinnedFrame then
+                    DF:UpdateVehicleIcon(pinnedFrame)
+                    if DF.UpdateAuras_Enhanced then DF:UpdateAuras_Enhanced(pinnedFrame) end
+                    if DF.UpdateDefensiveBar then DF:UpdateDefensiveBar(pinnedFrame) end
+                    if DF.UpdateName then DF:UpdateName(pinnedFrame) end
+                end
             end
         end
         return

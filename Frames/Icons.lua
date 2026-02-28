@@ -866,28 +866,34 @@ function DF:UpdateDefensiveBar(frame)
         if cache and cache.defensives then
             for id in pairs(cache.defensives) do
                 if count >= maxDefs then break end
-                count = count + 1
-                local icon = GetOrCreateDefensiveBarIcon(frame, count)
-                RenderDefensiveBarIcon(icon, unit, id, db, iconSize, borderSize, borderColor, showBorder, showDuration, durationScale, durationFont, durationOutline, durationX, durationY, durationColor)
-
-                -- Position the icon using wrap grid layout (same as buff/debuff icons)
-                local idx = count - 1  -- 0-based for offset calculation
-                local row = floor(idx / wrap)
-                local col = idx % wrap
-
-                local offsetX = (col * primaryX) + (row * secondaryX)
-                local offsetY = (col * primaryY) + (row * secondaryY)
-
-                icon:SetScale(scale)
-                icon:ClearAllPoints()
-                icon:SetPoint(anchor, frame, anchor, baseX + offsetX, baseY + offsetY)
-
-                -- Frame level
-                local frameLevel = db.defensiveIconFrameLevel or 0
-                if frameLevel == 0 then
-                    icon:SetFrameLevel(frame.contentOverlay:GetFrameLevel() + 15)
+                -- Validate auraInstanceID is still active before rendering
+                local auraData = C_UnitAuras.GetAuraDataByAuraInstanceID(unit, id)
+                if not auraData then
+                    cache.defensives[id] = nil
                 else
-                    icon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
+                    count = count + 1
+                    local icon = GetOrCreateDefensiveBarIcon(frame, count)
+                    RenderDefensiveBarIcon(icon, unit, id, db, iconSize, borderSize, borderColor, showBorder, showDuration, durationScale, durationFont, durationOutline, durationX, durationY, durationColor)
+
+                    -- Position the icon using wrap grid layout (same as buff/debuff icons)
+                    local idx = count - 1  -- 0-based for offset calculation
+                    local row = floor(idx / wrap)
+                    local col = idx % wrap
+
+                    local offsetX = (col * primaryX) + (row * secondaryX)
+                    local offsetY = (col * primaryY) + (row * secondaryY)
+
+                    icon:SetScale(scale)
+                    icon:ClearAllPoints()
+                    icon:SetPoint(anchor, frame, anchor, baseX + offsetX, baseY + offsetY)
+
+                    -- Frame level
+                    local frameLevel = db.defensiveIconFrameLevel or 0
+                    if frameLevel == 0 then
+                        icon:SetFrameLevel(frame.contentOverlay:GetFrameLevel() + 15)
+                    else
+                        icon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
+                    end
                 end
             end
         end

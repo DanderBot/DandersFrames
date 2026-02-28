@@ -1582,7 +1582,24 @@ local function CreateADBar(frame, auraName)
     bar.dfAD_expirationTime = 0
     bar.dfAD_colorElapsed = 0
     bar.dfAD_usedTimerDuration = false
+    bar.dfAD_expiryCheckElapsed = 0
     bar:SetScript("OnUpdate", function(self, elapsed)
+        -- Expiration guard: if the aura is gone, hide the bar (#406)
+        -- Throttled to ~1 FPS to avoid per-frame API calls
+        self.dfAD_expiryCheckElapsed = (self.dfAD_expiryCheckElapsed or 0) + elapsed
+        if self.dfAD_expiryCheckElapsed >= 1.0 then
+            self.dfAD_expiryCheckElapsed = 0
+            local unit = self.dfAD_unit
+            local auraID = self.dfAD_auraInstanceID
+            if unit and auraID then
+                if not C_UnitAuras.GetAuraDataByAuraInstanceID(unit, auraID) then
+                    self:SetValue(0)
+                    self:Hide()
+                    return
+                end
+            end
+        end
+
         self.dfAD_colorElapsed = (self.dfAD_colorElapsed or 0) + elapsed
 
         -- ============================================
@@ -2066,6 +2083,18 @@ function Indicators:HideUnusedBars(frame, activeMap)
     for auraName, bar in pairs(map) do
         if not activeMap[auraName] then
             bar:Hide()
+            -- Clear stale metadata so OnUpdate doesn't run with expired
+            -- auraInstanceIDs causing stuck/corrupted bar state (#406)
+            bar:SetValue(0)
+            bar.dfAD_auraInstanceID = nil
+            bar.dfAD_unit = nil
+            bar.dfAD_duration = 0
+            bar.dfAD_expirationTime = 0
+            bar.dfAD_colorCurve = nil
+            bar.dfAD_usedTimerDuration = false
+            if bar.durationCooldown then
+                bar.durationCooldown:Hide()
+            end
         end
     end
 end
