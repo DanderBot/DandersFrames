@@ -203,9 +203,6 @@ function DF:SetupPrivateAuraAnchors(frame)
     if not frame.bossDebuffScaleFrames then
         frame.bossDebuffScaleFrames = {}
     end
-    if not frame.bossDebuffIconParents then
-        frame.bossDebuffIconParents = {}
-    end
     frameAnchors[frame] = {}
     
     -- Base frame level
@@ -258,30 +255,15 @@ function DF:SetupPrivateAuraAnchors(frame)
         
         -- Always disable numbers on main anchor (we show them scaled via second anchor)
         local mainShowNumbers = false
-        
-        -- Create/reuse a tiny icon parent frame (hides Blizzard's default stack text)
-        local iconParent = frame.bossDebuffIconParents[i]
-        if not iconParent then
-            iconParent = CreateFrame("Frame", nil, frame.contentOverlay or frame)
-            frame.bossDebuffIconParents[i] = iconParent
-        end
-        iconParent:SetParent(frame.contentOverlay or frame)
-        iconParent:SetSize(0.001, 0.001)
-        iconParent:SetFrameLevel(baseLevel + frameLevel)
-        iconParent:ClearAllPoints()
-        iconParent:SetPoint("CENTER", container, "CENTER", 0, 0)
-        -- Propagate mouse events to parent so boss debuff tooltips work
-        -- (this is our frame, not the protected private aura icon)
-        if iconParent.SetPropagateMouseMotion then iconParent:SetPropagateMouseMotion(true) end
-        if iconParent.SetPropagateMouseClicks then iconParent:SetPropagateMouseClicks(true) end
-        iconParent:Show()
-        
+
         -- Register main anchor with Blizzard's system
+        -- Parent is the full-sized container so Blizzard's icon inherits proper
+        -- hit-testing and tooltips work on mouseover (ElvUI/Grid2 pattern).
         local success, anchorID = pcall(function()
             return C_UnitAuras.AddPrivateAuraAnchor({
                 unitToken = unit,
                 auraIndex = i,
-                parent = iconParent,
+                parent = container,
                 showCountdownFrame = showCountdown,
                 showCountdownNumbers = mainShowNumbers,
                 iconInfo = {
@@ -406,14 +388,6 @@ function DF:ClearPrivateAuraAnchors(frame)
         end
     end
     
-    -- Hide icon parent frames (reused on next setup)
-    if frame.bossDebuffIconParents then
-        for i, iconParent in ipairs(frame.bossDebuffIconParents) do
-            iconParent:Hide()
-            iconParent:ClearAllPoints()
-        end
-    end
-    
     -- Clear tracked unit so next ReanchorPrivateAuras will re-register
     frame.bossDebuffAnchoredUnit = nil
     
@@ -474,15 +448,11 @@ function DF:ReanchorPrivateAuras(frame)
     
     -- Step 3: Re-register each container with new unit token
     for i, container in ipairs(frame.bossDebuffContainers) do
-        -- Use the tiny icon parent (hides Blizzard's default stack text)
-        local iconParent = frame.bossDebuffIconParents and frame.bossDebuffIconParents[i]
-        local anchorParent = iconParent or container
-        
         local success, anchorID = pcall(function()
             return C_UnitAuras.AddPrivateAuraAnchor({
                 unitToken = newUnit,
                 auraIndex = i,
-                parent = anchorParent,
+                parent = container,
                 showCountdownFrame = showCountdown,
                 showCountdownNumbers = mainShowNumbers,
                 iconInfo = {
