@@ -976,7 +976,7 @@ function DF:CreateFrameElementsExtended(frame, db)
             GameTooltip:Show()
         elseif self.auraData and self.unitFrame then
             local unit = self.unitFrame.unit
-            if self.auraData.auraInstanceID and GameTooltip.SetUnitAuraByAuraInstanceID then
+            if unit and self.auraData.auraInstanceID and GameTooltip.SetUnitAuraByAuraInstanceID then
                 GameTooltip:SetUnitAuraByAuraInstanceID(unit, self.auraData.auraInstanceID)
             end
         end
@@ -1686,7 +1686,7 @@ function DF:CreateUnitFrame(unit, index, isRaid)
             GameTooltip:Show()
         elseif self.auraData and self.unitFrame then
             local unit = self.unitFrame.unit
-            if self.auraData.auraInstanceID and GameTooltip.SetUnitAuraByAuraInstanceID then
+            if unit and self.auraData.auraInstanceID and GameTooltip.SetUnitAuraByAuraInstanceID then
                 GameTooltip:SetUnitAuraByAuraInstanceID(unit, self.auraData.auraInstanceID)
             end
         end
@@ -2484,6 +2484,7 @@ function DF:CreateAuraIcon(parent, index, auraType)
         else
             if self.auraData and self.unitFrame then
                 local unit = self.unitFrame.unit
+                if not unit then return end
                 if self.auraData.auraInstanceID and GameTooltip.SetUnitAuraByAuraInstanceID then
                     GameTooltip:SetUnitAuraByAuraInstanceID(unit, self.auraData.auraInstanceID)
                 elseif self.auraData.index then
