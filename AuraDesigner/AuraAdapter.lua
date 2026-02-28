@@ -3,9 +3,10 @@ local addonName, DF = ...
 -- ============================================================
 -- AURA DESIGNER - DATA SOURCE ADAPTER
 -- Bridges the Aura Designer to Blizzard's C_UnitAuras API.
--- Uses DF.BlizzardAuraCache (populated by the Blizzard frame
--- hook in Features/Auras.lua) for secret-safe aura queries,
--- with a direct C_UnitAuras scan fallback for early init.
+-- Scans ALL auras on a unit directly via GetAuraSlots +
+-- GetAuraDataBySlot (the ElvUI/oUF pattern), so the designer
+-- sees every aura regardless of what Blizzard's compact frames
+-- choose to display.
 --
 -- Normalized aura data format:
 --   {
@@ -20,9 +21,12 @@ local addonName, DF = ...
 -- ============================================================
 
 local pairs, ipairs, type = pairs, ipairs, type
+local pcall, select = pcall, select
 local GetTime = GetTime
 local issecretvalue = issecretvalue or function() return false end
 local GetAuraDataByAuraInstanceID = C_UnitAuras and C_UnitAuras.GetAuraDataByAuraInstanceID
+local GetAuraSlots = C_UnitAuras and C_UnitAuras.GetAuraSlots
+local GetAuraDataBySlot = C_UnitAuras and C_UnitAuras.GetAuraDataBySlot
 
 DF.AuraDesigner = DF.AuraDesigner or {}
 
@@ -31,10 +35,11 @@ DF.AuraDesigner.Adapter = AuraAdapter
 
 -- ============================================================
 -- BLIZZARD AURA PROVIDER
--- Uses DF.BlizzardAuraCache (populated by the hooksecurefunc on
--- CompactUnitFrame_UpdateAuras in Features/Auras.lua) for
--- secret-safe queries. Falls back to direct C_UnitAuras scan
--- with pcall protection during early init.
+-- Scans all auras on a unit directly via C_UnitAuras.GetAuraSlots
+-- + GetAuraDataBySlot. This sees every buff/debuff on the unit,
+-- not just what Blizzard's compact frames choose to display.
+-- Secret values (health, etc.) are handled via issecretvalue()
+-- with a persistent instanceId→auraName cache for combat use.
 -- ============================================================
 
 local Provider = {}
@@ -79,6 +84,51 @@ local instanceIdToAuraName = {}  -- { [auraInstanceID] = auraName }
 local adapterDebugLast = 0
 local ADAPTER_DEBUG_INTERVAL = 3
 
+-- Helper: processes slot varargs from GetAuraSlots via pcall.
+-- GetAuraSlots returns (token, slot1, slot2, ...) and pcall prepends ok,
+-- so we receive (result, lookup, forwardLookup, unit, ok, token, slot1, slot2, ...).
+local function ProcessAuraSlots(result, lookup, forwardLookup, unit, ok, token, ...)
+    if not ok then return 0, 0, 0 end
+    local scanned, matched, cached = 0, 0, 0
+    for i = 1, select("#", ...) do
+        local slot = select(i, ...)
+        local auraData = GetAuraDataBySlot(unit, slot)
+        if auraData then
+            scanned = scanned + 1
+            local auraName = nil
+            local auraInstanceID = auraData.auraInstanceID
+
+            -- Try spellId lookup (works when not secret, i.e. out of combat)
+            local sid = auraData.spellId
+            if sid and not issecretvalue(sid) then
+                auraName = lookup[sid]
+                -- Update persistent cache for combat use
+                if auraName and auraInstanceID then
+                    instanceIdToAuraName[auraInstanceID] = auraName
+                end
+            elseif auraInstanceID then
+                -- In combat (secret): use cached mapping
+                auraName = instanceIdToAuraName[auraInstanceID]
+                if auraName then cached = cached + 1 end
+            end
+
+            if auraName then
+                matched = matched + 1
+                result[auraName] = {
+                    spellId = forwardLookup and forwardLookup[auraName] or 0,
+                    icon = auraData.icon,
+                    duration = auraData.duration,
+                    expirationTime = auraData.expirationTime,
+                    stacks = auraData.applications,
+                    caster = auraData.sourceUnit,
+                    auraInstanceID = auraInstanceID,
+                }
+            end
+        end
+    end
+    return scanned, matched, cached
+end
+
 function Provider:GetUnitAuras(unit, spec)
     local lookup = GetSpellIdLookup(spec)  -- { [spellId] = auraName }
     if not lookup or not next(lookup) then return {} end
@@ -93,89 +143,28 @@ function Provider:GetUnitAuras(unit, spec)
     local matchedCount = 0
     local cacheHits = 0
 
-    -- PRIMARY PATH: Use BlizzardAuraCache (secret-safe)
-    -- DF.BlizzardAuraCache is populated by the hooksecurefunc on
-    -- CompactUnitFrame_UpdateAuras in Features/Auras.lua. It stores
-    -- non-secret auraInstanceIDs captured from Blizzard's own frames.
-    local blizzCache = DF.BlizzardAuraCache and DF.BlizzardAuraCache[unit]
-    if blizzCache then
-        local sources = { blizzCache.buffs, blizzCache.debuffs }
-        for _, sourceSet in ipairs(sources) do
-            if sourceSet then
-                for auraInstanceID in pairs(sourceSet) do
-                    scannedCount = scannedCount + 1
-                    local auraData = GetAuraDataByAuraInstanceID and GetAuraDataByAuraInstanceID(unit, auraInstanceID)
-                    if auraData then
-                        local auraName = nil
+    -- Scan ALL auras directly via GetAuraSlots + GetAuraDataBySlot.
+    -- This sees every buff/debuff on the unit regardless of what
+    -- Blizzard's compact frames choose to display (e.g., Symbiotic
+    -- Relationship appears on the player but Blizzard's frame hides it).
+    if GetAuraSlots and GetAuraDataBySlot then
+        local s, m, c = ProcessAuraSlots(result, lookup, forwardLookup, unit,
+            pcall(GetAuraSlots, unit, "HELPFUL"))
+        scannedCount = scannedCount + s
+        matchedCount = matchedCount + m
+        cacheHits = cacheHits + c
 
-                        -- Try spellId lookup (works when not secret, i.e. out of combat)
-                        local sid = auraData.spellId
-                        if sid and not issecretvalue(sid) then
-                            auraName = lookup[sid]
-                            -- Update persistent cache for combat use
-                            if auraName then
-                                instanceIdToAuraName[auraInstanceID] = auraName
-                            end
-                        else
-                            -- In combat (secret): use cached mapping
-                            auraName = instanceIdToAuraName[auraInstanceID]
-                            if auraName then cacheHits = cacheHits + 1 end
-                        end
-
-                        if auraName then
-                            matchedCount = matchedCount + 1
-                            result[auraName] = {
-                                spellId = forwardLookup and forwardLookup[auraName] or 0,  -- our known non-secret ID
-                                icon = auraData.icon,              -- might be secret; OK for SetTexture
-                                duration = auraData.duration,       -- might be secret; OK for SetCooldown
-                                expirationTime = auraData.expirationTime,  -- might be secret
-                                stacks = auraData.applications,     -- might be secret
-                                caster = auraData.sourceUnit,
-                                auraInstanceID = auraInstanceID,    -- non-secret
-                            }
-                        end
-                    end
-                end
-            end
-        end
-    else
-        -- FALLBACK PATH: No BlizzardAuraCache (e.g., during early init)
-        -- Use direct scan with pcall protection against secret values
-        local i = 1
-        while true do
-            local auraData = C_UnitAuras.GetBuffDataByIndex(unit, i)
-            if not auraData then break end
-            scannedCount = scannedCount + 1
-
-            -- pcall protects against "table index is secret" in combat
-            local ok, auraName = pcall(function()
-                return lookup[auraData.spellId]
-            end)
-
-            if ok and auraName then
-                matchedCount = matchedCount + 1
-                -- Build entry with pcall (other fields might also be secret)
-                pcall(function()
-                    result[auraName] = {
-                        spellId = forwardLookup and forwardLookup[auraName] or 0,
-                        icon = auraData.icon,
-                        duration = auraData.duration,
-                        expirationTime = auraData.expirationTime,
-                        stacks = auraData.applications,
-                        caster = auraData.sourceUnit,
-                        auraInstanceID = auraData.auraInstanceID,
-                    }
-                end)
-            end
-            i = i + 1
-        end
+        s, m, c = ProcessAuraSlots(result, lookup, forwardLookup, unit,
+            pcall(GetAuraSlots, unit, "HARMFUL"))
+        scannedCount = scannedCount + s
+        matchedCount = matchedCount + m
+        cacheHits = cacheHits + c
     end
 
     if shouldLog then
         adapterDebugLast = now
-        DF:Debug("AD", "unit=%s spec=%s scanned=%d matched=%d cacheHits=%d blizzCache=%s",
-            unit, spec, scannedCount, matchedCount, cacheHits,
-            blizzCache and "yes" or "no")
+        DF:Debug("AD", "unit=%s spec=%s scanned=%d matched=%d cacheHits=%d",
+            unit, spec, scannedCount, matchedCount, cacheHits)
     end
 
     return result
