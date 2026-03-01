@@ -830,12 +830,17 @@ local function ScanUnitDirect(unit)
         end
 
         -- Populate cache with full aura data
+        -- Post-validate with IsAuraFilteredOutByInstanceID because
+        -- GetUnitAuras classification filters can break for out-of-range
+        -- or vehicle-swapped units, returning all HELPFUL auras unfiltered.
         for _, auraData in ipairs(buffAuras) do
             local id = auraData.auraInstanceID
             if id then
-                cache.buffs[id] = true
-                cache.buffOrder[#cache.buffOrder + 1] = id
-                cache.buffData[#cache.buffData + 1] = auraData
+                if not IsAuraFilteredOut or not IsAuraFilteredOut(unit, id, buffFilter) then
+                    cache.buffs[id] = true
+                    cache.buffOrder[#cache.buffOrder + 1] = id
+                    cache.buffData[#cache.buffData + 1] = auraData
+                end
             end
         end
     end
@@ -854,12 +859,16 @@ local function ScanUnitDirect(unit)
             table.sort(debuffAuras, SortByName)
         end
 
+        -- Post-validate: classification filters can break for out-of-range
+        -- or vehicle-swapped units, returning all HARMFUL auras unfiltered.
         for _, auraData in ipairs(debuffAuras) do
             local id = auraData.auraInstanceID
             if id then
-                cache.debuffs[id] = true
-                cache.debuffOrder[#cache.debuffOrder + 1] = id
-                cache.debuffData[#cache.debuffData + 1] = auraData
+                if not IsAuraFilteredOut or not IsAuraFilteredOut(unit, id, debuffFilter) then
+                    cache.debuffs[id] = true
+                    cache.debuffOrder[#cache.debuffOrder + 1] = id
+                    cache.debuffData[#cache.debuffData + 1] = auraData
+                end
             end
         end
     end
@@ -889,15 +898,19 @@ local function ScanUnitDirect(unit)
     local dispelFilter = BuildDirectDispelFilter()
     local dispelAuras = GetUnitAuras(unit, dispelFilter, 40)
     if dispelAuras then
+        -- Post-validate: classification filters can break for out-of-range
+        -- or vehicle-swapped units, returning all HARMFUL auras unfiltered.
         for _, auraData in ipairs(dispelAuras) do
             local id = auraData.auraInstanceID
             if id then
-                cache.playerDispellable[id] = true
-                -- Also add to debuffs if not already present
-                if not cache.debuffs[id] then
-                    cache.debuffs[id] = true
-                    cache.debuffOrder[#cache.debuffOrder + 1] = id
-                    cache.debuffData[#cache.debuffData + 1] = auraData
+                if not IsAuraFilteredOut or not IsAuraFilteredOut(unit, id, dispelFilter) then
+                    cache.playerDispellable[id] = true
+                    -- Also add to debuffs if not already present
+                    if not cache.debuffs[id] then
+                        cache.debuffs[id] = true
+                        cache.debuffOrder[#cache.debuffOrder + 1] = id
+                        cache.debuffData[#cache.debuffData + 1] = auraData
+                    end
                 end
             end
         end
