@@ -413,13 +413,20 @@ DF.ExportCategories = {
 
         -- Aura Source Mode
         "auraSourceMode",
+        "directBuffShowAll",
         "directBuffFilterPlayer",
         "directBuffFilterRaid",
         "directBuffFilterRaidInCombat",
         "directBuffFilterCancelable",
+        "directBuffFilterNotCancelable",
+        "directBuffFilterImportant",
+        "directBuffFilterBigDefensive",
+        "directBuffFilterExternalDefensive",
         "directBuffSortOrder",
+        "directDebuffShowAll",
         "directDebuffFilterRaid",
         "directDebuffFilterCrowdControl",
+        "directDebuffFilterImportant",
         "directDebuffSortOrder",
 
         -- Dead Auras

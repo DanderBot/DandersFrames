@@ -3688,24 +3688,42 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             self:RefreshStates()
         end), 30)
         bfAll.hideOn = HideDirectOptions
+        bfAll.tooltip = "Show every buff with no filtering."
 
-        local buffSubInfo = buffGroup:AddWidget(GUI:CreateLabel(self.child, "|cff888888Uncheck 'All Buffs' to use specific filters below.|r", 250), 25)
+        local buffSubInfo = buffGroup:AddWidget(GUI:CreateLabel(self.child, "|cff888888Enabled filters are combined \226\128\148 buffs matching any selected filter will be shown.|r", 250), 35)
         buffSubInfo.hideOn = HideBuffSubFilters
 
-        local bfPlayer = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, "My Buffs Only", db, "directBuffFilterPlayer", DirectFilterChanged), 30)
+        local bfPlayer = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, "My Buffs", db, "directBuffFilterPlayer", DirectFilterChanged), 30)
         bfPlayer.hideOn = HideBuffSubFilters
+        bfPlayer.tooltip = "Buffs you cast on the target."
 
         local bfRaid = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, "Raid Buffs", db, "directBuffFilterRaid", DirectFilterChanged), 30)
         bfRaid.hideOn = HideBuffSubFilters
+        bfRaid.tooltip = "Buffs flagged by Blizzard to show up on raid frames."
 
         local bfRaidIC = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, "Raid In Combat", db, "directBuffFilterRaidInCombat", DirectFilterChanged), 30)
         bfRaidIC.hideOn = HideBuffSubFilters
+        bfRaidIC.tooltip = "Buffs flagged to show on raid frames during combat, such as self-cast HoTs."
 
-        local bfCancel = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, "Cancelable Only", db, "directBuffFilterCancelable", DirectFilterChanged), 30)
+        local bfCancel = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, "Cancelable", db, "directBuffFilterCancelable", DirectFilterChanged), 30)
         bfCancel.hideOn = HideBuffSubFilters
+        bfCancel.tooltip = "Buffs that can be right-click cancelled."
+
+        local bfNotCancel = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, "Not Cancelable", db, "directBuffFilterNotCancelable", DirectFilterChanged), 30)
+        bfNotCancel.hideOn = HideBuffSubFilters
+        bfNotCancel.tooltip = "Buffs that cannot be cancelled by the player."
 
         local bfImportant = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, "Important Spells", db, "directBuffFilterImportant", DirectFilterChanged), 30)
         bfImportant.hideOn = HideBuffSubFilters
+        bfImportant.tooltip = "Spells flagged as important by Blizzard."
+
+        local bfBigDef = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, "Big Defensives", db, "directBuffFilterBigDefensive", DirectFilterChanged), 30)
+        bfBigDef.hideOn = HideBuffSubFilters
+        bfBigDef.tooltip = "Major defensive cooldowns like Divine Shield, Ice Block, or Barkskin."
+
+        local bfExtDef = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, "External Defensives", db, "directBuffFilterExternalDefensive", DirectFilterChanged), 30)
+        bfExtDef.hideOn = HideBuffSubFilters
+        bfExtDef.tooltip = "Defensive buffs from other players, like Pain Suppression or Blessing of Sacrifice."
 
         local buffSortOptions = {
             DEFAULT = "Default (Slot Order)",
@@ -3730,18 +3748,22 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             self:RefreshStates()
         end), 30)
         dfAll.hideOn = HideDirectOptions
+        dfAll.tooltip = "Show every debuff with no filtering."
 
-        local debuffSubInfo = debuffGroup:AddWidget(GUI:CreateLabel(self.child, "|cff888888Uncheck 'All Debuffs' to use specific filters below.|r", 250), 25)
+        local debuffSubInfo = debuffGroup:AddWidget(GUI:CreateLabel(self.child, "|cff888888Enabled filters are combined \226\128\148 debuffs matching any selected filter will be shown.|r", 250), 35)
         debuffSubInfo.hideOn = HideDebuffSubFilters
 
         local dfRaid = debuffGroup:AddWidget(GUI:CreateCheckbox(self.child, "Raid Debuffs", db, "directDebuffFilterRaid", DirectFilterChanged), 30)
         dfRaid.hideOn = HideDebuffSubFilters
+        dfRaid.tooltip = "Debuffs relevant in a raid context."
 
         local dfCC = debuffGroup:AddWidget(GUI:CreateCheckbox(self.child, "Crowd Control", db, "directDebuffFilterCrowdControl", DirectFilterChanged), 30)
         dfCC.hideOn = HideDebuffSubFilters
+        dfCC.tooltip = "CC effects like stuns, roots, and incapacitates."
 
         local dfImportant = debuffGroup:AddWidget(GUI:CreateCheckbox(self.child, "Important Spells", db, "directDebuffFilterImportant", DirectFilterChanged), 30)
         dfImportant.hideOn = HideDebuffSubFilters
+        dfImportant.tooltip = "Spells flagged as important by Blizzard."
 
         local debuffSortOptions = {
             DEFAULT = "Default (Slot Order)",
@@ -3757,7 +3779,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local defHeader = defGroup:AddWidget(GUI:CreateHeader(self.child, "Defensives"), 40)
         defHeader.hideOn = HideDirectOptions
 
-        local defInfo = defGroup:AddWidget(GUI:CreateLabel(self.child, "In Direct mode, all active big defensives are shown per unit (not just one). Adjust max count and layout on the Defensive Icon page.", 250), 60)
+        local defInfo = defGroup:AddWidget(GUI:CreateLabel(self.child, "In Direct mode, all active big and external defensives are shown per unit (not just one). Adjust max count and layout on the Defensive Icon page.", 250), 60)
         defInfo.hideOn = HideDirectOptions
 
         -- ===== DISPEL INFO =====
@@ -4823,7 +4845,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end, nil, true), 55)
         defWrap.hideOn = HideDefensiveIconOptions
 
-        local defSpacing = layoutGroup:AddWidget(GUI:CreateSlider(self.child, "Icon Spacing", 0, 10, 1, db, "defensiveBarSpacing", function()
+        local defSpacing = layoutGroup:AddWidget(GUI:CreateSlider(self.child, "Icon Spacing", -10, 10, 1, db, "defensiveBarSpacing", function()
             if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
         end, function() DF:LightweightUpdateDefensiveIcons() end, true), 55)
         defSpacing.hideOn = HideDefensiveIconOptions

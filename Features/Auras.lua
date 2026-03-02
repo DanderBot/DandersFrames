@@ -688,58 +688,89 @@ end
 -- Cache AuraUtil filter constants (available in 11.1+)
 local AuraFilters = AuraUtil and AuraUtil.AuraFilters or {}
 
--- Cached filter strings per mode (rebuilt only when settings change)
-local cachedPartyBuffFilter = nil
-local cachedPartyDebuffFilter = nil
-local cachedRaidBuffFilter = nil
-local cachedRaidDebuffFilter = nil
-local cachedDefensiveFilter = nil   -- mode-independent
-local cachedDispelFilter = nil      -- mode-independent
+-- Cached filter tables per mode (rebuilt only when settings change)
+-- Each is nil (show all / unavailable) or a table of individual filter strings
+-- e.g. {"HELPFUL|PLAYER", "HELPFUL|RAID", "HELPFUL|BIG_DEFENSIVE"}
+local cachedPartyBuffFilters = nil
+local cachedPartyDebuffFilters = nil
+local cachedRaidBuffFilters = nil
+local cachedRaidDebuffFilters = nil
+local cachedDefensiveFilters = nil   -- mode-independent
+local cachedDispelFilter = nil       -- mode-independent (single string, no OR needed)
 
--- Build filter string for buffs from Direct mode settings
-local function BuildDirectBuffFilter(db)
-    if db.directBuffShowAll then return "HELPFUL" end
-    local parts = { "HELPFUL" }
-    if db.directBuffFilterPlayer then parts[#parts + 1] = "PLAYER" end
-    if db.directBuffFilterRaid then parts[#parts + 1] = "RAID" end
+-- Build individual filter strings for buffs (OR logic via post-classification)
+-- Returns nil (show all) or table of "HELPFUL|CLASSIFICATION" strings
+local function BuildDirectBuffFilters(db)
+    if db.directBuffShowAll then return nil end
+    local filters = {}
+    if db.directBuffFilterPlayer then filters[#filters + 1] = "HELPFUL|PLAYER" end
+    if db.directBuffFilterRaid then filters[#filters + 1] = "HELPFUL|RAID" end
     if db.directBuffFilterRaidInCombat and AuraFilters.RaidInCombat then
-        parts[#parts + 1] = AuraFilters.RaidInCombat
+        filters[#filters + 1] = "HELPFUL|" .. AuraFilters.RaidInCombat
     end
-    if db.directBuffFilterCancelable then parts[#parts + 1] = "CANCELABLE" end
+    if db.directBuffFilterCancelable then filters[#filters + 1] = "HELPFUL|CANCELABLE" end
+    if db.directBuffFilterNotCancelable then filters[#filters + 1] = "HELPFUL|NOT_CANCELABLE" end
     if db.directBuffFilterImportant then
-        parts[#parts + 1] = AuraFilters.Important or "IMPORTANT"
+        filters[#filters + 1] = "HELPFUL|" .. (AuraFilters.Important or "IMPORTANT")
     end
-    return table.concat(parts, "|")
+    if db.directBuffFilterBigDefensive and AuraFilters.BigDefensive then
+        filters[#filters + 1] = "HELPFUL|" .. AuraFilters.BigDefensive
+    end
+    if db.directBuffFilterExternalDefensive and AuraFilters.ExternalDefensive then
+        filters[#filters + 1] = "HELPFUL|" .. AuraFilters.ExternalDefensive
+    end
+    -- No sub-filters selected = show all (backward compat)
+    if #filters == 0 then return nil end
+    return filters
 end
 
--- Build filter string for debuffs from Direct mode settings
-local function BuildDirectDebuffFilter(db)
-    if db.directDebuffShowAll then return "HARMFUL" end
-    local parts = { "HARMFUL" }
-    if db.directDebuffFilterRaid then parts[#parts + 1] = "RAID" end
+-- Build individual filter strings for debuffs (OR logic via post-classification)
+-- Returns nil (show all) or table of "HARMFUL|CLASSIFICATION" strings
+local function BuildDirectDebuffFilters(db)
+    if db.directDebuffShowAll then return nil end
+    local filters = {}
+    if db.directDebuffFilterRaid then filters[#filters + 1] = "HARMFUL|RAID" end
     if db.directDebuffFilterCrowdControl and AuraFilters.CrowdControl then
-        parts[#parts + 1] = AuraFilters.CrowdControl
+        filters[#filters + 1] = "HARMFUL|" .. AuraFilters.CrowdControl
     end
     if db.directDebuffFilterImportant then
-        parts[#parts + 1] = AuraFilters.Important or "IMPORTANT"
+        filters[#filters + 1] = "HARMFUL|" .. (AuraFilters.Important or "IMPORTANT")
     end
-    return table.concat(parts, "|")
+    -- No sub-filters selected = show all (backward compat)
+    if #filters == 0 then return nil end
+    return filters
 end
 
--- Build defensive filter (HELPFUL + BIG_DEFENSIVE, nil if unavailable)
-local function BuildDirectDefensiveFilter()
-    if cachedDefensiveFilter then return cachedDefensiveFilter end
-    if not AuraFilters.BigDefensive then return nil end
-    cachedDefensiveFilter = "HELPFUL|" .. AuraFilters.BigDefensive
-    return cachedDefensiveFilter
+-- Build defensive filter table (BIG_DEFENSIVE + EXTERNAL_DEFENSIVE, nil if unavailable)
+local function BuildDirectDefensiveFilters()
+    if cachedDefensiveFilters then return cachedDefensiveFilters end
+    local filters = {}
+    if AuraFilters.BigDefensive then filters[#filters + 1] = "HELPFUL|" .. AuraFilters.BigDefensive end
+    if AuraFilters.ExternalDefensive then filters[#filters + 1] = "HELPFUL|" .. AuraFilters.ExternalDefensive end
+    if #filters == 0 then return nil end
+    cachedDefensiveFilters = filters
+    return cachedDefensiveFilters
 end
 
--- Build dispel filter (HARMFUL + RAID_PLAYER_DISPELLABLE, nil if unavailable)
+-- Build dispel filter (HARMFUL + RAID_PLAYER_DISPELLABLE, single string)
 local function BuildDirectDispelFilter()
     if cachedDispelFilter then return cachedDispelFilter end
     local dispelConst = AuraFilters.RaidPlayerDispellable or "RAID_PLAYER_DISPELLABLE"
     cachedDispelFilter = "HARMFUL|" .. dispelConst
     return cachedDispelFilter
+end
+
+-- Check if an aura passes any filter in a table (OR logic)
+-- Returns true if IsAuraFilteredOutByInstanceID says the aura is NOT filtered out
+-- for at least one of the provided filter strings.
+local function AuraPassesAnyFilter(unit, auraInstanceID, filters)
+    if not IsAuraFilteredOut then return true end
+    for i = 1, #filters do
+        if not IsAuraFilteredOut(unit, auraInstanceID, filters[i]) then
+            return true
+        end
+    end
+    return false
 end
 
 -- Sort comparators for Direct mode
@@ -764,20 +795,20 @@ local function SortByName(a, b)
     return false
 end
 
--- Rebuild cached filter strings from current settings (per mode)
+-- Rebuild cached filter tables from current settings (per mode)
 function DF:RebuildDirectFilterStrings()
     local partyDb = DF:GetDB("party")
     local raidDb = DF:GetDB("raid")
     if partyDb then
-        cachedPartyBuffFilter = BuildDirectBuffFilter(partyDb)
-        cachedPartyDebuffFilter = BuildDirectDebuffFilter(partyDb)
+        cachedPartyBuffFilters = BuildDirectBuffFilters(partyDb)
+        cachedPartyDebuffFilters = BuildDirectDebuffFilters(partyDb)
     end
     if raidDb then
-        cachedRaidBuffFilter = BuildDirectBuffFilter(raidDb)
-        cachedRaidDebuffFilter = BuildDirectDebuffFilter(raidDb)
+        cachedRaidBuffFilters = BuildDirectBuffFilters(raidDb)
+        cachedRaidDebuffFilters = BuildDirectDebuffFilters(raidDb)
     end
     -- Defensive and dispel are mode-independent, clear to rebuild on next use
-    cachedDefensiveFilter = nil
+    cachedDefensiveFilters = nil
     cachedDispelFilter = nil
 end
 
@@ -814,99 +845,77 @@ local function ScanUnitDirect(unit)
 
     if not GetUnitAuras then return end
 
-    -- === BUFFS ===
-    local buffFilter = isRaid
-        and (cachedRaidBuffFilter or BuildDirectBuffFilter(db))
-        or (cachedPartyBuffFilter or BuildDirectBuffFilter(db))
+    -- Resolve cached filter tables for this frame's mode
+    -- Each is nil (show all) or a table of individual filter strings for OR logic
+    local buffFilters = isRaid
+        and (cachedRaidBuffFilters or BuildDirectBuffFilters(db))
+        or (cachedPartyBuffFilters or BuildDirectBuffFilters(db))
+    local defFilters = db.defensiveIconEnabled and BuildDirectDefensiveFilters() or nil
 
-    local buffAuras = GetUnitAuras(unit, buffFilter, 40)
-    if buffAuras then
-        -- Apply sort if requested
+    -- === HELPFUL AURAS (buffs + defensives in a single pass) ===
+    local helpfulAuras = GetUnitAuras(unit, "HELPFUL", 40)
+    if helpfulAuras then
+        -- Apply sort if requested (for buff display order)
         local buffSort = db.directBuffSortOrder or "DEFAULT"
-        if buffSort == "TIME" and #buffAuras > 1 then
-            table.sort(buffAuras, SortByTimeRemaining)
-        elseif buffSort == "NAME" and #buffAuras > 1 then
-            table.sort(buffAuras, SortByName)
+        if buffSort == "TIME" and #helpfulAuras > 1 then
+            table.sort(helpfulAuras, SortByTimeRemaining)
+        elseif buffSort == "NAME" and #helpfulAuras > 1 then
+            table.sort(helpfulAuras, SortByName)
         end
 
-        -- Populate cache with full aura data
-        -- Post-validate with IsAuraFilteredOutByInstanceID because
-        -- GetUnitAuras classification filters can break for out-of-range
-        -- or vehicle-swapped units, returning all HELPFUL auras unfiltered.
-        for _, auraData in ipairs(buffAuras) do
+        -- Post-classify each aura against enabled filters (OR logic).
+        -- buffFilters = nil means "show all buffs" (no post-classification).
+        -- defFilters = nil means defensive constants unavailable (skip).
+        for _, auraData in ipairs(helpfulAuras) do
             local id = auraData.auraInstanceID
             if id then
-                if not IsAuraFilteredOut or not IsAuraFilteredOut(unit, id, buffFilter) then
+                -- Buff classification
+                if not buffFilters or AuraPassesAnyFilter(unit, id, buffFilters) then
                     cache.buffs[id] = true
                     cache.buffOrder[#cache.buffOrder + 1] = id
                     cache.buffData[#cache.buffData + 1] = auraData
                 end
+                -- Defensive classification (independent of buff filters)
+                if defFilters and AuraPassesAnyFilter(unit, id, defFilters) then
+                    cache.defensives[id] = true
+                end
             end
         end
     end
 
-    -- === DEBUFFS ===
-    local debuffFilter = isRaid
-        and (cachedRaidDebuffFilter or BuildDirectDebuffFilter(db))
-        or (cachedPartyDebuffFilter or BuildDirectDebuffFilter(db))
+    -- Resolve cached debuff filter tables
+    local debuffFilters = isRaid
+        and (cachedRaidDebuffFilters or BuildDirectDebuffFilters(db))
+        or (cachedPartyDebuffFilters or BuildDirectDebuffFilters(db))
+    local dispelFilter = BuildDirectDispelFilter()
 
-    local debuffAuras = GetUnitAuras(unit, debuffFilter, 40)
-    if debuffAuras then
+    -- === HARMFUL AURAS (debuffs + dispels in a single pass) ===
+    local harmfulAuras = GetUnitAuras(unit, "HARMFUL", 40)
+    if harmfulAuras then
         local debuffSort = db.directDebuffSortOrder or "DEFAULT"
-        if debuffSort == "TIME" and #debuffAuras > 1 then
-            table.sort(debuffAuras, SortByTimeRemaining)
-        elseif debuffSort == "NAME" and #debuffAuras > 1 then
-            table.sort(debuffAuras, SortByName)
+        if debuffSort == "TIME" and #harmfulAuras > 1 then
+            table.sort(harmfulAuras, SortByTimeRemaining)
+        elseif debuffSort == "NAME" and #harmfulAuras > 1 then
+            table.sort(harmfulAuras, SortByName)
         end
 
-        -- Post-validate: classification filters can break for out-of-range
-        -- or vehicle-swapped units, returning all HARMFUL auras unfiltered.
-        for _, auraData in ipairs(debuffAuras) do
+        -- Post-classify each aura against enabled filters (OR logic).
+        -- debuffFilters = nil means "show all debuffs" (no post-classification).
+        for _, auraData in ipairs(harmfulAuras) do
             local id = auraData.auraInstanceID
             if id then
-                if not IsAuraFilteredOut or not IsAuraFilteredOut(unit, id, debuffFilter) then
+                -- Debuff classification
+                local addedAsDebuff = false
+                if not debuffFilters or AuraPassesAnyFilter(unit, id, debuffFilters) then
                     cache.debuffs[id] = true
                     cache.debuffOrder[#cache.debuffOrder + 1] = id
                     cache.debuffData[#cache.debuffData + 1] = auraData
+                    addedAsDebuff = true
                 end
-            end
-        end
-    end
-
-    -- === DEFENSIVES (BIG_DEFENSIVE filter, multiple results) ===
-    -- Only scan if BIG_DEFENSIVE filter is available — never fall back to
-    -- plain HELPFUL which would treat every buff as a defensive.
-    -- Post-validate each aura with IsAuraFilteredOutByInstanceID because
-    -- GetUnitAuras classification filters can break for out-of-range units,
-    -- returning all HELPFUL auras instead of just BIG_DEFENSIVE ones.
-    local defFilter = BuildDirectDefensiveFilter()
-    if defFilter then
-        local defAuras = GetUnitAuras(unit, defFilter, 40)
-        if defAuras then
-            for _, auraData in ipairs(defAuras) do
-                local id = auraData.auraInstanceID
-                if id then
-                    if not IsAuraFilteredOut or not IsAuraFilteredOut(unit, id, defFilter) then
-                        cache.defensives[id] = true
-                    end
-                end
-            end
-        end
-    end
-
-    -- === PLAYER DISPELLABLE ===
-    local dispelFilter = BuildDirectDispelFilter()
-    local dispelAuras = GetUnitAuras(unit, dispelFilter, 40)
-    if dispelAuras then
-        -- Post-validate: classification filters can break for out-of-range
-        -- or vehicle-swapped units, returning all HARMFUL auras unfiltered.
-        for _, auraData in ipairs(dispelAuras) do
-            local id = auraData.auraInstanceID
-            if id then
-                if not IsAuraFilteredOut or not IsAuraFilteredOut(unit, id, dispelFilter) then
+                -- Dispel classification (also merges into debuffs if not already present)
+                if dispelFilter and (not IsAuraFilteredOut or not IsAuraFilteredOut(unit, id, dispelFilter)) then
                     cache.playerDispellable[id] = true
-                    -- Also add to debuffs if not already present
-                    if not cache.debuffs[id] then
+                    if not addedAsDebuff and not cache.debuffs[id] then
                         cache.debuffs[id] = true
                         cache.debuffOrder[#cache.debuffOrder + 1] = id
                         cache.debuffData[#cache.debuffData + 1] = auraData
@@ -1310,7 +1319,7 @@ function DF:UpdateAuraIcons_Enhanced(frame, icons, auraType, maxAuras)
     local dedupSet = nil
     local cache = DF.BlizzardAuraCache[unit]
     if auraType == "BUFF" and db.buffDeduplicateDefensives then
-        if cache and cache.defensives and next(cache.defensives) then
+        if db.defensiveIconEnabled and cache and cache.defensives and next(cache.defensives) then
             dedupSet = cache.defensives
         end
         local adIDs = frame.dfAD_activeInstanceIDs
@@ -1640,8 +1649,8 @@ function DF:UpdateAuraIconsDirect(frame, icons, auraType, maxAuras)
     -- Defensive/AD deduplication: skip buffs already shown in defensive bar or Aura Designer
     local dedupSet = nil
     if auraType == "BUFF" and db.buffDeduplicateDefensives then
-        -- Defensive bar auraInstanceIDs
-        if cache and cache.defensives and next(cache.defensives) then
+        -- Defensive bar auraInstanceIDs (only dedup if bar is actually enabled)
+        if db.defensiveIconEnabled and cache and cache.defensives and next(cache.defensives) then
             dedupSet = cache.defensives
         end
         -- Aura Designer active auraInstanceIDs

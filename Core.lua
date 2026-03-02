@@ -3320,6 +3320,43 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
             end
         end
 
+        -- Force updated Direct mode filter defaults (v4.0.9b):
+        -- Buffs: Raid In Combat + Big Defensive + External Defensive (no Player)
+        -- Debuffs: Show All off, Raid + Crowd Control + Important on
+        for _, mode in ipairs({"party", "raid"}) do
+            local modeDb = DF.db[mode]
+            if modeDb and not modeDb._directFilterDefaultsV2 then
+                modeDb.directBuffShowAll = false
+                modeDb.directBuffFilterPlayer = false
+                modeDb.directBuffFilterRaidInCombat = true
+                modeDb.directBuffFilterBigDefensive = true
+                modeDb.directBuffFilterExternalDefensive = true
+                modeDb.directDebuffShowAll = false
+                modeDb.directDebuffFilterRaid = true
+                modeDb.directDebuffFilterCrowdControl = true
+                modeDb.directDebuffFilterImportant = true
+                modeDb._directFilterDefaultsV2 = true
+            end
+        end
+        if DandersFramesDB_v2 and DandersFramesDB_v2.profiles then
+            for profileName, profile in pairs(DandersFramesDB_v2.profiles) do
+                for _, mode in ipairs({"party", "raid"}) do
+                    if profile[mode] and not profile[mode]._directFilterDefaultsV2 then
+                        profile[mode].directBuffShowAll = false
+                        profile[mode].directBuffFilterPlayer = false
+                        profile[mode].directBuffFilterRaidInCombat = true
+                        profile[mode].directBuffFilterBigDefensive = true
+                        profile[mode].directBuffFilterExternalDefensive = true
+                        profile[mode].directDebuffShowAll = false
+                        profile[mode].directDebuffFilterRaid = true
+                        profile[mode].directDebuffFilterCrowdControl = true
+                        profile[mode].directDebuffFilterImportant = true
+                        profile[mode]._directFilterDefaultsV2 = true
+                    end
+                end
+            end
+        end
+
         -- Migrate texture paths from old format to new Media folder format (v3.2.0)
         local function MigrateTexturePath(path)
             if type(path) ~= "string" then return path end

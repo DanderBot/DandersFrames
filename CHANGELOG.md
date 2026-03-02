@@ -1,5 +1,18 @@
 # DandersFrames Changelog
 
+## [4.0.9] - 2026-03-02
+
+### Bug Fixes
+* Fixed imported and duplicated profiles resetting to Default on reload/relog due to per-character SavedVariable not being synced
+
+### New Features
+* **Direct API buff filters** — added Not Cancelable, Big Defensives, and External Defensives as toggleable filter options
+* **Additive filter logic** — enabled filters now use OR logic so selecting multiple categories shows the union (e.g. Raid In Combat + Big Defensives shows both) instead of requiring auras to match all selected filters
+* **Defensive icon scanning** — defensive icon now detects both Big Defensives and External Defensives (e.g. Pain Suppression, Blessing of Sacrifice)
+* **Filter tooltips** — hover any filter checkbox to see a description of what that category includes
+* **Defensive bar spacing** — icon spacing slider now supports negative values for overlapping icons
+* **Updated filter defaults** — buff filters default to Raid In Combat + Big Defensives + External Defensives; debuff filters default to Raid Debuffs + Crowd Control + Important Spells (migrated for existing users)
+
 ## [4.0.8] - 2026-03-01
 
 ### New: Aura Designer

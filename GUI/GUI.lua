@@ -1082,7 +1082,19 @@ function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, 
             txt:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
         end
     end
-    
+
+    -- Tooltip support: show container.tooltip on hover
+    container:EnableMouse(true)
+    container:SetScript("OnEnter", function(self)
+        if self.tooltip then
+            GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
+            GameTooltip:SetText(label, 1, 1, 1)
+            GameTooltip:AddLine(self.tooltip, 1, 0.82, 0, true)
+            GameTooltip:Show()
+        end
+    end)
+    container:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
     UpdateState()
     
     -- SEARCH: Register this setting

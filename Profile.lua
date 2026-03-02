@@ -242,6 +242,9 @@ function DF:DuplicateProfile(newName)
 
     -- Switch to the new profile
     DandersFramesDB_v2.currentProfile = newName
+    if DandersFramesCharDB then
+        DandersFramesCharDB.currentProfile = newName
+    end
     DF.db = DandersFramesDB_v2.profiles[newName]
     DF:WrapDB()
 
@@ -583,6 +586,9 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
 
         -- Switch to the new profile
         DandersFramesDB_v2.currentProfile = profileName
+        if DandersFramesCharDB then
+            DandersFramesCharDB.currentProfile = profileName
+        end
         DF.db = DandersFramesDB_v2.profiles[profileName]
         DF:WrapDB()
         
