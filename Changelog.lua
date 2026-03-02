@@ -7,6 +7,7 @@ DF.CHANGELOG_TEXT = [===[
 ## [4.0.10] - 2026-03-02
 
 ### Bug Fixes
+* Fixed addon managers (Wago, CurseForge) constantly prompting for updates due to stale version in TOC file — version is now updated as part of every release
 * Fixed Aura Designer tracking buffs from other players instead of only your own casts
 
 ### New Features
