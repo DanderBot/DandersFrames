@@ -3,508 +3,427 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Aura Designer Redesign - Interactive Prototype</title>
+<title>Aura Designer Redesign — DandersFrames Prototype</title>
 <style>
-  /* ================================================
-     BASE RESET & THEME TOKENS
-     Matches DandersFrames dark theme exactly
-     ================================================ */
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
+  /* ============================================================
+     COLOR PALETTE (mirrors the WoW addon's C_ constants)
+     ============================================================ */
   :root {
     --bg:        #141414;
     --panel:     #1e1e1e;
     --element:   #2e2e2e;
     --border:    #404040;
     --hover:     #383838;
-    --text:      #e5e5e5;
-    --text-dim:  #999999;
-    --accent:    #7373f2;
-    --accent-bg: rgba(115,115,242,0.08);
-    --accent-dim:rgba(115,115,242,0.4);
-    --red:       #e63e3e;
-    --red-bg:    rgba(230,62,62,0.12);
-    --font:      'Segoe UI', system-ui, -apple-system, sans-serif;
-    --mono:      'Cascadia Code', 'Fira Code', monospace;
+    --text:      #e6e6e6;
+    --text-dim:  #999;
+    --accent:    #5cb8f0;   /* theme / accent color */
+    --accent-bg: rgba(92,184,240,0.08);
+    --accent-border: rgba(92,184,240,0.5);
+    --danger:    #e64545;
   }
 
+  * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
-    background: #0d0d0d;
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: #0c0c0c;
     color: var(--text);
-    font-family: var(--font);
-    font-size: 13px;
-    line-height: 1.4;
     display: flex;
     justify-content: center;
     padding: 24px;
     min-height: 100vh;
   }
 
-  /* ================================================
-     MAIN CONTAINER (simulates WoW addon page)
-     ================================================ */
-  .page {
-    width: 100%;
-    max-width: 1100px;
+  /* ============================================================
+     MAIN CONTAINER  (simulates the WoW options page area)
+     ============================================================ */
+  .designer {
+    width: 980px;
+    display: grid;
+    grid-template-columns: 1fr 280px;
+    grid-template-rows: auto auto auto 1fr;
+    gap: 0 6px;
     background: var(--bg);
     border: 1px solid var(--border);
     border-radius: 4px;
     overflow: hidden;
   }
 
-  /* ================================================
-     ENABLE BANNER
-     ================================================ */
-  .enable-banner {
+  /* ============================================================
+     TOP BANNER (spec selector, enable toggle — unchanged)
+     ============================================================ */
+  .top-banner {
+    grid-column: 1 / -1;
+    background: #111;
+    border-bottom: 1px solid var(--border);
+    padding: 10px 14px;
     display: flex;
     align-items: center;
-    height: 44px;
-    padding: 0 12px;
-    background: #232323;
-    border-bottom: 1px solid var(--border);
-    gap: 10px;
+    gap: 14px;
   }
-  .enable-banner .cb {
-    width: 18px; height: 18px;
-    background: var(--element);
-    border: 1px solid var(--border);
-    border-radius: 2px;
-    display: flex; align-items: center; justify-content: center;
-    cursor: pointer;
-    flex-shrink: 0;
-  }
-  .enable-banner .cb.checked {
-    background: var(--accent);
-    border-color: var(--accent);
-  }
-  .enable-banner .cb.checked::after {
-    content: '';
-    width: 10px; height: 10px;
-    background: white;
-    border-radius: 1px;
-  }
-  .enable-banner .label-group { flex: 1; line-height: 1.2; }
-  .enable-banner .label-group .title { font-weight: 600; font-size: 13px; }
-  .enable-banner .label-group .subtitle { font-size: 10px; color: var(--text-dim); }
-  .enable-banner .spec-select {
-    background: var(--element);
-    border: 1px solid var(--border);
-    color: var(--text);
-    padding: 3px 8px;
+  .top-banner .spec-label {
     font-size: 11px;
-    border-radius: 2px;
-    cursor: pointer;
-  }
-
-  /* ================================================
-     MAIN CONTENT AREA (left + right)
-     ================================================ */
-  .content {
-    display: flex;
-    min-height: 580px;
-  }
-  .left-area {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    border-right: 1px solid var(--border);
-  }
-  .right-panel {
-    width: 300px;
-    flex-shrink: 0;
-    background: #191919;
-    display: flex;
-    flex-direction: column;
-  }
-
-  /* ================================================
-     TRACKABLE AURAS SECTION
-     ================================================ */
-  .tile-section {
-    border-bottom: 1px solid var(--border);
-  }
-  .tile-section .section-header {
-    display: flex;
-    align-items: center;
-    height: 22px;
-    padding: 0 10px;
-    background: var(--bg);
-    border-bottom: 1px solid rgba(64,64,64,0.5);
-    font-size: 9px;
-    letter-spacing: 0.5px;
     color: var(--text-dim);
     text-transform: uppercase;
-    justify-content: space-between;
+    letter-spacing: 0.6px;
   }
-  .tile-section .section-header .count {
+  .top-banner select {
+    background: var(--element);
+    color: var(--text);
+    border: 1px solid var(--border);
+    padding: 4px 8px;
+    border-radius: 3px;
+    font-size: 12px;
+  }
+  .top-banner .toggle-group {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
     color: var(--text-dim);
-    font-size: 9px;
+  }
+  .toggle-switch {
+    width: 34px; height: 18px;
+    background: var(--element);
+    border-radius: 9px;
+    position: relative;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    transition: background .2s;
+  }
+  .toggle-switch.active { background: var(--accent); border-color: var(--accent); }
+  .toggle-switch::after {
+    content: '';
+    position: absolute;
+    width: 12px; height: 12px;
+    background: #fff;
+    border-radius: 50%;
+    top: 2px; left: 2px;
+    transition: left .2s;
+  }
+  .toggle-switch.active::after { left: 18px; }
+
+  /* ============================================================
+     TRACKABLE AURAS STRIP  (left column, row 2)
+     ============================================================ */
+  .aura-strip-section {
+    grid-column: 1 / -1;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
   }
 
-  /* ================================================
-     TYPE SELECTOR (Icon / Square / Bar)
-     NEW: Lives above the tile strip
-     ================================================ */
+  .aura-strip-header {
+    display: flex;
+    align-items: center;
+    padding: 6px 12px;
+    gap: 12px;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+  }
+  .aura-strip-header .section-title {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: var(--text-dim);
+    white-space: nowrap;
+  }
+
+  /* ── Type Selector (Icon / Square / Bar) ── */
   .type-selector {
     display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 8px 10px;
-    background: #1a1a1a;
-    border-bottom: 1px solid rgba(64,64,64,0.4);
-  }
-  .type-selector .label {
-    font-size: 10px;
-    color: var(--text-dim);
-    text-transform: uppercase;
-    letter-spacing: 0.4px;
-    margin-right: 4px;
-    white-space: nowrap;
+    gap: 2px;
+    background: var(--bg);
+    border-radius: 4px;
+    padding: 2px;
+    border: 1px solid var(--border);
   }
   .type-btn {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    padding: 5px 12px;
-    background: rgba(0,0,0,0.25);
-    border: 1px solid var(--border);
-    border-radius: 3px;
-    color: var(--text-dim);
+    padding: 4px 14px;
     font-size: 11px;
+    color: var(--text-dim);
+    background: transparent;
+    border: none;
+    border-radius: 3px;
     cursor: pointer;
-    transition: all 0.15s;
-    white-space: nowrap;
+    transition: all .15s;
+    font-family: inherit;
+    font-weight: 500;
   }
-  .type-btn:hover {
-    border-color: var(--accent-dim);
-    color: var(--text);
-    background: rgba(115,115,242,0.06);
-  }
+  .type-btn:hover { color: var(--text); background: var(--element); }
   .type-btn.active {
-    border-color: var(--accent);
-    background: rgba(115,115,242,0.12);
-    color: var(--accent);
-    font-weight: 600;
-  }
-  .type-btn .type-icon {
-    width: 16px; height: 16px;
-    border-radius: 2px;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 9px;
-  }
-  .type-btn.active .type-icon { opacity: 1; }
-
-  /* Icon type preview */
-  .type-icon.icon-preview {
-    background: linear-gradient(135deg, #4a8, #2a6);
-    border: 1px solid #5b9;
-    border-radius: 2px;
-  }
-  /* Square type preview */
-  .type-icon.square-preview {
-    background: #7373f2;
-    border: 1px solid #8888ff;
-    border-radius: 1px;
-  }
-  /* Bar type preview */
-  .type-icon.bar-preview {
-    width: 22px; height: 6px;
-    background: linear-gradient(90deg, #7373f2, #5555cc);
-    border: 1px solid #8888ff;
-    border-radius: 1px;
+    background: var(--accent);
+    color: #fff;
+    box-shadow: 0 1px 4px rgba(92,184,240,0.3);
   }
 
-  .type-description {
+  .strip-hint {
     font-size: 10px;
     color: var(--text-dim);
+    opacity: 0.6;
     margin-left: auto;
-    font-style: italic;
-    opacity: 0.7;
+    white-space: nowrap;
   }
 
-  /* ================================================
-     TILE STRIP (horizontal scrolling aura palette)
-     ================================================ */
-  .tile-strip {
+  /* ── Aura Tile Scroll Area ── */
+  .aura-tiles-scroll {
     display: flex;
-    gap: 6px;
-    padding: 10px;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 10px 12px 10px 12px;
     overflow-x: auto;
     overflow-y: hidden;
-    background: var(--panel);
-    scrollbar-width: thin;
-    scrollbar-color: #444 transparent;
   }
-  .tile-strip::-webkit-scrollbar { height: 6px; }
-  .tile-strip::-webkit-scrollbar-track { background: transparent; }
-  .tile-strip::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
+  .aura-tiles-scroll::-webkit-scrollbar { height: 4px; }
+  .aura-tiles-scroll::-webkit-scrollbar-track { background: transparent; }
+  .aura-tiles-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
+  /* ── Individual Aura Tile ── */
   .aura-tile {
     flex-shrink: 0;
     width: 68px;
     text-align: center;
-    cursor: pointer;
-    border-radius: 3px;
-    padding: 4px 0;
-    transition: all 0.15s;
+    cursor: grab;
     position: relative;
+    transition: transform .1s;
   }
-  .aura-tile:hover {
-    background: rgba(255,255,255,0.03);
-  }
-  .aura-tile.selected {
-    background: var(--accent-bg);
-  }
+  .aura-tile:active { cursor: grabbing; transform: scale(0.96); }
 
-  .aura-tile .tile-icon-wrapper {
-    width: 56px; height: 56px;
+  .aura-tile .tile-preview {
+    width: 56px;
+    height: 56px;
     margin: 0 auto;
-    border: 2px solid var(--border);
     border-radius: 3px;
-    display: flex; align-items: center; justify-content: center;
-    position: relative;
-    overflow: hidden;
-    transition: border-color 0.15s;
-    background: rgba(0,0,0,0.3);
-  }
-  .aura-tile:hover .tile-icon-wrapper {
-    border-color: var(--accent-dim);
-  }
-  .aura-tile.selected .tile-icon-wrapper {
-    border-color: var(--accent);
-    box-shadow: 0 0 8px rgba(115,115,242,0.25);
-  }
-  .aura-tile.configured .tile-icon-wrapper {
-    border-color: var(--accent-dim);
-  }
-
-  /* Type indicator on tile: shows icon/square/bar preview */
-  .tile-type-indicator {
-    position: absolute;
-    bottom: 2px;
-    left: 50%;
-    transform: translateX(-50%);
+    border: 2px solid var(--border);
+    background: var(--element);
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(0,0,0,0.85);
-    border-radius: 2px;
-    padding: 1px 3px;
+    position: relative;
+    overflow: hidden;
+    transition: border-color .15s, box-shadow .15s;
   }
-  .tile-type-indicator .mini-icon {
-    width: 12px; height: 12px;
-    border-radius: 1px;
+  .aura-tile:hover .tile-preview {
+    border-color: var(--accent-border);
+    box-shadow: 0 0 8px rgba(92,184,240,0.2);
   }
-  .tile-type-indicator .mini-icon.icon-type {
-    background: linear-gradient(135deg, #4a8, #2a6);
-    border: 1px solid #5b9;
+  .aura-tile.selected .tile-preview {
+    border-color: var(--accent);
+    box-shadow: 0 0 12px rgba(92,184,240,0.35);
   }
-  .tile-type-indicator .mini-icon.square-type {
-    width: 10px; height: 10px;
-    background: #7373f2;
-    border: 1px solid #8888ff;
-  }
-  .tile-type-indicator .mini-bar {
-    width: 18px; height: 4px;
-    background: linear-gradient(90deg, #7373f2, #5555cc);
-    border: 1px solid #8888ff;
-    border-radius: 1px;
+  .aura-tile.configured .tile-preview {
+    border-color: var(--accent-border);
+    box-shadow: 0 0 6px rgba(92,184,240,0.15);
   }
 
-  .aura-tile .tile-icon {
-    width: 44px; height: 44px;
+  /* Icon type preview (default) */
+  .tile-preview .preview-icon {
+    width: 46px; height: 46px;
     border-radius: 2px;
-    font-size: 20px;
-    font-weight: 700;
-    display: flex; align-items: center; justify-content: center;
+    object-fit: cover;
   }
+
+  /* Square type preview */
+  .tile-preview.type-square .preview-icon { display: none; }
+  .tile-preview.type-square::before {
+    content: '';
+    width: 20px; height: 20px;
+    border-radius: 2px;
+    background: var(--aura-color, #5cb8f0);
+    border: 1px solid rgba(255,255,255,0.15);
+  }
+
+  /* Bar type preview */
+  .tile-preview.type-bar .preview-icon { display: none; }
+  .tile-preview.type-bar::before {
+    content: '';
+    width: 42px; height: 6px;
+    border-radius: 1px;
+    background: var(--aura-color, #5cb8f0);
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
   .aura-tile .tile-name {
-    font-size: 9px;
-    color: var(--text);
-    margin-top: 3px;
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-top: 4px;
+    line-height: 1.2;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    padding: 0 2px;
   }
-  .aura-tile .badge {
+  .aura-tile.selected .tile-name { color: var(--text); }
+
+  /* Configured badge */
+  .tile-badge {
     position: absolute;
-    top: 1px; right: 3px;
+    bottom: 2px; right: 2px;
     background: var(--accent);
-    color: white;
+    color: #fff;
     font-size: 8px;
     font-weight: 700;
-    width: 14px; height: 14px;
-    border-radius: 7px;
-    display: flex; align-items: center; justify-content: center;
-    line-height: 1;
+    min-width: 14px;
+    height: 12px;
+    line-height: 12px;
+    border-radius: 6px;
+    text-align: center;
+    padding: 0 3px;
+    display: none;
   }
+  .aura-tile.configured .tile-badge { display: block; }
 
-  /* Global Settings tile */
-  .aura-tile.global .tile-icon-wrapper {
+  /* Global settings tile */
+  .aura-tile.global-tile .tile-preview {
     border-style: dashed;
-    background: var(--element);
+    border-color: #555;
   }
-  .aura-tile.global .tile-icon {
-    color: var(--text-dim);
-    font-size: 26px;
-  }
-
-  /* Drag hint in tile */
-  .tile-drag-hint {
-    font-size: 8px;
+  .aura-tile.global-tile .tile-preview .cog-icon {
+    font-size: 28px;
     color: var(--text-dim);
     opacity: 0.6;
-    margin-top: 1px;
-    font-style: italic;
   }
 
-  /* ================================================
-     FRAME PREVIEW
-     ================================================ */
-  .preview-area {
-    flex: 1;
+  /* ============================================================
+     FRAME PREVIEW (left column, row 3)
+     ============================================================ */
+  .frame-preview-section {
+    grid-column: 1;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    padding: 8px 0;
+    position: relative;
+  }
+  .frame-preview-section .section-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: var(--text-dim);
+    padding: 0 12px 6px;
+  }
+
+  .preview-canvas {
     display: flex;
-    flex-direction: column;
     align-items: center;
     justify-content: center;
-    padding: 20px;
-    background: var(--panel);
+    min-height: 180px;
     position: relative;
-    min-height: 200px;
-  }
-  .preview-label {
-    position: absolute;
-    top: 6px; left: 10px;
-    font-size: 9px;
-    text-transform: uppercase;
-    letter-spacing: 0.4px;
-    color: var(--text-dim);
   }
 
+  /* Mock unit frame */
   .mock-frame {
-    width: 160px;
-    height: 80px;
+    width: 150px;
+    height: 72px;
     background: #121212;
     border: 1px solid #444;
+    border-radius: 1px;
     position: relative;
-    margin-bottom: 12px;
-    transform: scale(1.3);
-    transform-origin: center center;
+    overflow: visible;
   }
   .mock-frame .health-bar {
     position: absolute;
-    top: 1px; left: 1px; bottom: 6px;
+    top: 1px; left: 1px; bottom: 5px;
     width: 72%;
-    background: linear-gradient(90deg, #2eb872 0%, #2eb872 100%);
-    opacity: 0.85;
+    background: linear-gradient(90deg, #2ecc71 0%, #27ae60 100%);
+    border-radius: 0;
   }
   .mock-frame .health-missing {
     position: absolute;
-    top: 1px; right: 1px; bottom: 6px;
+    top: 1px; right: 1px; bottom: 5px;
     width: 28%;
     background: rgba(0,0,0,0.4);
   }
   .mock-frame .power-bar {
     position: absolute;
-    bottom: 1px; left: 1px;
-    width: 85%;
+    bottom: 1px; left: 1px; right: 1px;
     height: 4px;
-    background: #4488ff;
-    opacity: 0.9;
+    background: #1a1a1a;
+  }
+  .mock-frame .power-fill {
+    height: 100%;
+    width: 85%;
+    background: #4589ff;
   }
   .mock-frame .name-text {
     position: absolute;
-    top: 8px; left: 50%;
-    transform: translateX(-50%);
-    font-size: 10px;
+    top: 6px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px;
     font-weight: 600;
-    color: #2eb872;
-    text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
-    white-space: nowrap;
+    color: #2ecc71;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+    z-index: 2;
   }
   .mock-frame .hp-text {
     position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    font-size: 9px;
+    top: 50%; left: 0; right: 0;
+    transform: translateY(-50%);
+    text-align: center;
+    font-size: 10px;
     color: #ddd;
-    text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
+    text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+    z-index: 2;
   }
 
-  /* Anchor dots */
+  /* ── Anchor Drop Zones ── */
   .anchor-dot {
     position: absolute;
-    width: 8px; height: 8px;
+    width: 10px; height: 10px;
     border-radius: 50%;
-    background: rgba(115,115,242,0.35);
-    transition: all 0.15s;
-    z-index: 5;
+    background: rgba(92,140,220,0.25);
+    border: 1px solid rgba(92,140,220,0.4);
+    z-index: 10;
+    transition: all .15s;
+    cursor: pointer;
   }
   .anchor-dot:hover, .anchor-dot.drag-hover {
-    width: 14px; height: 14px;
-    background: var(--accent);
+    width: 16px; height: 16px;
     margin: -3px;
+    background: var(--accent);
+    border-color: var(--accent);
+    box-shadow: 0 0 10px rgba(92,184,240,0.6);
   }
-  .anchor-dot.tl { top: -4px; left: -4px; }
-  .anchor-dot.t  { top: -4px; left: 50%; margin-left: -4px; }
-  .anchor-dot.tr { top: -4px; right: -4px; }
-  .anchor-dot.l  { top: 50%; left: -4px; margin-top: -4px; }
-  .anchor-dot.c  { top: 50%; left: 50%; margin-top: -4px; margin-left: -4px; }
-  .anchor-dot.r  { top: 50%; right: -4px; margin-top: -4px; }
-  .anchor-dot.bl { bottom: -4px; left: -4px; }
-  .anchor-dot.b  { bottom: -4px; left: 50%; margin-left: -4px; }
-  .anchor-dot.br { bottom: -4px; right: -4px; }
+  .anchor-dot[data-anchor="TOPLEFT"]     { top: -5px; left: -5px; }
+  .anchor-dot[data-anchor="TOP"]         { top: -5px; left: 50%; margin-left: -5px; }
+  .anchor-dot[data-anchor="TOPRIGHT"]    { top: -5px; right: -5px; }
+  .anchor-dot[data-anchor="LEFT"]        { top: 50%; margin-top: -5px; left: -5px; }
+  .anchor-dot[data-anchor="CENTER"]      { top: 50%; left: 50%; margin-top: -5px; margin-left: -5px; }
+  .anchor-dot[data-anchor="RIGHT"]       { top: 50%; margin-top: -5px; right: -5px; }
+  .anchor-dot[data-anchor="BOTTOMLEFT"]  { bottom: -5px; left: -5px; }
+  .anchor-dot[data-anchor="BOTTOM"]      { bottom: -5px; left: 50%; margin-left: -5px; }
+  .anchor-dot[data-anchor="BOTTOMRIGHT"] { bottom: -5px; right: -5px; }
 
-  /* Placed indicator previews */
+  /* ── Placed indicators on the mock frame ── */
   .placed-indicator {
     position: absolute;
-    z-index: 4;
-    border: 1px solid var(--accent);
+    z-index: 5;
     cursor: grab;
   }
-  .placed-indicator.icon-ind {
-    width: 22px; height: 22px;
-    top: -4px; left: -4px;
+  .placed-indicator.type-icon {
+    width: 24px; height: 24px;
+    border: 1px solid #444;
     border-radius: 2px;
     overflow: hidden;
   }
-  .placed-indicator.icon-ind .ind-icon {
+  .placed-indicator.type-icon img {
     width: 100%; height: 100%;
-    background: linear-gradient(135deg, #4a8, #2a6);
-    display: flex; align-items: center; justify-content: center;
-    font-size: 8px; color: white; font-weight: 700;
-    text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+    object-fit: cover;
   }
-  .placed-indicator.icon-ind .ind-duration {
-    position: absolute;
-    bottom: 0; left: 50%; transform: translateX(-50%);
-    font-size: 7px; color: #5f5; font-weight: 700;
-    text-shadow: 0 0 3px black;
-  }
-  .placed-indicator.square-ind {
-    width: 14px; height: 14px;
-    top: -4px; right: -4px;
+  .placed-indicator.type-square {
+    width: 12px; height: 12px;
+    border: 1px solid rgba(255,255,255,0.2);
     border-radius: 1px;
-    background: var(--accent);
   }
-  .placed-indicator.bar-ind {
-    height: 5px;
-    bottom: -8px; left: 1px; right: 1px;
-    background: linear-gradient(90deg, var(--accent), #5555cc);
-    border-radius: 1px;
+  .placed-indicator.type-bar {
+    height: 6px;
+    width: 100%;
+    left: 0;
+    border: 1px solid rgba(0,0,0,0.6);
   }
 
-  /* Instructions */
-  .instructions {
+  .preview-instructions {
+    position: absolute;
+    bottom: 8px; left: 12px; right: 12px;
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    margin-top: 8px;
-    align-self: stretch;
-    padding: 0 8px;
+    gap: 3px;
   }
   .instr-row {
     display: flex;
@@ -512,1051 +431,1110 @@
     gap: 6px;
     font-size: 10px;
     color: var(--text-dim);
-    opacity: 0.7;
+    opacity: 0.6;
   }
-  .instr-badge {
+  .instr-key {
     background: var(--element);
     border: 1px solid var(--border);
-    border-radius: 2px;
     padding: 1px 6px;
+    border-radius: 3px;
     font-size: 9px;
     color: var(--text);
     white-space: nowrap;
-    flex-shrink: 0;
   }
 
-  /* ================================================
-     ACTIVE EFFECTS STRIP
-     ================================================ */
-  .effects-strip {
-    border-top: 1px solid var(--border);
-  }
-  .effects-strip .section-header {
-    display: flex;
-    align-items: center;
-    height: 22px;
-    padding: 0 10px;
-    background: var(--bg);
-    border-bottom: 1px solid rgba(64,64,64,0.5);
-    font-size: 9px;
-    letter-spacing: 0.5px;
-    color: var(--accent);
-    text-transform: uppercase;
-    justify-content: space-between;
-  }
-  .effects-strip .strip-content {
-    display: flex;
-    gap: 6px;
-    padding: 8px 10px;
-    overflow-x: auto;
-    background: var(--panel);
-    min-height: 74px;
-    align-items: center;
-    scrollbar-width: thin;
-    scrollbar-color: #444 transparent;
-  }
-  .effects-strip .strip-content::-webkit-scrollbar { height: 6px; }
-  .effects-strip .strip-content::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
-
-  .effect-entry {
-    flex-shrink: 0;
-    width: 68px;
-    height: 58px;
+  /* ============================================================
+     RIGHT PANEL (rows 3-4, column 2)
+     ============================================================ */
+  .right-panel {
+    grid-column: 2;
+    grid-row: 3 / 5;
+    background: #1a1a1a;
+    border-left: 1px solid var(--border);
     display: flex;
     flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    border: 1px solid transparent;
-    border-radius: 3px;
-    cursor: pointer;
-    position: relative;
-    gap: 2px;
-    transition: all 0.15s;
-  }
-  .effect-entry:hover {
-    background: rgba(255,255,255,0.03);
-  }
-  .effect-entry.selected {
-    background: var(--accent-bg);
-    border-color: var(--accent-dim);
-  }
-  .effect-entry .effect-icon {
-    width: 28px; height: 28px;
-    border: 2px solid var(--accent);
-    border-radius: 2px;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 14px; font-weight: 700;
     overflow: hidden;
   }
-  .effect-entry .effect-name {
-    font-size: 7px;
-    color: white;
-    text-align: center;
-    max-width: 64px;
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-  }
-  .effect-entry .effect-type {
-    font-size: 7px;
-    color: #888;
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
-  }
-  .effect-entry .x-btn {
-    position: absolute;
-    top: -1px; right: -1px;
-    width: 14px; height: 14px;
-    background: rgba(10,10,10,0.9);
-    border: 1px solid rgba(230,62,62,0.5);
-    border-radius: 2px;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 9px; color: var(--red);
-    cursor: pointer;
-    opacity: 0;
-    transition: opacity 0.15s;
-  }
-  .effect-entry:hover .x-btn { opacity: 1; }
 
-  .effects-placeholder {
+  .right-panel-title {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
     color: var(--text-dim);
-    font-size: 11px;
-    opacity: 0.5;
-    font-style: italic;
-    width: 100%;
-    text-align: center;
-    padding: 16px 0;
+    padding: 8px 12px 6px;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
   }
 
-  /* ================================================
-     RIGHT PANEL
-     ================================================ */
-  .right-panel .panel-title {
-    height: 22px;
-    display: flex; align-items: center;
-    padding: 0 10px;
-    background: #161616;
-    border-bottom: 1px solid rgba(64,64,64,0.5);
-    font-size: 9px;
-    letter-spacing: 0.5px;
-    color: var(--text-dim);
-    text-transform: uppercase;
-  }
-  .right-panel .sel-header {
+  /* ── Selected Aura Header ── */
+  .selected-header {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 8px 12px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
     background: var(--bg);
-    border-bottom: 1px solid rgba(64,64,64,0.5);
   }
-  .sel-icon {
-    width: 34px; height: 34px;
-    border: 1px solid var(--border);
+  .selected-header .sel-icon {
+    width: 32px; height: 32px;
     border-radius: 3px;
-    display: flex; align-items: center; justify-content: center;
+    border: 1px solid var(--border);
+    object-fit: cover;
     flex-shrink: 0;
+  }
+  .selected-header .sel-icon-placeholder {
+    width: 32px; height: 32px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    background: var(--element);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: 16px;
+    color: var(--text-dim);
+  }
+  .selected-header .sel-info { flex: 1; min-width: 0; }
+  .selected-header .sel-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
     overflow: hidden;
-    background: rgba(0,0,0,0.3);
+    text-overflow: ellipsis;
   }
-  .sel-icon .icon-inner {
-    width: 100%; height: 100%;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 16px; font-weight: 700;
+  .selected-header .sel-sub {
+    font-size: 10px;
+    color: var(--accent);
+    margin-top: 1px;
   }
-  .sel-info { flex: 1; min-width: 0; }
-  .sel-info .sel-name { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .sel-info .sel-sub { font-size: 10px; color: var(--text-dim); }
 
-  /* Right panel scrollable settings */
-  .right-scroll {
+  /* ── Right Panel Scrollable Content ── */
+  .right-content {
     flex: 1;
     overflow-y: auto;
-    padding: 8px 0;
-    scrollbar-width: thin;
-    scrollbar-color: #444 transparent;
+    padding: 0;
   }
-  .right-scroll::-webkit-scrollbar { width: 6px; }
-  .right-scroll::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
+  .right-content::-webkit-scrollbar { width: 4px; }
+  .right-content::-webkit-scrollbar-track { background: transparent; }
+  .right-content::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
-  /* ================================================
-     ADD EFFECT BUTTON + DROPDOWN
-     ================================================ */
-  .add-effect-wrapper {
-    padding: 10px 12px;
-    position: relative;
+  /* ── Add Effect Button ── */
+  .add-effect-section {
+    padding: 12px;
   }
   .add-effect-btn {
     width: 100%;
-    height: 34px;
+    padding: 10px 14px;
+    background: var(--accent-bg);
+    border: 1px dashed var(--accent-border);
+    border-radius: 5px;
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all .15s;
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 6px;
-    background: var(--accent-bg);
-    border: 1px dashed var(--accent-dim);
-    border-radius: 4px;
-    color: var(--accent);
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.15s;
+    font-family: inherit;
   }
   .add-effect-btn:hover {
-    background: rgba(115,115,242,0.15);
+    background: rgba(92,184,240,0.14);
     border-color: var(--accent);
-    color: white;
+    color: #fff;
   }
-  .add-effect-btn .plus { font-size: 16px; font-weight: 700; }
+  .add-effect-btn .plus-icon {
+    font-size: 16px;
+    font-weight: 700;
+  }
 
-  /* Effect dropdown menu */
+  /* ── Effect Dropdown Menu ── */
   .effect-dropdown {
-    position: absolute;
-    top: 52px;
-    left: 12px;
-    right: 12px;
-    background: #1c1c1c;
+    margin: 0 12px 8px;
+    background: var(--element);
     border: 1px solid var(--border);
     border-radius: 4px;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
-    z-index: 100;
     overflow: hidden;
     display: none;
   }
   .effect-dropdown.open { display: block; }
 
-  .effect-dropdown .dropdown-header {
-    padding: 6px 10px;
+  .effect-dropdown .dropdown-section-title {
     font-size: 9px;
     text-transform: uppercase;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.8px;
     color: var(--text-dim);
-    background: rgba(0,0,0,0.2);
-    border-bottom: 1px solid rgba(64,64,64,0.4);
+    padding: 8px 10px 4px;
+    opacity: 0.7;
   }
-  .effect-dropdown .dropdown-item {
+
+  .effect-option {
     display: flex;
     align-items: center;
     gap: 10px;
     padding: 8px 12px;
     cursor: pointer;
-    transition: background 0.1s;
-    border-bottom: 1px solid rgba(64,64,64,0.2);
-  }
-  .effect-dropdown .dropdown-item:last-child { border-bottom: none; }
-  .effect-dropdown .dropdown-item:hover {
-    background: rgba(115,115,242,0.08);
-  }
-  .effect-dropdown .dropdown-item .item-icon {
-    width: 24px; height: 24px;
-    border-radius: 3px;
-    display: flex; align-items: center; justify-content: center;
-    flex-shrink: 0;
-    font-size: 12px;
-  }
-  .effect-dropdown .dropdown-item .item-text {
-    flex: 1;
-  }
-  .effect-dropdown .dropdown-item .item-text .item-name {
-    font-size: 12px;
-    font-weight: 500;
+    transition: background .1s;
+    border: none;
+    background: none;
+    width: 100%;
+    text-align: left;
+    font-family: inherit;
     color: var(--text);
   }
-  .effect-dropdown .dropdown-item .item-text .item-desc {
-    font-size: 9px;
+  .effect-option:hover { background: var(--hover); }
+  .effect-option.disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+  .effect-option .effect-icon {
+    width: 24px; height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 3px;
+    font-size: 14px;
+    flex-shrink: 0;
+  }
+  .effect-option .effect-icon.icon-placed { background: rgba(92,184,240,0.15); color: var(--accent); }
+  .effect-option .effect-icon.icon-frame  { background: rgba(240,180,60,0.15); color: #f0b43c; }
+  .effect-option .effect-label { font-size: 12px; }
+  .effect-option .effect-desc {
+    font-size: 10px;
     color: var(--text-dim);
     margin-top: 1px;
   }
-  .effect-dropdown .dropdown-item .item-check {
-    width: 18px; height: 18px;
-    border: 1px solid var(--border);
-    border-radius: 2px;
-    display: flex; align-items: center; justify-content: center;
-    flex-shrink: 0;
-  }
-  .effect-dropdown .dropdown-item .item-check.active {
-    background: var(--accent);
-    border-color: var(--accent);
-  }
-  .effect-dropdown .dropdown-item .item-check.active::after {
-    content: '✓';
-    color: white;
-    font-size: 11px;
+
+  .dropdown-divider {
+    height: 1px;
+    background: var(--border);
+    margin: 4px 10px;
+    opacity: 0.5;
   }
 
-  /* Placed indicators in dropdown */
-  .dropdown-item .item-icon.icon-type {
-    background: linear-gradient(135deg, #3a7, #265);
-    color: white;
-    font-size: 10px;
-    font-weight: 700;
-  }
-  .dropdown-item .item-icon.square-type {
-    background: var(--accent);
-  }
-  .dropdown-item .item-icon.bar-type {
-    width: 32px; height: 10px;
-    background: linear-gradient(90deg, var(--accent), #5555cc);
-    border-radius: 2px;
-  }
-  .dropdown-item .item-icon.border-type {
-    background: transparent;
-    border: 2px solid #ffcc44;
-  }
-  .dropdown-item .item-icon.healthbar-type {
-    background: linear-gradient(90deg, #e44, #c33);
-    border-radius: 2px;
-  }
-  .dropdown-item .item-icon.nametext-type {
-    color: #4ecdc4;
-    font-weight: 700;
-    font-size: 11px;
-  }
-  .dropdown-item .item-icon.healthtext-type {
-    color: #ff6b6b;
-    font-weight: 700;
-    font-size: 11px;
-  }
-  .dropdown-item .item-icon.alpha-type {
-    background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05));
-    border: 1px dashed rgba(255,255,255,0.3);
-    color: #888;
-    font-size: 10px;
-  }
-
-  /* ================================================
-     CONFIGURED EFFECTS LIST (in right panel)
-     ================================================ */
-  .configured-effects {
-    padding: 0 12px;
-  }
-  .configured-effects .section-label {
-    font-size: 9px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: var(--text-dim);
-    padding: 6px 0;
-    border-bottom: 1px solid rgba(64,64,64,0.3);
-    margin-bottom: 6px;
+  /* ── Active Effects List (cards) ── */
+  .active-effects-list {
+    padding: 0 12px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
   }
 
   .effect-card {
     background: var(--element);
     border: 1px solid var(--border);
-    border-radius: 3px;
-    margin-bottom: 4px;
+    border-radius: 4px;
     overflow: hidden;
-    transition: border-color 0.15s;
+    transition: border-color .15s;
   }
-  .effect-card:hover { border-color: var(--accent-dim); }
-  .effect-card .card-header {
+  .effect-card:hover { border-color: rgba(255,255,255,0.15); }
+
+  .effect-card-header {
     display: flex;
     align-items: center;
-    padding: 6px 8px;
-    cursor: pointer;
     gap: 8px;
+    padding: 7px 10px;
+    cursor: pointer;
+    transition: background .1s;
   }
-  .effect-card .card-header .card-chevron {
+  .effect-card-header:hover { background: var(--hover); }
+
+  .effect-card-header .card-chevron {
     font-size: 10px;
     color: var(--text-dim);
-    width: 14px; text-align: center;
-    transition: transform 0.15s;
-    flex-shrink: 0;
+    transition: transform .15s;
+    width: 12px;
+    text-align: center;
   }
-  .effect-card.expanded .card-header .card-chevron {
-    transform: rotate(90deg);
-  }
-  .effect-card .card-header .card-type-badge {
-    font-size: 8px;
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
-    background: rgba(115,115,242,0.12);
-    color: var(--accent);
+  .effect-card.expanded .card-chevron { transform: rotate(90deg); }
+
+  .effect-card-header .card-type-badge {
+    font-size: 9px;
     padding: 2px 6px;
-    border-radius: 2px;
+    border-radius: 3px;
     font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
   }
-  .effect-card .card-header .card-title {
+  .card-type-badge.badge-icon    { background: rgba(92,184,240,0.2); color: var(--accent); }
+  .card-type-badge.badge-square  { background: rgba(130,220,130,0.2); color: #82dc82; }
+  .card-type-badge.badge-bar     { background: rgba(240,180,60,0.2); color: #f0b43c; }
+  .card-type-badge.badge-border  { background: rgba(200,130,240,0.2); color: #c882f0; }
+  .card-type-badge.badge-health  { background: rgba(240,80,80,0.2); color: #f05050; }
+  .card-type-badge.badge-text    { background: rgba(255,255,255,0.1); color: #ccc; }
+  .card-type-badge.badge-alpha   { background: rgba(255,255,255,0.08); color: #aaa; }
+
+  .effect-card-header .card-label {
     flex: 1;
     font-size: 11px;
     color: var(--text);
   }
-  .effect-card .card-header .card-delete {
-    width: 16px; height: 16px;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 10px;
+
+  .effect-card-header .card-delete {
+    width: 18px; height: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 3px;
+    font-size: 12px;
     color: var(--text-dim);
-    border-radius: 2px;
     cursor: pointer;
-    opacity: 0;
-    transition: all 0.15s;
-    flex-shrink: 0;
+    transition: all .1s;
+    background: none;
+    border: none;
+    font-family: inherit;
   }
-  .effect-card:hover .card-header .card-delete { opacity: 1; }
-  .effect-card .card-header .card-delete:hover {
-    color: var(--red);
-    background: var(--red-bg);
+  .card-delete:hover {
+    background: rgba(230,69,69,0.15);
+    color: var(--danger);
   }
 
-  .effect-card .card-content {
+  /* Card body (settings) — collapsed by default */
+  .effect-card-body {
     display: none;
-    padding: 8px;
-    border-top: 1px solid rgba(64,64,64,0.3);
-    background: rgba(0,0,0,0.15);
+    padding: 8px 12px 12px;
+    border-top: 1px solid rgba(255,255,255,0.04);
   }
-  .effect-card.expanded .card-content { display: block; }
+  .effect-card.expanded .effect-card-body { display: block; }
 
-  /* Settings widgets (simplified mockups) */
+  /* ── Settings Row (generic slider/dropdown/checkbox mock) ── */
   .setting-row {
     display: flex;
     align-items: center;
-    padding: 4px 0;
-    gap: 8px;
+    justify-content: space-between;
+    padding: 5px 0;
   }
-  .setting-row .setting-label {
-    font-size: 10px;
+  .setting-row + .setting-row {
+    border-top: 1px solid rgba(255,255,255,0.03);
+  }
+  .setting-label {
+    font-size: 11px;
     color: var(--text-dim);
-    flex: 1;
-    min-width: 0;
   }
-  .setting-row .setting-control {
-    flex-shrink: 0;
+  .setting-value {
+    display: flex;
+    align-items: center;
+    gap: 6px;
   }
+
+  /* Mock slider */
   .mock-slider {
-    width: 100px;
-    height: 6px;
-    background: var(--element);
-    border: 1px solid var(--border);
-    border-radius: 3px;
+    width: 90px; height: 4px;
+    background: var(--bg);
+    border-radius: 2px;
     position: relative;
   }
-  .mock-slider .fill {
+  .mock-slider .slider-fill {
     height: 100%;
     background: var(--accent);
     border-radius: 2px;
-    width: 60%;
   }
-  .mock-slider .thumb {
+  .mock-slider .slider-thumb {
     position: absolute;
     top: -4px;
-    left: 58%;
-    width: 10px; height: 14px;
+    width: 10px; height: 12px;
     background: var(--accent);
     border-radius: 2px;
+    cursor: pointer;
   }
-  .mock-dropdown-control {
-    background: var(--element);
+  .slider-val {
+    font-size: 10px;
+    color: var(--text);
+    min-width: 24px;
+    text-align: right;
+  }
+
+  /* Mock dropdown */
+  .mock-dropdown {
+    background: var(--bg);
     border: 1px solid var(--border);
-    padding: 2px 6px;
-    border-radius: 2px;
+    padding: 3px 8px;
+    border-radius: 3px;
     font-size: 10px;
     color: var(--text);
     min-width: 80px;
+    cursor: pointer;
     display: flex;
     align-items: center;
-    justify-content: space-between;
     gap: 4px;
   }
-  .mock-dropdown-control .arrow { font-size: 8px; color: var(--text-dim); }
+  .mock-dropdown::after { content: '\25BE'; font-size: 8px; color: var(--text-dim); }
+
+  /* Mock checkbox */
   .mock-checkbox {
     width: 14px; height: 14px;
-    background: var(--element);
+    background: var(--bg);
     border: 1px solid var(--border);
     border-radius: 2px;
-    display: flex; align-items: center; justify-content: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
   }
   .mock-checkbox.checked {
     background: var(--accent);
     border-color: var(--accent);
   }
-  .mock-checkbox.checked::after {
-    content: '';
-    width: 8px; height: 8px;
-    background: white;
-    border-radius: 1px;
-  }
-  .mock-color-swatch {
-    width: 20px; height: 14px;
+  .mock-checkbox.checked::after { content: '\2713'; font-size: 10px; color: #fff; }
+
+  /* Mock color swatch */
+  .mock-color {
+    width: 18px; height: 18px;
+    border-radius: 3px;
     border: 1px solid var(--border);
-    border-radius: 2px;
+    cursor: pointer;
   }
 
-  /* Priority slider section */
+  /* Settings section divider */
+  .settings-divider {
+    height: 1px;
+    background: var(--border);
+    opacity: 0.3;
+    margin: 6px 0;
+  }
+  .settings-section-label {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--text-dim);
+    opacity: 0.6;
+    padding: 6px 0 2px;
+  }
+
+  /* ── Empty State ── */
+  .right-empty-state {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    text-align: center;
+  }
+  .right-empty-state .empty-icon {
+    font-size: 36px;
+    margin-bottom: 12px;
+    opacity: 0.2;
+  }
+  .right-empty-state p {
+    font-size: 12px;
+    color: var(--text-dim);
+    line-height: 1.5;
+  }
+
+  /* ── Priority Slider ── */
   .priority-section {
-    padding: 12px 12px 8px;
-    border-top: 1px solid rgba(64,64,64,0.3);
-    margin-top: 8px;
+    padding: 12px;
+    border-top: 1px solid var(--border);
+    margin-top: auto;
   }
   .priority-section .prio-label {
     font-size: 10px;
-    color: var(--text);
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
     margin-bottom: 6px;
   }
-  .priority-section .prio-track {
+  .priority-track {
     display: flex;
     align-items: center;
     gap: 8px;
   }
-  .priority-section .prio-track .labels {
+  .priority-track .prio-bar {
+    flex: 1; height: 6px;
+    background: var(--bg);
+    border-radius: 3px;
+    position: relative;
+  }
+  .priority-track .prio-bar .prio-fill {
+    height: 100%;
+    width: 50%;
+    background: var(--accent);
+    border-radius: 3px;
+  }
+  .priority-track .prio-labels {
     display: flex;
     justify-content: space-between;
-    width: 100%;
-    font-size: 8px;
+    font-size: 9px;
     color: var(--text-dim);
-    margin-top: 2px;
   }
 
-  /* ================================================
-     COMPARISON LABELS
-     ================================================ */
-  .comparison-header {
-    text-align: center;
-    padding: 12px 0 6px;
+  /* ============================================================
+     ACTIVE EFFECTS STRIP (bottom, left column)
+     ============================================================ */
+  .effects-strip-section {
+    grid-column: 1;
+    background: var(--panel);
+    border-top: 1px solid var(--border);
+    min-height: 100px;
+  }
+  .effects-strip-header {
     font-size: 10px;
-    letter-spacing: 1px;
     text-transform: uppercase;
+    letter-spacing: 0.8px;
     color: var(--text-dim);
-    background: rgba(0,0,0,0.3);
-    border-bottom: 2px solid var(--accent);
+    padding: 6px 12px;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    display: flex;
+    align-items: center;
+    gap: 8px;
   }
-  .comparison-header.before {
-    border-bottom-color: #e44;
-    color: #e88;
-  }
-  .comparison-header.after {
-    border-bottom-color: #4e4;
-    color: #8e8;
-  }
-
-  /* ================================================
-     ANNOTATIONS / CALLOUTS
-     ================================================ */
-  .annotation {
-    position: relative;
-    margin: 20px 24px;
-    padding: 14px 18px;
-    background: rgba(115,115,242,0.06);
-    border-left: 3px solid var(--accent);
-    border-radius: 0 4px 4px 0;
-    font-size: 12px;
-    color: var(--text);
-    line-height: 1.6;
-  }
-  .annotation .annotation-title {
+  .effects-strip-header .count-badge {
+    background: var(--accent);
+    color: #fff;
+    font-size: 9px;
     font-weight: 700;
-    color: var(--accent);
-    font-size: 13px;
-    margin-bottom: 4px;
+    padding: 1px 6px;
+    border-radius: 8px;
   }
-  .annotation ul {
-    padding-left: 18px;
-    margin-top: 6px;
-  }
-  .annotation li {
-    margin-bottom: 3px;
-    color: #ccc;
-  }
-  .annotation strong { color: var(--accent); font-weight: 600; }
 
-  /* ================================================
-     RESPONSIVE TWEAKS
-     ================================================ */
-  @media (max-width: 900px) {
-    .right-panel { width: 260px; }
+  .effects-scroll {
+    display: flex;
+    gap: 8px;
+    padding: 10px 12px;
+    overflow-x: auto;
+  }
+  .effects-scroll::-webkit-scrollbar { height: 4px; }
+  .effects-scroll::-webkit-scrollbar-track { background: transparent; }
+  .effects-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .effect-chip {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    background: var(--element);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: border-color .15s;
+  }
+  .effect-chip:hover { border-color: var(--accent-border); }
+  .effect-chip.active { border-color: var(--accent); background: var(--accent-bg); }
+  .effect-chip .chip-icon {
+    width: 28px; height: 28px;
+    border-radius: 3px;
+    border: 1px solid rgba(255,255,255,0.1);
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+  }
+  .effect-chip .chip-icon img {
+    width: 100%; height: 100%;
+    object-fit: cover;
+  }
+  .effect-chip .chip-info { font-size: 11px; }
+  .effect-chip .chip-aura { color: var(--text); font-weight: 500; }
+  .effect-chip .chip-type { color: var(--text-dim); font-size: 9px; text-transform: uppercase; }
+
+  .effects-placeholder {
+    padding: 20px 0;
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 11px;
+    opacity: 0.5;
+    width: 100%;
+  }
+
+  /* ============================================================
+     CHANGE LOG callout
+     ============================================================ */
+  .callout-box {
+    margin-top: 24px;
+    grid-column: 1 / -1;
+    background: #1a1a2e;
+    border: 1px solid #3d3d5c;
+    border-radius: 6px;
+    padding: 16px 20px;
+  }
+  .callout-box h3 {
+    font-size: 14px;
+    color: var(--accent);
+    margin-bottom: 10px;
+  }
+  .callout-box ul {
+    list-style: none;
+    padding: 0;
+  }
+  .callout-box li {
+    font-size: 12px;
+    color: var(--text-dim);
+    padding: 4px 0;
+    padding-left: 16px;
+    position: relative;
+    line-height: 1.5;
+  }
+  .callout-box li::before {
+    content: '\2192';
+    position: absolute;
+    left: 0;
+    color: var(--accent);
+  }
+  .callout-box .change-tag {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    margin-right: 4px;
+  }
+  .change-tag.new { background: rgba(46,204,113,0.2); color: #2ecc71; }
+  .change-tag.changed { background: rgba(241,196,15,0.2); color: #f1c40f; }
+  .change-tag.removed { background: rgba(231,76,60,0.2); color: #e74c3c; }
+
+  /* Copy from section */
+  .copy-from-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: rgba(92,184,240,0.04);
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+  }
+  .copy-from-row .cf-label {
+    font-size: 10px;
+    color: var(--text-dim);
+    white-space: nowrap;
+  }
+  .copy-from-row .cf-dropdown {
+    flex: 1;
+    background: var(--element);
+    border: 1px solid var(--border);
+    padding: 3px 8px;
+    border-radius: 3px;
+    font-size: 10px;
+    color: var(--text-dim);
+    cursor: pointer;
+  }
+  .copy-from-row .cf-btn {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    padding: 3px 10px;
+    border-radius: 3px;
+    font-size: 10px;
+    cursor: pointer;
+    font-family: inherit;
+    font-weight: 500;
   }
 </style>
 </head>
 <body>
 
-<!-- ================================================
-     ANNOTATION: DESIGN PHILOSOPHY
-     ================================================ -->
-<div style="width: 100%; max-width: 1100px; margin-bottom: 16px;">
-  <div class="annotation">
-    <div class="annotation-title">Redesigned Aura Designer - Interactive HTML Prototype</div>
-    <p>Key changes from the current design:</p>
-    <ul>
-      <li><strong>Type Selector above tiles</strong> &mdash; Choose Icon, Square, or Bar FIRST, then the aura tiles show a preview of that type, making it clear what you'll be dragging</li>
-      <li><strong>Visual type indicator on each tile</strong> &mdash; Each tile shows a small icon/square/bar preview badge so users see what they'll place</li>
-      <li><strong>Right panel simplified</strong> &mdash; Instead of a long list of collapsible inactive effects, there's a single "+ Add Effect" button that opens a clean dropdown menu</li>
-      <li><strong>Configured effects as cards</strong> &mdash; Only shows effects that are actually enabled, with expand/collapse for settings</li>
-      <li><strong>Less intimidating</strong> &mdash; New users see a simple button instead of 8 disabled effect sections</li>
-    </ul>
+<div style="display: flex; flex-direction: column; gap: 0; width: 980px;">
+
+<!-- ===== MAIN DESIGNER ===== -->
+<div class="designer">
+
+  <!-- TOP BANNER -->
+  <div class="top-banner">
+    <span class="spec-label">Spec</span>
+    <select>
+      <option>Auto-detect</option>
+      <option selected>Preservation Evoker</option>
+      <option>Restoration Druid</option>
+      <option>Discipline Priest</option>
+      <option>Holy Priest</option>
+      <option>Holy Paladin</option>
+      <option>Mistweaver Monk</option>
+      <option>Restoration Shaman</option>
+      <option>Augmentation Evoker</option>
+    </select>
+    <div class="toggle-group">
+      <span>Aura Designer</span>
+      <div class="toggle-switch active" onclick="this.classList.toggle('active')"></div>
+    </div>
   </div>
 
-  <!-- ================================================
-       REDESIGNED UI
-       ================================================ -->
-  <div class="comparison-header after">Redesigned Layout</div>
-  <div class="page" id="redesigned">
+  <!-- TRACKABLE AURAS STRIP -->
+  <div class="aura-strip-section">
+    <!-- Header with type selector -->
+    <div class="aura-strip-header">
+      <span class="section-title">Trackable Auras</span>
 
-    <!-- Enable Banner -->
-    <div class="enable-banner">
-      <div class="cb checked"></div>
-      <div class="label-group">
-        <div class="title">Enable Aura Designer</div>
-        <div class="subtitle">Custom buff and frame effect indicators</div>
+      <!-- NEW: Type selector -->
+      <div class="type-selector" id="typeSelector">
+        <button class="type-btn active" data-type="icon" onclick="selectType(this)">Icon</button>
+        <button class="type-btn" data-type="square" onclick="selectType(this)">Square</button>
+        <button class="type-btn" data-type="bar" onclick="selectType(this)">Bar</button>
       </div>
-      <span style="font-size:10px; color:var(--text-dim)">Spec:</span>
-      <select class="spec-select">
-        <option>Auto (Preservation Evoker)</option>
-        <option>Restoration Druid</option>
-        <option>Discipline Priest</option>
-        <option>Holy Priest</option>
-        <option>Holy Paladin</option>
-        <option>Restoration Shaman</option>
-        <option>Mistweaver Monk</option>
-        <option>Augmentation Evoker</option>
-      </select>
+
+      <span class="strip-hint">Drag an aura onto the frame to place it</span>
     </div>
 
-    <div class="content">
-      <div class="left-area">
-        <!-- Trackable Auras Section -->
-        <div class="tile-section">
-          <div class="section-header">
-            <span>Trackable Auras</span>
-            <span class="count">7</span>
-          </div>
-
-          <!-- NEW: Type Selector (Icon / Square / Bar) -->
-          <div class="type-selector">
-            <span class="label">Drag as:</span>
-            <div class="type-btn active" onclick="selectType(this, 'icon')">
-              <div class="type-icon icon-preview"></div>
-              Icon
-            </div>
-            <div class="type-btn" onclick="selectType(this, 'square')">
-              <div class="type-icon square-preview"></div>
-              Square
-            </div>
-            <div class="type-btn" onclick="selectType(this, 'bar')">
-              <div class="type-icon bar-preview"></div>
-              Bar
-            </div>
-            <span class="type-description" id="type-desc">Spell icon with cooldown swipe &amp; duration</span>
-          </div>
-
-          <!-- Tile Strip -->
-          <div class="tile-strip">
-            <!-- Global Settings tile -->
-            <div class="aura-tile global" onclick="selectTile(this, null)">
-              <div class="tile-icon-wrapper">
-                <div class="tile-icon" style="color:var(--text-dim);">⚙</div>
-              </div>
-              <div class="tile-name" style="color:var(--text-dim)">Global Settings</div>
-            </div>
-
-            <!-- Echo -->
-            <div class="aura-tile configured selected" onclick="selectTile(this, 'Echo')">
-              <div class="tile-icon-wrapper">
-                <div class="tile-icon" style="background: linear-gradient(135deg, #4ec1f0 20%, #2a8ac0 80%); border-radius: 2px;">E</div>
-                <div class="tile-type-indicator">
-                  <div class="mini-icon icon-type"></div>
-                </div>
-              </div>
-              <div class="tile-name">Echo</div>
-              <div class="tile-drag-hint">drag me</div>
-              <div class="badge">2</div>
-            </div>
-
-            <!-- Reversion -->
-            <div class="aura-tile configured" onclick="selectTile(this, 'Reversion')">
-              <div class="tile-icon-wrapper">
-                <div class="tile-icon" style="background: linear-gradient(135deg, #82c885 20%, #4a8a4d 80%); border-radius: 2px;">R</div>
-                <div class="tile-type-indicator">
-                  <div class="mini-icon square-type"></div>
-                </div>
-              </div>
-              <div class="tile-name">Reversion</div>
-              <div class="tile-drag-hint">drag me</div>
-              <div class="badge">1</div>
-            </div>
-
-            <!-- Echo Reversion -->
-            <div class="aura-tile" onclick="selectTile(this, 'EchoReversion')">
-              <div class="tile-icon-wrapper">
-                <div class="tile-icon" style="background: linear-gradient(135deg, #66c5bc 20%, #3a8a80 80%); border-radius: 2px;">E</div>
-                <div class="tile-type-indicator">
-                  <div class="mini-icon icon-type"></div>
-                </div>
-              </div>
-              <div class="tile-name">Echo Reversion</div>
-              <div class="tile-drag-hint">drag me</div>
-            </div>
-
-            <!-- Dream Breath -->
-            <div class="aura-tile" onclick="selectTile(this, 'DreamBreath')">
-              <div class="tile-icon-wrapper">
-                <div class="tile-icon" style="background: linear-gradient(135deg, #78de78 20%, #3aaa3a 80%); border-radius: 2px;">D</div>
-                <div class="tile-type-indicator">
-                  <div class="mini-icon icon-type"></div>
-                </div>
-              </div>
-              <div class="tile-name">Dream Breath</div>
-              <div class="tile-drag-hint">drag me</div>
-            </div>
-
-            <!-- Echo Dream Breath -->
-            <div class="aura-tile" onclick="selectTile(this, 'EchoDreamBreath')">
-              <div class="tile-icon-wrapper">
-                <div class="tile-icon" style="background: linear-gradient(135deg, #5cd199 20%, #2a9060 80%); border-radius: 2px;">E</div>
-                <div class="tile-type-indicator">
-                  <div class="mini-icon icon-type"></div>
-                </div>
-              </div>
-              <div class="tile-name">Echo Dream B.</div>
-              <div class="tile-drag-hint">drag me</div>
-            </div>
-
-            <!-- Dream Flight -->
-            <div class="aura-tile" onclick="selectTile(this, 'DreamFlight')">
-              <div class="tile-icon-wrapper">
-                <div class="tile-icon" style="background: linear-gradient(135deg, #cf94ee 20%, #8a50aa 80%); border-radius: 2px;">D</div>
-                <div class="tile-type-indicator">
-                  <div class="mini-icon icon-type"></div>
-                </div>
-              </div>
-              <div class="tile-name">Dream Flight</div>
-              <div class="tile-drag-hint">drag me</div>
-            </div>
-
-            <!-- Lifebind -->
-            <div class="aura-tile" onclick="selectTile(this, 'Lifebind')">
-              <div class="tile-icon-wrapper">
-                <div class="tile-icon" style="background: linear-gradient(135deg, #f08080 20%, #c04040 80%); border-radius: 2px;">L</div>
-                <div class="tile-type-indicator">
-                  <div class="mini-icon icon-type"></div>
-                </div>
-              </div>
-              <div class="tile-name">Lifebind</div>
-              <div class="tile-drag-hint">drag me</div>
-            </div>
-          </div>
+    <!-- Scrollable tile strip -->
+    <div class="aura-tiles-scroll" id="tileStrip">
+      <!-- Global Settings tile -->
+      <div class="aura-tile global-tile" onclick="selectAura(null, this)">
+        <div class="tile-preview">
+          <span class="cog-icon">&#9881;</span>
         </div>
-
-        <!-- Frame Preview -->
-        <div class="preview-area">
-          <span class="preview-label">Frame Preview</span>
-
-          <div class="mock-frame">
-            <div class="health-bar"></div>
-            <div class="health-missing"></div>
-            <div class="power-bar"></div>
-            <div class="name-text">Danders</div>
-            <div class="hp-text">72%</div>
-
-            <!-- Anchor dots -->
-            <div class="anchor-dot tl"></div>
-            <div class="anchor-dot t"></div>
-            <div class="anchor-dot tr"></div>
-            <div class="anchor-dot l"></div>
-            <div class="anchor-dot c"></div>
-            <div class="anchor-dot r"></div>
-            <div class="anchor-dot bl"></div>
-            <div class="anchor-dot b"></div>
-            <div class="anchor-dot br"></div>
-
-            <!-- Placed indicator examples -->
-            <div class="placed-indicator icon-ind">
-              <div class="ind-icon" style="background: linear-gradient(135deg, #4ec1f0 20%, #2a8ac0 80%);">E</div>
-              <div class="ind-duration">5s</div>
-            </div>
-            <div class="placed-indicator square-ind" style="background: #82c885; border-color: #82c885;"></div>
-          </div>
-
-          <div class="instructions">
-            <div class="instr-row"><span class="instr-badge">Drag</span> a tile onto the frame to place it at an anchor point</div>
-            <div class="instr-row"><span class="instr-badge">Click</span> a tile to select and configure its effects</div>
-            <div class="instr-row"><span class="instr-badge">Right-click</span> a placed indicator to remove it</div>
-          </div>
-        </div>
-
-        <!-- Active Effects Strip -->
-        <div class="effects-strip">
-          <div class="section-header">
-            <span>Active Effects (3)</span>
-          </div>
-          <div class="strip-content">
-            <div class="effect-entry selected">
-              <div class="x-btn">×</div>
-              <div class="effect-icon" style="background: linear-gradient(135deg, #4ec1f0 20%, #2a8ac0 80%); color: white; font-size: 10px; font-weight: 700;">E</div>
-              <div class="effect-name">Echo</div>
-              <div class="effect-type">Icon</div>
-            </div>
-            <div class="effect-entry selected">
-              <div class="x-btn">×</div>
-              <div class="effect-icon" style="background: linear-gradient(135deg, #4ec1f0 20%, #2a8ac0 80%); border-color: #ffcc44;">
-                <div style="border: 2px solid #ffcc44; width: 100%; height: 100%; border-radius: 1px;"></div>
-              </div>
-              <div class="effect-name">Echo</div>
-              <div class="effect-type">Border</div>
-            </div>
-            <div class="effect-entry">
-              <div class="x-btn">×</div>
-              <div class="effect-icon" style="background: #82c885; border-color: #82c885;"></div>
-              <div class="effect-name">Reversion</div>
-              <div class="effect-type">Square</div>
-            </div>
-          </div>
-        </div>
+        <div class="tile-name">Global</div>
       </div>
 
-      <!-- RIGHT PANEL (Redesigned) -->
-      <div class="right-panel">
-        <div class="panel-title">Settings</div>
+      <!-- Aura tiles (Preservation Evoker example) -->
+      <div class="aura-tile configured selected" draggable="true" onclick="selectAura('Echo', this)" data-aura="Echo" style="--aura-color: rgb(79,194,247)">
+        <div class="tile-preview" id="tile-Echo">
+          <img class="preview-icon" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='46' height='46'%3E%3Crect fill='%23264f6b' width='46' height='46'/%3E%3Ctext x='23' y='28' text-anchor='middle' fill='%234fc2f7' font-size='20' font-family='sans-serif'%3EE%3C/text%3E%3C/svg%3E" alt="Echo">
+          <span class="tile-badge">2</span>
+        </div>
+        <div class="tile-name">Echo</div>
+      </div>
 
-        <div class="sel-header">
-          <div class="sel-icon">
-            <div class="icon-inner" style="background: linear-gradient(135deg, #4ec1f0 20%, #2a8ac0 80%); color: white;">E</div>
+      <div class="aura-tile configured" draggable="true" onclick="selectAura('Reversion', this)" data-aura="Reversion" style="--aura-color: rgb(130,199,133)">
+        <div class="tile-preview" id="tile-Reversion">
+          <img class="preview-icon" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='46' height='46'%3E%3Crect fill='%23345336' width='46' height='46'/%3E%3Ctext x='23' y='28' text-anchor='middle' fill='%2382c785' font-size='20' font-family='sans-serif'%3ER%3C/text%3E%3C/svg%3E" alt="Reversion">
+          <span class="tile-badge">1</span>
+        </div>
+        <div class="tile-name">Reversion</div>
+      </div>
+
+      <div class="aura-tile" draggable="true" onclick="selectAura('EchoReversion', this)" data-aura="EchoReversion" style="--aura-color: rgb(102,196,189)">
+        <div class="tile-preview" id="tile-EchoReversion">
+          <img class="preview-icon" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='46' height='46'%3E%3Crect fill='%23284e4b' width='46' height='46'/%3E%3Ctext x='23' y='28' text-anchor='middle' fill='%2366c4bd' font-size='16' font-family='sans-serif'%3EER%3C/text%3E%3C/svg%3E" alt="Echo Rev">
+        </div>
+        <div class="tile-name">Echo Rev.</div>
+      </div>
+
+      <div class="aura-tile" draggable="true" onclick="selectAura('DreamBreath', this)" data-aura="DreamBreath" style="--aura-color: rgb(120,222,120)">
+        <div class="tile-preview" id="tile-DreamBreath">
+          <img class="preview-icon" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='46' height='46'%3E%3Crect fill='%23305530' width='46' height='46'/%3E%3Ctext x='23' y='28' text-anchor='middle' fill='%2378de78' font-size='16' font-family='sans-serif'%3EDB%3C/text%3E%3C/svg%3E" alt="Dream Breath">
+        </div>
+        <div class="tile-name">Dream Breath</div>
+      </div>
+
+      <div class="aura-tile" draggable="true" onclick="selectAura('EchoDreamBreath', this)" data-aura="EchoDreamBreath" style="--aura-color: rgb(92,209,153)">
+        <div class="tile-preview" id="tile-EchoDreamBreath">
+          <img class="preview-icon" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='46' height='46'%3E%3Crect fill='%23285339' width='46' height='46'/%3E%3Ctext x='23' y='28' text-anchor='middle' fill='%235cd199' font-size='14' font-family='sans-serif'%3EEDB%3C/text%3E%3C/svg%3E" alt="Echo Dream Breath">
+        </div>
+        <div class="tile-name">Echo D.B.</div>
+      </div>
+
+      <div class="aura-tile" draggable="true" onclick="selectAura('DreamFlight', this)" data-aura="DreamFlight" style="--aura-color: rgb(207,148,237)">
+        <div class="tile-preview" id="tile-DreamFlight">
+          <img class="preview-icon" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='46' height='46'%3E%3Crect fill='%23463060' width='46' height='46'/%3E%3Ctext x='23' y='28' text-anchor='middle' fill='%23cf94ed' font-size='16' font-family='sans-serif'%3EDF%3C/text%3E%3C/svg%3E" alt="Dream Flight">
+        </div>
+        <div class="tile-name">Dream Flight</div>
+      </div>
+
+      <div class="aura-tile" draggable="true" onclick="selectAura('Lifebind', this)" data-aura="Lifebind" style="--aura-color: rgb(240,128,128)">
+        <div class="tile-preview" id="tile-Lifebind">
+          <img class="preview-icon" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='46' height='46'%3E%3Crect fill='%23603030' width='46' height='46'/%3E%3Ctext x='23' y='28' text-anchor='middle' fill='%23f08080' font-size='20' font-family='sans-serif'%3EL%3C/text%3E%3C/svg%3E" alt="Lifebind">
+        </div>
+        <div class="tile-name">Lifebind</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FRAME PREVIEW (left) -->
+  <div class="frame-preview-section">
+    <div class="section-label">Frame Preview</div>
+    <div class="preview-canvas">
+      <div class="mock-frame" id="mockFrame">
+        <div class="health-bar"></div>
+        <div class="health-missing"></div>
+        <div class="power-bar"><div class="power-fill"></div></div>
+        <div class="name-text">Danders</div>
+        <div class="hp-text">72%</div>
+
+        <!-- Anchor dots -->
+        <div class="anchor-dot" data-anchor="TOPLEFT"></div>
+        <div class="anchor-dot" data-anchor="TOP"></div>
+        <div class="anchor-dot" data-anchor="TOPRIGHT"></div>
+        <div class="anchor-dot" data-anchor="LEFT"></div>
+        <div class="anchor-dot" data-anchor="CENTER"></div>
+        <div class="anchor-dot" data-anchor="RIGHT"></div>
+        <div class="anchor-dot" data-anchor="BOTTOMLEFT"></div>
+        <div class="anchor-dot" data-anchor="BOTTOM"></div>
+        <div class="anchor-dot" data-anchor="BOTTOMRIGHT"></div>
+
+        <!-- Placed indicators (example: Echo has an icon at TOPLEFT and a bar at BOTTOM) -->
+        <div class="placed-indicator type-icon" style="top: -2px; left: -2px; background: #264f6b;" title="Echo — Icon">
+          <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24'%3E%3Crect fill='%23264f6b' width='24' height='24'/%3E%3Ctext x='12' y='16' text-anchor='middle' fill='%234fc2f7' font-size='12' font-family='sans-serif'%3EE%3C/text%3E%3C/svg%3E">
+        </div>
+        <div class="placed-indicator type-bar" style="bottom: 5px; background: linear-gradient(90deg, rgb(79,194,247) 65%, transparent 65%);" title="Echo — Bar"></div>
+
+        <!-- Reversion has a square at TOPRIGHT -->
+        <div class="placed-indicator type-square" style="top: 2px; right: 2px; background: rgb(130,199,133);" title="Reversion — Square"></div>
+      </div>
+    </div>
+
+    <div class="preview-instructions">
+      <div class="instr-row"><span class="instr-key">Click</span> an aura tile to configure its effects</div>
+      <div class="instr-row"><span class="instr-key">Drag</span> a tile onto the frame to place it, or drag a placed indicator to move it</div>
+      <div class="instr-row"><span class="instr-key">Right-click</span> a placed indicator to remove it</div>
+    </div>
+  </div>
+
+  <!-- RIGHT PANEL -->
+  <div class="right-panel">
+    <div class="right-panel-title">Settings</div>
+
+    <!-- Selected aura header -->
+    <div class="selected-header">
+      <div class="sel-icon-placeholder" style="background: #264f6b; border-color: #4fc2f7;">
+        <span style="color: #4fc2f7; font-weight: 700;">E</span>
+      </div>
+      <div class="sel-info">
+        <div class="sel-name">Echo</div>
+        <div class="sel-sub">2 effects configured</div>
+      </div>
+    </div>
+
+    <!-- Copy from another aura -->
+    <div class="copy-from-row">
+      <span class="cf-label">Copy from:</span>
+      <div class="cf-dropdown">Select aura...</div>
+      <button class="cf-btn">Copy</button>
+    </div>
+
+    <div class="right-content">
+      <!-- ADD EFFECT BUTTON -->
+      <div class="add-effect-section">
+        <button class="add-effect-btn" onclick="toggleDropdown()">
+          <span class="plus-icon">+</span>
+          Add Effect
+        </button>
+      </div>
+
+      <!-- EFFECT DROPDOWN (hidden by default) -->
+      <div class="effect-dropdown" id="effectDropdown">
+        <div class="dropdown-section-title">Placed on Frame</div>
+        <button class="effect-option" onclick="addEffect('icon')">
+          <div class="effect-icon icon-placed">&#9635;</div>
+          <div>
+            <div class="effect-label">Icon</div>
+            <div class="effect-desc">Spell icon with duration &amp; stacks</div>
           </div>
-          <div class="sel-info">
-            <div class="sel-name">Echo</div>
-            <div class="sel-sub" style="color: #4ec1f0;">2 effect(s) configured</div>
+        </button>
+        <button class="effect-option" onclick="addEffect('square')">
+          <div class="effect-icon icon-placed">&#9632;</div>
+          <div>
+            <div class="effect-label">Square</div>
+            <div class="effect-desc">Colored square indicator</div>
+          </div>
+        </button>
+        <button class="effect-option" onclick="addEffect('bar')">
+          <div class="effect-icon icon-placed">&#9473;</div>
+          <div>
+            <div class="effect-label">Bar</div>
+            <div class="effect-desc">Duration bar with fill color</div>
+          </div>
+        </button>
+
+        <div class="dropdown-divider"></div>
+        <div class="dropdown-section-title">Frame-level Effects</div>
+
+        <button class="effect-option" onclick="addEffect('border')">
+          <div class="effect-icon icon-frame">&#9633;</div>
+          <div>
+            <div class="effect-label">Border</div>
+            <div class="effect-desc">Highlight the frame border</div>
+          </div>
+        </button>
+        <button class="effect-option" onclick="addEffect('healthbar')">
+          <div class="effect-icon icon-frame">&#9644;</div>
+          <div>
+            <div class="effect-label">Health Bar Color</div>
+            <div class="effect-desc">Tint or replace health bar color</div>
+          </div>
+        </button>
+        <button class="effect-option" onclick="addEffect('nametext')">
+          <div class="effect-icon icon-frame">A</div>
+          <div>
+            <div class="effect-label">Name Text Color</div>
+            <div class="effect-desc">Change the unit name color</div>
+          </div>
+        </button>
+        <button class="effect-option" onclick="addEffect('healthtext')">
+          <div class="effect-icon icon-frame">%</div>
+          <div>
+            <div class="effect-label">Health Text Color</div>
+            <div class="effect-desc">Change health percentage color</div>
+          </div>
+        </button>
+        <button class="effect-option" onclick="addEffect('framealpha')">
+          <div class="effect-icon icon-frame">&#9680;</div>
+          <div>
+            <div class="effect-label">Frame Alpha</div>
+            <div class="effect-desc">Reduce frame opacity</div>
+          </div>
+        </button>
+      </div>
+
+      <!-- ACTIVE EFFECTS LIST -->
+      <div class="active-effects-list" id="effectsList">
+
+        <!-- Effect card #1: Icon -->
+        <div class="effect-card expanded">
+          <div class="effect-card-header" onclick="this.parentElement.classList.toggle('expanded')">
+            <span class="card-chevron">&#9656;</span>
+            <span class="card-type-badge badge-icon">Icon</span>
+            <span class="card-label">TOPLEFT (0, 0)</span>
+            <button class="card-delete" title="Remove effect" onclick="event.stopPropagation(); this.closest('.effect-card').remove();">&#10005;</button>
+          </div>
+          <div class="effect-card-body">
+            <div class="settings-section-label">Placement</div>
+            <div class="setting-row">
+              <span class="setting-label">Anchor</span>
+              <div class="mock-dropdown">Top Left</div>
+            </div>
+            <div class="setting-row">
+              <span class="setting-label">Offset X</span>
+              <div class="setting-value">
+                <div class="mock-slider"><div class="slider-fill" style="width:50%"></div><div class="slider-thumb" style="left:46%"></div></div>
+                <span class="slider-val">0</span>
+              </div>
+            </div>
+            <div class="setting-row">
+              <span class="setting-label">Offset Y</span>
+              <div class="setting-value">
+                <div class="mock-slider"><div class="slider-fill" style="width:50%"></div><div class="slider-thumb" style="left:46%"></div></div>
+                <span class="slider-val">0</span>
+              </div>
+            </div>
+            <div class="settings-divider"></div>
+            <div class="settings-section-label">Appearance</div>
+            <div class="setting-row">
+              <span class="setting-label">Size</span>
+              <div class="setting-value">
+                <div class="mock-slider"><div class="slider-fill" style="width:35%"></div><div class="slider-thumb" style="left:31%"></div></div>
+                <span class="slider-val">24</span>
+              </div>
+            </div>
+            <div class="setting-row">
+              <span class="setting-label">Scale</span>
+              <div class="setting-value">
+                <div class="mock-slider"><div class="slider-fill" style="width:20%"></div><div class="slider-thumb" style="left:16%"></div></div>
+                <span class="slider-val">1.0</span>
+              </div>
+            </div>
+            <div class="setting-row">
+              <span class="setting-label">Show Border</span>
+              <div class="mock-checkbox checked"></div>
+            </div>
+            <div class="settings-divider"></div>
+            <div class="settings-section-label">Duration &amp; Stacks</div>
+            <div class="setting-row">
+              <span class="setting-label">Show Duration</span>
+              <div class="mock-checkbox checked"></div>
+            </div>
+            <div class="setting-row">
+              <span class="setting-label">Show Stacks</span>
+              <div class="mock-checkbox checked"></div>
+            </div>
+            <div class="settings-divider"></div>
+            <div class="settings-section-label">Expiring</div>
+            <div class="setting-row">
+              <span class="setting-label">Expiring Override</span>
+              <div class="mock-checkbox"></div>
+            </div>
           </div>
         </div>
 
-        <div class="right-scroll">
-          <!-- ADD EFFECT BUTTON (the key redesign element) -->
-          <div class="add-effect-wrapper">
-            <div class="add-effect-btn" onclick="toggleDropdown()">
-              <span class="plus">+</span> Add Effect
+        <!-- Effect card #2: Bar (collapsed) -->
+        <div class="effect-card">
+          <div class="effect-card-header" onclick="this.parentElement.classList.toggle('expanded')">
+            <span class="card-chevron">&#9656;</span>
+            <span class="card-type-badge badge-bar">Bar</span>
+            <span class="card-label">BOTTOM (0, 0)</span>
+            <button class="card-delete" title="Remove effect" onclick="event.stopPropagation(); this.closest('.effect-card').remove();">&#10005;</button>
+          </div>
+          <div class="effect-card-body">
+            <div class="settings-section-label">Placement</div>
+            <div class="setting-row">
+              <span class="setting-label">Anchor</span>
+              <div class="mock-dropdown">Bottom</div>
             </div>
-
-            <!-- Dropdown menu for adding effects -->
-            <div class="effect-dropdown" id="effectDropdown">
-              <div class="dropdown-header">Placed Indicators</div>
-              <div class="dropdown-item" onclick="addEffect('icon')">
-                <div class="item-icon icon-type">🖼</div>
-                <div class="item-text">
-                  <div class="item-name">Icon</div>
-                  <div class="item-desc">Spell icon with cooldown swipe &amp; duration text</div>
-                </div>
-                <div class="item-check active"></div>
-              </div>
-              <div class="dropdown-item" onclick="addEffect('square')">
-                <div class="item-icon square-type"></div>
-                <div class="item-text">
-                  <div class="item-name">Square</div>
-                  <div class="item-desc">Colored square indicator with cooldown &amp; stacks</div>
-                </div>
-                <div class="item-check"></div>
-              </div>
-              <div class="dropdown-item" onclick="addEffect('bar')">
-                <div class="item-icon bar-type"></div>
-                <div class="item-text">
-                  <div class="item-name">Bar</div>
-                  <div class="item-desc">Status bar with gradient, duration &amp; fill colors</div>
-                </div>
-                <div class="item-check"></div>
-              </div>
-
-              <div class="dropdown-header">Frame Effects</div>
-              <div class="dropdown-item" onclick="addEffect('border')">
-                <div class="item-icon border-type"></div>
-                <div class="item-text">
-                  <div class="item-name">Border</div>
-                  <div class="item-desc">Colored border around the unit frame (solid, glow, dashed...)</div>
-                </div>
-                <div class="item-check active"></div>
-              </div>
-              <div class="dropdown-item" onclick="addEffect('healthbar')">
-                <div class="item-icon healthbar-type"></div>
-                <div class="item-text">
-                  <div class="item-name">Health Bar Color</div>
-                  <div class="item-desc">Replace or tint the health bar color</div>
-                </div>
-                <div class="item-check"></div>
-              </div>
-              <div class="dropdown-item" onclick="addEffect('nametext')">
-                <div class="item-icon nametext-type">Aa</div>
-                <div class="item-text">
-                  <div class="item-name">Name Text Color</div>
-                  <div class="item-desc">Change the unit name text color</div>
-                </div>
-                <div class="item-check"></div>
-              </div>
-              <div class="dropdown-item" onclick="addEffect('healthtext')">
-                <div class="item-icon healthtext-type">%</div>
-                <div class="item-text">
-                  <div class="item-name">Health Text Color</div>
-                  <div class="item-desc">Change the health percentage text color</div>
-                </div>
-                <div class="item-check"></div>
-              </div>
-              <div class="dropdown-item" onclick="addEffect('framealpha')">
-                <div class="item-icon alpha-type">α</div>
-                <div class="item-text">
-                  <div class="item-name">Frame Alpha</div>
-                  <div class="item-desc">Adjust the entire frame's transparency</div>
-                </div>
-                <div class="item-check"></div>
-              </div>
+            <div class="setting-row">
+              <span class="setting-label">Orientation</span>
+              <div class="mock-dropdown">Horizontal</div>
+            </div>
+            <div class="settings-divider"></div>
+            <div class="settings-section-label">Colors</div>
+            <div class="setting-row">
+              <span class="setting-label">Fill Color</span>
+              <div class="mock-color" style="background: rgb(79,194,247);"></div>
+            </div>
+            <div class="setting-row">
+              <span class="setting-label">Background</span>
+              <div class="mock-color" style="background: rgba(0,0,0,0.5);"></div>
             </div>
           </div>
+        </div>
 
-          <!-- Configured effects (only enabled ones shown as cards) -->
-          <div class="configured-effects">
-            <div class="section-label">Configured Effects</div>
+      </div>
 
-            <!-- Icon effect card (expanded) -->
-            <div class="effect-card expanded" id="iconCard">
-              <div class="card-header" onclick="toggleCard('iconCard')">
-                <span class="card-chevron">▶</span>
-                <span class="card-type-badge">Icon</span>
-                <span class="card-title">Icon #1</span>
-                <span class="card-delete" onclick="event.stopPropagation()">✕</span>
-              </div>
-              <div class="card-content">
-                <div class="setting-row">
-                  <span class="setting-label">Anchor</span>
-                  <div class="mock-dropdown-control">Top Left <span class="arrow">▾</span></div>
-                </div>
-                <div class="setting-row">
-                  <span class="setting-label">Size</span>
-                  <div class="setting-control"><div class="mock-slider"><div class="fill" style="width:50%"></div><div class="thumb" style="left:48%"></div></div></div>
-                </div>
-                <div class="setting-row">
-                  <span class="setting-label">Scale</span>
-                  <div class="setting-control"><div class="mock-slider"><div class="fill" style="width:35%"></div><div class="thumb" style="left:33%"></div></div></div>
-                </div>
-                <div class="setting-row">
-                  <span class="setting-label">Show Border</span>
-                  <div class="setting-control"><div class="mock-checkbox checked"></div></div>
-                </div>
-                <div class="setting-row">
-                  <span class="setting-label">Show Duration</span>
-                  <div class="setting-control"><div class="mock-checkbox checked"></div></div>
-                </div>
-                <div class="setting-row">
-                  <span class="setting-label">Show Stacks</span>
-                  <div class="setting-control"><div class="mock-checkbox checked"></div></div>
-                </div>
-              </div>
-            </div>
-
-            <!-- Border effect card (collapsed) -->
-            <div class="effect-card" id="borderCard">
-              <div class="card-header" onclick="toggleCard('borderCard')">
-                <span class="card-chevron">▶</span>
-                <span class="card-type-badge">Border</span>
-                <span class="card-title">Solid Border</span>
-                <span class="card-delete" onclick="event.stopPropagation()">✕</span>
-              </div>
-              <div class="card-content">
-                <div class="setting-row">
-                  <span class="setting-label">Style</span>
-                  <div class="mock-dropdown-control">Solid <span class="arrow">▾</span></div>
-                </div>
-                <div class="setting-row">
-                  <span class="setting-label">Color</span>
-                  <div class="setting-control"><div class="mock-color-swatch" style="background:#ffcc44;"></div></div>
-                </div>
-                <div class="setting-row">
-                  <span class="setting-label">Thickness</span>
-                  <div class="setting-control"><div class="mock-slider"><div class="fill" style="width:30%"></div><div class="thumb" style="left:28%"></div></div></div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Priority -->
-          <div class="priority-section">
-            <div class="prio-label">Priority</div>
-            <div class="prio-track">
-              <div class="mock-slider" style="width: 100%;">
-                <div class="fill" style="width: 60%;"></div>
-                <div class="thumb" style="left: 58%;"></div>
-              </div>
-            </div>
-            <div style="display:flex; justify-content:space-between; font-size:8px; color:var(--text-dim); margin-top:3px;">
-              <span>Low</span>
-              <span>High</span>
-            </div>
-          </div>
+      <!-- PRIORITY (at bottom of scroll) -->
+      <div class="priority-section">
+        <div class="prio-label">Priority</div>
+        <div class="priority-track">
+          <span style="font-size:9px; color:var(--text-dim)">Low</span>
+          <div class="prio-bar"><div class="prio-fill" style="width:50%"></div></div>
+          <span style="font-size:9px; color:var(--text-dim)">High</span>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- ================================================
-       ANNOTATIONS: KEY DESIGN DECISIONS
-       ================================================ -->
-  <div class="annotation" style="margin-top: 20px;">
-    <div class="annotation-title">Design Decisions &amp; UX Improvements</div>
-    <ul>
-      <li><strong>Type Selector above tiles:</strong> The "Drag as: Icon | Square | Bar" selector tells users exactly what will happen when they drag a tile onto the frame. This eliminates the confusion of "what type will I get?"</li>
-      <li><strong>Type indicator badge on each tile:</strong> A small icon/square/bar badge at the bottom of each tile previews what you'll be placing, reinforcing the type selector choice</li>
-      <li><strong>"+ Add Effect" button:</strong> Instead of 8 collapsible sections (5 of which are disabled by default), there's one friendly button. Clicking it opens a dropdown where you choose which effect to add. This makes the feature feel approachable instead of overwhelming</li>
-      <li><strong>Only configured effects shown:</strong> The right panel only displays effects that are actually enabled, as collapsible cards. This reduces clutter dramatically &mdash; a fresh aura shows just the "+ Add Effect" button</li>
-      <li><strong>Dropdown with descriptions:</strong> Each effect in the dropdown has a one-line description, helping users understand what each effect does without having to enable it first</li>
-      <li><strong>Active checkmarks in dropdown:</strong> The dropdown shows which effects are already enabled with a check mark, so users can see the full picture at a glance</li>
-      <li><strong>"drag me" hint on tiles:</strong> Subtle hint text under each tile teaches users they can drag these onto the frame</li>
-    </ul>
+  <!-- ACTIVE EFFECTS STRIP (bottom) -->
+  <div class="effects-strip-section">
+    <div class="effects-strip-header">
+      <span>Active Effects</span>
+      <span class="count-badge">3</span>
+    </div>
+    <div class="effects-scroll">
+      <div class="effect-chip active">
+        <div class="chip-icon" style="background:#264f6b;">
+          <span style="color:#4fc2f7; font-weight:700;">E</span>
+        </div>
+        <div class="chip-info">
+          <div class="chip-aura">Echo</div>
+          <div class="chip-type">Icon &middot; TOPLEFT</div>
+        </div>
+      </div>
+      <div class="effect-chip">
+        <div class="chip-icon" style="background:#264f6b;">
+          <span style="color:#4fc2f7; font-weight:700;">E</span>
+        </div>
+        <div class="chip-info">
+          <div class="chip-aura">Echo</div>
+          <div class="chip-type">Bar &middot; BOTTOM</div>
+        </div>
+      </div>
+      <div class="effect-chip">
+        <div class="chip-icon" style="background:#345336;">
+          <span style="color:#82c785; font-weight:700;">R</span>
+        </div>
+        <div class="chip-info">
+          <div class="chip-aura">Reversion</div>
+          <div class="chip-type">Square &middot; TOPRIGHT</div>
+        </div>
+      </div>
+    </div>
   </div>
+
+</div>
+
+<!-- ===== CHANGE LOG / ANNOTATIONS ===== -->
+<div class="callout-box">
+  <h3>Redesign Changes Summary</h3>
+  <ul>
+    <li>
+      <span class="change-tag new">New</span>
+      <strong>Type Selector above tiles:</strong> Icon / Square / Bar toggle buttons sit above the aura tiles. Selecting a type changes the visual preview on each tile (icon thumbnail, colored square, or bar stripe). This makes it clear what you're about to place before dragging.
+    </li>
+    <li>
+      <span class="change-tag new">New</span>
+      <strong>"Add Effect" dropdown button:</strong> Replaces the old long list of 8 inactive collapsible sections. Users click "+ Add Effect" and pick from a categorized dropdown (Placed on Frame vs Frame-level). Only added effects appear as cards &mdash; no intimidating wall of disabled sections.
+    </li>
+    <li>
+      <span class="change-tag changed">Changed</span>
+      <strong>Right panel simplified:</strong> Now shows only the selected aura's header, the Add Effect button, and compact effect cards. Each card is collapsible and shows its type badge + placement info. Much less visual noise.
+    </li>
+    <li>
+      <span class="change-tag changed">Changed</span>
+      <strong>Effect cards are compact:</strong> Each active effect is a collapsible card with a colored type badge (Icon/Square/Bar/Border/etc.), placement info, and a delete button. Settings are grouped into clean sections with dividers.
+    </li>
+    <li>
+      <span class="change-tag changed">Changed</span>
+      <strong>Drag workflow:</strong> Users select Icon/Square/Bar type first &rarr; see that visual on tiles &rarr; drag tile onto the frame. This matches the mental model of "choose what kind &rarr; place it".
+    </li>
+    <li>
+      <span class="change-tag changed">Changed</span>
+      <strong>Active Effects strip:</strong> Unchanged concept, but now uses compact chips showing aura name + effect type + anchor, making it scannable at a glance.
+    </li>
+  </ul>
+</div>
+
 </div>
 
 <script>
-  // Type selector interaction
-  function selectType(btn, type) {
-    document.querySelectorAll('.type-btn').forEach(b => b.classList.remove('active'));
+  // Type selector
+  function selectType(btn) {
+    document.querySelectorAll('.type-btn').forEach(function(b) { b.classList.remove('active'); });
     btn.classList.add('active');
+    var type = btn.dataset.type;
 
-    const desc = document.getElementById('type-desc');
-    const descs = {
-      icon: 'Spell icon with cooldown swipe & duration',
-      square: 'Colored square indicator with cooldown',
-      bar: 'Status bar with gradient fill & duration text'
-    };
-    desc.textContent = descs[type] || '';
-
-    // Update tile type indicators
-    const indicators = document.querySelectorAll('.tile-type-indicator');
-    indicators.forEach(ind => {
-      ind.innerHTML = '';
-      if (type === 'icon') {
-        ind.innerHTML = '<div class="mini-icon icon-type"></div>';
-      } else if (type === 'square') {
-        ind.innerHTML = '<div class="mini-icon square-type"></div>';
-      } else if (type === 'bar') {
-        ind.innerHTML = '<div class="mini-bar"></div>';
+    // Update all tile previews to show the selected type
+    document.querySelectorAll('.aura-tile:not(.global-tile) .tile-preview').forEach(function(preview) {
+      preview.classList.remove('type-icon', 'type-square', 'type-bar');
+      if (type !== 'icon') {
+        preview.classList.add('type-' + type);
       }
     });
   }
 
-  // Tile selection interaction
-  function selectTile(tile, auraName) {
-    document.querySelectorAll('.aura-tile').forEach(t => t.classList.remove('selected'));
-    tile.classList.add('selected');
+  // Aura selection
+  function selectAura(auraName, tileEl) {
+    document.querySelectorAll('.aura-tile').forEach(function(t) { t.classList.remove('selected'); });
+    if (tileEl) tileEl.classList.add('selected');
+
+    // Update right panel header
+    var selName = document.querySelector('.sel-name');
+    var selSub = document.querySelector('.sel-sub');
+    if (auraName) {
+      selName.textContent = auraName;
+      var badge = tileEl.querySelector('.tile-badge');
+      selSub.textContent = tileEl.classList.contains('configured')
+        ? (badge ? badge.textContent : '0') + ' effect(s) configured'
+        : 'Not configured';
+    } else {
+      selName.textContent = 'Global Defaults';
+      selSub.textContent = 'Default values for all auras';
+    }
   }
 
   // Effect dropdown toggle
   function toggleDropdown() {
-    const dd = document.getElementById('effectDropdown');
-    dd.classList.toggle('open');
+    document.getElementById('effectDropdown').classList.toggle('open');
+  }
+
+  // Add effect (mock)
+  function addEffect(type) {
+    document.getElementById('effectDropdown').classList.remove('open');
+
+    var badgeClasses = {
+      icon: 'badge-icon', square: 'badge-square', bar: 'badge-bar',
+      border: 'badge-border', healthbar: 'badge-health',
+      nametext: 'badge-text', healthtext: 'badge-text', framealpha: 'badge-alpha'
+    };
+    var typeLabels = {
+      icon: 'Icon', square: 'Square', bar: 'Bar',
+      border: 'Border', healthbar: 'Health Bar', nametext: 'Name Text',
+      healthtext: 'Health Text', framealpha: 'Frame Alpha'
+    };
+
+    var card = document.createElement('div');
+    card.className = 'effect-card';
+    card.innerHTML =
+      '<div class="effect-card-header" onclick="this.parentElement.classList.toggle(\'expanded\')">' +
+        '<span class="card-chevron">&#9656;</span>' +
+        '<span class="card-type-badge ' + badgeClasses[type] + '">' + typeLabels[type] + '</span>' +
+        '<span class="card-label">New effect</span>' +
+        '<button class="card-delete" title="Remove effect" onclick="event.stopPropagation(); this.closest(\'.effect-card\').remove();">&#10005;</button>' +
+      '</div>' +
+      '<div class="effect-card-body">' +
+        '<p style="font-size:11px; color:var(--text-dim); padding:8px 0;">Settings would appear here...</p>' +
+      '</div>';
+    document.getElementById('effectsList').appendChild(card);
   }
 
   // Close dropdown when clicking outside
   document.addEventListener('click', function(e) {
-    const dd = document.getElementById('effectDropdown');
-    const btn = document.querySelector('.add-effect-btn');
-    if (dd && !dd.contains(e.target) && !btn.contains(e.target)) {
-      dd.classList.remove('open');
+    var dropdown = document.getElementById('effectDropdown');
+    var addBtn = document.querySelector('.add-effect-btn');
+    if (!dropdown.contains(e.target) && !addBtn.contains(e.target)) {
+      dropdown.classList.remove('open');
     }
   });
-
-  // Add effect (visual feedback)
-  function addEffect(type) {
-    const dd = document.getElementById('effectDropdown');
-    dd.classList.remove('open');
-    // In real implementation: creates the effect config and refreshes the panel
-  }
-
-  // Toggle effect card expand/collapse
-  function toggleCard(cardId) {
-    const card = document.getElementById(cardId);
-    card.classList.toggle('expanded');
-  }
 </script>
+
 </body>
 </html>
