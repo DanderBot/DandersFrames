@@ -1,5 +1,19 @@
 # DandersFrames Changelog
 
+## [4.0.11] - 2026-03-03
+
+### Bug Fixes
+* Fixed target/focus/aggro highlights not showing on arena frames
+* Fixed Aura Designer stack count font and outline settings not applying
+* Fixed buff/debuff tooltips permanently breaking after combat until reload
+* Fixed empty Buff Filters, Debuff Filters, and Defensives group containers showing when using Blizzard (default) aura mode
+* Fixed Aura Designer health bar color overlay not restoring the correct color when the tracked buff expires
+* Fixed Aura Designer health bar color overlay not matching the health bar texture
+* Fixed Aura Designer health bar color not restoring correctly on login when a buff is already active
+
+### Improvements
+* Improved click-casting debug logging to help diagnose intermittent binding failures
+
 ## [4.0.10] - 2026-03-02
 
 ### Bug Fixes
