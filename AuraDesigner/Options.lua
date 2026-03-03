@@ -596,14 +596,21 @@ local function CreateAuraProxy(auraName)
 end
 
 -- Get spell icon texture for an aura
+-- Uses static texture IDs to avoid C_Spell.GetSpellTexture returning
+-- the wrong icon when talent choice nodes replace a spell.
 local function GetAuraIcon(specKey, auraName)
+    -- Static icon table — always returns the correct icon regardless of talents
+    local icons = DF.AuraDesigner.IconTextures
+    if icons and icons[auraName] then
+        return icons[auraName]
+    end
+    -- Fallback to dynamic API for any aura not in the static table
     local spellIDs = DF.AuraDesigner.SpellIDs
     if not spellIDs or not specKey then return nil end
     local specIDs = spellIDs[specKey]
     if not specIDs then return nil end
     local spellID = specIDs[auraName]
     if not spellID or spellID == 0 then return nil end
-    -- Use modern API first, fall back to legacy
     if C_Spell and C_Spell.GetSpellTexture then
         return C_Spell.GetSpellTexture(spellID)
     elseif GetSpellTexture then

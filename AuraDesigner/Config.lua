@@ -41,8 +41,64 @@ DF.AuraDesigner.SpecInfo = {
 }
 
 -- ============================================================
+-- STATIC ICON TEXTURES
+-- Hardcoded texture IDs for the Aura Designer GUI tiles.
+-- C_Spell.GetSpellTexture() dynamically swaps icons when a
+-- talent choice node replaces a spell (e.g. Beacon of Virtue
+-- replaces Beacon of Light), causing both tiles to show the
+-- same icon. Static IDs avoid this entirely.
+-- ============================================================
+DF.AuraDesigner.IconTextures = {
+    -- Preservation Evoker
+    Echo                = 4622456,
+    Reversion           = 4630467,
+    EchoReversion       = 4630469,
+    DreamBreath         = 4622454,
+    EchoDreamBreath     = 7439198,
+    DreamFlight         = 4622455,
+    Lifebind            = 4630453,
+    -- Augmentation Evoker
+    Prescience          = 5199639,
+    ShiftingSands       = 5199633,
+    BlisteringScales    = 5199621,
+    InfernosBlessing    = 5199632,
+    SymbioticBloom      = 4554354,
+    EbonMight           = 5061347,
+    SourceOfMagic       = 4630412,
+    -- Restoration Druid
+    Rejuvenation        = 136081,
+    Regrowth            = 136085,
+    Lifebloom           = 134206,
+    Germination         = 1033478,
+    WildGrowth          = 236153,
+    SymbioticRelationship = 1408837,
+    -- Discipline Priest
+    PowerWordShield     = 135940,
+    Atonement           = 458720,
+    VoidShield          = 7514191,
+    PrayerOfMending     = 135944,
+    -- Holy Priest
+    Renew               = 135953,
+    EchoOfLight         = 237537,
+    -- Mistweaver Monk
+    RenewingMist        = 627487,
+    EnvelopingMist      = 775461,
+    SoothingMist        = 606550,
+    AspectOfHarmony     = 5927638,
+    -- Restoration Shaman
+    Riptide             = 252995,
+    EarthShield         = 136089,
+    -- Holy Paladin
+    BeaconOfFaith       = 1030095,
+    EternalFlame        = 135433,
+    BeaconOfLight       = 236247,
+    BeaconOfVirtue      = 1030094,
+    BeaconOfTheSavior   = 7514188,
+}
+
+-- ============================================================
 -- SPELL IDS PER SPEC
--- Used to fetch real spell icons via C_Spell.GetSpellTexture()
+-- Used for runtime aura matching via reverse spell ID lookup
 -- ============================================================
 DF.AuraDesigner.SpellIDs = {
     PreservationEvoker = {
