@@ -449,7 +449,6 @@ function DF.BuildAuraBlacklistPage(guiRef, pageRef, dbRef)
     local dropdownContainer = CreateFrame("Frame", nil, parent)
     dropdownContainer:SetSize(280, 55)
     dropdownContainer:SetPoint("TOPLEFT", 10, -30)
-    dropdownContainer:SetFrameStrata("DIALOG")
 
     local classLabel = dropdownContainer:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     classLabel:SetPoint("TOPLEFT", 0, 0)
@@ -505,8 +504,8 @@ function DF.BuildAuraBlacklistPage(guiRef, pageRef, dbRef)
         dropdownText:SetText("Select Class")
     end
 
-    -- Dropdown menu
-    local dropdownMenu = CreateFrame("Frame", nil, dropdownBtn, "BackdropTemplate")
+    -- Dropdown menu (parented to UIParent so it renders above everything)
+    local dropdownMenu = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
     dropdownMenu:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8x8",
         edgeFile = "Interface\\Buttons\\WHITE8x8",
@@ -514,7 +513,7 @@ function DF.BuildAuraBlacklistPage(guiRef, pageRef, dbRef)
     })
     dropdownMenu:SetBackdropColor(0.1, 0.1, 0.1, 0.98)
     dropdownMenu:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
-    dropdownMenu:SetFrameStrata("DIALOG")
+    dropdownMenu:SetFrameStrata("FULLSCREEN_DIALOG")
     dropdownMenu:SetPoint("TOPLEFT", dropdownBtn, "BOTTOMLEFT", 0, -2)
     dropdownMenu:SetSize(200, #classOptions * 22 + 4)
     dropdownMenu:Hide()
