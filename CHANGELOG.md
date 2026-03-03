@@ -10,6 +10,8 @@
 * Fixed Aura Designer health bar color overlay not restoring the correct color when the tracked buff expires
 * Fixed Aura Designer health bar color overlay not matching the health bar texture
 * Fixed Aura Designer health bar color not restoring correctly on login when a buff is already active
+* Fixed party frames showing empty when loading into a follower dungeon
+* Fixed Beacon of Virtue not available in the Aura Designer — it can now be configured with its own independent indicators
 
 ### Improvements
 * Improved click-casting debug logging to help diagnose intermittent binding failures
