@@ -110,9 +110,7 @@ DF.AuraBlacklist.BuffSpells = {
 -- ============================================================
 DF.AuraBlacklist.DebuffSpells = {
     { spellId = 57723,  display = "Exhaustion",             icon = 136090  },
-    { spellId = 390435, display = "Exhaustion",             icon = 136090  },
     { spellId = 160455, display = "Fatigued",               icon = 132307  },
-    { spellId = 264689, display = "Fatigued",               icon = 132307  },
     { spellId = 95809,  display = "Insanity",               icon = 132127  },
     { spellId = 57724,  display = "Sated",                  icon = 136090  },
     { spellId = 80354,  display = "Temporal Displacement",  icon = 236502  },
@@ -130,6 +128,10 @@ DF.AuraBlacklist.AlternateSpellIDs = {
     -- Symbiotic Relationship variants
     [474750] = 474754,
     [474760] = 474754,
+    -- Exhaustion variant
+    [390435] = 57723,
+    -- Fatigued variant
+    [264689] = 160455,
 }
 
 -- ============================================================
