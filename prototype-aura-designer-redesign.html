@@ -1,0 +1,1562 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Aura Designer Redesign - Interactive Prototype</title>
+<style>
+  /* ================================================
+     BASE RESET & THEME TOKENS
+     Matches DandersFrames dark theme exactly
+     ================================================ */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:        #141414;
+    --panel:     #1e1e1e;
+    --element:   #2e2e2e;
+    --border:    #404040;
+    --hover:     #383838;
+    --text:      #e5e5e5;
+    --text-dim:  #999999;
+    --accent:    #7373f2;
+    --accent-bg: rgba(115,115,242,0.08);
+    --accent-dim:rgba(115,115,242,0.4);
+    --red:       #e63e3e;
+    --red-bg:    rgba(230,62,62,0.12);
+    --font:      'Segoe UI', system-ui, -apple-system, sans-serif;
+    --mono:      'Cascadia Code', 'Fira Code', monospace;
+  }
+
+  body {
+    background: #0d0d0d;
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 13px;
+    line-height: 1.4;
+    display: flex;
+    justify-content: center;
+    padding: 24px;
+    min-height: 100vh;
+  }
+
+  /* ================================================
+     MAIN CONTAINER (simulates WoW addon page)
+     ================================================ */
+  .page {
+    width: 100%;
+    max-width: 1100px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+
+  /* ================================================
+     ENABLE BANNER
+     ================================================ */
+  .enable-banner {
+    display: flex;
+    align-items: center;
+    height: 44px;
+    padding: 0 12px;
+    background: #232323;
+    border-bottom: 1px solid var(--border);
+    gap: 10px;
+  }
+  .enable-banner .cb {
+    width: 18px; height: 18px;
+    background: var(--element);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .enable-banner .cb.checked {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+  .enable-banner .cb.checked::after {
+    content: '';
+    width: 10px; height: 10px;
+    background: white;
+    border-radius: 1px;
+  }
+  .enable-banner .label-group { flex: 1; line-height: 1.2; }
+  .enable-banner .label-group .title { font-weight: 600; font-size: 13px; }
+  .enable-banner .label-group .subtitle { font-size: 10px; color: var(--text-dim); }
+  .enable-banner .spec-select {
+    background: var(--element);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 3px 8px;
+    font-size: 11px;
+    border-radius: 2px;
+    cursor: pointer;
+  }
+
+  /* ================================================
+     MAIN CONTENT AREA (left + right)
+     ================================================ */
+  .content {
+    display: flex;
+    min-height: 580px;
+  }
+  .left-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    border-right: 1px solid var(--border);
+  }
+  .right-panel {
+    width: 300px;
+    flex-shrink: 0;
+    background: #191919;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ================================================
+     TRACKABLE AURAS SECTION
+     ================================================ */
+  .tile-section {
+    border-bottom: 1px solid var(--border);
+  }
+  .tile-section .section-header {
+    display: flex;
+    align-items: center;
+    height: 22px;
+    padding: 0 10px;
+    background: var(--bg);
+    border-bottom: 1px solid rgba(64,64,64,0.5);
+    font-size: 9px;
+    letter-spacing: 0.5px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    justify-content: space-between;
+  }
+  .tile-section .section-header .count {
+    color: var(--text-dim);
+    font-size: 9px;
+  }
+
+  /* ================================================
+     TYPE SELECTOR (Icon / Square / Bar)
+     NEW: Lives above the tile strip
+     ================================================ */
+  .type-selector {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 10px;
+    background: #1a1a1a;
+    border-bottom: 1px solid rgba(64,64,64,0.4);
+  }
+  .type-selector .label {
+    font-size: 10px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    margin-right: 4px;
+    white-space: nowrap;
+  }
+  .type-btn {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 12px;
+    background: rgba(0,0,0,0.25);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    color: var(--text-dim);
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .type-btn:hover {
+    border-color: var(--accent-dim);
+    color: var(--text);
+    background: rgba(115,115,242,0.06);
+  }
+  .type-btn.active {
+    border-color: var(--accent);
+    background: rgba(115,115,242,0.12);
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .type-btn .type-icon {
+    width: 16px; height: 16px;
+    border-radius: 2px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 9px;
+  }
+  .type-btn.active .type-icon { opacity: 1; }
+
+  /* Icon type preview */
+  .type-icon.icon-preview {
+    background: linear-gradient(135deg, #4a8, #2a6);
+    border: 1px solid #5b9;
+    border-radius: 2px;
+  }
+  /* Square type preview */
+  .type-icon.square-preview {
+    background: #7373f2;
+    border: 1px solid #8888ff;
+    border-radius: 1px;
+  }
+  /* Bar type preview */
+  .type-icon.bar-preview {
+    width: 22px; height: 6px;
+    background: linear-gradient(90deg, #7373f2, #5555cc);
+    border: 1px solid #8888ff;
+    border-radius: 1px;
+  }
+
+  .type-description {
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-left: auto;
+    font-style: italic;
+    opacity: 0.7;
+  }
+
+  /* ================================================
+     TILE STRIP (horizontal scrolling aura palette)
+     ================================================ */
+  .tile-strip {
+    display: flex;
+    gap: 6px;
+    padding: 10px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    background: var(--panel);
+    scrollbar-width: thin;
+    scrollbar-color: #444 transparent;
+  }
+  .tile-strip::-webkit-scrollbar { height: 6px; }
+  .tile-strip::-webkit-scrollbar-track { background: transparent; }
+  .tile-strip::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
+
+  .aura-tile {
+    flex-shrink: 0;
+    width: 68px;
+    text-align: center;
+    cursor: pointer;
+    border-radius: 3px;
+    padding: 4px 0;
+    transition: all 0.15s;
+    position: relative;
+  }
+  .aura-tile:hover {
+    background: rgba(255,255,255,0.03);
+  }
+  .aura-tile.selected {
+    background: var(--accent-bg);
+  }
+
+  .aura-tile .tile-icon-wrapper {
+    width: 56px; height: 56px;
+    margin: 0 auto;
+    border: 2px solid var(--border);
+    border-radius: 3px;
+    display: flex; align-items: center; justify-content: center;
+    position: relative;
+    overflow: hidden;
+    transition: border-color 0.15s;
+    background: rgba(0,0,0,0.3);
+  }
+  .aura-tile:hover .tile-icon-wrapper {
+    border-color: var(--accent-dim);
+  }
+  .aura-tile.selected .tile-icon-wrapper {
+    border-color: var(--accent);
+    box-shadow: 0 0 8px rgba(115,115,242,0.25);
+  }
+  .aura-tile.configured .tile-icon-wrapper {
+    border-color: var(--accent-dim);
+  }
+
+  /* Type indicator on tile: shows icon/square/bar preview */
+  .tile-type-indicator {
+    position: absolute;
+    bottom: 2px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,0.85);
+    border-radius: 2px;
+    padding: 1px 3px;
+  }
+  .tile-type-indicator .mini-icon {
+    width: 12px; height: 12px;
+    border-radius: 1px;
+  }
+  .tile-type-indicator .mini-icon.icon-type {
+    background: linear-gradient(135deg, #4a8, #2a6);
+    border: 1px solid #5b9;
+  }
+  .tile-type-indicator .mini-icon.square-type {
+    width: 10px; height: 10px;
+    background: #7373f2;
+    border: 1px solid #8888ff;
+  }
+  .tile-type-indicator .mini-bar {
+    width: 18px; height: 4px;
+    background: linear-gradient(90deg, #7373f2, #5555cc);
+    border: 1px solid #8888ff;
+    border-radius: 1px;
+  }
+
+  .aura-tile .tile-icon {
+    width: 44px; height: 44px;
+    border-radius: 2px;
+    font-size: 20px;
+    font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .aura-tile .tile-name {
+    font-size: 9px;
+    color: var(--text);
+    margin-top: 3px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding: 0 2px;
+  }
+  .aura-tile .badge {
+    position: absolute;
+    top: 1px; right: 3px;
+    background: var(--accent);
+    color: white;
+    font-size: 8px;
+    font-weight: 700;
+    width: 14px; height: 14px;
+    border-radius: 7px;
+    display: flex; align-items: center; justify-content: center;
+    line-height: 1;
+  }
+
+  /* Global Settings tile */
+  .aura-tile.global .tile-icon-wrapper {
+    border-style: dashed;
+    background: var(--element);
+  }
+  .aura-tile.global .tile-icon {
+    color: var(--text-dim);
+    font-size: 26px;
+  }
+
+  /* Drag hint in tile */
+  .tile-drag-hint {
+    font-size: 8px;
+    color: var(--text-dim);
+    opacity: 0.6;
+    margin-top: 1px;
+    font-style: italic;
+  }
+
+  /* ================================================
+     FRAME PREVIEW
+     ================================================ */
+  .preview-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background: var(--panel);
+    position: relative;
+    min-height: 200px;
+  }
+  .preview-label {
+    position: absolute;
+    top: 6px; left: 10px;
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--text-dim);
+  }
+
+  .mock-frame {
+    width: 160px;
+    height: 80px;
+    background: #121212;
+    border: 1px solid #444;
+    position: relative;
+    margin-bottom: 12px;
+    transform: scale(1.3);
+    transform-origin: center center;
+  }
+  .mock-frame .health-bar {
+    position: absolute;
+    top: 1px; left: 1px; bottom: 6px;
+    width: 72%;
+    background: linear-gradient(90deg, #2eb872 0%, #2eb872 100%);
+    opacity: 0.85;
+  }
+  .mock-frame .health-missing {
+    position: absolute;
+    top: 1px; right: 1px; bottom: 6px;
+    width: 28%;
+    background: rgba(0,0,0,0.4);
+  }
+  .mock-frame .power-bar {
+    position: absolute;
+    bottom: 1px; left: 1px;
+    width: 85%;
+    height: 4px;
+    background: #4488ff;
+    opacity: 0.9;
+  }
+  .mock-frame .name-text {
+    position: absolute;
+    top: 8px; left: 50%;
+    transform: translateX(-50%);
+    font-size: 10px;
+    font-weight: 600;
+    color: #2eb872;
+    text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
+    white-space: nowrap;
+  }
+  .mock-frame .hp-text {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 9px;
+    color: #ddd;
+    text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
+  }
+
+  /* Anchor dots */
+  .anchor-dot {
+    position: absolute;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: rgba(115,115,242,0.35);
+    transition: all 0.15s;
+    z-index: 5;
+  }
+  .anchor-dot:hover, .anchor-dot.drag-hover {
+    width: 14px; height: 14px;
+    background: var(--accent);
+    margin: -3px;
+  }
+  .anchor-dot.tl { top: -4px; left: -4px; }
+  .anchor-dot.t  { top: -4px; left: 50%; margin-left: -4px; }
+  .anchor-dot.tr { top: -4px; right: -4px; }
+  .anchor-dot.l  { top: 50%; left: -4px; margin-top: -4px; }
+  .anchor-dot.c  { top: 50%; left: 50%; margin-top: -4px; margin-left: -4px; }
+  .anchor-dot.r  { top: 50%; right: -4px; margin-top: -4px; }
+  .anchor-dot.bl { bottom: -4px; left: -4px; }
+  .anchor-dot.b  { bottom: -4px; left: 50%; margin-left: -4px; }
+  .anchor-dot.br { bottom: -4px; right: -4px; }
+
+  /* Placed indicator previews */
+  .placed-indicator {
+    position: absolute;
+    z-index: 4;
+    border: 1px solid var(--accent);
+    cursor: grab;
+  }
+  .placed-indicator.icon-ind {
+    width: 22px; height: 22px;
+    top: -4px; left: -4px;
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .placed-indicator.icon-ind .ind-icon {
+    width: 100%; height: 100%;
+    background: linear-gradient(135deg, #4a8, #2a6);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 8px; color: white; font-weight: 700;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+  }
+  .placed-indicator.icon-ind .ind-duration {
+    position: absolute;
+    bottom: 0; left: 50%; transform: translateX(-50%);
+    font-size: 7px; color: #5f5; font-weight: 700;
+    text-shadow: 0 0 3px black;
+  }
+  .placed-indicator.square-ind {
+    width: 14px; height: 14px;
+    top: -4px; right: -4px;
+    border-radius: 1px;
+    background: var(--accent);
+  }
+  .placed-indicator.bar-ind {
+    height: 5px;
+    bottom: -8px; left: 1px; right: 1px;
+    background: linear-gradient(90deg, var(--accent), #5555cc);
+    border-radius: 1px;
+  }
+
+  /* Instructions */
+  .instructions {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 8px;
+    align-self: stretch;
+    padding: 0 8px;
+  }
+  .instr-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10px;
+    color: var(--text-dim);
+    opacity: 0.7;
+  }
+  .instr-badge {
+    background: var(--element);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    padding: 1px 6px;
+    font-size: 9px;
+    color: var(--text);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  /* ================================================
+     ACTIVE EFFECTS STRIP
+     ================================================ */
+  .effects-strip {
+    border-top: 1px solid var(--border);
+  }
+  .effects-strip .section-header {
+    display: flex;
+    align-items: center;
+    height: 22px;
+    padding: 0 10px;
+    background: var(--bg);
+    border-bottom: 1px solid rgba(64,64,64,0.5);
+    font-size: 9px;
+    letter-spacing: 0.5px;
+    color: var(--accent);
+    text-transform: uppercase;
+    justify-content: space-between;
+  }
+  .effects-strip .strip-content {
+    display: flex;
+    gap: 6px;
+    padding: 8px 10px;
+    overflow-x: auto;
+    background: var(--panel);
+    min-height: 74px;
+    align-items: center;
+    scrollbar-width: thin;
+    scrollbar-color: #444 transparent;
+  }
+  .effects-strip .strip-content::-webkit-scrollbar { height: 6px; }
+  .effects-strip .strip-content::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
+
+  .effect-entry {
+    flex-shrink: 0;
+    width: 68px;
+    height: 58px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    cursor: pointer;
+    position: relative;
+    gap: 2px;
+    transition: all 0.15s;
+  }
+  .effect-entry:hover {
+    background: rgba(255,255,255,0.03);
+  }
+  .effect-entry.selected {
+    background: var(--accent-bg);
+    border-color: var(--accent-dim);
+  }
+  .effect-entry .effect-icon {
+    width: 28px; height: 28px;
+    border: 2px solid var(--accent);
+    border-radius: 2px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 700;
+    overflow: hidden;
+  }
+  .effect-entry .effect-name {
+    font-size: 7px;
+    color: white;
+    text-align: center;
+    max-width: 64px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .effect-entry .effect-type {
+    font-size: 7px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+  .effect-entry .x-btn {
+    position: absolute;
+    top: -1px; right: -1px;
+    width: 14px; height: 14px;
+    background: rgba(10,10,10,0.9);
+    border: 1px solid rgba(230,62,62,0.5);
+    border-radius: 2px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 9px; color: var(--red);
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+  .effect-entry:hover .x-btn { opacity: 1; }
+
+  .effects-placeholder {
+    color: var(--text-dim);
+    font-size: 11px;
+    opacity: 0.5;
+    font-style: italic;
+    width: 100%;
+    text-align: center;
+    padding: 16px 0;
+  }
+
+  /* ================================================
+     RIGHT PANEL
+     ================================================ */
+  .right-panel .panel-title {
+    height: 22px;
+    display: flex; align-items: center;
+    padding: 0 10px;
+    background: #161616;
+    border-bottom: 1px solid rgba(64,64,64,0.5);
+    font-size: 9px;
+    letter-spacing: 0.5px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+  }
+  .right-panel .sel-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: var(--bg);
+    border-bottom: 1px solid rgba(64,64,64,0.5);
+  }
+  .sel-icon {
+    width: 34px; height: 34px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    overflow: hidden;
+    background: rgba(0,0,0,0.3);
+  }
+  .sel-icon .icon-inner {
+    width: 100%; height: 100%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; font-weight: 700;
+  }
+  .sel-info { flex: 1; min-width: 0; }
+  .sel-info .sel-name { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sel-info .sel-sub { font-size: 10px; color: var(--text-dim); }
+
+  /* Right panel scrollable settings */
+  .right-scroll {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 0;
+    scrollbar-width: thin;
+    scrollbar-color: #444 transparent;
+  }
+  .right-scroll::-webkit-scrollbar { width: 6px; }
+  .right-scroll::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
+
+  /* ================================================
+     ADD EFFECT BUTTON + DROPDOWN
+     ================================================ */
+  .add-effect-wrapper {
+    padding: 10px 12px;
+    position: relative;
+  }
+  .add-effect-btn {
+    width: 100%;
+    height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    background: var(--accent-bg);
+    border: 1px dashed var(--accent-dim);
+    border-radius: 4px;
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .add-effect-btn:hover {
+    background: rgba(115,115,242,0.15);
+    border-color: var(--accent);
+    color: white;
+  }
+  .add-effect-btn .plus { font-size: 16px; font-weight: 700; }
+
+  /* Effect dropdown menu */
+  .effect-dropdown {
+    position: absolute;
+    top: 52px;
+    left: 12px;
+    right: 12px;
+    background: #1c1c1c;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    z-index: 100;
+    overflow: hidden;
+    display: none;
+  }
+  .effect-dropdown.open { display: block; }
+
+  .effect-dropdown .dropdown-header {
+    padding: 6px 10px;
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-dim);
+    background: rgba(0,0,0,0.2);
+    border-bottom: 1px solid rgba(64,64,64,0.4);
+  }
+  .effect-dropdown .dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    cursor: pointer;
+    transition: background 0.1s;
+    border-bottom: 1px solid rgba(64,64,64,0.2);
+  }
+  .effect-dropdown .dropdown-item:last-child { border-bottom: none; }
+  .effect-dropdown .dropdown-item:hover {
+    background: rgba(115,115,242,0.08);
+  }
+  .effect-dropdown .dropdown-item .item-icon {
+    width: 24px; height: 24px;
+    border-radius: 3px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    font-size: 12px;
+  }
+  .effect-dropdown .dropdown-item .item-text {
+    flex: 1;
+  }
+  .effect-dropdown .dropdown-item .item-text .item-name {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text);
+  }
+  .effect-dropdown .dropdown-item .item-text .item-desc {
+    font-size: 9px;
+    color: var(--text-dim);
+    margin-top: 1px;
+  }
+  .effect-dropdown .dropdown-item .item-check {
+    width: 18px; height: 18px;
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .effect-dropdown .dropdown-item .item-check.active {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+  .effect-dropdown .dropdown-item .item-check.active::after {
+    content: '✓';
+    color: white;
+    font-size: 11px;
+  }
+
+  /* Placed indicators in dropdown */
+  .dropdown-item .item-icon.icon-type {
+    background: linear-gradient(135deg, #3a7, #265);
+    color: white;
+    font-size: 10px;
+    font-weight: 700;
+  }
+  .dropdown-item .item-icon.square-type {
+    background: var(--accent);
+  }
+  .dropdown-item .item-icon.bar-type {
+    width: 32px; height: 10px;
+    background: linear-gradient(90deg, var(--accent), #5555cc);
+    border-radius: 2px;
+  }
+  .dropdown-item .item-icon.border-type {
+    background: transparent;
+    border: 2px solid #ffcc44;
+  }
+  .dropdown-item .item-icon.healthbar-type {
+    background: linear-gradient(90deg, #e44, #c33);
+    border-radius: 2px;
+  }
+  .dropdown-item .item-icon.nametext-type {
+    color: #4ecdc4;
+    font-weight: 700;
+    font-size: 11px;
+  }
+  .dropdown-item .item-icon.healthtext-type {
+    color: #ff6b6b;
+    font-weight: 700;
+    font-size: 11px;
+  }
+  .dropdown-item .item-icon.alpha-type {
+    background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05));
+    border: 1px dashed rgba(255,255,255,0.3);
+    color: #888;
+    font-size: 10px;
+  }
+
+  /* ================================================
+     CONFIGURED EFFECTS LIST (in right panel)
+     ================================================ */
+  .configured-effects {
+    padding: 0 12px;
+  }
+  .configured-effects .section-label {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-dim);
+    padding: 6px 0;
+    border-bottom: 1px solid rgba(64,64,64,0.3);
+    margin-bottom: 6px;
+  }
+
+  .effect-card {
+    background: var(--element);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    margin-bottom: 4px;
+    overflow: hidden;
+    transition: border-color 0.15s;
+  }
+  .effect-card:hover { border-color: var(--accent-dim); }
+  .effect-card .card-header {
+    display: flex;
+    align-items: center;
+    padding: 6px 8px;
+    cursor: pointer;
+    gap: 8px;
+  }
+  .effect-card .card-header .card-chevron {
+    font-size: 10px;
+    color: var(--text-dim);
+    width: 14px; text-align: center;
+    transition: transform 0.15s;
+    flex-shrink: 0;
+  }
+  .effect-card.expanded .card-header .card-chevron {
+    transform: rotate(90deg);
+  }
+  .effect-card .card-header .card-type-badge {
+    font-size: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    background: rgba(115,115,242,0.12);
+    color: var(--accent);
+    padding: 2px 6px;
+    border-radius: 2px;
+    font-weight: 600;
+  }
+  .effect-card .card-header .card-title {
+    flex: 1;
+    font-size: 11px;
+    color: var(--text);
+  }
+  .effect-card .card-header .card-delete {
+    width: 16px; height: 16px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px;
+    color: var(--text-dim);
+    border-radius: 2px;
+    cursor: pointer;
+    opacity: 0;
+    transition: all 0.15s;
+    flex-shrink: 0;
+  }
+  .effect-card:hover .card-header .card-delete { opacity: 1; }
+  .effect-card .card-header .card-delete:hover {
+    color: var(--red);
+    background: var(--red-bg);
+  }
+
+  .effect-card .card-content {
+    display: none;
+    padding: 8px;
+    border-top: 1px solid rgba(64,64,64,0.3);
+    background: rgba(0,0,0,0.15);
+  }
+  .effect-card.expanded .card-content { display: block; }
+
+  /* Settings widgets (simplified mockups) */
+  .setting-row {
+    display: flex;
+    align-items: center;
+    padding: 4px 0;
+    gap: 8px;
+  }
+  .setting-row .setting-label {
+    font-size: 10px;
+    color: var(--text-dim);
+    flex: 1;
+    min-width: 0;
+  }
+  .setting-row .setting-control {
+    flex-shrink: 0;
+  }
+  .mock-slider {
+    width: 100px;
+    height: 6px;
+    background: var(--element);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    position: relative;
+  }
+  .mock-slider .fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    width: 60%;
+  }
+  .mock-slider .thumb {
+    position: absolute;
+    top: -4px;
+    left: 58%;
+    width: 10px; height: 14px;
+    background: var(--accent);
+    border-radius: 2px;
+  }
+  .mock-dropdown-control {
+    background: var(--element);
+    border: 1px solid var(--border);
+    padding: 2px 6px;
+    border-radius: 2px;
+    font-size: 10px;
+    color: var(--text);
+    min-width: 80px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4px;
+  }
+  .mock-dropdown-control .arrow { font-size: 8px; color: var(--text-dim); }
+  .mock-checkbox {
+    width: 14px; height: 14px;
+    background: var(--element);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .mock-checkbox.checked {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+  .mock-checkbox.checked::after {
+    content: '';
+    width: 8px; height: 8px;
+    background: white;
+    border-radius: 1px;
+  }
+  .mock-color-swatch {
+    width: 20px; height: 14px;
+    border: 1px solid var(--border);
+    border-radius: 2px;
+  }
+
+  /* Priority slider section */
+  .priority-section {
+    padding: 12px 12px 8px;
+    border-top: 1px solid rgba(64,64,64,0.3);
+    margin-top: 8px;
+  }
+  .priority-section .prio-label {
+    font-size: 10px;
+    color: var(--text);
+    margin-bottom: 6px;
+  }
+  .priority-section .prio-track {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .priority-section .prio-track .labels {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+    font-size: 8px;
+    color: var(--text-dim);
+    margin-top: 2px;
+  }
+
+  /* ================================================
+     COMPARISON LABELS
+     ================================================ */
+  .comparison-header {
+    text-align: center;
+    padding: 12px 0 6px;
+    font-size: 10px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    background: rgba(0,0,0,0.3);
+    border-bottom: 2px solid var(--accent);
+  }
+  .comparison-header.before {
+    border-bottom-color: #e44;
+    color: #e88;
+  }
+  .comparison-header.after {
+    border-bottom-color: #4e4;
+    color: #8e8;
+  }
+
+  /* ================================================
+     ANNOTATIONS / CALLOUTS
+     ================================================ */
+  .annotation {
+    position: relative;
+    margin: 20px 24px;
+    padding: 14px 18px;
+    background: rgba(115,115,242,0.06);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 4px 4px 0;
+    font-size: 12px;
+    color: var(--text);
+    line-height: 1.6;
+  }
+  .annotation .annotation-title {
+    font-weight: 700;
+    color: var(--accent);
+    font-size: 13px;
+    margin-bottom: 4px;
+  }
+  .annotation ul {
+    padding-left: 18px;
+    margin-top: 6px;
+  }
+  .annotation li {
+    margin-bottom: 3px;
+    color: #ccc;
+  }
+  .annotation strong { color: var(--accent); font-weight: 600; }
+
+  /* ================================================
+     RESPONSIVE TWEAKS
+     ================================================ */
+  @media (max-width: 900px) {
+    .right-panel { width: 260px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ================================================
+     ANNOTATION: DESIGN PHILOSOPHY
+     ================================================ -->
+<div style="width: 100%; max-width: 1100px; margin-bottom: 16px;">
+  <div class="annotation">
+    <div class="annotation-title">Redesigned Aura Designer - Interactive HTML Prototype</div>
+    <p>Key changes from the current design:</p>
+    <ul>
+      <li><strong>Type Selector above tiles</strong> &mdash; Choose Icon, Square, or Bar FIRST, then the aura tiles show a preview of that type, making it clear what you'll be dragging</li>
+      <li><strong>Visual type indicator on each tile</strong> &mdash; Each tile shows a small icon/square/bar preview badge so users see what they'll place</li>
+      <li><strong>Right panel simplified</strong> &mdash; Instead of a long list of collapsible inactive effects, there's a single "+ Add Effect" button that opens a clean dropdown menu</li>
+      <li><strong>Configured effects as cards</strong> &mdash; Only shows effects that are actually enabled, with expand/collapse for settings</li>
+      <li><strong>Less intimidating</strong> &mdash; New users see a simple button instead of 8 disabled effect sections</li>
+    </ul>
+  </div>
+
+  <!-- ================================================
+       REDESIGNED UI
+       ================================================ -->
+  <div class="comparison-header after">Redesigned Layout</div>
+  <div class="page" id="redesigned">
+
+    <!-- Enable Banner -->
+    <div class="enable-banner">
+      <div class="cb checked"></div>
+      <div class="label-group">
+        <div class="title">Enable Aura Designer</div>
+        <div class="subtitle">Custom buff and frame effect indicators</div>
+      </div>
+      <span style="font-size:10px; color:var(--text-dim)">Spec:</span>
+      <select class="spec-select">
+        <option>Auto (Preservation Evoker)</option>
+        <option>Restoration Druid</option>
+        <option>Discipline Priest</option>
+        <option>Holy Priest</option>
+        <option>Holy Paladin</option>
+        <option>Restoration Shaman</option>
+        <option>Mistweaver Monk</option>
+        <option>Augmentation Evoker</option>
+      </select>
+    </div>
+
+    <div class="content">
+      <div class="left-area">
+        <!-- Trackable Auras Section -->
+        <div class="tile-section">
+          <div class="section-header">
+            <span>Trackable Auras</span>
+            <span class="count">7</span>
+          </div>
+
+          <!-- NEW: Type Selector (Icon / Square / Bar) -->
+          <div class="type-selector">
+            <span class="label">Drag as:</span>
+            <div class="type-btn active" onclick="selectType(this, 'icon')">
+              <div class="type-icon icon-preview"></div>
+              Icon
+            </div>
+            <div class="type-btn" onclick="selectType(this, 'square')">
+              <div class="type-icon square-preview"></div>
+              Square
+            </div>
+            <div class="type-btn" onclick="selectType(this, 'bar')">
+              <div class="type-icon bar-preview"></div>
+              Bar
+            </div>
+            <span class="type-description" id="type-desc">Spell icon with cooldown swipe &amp; duration</span>
+          </div>
+
+          <!-- Tile Strip -->
+          <div class="tile-strip">
+            <!-- Global Settings tile -->
+            <div class="aura-tile global" onclick="selectTile(this, null)">
+              <div class="tile-icon-wrapper">
+                <div class="tile-icon" style="color:var(--text-dim);">⚙</div>
+              </div>
+              <div class="tile-name" style="color:var(--text-dim)">Global Settings</div>
+            </div>
+
+            <!-- Echo -->
+            <div class="aura-tile configured selected" onclick="selectTile(this, 'Echo')">
+              <div class="tile-icon-wrapper">
+                <div class="tile-icon" style="background: linear-gradient(135deg, #4ec1f0 20%, #2a8ac0 80%); border-radius: 2px;">E</div>
+                <div class="tile-type-indicator">
+                  <div class="mini-icon icon-type"></div>
+                </div>
+              </div>
+              <div class="tile-name">Echo</div>
+              <div class="tile-drag-hint">drag me</div>
+              <div class="badge">2</div>
+            </div>
+
+            <!-- Reversion -->
+            <div class="aura-tile configured" onclick="selectTile(this, 'Reversion')">
+              <div class="tile-icon-wrapper">
+                <div class="tile-icon" style="background: linear-gradient(135deg, #82c885 20%, #4a8a4d 80%); border-radius: 2px;">R</div>
+                <div class="tile-type-indicator">
+                  <div class="mini-icon square-type"></div>
+                </div>
+              </div>
+              <div class="tile-name">Reversion</div>
+              <div class="tile-drag-hint">drag me</div>
+              <div class="badge">1</div>
+            </div>
+
+            <!-- Echo Reversion -->
+            <div class="aura-tile" onclick="selectTile(this, 'EchoReversion')">
+              <div class="tile-icon-wrapper">
+                <div class="tile-icon" style="background: linear-gradient(135deg, #66c5bc 20%, #3a8a80 80%); border-radius: 2px;">E</div>
+                <div class="tile-type-indicator">
+                  <div class="mini-icon icon-type"></div>
+                </div>
+              </div>
+              <div class="tile-name">Echo Reversion</div>
+              <div class="tile-drag-hint">drag me</div>
+            </div>
+
+            <!-- Dream Breath -->
+            <div class="aura-tile" onclick="selectTile(this, 'DreamBreath')">
+              <div class="tile-icon-wrapper">
+                <div class="tile-icon" style="background: linear-gradient(135deg, #78de78 20%, #3aaa3a 80%); border-radius: 2px;">D</div>
+                <div class="tile-type-indicator">
+                  <div class="mini-icon icon-type"></div>
+                </div>
+              </div>
+              <div class="tile-name">Dream Breath</div>
+              <div class="tile-drag-hint">drag me</div>
+            </div>
+
+            <!-- Echo Dream Breath -->
+            <div class="aura-tile" onclick="selectTile(this, 'EchoDreamBreath')">
+              <div class="tile-icon-wrapper">
+                <div class="tile-icon" style="background: linear-gradient(135deg, #5cd199 20%, #2a9060 80%); border-radius: 2px;">E</div>
+                <div class="tile-type-indicator">
+                  <div class="mini-icon icon-type"></div>
+                </div>
+              </div>
+              <div class="tile-name">Echo Dream B.</div>
+              <div class="tile-drag-hint">drag me</div>
+            </div>
+
+            <!-- Dream Flight -->
+            <div class="aura-tile" onclick="selectTile(this, 'DreamFlight')">
+              <div class="tile-icon-wrapper">
+                <div class="tile-icon" style="background: linear-gradient(135deg, #cf94ee 20%, #8a50aa 80%); border-radius: 2px;">D</div>
+                <div class="tile-type-indicator">
+                  <div class="mini-icon icon-type"></div>
+                </div>
+              </div>
+              <div class="tile-name">Dream Flight</div>
+              <div class="tile-drag-hint">drag me</div>
+            </div>
+
+            <!-- Lifebind -->
+            <div class="aura-tile" onclick="selectTile(this, 'Lifebind')">
+              <div class="tile-icon-wrapper">
+                <div class="tile-icon" style="background: linear-gradient(135deg, #f08080 20%, #c04040 80%); border-radius: 2px;">L</div>
+                <div class="tile-type-indicator">
+                  <div class="mini-icon icon-type"></div>
+                </div>
+              </div>
+              <div class="tile-name">Lifebind</div>
+              <div class="tile-drag-hint">drag me</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Frame Preview -->
+        <div class="preview-area">
+          <span class="preview-label">Frame Preview</span>
+
+          <div class="mock-frame">
+            <div class="health-bar"></div>
+            <div class="health-missing"></div>
+            <div class="power-bar"></div>
+            <div class="name-text">Danders</div>
+            <div class="hp-text">72%</div>
+
+            <!-- Anchor dots -->
+            <div class="anchor-dot tl"></div>
+            <div class="anchor-dot t"></div>
+            <div class="anchor-dot tr"></div>
+            <div class="anchor-dot l"></div>
+            <div class="anchor-dot c"></div>
+            <div class="anchor-dot r"></div>
+            <div class="anchor-dot bl"></div>
+            <div class="anchor-dot b"></div>
+            <div class="anchor-dot br"></div>
+
+            <!-- Placed indicator examples -->
+            <div class="placed-indicator icon-ind">
+              <div class="ind-icon" style="background: linear-gradient(135deg, #4ec1f0 20%, #2a8ac0 80%);">E</div>
+              <div class="ind-duration">5s</div>
+            </div>
+            <div class="placed-indicator square-ind" style="background: #82c885; border-color: #82c885;"></div>
+          </div>
+
+          <div class="instructions">
+            <div class="instr-row"><span class="instr-badge">Drag</span> a tile onto the frame to place it at an anchor point</div>
+            <div class="instr-row"><span class="instr-badge">Click</span> a tile to select and configure its effects</div>
+            <div class="instr-row"><span class="instr-badge">Right-click</span> a placed indicator to remove it</div>
+          </div>
+        </div>
+
+        <!-- Active Effects Strip -->
+        <div class="effects-strip">
+          <div class="section-header">
+            <span>Active Effects (3)</span>
+          </div>
+          <div class="strip-content">
+            <div class="effect-entry selected">
+              <div class="x-btn">×</div>
+              <div class="effect-icon" style="background: linear-gradient(135deg, #4ec1f0 20%, #2a8ac0 80%); color: white; font-size: 10px; font-weight: 700;">E</div>
+              <div class="effect-name">Echo</div>
+              <div class="effect-type">Icon</div>
+            </div>
+            <div class="effect-entry selected">
+              <div class="x-btn">×</div>
+              <div class="effect-icon" style="background: linear-gradient(135deg, #4ec1f0 20%, #2a8ac0 80%); border-color: #ffcc44;">
+                <div style="border: 2px solid #ffcc44; width: 100%; height: 100%; border-radius: 1px;"></div>
+              </div>
+              <div class="effect-name">Echo</div>
+              <div class="effect-type">Border</div>
+            </div>
+            <div class="effect-entry">
+              <div class="x-btn">×</div>
+              <div class="effect-icon" style="background: #82c885; border-color: #82c885;"></div>
+              <div class="effect-name">Reversion</div>
+              <div class="effect-type">Square</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT PANEL (Redesigned) -->
+      <div class="right-panel">
+        <div class="panel-title">Settings</div>
+
+        <div class="sel-header">
+          <div class="sel-icon">
+            <div class="icon-inner" style="background: linear-gradient(135deg, #4ec1f0 20%, #2a8ac0 80%); color: white;">E</div>
+          </div>
+          <div class="sel-info">
+            <div class="sel-name">Echo</div>
+            <div class="sel-sub" style="color: #4ec1f0;">2 effect(s) configured</div>
+          </div>
+        </div>
+
+        <div class="right-scroll">
+          <!-- ADD EFFECT BUTTON (the key redesign element) -->
+          <div class="add-effect-wrapper">
+            <div class="add-effect-btn" onclick="toggleDropdown()">
+              <span class="plus">+</span> Add Effect
+            </div>
+
+            <!-- Dropdown menu for adding effects -->
+            <div class="effect-dropdown" id="effectDropdown">
+              <div class="dropdown-header">Placed Indicators</div>
+              <div class="dropdown-item" onclick="addEffect('icon')">
+                <div class="item-icon icon-type">🖼</div>
+                <div class="item-text">
+                  <div class="item-name">Icon</div>
+                  <div class="item-desc">Spell icon with cooldown swipe &amp; duration text</div>
+                </div>
+                <div class="item-check active"></div>
+              </div>
+              <div class="dropdown-item" onclick="addEffect('square')">
+                <div class="item-icon square-type"></div>
+                <div class="item-text">
+                  <div class="item-name">Square</div>
+                  <div class="item-desc">Colored square indicator with cooldown &amp; stacks</div>
+                </div>
+                <div class="item-check"></div>
+              </div>
+              <div class="dropdown-item" onclick="addEffect('bar')">
+                <div class="item-icon bar-type"></div>
+                <div class="item-text">
+                  <div class="item-name">Bar</div>
+                  <div class="item-desc">Status bar with gradient, duration &amp; fill colors</div>
+                </div>
+                <div class="item-check"></div>
+              </div>
+
+              <div class="dropdown-header">Frame Effects</div>
+              <div class="dropdown-item" onclick="addEffect('border')">
+                <div class="item-icon border-type"></div>
+                <div class="item-text">
+                  <div class="item-name">Border</div>
+                  <div class="item-desc">Colored border around the unit frame (solid, glow, dashed...)</div>
+                </div>
+                <div class="item-check active"></div>
+              </div>
+              <div class="dropdown-item" onclick="addEffect('healthbar')">
+                <div class="item-icon healthbar-type"></div>
+                <div class="item-text">
+                  <div class="item-name">Health Bar Color</div>
+                  <div class="item-desc">Replace or tint the health bar color</div>
+                </div>
+                <div class="item-check"></div>
+              </div>
+              <div class="dropdown-item" onclick="addEffect('nametext')">
+                <div class="item-icon nametext-type">Aa</div>
+                <div class="item-text">
+                  <div class="item-name">Name Text Color</div>
+                  <div class="item-desc">Change the unit name text color</div>
+                </div>
+                <div class="item-check"></div>
+              </div>
+              <div class="dropdown-item" onclick="addEffect('healthtext')">
+                <div class="item-icon healthtext-type">%</div>
+                <div class="item-text">
+                  <div class="item-name">Health Text Color</div>
+                  <div class="item-desc">Change the health percentage text color</div>
+                </div>
+                <div class="item-check"></div>
+              </div>
+              <div class="dropdown-item" onclick="addEffect('framealpha')">
+                <div class="item-icon alpha-type">α</div>
+                <div class="item-text">
+                  <div class="item-name">Frame Alpha</div>
+                  <div class="item-desc">Adjust the entire frame's transparency</div>
+                </div>
+                <div class="item-check"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Configured effects (only enabled ones shown as cards) -->
+          <div class="configured-effects">
+            <div class="section-label">Configured Effects</div>
+
+            <!-- Icon effect card (expanded) -->
+            <div class="effect-card expanded" id="iconCard">
+              <div class="card-header" onclick="toggleCard('iconCard')">
+                <span class="card-chevron">▶</span>
+                <span class="card-type-badge">Icon</span>
+                <span class="card-title">Icon #1</span>
+                <span class="card-delete" onclick="event.stopPropagation()">✕</span>
+              </div>
+              <div class="card-content">
+                <div class="setting-row">
+                  <span class="setting-label">Anchor</span>
+                  <div class="mock-dropdown-control">Top Left <span class="arrow">▾</span></div>
+                </div>
+                <div class="setting-row">
+                  <span class="setting-label">Size</span>
+                  <div class="setting-control"><div class="mock-slider"><div class="fill" style="width:50%"></div><div class="thumb" style="left:48%"></div></div></div>
+                </div>
+                <div class="setting-row">
+                  <span class="setting-label">Scale</span>
+                  <div class="setting-control"><div class="mock-slider"><div class="fill" style="width:35%"></div><div class="thumb" style="left:33%"></div></div></div>
+                </div>
+                <div class="setting-row">
+                  <span class="setting-label">Show Border</span>
+                  <div class="setting-control"><div class="mock-checkbox checked"></div></div>
+                </div>
+                <div class="setting-row">
+                  <span class="setting-label">Show Duration</span>
+                  <div class="setting-control"><div class="mock-checkbox checked"></div></div>
+                </div>
+                <div class="setting-row">
+                  <span class="setting-label">Show Stacks</span>
+                  <div class="setting-control"><div class="mock-checkbox checked"></div></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Border effect card (collapsed) -->
+            <div class="effect-card" id="borderCard">
+              <div class="card-header" onclick="toggleCard('borderCard')">
+                <span class="card-chevron">▶</span>
+                <span class="card-type-badge">Border</span>
+                <span class="card-title">Solid Border</span>
+                <span class="card-delete" onclick="event.stopPropagation()">✕</span>
+              </div>
+              <div class="card-content">
+                <div class="setting-row">
+                  <span class="setting-label">Style</span>
+                  <div class="mock-dropdown-control">Solid <span class="arrow">▾</span></div>
+                </div>
+                <div class="setting-row">
+                  <span class="setting-label">Color</span>
+                  <div class="setting-control"><div class="mock-color-swatch" style="background:#ffcc44;"></div></div>
+                </div>
+                <div class="setting-row">
+                  <span class="setting-label">Thickness</span>
+                  <div class="setting-control"><div class="mock-slider"><div class="fill" style="width:30%"></div><div class="thumb" style="left:28%"></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Priority -->
+          <div class="priority-section">
+            <div class="prio-label">Priority</div>
+            <div class="prio-track">
+              <div class="mock-slider" style="width: 100%;">
+                <div class="fill" style="width: 60%;"></div>
+                <div class="thumb" style="left: 58%;"></div>
+              </div>
+            </div>
+            <div style="display:flex; justify-content:space-between; font-size:8px; color:var(--text-dim); margin-top:3px;">
+              <span>Low</span>
+              <span>High</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================
+       ANNOTATIONS: KEY DESIGN DECISIONS
+       ================================================ -->
+  <div class="annotation" style="margin-top: 20px;">
+    <div class="annotation-title">Design Decisions &amp; UX Improvements</div>
+    <ul>
+      <li><strong>Type Selector above tiles:</strong> The "Drag as: Icon | Square | Bar" selector tells users exactly what will happen when they drag a tile onto the frame. This eliminates the confusion of "what type will I get?"</li>
+      <li><strong>Type indicator badge on each tile:</strong> A small icon/square/bar badge at the bottom of each tile previews what you'll be placing, reinforcing the type selector choice</li>
+      <li><strong>"+ Add Effect" button:</strong> Instead of 8 collapsible sections (5 of which are disabled by default), there's one friendly button. Clicking it opens a dropdown where you choose which effect to add. This makes the feature feel approachable instead of overwhelming</li>
+      <li><strong>Only configured effects shown:</strong> The right panel only displays effects that are actually enabled, as collapsible cards. This reduces clutter dramatically &mdash; a fresh aura shows just the "+ Add Effect" button</li>
+      <li><strong>Dropdown with descriptions:</strong> Each effect in the dropdown has a one-line description, helping users understand what each effect does without having to enable it first</li>
+      <li><strong>Active checkmarks in dropdown:</strong> The dropdown shows which effects are already enabled with a check mark, so users can see the full picture at a glance</li>
+      <li><strong>"drag me" hint on tiles:</strong> Subtle hint text under each tile teaches users they can drag these onto the frame</li>
+    </ul>
+  </div>
+</div>
+
+<script>
+  // Type selector interaction
+  function selectType(btn, type) {
+    document.querySelectorAll('.type-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+
+    const desc = document.getElementById('type-desc');
+    const descs = {
+      icon: 'Spell icon with cooldown swipe & duration',
+      square: 'Colored square indicator with cooldown',
+      bar: 'Status bar with gradient fill & duration text'
+    };
+    desc.textContent = descs[type] || '';
+
+    // Update tile type indicators
+    const indicators = document.querySelectorAll('.tile-type-indicator');
+    indicators.forEach(ind => {
+      ind.innerHTML = '';
+      if (type === 'icon') {
+        ind.innerHTML = '<div class="mini-icon icon-type"></div>';
+      } else if (type === 'square') {
+        ind.innerHTML = '<div class="mini-icon square-type"></div>';
+      } else if (type === 'bar') {
+        ind.innerHTML = '<div class="mini-bar"></div>';
+      }
+    });
+  }
+
+  // Tile selection interaction
+  function selectTile(tile, auraName) {
+    document.querySelectorAll('.aura-tile').forEach(t => t.classList.remove('selected'));
+    tile.classList.add('selected');
+  }
+
+  // Effect dropdown toggle
+  function toggleDropdown() {
+    const dd = document.getElementById('effectDropdown');
+    dd.classList.toggle('open');
+  }
+
+  // Close dropdown when clicking outside
+  document.addEventListener('click', function(e) {
+    const dd = document.getElementById('effectDropdown');
+    const btn = document.querySelector('.add-effect-btn');
+    if (dd && !dd.contains(e.target) && !btn.contains(e.target)) {
+      dd.classList.remove('open');
+    }
+  });
+
+  // Add effect (visual feedback)
+  function addEffect(type) {
+    const dd = document.getElementById('effectDropdown');
+    dd.classList.remove('open');
+    // In real implementation: creates the effect config and refreshes the panel
+  }
+
+  // Toggle effect card expand/collapse
+  function toggleCard(cardId) {
+    const card = document.getElementById(cardId);
+    card.classList.toggle('expanded');
+  }
+</script>
+</body>
+</html>
