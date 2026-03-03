@@ -2397,6 +2397,10 @@ function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate)
     -- Debug: track when bindings are reapplied (helps diagnose unexpected clears)
     local isHovered = (self.currentHoveredFrame == frame) or (frame.IsMouseOver and frame:IsMouseOver())
     DF:Debug("CLICK", "ApplyBindings %s hovered=%s", frameName, tostring(isHovered))
+    if isHovered then
+        DF:DebugWarn("CLICK", "ApplyBindings on HOVERED frame %s — bindings may flicker! caller: %s",
+            frameName, debugstack(2, 1, 0) or "unknown")
+    end
 
     -- Clear existing bindings first
     self:ClearBindingsFromFrame(frame)

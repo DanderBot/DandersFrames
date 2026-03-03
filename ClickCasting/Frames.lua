@@ -1335,6 +1335,11 @@ function CC:SetupSecureHandlers(frame)
     -- Clear bindings when frame is hidden
     frame:HookScript("OnHide", function(self)
         if not InCombatLockdown() then
+            local wasHovered = (CC.currentHoveredFrame == self)
+            if wasHovered then
+                DF:DebugWarn("CLICK", "OnHide %s while HOVERED — clearing bindings! caller: %s",
+                    self:GetName() or "unnamed", debugstack(2, 1, 0) or "unknown")
+            end
             ClearOverrideBindings(self)
         end
     end)
@@ -1370,9 +1375,19 @@ function CC:SetupSecureHandlers(frame)
             DF:DebugWarn("CLICK", "HOVER BUT NO KB BINDINGS on %s! Key presses will go to action bar", frameName)
             if wrapCount == prevWrapCount then
                 DF:DebugWarn("CLICK", "  WrapScript OnEnter DID NOT FIRE (count=%d)", wrapCount)
+                DF:DebugWarn("CLICK", "  frame visible=%s shown=%s mouseOver=%s combat=%s",
+                    tostring(self:IsVisible()), tostring(self:IsShown()),
+                    tostring(self:IsMouseOver()), tostring(InCombatLockdown()))
+                -- Check if header still owns this frame
+                local parent = self:GetParent()
+                DF:DebugWarn("CLICK", "  parent=%s headerRef=%s",
+                    parent and parent:GetName() or "nil",
+                    CC.header and CC.header:GetName() or "nil")
             else
                 DF:DebugWarn("CLICK", "  WrapScript fired (count=%d) but dfBindingsActive=%s snippet=%d chars",
                     wrapCount, tostring(bindingsActive), #snippet)
+                -- Snippet exists but didn't set bindings active — log first 200 chars
+                DF:DebugWarn("CLICK", "  snippet preview: %s", snippet:sub(1, 200))
             end
             DF:DebugWarn("CLICK", "  handlersSetup=%s registered=%s",
                 tostring(self.dfKeyboardHandlersSetup), tostring(self.dfClickCastRegistered))
@@ -1385,8 +1400,13 @@ function CC:SetupSecureHandlers(frame)
     end)
 
     frame:HookScript("OnLeave", function(self)
+        local wasTracked = (CC.currentHoveredFrame == self)
         CC.currentHoveredFrame = nil
         DF:Debug("CLICK", "OnLeave %s", self:GetName() or "unnamed")
+        if not wasTracked then
+            DF:DebugWarn("CLICK", "OnLeave %s but wasn't tracked as hovered — possible orphan leave",
+                self:GetName() or "unnamed")
+        end
     end)
 
     -- Debug: PreClick hook to log click state and detect binding mismatches
@@ -1419,6 +1439,10 @@ function CC:SetupSecureHandlers(frame)
         -- Warn if click-cast type is missing for this button
         if not typeAttr or typeAttr == "" then
             DF:DebugWarn("CLICK", "MISSING TYPE for btn=%s on %s - click won't cast!", button, frameName)
+            local bindingsActive = self:GetAttribute("dfBindingsActive")
+            local snippet = self:GetAttribute("dfBindingSnippet") or ""
+            DF:DebugWarn("CLICK", "  kbActive=%s snippet=%d chars combat=%s",
+                tostring(bindingsActive), #snippet, tostring(InCombatLockdown()))
         end
     end)
 
