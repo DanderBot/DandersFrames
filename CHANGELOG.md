@@ -12,9 +12,11 @@
 * Fixed Aura Designer health bar color not restoring correctly on login when a buff is already active
 * Fixed party frames showing empty when loading into a follower dungeon
 * Fixed Beacon of Virtue not available in the Aura Designer — it can now be configured with its own independent indicators
+* Fixed Aura Designer spell icons changing when talent choice nodes replace a spell (e.g. Beacon of Light showing Beacon of Virtue's icon)
 
 ### Improvements
 * Improved click-casting debug logging to help diagnose intermittent binding failures
+* Added horizontal scrollbars to Aura Designer trackable auras and active effects strips
 
 ## [4.0.10] - 2026-03-02
 
