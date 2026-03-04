@@ -531,15 +531,25 @@ local GLOBAL_DEFAULT_MAP = {
     icon   = {
         size = "iconSize", scale = "iconScale", showDuration = "showDuration", showStacks = "showStacks",
         durationFont = "durationFont", durationScale = "durationScale", durationOutline = "durationOutline",
+        durationAnchor = "durationAnchor", durationX = "durationX", durationY = "durationY",
+        durationColorByTime = "durationColorByTime",
         stackFont = "stackFont", stackScale = "stackScale", stackOutline = "stackOutline",
+        stackAnchor = "stackAnchor", stackX = "stackX", stackY = "stackY",
+        stackMinimum = "stackMinimum",
     },
     square = {
         size = "iconSize", scale = "iconScale", showDuration = "showDuration", showStacks = "showStacks",
         durationFont = "durationFont", durationScale = "durationScale", durationOutline = "durationOutline",
+        durationAnchor = "durationAnchor", durationX = "durationX", durationY = "durationY",
+        durationColorByTime = "durationColorByTime",
         stackFont = "stackFont", stackScale = "stackScale", stackOutline = "stackOutline",
+        stackAnchor = "stackAnchor", stackX = "stackX", stackY = "stackY",
+        stackMinimum = "stackMinimum",
     },
     bar    = {
         durationFont = "durationFont", durationScale = "durationScale", durationOutline = "durationOutline",
+        durationAnchor = "durationAnchor", durationX = "durationX", durationY = "durationY",
+        durationColorByTime = "durationColorByTime",
     },
 }
 

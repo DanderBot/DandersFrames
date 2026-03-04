@@ -1011,9 +1011,9 @@ function Indicators:ApplyIcon(frame, config, auraData, defaults, auraName, prior
     local stackScale = config.stackScale or (defaults and defaults.stackScale) or 1.0
     local stackOutline = config.stackOutline or (defaults and defaults.stackOutline) or "OUTLINE"
     if stackOutline == "NONE" then stackOutline = "" end
-    local stackAnchor = config.stackAnchor or "BOTTOMRIGHT"
-    local stackX = config.stackX or 0
-    local stackY = config.stackY or 0
+    local stackAnchor = config.stackAnchor or (defaults and defaults.stackAnchor) or "BOTTOMRIGHT"
+    local stackX = config.stackX; if stackX == nil then stackX = defaults and defaults.stackX end; if stackX == nil then stackX = 0 end
+    local stackY = config.stackY; if stackY == nil then stackY = defaults and defaults.stackY end; if stackY == nil then stackY = 0 end
 
     if icon.count then
         local stackSize = 10 * stackScale
@@ -1053,11 +1053,14 @@ function Indicators:ApplyIcon(frame, config, auraData, defaults, auraName, prior
     local durationScale = config.durationScale or (defaults and defaults.durationScale) or 1.0
     local durationOutline = config.durationOutline or (defaults and defaults.durationOutline) or "OUTLINE"
     if durationOutline == "NONE" then durationOutline = "" end
-    local durationAnchor = config.durationAnchor or "CENTER"
-    local durationX = config.durationX or 0
-    local durationY = config.durationY or 0
+    local durationAnchor = config.durationAnchor or (defaults and defaults.durationAnchor) or "CENTER"
+    local durationX = config.durationX; if durationX == nil then durationX = defaults and defaults.durationX end; if durationX == nil then durationX = 0 end
+    local durationY = config.durationY; if durationY == nil then durationY = defaults and defaults.durationY end; if durationY == nil then durationY = 0 end
     local durationColorByTime = config.durationColorByTime
-    if durationColorByTime == nil then durationColorByTime = true end
+    if durationColorByTime == nil then
+        durationColorByTime = (defaults and defaults.durationColorByTime)
+        if durationColorByTime == nil then durationColorByTime = true end
+    end
 
     -- Wire settings to icon properties (read by shared aura timer if registered)
     icon.showDuration = showDuration
@@ -1365,9 +1368,9 @@ function Indicators:ApplySquare(frame, config, auraData, defaults, auraName, pri
     local stackScale = config.stackScale or (defaults and defaults.stackScale) or 1.0
     local stackOutline = config.stackOutline or (defaults and defaults.stackOutline) or "OUTLINE"
     if stackOutline == "NONE" then stackOutline = "" end
-    local stackAnchor = config.stackAnchor or "BOTTOMRIGHT"
-    local stackX = config.stackX or 0
-    local stackY = config.stackY or 0
+    local stackAnchor = config.stackAnchor or (defaults and defaults.stackAnchor) or "BOTTOMRIGHT"
+    local stackX = config.stackX; if stackX == nil then stackX = defaults and defaults.stackX end; if stackX == nil then stackX = 0 end
+    local stackY = config.stackY; if stackY == nil then stackY = defaults and defaults.stackY end; if stackY == nil then stackY = 0 end
 
     if sq.count then
         local stackSize = 10 * stackScale
@@ -1404,11 +1407,14 @@ function Indicators:ApplySquare(frame, config, auraData, defaults, auraName, pri
     local durationScale = config.durationScale or (defaults and defaults.durationScale) or 1.0
     local durationOutline = config.durationOutline or (defaults and defaults.durationOutline) or "OUTLINE"
     if durationOutline == "NONE" then durationOutline = "" end
-    local durationAnchor = config.durationAnchor or "CENTER"
-    local durationX = config.durationX or 0
-    local durationY = config.durationY or 0
+    local durationAnchor = config.durationAnchor or (defaults and defaults.durationAnchor) or "CENTER"
+    local durationX = config.durationX; if durationX == nil then durationX = defaults and defaults.durationX end; if durationX == nil then durationX = 0 end
+    local durationY = config.durationY; if durationY == nil then durationY = defaults and defaults.durationY end; if durationY == nil then durationY = 0 end
     local durationColorByTime = config.durationColorByTime
-    if durationColorByTime == nil then durationColorByTime = true end
+    if durationColorByTime == nil then
+        durationColorByTime = (defaults and defaults.durationColorByTime)
+        if durationColorByTime == nil then durationColorByTime = true end
+    end
 
     if sq.cooldown then
         sq.cooldown:SetHideCountdownNumbers(not showDuration)
@@ -2002,11 +2008,14 @@ function Indicators:ApplyBar(frame, config, auraData, defaults, auraName, priori
     local durationScale = config.durationScale or (defaults and defaults.durationScale) or 1.0
     local durationOutline = config.durationOutline or (defaults and defaults.durationOutline) or "OUTLINE"
     if durationOutline == "NONE" then durationOutline = "" end
-    local durationAnchor = config.durationAnchor or "CENTER"
-    local durationX = config.durationX or 0
-    local durationY = config.durationY or 0
+    local durationAnchor = config.durationAnchor or (defaults and defaults.durationAnchor) or "CENTER"
+    local durationX = config.durationX; if durationX == nil then durationX = defaults and defaults.durationX end; if durationX == nil then durationX = 0 end
+    local durationY = config.durationY; if durationY == nil then durationY = defaults and defaults.durationY end; if durationY == nil then durationY = 0 end
     local durationColorByTime = config.durationColorByTime
-    if durationColorByTime == nil then durationColorByTime = true end
+    if durationColorByTime == nil then
+        durationColorByTime = (defaults and defaults.durationColorByTime)
+        if durationColorByTime == nil then durationColorByTime = true end
+    end
 
     -- Store color-by-time flag for OnUpdate to read
     bar.dfAD_durationColorByTime = durationColorByTime
