@@ -959,10 +959,11 @@ function Indicators:ApplyIcon(frame, config, auraData, defaults, auraName, prior
     end
 
     -- Cooldown — uses Duration object pipeline (secret-safe)
+    local hideSwipe = config.hideSwipe; if hideSwipe == nil then hideSwipe = defaults and defaults.hideSwipe end
     local hasDuration = HasAuraDuration(auraData, frame.unit)
     if hasDuration then
         SafeSetCooldown(icon.cooldown, auraData, frame.unit)
-        icon.cooldown:SetDrawSwipe(not config.hideSwipe)
+        icon.cooldown:SetDrawSwipe(not hideSwipe)
         icon.cooldown:Show()
     else
         icon.cooldown:SetDrawSwipe(false)
@@ -1346,11 +1347,12 @@ function Indicators:ApplySquare(frame, config, auraData, defaults, auraName, pri
     -- ========================================
     -- COOLDOWN SWIPE (Duration object pipeline)
     -- ========================================
+    local hideSwipe = config.hideSwipe; if hideSwipe == nil then hideSwipe = defaults and defaults.hideSwipe end
     local hasDuration = HasAuraDuration(auraData, frame.unit)
     if sq.cooldown then
         if hasDuration then
             SafeSetCooldown(sq.cooldown, auraData, frame.unit)
-            sq.cooldown:SetDrawSwipe(not config.hideSwipe)
+            sq.cooldown:SetDrawSwipe(not hideSwipe)
             sq.cooldown:Show()
         else
             sq.cooldown:SetDrawSwipe(false)

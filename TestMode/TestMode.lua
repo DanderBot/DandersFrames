@@ -6463,7 +6463,6 @@ function DF:CreateTestPanel()
         self.showAurasCheck:SetChecked(db.testShowAuras)
         self.showOutOfRangeCheck:SetChecked(db.testShowOutOfRange)
         self.showDispelGlowCheck:SetChecked(db.testShowDispelGlow)
-        self.showMyBuffIndicatorCheck:SetChecked(db.testShowMyBuffIndicator)
         self.showMissingBuffCheck:SetChecked(db.testShowMissingBuff)
         self.showExternalDefCheck:SetChecked(db.testShowExternalDef)
         self.showTargetedSpellCheck:SetChecked(db.testShowTargetedSpell)
@@ -6473,7 +6472,7 @@ function DF:CreateTestPanel()
         self.showAggroCheck:SetChecked(db.testShowAggro)
         self.showSelectionCheck:SetChecked(db.testShowSelection)
         self.showPetsCheck:SetChecked(db.testShowPets ~= false)
-        
+
         -- Sliders
         local buffCount = db.testBuffCount or 3
         self.buffSlider:SetValue(buffCount)
@@ -6576,7 +6575,6 @@ function DF:CreateTestPanel()
         self.showIconsCheck:SetChecked(db.testShowIcons ~= false)
         self.showStatusIconsCheck:SetChecked(db.testShowStatusIcons ~= false)
         self.showAggroCheck:SetChecked(db.testShowAggro)
-        self.showMyBuffIndicatorCheck:SetChecked(db.testShowMyBuffIndicator)
         self.showSelectionCheck:SetChecked(db.testShowSelection)
         self.showPetsCheck:SetChecked(db.testShowPets ~= false)
         

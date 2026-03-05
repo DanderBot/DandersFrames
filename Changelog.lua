@@ -1,8 +1,52 @@
 local addonName, DF = ...
-DF.BUILD_DATE = "2026-03-03T12:00:00Z"
+DF.BUILD_DATE = "2026-03-04T19:16:17Z"
 DF.RELEASE_CHANNEL = "alpha"
 DF.CHANGELOG_TEXT = [===[
 # DandersFrames Changelog
+
+## [4.0.13] - 2026-03-05
+
+### New Features
+* **Spec-scoped aura configs** — Aura Designer configurations are now saved per-spec, so shared buffs like Prayer of Mending can have different indicator setups on each spec
+* **Global Hide Cooldown Swipe** — new toggle in Aura Designer Global Defaults to hide the cooldown swipe animation on all icon and square indicators
+
+### Bug Fixes
+* Fixed Aura Blacklist class dropdown staying open when clicking outside it
+* Fixed Aura Blacklist buff list rendering outside of scroll area when list is long
+* Fixed Aura Blacklist "No spells blacklisted" / "No spells available" text positioned incorrectly
+* Fixed Aura Blacklist overlapping faded buff entries after removing items
+* Fixed TestMode lua error from orphaned My Buff Indicator checkbox reference
+* Fixed Aura Designer "Add aura" dropdown in layout groups not closing on ESC or clicking outside
+* Fixed border indicator showing no visible difference between thickness 1 and 2 at most UI scales
+* Fixed Aura Designer Hide Cooldown Swipe per-indicator setting not falling back to global default
+
+## [4.0.12] - 2026-03-04
+
+### New Features
+* **Multi-trigger frame effects** — a single frame effect (border, health bar color, etc.) can now trigger on any of multiple auras (e.g. show a border if Rejuvenation OR Regrowth OR Lifebloom is active)
+* **Layout groups** — group placed indicators at a shared anchor with automatic flow positioning; when an aura is inactive, grouped indicators collapse without gaps
+* **Copy appearance** — copy indicator appearance settings (size, color, border, etc.) from any other indicator of the same type via a dropdown on the effect card
+* **Preview click-to-select** — left-click any indicator on the frame preview to jump to its settings; right-click to remove it
+
+### Improvements
+* Redesigned Aura Designer UI with 50/50 split layout, tabbed effects panel, and flat effects list with filter chips
+* Added spell icons to effect card headers and layout group member rows for easier identification
+* Replaced Unicode font icons with texture icons from Media/Icons (WoW fonts don't render Unicode glyphs)
+* Increased Add Indicator dropdown font size and row height for better readability
+* Enlarged filter chips (bigger font and hit area) for easier interaction
+* Changed type badge text to white for better readability on colored backgrounds
+* Increased layout group member row height with larger reorder arrows
+* Added "Active Indicators" section heading above filter chips for clarity
+* Added bottom padding to preview instruction text
+* Added duration and stack text placement controls (anchor, offset X/Y) to Global Defaults
+* Added priority slider to frame-level effects for resolving conflicts when multiple auras set the same effect
+* Layout group sliders (offset X, offset Y, spacing) now update the preview live during drag
+
+### Bug Fixes
+* Fixed Aura Designer showing indicators from other specs/classes on the current character
+* Fixed Aura Designer preview click-to-select causing error due to scoping issue with SwitchTab
+* Fixed Copy Appearance dropdown causing error due to same SwitchTab scoping issue
+* Fixed Global Defaults duration/stack placement controls not showing values on existing profiles
 
 ## [4.0.11] - 2026-03-03
 
@@ -14,9 +58,13 @@ DF.CHANGELOG_TEXT = [===[
 * Fixed Aura Designer health bar color overlay not restoring the correct color when the tracked buff expires
 * Fixed Aura Designer health bar color overlay not matching the health bar texture
 * Fixed Aura Designer health bar color not restoring correctly on login when a buff is already active
+* Fixed party frames showing empty when loading into a follower dungeon
+* Fixed Beacon of Virtue not available in the Aura Designer — it can now be configured with its own independent indicators
+* Fixed Aura Designer spell icons changing when talent choice nodes replace a spell (e.g. Beacon of Light showing Beacon of Virtue's icon)
 
 ### Improvements
 * Improved click-casting debug logging to help diagnose intermittent binding failures
+* Added horizontal scrollbars to Aura Designer trackable auras and active effects strips
 
 ## [4.0.10] - 2026-03-02
 

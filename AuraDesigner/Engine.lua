@@ -147,12 +147,20 @@ function Engine:UpdateFrame(frame)
         return
     end
 
+    -- Lazy migration: ensure spec-scoped format
+    if not adDB._specScopedV1 and DF.MigrateAuraDesignerSpecScope then
+        DF.MigrateAuraDesignerSpecScope(adDB)
+    end
+
     -- Debug: throttled diagnostic dump
     local now = GetTime()
     local shouldLog = (now - debugLastLog) >= DEBUG_INTERVAL
 
     -- Query adapter for active auras on this unit
     local activeAuras = Adapter:GetUnitAuras(unit, spec)
+
+    -- Spec-scoped aura configs
+    local specAuras = adDB.auras and adDB.auras[spec]
 
     if shouldLog then
         debugLastLog = now
@@ -162,8 +170,8 @@ function Engine:UpdateFrame(frame)
         -- Count configured auras and indicators
         local configCount = 0
         local configIndicators = 0
-        if adDB.auras then
-            for auraName, auraCfg in pairs(adDB.auras) do
+        if specAuras then
+            for auraName, auraCfg in pairs(specAuras) do
                 configCount = configCount + 1
                 if auraCfg.indicators then
                     configIndicators = configIndicators + #auraCfg.indicators
@@ -180,8 +188,8 @@ function Engine:UpdateFrame(frame)
             DF:Debug("AD", "  active: %s", auraName)
         end
         -- Log configured auras with their indicators
-        if adDB.auras then
-            for auraName, auraCfg in pairs(adDB.auras) do
+        if specAuras then
+            for auraName, auraCfg in pairs(specAuras) do
                 local types = {}
                 if auraCfg.indicators then
                     for _, ind in ipairs(auraCfg.indicators) do
@@ -205,7 +213,7 @@ function Engine:UpdateFrame(frame)
 
     -- Gather configured auras that are currently active
     wipe(activeIndicators)
-    local auras = adDB.auras
+    local auras = specAuras
     if auras then
         for auraName, auraCfg in pairs(auras) do
             local auraData = activeAuras[auraName]

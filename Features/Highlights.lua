@@ -230,17 +230,12 @@ local function ApplyHighlightStyle(ch, mode, thickness, inset, r, g, b, alpha, d
     HideGlowLayers(ch)
     SelectionAnimator_Remove(ch)
     
-    -- Ensure thickness is at least 1 actual screen pixel
+    -- Snap thickness to whole screen pixels so every +1 step is visible
     local scale = UIParent:GetEffectiveScale()
     local minThickness = 1 / scale
-    if thickness < minThickness then
-        thickness = minThickness
-    end
-    -- Round thickness to nearest pixel to avoid rendering artifacts
-    thickness = math.floor(thickness * scale + 0.5) / scale
-    if thickness < minThickness then
-        thickness = minThickness
-    end
+    local px = thickness * scale              -- desired thickness in pixels
+    px = math.max(1, math.ceil(px - 0.01))    -- round up (with tiny epsilon for exact integers)
+    thickness = px / scale
     
     if mode == "NONE" then
         ch:Hide()

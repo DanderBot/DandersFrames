@@ -377,26 +377,27 @@ function DF.BuildAuraBlacklistPage(guiRef, pageRef, dbRef)
         rightScroll:SetScrollChild(rightContent)
 
         -- ===== EMPTY HINTS =====
-        local leftEmpty = leftContent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        leftEmpty:SetPoint("CENTER", 0, 0)
+        -- Parent to bg frame so CENTER is visible even when content height is 1
+        local leftEmpty = leftBg:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        leftEmpty:SetPoint("CENTER", leftBg, "CENTER", 0, 0)
         leftEmpty:SetText("No spells available")
 
-        local rightEmpty = rightContent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        rightEmpty:SetPoint("CENTER", 0, 0)
+        local rightEmpty = rightBg:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        rightEmpty:SetPoint("CENTER", rightBg, "CENTER", 0, 0)
         rightEmpty:SetText("No spells blacklisted")
 
         -- ===== REFRESH ==========
         local function Refresh()
-            -- Clear old items
+            -- Clear old items — ClearAllPoints + Hide, never SetParent(nil)
             for _, item in ipairs(leftItemPool) do
+                item:ClearAllPoints()
                 item:Hide()
-                item:SetParent(nil)
             end
             wipe(leftItemPool)
 
             for _, item in ipairs(rightItemPool) do
+                item:ClearAllPoints()
                 item:Hide()
-                item:SetParent(nil)
             end
             wipe(rightItemPool)
 
@@ -518,6 +519,16 @@ function DF.BuildAuraBlacklistPage(guiRef, pageRef, dbRef)
     dropdownMenu:SetSize(200, #classOptions * 22 + 4)
     dropdownMenu:Hide()
 
+    -- Click-outside overlay to close dropdown (#441)
+    local dropdownOverlay = CreateFrame("Button", nil, UIParent)
+    dropdownOverlay:SetAllPoints(UIParent)
+    dropdownOverlay:SetFrameStrata("FULLSCREEN")
+    dropdownOverlay:Hide()
+    dropdownOverlay:SetScript("OnClick", function()
+        dropdownMenu:Hide()
+        dropdownOverlay:Hide()
+    end)
+
     for i, opt in ipairs(classOptions) do
         local optBtn = CreateFrame("Button", nil, dropdownMenu)
         optBtn:SetSize(196, 20)
@@ -542,6 +553,7 @@ function DF.BuildAuraBlacklistPage(guiRef, pageRef, dbRef)
             selectedClass = opt.value
             UpdateDropdownText()
             dropdownMenu:Hide()
+            dropdownOverlay:Hide()
             if page._buffWidget then page._buffWidget:Refresh() end
         end)
     end
@@ -549,8 +561,10 @@ function DF.BuildAuraBlacklistPage(guiRef, pageRef, dbRef)
     dropdownBtn:SetScript("OnClick", function()
         if dropdownMenu:IsShown() then
             dropdownMenu:Hide()
+            dropdownOverlay:Hide()
         else
             dropdownMenu:Show()
+            dropdownOverlay:Show()
         end
     end)
     dropdownBtn:SetScript("OnEnter", function(self)

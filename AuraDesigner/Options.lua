@@ -80,8 +80,52 @@ local OUTLINE_OPTIONS = {
 -- HELPERS
 -- ============================================================
 
+local function MigrateToSpecScoped(adDB)
+    if not adDB or adDB._specScopedV1 then return end
+    if not adDB.auras then adDB._specScopedV1 = true; return end
+    local isFlat = false
+    for _, val in pairs(adDB.auras) do
+        if type(val) == "table" and (val.priority ~= nil or val.indicators ~= nil) then
+            isFlat = true
+            break
+        end
+    end
+    if isFlat then
+        local oldAuras = adDB.auras
+        local newAuras = {}
+        local auraToSpecs = {}
+        local trackable = DF.AuraDesigner and DF.AuraDesigner.TrackableAuras
+        if trackable then
+            for specKey, auraList in pairs(trackable) do
+                for _, info in ipairs(auraList) do
+                    if not auraToSpecs[info.name] then auraToSpecs[info.name] = {} end
+                    tinsert(auraToSpecs[info.name], specKey)
+                end
+            end
+        end
+        for auraName, auraCfg in pairs(oldAuras) do
+            local specs = auraToSpecs[auraName]
+            if specs then
+                for _, specKey in ipairs(specs) do
+                    if not newAuras[specKey] then newAuras[specKey] = {} end
+                    newAuras[specKey][auraName] = DF:DeepCopy(auraCfg)
+                end
+            end
+        end
+        adDB.auras = newAuras
+    end
+    adDB._specScopedV1 = true
+end
+
+-- Expose for Engine.lua and post-import use
+DF.MigrateAuraDesignerSpecScope = MigrateToSpecScoped
+
 local function GetAuraDesignerDB()
-    return db.auraDesigner
+    local adDB = db.auraDesigner
+    if adDB and not adDB._specScopedV1 then
+        MigrateToSpecScoped(adDB)
+    end
+    return adDB
 end
 
 local function GetThemeColor()
@@ -201,15 +245,26 @@ local function ResolveSpec()
     return adDB.spec
 end
 
+-- Returns the spec-scoped auras sub-table, creating it if needed
+local function GetSpecAuras(spec)
+    local adDB = GetAuraDesignerDB()
+    if not adDB then return {} end
+    if not adDB.auras then adDB.auras = {} end
+    spec = spec or ResolveSpec()
+    if not spec then return {} end
+    if not adDB.auras[spec] then adDB.auras[spec] = {} end
+    return adDB.auras[spec]
+end
+
 -- Ensure an aura config table exists, creating it with defaults if needed
 local function EnsureAuraConfig(auraName)
-    local adDB = GetAuraDesignerDB()
-    if not adDB.auras[auraName] then
-        adDB.auras[auraName] = {
+    local specAuras = GetSpecAuras()
+    if not specAuras[auraName] then
+        specAuras[auraName] = {
             priority = 5,
         }
     end
-    return adDB.auras[auraName]
+    return specAuras[auraName]
 end
 
 -- Ensure a type sub-table exists within an aura config
@@ -433,8 +488,7 @@ end
 
 -- Find an indicator instance by its stable ID
 local function GetIndicatorByID(auraName, indicatorID)
-    local adDB = GetAuraDesignerDB()
-    local auraCfg = adDB.auras[auraName]
+    local auraCfg = GetSpecAuras()[auraName]
     if not auraCfg or not auraCfg.indicators then return nil end
     for _, inst in ipairs(auraCfg.indicators) do
         if inst.id == indicatorID then
@@ -446,8 +500,7 @@ end
 
 -- Remove an indicator instance by its stable ID
 local function RemoveIndicatorInstance(auraName, indicatorID)
-    local adDB = GetAuraDesignerDB()
-    local auraCfg = adDB.auras[auraName]
+    local auraCfg = GetSpecAuras()[auraName]
     if not auraCfg or not auraCfg.indicators then return end
     for i, inst in ipairs(auraCfg.indicators) do
         if inst.id == indicatorID then
@@ -536,6 +589,7 @@ local GLOBAL_DEFAULT_MAP = {
         stackFont = "stackFont", stackScale = "stackScale", stackOutline = "stackOutline",
         stackAnchor = "stackAnchor", stackX = "stackX", stackY = "stackY",
         stackMinimum = "stackMinimum",
+        hideSwipe = "hideSwipe",
     },
     square = {
         size = "iconSize", scale = "iconScale", showDuration = "showDuration", showStacks = "showStacks",
@@ -545,6 +599,7 @@ local GLOBAL_DEFAULT_MAP = {
         stackFont = "stackFont", stackScale = "stackScale", stackOutline = "stackOutline",
         stackAnchor = "stackAnchor", stackX = "stackX", stackY = "stackY",
         stackMinimum = "stackMinimum",
+        hideSwipe = "hideSwipe",
     },
     bar    = {
         durationFont = "durationFont", durationScale = "durationScale", durationOutline = "durationOutline",
@@ -605,8 +660,7 @@ local function CreateProxy(auraName, typeKey)
     local defaults = TYPE_DEFAULTS[typeKey]
     return setmetatable({}, {
         __index = function(_, k)
-            local adDB = GetAuraDesignerDB()
-            local auraCfg = adDB.auras[auraName]
+            local auraCfg = GetSpecAuras()[auraName]
             if auraCfg and auraCfg[typeKey] then
                 local val = auraCfg[typeKey][k]
                 if val ~= nil then return val end
@@ -636,8 +690,7 @@ end
 local function CreateAuraProxy(auraName)
     return setmetatable({}, {
         __index = function(_, k)
-            local adDB = GetAuraDesignerDB()
-            local auraCfg = adDB.auras[auraName]
+            local auraCfg = GetSpecAuras()[auraName]
             if auraCfg then return auraCfg[k] end
             return nil
         end,
@@ -675,8 +728,7 @@ end
 
 -- Count active effects for an aura (instances + frame-level types)
 local function CountActiveEffects(auraName)
-    local adDB = GetAuraDesignerDB()
-    local auraCfg = adDB.auras[auraName]
+    local auraCfg = GetSpecAuras()[auraName]
     if not auraCfg then return 0 end
     local count = 0
     -- Count placed indicator instances
@@ -699,8 +751,7 @@ end
 
 -- Get triggers for a frame effect (returns owning aura name in a table if no explicit triggers)
 local function GetFrameEffectTriggers(auraName, typeKey)
-    local adDB = GetAuraDesignerDB()
-    local auraCfg = adDB and adDB.auras and adDB.auras[auraName]
+    local auraCfg = GetSpecAuras()[auraName]
     local typeCfg = auraCfg and auraCfg[typeKey]
     if typeCfg and typeCfg.triggers then
         return typeCfg.triggers
@@ -723,8 +774,7 @@ end
 
 -- Remove a trigger aura from a frame effect (minimum 1 trigger required)
 local function RemoveFrameEffectTrigger(auraName, typeKey, triggerName)
-    local adDB = GetAuraDesignerDB()
-    local auraCfg = adDB and adDB.auras and adDB.auras[auraName]
+    local auraCfg = GetSpecAuras()[auraName]
     local typeCfg = auraCfg and auraCfg[typeKey]
     if not typeCfg or not typeCfg.triggers or #typeCfg.triggers <= 1 then return end
     for i, t in ipairs(typeCfg.triggers) do
@@ -762,7 +812,7 @@ end
 -- Get all placed indicators NOT in any layout group
 local function GetUngroupedIndicators()
     local adDB = GetAuraDesignerDB()
-    if not adDB or not adDB.auras then return {} end
+    if not adDB then return {} end
     -- Build set of grouped indicators
     local grouped = {}
     if adDB.layoutGroups then
@@ -784,7 +834,7 @@ local function GetUngroupedIndicators()
             displayNames[info.name] = info.display
         end
     end
-    for auraName, auraCfg in pairs(adDB.auras) do
+    for auraName, auraCfg in pairs(GetSpecAuras(spec)) do
         if auraCfg.indicators then
             for _, ind in ipairs(auraCfg.indicators) do
                 local key = auraName .. "#" .. ind.id
@@ -976,8 +1026,6 @@ local BADGE_COLORS = {
 -- Returns: { { source="placed"|"frame", auraName, typeKey, ... }, ... }
 local function CollectAllEffects()
     local effects = {}
-    local adDB = GetAuraDesignerDB()
-    if not adDB or not adDB.auras then return effects end
 
     local spec = ResolveSpec()
     local trackable = spec and Adapter and Adapter:GetTrackableAuras(spec)
@@ -989,7 +1037,7 @@ local function CollectAllEffects()
         end
     end
 
-    for auraName, auraCfg in pairs(adDB.auras) do
+    for auraName, auraCfg in pairs(GetSpecAuras(spec)) do
         -- Only show effects for auras belonging to the current spec
         if displayNames[auraName] then
             -- Placed indicators
@@ -1041,9 +1089,7 @@ end
 
 -- Check if a specific aura + type combo already has a placed indicator
 local function IsAuraTypePlaced(auraName, typeKey)
-    local adDB = GetAuraDesignerDB()
-    if not adDB or not adDB.auras then return false end
-    local auraCfg = adDB.auras[auraName]
+    local auraCfg = GetSpecAuras()[auraName]
     if not auraCfg or not auraCfg.indicators then return false end
     for _, indicator in ipairs(auraCfg.indicators) do
         if indicator.type == typeKey then return true end
@@ -1306,8 +1352,7 @@ EndDrag = function()
         end
 
         -- Expand the new indicator card in the Effects tab
-        local adDB = GetAuraDesignerDB()
-        local auraCfg = adDB and adDB.auras and adDB.auras[auraName]
+        local auraCfg = GetSpecAuras()[auraName]
         local lastInst = auraCfg and auraCfg.indicators and auraCfg.indicators[#auraCfg.indicators]
         if lastInst then
             local cardKey = "placed:" .. auraName .. "#" .. lastInst.id
@@ -1385,7 +1430,7 @@ local function RefreshPlacedIndicators()
                     -- Compute position based on group settings
                     local activeIdx = memberIdx - 1  -- 0-based
                     -- Need to find the indicator's size to compute step
-                    local memberCfg = adDB.auras and adDB.auras[member.auraName]
+                    local memberCfg = GetSpecAuras()[member.auraName]
                     local indCfg = nil
                     if memberCfg and memberCfg.indicators then
                         for _, ind in ipairs(memberCfg.indicators) do
@@ -1421,7 +1466,7 @@ local function RefreshPlacedIndicators()
     end
 
     -- Iterate all configured auras, find placed indicator instances
-    for auraName, auraCfg in pairs(adDB.auras) do
+    for auraName, auraCfg in pairs(GetSpecAuras(spec)) do
         local info = infoLookup[auraName]
         if info and auraCfg.indicators then
             for _, indicator in ipairs(auraCfg.indicators) do
@@ -1592,10 +1637,8 @@ local function RefreshPreviewEffects()
 
     -- Show frame-level effects from all configured auras
     -- (new UI has no single selectedAura — preview shows all effects)
-    local adDB = GetAuraDesignerDB()
-    if not adDB or not adDB.auras then return end
 
-    for _, auraCfg in pairs(adDB.auras) do
+    for _, auraCfg in pairs(GetSpecAuras()) do
 
     -- Border effect (uses highlight system for all 6 styles)
     if auraCfg.border and framePreview.borderOverlay and DF.ApplyHighlightStyle then
@@ -1671,7 +1714,7 @@ RefreshPreviewLightweight = function()
                 for memberIdx, member in ipairs(group.members) do
                     local key = member.auraName .. "#" .. member.indicatorID
                     local activeIdx = memberIdx - 1
-                    local memberCfg = adDB.auras and adDB.auras[member.auraName]
+                    local memberCfg = GetSpecAuras()[member.auraName]
                     local indCfg = nil
                     if memberCfg and memberCfg.indicators then
                         for _, ind in ipairs(memberCfg.indicators) do
@@ -1694,7 +1737,7 @@ RefreshPreviewLightweight = function()
     end
 
     -- Re-apply placed indicator instances using current settings
-    for auraName, auraCfg in pairs(adDB.auras) do
+    for auraName, auraCfg in pairs(GetSpecAuras()) do
         if auraCfg.indicators then
             for _, indicator in ipairs(auraCfg.indicators) do
                 local instanceKey = auraName .. "#" .. indicator.id
@@ -1836,9 +1879,6 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
 
         copyBtn:SetScript("OnClick", function()
             -- Build list of other placed indicators of the same type
-            local adDB = GetAuraDesignerDB()
-            if not adDB or not adDB.auras then return end
-
             local spec = ResolveSpec()
             local trackable = spec and Adapter and Adapter:GetTrackableAuras(spec)
             local displayNames = {}
@@ -1849,7 +1889,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             end
 
             local sources = {}
-            for srcAura, auraCfg in pairs(adDB.auras) do
+            for srcAura, auraCfg in pairs(GetSpecAuras()) do
                 if auraCfg.indicators then
                     for _, ind in ipairs(auraCfg.indicators) do
                         if ind.type == capturedTypeKey then
@@ -2213,6 +2253,7 @@ local GLOBAL_DEFAULTS_FALLBACK = {
     stackX = 0, stackY = 0,
     iconBorderEnabled = true, iconBorderThickness = 1,
     stackMinimum = 2,
+    hideSwipe = false,
 }
 
 local function BuildGlobalView(parent)
@@ -2262,6 +2303,10 @@ local function BuildGlobalView(parent)
 
     local showStacks = GUI:CreateCheckbox(parent, "Show Stack Count", defaults, "showStacks")
     showStacks:SetPoint("TOPLEFT", 5, yPos)
+    yPos = yPos - 24
+
+    local hideSwipeCb = GUI:CreateCheckbox(parent, "Hide Cooldown Swipe", defaults, "hideSwipe")
+    hideSwipeCb:SetPoint("TOPLEFT", 5, yPos)
     yPos = yPos - 28
 
     -- ===== FONT SETTINGS =====
@@ -2987,9 +3032,7 @@ local spellPickerMode = "placed"   -- "placed" | "frame"
 
 -- Check if a specific aura has a frame-level effect of given type
 local function HasFrameEffect(auraName, typeKey)
-    local adDB = GetAuraDesignerDB()
-    if not adDB or not adDB.auras then return false end
-    local auraCfg = adDB.auras[auraName]
+    local auraCfg = GetSpecAuras()[auraName]
     return auraCfg and auraCfg[typeKey] ~= nil
 end
 
@@ -3360,11 +3403,10 @@ CreateEffectCard = function(parent, yPos, effect)
             line2:SetColorTexture(0.55, 0.20, 0.20, 1)
         end)
         delBtn:SetScript("OnClick", function()
-            local adDB = GetAuraDesignerDB()
             if isPlaced then
                 RemoveIndicatorInstance(effect.auraName, effect.indicatorID)
             else
-                local auraCfg = adDB.auras[effect.auraName]
+                local auraCfg = GetSpecAuras()[effect.auraName]
                 if auraCfg then auraCfg[effect.typeKey] = nil end
             end
             expandedCards[cardKey] = nil
@@ -4181,7 +4223,7 @@ BuildLayoutGroupsTab = function()
 
                         -- Type badge
                         local memberType = nil
-                        local memberAuraCfg = adDB and adDB.auras and adDB.auras[member.auraName]
+                        local memberAuraCfg = GetSpecAuras()[member.auraName]
                         if memberAuraCfg and memberAuraCfg.indicators then
                             for _, ind in ipairs(memberAuraCfg.indicators) do
                                 if ind.id == member.indicatorID then
@@ -4293,6 +4335,31 @@ BuildLayoutGroupsTab = function()
                         drop = CreateFrame("Frame", dropName, UIParent, "BackdropTemplate")
                         drop:SetFrameStrata("FULLSCREEN_DIALOG")
                         drop:SetClampedToScreen(true)
+                        -- Click-outside overlay to close dropdown (#444)
+                        local overlay = CreateFrame("Button", nil, UIParent)
+                        overlay:SetAllPoints(UIParent)
+                        overlay:SetFrameStrata("FULLSCREEN")
+                        overlay:Hide()
+                        overlay:SetScript("OnClick", function()
+                            drop:Hide()
+                            overlay:Hide()
+                        end)
+                        drop._overlay = overlay
+                        -- ESC closes dropdown (#444)
+                        drop:EnableKeyboard(true)
+                        drop:SetPropagateKeyboardInput(true)
+                        drop:SetScript("OnKeyDown", function(self, key)
+                            if key == "ESCAPE" then
+                                self:SetPropagateKeyboardInput(false)
+                                self:Hide()
+                            else
+                                self:SetPropagateKeyboardInput(true)
+                            end
+                        end)
+                        drop:SetScript("OnHide", function(self)
+                            self._ownerBtn = nil
+                            if self._overlay then self._overlay:Hide() end
+                        end)
                     end
                     if drop:IsShown() and drop._ownerBtn == addMemBtn then
                         drop:Hide()
@@ -4425,7 +4492,7 @@ BuildLayoutGroupsTab = function()
                     drop:ClearAllPoints()
                     drop:SetPoint("TOPLEFT", addMemBtn, "BOTTOMLEFT", 0, -2)
                     drop:Show()
-                    drop:SetScript("OnHide", function() drop._ownerBtn = nil end)
+                    if drop._overlay then drop._overlay:Show() end
                 end)
                 by = by - 28
 

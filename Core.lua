@@ -3539,29 +3539,57 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         -- New format: auraCfg.indicators = { { id = 1, type = "icon", anchor = ..., size = ... } }
         local AD_PLACED_TYPE_KEYS = { "icon", "square", "bar" }
 
+        -- Inner migration: converts a flat auras table from type-keyed to instance-based
+        local function MigrateAuraConfigs(aurasTable)
+            for auraName, auraCfg in pairs(aurasTable) do
+                if type(auraCfg) == "table" and not auraCfg.indicators then
+                    -- Only migrate if it has old-style placed type keys
+                    local hasOldKeys = false
+                    for _, typeKey in ipairs(AD_PLACED_TYPE_KEYS) do
+                        if auraCfg[typeKey] then hasOldKeys = true; break end
+                    end
+                    if hasOldKeys then
+                        local indicators = {}
+                        local nextID = 1
+                        for _, typeKey in ipairs(AD_PLACED_TYPE_KEYS) do
+                            if auraCfg[typeKey] then
+                                local instance = DF:DeepCopy(auraCfg[typeKey])
+                                instance.id = nextID
+                                instance.type = typeKey
+                                indicators[#indicators + 1] = instance
+                                nextID = nextID + 1
+                                auraCfg[typeKey] = nil
+                            end
+                        end
+                        if #indicators > 0 then
+                            auraCfg.indicators = indicators
+                        end
+                        auraCfg.nextIndicatorID = nextID
+                    end
+                end
+            end
+        end
+
         local function MigrateAuraDesignerToInstances(modeDb)
             local adDB = modeDb and modeDb.auraDesigner
             if not adDB or not adDB.auras then return end
 
-            for auraName, auraCfg in pairs(adDB.auras) do
-                if not auraCfg.indicators then
-                    local indicators = {}
-                    local nextID = 1
-                    for _, typeKey in ipairs(AD_PLACED_TYPE_KEYS) do
-                        if auraCfg[typeKey] then
-                            local instance = DF:DeepCopy(auraCfg[typeKey])
-                            instance.id = nextID
-                            instance.type = typeKey
-                            indicators[#indicators + 1] = instance
-                            nextID = nextID + 1
-                            auraCfg[typeKey] = nil
+            -- Detect format: check first entry to see if it's flat aura configs or spec-scoped
+            for key, val in pairs(adDB.auras) do
+                if type(val) == "table" then
+                    if val.priority ~= nil or val.indicators ~= nil or val.border ~= nil then
+                        -- Flat format (pre-spec-scoping): migrate directly
+                        MigrateAuraConfigs(adDB.auras)
+                    else
+                        -- Spec-scoped format: iterate each spec's auras
+                        for specKey, specAuras in pairs(adDB.auras) do
+                            if type(specAuras) == "table" then
+                                MigrateAuraConfigs(specAuras)
+                            end
                         end
                     end
-                    if #indicators > 0 then
-                        auraCfg.indicators = indicators
-                    end
-                    auraCfg.nextIndicatorID = nextID
                 end
+                break  -- Only check first entry
             end
         end
 
