@@ -18,6 +18,13 @@
 * (Click Casting) Fixed smart resurrection not working on non-English WoW clients
 * (Click Casting) Fixed click-casting "Spell not Learned" errors after talent changes
 * (Click Casting) Fixed all click-casting bindings failing on non-English WoW clients
+* (Click Casting) Fixed spell transform procs (e.g. Flash of Light → Benediction) causing "Spell not Learned" errors — macros now always use the base spell name since WoW's /cast command handles override resolution automatically
+* (Aura Blacklist) Fixed class dropdown overlapping text and not changing the displayed lists when selecting a different class
+* (Auto Layouts) Fixed Aura Designer changes not saving when editing an auto layout a second time — existing overrides are now properly updated instead of silently skipped
+
+### Improvements
+* (Aura Designer) Increased all X/Y offset slider ranges to -150 to 150 for more positioning flexibility
+* (Aura Designer) Grouped layout spacing slider now allows negative values (down to -5) for overlapping indicators
 
 ## [4.0.11] - 2026-03-03
 

@@ -16,6 +16,15 @@ local CreateFrame = CreateFrame
 -- ============================================================
 
 function DF.BuildAuraBlacklistPage(guiRef, pageRef, dbRef)
+    -- Build frames once; subsequent calls just refresh widget data
+    if pageRef._auraBlacklistBuilt then
+        if pageRef._buffWidget then pageRef._buffWidget:Refresh() end
+        if pageRef._debuffWidget then pageRef._debuffWidget:Refresh() end
+        if pageRef._updateDropdownText then pageRef._updateDropdownText() end
+        return
+    end
+    pageRef._auraBlacklistBuilt = true
+
     local GUI = guiRef
     local page = pageRef
     local parent = page.child
@@ -575,6 +584,7 @@ function DF.BuildAuraBlacklistPage(guiRef, pageRef, dbRef)
     end)
 
     UpdateDropdownText()
+    page._updateDropdownText = UpdateDropdownText
 
     -- ========== BUFF BLACKLIST WIDGET ==========
     local buffWidget = CreateTransferWidget(

@@ -2056,8 +2056,8 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             AddWidget(groupNote, 18)
         else
             AddWidget(GUI:CreateDropdown(parent, "Anchor", ANCHOR_OPTIONS, proxy, "anchor", function() DF:AuraDesigner_RefreshPage() end), 54)
-            AddWidget(GUI:CreateSlider(parent, "Offset X", -50, 50, 1, proxy, "offsetX"), 54)
-            AddWidget(GUI:CreateSlider(parent, "Offset Y", -50, 50, 1, proxy, "offsetY"), 54)
+            AddWidget(GUI:CreateSlider(parent, "Offset X", -150, 150, 1, proxy, "offsetX"), 54)
+            AddWidget(GUI:CreateSlider(parent, "Offset Y", -150, 150, 1, proxy, "offsetY"), 54)
         end
         AddDivider()
         -- Sizing & appearance
@@ -2078,8 +2078,8 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         AddWidget(GUI:CreateSlider(parent, "Duration Scale", 0.5, 2.0, 0.1, proxy, "durationScale"), 54)
         AddWidget(GUI:CreateDropdown(parent, "Duration Outline", OUTLINE_OPTIONS, proxy, "durationOutline"), 54)
         AddWidget(GUI:CreateDropdown(parent, "Duration Anchor", ANCHOR_OPTIONS, proxy, "durationAnchor"), 54)
-        AddWidget(GUI:CreateSlider(parent, "Duration Offset X", -20, 20, 1, proxy, "durationX"), 54)
-        AddWidget(GUI:CreateSlider(parent, "Duration Offset Y", -20, 20, 1, proxy, "durationY"), 54)
+        AddWidget(GUI:CreateSlider(parent, "Duration Offset X", -150, 150, 1, proxy, "durationX"), 54)
+        AddWidget(GUI:CreateSlider(parent, "Duration Offset Y", -150, 150, 1, proxy, "durationY"), 54)
         AddWidget(GUI:CreateCheckbox(parent, "Color Duration by Time", proxy, "durationColorByTime"), 28)
         AddWidget(GUI:CreateColorPicker(parent, "Duration Text Color", proxy, "durationColor", true,
             function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
@@ -2093,8 +2093,8 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         AddWidget(GUI:CreateSlider(parent, "Stack Scale", 0.5, 2.0, 0.1, proxy, "stackScale"), 54)
         AddWidget(GUI:CreateDropdown(parent, "Stack Outline", OUTLINE_OPTIONS, proxy, "stackOutline"), 54)
         AddWidget(GUI:CreateDropdown(parent, "Stack Anchor", ANCHOR_OPTIONS, proxy, "stackAnchor"), 54)
-        AddWidget(GUI:CreateSlider(parent, "Stack Offset X", -20, 20, 1, proxy, "stackX"), 54)
-        AddWidget(GUI:CreateSlider(parent, "Stack Offset Y", -20, 20, 1, proxy, "stackY"), 54)
+        AddWidget(GUI:CreateSlider(parent, "Stack Offset X", -150, 150, 1, proxy, "stackX"), 54)
+        AddWidget(GUI:CreateSlider(parent, "Stack Offset Y", -150, 150, 1, proxy, "stackY"), 54)
         AddWidget(GUI:CreateColorPicker(parent, "Stack Text Color", proxy, "stackColor", true,
             function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
             function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
@@ -2117,8 +2117,8 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             AddWidget(groupNote, 18)
         else
             AddWidget(GUI:CreateDropdown(parent, "Anchor", ANCHOR_OPTIONS, proxy, "anchor", function() DF:AuraDesigner_RefreshPage() end), 54)
-            AddWidget(GUI:CreateSlider(parent, "Offset X", -50, 50, 1, proxy, "offsetX"), 54)
-            AddWidget(GUI:CreateSlider(parent, "Offset Y", -50, 50, 1, proxy, "offsetY"), 54)
+            AddWidget(GUI:CreateSlider(parent, "Offset X", -150, 150, 1, proxy, "offsetX"), 54)
+            AddWidget(GUI:CreateSlider(parent, "Offset Y", -150, 150, 1, proxy, "offsetY"), 54)
         end
         AddDivider()
         -- Sizing & appearance
@@ -2143,8 +2143,8 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         AddWidget(GUI:CreateSlider(parent, "Duration Scale", 0.5, 2.0, 0.1, proxy, "durationScale"), 54)
         AddWidget(GUI:CreateDropdown(parent, "Duration Outline", OUTLINE_OPTIONS, proxy, "durationOutline"), 54)
         AddWidget(GUI:CreateDropdown(parent, "Duration Anchor", ANCHOR_OPTIONS, proxy, "durationAnchor"), 54)
-        AddWidget(GUI:CreateSlider(parent, "Duration Offset X", -20, 20, 1, proxy, "durationX"), 54)
-        AddWidget(GUI:CreateSlider(parent, "Duration Offset Y", -20, 20, 1, proxy, "durationY"), 54)
+        AddWidget(GUI:CreateSlider(parent, "Duration Offset X", -150, 150, 1, proxy, "durationX"), 54)
+        AddWidget(GUI:CreateSlider(parent, "Duration Offset Y", -150, 150, 1, proxy, "durationY"), 54)
         AddWidget(GUI:CreateCheckbox(parent, "Color Duration by Time", proxy, "durationColorByTime"), 28)
         AddWidget(GUI:CreateColorPicker(parent, "Duration Text Color", proxy, "durationColor", true,
             function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
@@ -2158,8 +2158,8 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         AddWidget(GUI:CreateSlider(parent, "Stack Scale", 0.5, 2.0, 0.1, proxy, "stackScale"), 54)
         AddWidget(GUI:CreateDropdown(parent, "Stack Outline", OUTLINE_OPTIONS, proxy, "stackOutline"), 54)
         AddWidget(GUI:CreateDropdown(parent, "Stack Anchor", ANCHOR_OPTIONS, proxy, "stackAnchor"), 54)
-        AddWidget(GUI:CreateSlider(parent, "Stack Offset X", -20, 20, 1, proxy, "stackX"), 54)
-        AddWidget(GUI:CreateSlider(parent, "Stack Offset Y", -20, 20, 1, proxy, "stackY"), 54)
+        AddWidget(GUI:CreateSlider(parent, "Stack Offset X", -150, 150, 1, proxy, "stackX"), 54)
+        AddWidget(GUI:CreateSlider(parent, "Stack Offset Y", -150, 150, 1, proxy, "stackY"), 54)
         AddWidget(GUI:CreateColorPicker(parent, "Stack Text Color", proxy, "stackColor", true,
             function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
             function() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end,
@@ -2182,8 +2182,8 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             AddWidget(groupNote, 18)
         else
             AddWidget(GUI:CreateDropdown(parent, "Anchor", ANCHOR_OPTIONS, proxy, "anchor", function() DF:AuraDesigner_RefreshPage() end), 54)
-            AddWidget(GUI:CreateSlider(parent, "Offset X", -50, 50, 1, proxy, "offsetX"), 54)
-            AddWidget(GUI:CreateSlider(parent, "Offset Y", -50, 50, 1, proxy, "offsetY"), 54)
+            AddWidget(GUI:CreateSlider(parent, "Offset X", -150, 150, 1, proxy, "offsetX"), 54)
+            AddWidget(GUI:CreateSlider(parent, "Offset Y", -150, 150, 1, proxy, "offsetY"), 54)
         end
         AddDivider()
         -- Size & orientation
@@ -2243,8 +2243,8 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         AddWidget(GUI:CreateSlider(parent, "Duration Scale", 0.5, 2.0, 0.1, proxy, "durationScale"), 54)
         AddWidget(GUI:CreateDropdown(parent, "Duration Outline", OUTLINE_OPTIONS, proxy, "durationOutline"), 54)
         AddWidget(GUI:CreateDropdown(parent, "Duration Anchor", ANCHOR_OPTIONS, proxy, "durationAnchor"), 54)
-        AddWidget(GUI:CreateSlider(parent, "Duration Offset X", -20, 20, 1, proxy, "durationX"), 54)
-        AddWidget(GUI:CreateSlider(parent, "Duration Offset Y", -20, 20, 1, proxy, "durationY"), 54)
+        AddWidget(GUI:CreateSlider(parent, "Duration Offset X", -150, 150, 1, proxy, "durationX"), 54)
+        AddWidget(GUI:CreateSlider(parent, "Duration Offset Y", -150, 150, 1, proxy, "durationY"), 54)
         AddWidget(GUI:CreateCheckbox(parent, "Color Duration by Time", proxy, "durationColorByTime"), 28)
 
     elseif typeKey == "border" then
@@ -2449,12 +2449,12 @@ local function BuildGlobalView(parent)
     durAnchor:SetWidth(contentWidth - 10)
     yPos = yPos - 54
 
-    local durOffX = GUI:CreateSlider(parent, "Offset X", -20, 20, 1, defaults, "durationX")
+    local durOffX = GUI:CreateSlider(parent, "Offset X", -150, 150, 1, defaults, "durationX")
     durOffX:SetPoint("TOPLEFT", 5, yPos)
     durOffX:SetWidth(contentWidth - 10)
     yPos = yPos - 50
 
-    local durOffY = GUI:CreateSlider(parent, "Offset Y", -20, 20, 1, defaults, "durationY")
+    local durOffY = GUI:CreateSlider(parent, "Offset Y", -150, 150, 1, defaults, "durationY")
     durOffY:SetPoint("TOPLEFT", 5, yPos)
     durOffY:SetWidth(contentWidth - 10)
     yPos = yPos - 50
@@ -2496,12 +2496,12 @@ local function BuildGlobalView(parent)
     stkAnchor:SetWidth(contentWidth - 10)
     yPos = yPos - 54
 
-    local stkOffX = GUI:CreateSlider(parent, "Offset X", -20, 20, 1, defaults, "stackX")
+    local stkOffX = GUI:CreateSlider(parent, "Offset X", -150, 150, 1, defaults, "stackX")
     stkOffX:SetPoint("TOPLEFT", 5, yPos)
     stkOffX:SetWidth(contentWidth - 10)
     yPos = yPos - 50
 
-    local stkOffY = GUI:CreateSlider(parent, "Offset Y", -20, 20, 1, defaults, "stackY")
+    local stkOffY = GUI:CreateSlider(parent, "Offset Y", -150, 150, 1, defaults, "stackY")
     stkOffY:SetPoint("TOPLEFT", 5, yPos)
     stkOffY:SetWidth(contentWidth - 10)
     yPos = yPos - 50
@@ -4631,7 +4631,7 @@ BuildLayoutGroupsTab = function()
                 if anchorDrop.SetWidth then anchorDrop:SetWidth(bodyWidth - 10) end
                 by = by - 54
 
-                local oxSlider = GUI:CreateSlider(body, "Offset X", -50, 50, 1, group, "offsetX", function()
+                local oxSlider = GUI:CreateSlider(body, "Offset X", -150, 150, 1, group, "offsetX", function()
                     RefreshPlacedIndicators()
                     DF.AuraDesigner.Engine:ForceRefreshAllFrames()
                 end, function()
@@ -4641,7 +4641,7 @@ BuildLayoutGroupsTab = function()
                 if oxSlider.SetWidth then oxSlider:SetWidth(bodyWidth - 10) end
                 by = by - 54
 
-                local oySlider = GUI:CreateSlider(body, "Offset Y", -50, 50, 1, group, "offsetY", function()
+                local oySlider = GUI:CreateSlider(body, "Offset Y", -150, 150, 1, group, "offsetY", function()
                     RefreshPlacedIndicators()
                     DF.AuraDesigner.Engine:ForceRefreshAllFrames()
                 end, function()
@@ -4668,7 +4668,7 @@ BuildLayoutGroupsTab = function()
                 if dirDrop.SetWidth then dirDrop:SetWidth(bodyWidth - 10) end
                 by = by - 54
 
-                local spacingSlider = GUI:CreateSlider(body, "Spacing", 0, 20, 1, group, "spacing", function()
+                local spacingSlider = GUI:CreateSlider(body, "Spacing", -5, 20, 1, group, "spacing", function()
                     RefreshPlacedIndicators()
                     DF.AuraDesigner.Engine:ForceRefreshAllFrames()
                 end, function()

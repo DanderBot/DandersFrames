@@ -2567,9 +2567,12 @@ function AutoProfilesUI:ExitEditing(skipUIUpdates)
             local currentVal = GetRaidValue(key)
             local matches = DeepCompare(snapshotVal, currentVal)
 
-            if not matches and overrides[key] == nil then
-                overrides[key] = DeepCopyValue(currentVal)
-                autoStored = autoStored + 1
+            if not matches then
+                -- Only deep-copy when override is new or has actually changed
+                if overrides[key] == nil or not DeepCompare(overrides[key], currentVal) then
+                    overrides[key] = DeepCopyValue(currentVal)
+                    autoStored = autoStored + 1
+                end
             elseif matches and overrides[key] ~= nil then
                 overrides[key] = nil
                 autoCleaned = autoCleaned + 1

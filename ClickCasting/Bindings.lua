@@ -1948,29 +1948,20 @@ function CC:BuildMacroTextForBinding(binding, forGlobalBinding)
     
     -- Handle different action types
     if actionType == self.ACTION_TYPES.SPELL then
-        -- Resolve current spell name for the active locale and spec.
+        -- Resolve current spell name for the active locale.
         -- Bindings store the spell name from the language the client was using at
         -- creation time.  We must re-resolve via spell ID so the macro contains
         -- the name WoW's parser expects on the current client language.
-        -- Also handles spec overrides (e.g. "Remove Corruption" → "Nature's Cure").
+        -- IMPORTANT: Always use the BASE spell name, never the override name.
+        -- WoW's /cast command is override-aware and will automatically resolve
+        -- base spells to their current form (e.g. /cast Flash of Light will cast
+        -- Benediction when the proc is active). Using the override name in the
+        -- macro causes "spell not learned" errors when the proc expires.
         local spellName = binding.spellName
         if binding.spellId then
-            -- Check for spec override first (e.g. Remove Corruption → Nature's Cure)
-            if C_Spell.GetOverrideSpell then
-                local overrideId = C_Spell.GetOverrideSpell(binding.spellId)
-                if overrideId and overrideId ~= binding.spellId then
-                    local overrideInfo = C_Spell.GetSpellInfo(overrideId)
-                    if overrideInfo and overrideInfo.name then
-                        spellName = overrideInfo.name
-                    end
-                end
-            end
-            -- If no override changed the name, resolve the base spell for current locale
-            if spellName == binding.spellName then
-                local localizedName = GetLocalizedSpellName(binding.spellId)
-                if localizedName then
-                    spellName = localizedName
-                end
+            local localizedName = GetLocalizedSpellName(binding.spellId)
+            if localizedName then
+                spellName = localizedName
             end
         end
         if not spellName then return nil end
