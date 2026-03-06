@@ -14,12 +14,27 @@
 # Libraries
 Libs\LibStub\LibStub.lua
 Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
+Libs\AceLocale-3.0\AceLocale-3.0.lua
 Libs\AceSerializer-3.0\AceSerializer-3.0.lua
 Libs\LibDataBroker-1.1\LibDataBroker-1.1.lua
 Libs\LibDBIcon-1.0\LibDBIcon-1.0.lua
 Libs\LibSharedMedia-3.0\LibSharedMedia-3.0.lua
 Libs\LibDeflate\LibDeflate.lua
 Libs\LibSerialize\LibSerialize.lua
+
+# Localizations (must load before code that uses them)
+Locales\deDE.lua
+Locales\enUS.lua
+Locales\esES.lua
+Locales\esMX.lua
+Locales\frFR.lua
+Locales\itIT.lua
+Locales\koKR.lua
+Locales\ptBR.lua
+Locales\ruRU.lua
+Locales\trTR.lua
+Locales\zhCN.lua
+Locales\zhTW.lua
 
 # XML Templates (must load before Lua that uses them)
 DandersFrames.xml
