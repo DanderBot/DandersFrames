@@ -1178,7 +1178,7 @@ function DF:UpdateFrame(frame)
     if not frame or not frame.unit then return end
     
     -- For party frames, use the unified update
-    if not frame.isRaidFrame then
+    if not DF:IsRaidFrame(frame) then
         DF:UpdateUnitFrame(frame)
         -- Also call aura update and other party-specific updates
         DF:UpdateAuras(frame)
@@ -1787,20 +1787,24 @@ local function RefreshFrameFonts(frame, db)
 end
 
 function DF:RefreshAllFonts()
-    local partyDb = DF:GetDB()
-    local raidDb = DF:GetRaidDB()
-    
     -- Refresh party frames via iterator
     if DF.IteratePartyFrames then
         DF:IteratePartyFrames(function(frame)
-            RefreshFrameFonts(frame, partyDb)
+            RefreshFrameFonts(frame, DF:GetFrameDB(frame))
         end)
     end
     
     -- Refresh raid frames via iterator
     if DF.IterateRaidFrames then
         DF:IterateRaidFrames(function(frame)
-            RefreshFrameFonts(frame, raidDb)
+            RefreshFrameFonts(frame, DF:GetFrameDB(frame))
+        end)
+    end
+
+    -- Refresh pinned frames via iterator
+    if DF.IteratePinnedFrames then
+        DF:IteratePinnedFrames(function(frame)
+            RefreshFrameFonts(frame, DF:GetFrameDB(frame))
         end)
     end
     

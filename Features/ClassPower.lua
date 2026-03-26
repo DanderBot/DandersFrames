@@ -399,8 +399,7 @@ function DF:UpdateTestClassPower(frame, testData)
     end
 
     local maxPips = CLASS_POWER_MAX[classToken] or 5
-    local isRaid = frame.isRaidFrame
-    local db = isRaid and DF:GetRaidDB() or DF:GetDB()
+    local db = DF:GetFrameDB(frame)
     if not db or not db.classPowerEnabled then
         self:HideTestClassPower(frame)
         return

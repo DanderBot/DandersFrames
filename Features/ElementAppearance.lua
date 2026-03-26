@@ -1164,7 +1164,7 @@ function DF:UpdateAllElementAppearances(frame)
     DF:UpdateTargetedSpellAppearance(frame)
     DF:UpdateAuraDesignerAppearance(frame)
     -- Class power pips (player frame only): reparent/alpha for health fade (party or raid player frame)
-    if DF.UpdateClassPowerAlpha and (frame == DF.playerFrame or (frame.unit and frame.isRaidFrame and UnitIsUnit(frame.unit, "player"))) then
+    if DF.UpdateClassPowerAlpha and (frame == DF.playerFrame or (frame.unit and DF:IsRaidFrame(frame) and UnitIsUnit(frame.unit, "player"))) then
         DF.UpdateClassPowerAlpha()
     end
 end

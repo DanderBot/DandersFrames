@@ -142,7 +142,7 @@ auraTimerGroup:SetScript("OnLoop", function()
             if icon.unitFrame then
                 if icon.unitFrame.isPinnedFrame then
                     frameType = "highlight"
-                elseif icon.unitFrame.isRaidFrame then
+                elseif DF:IsRaidFrame(icon.unitFrame) then
                     frameType = "raid"
                 else
                     frameType = "party"
@@ -946,8 +946,8 @@ local function ScanUnitDirect(unit)
     local frame = DF.unitFrameMap and DF.unitFrameMap[unit]
     local db, isRaid
     if frame then
-        isRaid = frame.isRaidFrame
-        db = isRaid and DF:GetRaidDB() or DF:GetDB()
+        isRaid = DF:IsRaidFrame(frame)
+        db = DF:GetFrameDB(frame)
     else
         db = DF:GetDB()
         isRaid = false

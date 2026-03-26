@@ -778,7 +778,7 @@ local function EnsureIconPool(frame, count)
 
     -- Raid frames: create only 1 icon now, stagger the rest to avoid
     -- "script ran too long" when 40 frames each create 5 icons simultaneously
-    if frame.isRaidFrame and existing == 0 then
+    if DF:IsRaidFrame(frame) and existing == 0 then
         frame.targetedSpellIcons[1] = CreateSingleIcon(frame.targetedSpellContainer, 1)
         frame.targetedSpellIcons[1].unitFrame = frame
         -- Schedule remaining icons one-per-timer-tick
@@ -1473,7 +1473,7 @@ local function ProcessCastInternal(casterUnit, isChannel)
         local frame = GetFrameForUnit(targetUnit)
         if frame then
             -- Check if this frame type should show targeted spells in current content
-            local shouldShow = frame.isRaidFrame and showOnRaidFrames or showOnPartyFrames
+            local shouldShow = DF:IsRaidFrame(frame) and showOnRaidFrames or showOnPartyFrames
             
             if shouldShow then
                 -- Show icon (creates/reuses icon for this caster on this frame)

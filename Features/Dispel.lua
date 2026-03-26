@@ -651,12 +651,7 @@ function DF:UpdateDispelGradientHealth(frame)
     if not unit or not UnitExists(unit) then return end
     
     -- Get the appropriate db for this frame to check smoothBars setting
-    local db
-    if frame.isRaidFrame then
-        db = DF.GetRaidDB and DF:GetRaidDB()
-    else
-        db = DF.GetDB and DF:GetDB()
-    end
+    local db = DF.GetFrameDB and DF:GetFrameDB(frame) or (DF.GetDB and DF:GetDB())
     local smoothEnabled = db and db.smoothBars
     
     -- StatusBar API handles secret values internally via SetMinMaxValues/SetValue
@@ -1345,7 +1340,7 @@ function DF:UpdateDispelOverlay(frame)
     local db = DF:GetFrameDB(frame)
     
     -- Check if in test mode first (allows preview even when dispel overlay is disabled)
-    local isRaidFrame = frame.isRaidFrame
+    local isRaidFrame = DF:IsRaidFrame(frame)
     local inRelevantTestMode = (isRaidFrame and DF.raidTestMode) or (not isRaidFrame and DF.testMode)
     
     -- In test mode, check testShowDispelGlow; otherwise check dispelOverlayEnabled
@@ -1382,7 +1377,7 @@ function DF:UpdateDispelOverlay(frame)
             end
         end
         
-        local testData = DF.GetTestUnitData and DF:GetTestUnitData(testIndex, frame.isRaidFrame)
+        local testData = DF.GetTestUnitData and DF:GetTestUnitData(testIndex, DF:IsRaidFrame(frame))
         
         if testData and testData.dispelType then
             local overlay = CreateDispelOverlay(frame)
