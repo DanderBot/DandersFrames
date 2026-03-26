@@ -1646,7 +1646,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                         horizontalSpacing = 2, verticalSpacing = 2, scale = 1.0,
                         position = { point = "CENTER", x = 0, y = 200 },
                         locked = false, showLabel = false,
-                        autoAddTanks = false, autoAddHealers = false, autoAddDPS = false,
+                        autoAddTanks = false, autoAddHealers = false, autoAddDPS = false, autoAddSelf = false, autoSortOrder = "NONE",
                         keepOfflinePlayers = true,
                     },
                     [2] = {
@@ -1655,7 +1655,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                         horizontalSpacing = 2, verticalSpacing = 2, scale = 1.0,
                         position = { point = "CENTER", x = 0, y = -200 },
                         locked = false, showLabel = false,
-                        autoAddTanks = false, autoAddHealers = false, autoAddDPS = false,
+                        autoAddTanks = false, autoAddHealers = false, autoAddDPS = false, autoAddSelf = false, autoSortOrder = "NONE",
                         keepOfflinePlayers = true,
                     },
                 },
@@ -1669,6 +1669,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 if set.autoAddTanks == nil then set.autoAddTanks = false end
                 if set.autoAddHealers == nil then set.autoAddHealers = false end
                 if set.autoAddDPS == nil then set.autoAddDPS = false end
+                if set.autoAddSelf == nil then set.autoAddSelf = false end
+                if set.autoSortOrder == nil then set.autoSortOrder = "NONE" end
                 if set.keepOfflinePlayers == nil then set.keepOfflinePlayers = true end
                 if set.columnAnchor == nil then set.columnAnchor = "START" end
                 if set.frameAnchor == nil then set.frameAnchor = "START" end
@@ -2364,6 +2366,37 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 SyncPlayersOverride()
             end
         end), 28)
+        autoPopGroup:AddWidget(CreateRefreshableCheckbox(self.child, "Auto-add Self", "autoAddSelf", function()
+            if DF.PinnedFrames then
+                DF.PinnedFrames:AutoPopulateSet(GetCurrentSet())
+                DF.PinnedFrames:UpdateHeaderNameList(activeHighlightTab)
+                if rosterWidget then rosterWidget:Refresh() end
+                SyncPlayersOverride()
+            end
+        end), 28)
+        local autoSortOptions = {
+            NONE = "No Sorting",
+            TANK_HEALER_DPS = "Tank > Healer > DPS",
+            TANK_DPS_HEALER = "Tank > DPS > Healer",
+            HEALER_TANK_DPS = "Healer > Tank > DPS",
+            HEALER_DPS_TANK = "Healer > DPS > Tank",
+            DPS_TANK_HEALER = "DPS > Tank > Healer",
+            DPS_HEALER_TANK = "DPS > Healer > Tank",
+            SELF_TANK_HEALER_DPS = "Self > Tank > Healer > DPS",
+            SELF_TANK_DPS_HEALER = "Self > Tank > DPS > Healer",
+            SELF_HEALER_TANK_DPS = "Self > Healer > Tank > DPS",
+            SELF_HEALER_DPS_TANK = "Self > Healer > DPS > Tank",
+            SELF_DPS_TANK_HEALER = "Self > DPS > Tank > Healer",
+            SELF_DPS_HEALER_TANK = "Self > DPS > Healer > Tank",
+        }
+        autoPopGroup:AddWidget(CreateRefreshableDropdown(self.child, "Sort Order", autoSortOptions, "autoSortOrder", function()
+            if DF.PinnedFrames then
+                DF.PinnedFrames:AutoPopulateSet(GetCurrentSet())
+                DF.PinnedFrames:UpdateHeaderNameList(activeHighlightTab)
+                if rosterWidget then rosterWidget:Refresh() end
+                SyncPlayersOverride()
+            end
+        end), 55)
         autoPopGroup:AddWidget(CreateRefreshableCheckbox(self.child, "Keep when offline/left", "keepOfflinePlayers", function() end), 28)
         
         Add(autoPopGroup, nil, 2)
