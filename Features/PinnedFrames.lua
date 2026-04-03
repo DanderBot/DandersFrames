@@ -118,6 +118,91 @@ local function IsPlayerInGroup(fullName, roster)
     return nil
 end
 
+local ROLE_SORT_ORDERS = {
+    NONE = nil,
+    TANK_HEALER_DPS = { TANK = 1, HEALER = 2, DAMAGER = 3, NONE = 4 },
+    TANK_DPS_HEALER = { TANK = 1, DAMAGER = 2, HEALER = 3, NONE = 4 },
+    HEALER_TANK_DPS = { HEALER = 1, TANK = 2, DAMAGER = 3, NONE = 4 },
+    HEALER_DPS_TANK = { HEALER = 1, DAMAGER = 2, TANK = 3, NONE = 4 },
+    DPS_TANK_HEALER = { DAMAGER = 1, TANK = 2, HEALER = 3, NONE = 4 },
+    DPS_HEALER_TANK = { DAMAGER = 1, HEALER = 2, TANK = 3, NONE = 4 },
+    SELF_TANK_HEALER_DPS = { SELF = 1, TANK = 2, HEALER = 3, DAMAGER = 4, NONE = 5 },
+    SELF_TANK_DPS_HEALER = { SELF = 1, TANK = 2, DAMAGER = 3, HEALER = 4, NONE = 5 },
+    SELF_HEALER_TANK_DPS = { SELF = 1, HEALER = 2, TANK = 3, DAMAGER = 4, NONE = 5 },
+    SELF_HEALER_DPS_TANK = { SELF = 1, HEALER = 2, DAMAGER = 3, TANK = 4, NONE = 5 },
+    SELF_DPS_TANK_HEALER = { SELF = 1, DAMAGER = 2, TANK = 3, HEALER = 4, NONE = 5 },
+    SELF_DPS_HEALER_TANK = { SELF = 1, DAMAGER = 2, HEALER = 3, TANK = 4, NONE = 5 },
+}
+
+local function BuildRosterSortMaps()
+    local roleMap = {}
+    local selfMap = {}
+    local numMembers = GetNumGroupMembers()
+    local isRaid = IsInRaid()
+
+    if numMembers == 0 then
+        local fullName = GetUnitName("player", true)
+        if fullName then
+            local shortName = fullName:match("([^%-]+)") or fullName
+            roleMap[fullName] = "DAMAGER"
+            roleMap[shortName] = "DAMAGER"
+            selfMap[fullName] = true
+            selfMap[shortName] = true
+        end
+        return roleMap, selfMap
+    end
+
+    for i = 1, numMembers do
+        local unit = isRaid and ("raid" .. i) or (i == 1 and "player" or "party" .. (i - 1))
+        local fullName = GetUnitName(unit, true)
+        if fullName then
+            local shortName = fullName:match("([^%-]+)") or fullName
+            local role = UnitGroupRolesAssigned(unit)
+            if role == "NONE" then role = "DAMAGER" end
+            roleMap[fullName] = role
+            roleMap[shortName] = role
+            if UnitIsUnit(unit, "player") then
+                selfMap[fullName] = true
+                selfMap[shortName] = true
+            end
+        end
+    end
+
+    return roleMap, selfMap
+end
+
+local function GetSortTokenForPlayer(playerName, roleMap, selfMap, preferSelf)
+    local shortName = playerName and (playerName:match("([^%-]+)") or playerName)
+    if preferSelf and (selfMap[playerName] or (shortName and selfMap[shortName])) then
+        return "SELF"
+    end
+    return roleMap[playerName] or (shortName and roleMap[shortName]) or "NONE"
+end
+
+local function SortPlayersByConfiguredRole(set)
+    local sortOrder = ROLE_SORT_ORDERS[set and set.autoSortOrder or "NONE"]
+    if not sortOrder or not set or not set.players or #set.players <= 1 then
+        return false
+    end
+
+    local roleMap, selfMap = BuildRosterSortMaps()
+    local preferSelf = sortOrder.SELF ~= nil
+    local before = table.concat(set.players, "\031")
+
+    table.sort(set.players, function(a, b)
+        local tokenA = GetSortTokenForPlayer(a, roleMap, selfMap, preferSelf)
+        local tokenB = GetSortTokenForPlayer(b, roleMap, selfMap, preferSelf)
+        local weightA = sortOrder[tokenA] or 99
+        local weightB = sortOrder[tokenB] or 99
+        if weightA ~= weightB then
+            return weightA < weightB
+        end
+        return string.lower(a) < string.lower(b)
+    end)
+
+    return before ~= table.concat(set.players, "\031")
+end
+
 -- ============================================================
 -- AUTO-POPULATION
 -- ============================================================
@@ -132,7 +217,7 @@ function PinnedFrames:AutoPopulateSet(set, roster)
     -- Ensure manualPlayers table exists (migration for existing profiles)
     if not set.manualPlayers then set.manualPlayers = {} end
 
-    local hasAnyAutoFilter = set.autoAddTanks or set.autoAddHealers or set.autoAddDPS
+    local hasAnyAutoFilter = set.autoAddTanks or set.autoAddHealers or set.autoAddDPS or set.autoAddSelf
 
     -- Build lookup of current players in set
     local existingPlayers = {}
@@ -148,8 +233,8 @@ function PinnedFrames:AutoPopulateSet(set, roster)
         local fullName = GetUnitName("player", true)
         local shortName = fullName and fullName:match("([^%-]+)") or fullName
 
-        -- Auto-add player if DPS filter is on
-        if set.autoAddDPS and shortName and not existingPlayers[shortName] then
+        -- Auto-add player if requested in solo mode
+        if (set.autoAddSelf or set.autoAddDPS) and shortName and not existingPlayers[shortName] then
             table.insert(set.players, fullName)
             changed = true
         end
@@ -162,7 +247,7 @@ function PinnedFrames:AutoPopulateSet(set, roster)
                     -- Solo player is always DAMAGER
                     local pShort = playerName:match("([^%-]+)") or playerName
                     if pShort == shortName then
-                        if not set.autoAddDPS then
+                        if not (set.autoAddSelf or set.autoAddDPS) then
                             table.remove(set.players, i)
                             changed = true
                         end
@@ -172,6 +257,10 @@ function PinnedFrames:AutoPopulateSet(set, roster)
                     end
                 end
             end
+        end
+
+        if SortPlayersByConfiguredRole(set) then
+            changed = true
         end
 
         return changed
@@ -194,7 +283,9 @@ function PinnedFrames:AutoPopulateSet(set, roster)
             -- Auto-add pass: add players matching enabled role filters
             if not existingPlayers[shortName] then
                 local shouldAdd = false
-                if set.autoAddTanks and role == "TANK" then
+                if set.autoAddSelf and UnitIsUnit(unit, "player") then
+                    shouldAdd = true
+                elseif set.autoAddTanks and role == "TANK" then
                     shouldAdd = true
                 elseif set.autoAddHealers and role == "HEALER" then
                     shouldAdd = true
@@ -226,7 +317,10 @@ function PinnedFrames:AutoPopulateSet(set, roster)
                 local role = rosterRoles[playerName]
                 if role then
                     local matchesFilter = false
-                    if set.autoAddTanks and role == "TANK" then
+                    local isSelf = UnitName("player") == (playerName:match("([^%-]+)") or playerName)
+                    if set.autoAddSelf and isSelf then
+                        matchesFilter = true
+                    elseif set.autoAddTanks and role == "TANK" then
                         matchesFilter = true
                     elseif set.autoAddHealers and role == "HEALER" then
                         matchesFilter = true
@@ -241,6 +335,10 @@ function PinnedFrames:AutoPopulateSet(set, roster)
                 end
             end
         end
+    end
+
+    if SortPlayersByConfiguredRole(set) then
+        changed = true
     end
 
     return changed
