@@ -1349,6 +1349,18 @@ DF.PartyDefaults = {
     nameTextX = 0,
     nameTextY = -10,
 
+    -- Party Number Text
+    partyIndexTextAnchor = "TOPLEFT",
+    partyIndexTextColor = {r = 1, g = 1, b = 1, a = 1},
+    partyIndexTextEnabled = false,
+    partyIndexTextFont = "DF Roboto SemiBold",
+    partyIndexTextFontSize = 10,
+    partyIndexTextOutline = "SHADOW",
+    partyIndexTextPlayerAtBottom = false,
+    partyIndexTextUseClassColor = false,
+    partyIndexTextX = 2,
+    partyIndexTextY = -2,
+
     -- Out of Range
     oorAbsorbBarAlpha = 0.20000000298023,
     oorAurasAlpha = 0.20000000298023,
@@ -2565,6 +2577,18 @@ DF.RaidDefaults = {
     nameTextUseClassColor = false,
     nameTextX = 0,
     nameTextY = -10,
+
+    -- Party Number Text
+    partyIndexTextAnchor = "TOPLEFT",
+    partyIndexTextColor = {r = 1, g = 1, b = 1, a = 1},
+    partyIndexTextEnabled = false,
+    partyIndexTextFont = "DF Roboto SemiBold",
+    partyIndexTextFontSize = 10,
+    partyIndexTextOutline = "SHADOW",
+    partyIndexTextPlayerAtBottom = false,
+    partyIndexTextUseClassColor = false,
+    partyIndexTextX = 2,
+    partyIndexTextY = -2,
 
     -- Out of Range
     oorAbsorbBarAlpha = 0.20000000298023,

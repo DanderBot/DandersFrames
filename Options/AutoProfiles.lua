@@ -140,6 +140,7 @@ local OVERRIDE_TAB_MAP = {
     -- Text
     {"statusText",          "text_status",          "Status Text"},
     {"name",                "text_name",            "Name Text"},
+    {"partyIndexText",      "text_party_index",     "Party Number Text"},
     -- Auras (specific before generic)
     -- myBuffIndicator removed — feature deprecated and hidden from UI
     {"bossDebuff",          "auras_bossdebuffs",    "Boss Debuffs"},

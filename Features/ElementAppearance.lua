@@ -539,6 +539,54 @@ function DF:UpdateStatusTextAppearance(frame)
 end
 
 -- ============================================================
+-- PARTY INDEX TEXT APPEARANCE
+-- ============================================================
+
+function DF:UpdatePartyIndexTextAppearance(frame)
+    if not IsDandersFrame(frame) then return end
+    if not frame.partyIndexText then return end
+
+    local db = GetDB(frame)
+    if not db then return end
+
+    if db.partyIndexTextEnabled == false then
+        frame.partyIndexText:Hide()
+        return
+    end
+
+    local deadOrOffline = IsDeadOrOffline(frame)
+    local inRange = GetInRange(frame)
+
+    local r, g, b = 1, 1, 1
+    local baseAlpha = 1.0
+
+    if db.partyIndexTextUseClassColor then
+        local classColor = GetClassColor(frame)
+        r, g, b = classColor.r, classColor.g, classColor.b
+    elseif deadOrOffline then
+        r, g, b = 0.5, 0.5, 0.5
+    else
+        local c = db.partyIndexTextColor or DEFAULT_COLOR_WHITE
+        r, g, b = c.r, c.g, c.b
+        baseAlpha = c.a or 1.0
+    end
+
+    local alpha = baseAlpha
+    if deadOrOffline and db.fadeDeadFrames then
+        alpha = db.fadeDeadName or 1.0
+    end
+
+    frame.partyIndexText:SetTextColor(r, g, b, 1.0)
+
+    if db.oorEnabled then
+        local oorAlpha = db.oorNameTextAlpha or 1
+        ApplyOORAlpha(frame.partyIndexText, inRange, alpha, oorAlpha)
+    else
+        frame.partyIndexText:SetAlpha(alpha)
+    end
+end
+
+-- ============================================================
 -- POWER BAR APPEARANCE
 -- ============================================================
 
@@ -1148,6 +1196,7 @@ function DF:UpdateAllElementAppearances(frame)
     DF:UpdateNameTextAppearance(frame)
     DF:UpdateHealthTextAppearance(frame)
     DF:UpdateStatusTextAppearance(frame)
+    DF:UpdatePartyIndexTextAppearance(frame)
     DF:UpdatePowerBarAppearance(frame)
     DF:UpdateBuffIconsAppearance(frame)
     DF:UpdateDebuffIconsAppearance(frame)
@@ -1219,6 +1268,7 @@ DF.UpdateBackgroundAlpha = DF.UpdateBackgroundAppearance
 DF.UpdateNameTextAlpha = DF.UpdateNameTextAppearance
 DF.UpdateHealthTextAlpha = DF.UpdateHealthTextAppearance
 DF.UpdateStatusTextAlpha = DF.UpdateStatusTextAppearance
+DF.UpdatePartyIndexTextAlpha = DF.UpdatePartyIndexTextAppearance
 DF.UpdatePowerBarAlpha = DF.UpdatePowerBarAppearance
 DF.UpdateBuffIconsAlpha = DF.UpdateBuffIconsAppearance
 DF.UpdateDebuffIconsAlpha = DF.UpdateDebuffIconsAppearance

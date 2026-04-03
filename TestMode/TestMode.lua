@@ -625,6 +625,21 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
         end
     end
     frame.nameText:SetText(displayName)
+
+    if frame.partyIndexText then
+        local displayIndex = DF.GetUnitPartyIndex and DF:GetUnitPartyIndex(frame.unit, db) or nil
+        if (not displayIndex) and type(index) == "number" then
+            displayIndex = (index == 0) and 1 or index
+        end
+
+        if db.partyIndexTextEnabled ~= false and displayIndex then
+            frame.partyIndexText:SetText(tostring(displayIndex))
+            frame.partyIndexText:Show()
+        else
+            frame.partyIndexText:SetText("")
+            frame.partyIndexText:Hide()
+        end
+    end
     
     -- Determine if this frame should show out-of-range effects
     -- OOR takes priority over dead fade (they should never multiply)
@@ -738,6 +753,18 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     else
         local c = db.nameTextColor or {r=1, g=1, b=1}
         frame.nameText:SetTextColor(c.r, c.g, c.b, finalNameAlpha)
+    end
+
+    if frame.partyIndexText and frame.partyIndexText:IsShown() then
+        if db.partyIndexTextUseClassColor then
+            local classColor = DF:GetClassColor(testData.class)
+            if classColor then
+                frame.partyIndexText:SetTextColor(classColor.r, classColor.g, classColor.b, finalNameAlpha)
+            end
+        else
+            local c = db.partyIndexTextColor or {r=1, g=1, b=1}
+            frame.partyIndexText:SetTextColor(c.r, c.g, c.b, finalNameAlpha)
+        end
     end
     
     -- Update health bar color based on mode

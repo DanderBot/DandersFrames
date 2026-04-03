@@ -634,6 +634,20 @@ function DF:CreateFrameElements(frame, isRaid)
     frame.statusText:SetTextColor(statusColor.r, statusColor.g, statusColor.b, 1)
     frame.statusText:SetDrawLayer("OVERLAY", 7)
     frame.statusText:Hide()
+
+    -- ========================================
+    -- PARTY INDEX TEXT
+    -- ========================================
+    frame.partyIndexText = frame.contentOverlay:CreateFontString(nil, "OVERLAY")
+    local partyIndexOutline = db.partyIndexTextOutline or "OUTLINE"
+    if partyIndexOutline == "NONE" then partyIndexOutline = "" end
+    DF:SafeSetFont(frame.partyIndexText, db.partyIndexTextFont or "Fonts\\FRIZQT__.TTF", db.partyIndexTextFontSize or 10, partyIndexOutline)
+    local partyIndexAnchor = db.partyIndexTextAnchor or "TOPLEFT"
+    frame.partyIndexText:SetPoint(partyIndexAnchor, frame, partyIndexAnchor, db.partyIndexTextX or 2, db.partyIndexTextY or -2)
+    local partyIndexColor = db.partyIndexTextColor or {r = 1, g = 1, b = 1}
+    frame.partyIndexText:SetTextColor(partyIndexColor.r, partyIndexColor.g, partyIndexColor.b, partyIndexColor.a or 1)
+    frame.partyIndexText:SetDrawLayer("OVERLAY", 7)
+    frame.partyIndexText:Hide()
     
     -- Continue with the rest of the elements...
     -- (Border, icons, power bar, auras, absorbs, etc.)
@@ -1344,6 +1358,20 @@ function DF:CreateUnitFrame(unit, index, isRaid)
     frame.statusText:SetTextColor(statusColor.r, statusColor.g, statusColor.b, 1)
     frame.statusText:SetDrawLayer("OVERLAY", 7)
     frame.statusText:Hide()
+
+    -- ========================================
+    -- PARTY INDEX TEXT
+    -- ========================================
+    frame.partyIndexText = frame.contentOverlay:CreateFontString(nil, "OVERLAY")
+    local partyIndexOutline = db.partyIndexTextOutline or "OUTLINE"
+    if partyIndexOutline == "NONE" then partyIndexOutline = "" end
+    DF:SafeSetFont(frame.partyIndexText, db.partyIndexTextFont or "Fonts\\FRIZQT__.TTF", db.partyIndexTextFontSize or 10, partyIndexOutline)
+    local partyIndexAnchor = db.partyIndexTextAnchor or "TOPLEFT"
+    frame.partyIndexText:SetPoint(partyIndexAnchor, frame, partyIndexAnchor, db.partyIndexTextX or 2, db.partyIndexTextY or -2)
+    local partyIndexColor = db.partyIndexTextColor or {r = 1, g = 1, b = 1}
+    frame.partyIndexText:SetTextColor(partyIndexColor.r, partyIndexColor.g, partyIndexColor.b, partyIndexColor.a or 1)
+    frame.partyIndexText:SetDrawLayer("OVERLAY", 7)
+    frame.partyIndexText:Hide()
     
     -- ========================================
     -- BORDER

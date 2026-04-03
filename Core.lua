@@ -569,6 +569,12 @@ function DF:LightweightUpdateFontSize(textType)
             if fontOutline == "NONE" then fontOutline = "" end
             local size = db.statusTextFontSize or 10
             DF:SafeSetFont(frame.statusText, fontPath, size, fontOutline)
+        elseif textType == "partyIndex" and frame.partyIndexText then
+            local fontPath = db.partyIndexTextFont or "Fonts\\FRIZQT__.TTF"
+            local fontOutline = db.partyIndexTextOutline or "OUTLINE"
+            if fontOutline == "NONE" then fontOutline = "" end
+            local size = db.partyIndexTextFontSize or 10
+            DF:SafeSetFont(frame.partyIndexText, fontPath, size, fontOutline)
         end
     end
     
@@ -596,6 +602,10 @@ function DF:LightweightUpdateTextPosition(textType)
             frame.statusText:ClearAllPoints()
             local anchor = db.statusTextAnchor or "BOTTOM"
             frame.statusText:SetPoint(anchor, frame, anchor, db.statusTextX or 0, db.statusTextY or 0)
+        elseif textType == "partyIndex" and frame.partyIndexText then
+            frame.partyIndexText:ClearAllPoints()
+            local anchor = db.partyIndexTextAnchor or "TOPLEFT"
+            frame.partyIndexText:SetPoint(anchor, frame, anchor, db.partyIndexTextX or 2, db.partyIndexTextY or -2)
         end
     end
     
@@ -1963,6 +1973,10 @@ function DF:LightweightUpdateTextColor(textType)
     elseif textType == "status" then
         colorKey = "statusTextColor"
         textKey = "statusText"
+    elseif textType == "partyIndex" then
+        if db.partyIndexTextUseClassColor then return end
+        colorKey = "partyIndexTextColor"
+        textKey = "partyIndexText"
     else
         return
     end
@@ -1994,6 +2008,12 @@ function DF:LightweightUpdateTextColor(textType)
                         else
                             alpha = db.rangeFadeAlpha or 0.55
                         end
+                    elseif textType == "partyIndex" then
+                        if db.oorEnabled then
+                            alpha = db.oorNameTextAlpha or 0.55
+                        else
+                            alpha = db.rangeFadeAlpha or 0.55
+                        end
                     end
                 -- Dead fade only applies when in range
                 elseif testData.status and db.fadeDeadFrames then
@@ -2001,6 +2021,8 @@ function DF:LightweightUpdateTextColor(textType)
                         alpha = db.fadeDeadName or 1.0
                     elseif textType == "status" then
                         alpha = db.fadeDeadStatusText or 1.0
+                    elseif textType == "partyIndex" then
+                        alpha = db.fadeDeadName or 1.0
                     end
                 end
             end

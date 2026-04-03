@@ -493,6 +493,117 @@ function DF:GetUnitName(unit)
     return UnitName(unit) or unit
 end
 
+-- Update name text on a frame - uses GetUnitName which can be overridden
+function DF:UpdateNameText(frame)
+    if not frame or not frame.nameText or not frame.unit then return end
+    
+    local unit = frame.unit
+    local db = frame.isRaidFrame and DF:GetRaidDB() or DF:GetDB()
+    
+    -- Get name using the overridable method
+    local name = DF:GetUnitName(unit) or unit
+    
+    -- Apply truncation if configured (UTF-8 aware)
+    local nameLength = db.nameTextLength or 0
+    if nameLength > 0 and name and DF:UTF8Len(name) > nameLength then
+        if db.nameTextTruncateMode == "ELLIPSIS" then
+            name = DF:UTF8Sub(name, 1, nameLength) .. "..."
+        else
+            name = DF:UTF8Sub(name, 1, nameLength)
+        end
+    end
+    
+    frame.nameText:SetText(name)
+    
+    -- Get class for class-colored elements
+    local _, class = UnitClass(unit)
+    local classColor = class and DF:GetClassColor(class)
+    
+    -- Apply name color
+    if db.nameTextUseClassColor and classColor then
+        frame.nameText:SetTextColor(classColor.r, classColor.g, classColor.b, 1)
+    else
+        local nameColor = db.nameTextColor or {r = 1, g = 1, b = 1}
+        frame.nameText:SetTextColor(nameColor.r, nameColor.g, nameColor.b, 1)
+    end
+    
+    -- Apply health text class color if enabled
+    if db.healthTextUseClassColor and classColor and frame.healthText then
+        frame.healthText:SetTextColor(classColor.r, classColor.g, classColor.b, 1)
+    end
+end
+
+-- Get the displayed party/raid index for a unit token.
+-- Party mode default: player=1, party1=2 ... party4=5
+-- Optional remap mode: party1=1 ... party4=4, player=party size
+-- Raid mode: raid1 ... raid40
+function DF:GetUnitPartyIndex(unit, db)
+    if not unit or unit == "" then return nil end
+
+    local raidTokenIndex = unit:match("^raid(%d+)$")
+    if raidTokenIndex then
+        return tonumber(raidTokenIndex)
+    end
+
+    local raidIndex = UnitInRaid(unit)
+    if raidIndex and raidIndex > 0 then
+        return raidIndex
+    end
+
+    local partyTokenIndex = unit:match("^party(%d+)$")
+    if partyTokenIndex then
+        if db and db.partyIndexTextPlayerAtBottom then
+            return tonumber(partyTokenIndex)
+        end
+        return tonumber(partyTokenIndex) + 1
+    end
+
+    if UnitIsUnit(unit, "player") then
+        if db and db.partyIndexTextPlayerAtBottom then
+            return (GetNumSubgroupMembers() or 0) + 1
+        end
+        return 1
+    end
+
+    return nil
+end
+
+function DF:UpdatePartyIndexText(frame)
+    if not frame or not frame.partyIndexText or not frame.unit then return end
+
+    local db = frame.isRaidFrame and DF:GetRaidDB() or DF:GetDB()
+    if not db then return end
+
+    if db.partyIndexTextEnabled == false then
+        frame.partyIndexText:SetText("")
+        frame.partyIndexText:Hide()
+        return
+    end
+
+    local index = DF:GetUnitPartyIndex(frame.unit, db)
+    if not index then
+        frame.partyIndexText:SetText("")
+        frame.partyIndexText:Hide()
+        return
+    end
+
+    frame.partyIndexText:SetText(tostring(index))
+    frame.partyIndexText:Show()
+
+    if DF.UpdatePartyIndexTextAppearance then
+        DF:UpdatePartyIndexTextAppearance(frame)
+    elseif db.partyIndexTextUseClassColor then
+        local _, class = UnitClass(frame.unit)
+        local classColor = class and DF:GetClassColor(class)
+        if classColor then
+            frame.partyIndexText:SetTextColor(classColor.r, classColor.g, classColor.b, 1)
+        end
+    else
+        local c = db.partyIndexTextColor or {r = 1, g = 1, b = 1}
+        frame.partyIndexText:SetTextColor(c.r, c.g, c.b, c.a or 1)
+    end
+end
+
 -- Iterator for all compact unit frames (player, party, raid)
 -- Accepts a callback function OR returns an iterator if no callback provided
 -- Usage with callback: DF:IterateCompactFrames(function(frame) ... end)

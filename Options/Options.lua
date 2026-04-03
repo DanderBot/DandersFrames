@@ -1478,6 +1478,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             db.nameFont = font; db.nameTextOutline = outline
             db.healthFont = font; db.healthTextOutline = outline
             db.statusTextFont = font; db.statusTextOutline = outline
+            db.partyIndexTextFont = font; db.partyIndexTextOutline = outline
             db.buffStackFont = font; db.buffStackOutline = outline
             db.buffDurationFont = font; db.buffDurationOutline = outline
             db.debuffStackFont = font; db.debuffStackOutline = outline
@@ -1561,7 +1562,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- ===== AFFECTED ELEMENTS GROUP (Column 2) =====
         local infoGroup = GUI:CreateSettingsGroup(self.child, 280)
         infoGroup:AddWidget(GUI:CreateHeader(self.child, "Affected Elements"), 40)
-        infoGroup:AddWidget(GUI:CreateLabel(self.child, "• Name Text\n• Health Text\n• Status Text (Dead/Offline)\n• Buff Stack & Duration\n• Debuff Stack & Duration\n• Pet Frame Text\n• Targeted Spell Duration\n• Defensive Icon Duration\n• Status Icon Text (Res, Summon, etc.)\n• Group Labels (Raid)", 250), 175)
+        infoGroup:AddWidget(GUI:CreateLabel(self.child, "• Name Text\n• Health Text\n• Status Text (Dead/Offline)\n• Party Number Text\n• Buff Stack & Duration\n• Debuff Stack & Duration\n• Pet Frame Text\n• Targeted Spell Duration\n• Defensive Icon Duration\n• Status Icon Text (Res, Summon, etc.)\n• Group Labels (Raid)", 250), 190)
         infoGroup:AddWidget(GUI:CreateLabel(self.child, "Note: Font sizes are not changed. Adjust sizes in each element's page.", 250), 40)
         Add(infoGroup, nil, 2)
     end)
@@ -3811,6 +3812,56 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local truncDropdown = truncGroup:AddWidget(GUI:CreateDropdown(self.child, "Truncate Mode", truncOptions, db, "nameTextTruncateMode", function() DF:RefreshAllVisibleFrames() end), 55)
         truncDropdown.disableOn = function(d) return (d.nameTextLength or 0) == 0 end
         Add(truncGroup, nil, 2)
+    end)
+
+    -- Text > Party Number Text
+    local pagePartyIndexText = CreateSubTab("text", "text_party_index", "Party Number Text")
+    BuildPage(pagePartyIndexText, function(self, db, Add, AddSpace, AddSyncPoint)
+        Add(CreateCopyButton(self.child, {"partyIndexText"}, "Party Number Text", "text_party_index"), 25, 2)
+
+        local settingsGroup = GUI:CreateSettingsGroup(self.child, 280)
+        settingsGroup:AddWidget(GUI:CreateHeader(self.child, "Party Number Text"), 40)
+        settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, "Enable Party Number Text", db, "partyIndexTextEnabled", function()
+            DF:RefreshAllVisibleFrames()
+            if DF.UpdateAllFrameAppearances then DF:UpdateAllFrameAppearances() end
+        end), 30)
+        settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, "Player Labeled As Party Size", db, "partyIndexTextPlayerAtBottom", function()
+            DF:RefreshAllVisibleFrames()
+            if DF.UpdateAllFrameAppearances then DF:UpdateAllFrameAppearances() end
+        end), 30)
+        Add(settingsGroup, nil, 1)
+
+        local positionGroup = GUI:CreateSettingsGroup(self.child, 280)
+        positionGroup:AddWidget(GUI:CreateHeader(self.child, "Position"), 40)
+
+        local anchorOptions = {
+            CENTER = "Center", TOP = "Top", BOTTOM = "Bottom", LEFT = "Left", RIGHT = "Right",
+            TOPLEFT = "Top Left", TOPRIGHT = "Top Right", BOTTOMLEFT = "Bottom Left", BOTTOMRIGHT = "Bottom Right",
+        }
+        positionGroup:AddWidget(GUI:CreateDropdown(self.child, "Anchor", anchorOptions, db, "partyIndexTextAnchor", function() DF:UpdateAllFrames() end), 55)
+        positionGroup:AddWidget(GUI:CreateSlider(self.child, "Offset X", -50, 50, 1, db, "partyIndexTextX", nil, function() DF:LightweightUpdateTextPosition("partyIndex") end, true), 55)
+        positionGroup:AddWidget(GUI:CreateSlider(self.child, "Offset Y", -50, 50, 1, db, "partyIndexTextY", nil, function() DF:LightweightUpdateTextPosition("partyIndex") end, true), 55)
+        Add(positionGroup, nil, 2)
+
+        local fontGroup = GUI:CreateSettingsGroup(self.child, 280)
+        fontGroup:AddWidget(GUI:CreateHeader(self.child, "Font"), 40)
+        fontGroup:AddWidget(GUI:CreateFontDropdown(self.child, "Font", db, "partyIndexTextFont", function() DF:UpdateAllFrames() end), 55)
+        fontGroup:AddWidget(GUI:CreateSlider(self.child, "Font Size", 6, 24, 1, db, "partyIndexTextFontSize", nil, function() DF:LightweightUpdateFontSize("partyIndex") end, true), 55)
+
+        local outlineOptions = { NONE = "None", OUTLINE = "Outline", THICKOUTLINE = "Thick Outline", SHADOW = "Shadow" }
+        fontGroup:AddWidget(GUI:CreateDropdown(self.child, "Outline", outlineOptions, db, "partyIndexTextOutline", function() DF:LightweightUpdateFontSize("partyIndex") end), 55)
+        Add(fontGroup, nil, 1)
+
+        local colorGroup = GUI:CreateSettingsGroup(self.child, 280)
+        colorGroup:AddWidget(GUI:CreateHeader(self.child, "Color"), 40)
+        colorGroup:AddWidget(GUI:CreateCheckbox(self.child, "Use Class Color", db, "partyIndexTextUseClassColor", function()
+            self:RefreshStates()
+            DF:RefreshAllVisibleFrames()
+            if DF.UpdateAllFrameAppearances then DF:UpdateAllFrameAppearances() end
+        end), 30)
+        local partyIndexColor = colorGroup:AddWidget(GUI:CreateColorPicker(self.child, "Text Color", db, "partyIndexTextColor", true, nil, function() DF:LightweightUpdateTextColor("partyIndex") end, true), 35)
+        partyIndexColor.disableOn = function(d) return d.partyIndexTextUseClassColor end
+        Add(colorGroup, nil, 2)
     end)
     
     -- ========================================

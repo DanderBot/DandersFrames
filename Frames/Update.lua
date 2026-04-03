@@ -291,6 +291,29 @@ function DF:ApplyFrameLayout(frame)
             frame.statusText:SetTextColor(statusColor.r, statusColor.g, statusColor.b, statusColor.a or 1)
         end
     end
+
+    -- ========================================
+    -- PARTY INDEX TEXT
+    -- ========================================
+    if frame.partyIndexText then
+        local partyIndexFont = db.partyIndexTextFont or "Fonts\\FRIZQT__.TTF"
+        local partyIndexFontSize = db.partyIndexTextFontSize or 10
+        local partyIndexOutline = db.partyIndexTextOutline or "OUTLINE"
+        if partyIndexOutline == "NONE" then partyIndexOutline = "" end
+
+        DF:SafeSetFont(frame.partyIndexText, partyIndexFont, partyIndexFontSize, partyIndexOutline)
+
+        local partyIndexAnchor = db.partyIndexTextAnchor or "TOPLEFT"
+        frame.partyIndexText:ClearAllPoints()
+        frame.partyIndexText:SetPoint(partyIndexAnchor, frame, partyIndexAnchor, db.partyIndexTextX or 2, db.partyIndexTextY or -2)
+
+        if DF.UpdatePartyIndexTextAppearance then
+            DF:UpdatePartyIndexTextAppearance(frame)
+        elseif not db.partyIndexTextUseClassColor then
+            local partyIndexColor = db.partyIndexTextColor or {r = 1, g = 1, b = 1, a = 1}
+            frame.partyIndexText:SetTextColor(partyIndexColor.r, partyIndexColor.g, partyIndexColor.b, partyIndexColor.a or 1)
+        end
+    end
     
     -- ========================================
     -- ROLE ICON
@@ -560,6 +583,7 @@ function DF:UpdateUnitFrame(frame, source)
                 frame.statusText:Hide()
             end
         end
+        DF:UpdatePartyIndexText(frame)
         if frame.healthText then
             frame.healthText:Hide()
         end
@@ -614,6 +638,7 @@ function DF:UpdateUnitFrame(frame, source)
                 frame.statusText:Hide()
             end
         end
+        DF:UpdatePartyIndexText(frame)
         if frame.healthText then
             frame.healthText:Hide()
         end
@@ -777,6 +802,11 @@ function DF:UpdateUnitFrame(frame, source)
     -- ========================================
     DF:UpdateName(frame)
     
+    -- ========================================
+    -- PARTY INDEX
+    -- ========================================
+    DF:UpdatePartyIndexText(frame)
+
     -- ========================================
     -- HEALTH TEXT
     -- ========================================
@@ -1804,6 +1834,15 @@ local function RefreshFrameFonts(frame, db)
         local statusOutline = db.statusTextOutline or "OUTLINE"
         if statusOutline == "NONE" then statusOutline = "" end
         DF:SafeSetFont(frame.statusText, statusFont, statusFontSize, statusOutline)
+    end
+
+    -- Party index text
+    if frame.partyIndexText then
+        local partyIndexFont = db.partyIndexTextFont or "Fonts\\FRIZQT__.TTF"
+        local partyIndexFontSize = db.partyIndexTextFontSize or 10
+        local partyIndexOutline = db.partyIndexTextOutline or "OUTLINE"
+        if partyIndexOutline == "NONE" then partyIndexOutline = "" end
+        DF:SafeSetFont(frame.partyIndexText, partyIndexFont, partyIndexFontSize, partyIndexOutline)
     end
 end
 
