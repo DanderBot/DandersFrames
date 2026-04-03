@@ -82,12 +82,7 @@ local function SetBarValue(bar, value, frame)
     if not bar or not bar.SetValue then return end
     
     -- Get the appropriate db for this frame
-    local db
-    if frame and frame.isRaidFrame then
-        db = DF.GetRaidDB and DF:GetRaidDB()
-    else
-        db = DF.GetDB and DF:GetDB()
-    end
+    local db = frame and DF.GetFrameDB and DF:GetFrameDB(frame) or (DF.GetDB and DF:GetDB())
     local smoothEnabled = db and db.smoothBars
     
     if smoothEnabled and Enum and Enum.StatusBarInterpolation and Enum.StatusBarInterpolation.ExponentialEaseOut then

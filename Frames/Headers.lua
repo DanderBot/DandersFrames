@@ -516,12 +516,13 @@ function DF:InitializeHeaderChild(frame)
     
     -- Determine if this is a raid, party, or arena frame based on parent
     local parent = frame:GetParent()
+    local parentName = ""
     local isRaid = false
     local isArena = false
     local isRaidCombined = false
     local isPinned = false
     if parent then
-        local parentName = parent:GetName() or ""
+        parentName = parent:GetName() or ""
         isArena = parentName:find("Arena") ~= nil
         isPinned = parentName:find("Pinned") ~= nil
         isRaid = parentName:find("Raid") ~= nil and not isArena and not isPinned
@@ -534,14 +535,22 @@ function DF:InitializeHeaderChild(frame)
     -- PINNED FRAMES: Use current group status to determine raid vs party
     -- Pinned frames can show either party or raid members, so they should
     -- use the appropriate settings based on whether we're in a raid
+    local pinnedLayoutMode
     if isPinned then
-        isRaid = IsInRaid()
+        local setIndex = tonumber(parentName:match("DandersPinned(%d+)"))
+        pinnedLayoutMode = (setIndex and DF.GetPinnedLayoutMode) and DF:GetPinnedLayoutMode(setIndex) or (IsInRaid() and "raid" or "party")
+        isRaid = pinnedLayoutMode == "raid"
     end
 
     frame.isRaidFrame = isRaid
     frame.isArenaFrame = isArena  -- Arena uses party settings but raid units
     frame.isPinnedFrame = isPinned
+    frame.dfPinnedLayoutMode = isPinned and pinnedLayoutMode or nil
     frame.dfIsRaidCombinedChild = isRaidCombined
+
+    if isPinned and DF.RegisterPinnedFrameLayout then
+        DF:RegisterPinnedFrameLayout(frame, pinnedLayoutMode)
+    end
 
     -- Register in external lookup table (immune to WoW's secure template clearing fields)
     if isRaid and DF.RegisterRaidFrame then
@@ -4343,6 +4352,15 @@ function DF:RefreshLiveFrames()
             end
         end)
     end
+
+    -- Refresh pinned frames
+    if DF.IteratePinnedFrames then
+        DF:IteratePinnedFrames(function(frame)
+            if frame and frame.unit then
+                DF:FullFrameRefresh(frame)
+            end
+        end)
+    end
 end
 
 -- Refresh ALL visible frames (both test and live)
@@ -4985,6 +5003,22 @@ function DF:IterateRaidFrames(callback)
     end
 end
 
+function DF:IteratePinnedFrames(callback)
+    if not callback or not DF.PinnedFrames or not DF.PinnedFrames.headers then return end
+
+    for setIndex = 1, 2 do
+        local header = DF.PinnedFrames.headers[setIndex]
+        if header then
+            for i = 1, 40 do
+                local frame = header:GetAttribute("child" .. i)
+                if frame and frame.unit then
+                    if callback(frame, i, frame.unit, setIndex) then return true end
+                end
+            end
+        end
+    end
+end
+
 function DF:IterateAllFrames(callback)
     if DF:IsInArena() then
         -- Arena: use arena header (raid units, party layout)
@@ -4994,6 +5028,7 @@ function DF:IterateAllFrames(callback)
         if DF:IteratePartyFrames(callback) then return true end
         if DF:IterateRaidFrames(callback) then return true end
     end
+    if DF:IteratePinnedFrames(callback) then return true end
 end
 
 -- ============================================================
@@ -8197,6 +8232,9 @@ function DF:ProcessRoleUpdate()
     
     DF:IteratePartyFrames(updateFrameRole)
     DF:IterateRaidFrames(updateFrameRole)
+    if DF.IteratePinnedFrames then
+        DF:IteratePinnedFrames(updateFrameRole)
+    end
 end
 
 -- ========================================

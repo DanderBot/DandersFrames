@@ -1796,7 +1796,7 @@ function DF:LightweightUpdateHealthColor()
             frame.healthBar:SetStatusBarColor(c.r, c.g, c.b, c.a or 1)
         elseif db.healthColorMode == "PERCENT" and inTestMode then
             -- For gradient mode in test mode, get the test data health value
-            local isRaid = frame.isRaidFrame
+            local isRaid = DF:IsRaidFrame(frame)
             local testData = DF:GetTestUnitData(index, isRaid)
             if testData then
                 local health = testData.healthPercent or testData.health or 0.75
@@ -1807,7 +1807,7 @@ function DF:LightweightUpdateHealthColor()
             end
         elseif db.healthColorMode == "CLASS" and inTestMode then
             -- For class color mode in test mode
-            local isRaid = frame.isRaidFrame
+            local isRaid = DF:IsRaidFrame(frame)
             local testData = DF:GetTestUnitData(index, isRaid)
             if testData and testData.class then
                 local classColor = DF:GetClassColor(testData.class)
@@ -1976,7 +1976,7 @@ function DF:LightweightUpdateTextColor(textType)
         
         -- In test mode, respect OOR and dead fade alphas
         if inTestMode then
-            local isRaid = frame.isRaidFrame
+            local isRaid = DF:IsRaidFrame(frame)
             local testData = DF:GetTestUnitData(index, isRaid)
             
             if testData then
@@ -2637,6 +2637,27 @@ end
 
 function DF:GetRaidDB()
     return DF:GetDB("raid")
+end
+
+function DF:GetPinnedLayoutMode(setOrIndex, actualMode)
+    actualMode = actualMode or (IsInRaid() and "raid" or "party")
+
+    local set = setOrIndex
+    if type(setOrIndex) ~= "table" then
+        local modeDB = DF.db and DF.db[actualMode]
+        set = modeDB and modeDB.pinnedFrames and modeDB.pinnedFrames.sets and modeDB.pinnedFrames.sets[setOrIndex]
+    end
+
+    local layoutSource = set and set.layoutSource or "current"
+    if layoutSource == "party" or layoutSource == "raid" then
+        return layoutSource
+    end
+
+    return actualMode
+end
+
+function DF:GetPinnedLayoutDB(setOrIndex, actualMode)
+    return DF:GetDB(DF:GetPinnedLayoutMode(setOrIndex, actualMode))
 end
 
 -- ============================================================

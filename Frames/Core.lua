@@ -86,12 +86,7 @@ local function SetHealthBarValue(bar, unit, frame)
     bar:SetMinMaxValues(0, 100)
 
     -- Get the appropriate db for this frame
-    local db
-    if frame and frame.isRaidFrame then
-        db = DF.GetRaidDB and DF:GetRaidDB()
-    else
-        db = DF.GetDB and DF:GetDB()
-    end
+    local db = frame and DF.GetFrameDB and DF:GetFrameDB(frame) or (DF.GetDB and DF:GetDB())
     local smoothEnabled = db and db.smoothBars
 
     if smoothEnabled and Enum and Enum.StatusBarInterpolation and Enum.StatusBarInterpolation.ExponentialEaseOut then
@@ -118,12 +113,7 @@ local function SetMissingHealthBarValue(bar, unit, frame)
     if not bar then return end
     
     -- Get the appropriate db for this frame
-    local db
-    if frame and frame.isRaidFrame then
-        db = DF.GetRaidDB and DF:GetRaidDB()
-    else
-        db = DF.GetDB and DF:GetDB()
-    end
+    local db = frame and DF.GetFrameDB and DF:GetFrameDB(frame) or (DF.GetDB and DF:GetDB())
     
     local backgroundMode = db and db.backgroundMode or "BACKGROUND"
     
@@ -399,6 +389,7 @@ end)
 -- frames during template processing. This table lives OUTSIDE the frame object,
 -- so the secure template can't touch it.
 DF.raidFrameRegistry = DF.raidFrameRegistry or setmetatable({}, {__mode = "k"})
+DF.pinnedFrameLayoutRegistry = DF.pinnedFrameLayoutRegistry or setmetatable({}, {__mode = "k"})
 
 -- Register a frame as a raid frame (call from InitializeHeaderChild and FlatRaidFrames)
 function DF:RegisterRaidFrame(frame)
@@ -408,19 +399,36 @@ function DF:RegisterRaidFrame(frame)
     end
 end
 
+function DF:RegisterPinnedFrameLayout(frame, layoutMode)
+    if not frame then return end
+    layoutMode = (layoutMode == "raid") and "raid" or "party"
+    self.pinnedFrameLayoutRegistry[frame] = layoutMode
+    frame.dfPinnedLayoutMode = layoutMode
+    frame.isRaidFrame = layoutMode == "raid"
+end
+
+function DF:GetFrameLayoutMode(frame)
+    if not frame then return "party" end
+
+    if frame.isPinnedFrame then
+        local layoutMode = frame.dfPinnedLayoutMode or self.pinnedFrameLayoutRegistry[frame]
+        if layoutMode == "raid" or layoutMode == "party" then
+            return layoutMode
+        end
+    end
+
+    return (frame.isRaidFrame or self.raidFrameRegistry[frame]) and "raid" or "party"
+end
+
 -- Check if a frame is a raid frame (checks external registry first, then field)
 function DF:IsRaidFrame(frame)
     if not frame then return false end
-    return frame.isRaidFrame or self.raidFrameRegistry[frame] or false
+    return self:GetFrameLayoutMode(frame) == "raid"
 end
 
 -- Helper to get correct DB based on frame type
 function DF:GetFrameDB(frame)
-    if frame and DF:IsRaidFrame(frame) then
-        return DF:GetRaidDB()
-    else
-        return DF:GetDB()
-    end
+    return DF:GetDB(DF:GetFrameLayoutMode(frame))
 end
 
 -- Note: FormatNumber should only be used with known-accessible values
@@ -573,6 +581,15 @@ function DF:GetAllFrames()
     -- Add raid frames
     if DF.IterateRaidFrames then
         DF:IterateRaidFrames(function(frame)
+            if frame and frame:IsShown() then
+                table.insert(frames, frame)
+            end
+        end)
+    end
+
+    -- Add pinned frames
+    if DF.IteratePinnedFrames then
+        DF:IteratePinnedFrames(function(frame)
             if frame and frame:IsShown() then
                 table.insert(frames, frame)
             end

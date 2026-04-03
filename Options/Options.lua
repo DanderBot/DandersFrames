@@ -1654,6 +1654,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 sets = {
                     [1] = {
                         enabled = false, name = "Pinned 1", players = {},
+                        layoutSource = "current",
                         growDirection = "HORIZONTAL", unitsPerRow = 5,
                         horizontalSpacing = 2, verticalSpacing = 2, scale = 1.0,
                         position = { point = "CENTER", x = 0, y = 200 },
@@ -1663,6 +1664,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                     },
                     [2] = {
                         enabled = false, name = "Pinned 2", players = {},
+                        layoutSource = "current",
                         growDirection = "HORIZONTAL", unitsPerRow = 5,
                         horizontalSpacing = 2, verticalSpacing = 2, scale = 1.0,
                         position = { point = "CENTER", x = 0, y = -200 },
@@ -1681,6 +1683,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 if set.autoAddTanks == nil then set.autoAddTanks = false end
                 if set.autoAddHealers == nil then set.autoAddHealers = false end
                 if set.autoAddDPS == nil then set.autoAddDPS = false end
+                if set.layoutSource == nil then set.layoutSource = "current" end
                 if set.keepOfflinePlayers == nil then set.keepOfflinePlayers = true end
                 if set.columnAnchor == nil then set.columnAnchor = "START" end
                 if set.frameAnchor == nil then set.frameAnchor = "START" end
@@ -2226,6 +2229,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             if DF.PinnedFrames then
                 DF.PinnedFrames:ApplyLayoutSettings(activeHighlightTab)
                 DF.PinnedFrames:ResizeContainer(activeHighlightTab)
+                DF.PinnedFrames:RefreshChildFrames(activeHighlightTab)
             end
         end
         
@@ -2325,6 +2329,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- ===== LAYOUT GROUP (Column 2) =====
         local layoutGroup = GUI:CreateSettingsGroup(self.child, 280)
         layoutGroup:AddWidget(GUI:CreateHeader(self.child, "Layout"), 40)
+
+        local layoutSourceOptions = {
+            current = "Match Current Mode",
+            party = "Use Party Layout",
+            raid = "Use Raid Layout",
+        }
+        layoutGroup:AddWidget(CreateRefreshableDropdown(self.child, "Layout Source", layoutSourceOptions, "layoutSource", UpdateHighlightLayout), 55)
         
         local directionOptions = { HORIZONTAL = "Horizontal", VERTICAL = "Vertical" }
         layoutGroup:AddWidget(CreateRefreshableDropdown(self.child, "Direction", directionOptions, "growDirection", UpdateHighlightLayout), 55)

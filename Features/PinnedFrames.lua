@@ -30,6 +30,14 @@ local function GetActualMode()
     return IsInRaid() and "raid" or "party"
 end
 
+local function GetPinnedLayoutMode(setOrIndex)
+    return DF:GetPinnedLayoutMode(setOrIndex, GetActualMode())
+end
+
+local function GetPinnedLayoutDB(setOrIndex)
+    return DF:GetPinnedLayoutDB(setOrIndex, GetActualMode())
+end
+
 -- Get a specific set's config
 local function GetSetDB(setIndex)
     local hlDB = GetPinnedDB()
@@ -707,13 +715,15 @@ function PinnedFrames:ApplyLayoutSettings(setIndex)
     if not header or not set then return end
     if InCombatLockdown() then return end
     
-    local db = IsInRaid() and DF:GetRaidDB() or DF:GetDB()
+    local db = GetPinnedLayoutDB(set)
     if not db then
         if DF.debugPinnedFrames then
             print("|cFF00FFFF[DF Pinned]|r ApplyLayoutSettings: db is nil!")
         end
         return
     end
+
+    local layoutMode = GetPinnedLayoutMode(set)
     
     local frameWidth = db.frameWidth or 120
     local frameHeight = db.frameHeight or 50
@@ -724,8 +734,12 @@ function PinnedFrames:ApplyLayoutSettings(setIndex)
         local child = header:GetAttribute("child" .. i)
         if child then
             child:SetSize(frameWidth, frameHeight)
-            -- Also update the isRaidFrame flag for proper DB selection in other functions
-            child.isRaidFrame = IsInRaid()
+            if DF.RegisterPinnedFrameLayout then
+                DF:RegisterPinnedFrameLayout(child, layoutMode)
+            else
+                child.isRaidFrame = layoutMode == "raid"
+                child.dfPinnedLayoutMode = layoutMode
+            end
         end
     end
     
@@ -874,7 +888,7 @@ function PinnedFrames:ResizeContainer(setIndex)
     
     if not container or not header or not set then return end
     
-    local db = IsInRaid() and DF:GetRaidDB() or DF:GetDB()
+    local db = GetPinnedLayoutDB(set)
     local frameWidth = db.frameWidth or 120
     local frameHeight = db.frameHeight or 50
     

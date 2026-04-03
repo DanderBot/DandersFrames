@@ -946,6 +946,15 @@ function DF:UpdateAllFramesStatusIcons()
             end
         end
     end
+
+    -- Update pinned frames
+    if DF.IteratePinnedFrames then
+        DF:IteratePinnedFrames(function(frame)
+            if frame.unit then
+                DF:UpdateAllStatusIcons(frame)
+            end
+        end)
+    end
     
     -- Also refresh test frames if in test mode
     if DF.testMode or DF.raidTestMode then
@@ -998,6 +1007,16 @@ afkTickerFrame:SetScript("OnUpdate", function(self, elapsed)
                 end
             end
         end
+    end
+
+    -- Update pinned frames using each frame's effective layout DB
+    if DF.IteratePinnedFrames then
+        DF:IteratePinnedFrames(function(frame)
+            local db = DF:GetFrameDB(frame)
+            if db and db.afkIconEnabled and db.afkIconShowTimer ~= false and frame.afkIcon and frame.afkIcon:IsShown() then
+                DF:UpdateAFKIcon(frame)
+            end
+        end)
     end
     
     -- Update test frames if in test mode

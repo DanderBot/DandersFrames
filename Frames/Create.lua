@@ -114,7 +114,7 @@ function DF:ShowBindingTooltip(anchorFrame)
     local unit = anchorFrame.unit
     local isDead = false
     if anchorFrame.dfIsTestFrame then
-        local testData = DF.GetTestUnitData and DF:GetTestUnitData(anchorFrame.index, anchorFrame.isRaidFrame)
+        local testData = DF.GetTestUnitData and DF:GetTestUnitData(anchorFrame.index, DF:IsRaidFrame(anchorFrame))
         isDead = testData and testData.status == "Dead"
     elseif unit and UnitExists(unit) then
         isDead = UnitIsDeadOrGhost(unit)
@@ -548,10 +548,10 @@ function DF:CreateFrameElements(frame, isRaid)
     
     -- Determine if raid based on frame property or parameter
     if isRaid == nil then
-        isRaid = frame.isRaidFrame
+        isRaid = DF:IsRaidFrame(frame)
     end
     
-    local db = isRaid and DF:GetRaidDB() or DF:GetDB()
+    local db = DF:GetFrameDB(frame)
     
     -- Store reference for DB lookups
     frame.isRaidFrame = isRaid
@@ -2136,7 +2136,8 @@ function DF:CreateUnitFrame(unit, index, isRaid)
         if db.tooltipFrameDisableInCombat and InCombatLockdown() then return end
 
         -- Check for test mode (party or raid)
-        local inTestMode = (self.isRaidFrame and DF.raidTestMode) or (not self.isRaidFrame and DF.testMode)
+        local isRaidFrame = DF:IsRaidFrame(self)
+        local inTestMode = (isRaidFrame and DF.raidTestMode) or (not isRaidFrame and DF.testMode)
 
         if inTestMode then
             local testData = DF:GetTestUnitData(self.unit == "player" and 0 or tonumber(self.unit:match("%d+")))

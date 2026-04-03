@@ -1736,6 +1736,13 @@ function DF:UpdateRoleIcon(frame, source)
     
     -- Use raid DB for raid frames, party DB for party frames
     local db = DF:GetFrameDB(frame)
+
+    local enabled = db.roleIconEnabled
+    if enabled == nil then enabled = true end
+    if not enabled then
+        frame.roleIcon:Hide()
+        return
+    end
     
     local role = UnitGroupRolesAssigned(frame.unit)
     
@@ -1833,6 +1840,11 @@ function DF:UpdateAllRoleIcons()
     -- Raid frames via iterator
     if DF.IterateRaidFrames then
         DF:IterateRaidFrames(updateFrame)
+    end
+
+    -- Pinned frames via iterator
+    if DF.IteratePinnedFrames then
+        DF:IteratePinnedFrames(updateFrame)
     end
 end
 

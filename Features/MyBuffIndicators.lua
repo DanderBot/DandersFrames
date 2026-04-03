@@ -446,12 +446,7 @@ function DF:UpdateMyBuffGradientHealth(frame)
     if not unit or not UnitExists(unit) then return end
     
     -- Get the appropriate db for this frame to check smoothBars setting
-    local db
-    if frame.isRaidFrame then
-        db = DF.GetRaidDB and DF:GetRaidDB()
-    else
-        db = DF.GetDB and DF:GetDB()
-    end
+    local db = DF.GetFrameDB and DF:GetFrameDB(frame) or (DF.GetDB and DF:GetDB())
     local smoothEnabled = db and db.smoothBars
     
     -- StatusBar API handles secret values internally via SetMinMaxValues/SetValue
@@ -479,7 +474,7 @@ function DF:UpdateMyBuffIndicator(frame)
     local db = DF:GetFrameDB(frame)
     
     -- Check if in test mode first (allows preview even when feature is disabled)
-    local isRaidFrame = frame.isRaidFrame
+    local isRaidFrame = DF:IsRaidFrame(frame)
     local inRelevantTestMode = (isRaidFrame and DF.raidTestMode) or (not isRaidFrame and DF.testMode)
     
     -- In test mode, check testShowMyBuffIndicator; otherwise check myBuffIndicatorEnabled
@@ -521,7 +516,7 @@ function DF:UpdateMyBuffIndicator(frame)
             end
         end
         
-        local testData = DF.GetTestUnitData and DF:GetTestUnitData(testIndex, frame.isRaidFrame)
+        local testData = DF.GetTestUnitData and DF:GetTestUnitData(testIndex, DF:IsRaidFrame(frame))
         
         if testData and testData.hasMyBuff then
             local overlay = CreateMyBuffOverlay(frame)
