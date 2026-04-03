@@ -889,12 +889,16 @@ function FlatRaidFrames:UpdateSorting()
     
     -- Check sorting settings
     local sortEnabled = db.sortEnabled
+    -- party/raid index option overrides all other custom sorting
+    if db.sortByPartyOrder then
+        sortEnabled = false
+    end
     local selfPosition = db.sortSelfPosition or "SORTED"
     local separateMeleeRanged = db.sortSeparateMeleeRanged
     local sortByClass = db.sortByClass
     local sortAlphabetical = db.sortAlphabetical
     
-    DebugPrint("UpdateSorting: sortEnabled=", sortEnabled, "selfPosition=", selfPosition)
+    DebugPrint("UpdateSorting: sortEnabled=", sortEnabled, "selfPosition=", selfPosition, "partyOrder=", tostring(db.sortByPartyOrder))
     DebugPrint("  separateMeleeRanged=", separateMeleeRanged, "sortByClass=", sortByClass, "sortAlphabetical=", sortAlphabetical)
     
     -- CRITICAL: Handle sortEnabled=false first

@@ -9,11 +9,16 @@ local addonName, DF = ...
 local pairs, ipairs, type, wipe = pairs, ipairs, type, wipe
 local sort = table.sort
 local tinsert = table.insert
+
 local UnitExists = UnitExists
 local UnitGUID = UnitGUID
 local UnitGroupRolesAssigned = UnitGroupRolesAssigned
 local UnitClass = UnitClass
+local UnitIsUnit = UnitIsUnit
+local UnitName = UnitName
 local GetSpecializationInfoByID = GetSpecializationInfoByID
+local GetSpecialization = GetSpecialization
+local InCombatLockdown = InCombatLockdown
 
 -- NOTE: Previously used reusable tables here, but that caused bugs when
 -- SortFrameList was called while iterating over a previous result.
@@ -157,6 +162,31 @@ end
 
 -- Compare function for sorting frames
 function Sort:CompareUnits(unitA, unitB, db)
+    -- Option to ignore role/class/name and simply use party/raid index
+    if db.sortByPartyOrder then
+        local function GetIndex(u)
+            if not u then return 9999 end
+            if UnitIsUnit(u, "player") then return 0 end
+
+            -- Prefer a GUID->party slot lookup so the "index order" matches the actual party roster
+            -- even if the unit-id on a frame isn't literally "partyN" (e.g. raidN assignment).
+            local guid = UnitGUID(u)
+            if guid then
+                for i = 1, 4 do
+                    local pu = "party" .. i
+                    if UnitExists(pu) and UnitGUID(pu) == guid then
+                        return i
+                    end
+                end
+            end
+
+            -- Fallback: parse digits from the unit string (party1/raid1/etc)
+            local num = tonumber((u:match("%d+")))
+            return num or 9999
+        end
+        return GetIndex(unitA) < GetIndex(unitB)
+    end
+
     local roleA = self:GetUnitRole(unitA)
     local roleB = self:GetUnitRole(unitB)
     
@@ -199,6 +229,13 @@ end
 
 -- Compare function for test mode using test data
 function Sort:CompareTestData(dataA, dataB, db)
+    -- If party-order sorting is requested, use the precomputed index
+    if db.sortByPartyOrder then
+        local idxA = dataA.index or 9999
+        local idxB = dataB.index or 9999
+        return idxA < idxB
+    end
+
     -- Get roles from test data
     local roleA = dataA.role or "DAMAGER"
     local roleB = dataB.role or "DAMAGER"
@@ -424,6 +461,7 @@ SlashCmdList["DFSORT"] = function(msg)
         print("  sortByClass:", db.sortByClass)
         print("  sortAlphabetical:", tostring(db.sortAlphabetical))
         print("  sortSeparateMeleeRanged:", db.sortSeparateMeleeRanged)
+        print("  sortByPartyOrder:", tostring(db.sortByPartyOrder))
         print("  sortRoleOrder:", table.concat(db.sortRoleOrder or {}, ", "))
         if db.sortByClass then
             print("  sortClassOrder:", table.concat(db.sortClassOrder or {}, ", "))

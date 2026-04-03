@@ -3994,6 +3994,7 @@ function DF:ApplyRaidGroupSorting()
     end
     
     -- Determine if we need nameList for advanced sorting
+    -- Party order option disables custom sorting entirely (sortEnabled=false above)
     -- Use nameList for ALL groups when:
     -- - Player position is FIRST/LAST (player's group only)
     -- - OR any advanced option is enabled (all groups need it)
@@ -4425,19 +4426,78 @@ function DF:BuildRaidGroupNameList(groupIndex, selfPosition)
     return DF:BuildSortedNameList(members, DF:GetRaidDB(), selfPosition, playerInGroup)
 end
 
--- Build a namelist for party that puts player first or last, sorted by role priority
+-- Build a nameList for party, honoring sortByPartyOrder and selfPosition
 function DF:BuildPartyNameList(selfPosition)
-    -- Get members in party (player + party1-4)
-    local members = {}
+    local db = DF:GetDB()
     local playerName = UnitName("player")
-    
+
+    if db.sortByPartyOrder then
+        local names = {}
+
+        local partyNames = {}
+        for i = 1, 4 do
+            local unit = "party" .. i
+            if UnitExists(unit) and not UnitIsUnit(unit, "player") then
+                local name, realm = UnitName(unit)
+                if name then
+                    local fullName = name
+                    if realm and realm ~= "" then
+                        fullName = name .. "-" .. realm
+                    end
+                    table.insert(partyNames, fullName)
+                end
+            end
+        end
+
+        local targetPos
+        if selfPosition == "FIRST" or selfPosition == "1" then
+            targetPos = 1
+        elseif selfPosition == "LAST" then
+            targetPos = #partyNames + 1
+        else
+            local n = tonumber(selfPosition)
+            if n and n >= 1 then
+                if n > (#partyNames + 1) then n = #partyNames + 1 end
+                targetPos = n
+            else
+                targetPos = nil
+            end
+        end
+
+        if targetPos then
+            local inserted = false
+            for i = 1, #partyNames + 1 do
+                if i == targetPos then
+                    table.insert(names, playerName)
+                    inserted = true
+                end
+                if i <= #partyNames then
+                    table.insert(names, partyNames[i])
+                end
+            end
+            if not inserted then
+                table.insert(names, playerName)
+            end
+        else
+            table.insert(names, playerName)
+            for _, n in ipairs(partyNames) do
+                table.insert(names, n)
+            end
+        end
+
+        return table.concat(names, ",")
+    end
+
+    -- Default path: role/class/name sorting via unified function
+    local members = {}
+
     -- Add player
     table.insert(members, {
         unit = "player",
         name = playerName,
         isPlayer = true
     })
-    
+
     -- Add party members
     for i = 1, 4 do
         local unit = "party" .. i
@@ -4457,8 +4517,7 @@ function DF:BuildPartyNameList(selfPosition)
         end
     end
     
-    -- Use the unified sorting function
-    return DF:BuildSortedNameList(members, DF:GetDB(), selfPosition, true)
+    return DF:BuildSortedNameList(members, db, selfPosition, true)
 end
 
 -- ============================================================
@@ -5874,8 +5933,12 @@ function DF:ApplyPartyGroupSorting()
     local sortByClass = db.sortByClass
     local sortAlphabetical = db.sortAlphabetical
     
-    -- Determine if we need nameList (any advanced option or FIRST/LAST)
-    local needsNameList = (selfPosition ~= "SORTED") or separateMeleeRanged or sortByClass or sortAlphabetical
+    -- Determine if we need nameList (any advanced option, FIRST/LAST, or party-index mode)
+    local needsNameList = db.sortByPartyOrder
+                       or (selfPosition ~= "SORTED")
+                       or separateMeleeRanged
+                       or sortByClass
+                       or sortAlphabetical
     
     if DF.debugHeaders then
         print("|cFF00FF00[DF Headers]|r ApplyPartyGroupSorting:")
@@ -6907,10 +6970,12 @@ function DF:DumpHeaderInfo()
     print("  growthAnchor:", db.growthAnchor or "nil")
     print("  sortSelfPosition:", db.sortSelfPosition or "nil")
     print("  sortEnabled:", db.sortEnabled and "true" or "false")
+    print("  sortByPartyOrder:", db.sortByPartyOrder and "true" or "false")
     print("Raid Settings:")
     print("  raidUseGroups:", raidDb.raidUseGroups and "true" or "false")
     print("  raidEnabled:", raidDb.raidEnabled and "true" or "false")
     print("  sortEnabled:", raidDb.sortEnabled and "true" or "false")
+    print("  sortByPartyOrder:", raidDb.sortByPartyOrder and "true" or "false")
     print("  sortSelfPosition:", raidDb.sortSelfPosition or "nil")
     print("  sortSeparateMeleeRanged:", raidDb.sortSeparateMeleeRanged and "true" or "false")
     print("  sortByClass:", raidDb.sortByClass and "true" or "false")

@@ -596,10 +596,19 @@ function SecureSort:CreateHandler()
             -- STEP 2: Get sort settings
             -- =====================================================
             local sortEnabled = self:GetAttribute("sortEnabled")
+            local sortByPartyOrder = self:GetAttribute("sortByPartyOrder") or false
+            local partyOrderSort = sortByPartyOrder
             local selfPosition = self:GetAttribute("selfPosition") or "NORMAL"
             local sortAlphabetical = self:GetAttribute("sortAlphabetical") or false
             local sortAlphaReverse = (sortAlphabetical == "ZA")
             local sortByClass = self:GetAttribute("sortByClass") or false
+            
+            if sortByPartyOrder then
+                -- ignore other criteria when using raw party order
+                sortEnabled = false
+                sortAlphabetical = false
+                sortByClass = false
+            end
             
             -- =====================================================
             -- STEP 3: Query roles (if sorting enabled)
@@ -700,11 +709,23 @@ function SecureSort:CreateHandler()
             for idx = 0, frameCount - 1 do
                 local i = visibleFrames[idx]
                 local unit = frameUnits[i]
-                local role = unit2role[unit] or "DAMAGER"
-                local rp = rolePriority[role] or 99
-                local cls = unit2class[unit]
-                local cp = sortByClass and (classPriority[cls] or 99) or 0
-                frameSortKey[idx] = rp * 100 + cp
+                if partyOrderSort then
+                    -- When using "party/raid index order", we want to KEEP the
+                    -- existing visual order of the frames and only apply the
+                    -- selfPosition override (player first/last/numeric slot).
+                    --
+                    -- The existing order is exactly the order of visibleFrames,
+                    -- so we just use the current index as the sort key. This
+                    -- guarantees non-player units stay in their current order,
+                    -- matching the behavior when sorting is disabled.
+                    frameSortKey[idx] = idx
+                else
+                    local role = unit2role[unit] or "DAMAGER"
+                    local rp = rolePriority[role] or 99
+                    local cls = unit2class[unit]
+                    local cp = sortByClass and (classPriority[cls] or 99) or 0
+                    frameSortKey[idx] = rp * 100 + cp
+                end
                 
                 -- Read name from attribute (pushed by Lua code)
                 frameName[idx] = self:GetAttribute("frameName" .. i) or ""
@@ -720,7 +741,7 @@ function SecureSort:CreateHandler()
             end
             
             -- Bubble sort by sort key, then by name as tiebreaker
-            if sortEnabled then
+            if sortEnabled or partyOrderSort then
                 for i = 0, frameCount - 2 do
                     for j = 0, frameCount - 2 - i do
                         local a = sortOrder[j]
@@ -2023,6 +2044,7 @@ function SecureSort:PushSortSettings()
     self.sortButton:SetAttribute("roleOrder3", roleOrder[3] or "DAMAGER")
     self.sortButton:SetAttribute("selfPosition", db.sortSelfPosition or "SORTED")
     self.sortButton:SetAttribute("sortEnabled", db.sortEnabled or false)
+    self.sortButton:SetAttribute("sortByPartyOrder", db.sortByPartyOrder or false)
     self.sortButton:SetAttribute("sortByClass", db.sortByClass or false)
     self.sortButton:SetAttribute("meleeBeforeRanged", meleeBeforeRanged)
     self.sortButton:SetAttribute("sortAlphabetical", db.sortAlphabetical or false)
@@ -2034,6 +2056,7 @@ function SecureSort:PushSortSettings()
         self.handler:SetAttribute("roleOrder3", roleOrder[3] or "DAMAGER")
         self.handler:SetAttribute("selfPosition", db.sortSelfPosition or "SORTED")
         self.handler:SetAttribute("sortEnabled", db.sortEnabled or false)
+        self.handler:SetAttribute("sortByPartyOrder", db.sortByPartyOrder or false)
         self.handler:SetAttribute("sortByClass", db.sortByClass or false)
         self.handler:SetAttribute("meleeBeforeRanged", meleeBeforeRanged)
         self.handler:SetAttribute("sortAlphabetical", db.sortAlphabetical or false)
@@ -2063,6 +2086,7 @@ function SecureSort:PushSortSettings()
     DebugPrint("Sort settings pushed: " .. 
         (roleOrder[1] or "?") .. ">" .. (roleOrder[2] or "?") .. ">" .. (roleOrder[3] or "?") ..
         " self=" .. (db.sortSelfPosition or "SORTED") ..
+        " partyOrder=" .. tostring(db.sortByPartyOrder) ..
         " class=" .. tostring(db.sortByClass or false) ..
         " alpha=" .. tostring(db.sortAlphabetical or false))
     
