@@ -1782,9 +1782,12 @@ function DF:UpdateRoleIcon(frame, source)
         return
     end
     
-    local tex, l, r, t, b = DF:GetRoleIconTexture(db, role)
-    frame.roleIcon.texture:SetTexture(tex)
-    frame.roleIcon.texture:SetTexCoord(l, r, t, b)
+    local tex, isAtlas = DF:GetRoleIconTexture(db, role)
+    if isAtlas then
+        frame.roleIcon.texture:SetAtlas(tex)
+    else
+        frame.roleIcon.texture:SetTexture(tex)
+    end
     
     frame.roleIcon:Show()
     
@@ -1979,10 +1982,10 @@ function DF:UpdateReadyCheckIcon(frame)
     local readyCheckStatus = GetReadyCheckStatus(frame.unit)
     
     if readyCheckStatus == "ready" then
-        frame.readyCheckIcon.texture:SetTexture("Interface\\RaidFrame\\ReadyCheck-Ready")
+        frame.readyCheckIcon.texture:SetAtlas("UI-LFG-ReadyMark-Raid")
         frame.readyCheckIcon:Show()
     elseif readyCheckStatus == "notready" then
-        frame.readyCheckIcon.texture:SetTexture("Interface\\RaidFrame\\ReadyCheck-NotReady")
+        frame.readyCheckIcon.texture:SetAtlas("UI-LFG-DeclineMark-Raid")
         frame.readyCheckIcon:Show()
     elseif readyCheckStatus == "waiting" then
         -- Check if player is AFK while waiting (enhanced ready check)
@@ -1996,9 +1999,9 @@ function DF:UpdateReadyCheckIcon(frame)
         
         if afkAccessible and isAFK then
             -- AFK state - show not ready icon (they likely won't respond)
-            frame.readyCheckIcon.texture:SetTexture("Interface\\RaidFrame\\ReadyCheck-NotReady")
+            frame.readyCheckIcon.texture:SetAtlas("UI-LFG-DeclineMark-Raid")
         else
-            frame.readyCheckIcon.texture:SetTexture("Interface\\RaidFrame\\ReadyCheck-Waiting")
+            frame.readyCheckIcon.texture:SetAtlas("UI-LFG-PendingMark-Raid")
         end
         frame.readyCheckIcon:Show()
     else
@@ -2073,7 +2076,7 @@ function DF:UpdateCenterStatusIcon(frame)
     
     local unit = frame.unit
     local showIcon = false
-    local texture = nil
+    local atlas = nil
     
     -- Check for incoming summon (secret-safe)
     if C_IncomingSummon and C_IncomingSummon.HasIncomingSummon then
@@ -2085,13 +2088,13 @@ function DF:UpdateCenterStatusIcon(frame)
         -- Check if value is accessible
         if summonStatus ~= nil and not (issecretvalue and issecretvalue(summonStatus)) then
             if summonStatus == Enum.SummonStatus.Pending then
-                texture = "Interface\\RaidFrame\\Raid-Icon-SummonPending"
+                atlas = "RaidFrame-Icon-SummonPending"
                 showIcon = true
             elseif summonStatus == Enum.SummonStatus.Accepted then
-                texture = "Interface\\RaidFrame\\Raid-Icon-SummonAccepted"
+                atlas = "RaidFrame-Icon-SummonAccepted"
                 showIcon = true
             elseif summonStatus == Enum.SummonStatus.Declined then
-                texture = "Interface\\RaidFrame\\Raid-Icon-SummonDeclined"
+                atlas = "RaidFrame-Icon-SummonDeclined"
                 showIcon = true
             end
         end
@@ -2105,13 +2108,13 @@ function DF:UpdateCenterStatusIcon(frame)
         end)
         
         if hasRes ~= nil and not (issecretvalue and issecretvalue(hasRes)) and hasRes then
-            texture = "Interface\\RaidFrame\\Raid-Icon-Rez"
+            atlas = "RaidFrame-Icon-Rez"
             showIcon = true
         end
     end
     
-    if showIcon and texture then
-        frame.centerStatusIcon.texture:SetTexture(texture)
+    if showIcon and atlas then
+        frame.centerStatusIcon.texture:SetAtlas(atlas)
         frame.centerStatusIcon:Show()
         
         -- Apply positioning
