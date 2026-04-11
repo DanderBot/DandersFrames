@@ -635,10 +635,10 @@ local ROLE_ICON_TEXTURES = {
     DAMAGER = "Interface\\AddOns\\DandersFrames\\Media\\DF_DPS",
 }
 
-local BLIZZARD_ROLE_COORDS = {
-    TANK = {0, 0.296875, 0.296875, 0.65},
-    HEALER = {0.296875, 0.59375, 0, 0.296875},
-    DAMAGER = {0.296875, 0.59375, 0.296875, 0.65},
+local BLIZZARD_ROLE_ATLASES = {
+    TANK = "UI-LFG-RoleIcon-Tank-Micro",
+    HEALER = "UI-LFG-RoleIcon-Healer-Micro",
+    DAMAGER = "UI-LFG-RoleIcon-DPS-Micro",
 }
 
 function DF:GetRoleIconTexture(db, role)
@@ -658,16 +658,15 @@ function DF:GetRoleIconTexture(db, role)
             path = path:gsub("%.[tT][gG][aA]$", "")
             path = path:gsub("%.[bB][lL][pP]$", "")
             path = path:gsub("%.[pP][nN][gG]$", "")
-            return path, 0, 1, 0, 1
+            return path, false -- Not an atlas
         end
         style = "CUSTOM"
     end
 
     if style == "CUSTOM" then
-        return ROLE_ICON_TEXTURES[role], 0, 1, 0, 1
+        return ROLE_ICON_TEXTURES[role], false -- Not an atlas
     else
         -- BLIZZARD
-        local c = BLIZZARD_ROLE_COORDS[role]
-        return "Interface\\LFGFrame\\UI-LFG-ICON-PORTRAITROLES", c[1], c[2], c[3], c[4]
+        return BLIZZARD_ROLE_ATLASES[role], true -- Is an atlas
     end
 end

@@ -48,15 +48,18 @@ local ATLAS_LIST = {
     "ping_marker_threat",
     
     -- Group finder / roles
-    "groupfinder-icon-class-healer",
-    "groupfinder-icon-class-tank",
-    "groupfinder-icon-class-dps",
+    "groupfinder-icon-role-large-heal",
+    "groupfinder-icon-role-large-tank",
+    "groupfinder-icon-role-large-dps",
     "roleicon-tiny-tank",
     "roleicon-tiny-healer",
     "roleicon-tiny-dps",
     "UI-LFG-RoleIcon-Tank",
     "UI-LFG-RoleIcon-Healer",
     "UI-LFG-RoleIcon-DPS",
+    "UI-LFG-RoleIcon-Tank-Micro",
+    "UI-LFG-RoleIcon-Healer-Micro",
+    "UI-LFG-RoleIcon-DPS-Micro",
     
     -- Voice chat
     "voicechat-icon-mic",

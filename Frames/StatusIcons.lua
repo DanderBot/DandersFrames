@@ -83,7 +83,7 @@ function DF:CreateStatusIcons(frame)
     -- ========================================
     frame.summonIcon = CreateStatusIcon(overlay, 16)
     frame.summonIcon:SetPoint("CENTER", frame, "CENTER", 0, 0)
-    frame.summonIcon.texture:SetTexture("Interface\\RaidFrame\\Raid-Icon-SummonPending")
+    frame.summonIcon.texture:SetAtlas("RaidFrame-Icon-SummonPending")
     frame.summonIcon.text:SetTextColor(0.6, 0.2, 1, 1)  -- Purple for summon
     
     -- ========================================
@@ -91,7 +91,7 @@ function DF:CreateStatusIcons(frame)
     -- ========================================
     frame.resurrectionIcon = CreateStatusIcon(overlay, 16)
     frame.resurrectionIcon:SetPoint("CENTER", frame, "CENTER", 0, 10)
-    frame.resurrectionIcon.texture:SetTexture("Interface\\RaidFrame\\Raid-Icon-Rez")
+    frame.resurrectionIcon.texture:SetAtlas("RaidFrame-Icon-Rez")
     frame.resurrectionIcon.text:SetTextColor(0.2, 1, 0.2, 1)  -- Green for res
     frame.resurrectionIcon.unitFrame = frame
     frame.resurrectionIcon:EnableMouse(true)
@@ -131,7 +131,7 @@ function DF:CreateStatusIcons(frame)
     -- ========================================
     frame.phasedIcon = CreateStatusIcon(overlay, 16)
     frame.phasedIcon:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -2, -2)
-    frame.phasedIcon.texture:SetTexture("Interface\\TargetingFrame\\UI-PhasingIcon")
+    frame.phasedIcon.texture:SetAtlas("RaidFrame-Icon-Phasing")
     frame.phasedIcon.texture:SetTexCoord(0.15625, 0.84375, 0.15625, 0.84375)
     frame.phasedIcon.text:SetTextColor(0.5, 0.5, 1, 1)  -- Blue-ish for phased
     
@@ -140,7 +140,7 @@ function DF:CreateStatusIcons(frame)
     -- ========================================
     frame.afkIcon = CreateStatusIcon(overlay, 32)
     frame.afkIcon:SetPoint("CENTER", frame, "CENTER", 0, 0)
-    frame.afkIcon.texture:SetTexture("Interface\\FriendsFrame\\StatusIcon-Away")
+    frame.afkIcon.texture:SetAtlas("characterupdate_clock-icon")
     frame.afkIcon.text:SetFont("Fonts\\FRIZQT__.TTF", 12, "OUTLINE")
     frame.afkIcon.text:SetTextColor(1, 0.5, 0, 1)  -- Orange for AFK
     -- Timer text (separate from main text, shown below/after)
@@ -155,7 +155,7 @@ function DF:CreateStatusIcons(frame)
     -- ========================================
     frame.vehicleIcon = CreateStatusIcon(overlay, 16)
     frame.vehicleIcon:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -2, 2)
-    frame.vehicleIcon.texture:SetTexture("Interface\\Vehicles\\UI-Vehicles-Raid-Icon")
+    frame.vehicleIcon.texture:SetAtlas("RaidFrame-Icon-Vehicle")
     frame.vehicleIcon.text:SetTextColor(0.4, 0.8, 1, 1)  -- Light blue for vehicle
     
     -- ========================================
@@ -292,7 +292,7 @@ function DF:UpdateSummonIcon(frame)
     
     local unit = frame.unit
     local showIcon = false
-    local texture = nil
+    local atlas = nil
     local statusText = nil
 
     -- If the unit no longer exists (player left group), clear the icon immediately
@@ -316,15 +316,15 @@ function DF:UpdateSummonIcon(frame)
             
             if canaccessvalue(summonStatus) then
                 if summonStatus == Enum.SummonStatus.Pending then
-                    texture = "Interface\\RaidFrame\\Raid-Icon-SummonPending"
+                    atlas = "RaidFrame-Icon-SummonPending"
                     statusText = db.summonIconTextPending or "Summon"
                     showIcon = true
                 elseif summonStatus == Enum.SummonStatus.Accepted then
-                    texture = "Interface\\RaidFrame\\Raid-Icon-SummonAccepted"
+                    atlas = "RaidFrame-Icon-SummonAccepted"
                     statusText = db.summonIconTextAccepted or "Accepted"
                     showIcon = true
                 elseif summonStatus == Enum.SummonStatus.Declined then
-                    texture = "Interface\\RaidFrame\\Raid-Icon-SummonDeclined"
+                    atlas = "RaidFrame-Icon-SummonDeclined"
                     statusText = db.summonIconTextDeclined or "Declined"
                     showIcon = true
                 end
@@ -333,8 +333,7 @@ function DF:UpdateSummonIcon(frame)
     end
     
     if showIcon then
-        frame.summonIcon.texture:SetTexture(texture)
-        frame.summonIcon.texture:SetTexCoord(0, 1, 0, 1)
+        frame.summonIcon.texture:SetAtlas(atlas)
         ApplyIconSettings(frame.summonIcon, db, "summonIcon")
         
         -- Show as text or icon based on setting
@@ -405,7 +404,7 @@ function DF:UpdateResurrectionIcon(frame)
                 resCache[unit] = 1
                 resTimer = resTimer or C_Timer.NewTicker(0.25, ResTimerCleanup)
             end
-            frame.resurrectionIcon.texture:SetTexture("Interface\\RaidFrame\\Raid-Icon-Rez")
+            frame.resurrectionIcon.texture:SetAtlas("RaidFrame-Icon-Rez")
             frame.resurrectionIcon.texture:SetVertexColor(0, 1, 0, 1)
             ApplyIconSettings(frame.resurrectionIcon, db, "resurrectionIcon")
             frame.resurrectionIcon:Show()
@@ -414,7 +413,7 @@ function DF:UpdateResurrectionIcon(frame)
             -- Was casting, now stopped → pending accept (yellow)
             -- Store timestamp so we can expire after 60s
             resCache[unit] = GetTime()
-            frame.resurrectionIcon.texture:SetTexture("Interface\\RaidFrame\\Raid-Icon-Rez")
+            frame.resurrectionIcon.texture:SetAtlas("RaidFrame-Icon-Rez")
             frame.resurrectionIcon.texture:SetVertexColor(1, 1, 0, 0.75)
             ApplyIconSettings(frame.resurrectionIcon, db, "resurrectionIcon")
             frame.resurrectionIcon:Show()
@@ -422,7 +421,7 @@ function DF:UpdateResurrectionIcon(frame)
         elseif resCache[unit] and resCache[unit] ~= 1 then
             -- Still showing pending accept (check not expired)
             if (GetTime() - resCache[unit]) <= RES_ACCEPT_TIMEOUT then
-                frame.resurrectionIcon.texture:SetTexture("Interface\\RaidFrame\\Raid-Icon-Rez")
+                frame.resurrectionIcon.texture:SetAtlas("RaidFrame-Icon-Rez")
                 frame.resurrectionIcon.texture:SetVertexColor(1, 1, 0, 0.75)
                 ApplyIconSettings(frame.resurrectionIcon, db, "resurrectionIcon")
                 frame.resurrectionIcon:Show()
@@ -655,11 +654,9 @@ function DF:UpdatePhasedIcon(frame)
         -- cached == -1 means LFG (other party), anything else means phased
         local isLFG = (cached == -1)
         if isLFG and db.phasedIconShowLFGEye then
-            frame.phasedIcon.texture:SetTexture("Interface\\LFGFrame\\LFG-Eye")
-            frame.phasedIcon.texture:SetTexCoord(0.14, 0.235, 0.28, 0.47)
+            frame.phasedIcon.texture:SetAtlas("RaidFrame-Icon-LFR")
         else
-            frame.phasedIcon.texture:SetTexture("Interface\\TargetingFrame\\UI-PhasingIcon")
-            frame.phasedIcon.texture:SetTexCoord(0.15625, 0.84375, 0.15625, 0.84375)
+            frame.phasedIcon.texture:SetAtlas("RaidFrame-Icon-Phasing")
         end
         ApplyIconSettings(frame.phasedIcon, db, "phasedIcon")
         ShowIconAsText(frame.phasedIcon, db.phasedIconText or "Phased", db.phasedIconShowText)
@@ -889,10 +886,10 @@ function DF:UpdateRaidRoleIcon(frame)
     if showIcon and role then
         local statusText = nil
         if role == "MAINTANK" then
-            frame.raidRoleIcon.texture:SetTexture("Interface\\GroupFrame\\UI-Group-MainTankIcon")
+            frame.raidRoleIcon.texture:SetAtlas("RaidFrame-Icon-MainTank")
             statusText = db.raidRoleIconTextTank or "MT"
         else
-            frame.raidRoleIcon.texture:SetTexture("Interface\\GroupFrame\\UI-Group-MainAssistIcon")
+            frame.raidRoleIcon.texture:SetAtlas("RaidFrame-Icon-MainAssist")
             statusText = db.raidRoleIconTextAssist or "MA"
         end
         frame.raidRoleIcon.texture:SetTexCoord(0, 1, 0, 1)
@@ -1057,11 +1054,11 @@ function DF:UpdateReadyCheckIconEnhanced(frame)
         return
     end
     
-    local texture
+    local atlas
     if readyCheckStatus == "ready" then
-        texture = "Interface\\RaidFrame\\ReadyCheck-Ready"
+        atlas = "UI-LFG-ReadyMark-Raid"
     elseif readyCheckStatus == "notready" then
-        texture = "Interface\\RaidFrame\\ReadyCheck-NotReady"
+        atlas = "UI-LFG-DeclineMark-Raid"
     elseif readyCheckStatus == "waiting" then
         -- Check if also AFK
         local isAFK = nil
@@ -1071,17 +1068,17 @@ function DF:UpdateReadyCheckIconEnhanced(frame)
         
         if canaccessvalue(isAFK) and isAFK then
             -- AFK state - use notready icon with different tint or keep waiting
-            texture = "Interface\\RaidFrame\\ReadyCheck-NotReady"
+            atlas = "UI-LFG-DeclineMark-Raid"
             -- Could add vertex color for AFK distinction
         else
-            texture = "Interface\\RaidFrame\\ReadyCheck-Waiting"
+            atlas = "UI-LFG-PendingMark-Raid"
         end
     else
         frame.readyCheckIcon:Hide()
         return
     end
     
-    frame.readyCheckIcon.texture:SetTexture(texture)
+    frame.readyCheckIcon.texture:SetAtlas(atlas)
     
     -- Apply positioning
     local scale = db.readyCheckIconScale or 1.0
@@ -1149,9 +1146,12 @@ function DF:UpdateRoleIconEnhanced(frame)
     end
     
     -- Set texture based on style
-    local tex, l, r, t, b = DF:GetRoleIconTexture(db, role)
-    frame.roleIcon.texture:SetTexture(tex)
-    frame.roleIcon.texture:SetTexCoord(l, r, t, b)
+    local tex, isAtlas = DF:GetRoleIconTexture(db, role)
+    if isAtlas then
+        frame.roleIcon.texture:SetAtlas(tex)
+    else
+        frame.roleIcon.texture:SetTexture(tex)
+    end
     
     frame.roleIcon:Show()
     

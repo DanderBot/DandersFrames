@@ -1103,9 +1103,12 @@ function DF:UpdateTestIcons(frame, testData)
         end
         
         if shouldShow then
-            local tex, l, r, t, b = DF:GetRoleIconTexture(db, role)
-            frame.roleIcon.texture:SetTexture(tex)
-            frame.roleIcon.texture:SetTexCoord(l, r, t, b)
+            local tex, isAtlas = DF:GetRoleIconTexture(db, role)
+            if isAtlas then
+                frame.roleIcon.texture:SetAtlas(tex)
+            else
+                frame.roleIcon.texture:SetTexture(tex)
+            end
             
             frame.roleIcon:Show()
             local scale = db.roleIconScale or 1.0
@@ -1203,7 +1206,7 @@ function DF:UpdateTestIcons(frame, testData)
         if not db.readyCheckIconEnabled or db.testShowStatusIcons == false then
             frame.readyCheckIcon:Hide()
         elseif testData.isLeader then
-            frame.readyCheckIcon.texture:SetTexture("Interface\\RaidFrame\\ReadyCheck-Ready")
+            frame.readyCheckIcon.texture:SetAtlas("UI-LFG-ReadyMark-Raid")
             
             local scale = db.readyCheckIconScale or 1.0
             local anchor = db.readyCheckIconAnchor or "CENTER"
@@ -1231,9 +1234,9 @@ function DF:UpdateTestIcons(frame, testData)
         elseif testData.centerStatus then
             local texture = nil
             if testData.centerStatus == "resurrect" then
-                texture = "Interface\\RaidFrame\\Raid-Icon-Rez"
+                texture = "RaidFrame-Icon-Rez"
             elseif testData.centerStatus == "summon" then
-                texture = "Interface\\RaidFrame\\Raid-Icon-SummonPending"
+                texture = "RaidFrame-Icon-SummonPending"
             end
             
             if texture then
@@ -1412,7 +1415,7 @@ function DF:UpdateTestStatusIcons(frame, testData)
         if not db.readyCheckIconEnabled or db.testShowStatusIcons == false then
             frame.readyCheckIcon:Hide()
         elseif testData.isLeader then
-            frame.readyCheckIcon.texture:SetTexture("Interface\\RaidFrame\\ReadyCheck-Ready")
+            frame.readyCheckIcon.texture:SetAtlas("UI-LFG-ReadyMark-Raid")
             
             local scale = db.readyCheckIconScale or 1.0
             local anchor = db.readyCheckIconAnchor or "CENTER"
@@ -1439,7 +1442,7 @@ function DF:UpdateTestStatusIcons(frame, testData)
         if not db.summonIconEnabled or db.testShowStatusIcons == false then
             frame.summonIcon:Hide()
         elseif testData.centerStatus == "summon" then
-            frame.summonIcon.texture:SetTexture("Interface\\RaidFrame\\Raid-Icon-SummonPending")
+            frame.summonIcon.texture:SetAtlas("RaidFrame-Icon-SummonPending")
             
             local scale = db.summonIconScale or 1.0
             local anchor = db.summonIconAnchor or "CENTER"
@@ -1468,7 +1471,7 @@ function DF:UpdateTestStatusIcons(frame, testData)
         if not db.resurrectionIconEnabled or db.testShowStatusIcons == false then
             frame.resurrectionIcon:Hide()
         elseif testData.centerStatus == "resurrect" then
-            frame.resurrectionIcon.texture:SetTexture("Interface\\RaidFrame\\Raid-Icon-Rez")
+            frame.resurrectionIcon.texture:SetAtlas("RaidFrame-Icon-Rez")
             frame.resurrectionIcon.texture:SetVertexColor(0, 1, 0)  -- Green = being cast
             
             local scale = db.resurrectionIconScale or 1.0
@@ -1498,7 +1501,7 @@ function DF:UpdateTestStatusIcons(frame, testData)
         if not db.phasedIconEnabled or db.testShowStatusIcons == false then
             frame.phasedIcon:Hide()
         elseif testData.isPhased then
-            frame.phasedIcon.texture:SetTexture("Interface\\TargetingFrame\\UI-PhasingIcon")
+            frame.phasedIcon.texture:SetAtlas("RaidFrame-Icon-Phasing")
             
             local scale = db.phasedIconScale or 1.0
             local anchor = db.phasedIconAnchor or "TOPRIGHT"
@@ -1528,7 +1531,7 @@ function DF:UpdateTestStatusIcons(frame, testData)
             frame.afkIcon:Hide()
             if frame.afkIcon.timerText then frame.afkIcon.timerText:Hide() end
         elseif testData.isAFK then
-            frame.afkIcon.texture:SetTexture("Interface\\FriendsFrame\\StatusIcon-Away")
+            frame.afkIcon.texture:SetAtlas("characterupdate_clock-icon")
             
             local scale = db.afkIconScale or 1.0
             local anchor = db.afkIconAnchor or "CENTER"
@@ -1591,7 +1594,7 @@ function DF:UpdateTestStatusIcons(frame, testData)
         if not db.vehicleIconEnabled or db.testShowStatusIcons == false then
             frame.vehicleIcon:Hide()
         elseif testData.inVehicle then
-            frame.vehicleIcon.texture:SetTexture("Interface\\Vehicles\\UI-Vehicles-Raid-Icon")
+            frame.vehicleIcon.texture:SetAtlas("RaidFrame-Icon-Vehicle")
             
             local scale = db.vehicleIconScale or 1.0
             local anchor = db.vehicleIconAnchor or "BOTTOMRIGHT"
@@ -1620,7 +1623,7 @@ function DF:UpdateTestStatusIcons(frame, testData)
         if not db.raidRoleIconEnabled or db.testShowStatusIcons == false then
             frame.raidRoleIcon:Hide()
         elseif testData.isMainTank and db.raidRoleIconShowTank ~= false then
-            frame.raidRoleIcon.texture:SetTexture("Interface\\GroupFrame\\UI-Group-MainTankIcon")
+            frame.raidRoleIcon.texture:SetAtlas("RaidFrame-Icon-MainTank")
             
             local scale = db.raidRoleIconScale or 1.0
             local anchor = db.raidRoleIconAnchor or "BOTTOMLEFT"
@@ -1640,7 +1643,7 @@ function DF:UpdateTestStatusIcons(frame, testData)
                 frame.raidRoleIcon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
             end
         elseif testData.isMainAssist and db.raidRoleIconShowAssist ~= false then
-            frame.raidRoleIcon.texture:SetTexture("Interface\\GroupFrame\\UI-Group-MainAssistIcon")
+            frame.raidRoleIcon.texture:SetAtlas("RaidFrame-Icon-MainAssist")
             
             local scale = db.raidRoleIconScale or 1.0
             local anchor = db.raidRoleIconAnchor or "BOTTOMLEFT"
@@ -1680,15 +1683,15 @@ function DF:UpdateTestStatusIcons(frame, testData)
         if not showCenterStatus then
             frame.centerStatusIcon:Hide()
         elseif testData.centerStatus then
-            local texture = nil
+            local atlas = nil
             if testData.centerStatus == "resurrect" then
-                texture = "Interface\\RaidFrame\\Raid-Icon-Rez"
+                atlas = "RaidFrame-Icon-Rez"
             elseif testData.centerStatus == "summon" then
-                texture = "Interface\\RaidFrame\\Raid-Icon-SummonPending"
+                atlas = "RaidFrame-Icon-SummonPending"
             end
             
-            if texture then
-                frame.centerStatusIcon.texture:SetTexture(texture)
+            if atlas then
+                frame.centerStatusIcon.texture:SetAtlas(atlas)
                 
                 local scale = db.centerStatusIconScale or 1.0
                 local anchor = db.centerStatusIconAnchor or "CENTER"
