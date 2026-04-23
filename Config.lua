@@ -3342,7 +3342,6 @@ DF.BossDefaults = {
 
     -- Portrait
     portraitPosition = "RIGHT",  -- LEFT | RIGHT | HIDDEN
-    portraitStyle    = "2D",     -- 3D | 2D (2D matches Blizzard's default)
     portraitSize     = 44,       -- px
 
     -- Health bar

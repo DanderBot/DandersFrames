@@ -273,39 +273,11 @@ local function UpdateFrame(frame)
         end
     end
 
-    -- Portrait
+    -- Portrait (2D Blizzard-style face icon)
     if frame.portrait then
         if db.portraitPosition ~= "HIDDEN" then
             frame.portrait:Show()
-            if frame.portrait.isModel then
-                -- 3D model
-                if frame._testMode then
-                    if not frame._testModelSet then
-                        frame.portrait:ClearModel()
-                        frame.portrait:SetUnit("player")
-                        frame.portrait:SetPortraitZoom(0.9)
-                        frame._testModelSet = true
-                    end
-                else
-                    frame._testModelSet = nil
-                    frame.portrait:SetUnit(unit)
-                    frame.portrait:SetPortraitZoom(1)
-                end
-                if db.portraitPosition == "RIGHT" then
-                    frame.portrait:SetFacing(-0.5)
-                elseif db.portraitPosition == "LEFT" then
-                    frame.portrait:SetFacing(0.5)
-                else
-                    frame.portrait:SetFacing(0)
-                end
-            else
-                -- 2D texture (Blizzard-style face icon)
-                if frame._testMode then
-                    SetPortraitTexture(frame.portrait, "player")
-                else
-                    SetPortraitTexture(frame.portrait, unit)
-                end
-            end
+            SetPortraitTexture(frame.portrait, frame._testMode and "player" or unit)
         else
             frame.portrait:Hide()
         end
@@ -438,12 +410,6 @@ local function ApplyLayout()
             end
         end
 
-        -- Portrait layout: pick 3D model or 2D texture based on portraitStyle
-        local use3D = (db.portraitStyle ~= "2D")
-        f.portrait = use3D and f.portrait3D or f.portrait2D
-        local other = use3D and f.portrait2D or f.portrait3D
-
-        if other then other:Hide() end
         if f.portrait then
             local size = db.portraitSize
             f.portrait:SetSize(size, size)
@@ -647,20 +613,11 @@ local function CreateBossFrame(index)
     pwText:SetJustifyH("RIGHT")
     f.powerText = pwText
 
-    -- Portrait — create both a 3D model and a 2D texture; the layout picks
-    -- the active one based on db.portraitStyle.
-    local portrait3D = CreateFrame("PlayerModel", nil, f)
-    portrait3D.isModel = true
-    portrait3D:Hide()
-    f.portrait3D = portrait3D
-
-    local portrait2D = f:CreateTexture(nil, "ARTWORK")
-    portrait2D:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-    portrait2D:Hide()
-    f.portrait2D = portrait2D
-
-    -- `portrait` is the active one, set by ApplyLayout
-    f.portrait = portrait3D
+    -- Portrait — 2D only (Blizzard-style face icon via SetPortraitTexture)
+    local portrait = f:CreateTexture(nil, "ARTWORK")
+    portrait:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    portrait:Hide()
+    f.portrait = portrait
 
     -- Thin border around the portrait: a slightly larger black rectangle
     -- behind the model creates a 1px "frame" look.

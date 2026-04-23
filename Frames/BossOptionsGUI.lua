@@ -164,10 +164,6 @@ function DF:SetupBossPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             HIDDEN = L["Hidden"] or "Hidden",
         }, db, "portraitPosition", refresh), 55, 1)
         Add(GUI:CreateSlider(self.child, L["Portrait Size"] or "Portrait size", 20, 80, 1, db, "portraitSize", refresh), 55, 2)
-        Add(GUI:CreateDropdown(self.child, L["Portrait Style"] or "Portrait style", {
-            ["2D"] = L["2D (Blizzard-style face icon)"] or "2D (Blizzard-style face icon)",
-            ["3D"] = L["3D (animated model)"]          or "3D (animated model)",
-        }, db, "portraitStyle", refresh), 55, "both")
     end)
 
     -- ========================================
