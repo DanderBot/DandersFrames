@@ -80,6 +80,11 @@ Frames\StatusIcons.lua
 Frames\Init.lua
 Frames\Position.lua
 Frames\Pets.lua
+Frames\Boss.lua
+Frames\BossCastBar.lua
+Frames\BossAuras.lua
+Frames\BossOptions.lua
+Frames\BossOptionsGUI.lua
 
 # Test Mode
 TestMode\TestFramePool.lua

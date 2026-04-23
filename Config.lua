@@ -3315,3 +3315,208 @@ function DF:GetGlobalDB()
     end
     return DandersFramesDB_v2.global
 end
+
+-- ============================================================
+-- BOSS FRAME DEFAULTS (v1 scaffold)
+-- Standalone subsystem — not yet part of profile migration.
+-- Stored under DandersFramesDB_v2.boss as a single shared block.
+-- ============================================================
+
+DF.BossDefaults = {
+    enabled = true,
+    hideBlizzard = true,
+
+    -- Container position (via mover)
+    anchor = "RIGHT",
+    anchorX = -50,
+    anchorY = 100,
+
+    -- Frame size
+    frameWidth = 220,
+    frameHeight = 50,
+    frameSpacing = 8,
+    growDirection = "DOWN",  -- DOWN | UP
+
+    -- Scale
+    frameScale = 1.0,
+
+    -- Portrait
+    portraitPosition = "RIGHT",  -- LEFT | RIGHT | HIDDEN
+    portraitStyle    = "2D",     -- 3D | 2D (2D matches Blizzard's default)
+    portraitSize     = 44,       -- px
+
+    -- Health bar
+    healthTexture = "DF Smooth",
+    healthBackgroundAlpha = 0.35,
+    healthColorMode = "REACTION", -- REACTION (Blizzard: red/yellow/green by hostility) | CLASS_FALLBACK | STATIC
+    healthStaticColor = {r = 0.8, g = 0.1, b = 0.1, a = 1},
+
+    -- Power bar
+    showPowerBar         = false,
+    powerBarHeight       = 6,
+    powerTexture         = "DF Smooth",
+    powerBackgroundAlpha = 0.7,
+
+    -- Power (mana) text
+    showPowerText   = true,
+    powerTextAnchor = "RIGHT",    -- 9-point on the power bar
+    powerTextX      = -2,
+    powerTextY      = 0,
+    powerTextFormat = "PERCENT",  -- PERCENT | CURRENT | CURRENT_MAX | CURRENT_PERCENT
+
+    -- Cast bar
+    showCastBar         = true,
+    castBarHeight       = 14,
+    castBarDetached     = false,
+    castBarIconPosition = "LEFT", -- LEFT | RIGHT
+    castTexture         = "DF Smooth",
+    castBackgroundAlpha = 0.7,
+
+    -- Text
+    showName       = true,
+    nameAnchor     = "RIGHT",     -- 9-point: TOPLEFT|TOP|TOPRIGHT|LEFT|CENTER|RIGHT|BOTTOMLEFT|BOTTOM|BOTTOMRIGHT
+    nameX          = 1,
+    nameY          = 0,
+    nameMaxLength  = 16,          -- 0 = no truncation
+
+    showHealthText = true,
+    healthTextAnchor = "LEFT",    -- 9-point
+    healthTextX      = 0,
+    healthTextY      = 0,
+    healthTextFormat = "PERCENT", -- PERCENT | CURRENT | CURRENT_MAX | CURRENT_PERCENT
+
+    -- Raid target icon (skull, cross, star...)
+    showRaidTargetIcon = true,
+    raidTargetAnchor   = "CENTER",  -- 9-point
+    raidTargetX        = 0,
+    raidTargetY        = 0,
+    raidTargetSize     = 28,
+    raidTargetAlpha    = 0.9,
+
+    -- Detached cast bar (anchored relative to each boss frame, like name/HP)
+    castBarDetachedAnchor = "BOTTOM",  -- 9-point on the boss frame
+    castBarDetachedX      = 0,
+    castBarDetachedY      = -4,
+    castBarDetachedWidth  = 0,          -- 0 = match frame width
+
+    -- Auras / Debuffs
+    showAuras       = true,
+    aurasMaxCount   = 3,
+    aurasSize       = 22,
+    aurasSpacing    = 2,
+    aurasAnchor     = "TOPRIGHT",
+    aurasX          = 0,
+    aurasY          = 0,
+    aurasGrowX      = "LEFT",       -- LEFT | RIGHT
+    aurasGrowY      = "DOWN",       -- UP | DOWN
+    aurasFilter     = "HARMFUL",    -- HARMFUL (debuffs) | HELPFUL (buffs)
+    aurasSource     = "ALL",        -- ALL (Blizzard-like) | MINE | NOT_MINE | BOSS_ONLY
+    aurasShowStacks    = true,
+    aurasStackAnchor   = "BOTTOMRIGHT",
+    aurasStackX        = 0,
+    aurasStackY        = 0,
+
+    aurasShowTimer     = true,
+    aurasTimerPlacement = "BELOW",       -- INSIDE | BELOW | ABOVE
+    aurasTimerX        = 0,
+    aurasTimerY        = 0,
+
+    -- Fonts (reuse addon defaults at runtime if nil)
+    fontSize = 12,
+    fontOutline = "OUTLINE",
+
+    -- Frame strata
+    frameStrata = "MEDIUM",
+}
+
+-- Deep-copy the BossDefaults into an empty mode block
+local function seedBossDefaults(target)
+    for k, v in pairs(DF.BossDefaults) do
+        if target[k] == nil then
+            if type(v) == "table" then
+                local c = {}
+                for kk, vv in pairs(v) do c[kk] = vv end
+                target[k] = c
+            else
+                target[k] = v
+            end
+        end
+    end
+end
+
+-- Returns the boss settings table for the requested mode ("party"|"raid").
+-- If no mode is given, auto-detects from GUI.SelectedMode (for options
+-- panel editing) or IsInRaid() (for in-game display fallback).
+--
+-- Migrates the pre-split flat DandersFramesDB_v2.boss table into
+-- DandersFramesDB_v2.boss.party the first time this runs after the split.
+function DF:GetBossDB(mode)
+    DandersFramesDB_v2 = DandersFramesDB_v2 or {}
+    DandersFramesDB_v2.boss = DandersFramesDB_v2.boss or {}
+    local root = DandersFramesDB_v2.boss
+
+    -- Migration: old flat { enabled=..., anchor=..., ... } → { party = {...} }
+    if root.enabled ~= nil and root.party == nil then
+        local copy = {}
+        for k, v in pairs(root) do
+            if k ~= "party" and k ~= "raid" then copy[k] = v end
+        end
+        for k in pairs(root) do
+            if k ~= "party" and k ~= "raid" then root[k] = nil end
+        end
+        root.party = copy
+    end
+
+    if not mode then
+        if DF.GUI and DF.GUI.SelectedMode == "raid" then
+            mode = "raid"
+        elseif DF.GUI and DF.GUI.SelectedMode == "party" then
+            mode = "party"
+        else
+            mode = IsInRaid() and "raid" or "party"
+        end
+    end
+    if mode ~= "party" and mode ~= "raid" then mode = "party" end
+
+    root[mode] = root[mode] or {}
+    seedBossDefaults(root[mode])
+    return root[mode]
+end
+
+-- Live display mode (for in-game rendering), independent of options panel.
+function DF:GetActiveBossDB()
+    return DF:GetBossDB(IsInRaid() and "raid" or "party")
+end
+
+-- Rendering path: honour the GUI mode during test-mode previews, otherwise
+-- follow real group state (IsInRaid).
+function DF:GetRenderBossDB()
+    if DF.BossFrames then
+        for i = 1, 5 do
+            local f = DF.BossFrames[i]
+            if f and f._testMode then
+                if DF.GUI then return DF:GetBossDB(DF.GUI.SelectedMode) end
+                break
+            end
+        end
+    end
+    return DF:GetActiveBossDB()
+end
+
+-- Copy all settings from one mode to the other.
+function DF:CopyBossSettings(fromMode, toMode)
+    if fromMode == toMode then return end
+    local src = DF:GetBossDB(fromMode)
+    local dst = DF:GetBossDB(toMode)
+    for k in pairs(dst) do dst[k] = nil end
+    for k, v in pairs(src) do
+        if type(v) == "table" then
+            local c = {}
+            for kk, vv in pairs(v) do c[kk] = vv end
+            dst[k] = c
+        else
+            dst[k] = v
+        end
+    end
+    if DF.RefreshBossFrames then DF:RefreshBossFrames() end
+end
