@@ -11,6 +11,17 @@
 ## SavedVariablesPerCharacter: DandersFramesCharDB
 ## AllowAddOnTableAccess: 1
 ## OptionalDeps: Masque, LibSharedMedia-3.0, SharedMedia, SharedMedia_MyMedia, SharedMediaAdditionalFonts, FrameSort
+## Category: Unit Frames
+## Category-deDE: Einheitenfenster
+## Category-esES: Marcos de unidades
+## Category-esMX: Marcos de unidades
+## Category-frFR: Portraits d'unités
+## Category-itIT: Riquadri delle unità
+## Category-koKR: 개체창
+## Category-ptBR: Quadros de unidade
+## Category-ruRU: Рамки юнитов
+## Category-zhCN: 单位框体
+## Category-zhTW: 單位框架
 
 # Libraries
 Libs\LibStub\LibStub.lua
