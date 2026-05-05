@@ -14,7 +14,13 @@ if (WOW_PROJECT_ID == WOW_PROJECT_MAINLINE) then                        -- If on
                 if menuInputData.buttonName == "LeftButton" then        -- if a left click
                     DF:ToggleGUI()                                      -- toggle GUI vibility
                 elseif menuInputData.buttonName == "RightButton" then   -- if a right click
-					-- add solo mode here
+					if db.soloMode ~= nil then                          -- if solo mode is set
+						if db.soloMode then print("solomode is set to true") else print("solomode is set to false") end -- debug line; remove post debug
+						db.soloMode = not db.soloMode                   -- switch the setting
+						if db.soloMode then print("solomode is set to true") else print("solomode is set to false") end -- debug line; remove post debug
+						DF:UpdateAllFrames()                            -- update frames || this is not honored for some reason || needs incestigation
+						print("|cff00ff00DandersFrames:|r " .. format(L["Solo mode %s"], db.soloMode and L["enabled"] or L["disabled"]))
+					end
                 end
             end,
             funcOnEnter = function(button)
