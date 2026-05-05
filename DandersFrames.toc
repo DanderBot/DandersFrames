@@ -142,3 +142,6 @@ ClickCasting\UI\Dialogs.lua
 
 # External API (for Wago UI Packs, etc.)
 API.lua
+
+# Show in Blizzard AddOn Compartment
+AddOnCompartment.lua
