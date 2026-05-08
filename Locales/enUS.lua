@@ -894,6 +894,7 @@ L["Low"] = true
 L["Low Health (0%)"] = true
 L["Lunar Power"] = true
 L["Mage"] = true
+L["Maelstrom"] = true
 L["Magic"] = true
 L["Major defensive cooldowns like Divine Shield, Ice Block, or Barkskin."] = true
 L["Make icons click-through for external click-casting addons. Not needed for DF built-in click-casting."] = true
