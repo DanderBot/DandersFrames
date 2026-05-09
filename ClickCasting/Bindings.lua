@@ -1910,9 +1910,12 @@ function CC:BuildMacroTextForBinding(binding, forGlobalBinding)
     
     -- Check if we should add nomounted/noflying condition
     -- noflying catches druid flight form (which isn't considered "mounted")
+	-- if not the first, check for flight only
     local mountedStr = ""
     if self.db and self.db.global and self.db.global.disableWhileMounted then
         mountedStr = ",nomounted,noflying"
+	elseif self.db and self.db.global and self.db.global.disableWhileFlying then
+        mountedStr = ",noflying"
     end
     
     -- Build combat condition string
