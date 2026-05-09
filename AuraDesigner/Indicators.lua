@@ -1031,14 +1031,26 @@ function Indicators:ApplyHealthBar(frame, config, auraData)
     local color = config.color
     if not color then return end
 
-    local r, g, b = color[1] or color.r or 1, color[2] or color.g or 1, color[3] or color.b or 1
+    local r, g, b, a = color[1] or color.r or 1, color[2] or color.g or 1, color[3] or color.b or 1, color[4] or color.a or 1
     local mode = string.lower(config.mode or "replace")
-    -- Both modes use the overlay — replace forces full opacity, tint uses blend slider
-    local blend = (mode == "replace") and 1 or (config.blend or 0.5)
+    -- Replace: colour alpha from the colour picker controls overlay opacity.
+    -- Tint: blend slider controls how strongly the AD colour mixes with the health bar.
+    local blend = (mode == "replace") and a or (config.blend or 0.5)
 
     local overlay = GetOrCreateTintOverlay(frame)
     if overlay then
         overlay:SetStatusBarColor(r, g, b, blend)
+        -- In replace mode with full opacity, also colour the underlying health bar texture to
+        -- match. This prevents class-colour bleedthrough when the overlay fades OOR. We only
+        -- do this when a >= 1 (fully opaque) — if the user has set alpha < 1 they want the
+        -- underlying bar to show through, so we leave it at its normal class colour.
+        -- In tint mode the underlying colour is always intentionally visible, so we skip it.
+        -- UpdateHealthBarAppearance skips colour changes while adHealthBarActive = true;
+        -- RevertHealthBar clears that flag so it can restore the class colour on revert.
+        if mode == "replace" and a >= 1 then
+            local hbTex = healthBar:GetStatusBarTexture()
+            if hbTex then hbTex:SetVertexColor(r, g, b) end
+        end
         -- Snap fill to current health before showing so the bar doesn't animate
         -- from near-empty to the correct position (ExponentialEaseOut + the
         -- min/max changing from the creation default of 0-1 to 0-maxHealth
