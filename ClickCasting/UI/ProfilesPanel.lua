@@ -345,12 +345,9 @@ function CC:CreateProfilesPanelContent()
         self:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:AddLine(L["Disable While Mounted"], 1, 1, 1)
-        GameTooltip:AddLine(L["When enabled, click-casting bindings will be"], 0.7, 0.7, 0.7, true)
-        GameTooltip:AddLine("temporarily disabled while you are mounted", 0.7, 0.7, 0.7, true)
-        GameTooltip:AddLine("or in druid flight form.", 0.7, 0.7, 0.7, true)
+        GameTooltip:AddLine(L["When enabled, click-casting bindings will be temporarily disabled while you are mounted or in druid flight form."], 0.7, 0.7, 0.7, true)
         GameTooltip:AddLine(" ", 0.7, 0.7, 0.7)
-        GameTooltip:AddLine("This allows normal clicking on unit frames", 0.7, 0.7, 0.7, true)
-        GameTooltip:AddLine("to select targets while traveling.", 0.7, 0.7, 0.7, true)
+        GameTooltip:AddLine("This allows normal clicking on unit frames to select targets while traveling.", 0.7, 0.7, 0.7, true)
         GameTooltip:Show()
     end)
     mountCb:SetScript("OnLeave", function(self)
@@ -359,6 +356,80 @@ function CC:CreateProfilesPanelContent()
     end)
     
     CC.mountCb = mountCb
+    
+    -- Disable while flying only checkbox
+    local flyingCb = CreateFrame("Button", nil, leftCol, "BackdropTemplate")
+    flyingCb:SetSize(16, 16)
+    flyingCb:SetPoint("TOPLEFT", autoCreateCb, "BOTTOMLEFT", 0, -32)
+    flyingCb:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = 1,
+    })
+    flyingCb:SetBackdropColor(0.1, 0.1, 0.1, 1)
+    flyingCb:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.5)
+    
+    local flightCheck = flyingCb:CreateTexture(nil, "OVERLAY")
+    flightCheck:SetSize(10, 10)
+    flightCheck:SetPoint("CENTER")
+    flightCheck:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
+    flightCheck:SetVertexColor(themeColor.r, themeColor.g, themeColor.b)
+    flyingCb.check = flightCheck
+    
+    local flightLabel = leftCol:CreateFontString(nil, "OVERLAY", "DFFontNormal")
+    flightLabel:SetPoint("LEFT", flyingCb, "RIGHT", 6, 0)
+    flightLabel:SetText(L["Disable only while flying"])
+    flightLabel:SetTextColor(C.text.r, C.text.g, C.text.b)
+    
+    -- Define methods first
+    flyingCb.SetChecked = function(self, checked)
+        self.isChecked = checked
+        self.check:SetShown(checked)
+    end
+    flyingCb.GetChecked = function(self)
+        return self.isChecked
+    end
+    
+    -- Initialize checkbox state
+    local disableFlying = CC.db and CC.db.global and CC.db.global.disableWhileFlying
+    if disableFlying == nil then disableFlying = false end
+    flyingCb:SetChecked(disableFlying)
+    
+    flyingCb:SetScript("OnClick", function(self)
+        local checked = not self:GetChecked()
+        self:SetChecked(checked)
+        if CC.db and CC.db.global then
+            CC.db.global.disableWhileFlying = checked
+        end
+        if checked then
+            print("|cff33cc33DandersFrames:|r Click-casting will be disabled only while flying.")
+        else
+            print("|cffff9900DandersFrames:|r Click-casting will stay active while flying.")
+        end
+        -- Rebuild bindings with new macro conditions (if not in combat)
+        if not InCombatLockdown() then
+            CC:ApplyBindings()
+        else
+            CC.needsBindingRefresh = true
+        end
+    end)
+    
+    flyingCb:SetScript("OnEnter", function(self)
+        self:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine(L["Disable While Flying"], 1, 1, 1)
+        GameTooltip:AddLine(L["When enabled, click-casting bindings will be temporarily disabled while you are flying."], 0.7, 0.7, 0.7, true)
+        GameTooltip:AddLine("This includes mounted & druid flight form.", 0.7, 0.7, 0.7, true)
+        GameTooltip:AddLine(" ", 0.7, 0.7, 0.7)
+        GameTooltip:AddLine("This allows normal clicking on unit frames to select targets while traveling.", 0.7, 0.7, 0.7, true)
+        GameTooltip:Show()
+    end)
+    flyingCb:SetScript("OnLeave", function(self)
+        self:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.5)
+        GameTooltip:Hide()
+    end)
+    
+    CC.flyingCb = flyingCb
     
     -- ===== RIGHT COLUMN: Loadout Assignments =====
     local loadoutLabel = rightCol:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
@@ -436,6 +507,36 @@ function CC:RefreshProfilesPanel()
         if self.mountCb.check then
             self.mountCb.check:SetShown(disableMounted)
         end
+		-- ensure mounted & flight OR only flight are checked
+        local disableFlying = self.db and self.db.global and self.db.global.disableWhileFlying
+        if disableFlying == nil then disableFlying = false end
+		if disableFlying and (disableFlying == disableMounted) then
+			disableFlying = false
+			self.flyingCb:SetChecked(disableFlying)
+			if self.flyingCb.check then
+				self.flyingCb.check:SetShown(disableFlying)
+			end
+		end
+    end
+    
+    -- Update flying checkbox state
+    if self.flyingCb then
+        local disableFlying = self.db and self.db.global and self.db.global.disableWhileFlying
+        if disableFlying == nil then disableFlying = false end
+        self.flyingCb:SetChecked(disableFlying)
+        if self.flyingCb.check then
+            self.flyingCb.check:SetShown(disableFlying)
+        end
+		-- ensure mounted & flight OR only flight are checked
+        local disableMounted = self.db and self.db.global and self.db.global.disableWhileMounted
+        if disableMounted == nil then disableMounted = false end
+		if disableMounted and (disableFlying == disableMounted) then
+			disableMounted = false
+			self.mountCb:SetChecked(disableMounted)
+			if self.mountCb.check then
+				self.mountCb.check:SetShown(disableMounted)
+			end
+		end
     end
     
     -- Get profiles

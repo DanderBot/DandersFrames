@@ -73,6 +73,9 @@ function CC:InitializeSavedVariables()
     if self.db.global.disableWhileMounted == nil then
         self.db.global.disableWhileMounted = false
     end
+    if self.db.global.disableWhileFlying == nil then
+        self.db.global.disableWhileFlying = false
+    end
     
     -- Ensure classes table exists
     if not self.db.classes then
