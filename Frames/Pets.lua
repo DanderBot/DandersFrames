@@ -535,7 +535,7 @@ function DF:UpdatePetName(frame)
     if not UnitExists(frame.unit) then return end
     
     local name = GetUnitName(frame.unit, true)
-    if name then
+    if name and not issecretvalue(name) then
         -- Truncate long names
         local db = DF:GetFrameDB(frame)
         local maxLen = db.petNameMaxLength or 12
