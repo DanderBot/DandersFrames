@@ -885,7 +885,7 @@ function DF:UpdatePetGroupLayout()
                 if partyGrowth == "HORIZONTAL" then
                     container:SetPoint("LEFT", rightmostFrame, "RIGHT", -offsetX, offsetY)
                 else
-                    container:SetPoint("TOPLEFT", bottommostFrame, "TOPRIGHT", -offsetX, -centerOffsetY + offsetY)
+                    container:SetPoint("TOPLEFT", topmostFrame, "TOPRIGHT", -offsetX, -centerOffsetY + offsetY)
                 end
             end
             
