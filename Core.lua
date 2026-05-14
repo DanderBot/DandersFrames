@@ -5232,6 +5232,23 @@ function DF:FullProfileRefresh()
         DF:UpdateRestedIndicator()
     end
     
+    -- === REFRESH NAME TRUNCATION ===
+    -- UpdateAllFrames only pushes attribute changes; name truncation requires
+    -- a full visible-frame pass to recalculate text widths.
+    if DF.RefreshAllVisibleFrames then
+        DF:RefreshAllVisibleFrames()
+    end
+
+    -- === UPDATE MINIMAP BUTTON ===
+    if DF.UpdateMinimapButton then
+        DF:UpdateMinimapButton()
+    end
+
+    -- === CLEAR GLOBAL FONT TEMP ===
+    -- Force the Global Fonts page to re-read current DB values on next visit,
+    -- so its dropdowns reflect any settings reset since the last page build.
+    DF.GlobalFontTemp = nil
+
     -- === REFRESH GUI IF OPEN ===
     if DF.GUIFrame and DF.GUIFrame:IsShown() then
         if DF.GUI and DF.GUI.RefreshCurrentPage then

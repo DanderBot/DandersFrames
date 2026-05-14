@@ -4686,7 +4686,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         Add(adBanner, 32, "both")
 
         -- Copy button at top right
-        Add(CreateCopyButton(self.child, {"buff"}, L["Buffs"], "auras_buffs"), 25, 2)
+        Add(CreateCopyButton(self.child, {"buff", "showBuffs"}, L["Buffs"], "auras_buffs"), 25, 2)
 
         -- ===== DEDUPLICATION =====
         AddSpace(10, "both")
@@ -4906,7 +4906,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     local pageDebuffs = CreateSubTab("auras", "auras_debuffs", L["Debuffs"])
     BuildPage(pageDebuffs, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top
-        Add(CreateCopyButton(self.child, {"debuff"}, L["Debuffs"], "auras_debuffs"), 25, 2)
+        Add(CreateCopyButton(self.child, {"debuff", "showDebuffs"}, L["Debuffs"], "auras_debuffs"), 25, 2)
         
         AddSpace(10, "both")
         
