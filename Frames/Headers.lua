@@ -680,8 +680,9 @@ function DF:InitializeHeaderChild(frame)
             self.unit = actualUnit
             -- Clear background color tracking (unit changed, need fresh colors)
             self.dfCurrentBgKey = nil
-            -- Clear stale range state - prevents new player inheriting old player's
-            -- faded-out appearance until next range timer tick
+            -- Clear stale range state so this slot doesn't inherit the previous
+            -- occupant's faded appearance. dfInRange is immediately repopulated
+            -- by UpdateRange below for accurate OOR state before first render.
             self.dfInRange = nil
             -- Clear private aura unit tracking so next reanchor won't skip
             if not actualUnit then
@@ -691,6 +692,12 @@ function DF:InitializeHeaderChild(frame)
             if actualUnit then
                 -- Clear stale aura/range data that may belong to old occupant of this slot
                 ClearUnitCache(actualUnit)
+                -- Eagerly populate range state before the first render. Without this,
+                -- dfInRange is nil and GetInRange falls back to "assume in range", causing
+                -- OOR members to briefly flash as in-range on group join or roster reshuffle.
+                if DF.UpdateRange then
+                    DF:UpdateRange(self)
+                end
                 -- Clear phased cache for new unit (force fresh evaluation)
                 if DF.ResetPhasedCache then DF:ResetPhasedCache(actualUnit) end
                 -- Skip unitFrameMap for pinned frames (except boss-type pinned frames)
