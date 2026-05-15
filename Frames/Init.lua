@@ -971,6 +971,10 @@ function DF:UnlockRaidFrames()
         end
     end
     
+    -- Remember whether raid test mode was already active before this unlock cycle.
+    -- LockRaidFrames reads this to decide whether to keep or hide test frames.
+    DF.raidTestModeBeforeUnlock = DF.raidTestMode
+
     -- Enable raid test mode using the proper function
     DF:ShowRaidTestFrames()
     
@@ -1031,8 +1035,12 @@ function DF:LockRaidFrames()
         DF.positionPanel:Hide()
     end
     
-    -- Disable raid test mode using the proper function
-    DF:HideRaidTestFrames()
+    -- Only disable raid test mode if it was not already active before the last unlock.
+    -- Preserves the user's test mode state across the lock/unlock cycle.
+    if not DF.raidTestModeBeforeUnlock then
+        DF:HideRaidTestFrames()
+    end
+    DF.raidTestModeBeforeUnlock = nil
     
     -- Hide container if not in raid
     if not IsInRaid() then

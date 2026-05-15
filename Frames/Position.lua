@@ -2315,6 +2315,10 @@ function DF:UnlockFrames()
         DF.displayLockButton.Text:SetText(L["Lock Frames"])
     end
 
+    -- Remember whether test mode was already active before this unlock cycle.
+    -- LockFrames reads this to decide whether to keep or hide test frames.
+    DF.partyTestModeBeforeUnlock = DF.testMode
+
     -- Enable test mode so user can position with full group visible
     DF:ShowTestFrames(true)
 
@@ -2381,8 +2385,12 @@ function DF:LockFrames()
         if DF.GUI.UpdateTestButtonState then DF.GUI.UpdateTestButtonState() end
     end
 
-    -- Disable test mode
-    DF:HideTestFrames(true)
+    -- Only disable test mode if it was not already active before the last unlock.
+    -- Preserves the user's test mode state across the lock/unlock cycle.
+    if not DF.partyTestModeBeforeUnlock then
+        DF:HideTestFrames(true)
+    end
+    DF.partyTestModeBeforeUnlock = nil
 
     print("|cff00ff00DandersFrames:|r " .. L["Frames locked."])
 end
