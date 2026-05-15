@@ -1111,18 +1111,23 @@ function DF:CreateFrameElementsExtended(frame, db)
     -- ========================================
     -- ABSORB BAR
     -- ========================================
-    frame.dfAbsorbBar = CreateFrame("StatusBar", nil, frame)
+    -- Parent to healthBar (not frame) so frame level tracks alongside the dispel
+    -- gradient (also parented to healthBar). This prevents the gradient from
+    -- drifting above the absorb bars when SecureGroupHeaderTemplate adjusts
+    -- healthBar's frame level after creation. Levels bumped to stay above
+    -- the gradient which sits at healthBar+2.
+    frame.dfAbsorbBar = CreateFrame("StatusBar", nil, frame.healthBar)
     frame.dfAbsorbBar:SetStatusBarTexture("Interface\\RaidFrame\\Shield-Fill")
     frame.dfAbsorbBar:SetMinMaxValues(0, 1)
     frame.dfAbsorbBar:SetValue(0)
-    frame.dfAbsorbBar:SetFrameLevel(frame.healthBar:GetFrameLevel() + 3)
+    frame.dfAbsorbBar:SetFrameLevel(frame.healthBar:GetFrameLevel() + 4)
     frame.dfAbsorbBar:Hide()
-    
+
     local absorbBg = frame.dfAbsorbBar:CreateTexture(nil, "BACKGROUND")
     absorbBg:SetAllPoints()
     absorbBg:SetColorTexture(0, 0, 0, 0)
     frame.dfAbsorbBar.bg = absorbBg
-    
+
     local absorbBorder = CreateFrame("Frame", nil, frame.dfAbsorbBar, "BackdropTemplate")
     absorbBorder:SetPoint("TOPLEFT", -1, 1)
     absorbBorder:SetPoint("BOTTOMRIGHT", 1, -1)
@@ -1133,22 +1138,22 @@ function DF:CreateFrameElementsExtended(frame, db)
     absorbBorder:SetBackdropBorderColor(0, 0, 0, 1)
     absorbBorder:Hide()
     frame.dfAbsorbBar.border = absorbBorder
-    
+
     -- ========================================
     -- HEAL ABSORB BAR
     -- ========================================
-    frame.dfHealAbsorbBar = CreateFrame("StatusBar", nil, frame)
+    frame.dfHealAbsorbBar = CreateFrame("StatusBar", nil, frame.healthBar)
     frame.dfHealAbsorbBar:SetStatusBarTexture("Interface\\RaidFrame\\Shield-Fill")
     frame.dfHealAbsorbBar:SetMinMaxValues(0, 1)
     frame.dfHealAbsorbBar:SetValue(0)
-    frame.dfHealAbsorbBar:SetFrameLevel(frame.healthBar:GetFrameLevel() + 4)
+    frame.dfHealAbsorbBar:SetFrameLevel(frame.healthBar:GetFrameLevel() + 5)
     frame.dfHealAbsorbBar:Hide()
-    
+
     local healAbsorbBg = frame.dfHealAbsorbBar:CreateTexture(nil, "BACKGROUND")
     healAbsorbBg:SetAllPoints()
     healAbsorbBg:SetColorTexture(0, 0, 0, 0)
     frame.dfHealAbsorbBar.bg = healAbsorbBg
-    
+
     local healAbsorbBorder = CreateFrame("Frame", nil, frame.dfHealAbsorbBar, "BackdropTemplate")
     healAbsorbBorder:SetPoint("TOPLEFT", -1, 1)
     healAbsorbBorder:SetPoint("BOTTOMRIGHT", 1, -1)
@@ -1159,7 +1164,14 @@ function DF:CreateFrameElementsExtended(frame, db)
     healAbsorbBorder:SetBackdropBorderColor(0, 0, 0, 1)
     healAbsorbBorder:Hide()
     frame.dfHealAbsorbBar.border = healAbsorbBorder
-    
+
+    -- ========================================
+    -- REDUCED MAX HEALTH BAR
+    -- ========================================
+    if DF.CreateReducedMaxHealthBar then
+        DF:CreateReducedMaxHealthBar(frame, db)
+    end
+
     -- ========================================
     -- AURA CONTAINER AND ICONS
     -- ========================================
@@ -1828,18 +1840,23 @@ function DF:CreateUnitFrame(unit, index, isRaid)
     -- ========================================
     -- ABSORB BAR
     -- ========================================
-    frame.dfAbsorbBar = CreateFrame("StatusBar", nil, frame)
+    -- Parent to healthBar (not frame) so frame level tracks alongside the dispel
+    -- gradient (also parented to healthBar). This prevents the gradient from
+    -- drifting above the absorb bars when SecureGroupHeaderTemplate adjusts
+    -- healthBar's frame level after creation. Levels bumped to stay above
+    -- the gradient which sits at healthBar+2.
+    frame.dfAbsorbBar = CreateFrame("StatusBar", nil, frame.healthBar)
     frame.dfAbsorbBar:SetStatusBarTexture("Interface\\RaidFrame\\Shield-Fill")
     frame.dfAbsorbBar:SetMinMaxValues(0, 1)
     frame.dfAbsorbBar:SetValue(0)
-    frame.dfAbsorbBar:SetFrameLevel(frame.healthBar:GetFrameLevel() + 3)
+    frame.dfAbsorbBar:SetFrameLevel(frame.healthBar:GetFrameLevel() + 4)
     frame.dfAbsorbBar:Hide()
-    
+
     local absorbBg = frame.dfAbsorbBar:CreateTexture(nil, "BACKGROUND")
     absorbBg:SetAllPoints()
     absorbBg:SetColorTexture(0, 0, 0, 0)
     frame.dfAbsorbBar.bg = absorbBg
-    
+
     -- Border for absorb bar
     local absorbBorder = CreateFrame("Frame", nil, frame.dfAbsorbBar, "BackdropTemplate")
     absorbBorder:SetPoint("TOPLEFT", -1, 1)
@@ -1851,22 +1868,22 @@ function DF:CreateUnitFrame(unit, index, isRaid)
     absorbBorder:SetBackdropBorderColor(0, 0, 0, 1)
     absorbBorder:Hide()
     frame.dfAbsorbBar.border = absorbBorder
-    
+
     -- ========================================
     -- HEAL ABSORB BAR
     -- ========================================
-    frame.dfHealAbsorbBar = CreateFrame("StatusBar", nil, frame)
+    frame.dfHealAbsorbBar = CreateFrame("StatusBar", nil, frame.healthBar)
     frame.dfHealAbsorbBar:SetStatusBarTexture("Interface\\RaidFrame\\Shield-Fill")
     frame.dfHealAbsorbBar:SetMinMaxValues(0, 1)
     frame.dfHealAbsorbBar:SetValue(0)
-    frame.dfHealAbsorbBar:SetFrameLevel(frame.healthBar:GetFrameLevel() + 4)
+    frame.dfHealAbsorbBar:SetFrameLevel(frame.healthBar:GetFrameLevel() + 5)
     frame.dfHealAbsorbBar:Hide()
-    
+
     local healAbsorbBg = frame.dfHealAbsorbBar:CreateTexture(nil, "BACKGROUND")
     healAbsorbBg:SetAllPoints()
     healAbsorbBg:SetColorTexture(0, 0, 0, 0)
     frame.dfHealAbsorbBar.bg = healAbsorbBg
-    
+
     -- Border for heal absorb bar
     local healAbsorbBorder = CreateFrame("Frame", nil, frame.dfHealAbsorbBar, "BackdropTemplate")
     healAbsorbBorder:SetPoint("TOPLEFT", -1, 1)
@@ -1878,7 +1895,14 @@ function DF:CreateUnitFrame(unit, index, isRaid)
     healAbsorbBorder:SetBackdropBorderColor(0, 0, 0, 1)
     healAbsorbBorder:Hide()
     frame.dfHealAbsorbBar.border = healAbsorbBorder
-    
+
+    -- ========================================
+    -- REDUCED MAX HEALTH BAR
+    -- ========================================
+    if DF.CreateReducedMaxHealthBar then
+        DF:CreateReducedMaxHealthBar(frame, db)
+    end
+
     -- ========================================
     -- AURA CONTAINER AND ICONS
     -- ========================================

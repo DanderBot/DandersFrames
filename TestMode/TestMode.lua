@@ -12,11 +12,11 @@ local L = DF.L
 
 DF.TestData = {
     units = {
-        {name = "Tankerino", class = "WARRIOR", role = "TANK", specID = 73, health = 1.0, maxHealth = 100000, absorb = 0.20, healAbsorb = 0, healPrediction = 0.15, status = nil, outOfRange = false, isLeader = true, raidTarget = 8, dispelType = nil, centerStatus = nil, isMainTank = true, isAFK = false, isPhased = false, inVehicle = false, hasMyBuff = true},  -- Skull marker, leader, main tank, has HoT
-        {name = "Healsworth", class = "PRIEST", role = "HEALER", specID = 257, health = 0.95, maxHealth = 85000, absorb = 0.10, healAbsorb = 0, healPrediction = 0.05, status = nil, outOfRange = false, isAssist = true, raidTarget = nil, dispelType = "Magic", centerStatus = "summon", isMainAssist = true, isAFK = false, isPhased = false, inVehicle = false, hasMyBuff = false},  -- Assistant, main assist, summon pending
-        {name = "Мишок", class = "MAGE", role = "DAMAGER", specID = 63, health = 0.60, maxHealth = 75000, absorb = 0, healAbsorb = 0.15, healPrediction = 0.15, status = nil, outOfRange = true, raidTarget = 1, dispelType = "Curse", centerStatus = nil, isAFK = true, isPhased = false, inVehicle = false, hasMyBuff = true},  -- Star marker, AFK, has HoT
-        {name = "Alexandrosthegreat", class = "PALADIN", role = "DAMAGER", specID = 70, health = 0, maxHealth = 90000, absorb = 0, healAbsorb = 0, healPrediction = 0, status = "Dead", outOfRange = false, raidTarget = nil, dispelType = nil, centerStatus = "resurrect", isAFK = false, isPhased = false, inVehicle = false, hasMyBuff = false},  -- Dead unit, being resurrected
-        {name = "Xx", class = "ROGUE", role = "DAMAGER", specID = 260, health = 0.30, maxHealth = 70000, absorb = 0.05, healAbsorb = 0.12, healPrediction = 0.25, status = nil, outOfRange = false, raidTarget = nil, dispelType = "Poison", centerStatus = nil, isAFK = false, isPhased = true, inVehicle = true, hasMyBuff = true},  -- Phased, in vehicle, has HoT
+        {name = "Tankerino", class = "WARRIOR", role = "TANK", specID = 73, health = 1.0, maxHealth = 100000, absorb = 0.20, healAbsorb = 0, healPrediction = 0.15, status = nil, outOfRange = false, isLeader = true, raidTarget = 8, dispelType = nil, centerStatus = nil, isMainTank = true, isAFK = false, isPhased = false, inVehicle = false, hasMyBuff = true, reducedMaxPct = 0.20},  -- Skull marker, leader, main tank, has HoT
+        {name = "Healsworth", class = "PRIEST", role = "HEALER", specID = 257, health = 0.95, maxHealth = 85000, absorb = 0.10, healAbsorb = 0, healPrediction = 0.05, status = nil, outOfRange = false, isAssist = true, raidTarget = nil, dispelType = "Magic", centerStatus = "summon", isMainAssist = true, isAFK = false, isPhased = false, inVehicle = false, hasMyBuff = false, reducedMaxPct = 0},  -- Assistant, main assist, summon pending
+        {name = "Мишок", class = "MAGE", role = "DAMAGER", specID = 63, health = 0.60, maxHealth = 75000, absorb = 0, healAbsorb = 0.15, healPrediction = 0.15, status = nil, outOfRange = true, raidTarget = 1, dispelType = "Curse", centerStatus = nil, isAFK = true, isPhased = false, inVehicle = false, hasMyBuff = true, reducedMaxPct = 0},  -- Star marker, AFK, has HoT
+        {name = "Alexandrosthegreat", class = "PALADIN", role = "DAMAGER", specID = 70, health = 0, maxHealth = 90000, absorb = 0, healAbsorb = 0, healPrediction = 0, status = "Dead", outOfRange = false, raidTarget = nil, dispelType = nil, centerStatus = "resurrect", isAFK = false, isPhased = false, inVehicle = false, hasMyBuff = false, reducedMaxPct = 0},  -- Dead unit, being resurrected
+        {name = "Xx", class = "ROGUE", role = "DAMAGER", specID = 260, health = 0.30, maxHealth = 70000, absorb = 0.05, healAbsorb = 0.12, healPrediction = 0.25, status = nil, outOfRange = false, raidTarget = nil, dispelType = "Poison", centerStatus = nil, isAFK = false, isPhased = true, inVehicle = true, hasMyBuff = true, reducedMaxPct = 0.45},  -- Phased, in vehicle, has HoT
     },
     -- Test aura data - expanded for testing layouts
     buffs = {
@@ -241,6 +241,7 @@ function DF:GetTestUnitData(index, isRaid, isBoss)
             currentHealth = isDead and 0 or math.floor(baseHealth * 100000),
             powerPercent = isDead and 0 or basePower,
             absorbPercent = isDead and 0 or ((i % 3 == 0) and 0.15 or ((i % 5 == 0) and 0.10 or 0)),
+            reducedMaxPct = isDead and 0 or ((i % 7 == 0) and 0.30 or ((i % 11 == 0) and 0.15 or 0)),
             healAbsorbPercent = isDead and 0 or ((i % 7 == 0) and 0.15 or 0),
             healPredictionPercent = isDead and 0 or ((i % 2 == 0) and 0.12 or ((i % 3 == 1) and 0.08 or 0)),  -- Show heal prediction on some frames
             status = isDead and "Dead" or nil,
@@ -286,6 +287,7 @@ function DF:GetTestUnitData(index, isRaid, isBoss)
         currentHealth = math.floor(data.health * data.maxHealth),
         powerPercent = 0.8,  -- Default power for party
         absorbPercent = data.absorb,
+        reducedMaxPct = data.reducedMaxPct or 0,
         healAbsorbPercent = data.healAbsorb,
         healPredictionPercent = data.healPrediction or 0,
         status = data.status,
@@ -576,7 +578,10 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     else
         frame.healthBar:SetValue(healthValue)
     end
-    
+
+    frame.dfTestReducedMaxPct = testData.reducedMaxPct or 0
+    if DF.UpdateReducedMaxHealth then DF:UpdateReducedMaxHealth(frame) end
+
     -- Update missing health bar if enabled
     if frame.missingHealthBar then
         local backgroundMode = db.backgroundMode or "BACKGROUND"

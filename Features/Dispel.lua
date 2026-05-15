@@ -1002,15 +1002,19 @@ local function ShowOverlayWithSecretColor(overlay, db, unit, auraInstanceID, fra
                     local texturePath = GRADIENT_TEXTURES[gradientStyle] or GRADIENT_TEXTURES.FULL
                     overlay.gradient:SetStatusBarTexture(texturePath)
                     
-                    -- Apply the color with baked-in alpha from curve
+                    -- Apply the color from the curve. GetRGBA() returns a secret alpha
+                    -- (the ColorMixin from GetAuraDispelTypeColor is secret-tainted) which
+                    -- SetVertexColor cannot handle in the alpha position — it silently renders
+                    -- at full opacity. Use GetRGB() for the secret-safe colour and apply the
+                    -- base opacity via the frame's own alpha instead, folding OOR in together.
+                    local gradientAlpha = math.min((db.dispelGradientAlpha or 0.5) * (db.dispelGradientIntensity or 1.0), 1.0)
                     local tex = overlay.gradient:GetStatusBarTexture()
-                    tex:SetVertexColor(gradientColor:GetRGBA())
+                    tex:SetVertexColor(gradientColor:GetRGB())
                     tex:SetBlendMode(blendMode)
-                    -- Apply OOR alpha via SetAlphaFromBoolean
                     if overlay.gradient.SetAlphaFromBoolean then
-                        overlay.gradient:SetAlphaFromBoolean(inRange, 1.0, oorDispelAlpha)
+                        overlay.gradient:SetAlphaFromBoolean(inRange, gradientAlpha, gradientAlpha * oorDispelAlpha)
                     else
-                        overlay.gradient:SetAlpha(1)
+                        overlay.gradient:SetAlpha(gradientAlpha)
                     end
                     
                     overlay.gradient:Show()
@@ -1666,6 +1670,34 @@ end
 -- ============================================================
 
 function DF:UpdateAllDispelOverlays()
+    -- In test mode, only update test frames.  Live frames are hidden behind the
+    -- test container and must not receive overlay state derived from test data —
+    -- if they do, the overlay appears "stuck" on live frames after test mode
+    -- closes.  When test mode exits, DF.testMode is set to false *before* the
+    -- cleanup C_Timer fires, so the live-frame cleanup pass still runs correctly.
+    if DF.testMode or DF.raidTestMode then
+        if DF.testMode and DF.testPartyFrames then
+            local db = DF:GetDB()
+            local count = db and db.testFrameCount or 5
+            for i = 0, count - 1 do
+                local frame = DF.testPartyFrames[i]
+                if frame and frame:IsShown() then
+                    DF:UpdateDispelOverlay(frame)
+                end
+            end
+        end
+        if DF.raidTestMode and DF.testRaidFrames then
+            local raidDb = DF:GetRaidDB()
+            local count = raidDb and raidDb.raidTestFrameCount or 10
+            for i = 1, count do
+                local frame = DF.testRaidFrames[i]
+                if frame and frame:IsShown() then
+                    DF:UpdateDispelOverlay(frame)
+                end
+            end
+        end
+        return
+    end
     DF:IterateAllFrames(function(frame)
         if frame then
             DF:UpdateDispelOverlay(frame)

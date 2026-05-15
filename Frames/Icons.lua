@@ -1093,8 +1093,7 @@ function DF:UpdateDefensiveBar(frame)
         local wrap = db.defensiveBarWrap or 5
 
         if db.pixelPerfect then
-            borderSize = DF:PixelPerfect(borderSize)
-            iconSize = DF:PixelPerfect(iconSize)
+            iconSize, scale, borderSize = DF:PixelPerfectSizeAndScaleForBorder(iconSize, scale, borderSize)
         end
 
         -- Parse compound growth direction (PRIMARY_SECONDARY)

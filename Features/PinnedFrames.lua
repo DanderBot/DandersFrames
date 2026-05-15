@@ -718,6 +718,9 @@ function PinnedFrames:CreateBossFrames(setIndex, container)
                     or event == "UNIT_MAXHEALTH"
                     or event == "UNIT_MAX_HEALTH_MODIFIERS_CHANGED" then
                 if DF.UpdateHealthFast then DF:UpdateHealthFast(self) end
+                if event == "UNIT_MAX_HEALTH_MODIFIERS_CHANGED" and DF.UpdateReducedMaxHealth then
+                    DF:UpdateReducedMaxHealth(self)
+                end
 
             elseif event == "UNIT_POWER_UPDATE"
                     or event == "UNIT_MAXPOWER"

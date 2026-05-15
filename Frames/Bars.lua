@@ -136,24 +136,34 @@ function DF:ApplyResourceBarLayout(frame)
             -- SWAP: "Width" Value applies to Height (Length), "Height" value applies to Width (Thickness)
             bar:SetWidth(ppThickness)
             bar:SetHeight(ppLength)
-
-            if db.resourceBarMatchWidth then
-                if healthBarHeight > 1 then
-                    bar:SetHeight(healthBarHeight - (borderInset * 2))
-                end
-            end
         else
             -- NORMAL: "Width" Value applies to Width, "Height" value applies to Height
             bar:SetWidth(ppLength)
             bar:SetHeight(ppThickness)
+        end
 
+        -- When Pixel Perfect is on, borderInset must be snapped to a whole screen pixel
+        -- before being subtracted from healthBarWidth. Without this, barW is a fractional
+        -- screen-pixel value and WoW rounds it differently per frame depending on screen
+        -- position, producing a 1-pixel gap alternating left/right. Snapping borderInset
+        -- guarantees (FW - barW) = 2*(P+K) screen pixels (always even), so centering
+        -- always lands on a clean pixel boundary regardless of frame width parity.
+        local bInset = db.pixelPerfect and DF:PixelPerfect(borderInset) or borderInset
+
+        if isVertical then
+            if db.resourceBarMatchWidth then
+                if healthBarHeight > 1 then
+                    bar:SetHeight(healthBarHeight - bInset * 2)
+                end
+            end
+        else
             if db.resourceBarMatchWidth then
                 if healthBarWidth > 1 then
-                    bar:SetWidth(healthBarWidth - (borderInset * 2))
+                    bar:SetWidth(healthBarWidth - bInset * 2)
                 end
             end
         end
-        
+
         local anchor = db.resourceBarAnchor or "CENTER"
         bar:SetPoint(anchor, frame, anchor, db.resourceBarX or 0, db.resourceBarY or 0)
         

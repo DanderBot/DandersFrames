@@ -592,6 +592,10 @@ function DF:UpdateUnitFrame(frame, source)
         if frame.dfHealAbsorbBar then
             frame.dfHealAbsorbBar:Hide()
         end
+        if frame.dfReducedMaxHealthBar then
+            frame.dfReducedMaxHealthBar:Hide()
+            if DF.RestoreHealthBarFromReducedMax then DF:RestoreHealthBarFromReducedMax(frame) end
+        end
         -- Apply dead fade for offline units
         DF:ApplyDeadFade(frame, "Offline")
         frame.dfLastKnownConnected = false
@@ -603,7 +607,7 @@ function DF:UpdateUnitFrame(frame, source)
     -- ========================================
     local isDead = UnitIsDead(unit)
     local isGhost = UnitIsGhost(unit)
-    
+
     if isDead or isGhost then
         if frame.healthBar then
             frame.healthBar:SetMinMaxValues(0, 100)
@@ -646,7 +650,11 @@ function DF:UpdateUnitFrame(frame, source)
         if frame.dfHealAbsorbBar then
             frame.dfHealAbsorbBar:Hide()
         end
-        
+        if frame.dfReducedMaxHealthBar then
+            frame.dfReducedMaxHealthBar:Hide()
+            if DF.RestoreHealthBarFromReducedMax then DF:RestoreHealthBarFromReducedMax(frame) end
+        end
+
         -- Still update leader and raid target icons (role icons handled separately)
         DF:UpdateLeaderIcon(frame)
         DF:UpdateRaidTargetIcon(frame)
@@ -907,7 +915,12 @@ function DF:UpdateUnitFrame(frame, source)
     -- HEAL PREDICTION BAR
     -- ========================================
     DF:UpdateHealPrediction(frame)
-    
+
+    -- ========================================
+    -- REDUCED MAX HEALTH BAR
+    -- ========================================
+    if DF.UpdateReducedMaxHealth then DF:UpdateReducedMaxHealth(frame) end
+
     -- ========================================
     -- ICONS (Leader and Raid Target only - Role icons updated separately)
     -- ========================================
@@ -1004,6 +1017,10 @@ function DF:UpdateHealthFast(frame)
         if frame.dfHealAbsorbBar then
             frame.dfHealAbsorbBar:Hide()
         end
+        if frame.dfReducedMaxHealthBar then
+            frame.dfReducedMaxHealthBar:Hide()
+            if DF.RestoreHealthBarFromReducedMax then DF:RestoreHealthBarFromReducedMax(frame) end
+        end
         DF:ApplyDeadFade(frame, "Offline")
         frame.dfLastKnownConnected = false
         return
@@ -1039,6 +1056,10 @@ function DF:UpdateHealthFast(frame)
         end
         if frame.dfHealAbsorbBar then
             frame.dfHealAbsorbBar:Hide()
+        end
+        if frame.dfReducedMaxHealthBar then
+            frame.dfReducedMaxHealthBar:Hide()
+            if DF.RestoreHealthBarFromReducedMax then DF:RestoreHealthBarFromReducedMax(frame) end
         end
         DF:ApplyDeadFade(frame, "Dead")
         return
@@ -1141,6 +1162,13 @@ function DF:UpdateHealthFast(frame)
     if (absorbMode == "ATTACHED" or absorbMode == "ATTACHED_OVERFLOW") and (db.absorbBarAttachedClampMode or 1) > 0 then
         DF:UpdateAbsorb(frame)
     end
+
+    -- ========================================
+    -- REDUCED MAX HEALTH BAR
+    -- ========================================
+    -- Re-check on UNIT_HEALTH so dead→alive transitions re-evaluate the bar
+    -- (UNIT_MAX_HEALTH_MODIFIERS_CHANGED doesn't refire on resurrect).
+    if DF.UpdateReducedMaxHealth then DF:UpdateReducedMaxHealth(frame) end
 
     -- ========================================
     -- DISPEL GRADIENT HEALTH

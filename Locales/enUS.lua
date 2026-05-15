@@ -250,13 +250,7 @@ L["+ New"] = true
 L["+ New Wizard"] = true
 L["0=Auto, Higher=On top of more elements"] = true
 L["1"] = true
-L["1. Open ElvUI config with %s/ec%s"] = true
-L["2. Go to %sUnitFrames%s (left sidebar)"] = true
 L["20 players (fixed)"] = true
-L["3. Click %sGeneral%s at the top"] = true
-L["4. Scroll down to %sDisabled Blizzard Frames%s"] = true
-L["5. Under %sGroup Units%s, uncheck %sParty%s and %sRaid%s"] = true
-L["6. Click the reload button when prompted"] = true
 L["\"%s\" will be overwritten."] = true
 L["A layout with this name already exists in %s"] = true
 L["A profile with this name already exists"] = true
@@ -448,6 +442,7 @@ L["Click %sEdit Settings%s on a profile to customise it. This takes you to the s
 L["Click %sExit Editing%s when done. Your overrides are saved to the profile. If you change a setting back to match global, the override is automatically removed."] = true
 L["Click-cast profile: %s"] = true
 L["Click-Through Icons"] = true
+L["Clip Health Bar"] = true
 L["Close"] = true
 L["Color"] = true
 L["Color and opacity of the empty/inactive pips."] = true
@@ -1100,6 +1095,7 @@ L["Ready Check Icon"] = true
 L["Ready to copy"] = true
 L["Recommended: enable 'All Debuffs' to see all relevant debuffs, especially for healers."] = true
 L["Recovered %d raid settings from interrupted auto layout editing session."] = true
+L["Reduced Max Health"] = true
 L["Refresh"] = true
 L["Reload & Disable Blizzard Party"] = true
 L["Reload & Disable Blizzard Raid"] = true
@@ -1342,7 +1338,6 @@ L["Time Remaining"] = true
 L["Tint Color"] = true
 L["Tint Opacity"] = true
 L["to customise\nthis profile's settings"] = true
-L["To fix the ElvUI compatibility issue:"] = true
 L["To blacklist specific auras, see the Aura Blacklist tab."] = true
 L["To reposition: Unlock frames (/df unlock) and drag the mover."] = true
 L["Toggle Solo Mode"] = true
@@ -1414,7 +1409,7 @@ L["Z to A"] = true
 L["Zoom Icon"] = true
 L["%sGlobal: 80%s %s— Setting matches global, no override stored%s"] = true
 L["%sModified%s %s— Setting differs from global. Click%s %sreset%s %sto revert.%s"] = true
-L["• Name Text\n• Health Text\n• Status Text (Dead/Offline)\n• Buff Stack & Duration\n• Debuff Stack & Duration\n• Pet Frame Text\n• Targeted Spell Duration\n• Defensive Icon Duration\n• Status Icon Text (Res, Summon, etc.)\n• Group Labels (Raid)"] = true
+L["• Name Text\n• Health Text\n• Status Text (Dead/Offline)\n• Buff Stack & Duration\n• Debuff Stack & Duration\n• Pet Frame Text\n• Targeted Spell Duration\n• Defensive Icon Duration\n• Status Icon Text (Res, Summon, etc.)\n• Group Labels (Raid)\n• Targeted List\n• Personal Targeted Spell\n• Aura Designer Indicators\n• Pinned Frames"] = true
 L["⚠ Note: Click-through icons will not show tooltips."] = true
 
 -- Popup.lua and WizardBuilder.lua strings

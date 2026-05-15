@@ -2019,18 +2019,50 @@ local function GetPersonalMoverSize()
     return math.max(width, 50), math.max(height, 50)
 end
 
+-- Compute the container CENTER offset from the saved icon-block centre (x, y).
+-- The saved position represents the visual midpoint of the icon block.  The
+-- container is shifted opposite to the growth direction so that icon 1 (which
+-- anchors to the container's CENTER) ends up in the right place, with the full
+-- block symmetrically centred on the saved (x, y).
+local function GetPersonalContainerPoint(x, y)
+    local db = DF:GetDB()
+    local iconSize = db.personalTargetedSpellSize or 40
+    local scale = db.personalTargetedSpellScale or 1.0
+    local maxIcons = db.personalTargetedSpellMaxIcons or 5
+    local spacing = db.personalTargetedSpellSpacing or 4
+    local growthDirection = db.personalTargetedSpellGrowth or "RIGHT"
+
+    local scaledSize = iconSize * scale
+    local scaledSpacing = spacing * scale
+    local halfBlock = (maxIcons - 1) / 2 * (scaledSize + scaledSpacing)
+
+    local cx, cy = x, y
+    if growthDirection == "RIGHT" then
+        cx = x - halfBlock
+    elseif growthDirection == "LEFT" then
+        cx = x + halfBlock
+    elseif growthDirection == "UP" then
+        cy = y - halfBlock
+    elseif growthDirection == "DOWN" then
+        cy = y + halfBlock
+    -- CENTER_H / CENTER_V: already symmetric, no adjustment needed
+    end
+    return cx, cy
+end
+
 -- Create the personal targeted spells container
 local function CreatePersonalContainer()
     if personalContainer then return personalContainer end
-    
+
     local db = DF:GetDB()
     local x = db.personalTargetedSpellX or 0
     local y = db.personalTargetedSpellY or -150
-    
+
     local container = CreateFrame("Frame", "DandersFramesPersonalTargetedSpells", UIParent)
     local w, h = GetPersonalMoverSize()
     container:SetSize(w, h)
-    container:SetPoint("CENTER", UIParent, "CENTER", x, y)
+    local cx, cy = GetPersonalContainerPoint(x, y)
+    container:SetPoint("CENTER", UIParent, "CENTER", cx, cy)
     container:SetFrameStrata("HIGH")
     container:Hide()
     container:EnableMouse(false)
@@ -2696,7 +2728,8 @@ function DF:UpdatePersonalTargetedSpellsPosition()
     
     if personalContainer then
         personalContainer:ClearAllPoints()
-        personalContainer:SetPoint("CENTER", UIParent, "CENTER", x, y)
+        local cx, cy = GetPersonalContainerPoint(x, y)
+        personalContainer:SetPoint("CENTER", UIParent, "CENTER", cx, cy)
         local w, h = GetPersonalMoverSize()
         personalContainer:SetSize(w, h)
         personalContainer:SetAlpha(iconAlpha)
@@ -2776,7 +2809,8 @@ function DF:CreatePersonalTargetedSpellsMover()
             -- Update container position live
             if personalContainer then
                 personalContainer:ClearAllPoints()
-                personalContainer:SetPoint("CENTER", UIParent, "CENTER", x, y)
+                local cx, cy = GetPersonalContainerPoint(x, y)
+                personalContainer:SetPoint("CENTER", UIParent, "CENTER", cx, cy)
             end
             
             -- Snap preview
@@ -5575,6 +5609,7 @@ local function TargetedList_SpawnTestCast()
         -- Alternate self-targeting: every 3rd cast targets the player
         testIsTargetingPlayer = (targetedListTestNextId % 3 == 1),
     }
+
     -- NOTE: caller is responsible for calling TargetedList_Render()
     -- after all spawns/modifications are done. This avoids premature
     -- bar acquisition before static-mode record modifications.

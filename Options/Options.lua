@@ -8,8 +8,10 @@ local format = string.format
 function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     local L = DF.L
     
-    -- Helper function to create a themed "Copy to Raid/Party" button for a section
-    local function CreateCopyButton(parent, prefixes, sectionName, pageId)
+    -- Helper function to create a themed "Copy to Raid/Party" button for a section.
+    -- Pass omitReset=true for pages that manage their own reset flow (Aura Designer,
+    -- Click Casting) so they only get the Sync/Copy pair, not the destructive trio.
+    local function CreateCopyButton(parent, prefixes, sectionName, pageId, omitReset)
         -- Register section in the sync registry
         if pageId then
             DF.SectionRegistry[pageId] = prefixes
@@ -199,74 +201,76 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Reset to defaults button (red, destructive — leftmost in the trio).
         -- Static red palette (no theme listener) so it visually flags as
         -- destructive vs. the theme-coloured Copy/Sync buttons.
-        local resetBtn = CreateFrame("Button", nil, btn, "BackdropTemplate")
-        resetBtn:SetSize(115, 26)
-        if linkBtn then
-            resetBtn:SetPoint("RIGHT", linkBtn, "LEFT", -4, 0)
-        else
-            resetBtn:SetPoint("RIGHT", btn, "LEFT", -4, 0)
-        end
+        if not omitReset then
+            local resetBtn = CreateFrame("Button", nil, btn, "BackdropTemplate")
+            resetBtn:SetSize(115, 26)
+            if linkBtn then
+                resetBtn:SetPoint("RIGHT", linkBtn, "LEFT", -4, 0)
+            else
+                resetBtn:SetPoint("RIGHT", btn, "LEFT", -4, 0)
+            end
 
-        if not resetBtn.SetBackdrop then Mixin(resetBtn, BackdropTemplateMixin) end
-        resetBtn:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
-        })
-        resetBtn:SetBackdropColor(0.18, 0.18, 0.18, 1)
-        resetBtn:SetBackdropBorderColor(0.6, 0.25, 0.25, 0.6)
-
-        resetBtn.Icon = resetBtn:CreateTexture(nil, "OVERLAY")
-        resetBtn.Icon:SetPoint("LEFT", 8, 0)
-        resetBtn.Icon:SetSize(14, 14)
-        resetBtn.Icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\refresh")
-        resetBtn.Icon:SetVertexColor(0.7, 0.4, 0.4)
-
-        resetBtn.Text = resetBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-        resetBtn.Text:SetPoint("LEFT", resetBtn.Icon, "RIGHT", 4, 0)
-        resetBtn.Text:SetText(L["Reset Page"])
-        resetBtn.Text:SetTextColor(0.7, 0.4, 0.4)
-
-        resetBtn:SetScript("OnEnter", function(self)
-            self:SetBackdropColor(0.4, 0.15, 0.15, 1)
-            self:SetBackdropBorderColor(1, 0.4, 0.4, 1)
-            self.Text:SetTextColor(1, 0.7, 0.7)
-            self.Icon:SetVertexColor(1, 0.7, 0.7)
-
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText(format(L["Reset: %s"], sectionName))
-            local mode = GUI.SelectedMode or "party"
-            local m = (mode == "party") and L["Party"] or L["Raid"]
-            GameTooltip:AddLine(format(L["Reset %s settings on %s mode to defaults. Other settings are not affected."], sectionName, m), 1, 1, 1, true)
-            GameTooltip:Show()
-        end)
-
-        resetBtn:SetScript("OnLeave", function(self)
-            self:SetBackdropColor(0.18, 0.18, 0.18, 1)
-            self:SetBackdropBorderColor(0.6, 0.25, 0.25, 0.6)
-            self.Text:SetTextColor(0.7, 0.4, 0.4)
-            self.Icon:SetVertexColor(0.7, 0.4, 0.4)
-            GameTooltip:Hide()
-        end)
-
-        resetBtn:SetScript("OnClick", function()
-            local mode = GUI.SelectedMode or "party"
-            local m = (mode == "party") and L["Party"] or L["Raid"]
-            DF:ShowPopupAlert({
-                title = format(L["Reset: %s"], sectionName),
-                message = format(L["Reset %s settings to defaults?\n\nThis only affects %s settings on the current %s mode. This cannot be undone."], sectionName, sectionName, m),
-                buttons = {
-                    {
-                        label = L["Reset"],
-                        onClick = function()
-                            DF:ResetSectionSettings(prefixes, mode)
-                            if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
-                        end,
-                    },
-                    { label = L["Cancel"] },
-                },
+            if not resetBtn.SetBackdrop then Mixin(resetBtn, BackdropTemplateMixin) end
+            resetBtn:SetBackdrop({
+                bgFile = "Interface\\Buttons\\WHITE8x8",
+                edgeFile = "Interface\\Buttons\\WHITE8x8",
+                edgeSize = 1,
             })
-        end)
+            resetBtn:SetBackdropColor(0.18, 0.18, 0.18, 1)
+            resetBtn:SetBackdropBorderColor(0.6, 0.25, 0.25, 0.6)
+
+            resetBtn.Icon = resetBtn:CreateTexture(nil, "OVERLAY")
+            resetBtn.Icon:SetPoint("LEFT", 8, 0)
+            resetBtn.Icon:SetSize(14, 14)
+            resetBtn.Icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\refresh")
+            resetBtn.Icon:SetVertexColor(0.7, 0.4, 0.4)
+
+            resetBtn.Text = resetBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+            resetBtn.Text:SetPoint("LEFT", resetBtn.Icon, "RIGHT", 4, 0)
+            resetBtn.Text:SetText(L["Reset Page"])
+            resetBtn.Text:SetTextColor(0.7, 0.4, 0.4)
+
+            resetBtn:SetScript("OnEnter", function(self)
+                self:SetBackdropColor(0.4, 0.15, 0.15, 1)
+                self:SetBackdropBorderColor(1, 0.4, 0.4, 1)
+                self.Text:SetTextColor(1, 0.7, 0.7)
+                self.Icon:SetVertexColor(1, 0.7, 0.7)
+
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:SetText(format(L["Reset: %s"], sectionName))
+                local mode = GUI.SelectedMode or "party"
+                local m = (mode == "party") and L["Party"] or L["Raid"]
+                GameTooltip:AddLine(format(L["Reset %s settings on %s mode to defaults. Other settings are not affected."], sectionName, m), 1, 1, 1, true)
+                GameTooltip:Show()
+            end)
+
+            resetBtn:SetScript("OnLeave", function(self)
+                self:SetBackdropColor(0.18, 0.18, 0.18, 1)
+                self:SetBackdropBorderColor(0.6, 0.25, 0.25, 0.6)
+                self.Text:SetTextColor(0.7, 0.4, 0.4)
+                self.Icon:SetVertexColor(0.7, 0.4, 0.4)
+                GameTooltip:Hide()
+            end)
+
+            resetBtn:SetScript("OnClick", function()
+                local mode = GUI.SelectedMode or "party"
+                local m = (mode == "party") and L["Party"] or L["Raid"]
+                DF:ShowPopupAlert({
+                    title = format(L["Reset: %s"], sectionName),
+                    message = format(L["Reset %s settings to defaults?\n\nThis only affects %s settings on the current %s mode. This cannot be undone."], sectionName, sectionName, m),
+                    buttons = {
+                        {
+                            label = L["Reset"],
+                            onClick = function()
+                                DF:ResetSectionSettings(prefixes, mode)
+                                if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
+                            end,
+                        },
+                        { label = L["Cancel"] },
+                    },
+                })
+            end)
+        end
 
         -- Initial update
         UpdateAppearance()
@@ -1227,28 +1231,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- ===== INFO BANNER (global settings notice) =====
         do
-            local banner = CreateFrame("Frame", nil, self.child, "BackdropTemplate")
-            banner:SetSize(560, 40)
-            if not banner.SetBackdrop then Mixin(banner, BackdropTemplateMixin) end
-            banner:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
-            banner:SetBackdropColor(0.15, 0.18, 0.28, 1)
-            local tc = GUI.GetThemeColor and GUI.GetThemeColor() or {r = 0.45, g = 0.45, b = 0.95}
-            banner:SetBackdropBorderColor(tc.r, tc.g, tc.b, 0.5)
-
-            local icon = banner:CreateTexture(nil, "OVERLAY")
-            icon:SetPoint("LEFT", 10, 0)
-            icon:SetSize(16, 16)
-            icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\info")
-
-            local txt = banner:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-            txt:SetPoint("LEFT", icon, "RIGHT", 8, 0)
-            txt:SetPoint("RIGHT", banner, "RIGHT", -10, 0)
-            txt:SetJustifyH("LEFT")
-            txt:SetWordWrap(true)
-            txt:SetText(L["Settings on this page apply globally — changes persist across both the Party and Raid sections."])
-            txt:SetTextColor(0.85, 0.85, 0.85)
-
-            Add(banner, 44, "both")
+            local banner = GUI:CreateInfoBanner(self.child, {
+                tone = "info",
+                text = L["Settings on this page apply globally — changes persist across both the Party and Raid sections."],
+            })
+            Add(banner, banner.layoutHeight, "both")
         end
 
         -- ===== FRAME MODES GROUP (Column 1, Top) =====
@@ -1911,7 +1898,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- ===== AFFECTED ELEMENTS GROUP (Column 2) =====
         local infoGroup = GUI:CreateSettingsGroup(self.child, 280)
         infoGroup:AddWidget(GUI:CreateHeader(self.child, L["Affected Elements"]), 40)
-        infoGroup:AddWidget(GUI:CreateLabel(self.child, L["• Name Text\n• Health Text\n• Status Text (Dead/Offline)\n• Buff Stack & Duration\n• Debuff Stack & Duration\n• Pet Frame Text\n• Targeted Spell Duration\n• Defensive Icon Duration\n• Status Icon Text (Res, Summon, etc.)\n• Group Labels (Raid)"], 250), 175)
+        infoGroup:AddWidget(GUI:CreateLabel(self.child, L["• Name Text\n• Health Text\n• Status Text (Dead/Offline)\n• Buff Stack & Duration\n• Debuff Stack & Duration\n• Pet Frame Text\n• Targeted Spell Duration\n• Defensive Icon Duration\n• Status Icon Text (Res, Summon, etc.)\n• Group Labels (Raid)\n• Targeted List\n• Personal Targeted Spell\n• Aura Designer Indicators\n• Pinned Frames"], 250), 235)
         infoGroup:AddWidget(GUI:CreateLabel(self.child, L["Note: Font sizes are not changed. Adjust sizes in each element's page."], 250), 40)
         Add(infoGroup, nil, 2)
     end)
@@ -2971,66 +2958,36 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local roleOrderWidget = nil
         
         -- ===== COMBAT STATUS BANNER (full width) =====
-        local combatBanner = CreateFrame("Frame", nil, self.child, "BackdropTemplate")
-        combatBanner:SetSize(560, 45)
-        combatBanner:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
-        })
-        
-        local combatBannerIcon = combatBanner:CreateTexture(nil, "OVERLAY")
-        combatBannerIcon:SetSize(20, 20)
-        combatBannerIcon:SetPoint("LEFT", 12, 0)
-        
-        local combatBannerText = combatBanner:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-        combatBannerText:SetPoint("LEFT", combatBannerIcon, "RIGHT", 8, 0)
-        combatBannerText:SetPoint("RIGHT", -12, 0)
-        combatBannerText:SetJustifyH("LEFT")
-        combatBannerText:SetWordWrap(true)
-        
+        local combatBanner = GUI:CreateInfoBanner(self.child, { fontTemplate = "DFFontNormal" })
+
         local function UpdateCombatBanner()
             if not db.sortEnabled then
                 combatBanner:Hide()
                 return
             end
-            
             combatBanner:Show()
-            
+
             local selfPos = db.sortSelfPosition or "SORTED"
             local hasAdvancedOptions = db.sortSeparateMeleeRanged or db.sortByClass or db.sortAlphabetical
-            
+
             if hasAdvancedOptions then
-                -- All groups limited
-                combatBanner:SetBackdropColor(0.6, 0.3, 0.1, 0.9)
-                combatBanner:SetBackdropBorderColor(0.8, 0.4, 0.1, 1)
-                combatBannerIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\warning")
-                combatBannerIcon:SetVertexColor(1, 0.6, 0.2)
-                combatBannerText:SetText(L["Combat Limitation: All groups will not update with new players that join mid-combat."])
-                combatBannerText:SetTextColor(1, 0.85, 0.7)
+                combatBanner:SetTone("danger")
+                combatBanner:SetText(L["Combat Limitation: All groups will not update with new players that join mid-combat."])
             elseif selfPos == "FIRST" or selfPos == "LAST" then
-                -- Player's group limited
-                combatBanner:SetBackdropColor(0.5, 0.45, 0.1, 0.9)
-                combatBanner:SetBackdropBorderColor(0.7, 0.6, 0.1, 1)
-                combatBannerIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\info")
-                combatBannerIcon:SetVertexColor(1, 0.9, 0.3)
-                combatBannerText:SetText(L["Combat Limitation: Your group will not update with new players that join mid-combat."])
-                combatBannerText:SetTextColor(1, 0.95, 0.7)
+                combatBanner:SetTone("caution")
+                -- Override default warning icon with info icon for this softer state.
+                combatBanner:SetIconTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\info")
+                combatBanner:SetText(L["Combat Limitation: Your group will not update with new players that join mid-combat."])
             else
-                -- Fully combat safe
-                combatBanner:SetBackdropColor(0.1, 0.4, 0.2, 0.9)
-                combatBanner:SetBackdropBorderColor(0.2, 0.6, 0.3, 1)
-                combatBannerIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\check")
-                combatBannerIcon:SetVertexColor(0.3, 1, 0.5)
-                combatBannerText:SetText(L["Fully Combat Safe: Frames will update normally during combat."])
-                combatBannerText:SetTextColor(0.7, 1, 0.8)
+                combatBanner:SetTone("success")
+                combatBanner:SetText(L["Fully Combat Safe: Frames will update normally during combat."])
             end
         end
-        
+
         combatBanner.hideOn = HideSortOptions
         combatBanner.UpdateBanner = UpdateCombatBanner
-        Add(combatBanner, 50, "both")
-        
+        Add(combatBanner, combatBanner.layoutHeight, "both")
+
         -- Initial update
         UpdateCombatBanner()
         
@@ -3360,7 +3317,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     local pageHealthBar = CreateSubTab("bars", "bars_health", L["Health Bar"])
     BuildPage(pageHealthBar, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top
-        Add(CreateCopyButton(self.child, {"healthColor", "healthOrientation", "healthTexture", "classColor", "smoothBars", "background", "missingHealth"}, L["Health Bar"], "bars_health"), 25, 2)
+        Add(CreateCopyButton(self.child, {"healthColor", "healthOrientation", "healthTexture", "classColor", "smoothBars", "background", "missingHealth", "reducedMaxHealth"}, L["Health Bar"], "bars_health"), 25, 2)
         
         local currentSection = nil
         local function AddToSection(widget, height, col)
@@ -3540,9 +3497,32 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         mhLowGroup:AddWidget(GUI:CreateSlider(self.child, L["Weight"], 1, 5, 1, db, "missingHealthColorLowWeight", function() if mhGradBar.UpdatePreview then mhGradBar.UpdatePreview() end DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() end, function() DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() if mhGradBar.UpdatePreview then mhGradBar.UpdatePreview() end end, true), 55)
         mhLowGroup.hideOn = function(d) return d.backgroundMode == "BACKGROUND" or d.missingHealthColorMode ~= "PERCENT" end
         AddToSection(mhLowGroup, nil, 1)
-        
+
         currentSection = nil
-        
+
+        AddSpace(10, "both")
+
+        -- ===== REDUCED MAX HEALTH SECTION =====
+        local reducedSection = Add(GUI:CreateCollapsibleSection(self.child, L["Reduced Max Health"], true), 36, "both")
+        currentSection = reducedSection
+
+        -- ===== REDUCED MAX HEALTH SETTINGS GROUP (Column 1) =====
+        local reducedGroup = GUI:CreateSettingsGroup(self.child, 280)
+        reducedGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 40)
+        reducedGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable"], db, "reducedMaxHealthEnabled", function() DF:UpdateAllFrames() end), 30)
+        local reducedClip = reducedGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Clip Health Bar"], db, "reducedMaxHealthClipHealthBar", function() DF:UpdateAllFrames() end), 30)
+        reducedClip.hideOn = function(d) return not d.reducedMaxHealthEnabled end
+        local reducedTex = reducedGroup:AddWidget(GUI:CreateTextureDropdown(self.child, L["Texture"], db, "reducedMaxHealthTexture", function() DF:UpdateAllFrames() end), 55)
+        reducedTex.hideOn = function(d) return not d.reducedMaxHealthEnabled end
+        local reducedColor = reducedGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Bar Color"], db, "reducedMaxHealthColor", true, nil, function() DF:UpdateAllFrames() end, true), 35)
+        reducedColor.hideOn = function(d) return not d.reducedMaxHealthEnabled end
+        local reducedBlendOpts = { BLEND = L["Blend"], ADD = L["Add"], MOD = L["Modulate"] }
+        local reducedBlend = reducedGroup:AddWidget(GUI:CreateDropdown(self.child, L["Blend Mode"], reducedBlendOpts, db, "reducedMaxHealthBlendMode", function() DF:UpdateAllFrames() end), 55)
+        reducedBlend.hideOn = function(d) return not d.reducedMaxHealthEnabled end
+        AddToSection(reducedGroup, nil, 1)
+
+        currentSection = nil
+
         -- See Also links
         AddSpace(20, "both")
         Add(GUI:CreateSeeAlso(self.child, {
@@ -3755,8 +3735,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             return not d.classPowerEnabled
         end
         
-        AddSpace(10, 1)
-        Add(GUI:CreateHeader(self.child, L["Size"]), 40, 1)
+        local cpSizeSpace = AddSpace(10, 1)
+        if cpSizeSpace then cpSizeSpace.hideOn = HideClassPower end
+        local cpSizeHeader = Add(GUI:CreateHeader(self.child, L["Size"]), 40, 1)
+        cpSizeHeader.hideOn = HideClassPower
         
         local cpHeight = Add(GUI:CreateSlider(self.child, L["Pip Height"], 1, 12, 1, db, "classPowerHeight", nil, function() if DF.RefreshClassPower then DF.RefreshClassPower() end end, true), 55, 1)
         cpHeight.hideOn = HideClassPower
@@ -3769,8 +3751,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end), 25, 1)
         cpIgnoreFade.hideOn = HideClassPower
 
-        AddSpace(10, 1)
-        Add(GUI:CreateHeader(self.child, L["Colors"]), 40, 1)
+        local cpColorsSpace = AddSpace(10, 1)
+        if cpColorsSpace then cpColorsSpace.hideOn = HideClassPower end
+        local cpColorsHeader = Add(GUI:CreateHeader(self.child, L["Colors"]), 40, 1)
+        cpColorsHeader.hideOn = HideClassPower
 
         local cpUseCustomColor = Add(GUI:CreateCheckbox(self.child, L["Use Custom Pip Color"], db, "classPowerUseCustomColor", function()
             self:RefreshStates()
@@ -3795,7 +3779,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         cpBgColor.hideOn = HideClassPower
         cpBgColor.tooltip = L["Color and opacity of the empty/inactive pips."]
 
-        Add(GUI:CreateHeader(self.child, L["Position"]), 40, 2)
+        local cpPositionHeader = Add(GUI:CreateHeader(self.child, L["Position"]), 40, 2)
+        cpPositionHeader.hideOn = HideClassPower
         local anchorOptions = {
             INSIDE_BOTTOM = L["Inside (Bottom)"],
             INSIDE_TOP = L["Inside (Top)"],
@@ -3814,8 +3799,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local cpY = Add(GUI:CreateSlider(self.child, L["Offset Y"], -20, 20, 1, db, "classPowerY", nil, function() if DF.RefreshClassPower then DF.RefreshClassPower() end end, true), 55, 2)
         cpY.hideOn = HideClassPower
 
-        AddSpace(10, 2)
-        Add(GUI:CreateHeader(self.child, L["Show for Roles"]), 40, 2)
+        local cpRolesSpace = AddSpace(10, 2)
+        if cpRolesSpace then cpRolesSpace.hideOn = HideClassPower end
+        local cpRolesHeader = Add(GUI:CreateHeader(self.child, L["Show for Roles"]), 40, 2)
+        cpRolesHeader.hideOn = HideClassPower
 
         local cpShowTank = Add(GUI:CreateCheckbox(self.child, L["Tank"], db, "classPowerShowTank", function()
             if DF.RefreshClassPower then DF.RefreshClassPower() end
@@ -4357,100 +4344,37 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Explains that Aura Filters only affect buff/debuff bars, with inline
         -- links to related pages so users can find the independent systems.
         do
-            local infoBanner = CreateFrame("Frame", nil, self.child, "BackdropTemplate")
-            infoBanner:SetSize(560, 56)
-            if not infoBanner.SetBackdrop then Mixin(infoBanner, BackdropTemplateMixin) end
-            infoBanner:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
-            infoBanner:SetBackdropColor(0.15, 0.18, 0.28, 1)
             local tc = GUI.GetThemeColor()
-            infoBanner:SetBackdropBorderColor(tc.r, tc.g, tc.b, 0.5)
-
-            local infoIcon = infoBanner:CreateTexture(nil, "OVERLAY")
-            infoIcon:SetPoint("TOPLEFT", 12, -10)
-            infoIcon:SetSize(18, 18)
-            infoIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\info")
-
-            -- Helper to create an inline clickable link
-            local function CreateInlineLink(parent, text, pageId)
-                local btn = CreateFrame("Button", nil, parent)
-                local fs = btn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-                fs:SetAllPoints()
-                fs:SetText(text)
-                local c = GUI.GetThemeColor()
-                fs:SetTextColor(c.r, c.g, c.b)
-                btn:SetScript("OnEnter", function() fs:SetTextColor(1, 1, 1) end)
-                btn:SetScript("OnLeave", function()
-                    local c2 = GUI.GetThemeColor()
-                    fs:SetTextColor(c2.r, c2.g, c2.b)
-                end)
-                btn:SetScript("OnClick", function()
-                    if GUI.SelectTab then GUI.SelectTab(pageId) end
-                end)
-                btn:SetSize(fs:GetStringWidth() + 2, 14)
-                return btn
+            local linkColor = string.format("|cFF%02X%02X%02X",
+                math.floor((tc.r or 1) * 255),
+                math.floor((tc.g or 1) * 255),
+                math.floor((tc.b or 1) * 255))
+            local function L_link(text, pageId)
+                return linkColor .. "|HdfPage:" .. pageId .. "|h" .. text .. "|h|r"
             end
+            local bodyText = L["Aura Filters only affect the"] .. " "
+                .. L_link(L["Buff Bar"], "auras_buffs") .. " "
+                .. L["and"] .. " "
+                .. L_link(L["Debuff Bar"], "auras_debuffs") .. "."
+                .. "\n"
+                .. L["Auras displayed in the"] .. " "
+                .. L_link(L["Dispel Overlay"], "auras_dispel") .. ", "
+                .. L_link(L["Defensive Icon"], "auras_defensiveicon") .. ", "
+                .. L_link(L["Aura Designer"], "auras_auradesigner") .. ", "
+                .. L["and"] .. " "
+                .. L_link(L["Boss Debuffs"], "auras_bossdebuffs") .. " "
+                .. L["are independent of Aura Filters."]
 
-            -- Line 1: "Aura Filters only affect the [Buff Bar] and [Debuff Bar]."
-            local t1 = infoBanner:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-            t1:SetPoint("TOPLEFT", infoIcon, "TOPRIGHT", 8, 2)
-            t1:SetText(L["Aura Filters only affect the"])
-            t1:SetTextColor(0.85, 0.85, 0.85)
-
-            local linkBuff = CreateInlineLink(infoBanner, L["Buff Bar"], "auras_buffs")
-            linkBuff:SetPoint("LEFT", t1, "RIGHT", 3, 0)
-
-            local t2 = infoBanner:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-            t2:SetPoint("LEFT", linkBuff, "RIGHT", 3, 0)
-            t2:SetText(L["and"])
-            t2:SetTextColor(0.85, 0.85, 0.85)
-
-            local linkDebuff = CreateInlineLink(infoBanner, L["Debuff Bar"], "auras_debuffs")
-            linkDebuff:SetPoint("LEFT", t2, "RIGHT", 3, 0)
-
-            local t2b = infoBanner:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-            t2b:SetPoint("LEFT", linkDebuff, "RIGHT", 0, 0)
-            t2b:SetText(".")
-            t2b:SetTextColor(0.85, 0.85, 0.85)
-
-            -- Line 2: "Auras displayed in the [Dispel Overlay], [Defensive Icon], and [Aura Designer] are independent."
-            local t3 = infoBanner:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-            t3:SetPoint("TOPLEFT", t1, "BOTTOMLEFT", 0, -4)
-            t3:SetText(L["Auras displayed in the"])
-            t3:SetTextColor(0.85, 0.85, 0.85)
-
-            local linkDispel = CreateInlineLink(infoBanner, L["Dispel Overlay"], "auras_dispel")
-            linkDispel:SetPoint("LEFT", t3, "RIGHT", 3, 0)
-
-            local t4 = infoBanner:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-            t4:SetPoint("LEFT", linkDispel, "RIGHT", 0, 0)
-            t4:SetText(",")
-            t4:SetTextColor(0.85, 0.85, 0.85)
-
-            local linkDef = CreateInlineLink(infoBanner, L["Defensive Icon"], "auras_defensiveicon")
-            linkDef:SetPoint("LEFT", t4, "RIGHT", 3, 0)
-
-            local t5 = infoBanner:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-            t5:SetPoint("LEFT", linkDef, "RIGHT", 0, 0)
-            t5:SetText(",")
-            t5:SetTextColor(0.85, 0.85, 0.85)
-
-            local linkAD = CreateInlineLink(infoBanner, L["Aura Designer"], "auras_auradesigner")
-            linkAD:SetPoint("LEFT", t5, "RIGHT", 3, 0)
-
-            local t5b = infoBanner:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-            t5b:SetPoint("LEFT", linkAD, "RIGHT", 0, 0)
-            t5b:SetText(", " .. L["and"])
-            t5b:SetTextColor(0.85, 0.85, 0.85)
-
-            local linkBoss = CreateInlineLink(infoBanner, L["Boss Debuffs"], "auras_bossdebuffs")
-            linkBoss:SetPoint("LEFT", t5b, "RIGHT", 3, 0)
-
-            local t6 = infoBanner:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-            t6:SetPoint("LEFT", linkBoss, "RIGHT", 3, 0)
-            t6:SetText(L["are independent of Aura Filters."])
-            t6:SetTextColor(0.85, 0.85, 0.85)
-
-            Add(infoBanner, 62, "both")
+            local infoBanner = GUI:CreateInfoBanner(self.child, {
+                tone = "info",
+                html = true,
+                text = bodyText,
+                onLinkClick = function(pageId)
+                    if GUI.SelectTab then GUI.SelectTab(pageId) end
+                end,
+                minHeight = 56,
+            })
+            Add(infoBanner, infoBanner.layoutHeight, "both")
             AddSpace(4, "both")
         end
 
@@ -4579,34 +4503,15 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         dfAll.tooltip = L["Show every debuff with no filtering."]
 
         -- ===== WARNING BANNER: All Debuffs disabled =====
-        local debuffWarningBanner = CreateFrame("Frame", nil, self.child, "BackdropTemplate")
-        debuffWarningBanner:SetSize(560, 45)
-        debuffWarningBanner:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
+        local debuffWarningBanner = GUI:CreateInfoBanner(self.child, {
+            tone = "caution",
+            fontTemplate = "DFFontNormal",
+            text = L["Recommended: enable 'All Debuffs' to see all relevant debuffs, especially for healers."],
         })
-        debuffWarningBanner:SetBackdropColor(0.5, 0.45, 0.1, 0.9)
-        debuffWarningBanner:SetBackdropBorderColor(0.7, 0.6, 0.1, 1)
-
-        local debuffWarningIcon = debuffWarningBanner:CreateTexture(nil, "OVERLAY")
-        debuffWarningIcon:SetSize(20, 20)
-        debuffWarningIcon:SetPoint("LEFT", 12, 0)
-        debuffWarningIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\warning")
-        debuffWarningIcon:SetVertexColor(1, 0.9, 0.3)
-
-        local debuffWarningText = debuffWarningBanner:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-        debuffWarningText:SetPoint("LEFT", debuffWarningIcon, "RIGHT", 8, 0)
-        debuffWarningText:SetPoint("RIGHT", -12, 0)
-        debuffWarningText:SetJustifyH("LEFT")
-        debuffWarningText:SetWordWrap(true)
-        debuffWarningText:SetText(L["Recommended: enable 'All Debuffs' to see all relevant debuffs, especially for healers."])
-        debuffWarningText:SetTextColor(1, 0.95, 0.7)
-
         debuffWarningBanner.hideOn = function(d)
             return d.auraSourceMode ~= "DIRECT" or d.directDebuffShowAll
         end
-        debuffGroup:AddWidget(debuffWarningBanner, 50)
+        debuffGroup:AddWidget(debuffWarningBanner, debuffWarningBanner.layoutHeight)
 
         local debuffSubInfo = debuffGroup:AddWidget(GUI:CreateLabel(self.child, "|cff888888Enabled filters are combined \226\128\148 debuffs matching any selected filter will be shown.|r", 250), 35)
         debuffSubInfo.hideOn = HideDebuffSubFilters
@@ -5180,46 +5085,24 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- ===== INFO BANNER =====
         do
-            local bdBanner = CreateFrame("Frame", nil, self.child, "BackdropTemplate")
-            bdBanner:SetSize(560, 38)
-            if not bdBanner.SetBackdrop then Mixin(bdBanner, BackdropTemplateMixin) end
-            bdBanner:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
-            bdBanner:SetBackdropColor(0.15, 0.18, 0.28, 1)
             local tc = GUI.GetThemeColor()
-            bdBanner:SetBackdropBorderColor(tc.r, tc.g, tc.b, 0.5)
+            local linkColor = string.format("|cFF%02X%02X%02X",
+                math.floor((tc.r or 1) * 255),
+                math.floor((tc.g or 1) * 255),
+                math.floor((tc.b or 1) * 255))
+            local bodyText = L["Boss Debuffs only trigger"] .. " "
+                .. linkColor .. "|HdfPage:auras_dispel|h" .. L["Dispel Overlays"] .. "|h|r "
+                .. L["in Hybrid or Blizzard mode."]
 
-            local bdIcon = bdBanner:CreateTexture(nil, "OVERLAY")
-            bdIcon:SetPoint("LEFT", 12, 0)
-            bdIcon:SetSize(18, 18)
-            bdIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\info")
-
-            local bdText = bdBanner:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-            bdText:SetPoint("LEFT", bdIcon, "RIGHT", 8, 0)
-            bdText:SetText(L["Boss Debuffs only trigger"])
-            bdText:SetTextColor(0.85, 0.85, 0.85)
-
-            local bdLink = CreateFrame("Button", nil, bdBanner)
-            local bdLinkText = bdLink:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-            bdLinkText:SetAllPoints()
-            bdLinkText:SetText(L["Dispel Overlays"])
-            bdLinkText:SetTextColor(tc.r, tc.g, tc.b)
-            bdLink:SetSize(bdLinkText:GetStringWidth() + 2, 14)
-            bdLink:SetPoint("LEFT", bdText, "RIGHT", 3, 0)
-            bdLink:SetScript("OnEnter", function() bdLinkText:SetTextColor(1, 1, 1) end)
-            bdLink:SetScript("OnLeave", function()
-                local c = GUI.GetThemeColor()
-                bdLinkText:SetTextColor(c.r, c.g, c.b)
-            end)
-            bdLink:SetScript("OnClick", function()
-                if GUI.SelectTab then GUI.SelectTab("auras_dispel") end
-            end)
-
-            local bdSuffix = bdBanner:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-            bdSuffix:SetPoint("LEFT", bdLink, "RIGHT", 3, 0)
-            bdSuffix:SetText(L["in Hybrid or Blizzard mode."])
-            bdSuffix:SetTextColor(0.85, 0.85, 0.85)
-
-            Add(bdBanner, 44, "both")
+            local bdBanner = GUI:CreateInfoBanner(self.child, {
+                tone = "info",
+                html = true,
+                text = bodyText,
+                onLinkClick = function(pageId)
+                    if GUI.SelectTab then GUI.SelectTab(pageId) end
+                end,
+            })
+            Add(bdBanner, bdBanner.layoutHeight, "both")
         end
 
         AddSpace(10, "both")
@@ -7423,11 +7306,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         gradSize.hideOn = HideDispelOptions
         local gradAlpha = gradientGroup:AddWidget(GUI:CreateSlider(self.child, L["Gradient Opacity"], 0.1, 1.0, 0.1, db, "dispelGradientAlpha", function()
             InvalidateCurves()
-        end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
+        end, function() DF:InvalidateDispelColorCurve(); DF:LightweightUpdateDispelOverlay() end, true), 55)
         gradAlpha.hideOn = HideDispelOptions
         local gradIntensity = gradientGroup:AddWidget(GUI:CreateSlider(self.child, L["Gradient Intensity"], 0.5, 3.0, 0.1, db, "dispelGradientIntensity", function()
             InvalidateCurves()
-        end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
+        end, function() DF:InvalidateDispelColorCurve(); DF:LightweightUpdateDispelOverlay() end, true), 55)
         gradIntensity.hideOn = HideDispelOptions
         local blendModes = { ["ADD"]= L["Glow (ADD)"], ["BLEND"]= L["Solid (BLEND)"] }
         local blendDropdown = gradientGroup:AddWidget(GUI:CreateDropdown(self.child, L["Blend Mode"], blendModes, db, "dispelGradientBlendMode", function()
@@ -7989,7 +7872,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         presetRow:SetSize(240, 24)
         
         local presets = {
-            {name = "All", x = 0, cats = {"position", "layout", "bars", "auras", "text", "icons", "other"}},
+            {name = "All", x = 0, cats = {"position", "layout", "bars", "auras", "text", "icons", "other", "pinnedFrames", "auraDesigner", "autoLayout"}},
             {name = "Look", x = 60, cats = {"bars", "auras", "text", "icons", "other"}},
             {name = "Layout", x = 120, cats = {"position", "layout"}},
             {name = "None", x = 180, cats = {}},

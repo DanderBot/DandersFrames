@@ -12,6 +12,7 @@ local GetUnitName = GetUnitName
 local GetNumGroupMembers = GetNumGroupMembers
 local GetRaidRosterInfo = GetRaidRosterInfo
 local IsInRaid = IsInRaid
+local issecretvalue = issecretvalue
 local wipe = wipe
 local tconcat = table.concat
 local tsort = table.sort
@@ -56,8 +57,10 @@ local function UnitsToNameList(units)
     wipe(namesBuf)
     for i = 1, #units do
         local name = GetUnitName(units[i], true)
-        -- Guard against secret values (Midnight API restriction on some unit names)
-        if type(name) == "string" then
+        -- Skip nil and secret values (Midnight 12.0 returns opaque secret strings
+        -- for some unit names in instanced content; type() == "string" is not
+        -- sufficient — secret values pass that check but crash table.concat).
+        if name and not issecretvalue(name) then
             namesBuf[#namesBuf + 1] = name
         end
     end

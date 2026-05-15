@@ -190,9 +190,13 @@ function DF:UpdateHealthBarAppearance(frame)
     -- overwrite it.  Alpha is still applied below so OOR/dead fade
     -- continues to work.
     -- ========================================
+    -- In replace mode AD owns the bar colour entirely — skip normal colour updates.
+    -- In tint mode the underlying bar shows through the overlay, so normal colour
+    -- logic (class / percent / custom) must still run.
     local adHealthBarActive = frame.dfAD and frame.dfAD.healthbar
+    local adHealthBarMode   = adHealthBarActive and frame.dfAD.healthbarMode
 
-    if adHealthBarActive then
+    if adHealthBarMode == "replace" then
         -- AD owns the color — don't touch it
     elseif aggroActive then
         -- Priority 1: Aggro override
@@ -1089,6 +1093,38 @@ function DF:UpdateAuraDesignerAppearance(frame)
                 end
             end
         end
+        -- Tint overlay (health bar "show when missing" indicator)
+        -- Control opacity via SetStatusBarColor rather than SetAlpha.
+        -- SetAlpha compounds with the blend baked into SetStatusBarColor:
+        -- blend × oorAlpha = e.g. 0.5 × 0.2 = 0.1 (nearly invisible OOR).
+        -- Setting SetStatusBarColor directly gives the exact target opacity.
+        local tintOverlay = frame.dfAD and frame.dfAD.tintOverlay
+        if tintOverlay and tintOverlay:IsShown() then
+            local adState = frame.dfAD
+            -- Use the current displayed color (healthbarCurrent*), which the expiring
+            -- ticker updates to the expiring color when past the threshold. Falling back
+            -- to healthbarR/G/B (the configured active color) covers the non-expiring
+            -- case and initial setup before any ticker callback has fired.
+            local r = adState.healthbarCurrentR or adState.healthbarR or 1
+            local g = adState.healthbarCurrentG or adState.healthbarG or 1
+            local b = adState.healthbarCurrentB or adState.healthbarB or 1
+            local blend   = adState.healthbarBlend or 0.5
+
+            local effectiveBlend
+            if issecretvalue and issecretvalue(inRange) then
+                -- Secret boolean fallback — can't branch; leave at configured blend.
+                effectiveBlend = blend
+            elseif inRange then
+                effectiveBlend = blend
+            else
+                effectiveBlend = oorAlpha
+            end
+            tintOverlay:SetStatusBarColor(r, g, b, effectiveBlend)
+            tintOverlay:SetAlpha(1.0)
+            -- Record the alpha used so expiring callbacks (ticker) can match it
+            -- rather than resetting to full blend when the unit is OOR.
+            adState.healthbarEffectiveBlend = effectiveBlend
+        end
     else
         -- Frame-level mode: restore each indicator's base alpha
         if frame.dfAD_icons then
@@ -1105,6 +1141,24 @@ function DF:UpdateAuraDesignerAppearance(frame)
             for _, bar in pairs(frame.dfAD_bars) do
                 if bar then bar:SetAlpha(bar.dfBaseAlpha or 1.0) end
             end
+        end
+        -- Tint overlay (health bar "show when missing" indicator)
+        -- Frame-level mode: the frame cascade handles OOR alpha. Restore the overlay's
+        -- own alpha and SetStatusBarColor to their configured values.
+        local tintOverlay = frame.dfAD and frame.dfAD.tintOverlay
+        if tintOverlay and tintOverlay:IsShown() then
+            local adState = frame.dfAD
+            -- Use the current displayed color (healthbarCurrent*) so the expiring
+            -- color is preserved rather than reset to the active configured color.
+            local r = adState.healthbarCurrentR or adState.healthbarR or 1
+            local g = adState.healthbarCurrentG or adState.healthbarG or 1
+            local b = adState.healthbarCurrentB or adState.healthbarB or 1
+            local blend = adState.healthbarBlend or 0.5
+            tintOverlay:SetStatusBarColor(r, g, b, blend)
+            tintOverlay:SetAlpha(1.0)
+            -- In frame-level mode the frame cascade handles OOR alpha, so the
+            -- effective blend for this overlay is always the configured blend.
+            adState.healthbarEffectiveBlend = blend
         end
     end
 end

@@ -2896,231 +2896,6 @@ function DF:ApplySavedCVarSettings()
     end
 end
 
--- ============================================================
--- ELVUI COMPATIBILITY CHECK
--- ============================================================
-
-function DF:CheckElvUICompatibility()
-    -- Check if ElvUI is loaded
-    local elvuiLoaded = false
-    if C_AddOns and C_AddOns.IsAddOnLoaded then
-        elvuiLoaded = C_AddOns.IsAddOnLoaded("ElvUI")
-    elseif IsAddOnLoaded then
-        elvuiLoaded = IsAddOnLoaded("ElvUI")
-    end
-    
-    if not elvuiLoaded then return end
-    
-    -- Access ElvUI's engine and private settings
-    local E = _G.ElvUI and _G.ElvUI[1]
-    if not E or not E.private or not E.private.unitframe then return end
-    
-    local disable = E.private.unitframe.disabledBlizzardFrames
-    if not disable then return end
-    
-    -- Check if party or raid frames are disabled
-    local partyDisabled = disable.party == true
-    local raidDisabled = disable.raid == true
-    
-    if not partyDisabled and not raidDisabled then return end
-    
-    -- Check "don't show again" flag
-    if DandersFramesCharDB and DandersFramesCharDB.ignoreElvUIWarning then return end
-    
-    -- Build a description of which settings are problematic
-    local problemSettings = {}
-    if partyDisabled then
-        problemSettings[#problemSettings + 1] = "|cffff6666Party|r"
-    end
-    if raidDisabled then
-        problemSettings[#problemSettings + 1] = "|cffff6666Raid|r"
-    end
-    local settingsList = table.concat(problemSettings, " and ")
-    
-    -- Theme color (amber/warning)
-    local themeColor = { r = 1.0, g = 0.65, b = 0.0 }
-    
-    -- Helper function to create styled buttons
-    local function CreatePopupButton(parent, text, anchor, yOffset, isPrimary, width)
-        local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
-        btn:SetSize(width or 340, 30)
-        btn:SetPoint("TOP", anchor, "BOTTOM", 0, yOffset)
-        btn:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
-        })
-        
-        if isPrimary then
-            btn:SetBackdropColor(themeColor.r * 0.2, themeColor.g * 0.2, themeColor.b * 0.2, 1)
-            btn:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
-        else
-            btn:SetBackdropColor(0.15, 0.15, 0.15, 1)
-            btn:SetBackdropBorderColor(0.35, 0.35, 0.35, 1)
-        end
-        
-        local btnText = btn:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-        btnText:SetPoint("CENTER")
-        btnText:SetText(text)
-        btnText:SetTextColor(1, 1, 1)
-        btn.label = btnText
-        
-        btn:SetScript("OnEnter", function(self)
-            self:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
-            self:SetBackdropColor(themeColor.r * 0.25, themeColor.g * 0.25, themeColor.b * 0.25, 1)
-        end)
-        btn:SetScript("OnLeave", function(self)
-            if isPrimary then
-                btn:SetBackdropColor(themeColor.r * 0.2, themeColor.g * 0.2, themeColor.b * 0.2, 1)
-                self:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
-            else
-                self:SetBackdropColor(0.15, 0.15, 0.15, 1)
-                self:SetBackdropBorderColor(0.35, 0.35, 0.35, 1)
-            end
-        end)
-        
-        return btn
-    end
-    
-    -- Create the popup frame
-    local popup = CreateFrame("Frame", "DFElvUIWarning", UIParent, "BackdropTemplate")
-    popup:SetSize(480, 340)
-    popup:SetPoint("CENTER", 0, 100)
-    popup:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 2,
-    })
-    popup:SetBackdropColor(0.08, 0.08, 0.08, 0.98)
-    popup:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 0.8)
-    popup:SetFrameStrata("FULLSCREEN_DIALOG")
-    popup:SetFrameLevel(200)
-    popup:EnableMouse(true)
-    popup:SetMovable(true)
-    popup:RegisterForDrag("LeftButton")
-    popup:SetScript("OnDragStart", popup.StartMoving)
-    popup:SetScript("OnDragStop", popup.StopMovingOrSizing)
-    
-    -- Title
-    local title = popup:CreateFontString(nil, "OVERLAY", "DFFontNormalLarge")
-    title:SetPoint("TOP", 0, -14)
-    title:SetText("ElvUI Compatibility Issue")
-    title:SetTextColor(themeColor.r, themeColor.g, themeColor.b)
-    
-    -- Warning icons
-    local leftWarning = popup:CreateTexture(nil, "OVERLAY")
-    leftWarning:SetSize(18, 18)
-    leftWarning:SetPoint("RIGHT", title, "LEFT", -8, 0)
-    leftWarning:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\warning")
-    leftWarning:SetVertexColor(themeColor.r, themeColor.g, themeColor.b)
-    
-    local rightWarning = popup:CreateTexture(nil, "OVERLAY")
-    rightWarning:SetSize(18, 18)
-    rightWarning:SetPoint("LEFT", title, "RIGHT", 8, 0)
-    rightWarning:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\warning")
-    rightWarning:SetVertexColor(themeColor.r, themeColor.g, themeColor.b)
-    
-    -- Explanation
-    local msg = popup:CreateFontString(nil, "OVERLAY", "DFFontHighlight")
-    msg:SetPoint("TOP", title, "BOTTOM", 0, -12)
-    msg:SetPoint("LEFT", 25, 0)
-    msg:SetPoint("RIGHT", -25, 0)
-    msg:SetJustifyH("CENTER")
-    msg:SetSpacing(2)
-    msg:SetText(
-        "|cff1784d1ElvUI|r has disabled Blizzard's " .. settingsList .. " unit frames.\n\n" ..
-        "|cff00ff00DandersFrames|r reads aura data from these frames to display\n" ..
-        "buffs, debuffs, and dispel indicators. With them disabled,\n" ..
-        "auras will not appear on your frames."
-    )
-    msg:SetTextColor(0.9, 0.9, 0.9)
-    
-    -- Settings path callout
-    local pathLabel = popup:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    pathLabel:SetPoint("TOP", msg, "BOTTOM", 0, -12)
-    pathLabel:SetPoint("LEFT", 25, 0)
-    pathLabel:SetPoint("RIGHT", -25, 0)
-    pathLabel:SetJustifyH("CENTER")
-    pathLabel:SetText(
-        "The setting is located in:\n" ..
-        "|cff1784d1ElvUI|r  >  |cffffffffUnitFrames|r  >  |cffffffffGeneral|r  >  |cffffffffDisabled Blizzard Frames|r  >  |cffffffffGroup Units|r"
-    )
-    pathLabel:SetTextColor(0.6, 0.6, 0.6)
-    pathLabel:SetSpacing(2)
-    
-    -- Button: Fix & Reload (primary)
-    local fixBtn = CreatePopupButton(popup, "Fix & Reload UI", pathLabel, -16, true)
-    fixBtn:SetScript("OnClick", function()
-        -- Modify ElvUI's private settings directly
-        local Elv = _G.ElvUI and _G.ElvUI[1]
-        if Elv and Elv.private and Elv.private.unitframe and Elv.private.unitframe.disabledBlizzardFrames then
-            Elv.private.unitframe.disabledBlizzardFrames.party = false
-            Elv.private.unitframe.disabledBlizzardFrames.raid = false
-        end
-        ReloadUI()
-    end)
-    
-    -- Tooltip for fix button explaining what it does
-    fixBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
-        self:SetBackdropColor(themeColor.r * 0.25, themeColor.g * 0.25, themeColor.b * 0.25, 1)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Fix & Reload", themeColor.r, themeColor.g, themeColor.b)
-        GameTooltip:AddLine(" ")
-        GameTooltip:AddLine("This will uncheck the following in ElvUI:", 1, 1, 1)
-        if partyDisabled then
-            GameTooltip:AddLine("  - Disabled Blizzard Frames > Party", 0.9, 0.5, 0.5)
-        end
-        if raidDisabled then
-            GameTooltip:AddLine("  - Disabled Blizzard Frames > Raid", 0.9, 0.5, 0.5)
-        end
-        GameTooltip:AddLine(" ")
-        GameTooltip:AddLine("Your UI will then reload to apply the change.", 0.6, 0.6, 0.6)
-        GameTooltip:AddLine("This does NOT affect ElvUI's own unit frames.", 0.6, 0.6, 0.6)
-        GameTooltip:Show()
-    end)
-    fixBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(themeColor.r * 0.2, themeColor.g * 0.2, themeColor.b * 0.2, 1)
-        self:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
-        GameTooltip:Hide()
-    end)
-    
-    -- Button: I'll Fix It Myself
-    local manualBtn = CreatePopupButton(popup, "I'll Fix It Myself", fixBtn, -6, false)
-    manualBtn:SetScript("OnClick", function()
-        popup:Hide()
-        -- Print the path to chat so they have a reference
-        print(" ")
-        print("|cff00ff00DandersFrames:|r " .. L["To fix the ElvUI compatibility issue:"])
-        print("|cff00ff00DandersFrames:|r " .. format(L["1. Open ElvUI config with %s/ec%s"], "|cff1784d1", "|r"))
-        print("|cff00ff00DandersFrames:|r " .. format(L["2. Go to %sUnitFrames%s (left sidebar)"], "|cffffffff", "|r"))
-        print("|cff00ff00DandersFrames:|r " .. format(L["3. Click %sGeneral%s at the top"], "|cffffffff", "|r"))
-        print("|cff00ff00DandersFrames:|r " .. format(L["4. Scroll down to %sDisabled Blizzard Frames%s"], "|cffffffff", "|r"))
-        print("|cff00ff00DandersFrames:|r " .. format(L["5. Under %sGroup Units%s, uncheck %sParty%s and %sRaid%s"], "|cffffffff", "|r", "|cffff6666", "|r", "|cffff6666", "|r"))
-        print("|cff00ff00DandersFrames:|r " .. L["6. Click the reload button when prompted"])
-        print(" ")
-    end)
-    
-    -- Button: Ignore (Don't Show Again)
-    local ignoreBtn = CreatePopupButton(popup, "Don't Show Again", manualBtn, -6, false)
-    ignoreBtn:SetScript("OnClick", function()
-        if DandersFramesCharDB then
-            DandersFramesCharDB.ignoreElvUIWarning = true
-        end
-        popup:Hide()
-    end)
-    
-    -- Smaller, dimmer text for the ignore button
-    ignoreBtn:SetSize(200, 26)
-    ignoreBtn:ClearAllPoints()
-    ignoreBtn:SetPoint("TOP", manualBtn, "BOTTOM", 0, -6)
-    ignoreBtn.label:SetFontObject("DFFontHighlightSmall")
-    ignoreBtn.label:SetTextColor(0.5, 0.5, 0.5)
-    
-    -- Store reference
-    DF.elvUIWarningPopup = popup
-end
-
 -- Deep equality check for the proxy contamination guard.
 -- Lua's == is reference equality for tables, so a new table with identical
 -- contents would bypass the guard and leak override values into _realRaidDB.
@@ -4065,6 +3840,44 @@ DF._MainEventDispatcher = function(self, event, arg1)
             end
         end
 
+        -- Migrate personal targeted spells container centre to icon-block midpoint (bug 880).
+        -- Previously the saved (x, y) was the position of icon 1 (container centre).
+        -- Now (x, y) is the visual centre of the icon block; the container is offset so
+        -- the block is centred there.  Shift existing positions by halfBlock in the growth
+        -- direction so icon 1 stays at its old screen location for existing users.
+        local function MigratePersonalContainerPosition(partyDb)
+            if not partyDb or partyDb._personalContainerCenterMigrated then return end
+            local iconSize = partyDb.personalTargetedSpellSize or 40
+            local scale = partyDb.personalTargetedSpellScale or 1.0
+            local maxIcons = partyDb.personalTargetedSpellMaxIcons or 5
+            local spacing = partyDb.personalTargetedSpellSpacing or 4
+            local growthDirection = partyDb.personalTargetedSpellGrowth or "RIGHT"
+            local x = partyDb.personalTargetedSpellX or 0
+            local y = partyDb.personalTargetedSpellY or -150
+
+            local scaledSize = iconSize * scale
+            local scaledSpacing = spacing * scale
+            local halfBlock = (maxIcons - 1) / 2 * (scaledSize + scaledSpacing)
+
+            if growthDirection == "RIGHT" then
+                partyDb.personalTargetedSpellX = x + halfBlock
+            elseif growthDirection == "LEFT" then
+                partyDb.personalTargetedSpellX = x - halfBlock
+            elseif growthDirection == "UP" then
+                partyDb.personalTargetedSpellY = y + halfBlock
+            elseif growthDirection == "DOWN" then
+                partyDb.personalTargetedSpellY = y - halfBlock
+            -- CENTER_H / CENTER_V: no shift needed
+            end
+            partyDb._personalContainerCenterMigrated = true
+        end
+        MigratePersonalContainerPosition(DF.db.party)
+        if DandersFramesDB_v2 and DandersFramesDB_v2.profiles then
+            for _, profile in pairs(DandersFramesDB_v2.profiles) do
+                MigratePersonalContainerPosition(profile.party)
+            end
+        end
+
         -- Wrap DF.db with overlay proxy (must happen AFTER all migrations,
         -- BEFORE anything that reads through the proxy)
         DF:WrapDB()
@@ -4287,14 +4100,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
             -- Don't initialize DandersFrames if NephUI is loaded
             return
         end
-        
-        -- ============================================================
-        -- ELVUI COMPATIBILITY CHECK
-        -- ElvUI disables Blizzard party/raid frames by default, which
-        -- kills the aura data pipeline DandersFrames relies on.
-        -- Detect this and warn the user with actionable options.
-        -- ============================================================
-        DF:CheckElvUICompatibility()
         
         -- Enable raid buff filtering now that we're past ADDON_LOADED
         -- (avoids "secret value" errors during combat reload initialization)
@@ -4770,10 +4575,24 @@ DF._MainEventDispatcher = function(self, event, arg1)
 
     elseif event == "GROUP_ROSTER_UPDATE" then
         if DF.RosterDebugEvent then DF:RosterDebugEvent("Core.lua:GROUP_ROSTER_UPDATE") end
-        
-        -- Skip completely - Headers.lua handles roster updates via ProcessRosterUpdate
-        -- which manages container visibility and sorting. Frame updates happen via
-        -- OnAttributeChanged (unit changes) and PLAYER_ROLES_ASSIGNED (role changes).
+
+        -- Headers.lua handles roster updates via ProcessRosterUpdate (container
+        -- visibility, sorting). Frame updates happen via OnAttributeChanged (unit
+        -- changes) and PLAYER_ROLES_ASSIGNED (role changes).
+        --
+        -- Missing buff icons are not cleared by OnAttributeChanged when a slot
+        -- empties (unit → nil skips the refresh), and UNIT_AURA stops firing for
+        -- units that left the group. Frames that remain visible (player frame,
+        -- remaining group members) can be left with stale indicators. Sweep after
+        -- the roster settles. The 0.1s throttle inside UpdateAllMissingBuffIcons
+        -- prevents spam from rapid GRU bursts on group transitions.
+        if DF.UpdateAllMissingBuffIcons then
+            C_Timer.After(0.3, function()
+                if not InCombatLockdown() then
+                    DF:UpdateAllMissingBuffIcons()
+                end
+            end)
+        end
         return
         
     elseif event == "PLAYER_ROLES_ASSIGNED" then

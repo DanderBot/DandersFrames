@@ -130,7 +130,14 @@ DF.ExportCategories = {
         "missingHealthGradientAlpha",
         "missingHealthTexture",
         "missingHealthClassAlpha",
-        
+
+        -- Reduced Max Health Bar
+        "reducedMaxHealthBlendMode",
+        "reducedMaxHealthClipHealthBar",
+        "reducedMaxHealthColor",
+        "reducedMaxHealthEnabled",
+        "reducedMaxHealthTexture",
+
         -- Border
         "borderSize",
         

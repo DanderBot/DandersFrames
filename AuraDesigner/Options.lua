@@ -2903,26 +2903,12 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 topSpacer:SetHeight(4)
                 g:AddWidget(topSpacer, 4)
 
-                local banner = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-                banner:SetHeight(36)
+                local banner = GUI:CreateInfoBanner(parent, {
+                    tone = "warning",
+                    text = L["Sound alerts only work when you are in a group."],
+                })
                 banner:SetWidth(contentWidth - 10)
-                banner:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
-                banner:SetBackdropColor(0.25, 0.22, 0.10, 1)
-                banner:SetBackdropBorderColor(0.6, 0.55, 0.2, 0.6)
-
-                local icon = banner:CreateTexture(nil, "OVERLAY")
-                icon:SetPoint("LEFT", 8, 0)
-                icon:SetSize(18, 18)
-                icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\warning")
-
-                local text = banner:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-                text:SetPoint("LEFT", icon, "RIGHT", 7, 0)
-                text:SetPoint("RIGHT", banner, "RIGHT", -8, 0)
-                text:SetJustifyH("LEFT")
-                text:SetText(L["Sound alerts only work when you are in a group."])
-                text:SetTextColor(1, 0.82, 0)
-
-                g:AddWidget(banner, 36)
+                g:AddWidget(banner, banner.layoutHeight)
 
                 local spacer = CreateFrame("Frame", nil, parent)
                 spacer:SetHeight(6)
@@ -3347,15 +3333,26 @@ local function RefreshRightPanel() end
 
 local function CreateEnableBanner(parent)
     local banner = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    banner:SetHeight(36)
+    -- Two-row layout: row 1 (36px) has Enable toggle (left) + Sync/Copy buttons (right);
+    -- row 2 (32px) has Sound Alerts (left) + Spec dropdown (right).
+    banner:SetHeight(68)
     banner:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, 0)
     banner:SetPoint("TOPRIGHT", parent, "TOPRIGHT", 0, 0)
     ApplyBackdrop(banner, {r = 0.14, g = 0.14, b = 0.14, a = 1}, {r = 0.30, g = 0.30, b = 0.30, a = 0.5})
 
+    -- Subtle divider between the two rows
+    local rowDivider = banner:CreateTexture(nil, "BACKGROUND")
+    rowDivider:SetHeight(1)
+    rowDivider:SetPoint("TOPLEFT", banner, "TOPLEFT", 0, -36)
+    rowDivider:SetPoint("TOPRIGHT", banner, "TOPRIGHT", 0, -36)
+    rowDivider:SetColorTexture(0.25, 0.25, 0.25, 1)
+
     -- Themed checkbox (matches GUI:CreateCheckbox style)
+    -- Row 1 centre = 18px from top. Banner centre = 34px from top.
+    -- Offset from banner centre to row 1 centre = +16.
     local cb = CreateFrame("CheckButton", nil, banner, "BackdropTemplate")
     cb:SetSize(18, 18)
-    cb:SetPoint("LEFT", 10, 0)
+    cb:SetPoint("LEFT", banner, "LEFT", 10, 16)
     ApplyBackdrop(cb, C_ELEMENT, {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5})
 
     cb.Check = cb:CreateTexture(nil, "OVERLAY")
@@ -3368,6 +3365,9 @@ local function CreateEnableBanner(parent)
 
     local adDB = GetAuraDesignerDB()
     cb:SetChecked(adDB and adDB.enabled)
+
+    -- Forward declaration — UpdateMuteEnabled is defined after muteCb/muteLabel are created.
+    local UpdateMuteEnabled
     cb:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
         if checked then
@@ -3375,6 +3375,7 @@ local function CreateEnableBanner(parent)
             ShowBuffCoexistPopup(function(keepBuffs)
                 GetAuraDesignerDB().enabled = true
                 db.showBuffs = keepBuffs
+                if UpdateMuteEnabled then UpdateMuteEnabled(true) end
                 DF:AuraDesigner_RefreshPage()
                 DF:InvalidateAuraLayout()
                 DF:UpdateAllFrames()
@@ -3384,6 +3385,7 @@ local function CreateEnableBanner(parent)
             end)
         else
             GetAuraDesignerDB().enabled = false
+            if UpdateMuteEnabled then UpdateMuteEnabled(false) end
             DF:AuraDesigner_RefreshPage()
             DF:InvalidateAuraLayout()
             DF:UpdateAllFrames()
@@ -3400,8 +3402,9 @@ local function CreateEnableBanner(parent)
     cbSubLabel:SetText(L["Custom buff and frame effect indicators"])
     cbSubLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
+    -- Row 2 centre = 52px from top = 18px below banner centre → y offset -18.
     local specLabel = banner:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    specLabel:SetPoint("RIGHT", banner, "RIGHT", -145, 0)
+    specLabel:SetPoint("RIGHT", banner, "RIGHT", -145, -18)
     specLabel:SetText(L["Spec:"])
     specLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
@@ -3519,21 +3522,14 @@ local function CreateEnableBanner(parent)
         end
     end)
 
-    -- Mute Sound Alerts checkbox
+    -- Mute Sound Alerts checkbox — row 2 left side, same size as Enable checkbox.
     local muteCb = CreateFrame("CheckButton", nil, banner)
-    muteCb:SetSize(16, 16)
-    muteCb:SetPoint("RIGHT", specLabel, "LEFT", -20, 0)
+    muteCb:SetSize(18, 18)
+    muteCb:SetPoint("LEFT", banner, "LEFT", 10, -18)
 
-    local muteBg = muteCb:CreateTexture(nil, "BACKGROUND")
-    muteBg:SetAllPoints()
-    muteBg:SetColorTexture(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
+    -- Use the same ApplyBackdrop treatment as the Enable checkbox so both look identical.
+    ApplyBackdrop(muteCb, C_ELEMENT, {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5})
 
-    local muteBorder = muteCb:CreateTexture(nil, "BORDER")
-    muteBorder:SetPoint("TOPLEFT", -1, 1)
-    muteBorder:SetPoint("BOTTOMRIGHT", 1, -1)
-    muteBorder:SetColorTexture(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
-
-    -- Match GUI:CreateCheckbox visual: solid themed square, not a tick icon.
     local muteCheck = muteCb:CreateTexture(nil, "OVERLAY")
     muteCheck:SetTexture("Interface\\Buttons\\WHITE8x8")
     muteCheck:SetVertexColor(tc.r, tc.g, tc.b)
@@ -3553,11 +3549,26 @@ local function CreateEnableBanner(parent)
     end)
 
     local muteLabel = banner:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    muteLabel:SetPoint("RIGHT", muteCb, "LEFT", -4, 0)
+    muteLabel:SetPoint("LEFT", muteCb, "RIGHT", 4, 0)
     muteLabel:SetText(L["Sound Alerts"])
     muteLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
+    -- Grey out Sound Alerts when Aura Designer is disabled.
+    UpdateMuteEnabled = function(enabled)
+        if enabled then
+            muteCb:SetEnabled(true)
+            muteCb:SetAlpha(1)
+            muteLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+        else
+            muteCb:SetEnabled(false)
+            muteCb:SetAlpha(0.35)
+            muteLabel:SetTextColor(C_TEXT_DIM.r * 0.4, C_TEXT_DIM.g * 0.4, C_TEXT_DIM.b * 0.4)
+        end
+    end
+    UpdateMuteEnabled(adDB and adDB.enabled or false)
+
     banner.UpdateSpecText = UpdateSpecText
+    banner.UpdateMuteEnabled = UpdateMuteEnabled
     banner.checkbox = cb
     banner.specLabel = specLabel
     banner.specBtn = specBtn
@@ -5825,7 +5836,7 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     spellPickerType = nil
 
     -- Layout constants
-    local BANNER_H = 36
+    local BANNER_H = 68
     local SECTION_GAP = 8
 
     -- ========================================
@@ -5860,12 +5871,13 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     enableBanner.UpdateSpecText()
 
     if GUI.CreateCopyButton then
-        local copyBtn = GUI.CreateCopyButton(enableBanner, {"auraDesigner"}, "Aura Designer", "auras_auradesigner")
+        local copyBtn = GUI.CreateCopyButton(enableBanner, {"auraDesigner"}, "Aura Designer", "auras_auradesigner", true)
         copyBtn:ClearAllPoints()
-        copyBtn:SetPoint("RIGHT", enableBanner, "RIGHT", -5, 0)
+        -- Row 1 centre is 16px above banner centre, so y = +16.
+        copyBtn:SetPoint("RIGHT", enableBanner, "RIGHT", -5, 16)
         enableBanner.specBtn:SetSize(135, 22)
         enableBanner.specBtn:ClearAllPoints()
-        enableBanner.specBtn:SetPoint("RIGHT", enableBanner, "RIGHT", -256, 0)
+        enableBanner.specBtn:SetPoint("RIGHT", enableBanner, "RIGHT", -5, -18)
         enableBanner.specLabel:ClearAllPoints()
         enableBanner.specLabel:SetPoint("RIGHT", enableBanner.specBtn, "LEFT", -4, 0)
     end

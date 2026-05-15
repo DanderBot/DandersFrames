@@ -81,7 +81,7 @@ DF.AuraBlacklist.BuffSpells = {
         { spellId = 444490, display = "Hydrobubble",            icon = 1320371  },
         { spellId = 20608,  display = "Reincarnation",          icon = 451167   },
         { spellId = 61295,  display = "Riptide",                icon = 252995   },
-        { spellId = 462854, display = "Skyfury",                icon = 135831   },
+        { spellId = 462854, display = "Skyfury",                icon = 4630367  },
         { spellId = 369459, display = "Source of Magic",        icon = 4630412  },
         { spellId = 462757, display = "Thunderstrike Ward",     icon = 5975854  },
         { spellId = 457496, display = "Tidecaller's Guard",     icon = 1355357  },

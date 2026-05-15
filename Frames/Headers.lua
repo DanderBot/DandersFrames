@@ -6199,11 +6199,17 @@ function DF:ApplyArenaHeaderSorting()
     if InCombatLockdown() then return end
     if not DF.arenaHeader then return end
 
-    -- FrameSort integration: yield sorting to FrameSort when active.
-    -- But first clear any stale nameList from the previous Solo Shuffle round —
-    -- if we just return, SecureGroupHeaderTemplate keeps filtering by the old
-    -- teammate's name, hiding the new one. Clearing to INDEX shows all current
-    -- units immediately, then RequestSort lets FrameSort rebuild nameList.
+    -- FrameSort integration: yield sorting entirely to FrameSort when active.
+    -- Clear any stale nameList from the previous Solo Shuffle round so
+    -- SecureGroupHeaderTemplate stops filtering by an old teammate's name and
+    -- shows all current units in INDEX order immediately.
+    -- Do NOT call RequestSort() here — that would fire synchronously in the same
+    -- event frame as GROUP_ROSTER_UPDATE, before WoW has finished assigning units
+    -- to raid slots. The stale data would produce the wrong nameList, which then
+    -- persists for the whole round once combat starts.
+    -- FrameSort's Blizzard provider already schedules a sort on every
+    -- GROUP_ROSTER_UPDATE; it calls our Sort() via RequestSelfManagedProvidersSort()
+    -- on the next OnUpdate frame, by which time the unit API is fully settled.
     if DF:IsFrameSortActive() then
         DF.arenaHeader:SetAttribute("nameList", nil)
         DF.arenaHeader:SetAttribute("sortMethod", "INDEX")
@@ -6212,9 +6218,6 @@ function DF:ApplyArenaHeaderSorting()
         DF.arenaHeader:SetAttribute("groupFilter", nil)
         DF.arenaHeader:SetAttribute("roleFilter", nil)
         DF.arenaHeader:SetAttribute("strictFiltering", nil)
-        if DF.FrameSort and DF.FrameSort.RequestSort then
-            DF.FrameSort:RequestSort()
-        end
         return
     end
 
@@ -7775,8 +7778,16 @@ headerEventFrame:SetScript("OnEvent", function(self, event, arg1, arg2)
             if DF.debugHeaders then
                 print("|cFF00FF00[DF Headers]|r Applying queued sorting update after combat")
             end
-            -- Re-run ProcessRosterUpdate which will now apply sorting
-            DF:ProcessRosterUpdate()
+            -- When FrameSort integration is active, FrameSort already fires its own
+            -- combat-end sort synchronously on PLAYER_REGEN_ENABLED (via its
+            -- RunWhenCombatEnds callback queue). Calling ProcessRosterUpdate here
+            -- would run ApplyArenaHeaderSorting → clear nameList to INDEX, undoing
+            -- FrameSort's work. The event handler order between DF and FrameSort is
+            -- non-deterministic, so this caused intermittent wrong ordering between
+            -- Solo Shuffle rounds. Let FrameSort own the sort entirely.
+            if not DF:IsFrameSortActive() then
+                DF:ProcessRosterUpdate()
+            end
             -- BUG #4 FIX: Force refresh all frames after arena combat-end recovery.
             -- Health bars may show stale data because UNIT_HEALTH events were dropped
             -- while the arena header was hidden / events disabled.

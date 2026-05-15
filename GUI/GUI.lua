@@ -899,6 +899,388 @@ function GUI:CreateWarningBox(parent, text, width, height)
     return frame
 end
 
+-- ============================================================
+-- CreateInfoBanner
+-- ------------------------------------------------------------
+-- A self-resizing banner with an icon, body text, and a "tone"
+-- (info / warning / caution / danger / success) that controls
+-- background, border, default text colour, and default icon.
+--
+-- Usage:
+--   local banner = GUI:CreateInfoBanner(parent, { tone = "warning", text = "..." })
+--   Add(banner, banner.layoutHeight, "both")
+--
+-- Methods on the returned frame:
+--   :SetTone(name)                  apply a preset (see TONES below)
+--   :SetText(text, optColor)        plain text mode, auto-wraps + auto-resizes
+--   :SetHTML(html, onLinkClick)     flow-layout body with clickable link buttons
+--   :SetIcon(texture, r, g, b)      icon texture + optional vertex colour
+--   :SetIconTexture(path)           icon texture only
+--   :SetIconColor(r, g, b)          icon vertex colour only
+--
+-- The body word-wraps automatically; banner height is recomputed via
+-- OnSizeChanged so resizing the GUI (or calling SetText/SetHTML) grows
+-- or shrinks the banner to fit. The host page is re-laid out so widgets
+-- below the banner reposition.
+-- ============================================================
+local INFO_BANNER_TONES = {
+    info = {
+        bg = {0.15, 0.18, 0.28, 1},
+        useThemeBorder = true, borderAlpha = 0.5,
+        icon = "info",
+        textColor = {0.85, 0.85, 0.85},
+    },
+    warning = {
+        bg = {0.25, 0.22, 0.10, 1},
+        border = {0.6, 0.55, 0.2, 0.6},
+        icon = "warning",
+        textColor = {1, 0.82, 0},
+    },
+    caution = {
+        bg = {0.5, 0.45, 0.1, 0.9},
+        border = {0.7, 0.6, 0.1, 1},
+        icon = "warning", iconColor = {1, 0.9, 0.3},
+        textColor = {1, 0.95, 0.7},
+    },
+    danger = {
+        bg = {0.6, 0.3, 0.1, 0.9},
+        border = {0.8, 0.4, 0.1, 1},
+        icon = "warning", iconColor = {1, 0.6, 0.2},
+        textColor = {1, 0.85, 0.7},
+    },
+    success = {
+        bg = {0.1, 0.4, 0.2, 0.9},
+        border = {0.2, 0.6, 0.3, 1},
+        icon = "check", iconColor = {0.3, 1, 0.5},
+        textColor = {0.7, 1, 0.8},
+    },
+}
+local INFO_BANNER_ICON_PATH = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
+
+function GUI:CreateInfoBanner(parent, opts)
+    opts = opts or {}
+
+    local banner = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    if not banner.SetBackdrop then Mixin(banner, BackdropTemplateMixin) end
+    banner:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = 1,
+    })
+    -- Give the banner a defined initial height so child frames have valid positions
+    -- from the very first frame (before DoRecomputeHeight has run).
+    banner:SetHeight(opts.minHeight or 34)
+
+    -- Icon: top-left anchored so it stays put when content wraps to multiple lines.
+    local icon = banner:CreateTexture(nil, "OVERLAY")
+    icon:SetPoint("TOPLEFT", 12, -10)
+    icon:SetSize(18, 18)
+    banner.icon = icon
+
+    -- Plain-text body. Anchored top + right (no bottom) so the FontString
+    -- auto-grows to its natural wrapped height; the banner then resizes
+    -- to fit it via RecomputeHeight. SetWordWrap is on so long text wraps
+    -- at the width defined by the LEFT/RIGHT anchors.
+    local fontTemplate = opts.fontTemplate or "DFFontHighlightSmall"
+    local body = banner:CreateFontString(nil, "OVERLAY", fontTemplate)
+    -- Y offset of -3 nudges the first line of text down so its visual centre
+    -- aligns with the icon's vertical centre (DFFont line height is ~12 px,
+    -- icon is 18 px; the 3 px offset closes most of the gap).
+    body:SetPoint("TOPLEFT", icon, "TOPRIGHT", 8, -3)
+    body:SetPoint("RIGHT", banner, "RIGHT", -12, 0)
+    body:SetJustifyH("LEFT")
+    body:SetJustifyV("TOP")
+    body:SetWordWrap(true)
+    body:SetNonSpaceWrap(true)
+    if body.SetMaxLines then body:SetMaxLines(0) end
+    banner.body = body
+
+    banner.layoutHeight = (opts.minHeight or 28) + 6
+
+    local cachedH, recomputing = nil, false
+
+    local function TriggerHostRelayout()
+        -- If this banner was added to a SettingsGroup, sync its stored
+        -- height entry and re-lay out the group.
+        if banner.settingsGroup and banner.settingsGroup.LayoutChildren then
+            local g = banner.settingsGroup
+            for _, entry in ipairs(g.groupChildren or {}) do
+                if entry.widget == banner then
+                    entry.height = banner.layoutHeight
+                    break
+                end
+            end
+            g:LayoutChildren()
+            return
+        end
+        -- Otherwise, walk up to find a host page.
+        local p = banner:GetParent()
+        while p do
+            if type(p.RefreshStates) == "function" and p.children then
+                p:RefreshStates()
+                return
+            end
+            p = p:GetParent()
+        end
+    end
+
+    local function MeasureContent()
+        if banner._isHTML then
+            -- For HTML mode the flow layout positions all widgets and returns
+            -- the total pixel height of all lines. Re-running it here keeps
+            -- positions fresh and gives us an accurate height in one step.
+            return math.max(18, banner._DoFlowLayout and banner._DoFlowLayout() or 18)
+        end
+        return math.max(18, body:GetStringHeight())
+    end
+
+    local pending = false
+    local function DoRecomputeHeight()
+        pending = false
+        if recomputing then return end
+        local h = math.ceil(MeasureContent())
+        -- Chrome: 13 px top (icon at -10, text nudged -3) + 9 px bottom = 22 px.
+        local newH = math.max(opts.minHeight or 28, h + 22)
+        if cachedH ~= newH then
+            cachedH = newH
+            recomputing = true
+            banner:SetHeight(newH)
+            banner.layoutHeight = newH + 6
+            TriggerHostRelayout()
+            recomputing = false
+        end
+        -- Schedule one more measurement next frame: GetStringHeight can
+        -- return a stale single-line value the first time it's read after
+        -- a width change, before the FontString has finished re-rendering.
+        -- A second pass converges to the true wrapped height.
+        if not banner._secondPassDone then
+            banner._secondPassDone = true
+            if C_Timer and C_Timer.After then
+                C_Timer.After(0, DoRecomputeHeight)
+            end
+        end
+    end
+
+    -- Defer measurement to next frame so FontString has rendered with its
+    -- current width — GetStringHeight can return a stale single-line value
+    -- if called immediately after a width change. Coalesce multiple calls
+    -- per frame via the `pending` flag.
+    local function RecomputeHeight()
+        banner._secondPassDone = false  -- allow follow-up pass on every fresh trigger
+        if pending then return end
+        pending = true
+        if C_Timer and C_Timer.After then
+            C_Timer.After(0, DoRecomputeHeight)
+        else
+            DoRecomputeHeight()
+        end
+    end
+
+    banner:SetScript("OnSizeChanged", function()
+        RecomputeHeight()
+    end)
+    banner._RecomputeHeight = RecomputeHeight
+
+    function banner:SetIconTexture(path)
+        self.icon:SetTexture(path)
+    end
+
+    function banner:SetIconColor(r, g, b)
+        self.icon:SetVertexColor(r or 1, g or 1, b or 1)
+    end
+
+    function banner:SetIcon(path, r, g, b)
+        self:SetIconTexture(path)
+        if r then self:SetIconColor(r, g, b) end
+    end
+
+    function banner:SetTone(toneName)
+        local tone = INFO_BANNER_TONES[toneName]
+        if not tone then return end
+        self._tone = toneName
+        if tone.bg then self:SetBackdropColor(tone.bg[1], tone.bg[2], tone.bg[3], tone.bg[4] or 1) end
+        if tone.useThemeBorder then
+            local tc = (GUI.GetThemeColor and GUI.GetThemeColor()) or {r = 1, g = 1, b = 1}
+            self:SetBackdropBorderColor(tc.r, tc.g, tc.b, tone.borderAlpha or 1)
+        elseif tone.border then
+            self:SetBackdropBorderColor(tone.border[1], tone.border[2], tone.border[3], tone.border[4] or 1)
+        end
+        if tone.icon then
+            self:SetIconTexture(INFO_BANNER_ICON_PATH .. tone.icon)
+        end
+        if tone.iconColor then
+            self:SetIconColor(tone.iconColor[1], tone.iconColor[2], tone.iconColor[3])
+        else
+            self:SetIconColor(1, 1, 1)
+        end
+        if tone.textColor then
+            self.body:SetTextColor(tone.textColor[1], tone.textColor[2], tone.textColor[3])
+        end
+    end
+
+    function banner:SetText(text, color)
+        -- Hide any flow widgets from a previous SetHTML call.
+        if self._flowWidgets then
+            for _, w in ipairs(self._flowWidgets) do w:Hide() end
+        end
+        self._isHTML = false
+        self.body:Show()
+        self.body:SetText(text or "")
+        if color then
+            local r = color[1] or color.r
+            local g = color[2] or color.g
+            local b = color[3] or color.b
+            if r then self.body:SetTextColor(r, g, b) end
+        end
+        cachedH = nil
+        banner._secondPassDone = false
+        RecomputeHeight()
+    end
+
+    -- SetHTML renders text + clickable links using real Button widgets in a
+    -- flow layout. This mirrors the original per-link-button approach that
+    -- reliably dispatches OnClick in WoW, unlike SimpleHTML whose
+    -- OnHyperlinkClick failed to fire consistently.
+    --
+    -- Input text uses WoW hyperlink markup: |cCOLOR|HlinkData|hText|h|r
+    -- and \n for explicit line breaks. Plain text is word-split so wrapping
+    -- occurs at word boundaries when the banner is narrow.
+
+    -- Parse text into a flat list of typed tokens.
+    local function ParseHTMLSegments(s)
+        local segs = {}
+        local function addWords(chunk)
+            local pos = 1
+            while pos <= #chunk do
+                local nl = chunk:find("\n", pos, true)
+                local line = nl and chunk:sub(pos, nl - 1) or chunk:sub(pos)
+                for _, w in ipairs({strsplit(" ", line)}) do
+                    if #w > 0 then segs[#segs + 1] = {type = "word", text = w} end
+                end
+                if nl then
+                    segs[#segs + 1] = {type = "newline"}
+                    pos = nl + 1
+                else
+                    break
+                end
+            end
+        end
+        local rem = s
+        while #rem > 0 do
+            local pre, color, data, lt, rest =
+                rem:match("^(.-)|c(%x%x%x%x%x%x%x%x)|H([^|]*)|h([^|]*)|h|r(.*)")
+            if pre ~= nil then
+                addWords(pre)
+                segs[#segs + 1] = {type = "link", text = lt, data = data, color = color}
+                rem = rest or ""
+            else
+                addWords(rem)
+                break
+            end
+        end
+        return segs
+    end
+
+    -- Position all flow widgets left-to-right with wrapping; returns total
+    -- content height. Punctuation tokens attach to the preceding element
+    -- with no leading gap so "Foo," renders without extra space before the comma.
+    local FLOW_LINE_H = 14
+    local function DoFlowLayout()
+        if not banner._flowSegs then return 0 end
+        local availW = banner:GetWidth() - (12 + 18 + 8) - 12
+        if availW < 20 then return FLOW_LINE_H end
+        local x, lineY = 0, -3
+        for _, seg in ipairs(banner._flowSegs) do
+            if seg.type == "newline" then
+                x = 0; lineY = lineY - FLOW_LINE_H - 2
+            elseif seg._widget then
+                local w = seg._w
+                local isPunct = seg.type == "word" and seg.text:match("^[%p]") and true or false
+                local gap = (x > 0 and not isPunct) and 3 or 0
+                if x > 0 and (x + gap + w) > availW then
+                    x = 0; lineY = lineY - FLOW_LINE_H - 2; gap = 0
+                end
+                seg._widget:ClearAllPoints()
+                seg._widget:SetPoint("TOPLEFT", icon, "TOPRIGHT", 8 + x + gap, lineY)
+                x = x + gap + w
+            end
+        end
+        return math.abs(lineY - (-3)) + FLOW_LINE_H
+    end
+    banner._DoFlowLayout = DoFlowLayout
+
+    function banner:SetHTML(text, onLinkClick)
+        self._htmlText = text or ""
+        self._onLinkClick = onLinkClick
+        self._isHTML = true
+        self.body:Hide()
+
+        -- Tear down widgets from any previous call.
+        if self._flowWidgets then
+            for _, w in ipairs(self._flowWidgets) do w:Hide() end
+        end
+        self._flowWidgets = {}
+
+        local tc = GUI.GetThemeColor and GUI.GetThemeColor() or {r = 1, g = 0.82, b = 0}
+        local segs = ParseHTMLSegments(self._htmlText)
+        self._flowSegs = segs
+
+        for _, seg in ipairs(segs) do
+            if seg.type == "word" then
+                local fs = self:CreateFontString(nil, "OVERLAY", fontTemplate)
+                fs:SetText(seg.text)
+                fs:SetTextColor(0.85, 0.85, 0.85)
+                seg._w = fs:GetStringWidth()
+                -- Give an explicit size matching the button height so TOPLEFT
+                -- anchors place both text words and link buttons on the same baseline.
+                fs:SetSize(seg._w, FLOW_LINE_H)
+                seg._widget = fs
+                self._flowWidgets[#self._flowWidgets + 1] = fs
+            elseif seg.type == "link" then
+                local btn = CreateFrame("Button", nil, self)
+                local fs = btn:CreateFontString(nil, "OVERLAY", fontTemplate)
+                fs:SetAllPoints()
+                fs:SetText(seg.text)
+                fs:SetTextColor(tc.r, tc.g, tc.b)
+                local w = fs:GetStringWidth() + 2
+                btn:SetSize(w, FLOW_LINE_H)
+                btn:SetScript("OnEnter", function() fs:SetTextColor(1, 1, 1) end)
+                btn:SetScript("OnLeave", function()
+                    local c = GUI.GetThemeColor and GUI.GetThemeColor() or tc
+                    fs:SetTextColor(c.r, c.g, c.b)
+                end)
+                local segData = seg.data
+                btn:SetScript("OnClick", function()
+                    if self._onLinkClick then
+                        local _, pageId = strsplit(":", segData)
+                        self._onLinkClick(pageId or segData)
+                    end
+                end)
+                seg._widget = btn
+                seg._w = w
+                self._flowWidgets[#self._flowWidgets + 1] = btn
+            end
+        end
+
+        DoFlowLayout()
+        cachedH = nil
+        banner._secondPassDone = false
+        RecomputeHeight()
+    end
+
+    -- Apply opts at creation
+    if opts.tone then banner:SetTone(opts.tone) end
+    if opts.iconTexture then banner:SetIconTexture(opts.iconTexture) end
+    if opts.iconColor then banner:SetIconColor(opts.iconColor[1], opts.iconColor[2], opts.iconColor[3]) end
+    if opts.html then
+        banner:SetHTML(opts.text, opts.onLinkClick)
+    elseif opts.text then
+        banner:SetText(opts.text, opts.textColor)
+    end
+
+    return banner
+end
+
 function GUI:CreateButton(parent, text, width, height, func)
     local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
     btn:SetSize(width or 120, height or 22)
@@ -6802,7 +7184,7 @@ function DF:CreateGUI()
     CreateElementBackdrop(backBtn)
     local backText = backBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     backText:SetPoint("CENTER")
-    backText:SetText(L["Back"])
+    backText:SetText(L["Close"])
     backText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
     backBtn:SetScript("OnEnter", function(self)
         local tc = GetThemeColor()
@@ -7734,6 +8116,18 @@ function DF:CreateGUI()
                 end
             end
         end
+        -- Aura Designer needs the same minimum width as Click Casting to
+        -- prevent the two-row banner controls from overlapping.
+        local adMinWidth = 760
+        if name == "auras_auradesigner" then
+            frame:SetResizeBounds(adMinWidth, minHeight, maxWidth, maxHeight)
+            if frame:GetWidth() < adMinWidth then
+                frame:SetWidth(adMinWidth)
+            end
+        else
+            frame:SetResizeBounds(normalMinWidth, minHeight, maxWidth, maxHeight)
+        end
+
         GUI.CurrentPageName = name
         UpdateThemeColors()
     end
@@ -8005,6 +8399,7 @@ function DF:CreateGUI()
                 spacer.layoutHeight = h
                 spacer.layoutCol = col or "both"
                 table.insert(self.children, spacer)
+                return spacer
             end
             
             -- Sync point: forces both columns to align to the same Y position

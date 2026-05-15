@@ -238,6 +238,10 @@ function DF:SetProfile(name)
         DF.AutoProfilesUI.pendingAutoProfileEval = false
     end
     DF.raidOverrides = nil
+    -- Clear the Global Fonts temp selection so the page re-initialises from
+    -- the new profile's font settings rather than showing the old profile's
+    -- last-used font until the next /reload.
+    DF.GlobalFontTemp = nil
     DF:Debug("PROFILE", "SetProfile: cleared runtime state before switching to " .. name)
 
     -- Create new profile if doesn't exist

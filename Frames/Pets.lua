@@ -536,11 +536,15 @@ function DF:UpdatePetName(frame)
     
     local name = GetUnitName(frame.unit, true)
     if name then
-        -- Truncate long names
+        -- Truncate long names. Use secret-value-safe UTF-8 helpers — GetUnitName
+        -- can return a secret string in instanced content (delves, encounters).
+        -- DF:UTF8Len returns 0 for secret values so the truncation branch
+        -- no-ops, and SetText receives the secret string directly (FontStrings
+        -- accept secret values; only Lua string ops on them cause errors).
         local db = DF:GetFrameDB(frame)
         local maxLen = db.petNameMaxLength or 12
-        if #name > maxLen then
-            name = name:sub(1, maxLen) .. "..."
+        if maxLen > 0 and DF:UTF8Len(name) > maxLen then
+            name = DF:UTF8Sub(name, 1, maxLen) .. "..."
         end
         frame.nameText:SetText(name)
     end
@@ -701,7 +705,7 @@ function DF:PositionPetFrame(frame)
     elseif anchor == "LEFT" then
         frame:SetPoint("RIGHT", frame.ownerFrame, "LEFT", offsetX, offsetY)
     elseif anchor == "RIGHT" then
-        frame:SetPoint("LEFT", frame.ownerFrame, "RIGHT", -offsetX, offsetY)
+        frame:SetPoint("LEFT", frame.ownerFrame, "RIGHT", offsetX, offsetY)
     end
 end
 
@@ -883,9 +887,9 @@ function DF:UpdatePetGroupLayout()
                 end
             elseif anchor == "RIGHT" then
                 if partyGrowth == "HORIZONTAL" then
-                    container:SetPoint("LEFT", rightmostFrame, "RIGHT", -offsetX, offsetY)
+                    container:SetPoint("LEFT", rightmostFrame, "RIGHT", offsetX, offsetY)
                 else
-                    container:SetPoint("TOPLEFT", bottommostFrame, "TOPRIGHT", -offsetX, -centerOffsetY + offsetY)
+                    container:SetPoint("TOPLEFT", topmostFrame, "TOPRIGHT", offsetX, -centerOffsetY + offsetY)
                 end
             end
             
