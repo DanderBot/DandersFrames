@@ -8,7 +8,7 @@
 
 ### Bug Fixes
 
-* (Dispel Overlay) Fix gradient snapping to full brightness after a unit goes out of range and back in range while they have a dispellable debuff. (PR #88 by Krathe)
+* (Dispel Overlay) Fix gradient snapping to full brightness after a unit goes out of range and back in range while they have a dispellable debuff. (PR #89 by Krathe)
 * (Aura Designer) Banner controls no longer overlap when the settings window is narrow. (PR #81 by Krathe)
 * (Class Power) Fix Size, Colors, Position, and Show for Roles section headers showing as floating labels when Class Power Pips is disabled. (PR #82 by Krathe)
 * (Defensive Icons) Fix icon borders missing on one or more sides when Pixel Perfect is enabled. (PR #79 by Krathe)
