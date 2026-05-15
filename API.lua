@@ -622,7 +622,7 @@ end
 -- EXTERNAL HIGHLIGHTS
 -- Allows external addons to highlight specific unit frames with
 -- a colored border overlay. These are separate from DF's internal
--- selection/aggro/hover highlights and will not conflict.
+-- selection/aggro/hover/focus highlights and will not conflict.
 -- ============================================================
 
 local externalHighlights = {}

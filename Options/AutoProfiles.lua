@@ -169,6 +169,7 @@ local OVERRIDE_TAB_MAP = {
     {"statusIconFont",      "indicators_icons",     L["Icons"]},
     {"selectionHighlight",  "indicators_highlights", L["Highlights"]},
     {"hoverHighlight",      "indicators_highlights", L["Highlights"]},
+    {"focusHighlight",      "indicators_highlights", L["Highlights"]},
     {"aggroHighlight",      "indicators_highlights", L["Highlights"]},
     {"aggro",               "indicators_highlights", L["Highlights"]},
     -- Pinned frames (prefix match for "pinned.N.setting" format)

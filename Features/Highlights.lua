@@ -232,10 +232,11 @@ local function GetOrCreateHighlight(frame, highlightType)
     ch:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 0)
     ch:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
     ch:SetFrameStrata(frame:GetFrameStrata())
-    -- Frame levels: Aggro = +9, Hover = +10, Selection = +11
+    -- Frame levels: Aggro = +9, Hover = +10, Selection = +11, Focus = +12
     local levelOffset = 9
     if highlightType == "Hover" then levelOffset = 10
-    elseif highlightType == "Selection" then levelOffset = 11 end
+    elseif highlightType == "Selection" then levelOffset = 11
+    elseif highlightType == "Focus" then levelOffset = 12 end
     ch:SetFrameLevel(frame:GetFrameLevel() + levelOffset)
     ch:Hide()
     
@@ -248,6 +249,7 @@ local function GetOrCreateHighlight(frame, highlightType)
             if self.dfSelectionHighlight then self.dfSelectionHighlight:Hide() end
             if self.dfHoverHighlight then self.dfHoverHighlight:Hide() end
             if self.dfAggroHighlight then self.dfAggroHighlight:Hide() end
+            if self.dfFocusHighlight then self.dfFocusHighlight:Hide() end
         end)
         frame.dfHighlightHooked = true
     end
@@ -534,7 +536,7 @@ DF.UpdateHighlightStyleColor = UpdateHighlightStyleColor
 -- UPDATE HIGHLIGHTS FOR A FRAME
 -- ============================================================
 
-function DF:UpdateHighlights(frame, forceSelection, forceAggro)
+function DF:UpdateHighlights(frame, forceSelection, forceAggro, forceFocus)
     if not frame then return end
     
     -- DEBUG: Track what's happening
@@ -555,6 +557,7 @@ function DF:UpdateHighlights(frame, forceSelection, forceAggro)
         if frame.dfSelectionHighlight then frame.dfSelectionHighlight:Hide() end
         if frame.dfHoverHighlight then frame.dfHoverHighlight:Hide() end
         if frame.dfAggroHighlight then frame.dfAggroHighlight:Hide() end
+        if frame.dfFocusHighlight then frame.dfFocusHighlight:Hide() end
         return
     end
     
@@ -570,6 +573,7 @@ function DF:UpdateHighlights(frame, forceSelection, forceAggro)
         if frame.dfSelectionHighlight then frame.dfSelectionHighlight:Hide() end
         if frame.dfHoverHighlight then frame.dfHoverHighlight:Hide() end
         if frame.dfAggroHighlight then frame.dfAggroHighlight:Hide() end
+        if frame.dfFocusHighlight then frame.dfFocusHighlight:Hide() end
         return
     end
     
@@ -587,7 +591,7 @@ function DF:UpdateHighlights(frame, forceSelection, forceAggro)
     if debugHighlights then
         print("  inTestMode:", inTestMode and "true" or "false")
     end
-    if inTestMode and forceSelection == nil and forceAggro == nil then
+    if inTestMode and forceSelection == nil and forceAggro == nil and forceFocus == nil then
         -- Determine frame index for test mode
         local frameIndex = nil
         
@@ -637,6 +641,8 @@ function DF:UpdateHighlights(frame, forceSelection, forceAggro)
             print("  frameIndex:", frameIndex or "nil")
             print("  db.testShowSelection:", db.testShowSelection and "true" or "false")
             print("  db.testShowAggro:", db.testShowAggro and "true" or "false")
+            print("  db.testShowHover:", db.testShowHover and "true" or "false")
+            print("  db.testShowFocus:", db.testShowFocus and "true" or "false")
         end
         
         -- Apply test mode highlights based on settings
@@ -646,6 +652,9 @@ function DF:UpdateHighlights(frame, forceSelection, forceAggro)
             end
             if db.testShowAggro then
                 forceAggro = (frameIndex == 1)  -- Second frame gets aggro
+            end
+            if db.testShowFocus then
+                forceFocus = (frameIndex == 2)  -- Third frame gets focus
             end
         end
         
@@ -751,6 +760,48 @@ function DF:UpdateHighlights(frame, forceSelection, forceAggro)
         HideGlowLayers(hoverHighlight)
         hoverHighlight:Hide()
         SelectionAnimator_Remove(hoverHighlight)
+    end
+    
+    -- Check if unit is focused - can be overridden for test mode
+    local isFocused = forceFocus
+    if isFocused == nil then
+        isFocused = unit and UnitIsUnit(unit, "focus")
+    end
+
+    -- Focus Highlight
+    local focusHighlight = GetOrCreateHighlight(frame, "Focus")
+    local focusMode = db.focusHighlightMode or "NONE"
+    local wantFocus = isFocused and focusMode ~= "NONE"
+    
+    if debugHighlights then
+        print("  wantFocus:", wantFocus and "true" or "false")
+    end
+    
+    if wantFocus then
+        local c = db.focusHighlightColor or {r = 0, g = 0, b = 1}
+        local focusThickness = db.focusHighlightThickness or 2
+        local focusInset = db.focusHighlightInset or 0
+        
+        -- Apply pixel-perfect adjustments (use PixelPerfectThickness to ensure min 1px)
+        if db.pixelPerfect then
+            focusThickness = DF:PixelPerfectThickness(focusThickness)
+            focusInset = DF:PixelPerfect(focusInset)
+        end
+        
+        ApplyHighlightStyle(
+            focusHighlight,
+            focusMode,
+            focusThickness,
+            focusInset,
+            c.r, c.g, c.b,
+            db.focusHighlightAlpha or 1,
+            db
+        )
+    else
+        HideAnimatedBorder(focusHighlight)
+        HideGlowLayers(focusHighlight)
+        focusHighlight:Hide()
+        SelectionAnimator_Remove(focusHighlight)
     end
     
     -- Aggro Highlight

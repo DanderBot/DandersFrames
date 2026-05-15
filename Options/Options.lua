@@ -6914,7 +6914,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     local pageHighlights = CreateSubTab("indicators", "indicators_highlights", L["Highlights"])
     BuildPage(pageHighlights, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top
-        Add(CreateCopyButton(self.child, {"selectionHighlight", "hoverHighlight", "aggroHighlight", "aggro"}, L["Highlights"], "indicators_highlights"), 25, 2)
+        Add(CreateCopyButton(self.child, {"selectionHighlight", "hoverHighlight", "focusHighlight", "aggroHighlight", "aggro"}, L["Highlights"], "indicators_highlights"), 25, 2)
         
         AddSpace(10, "both")
         
@@ -6983,6 +6983,32 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local hoverCol = hoverGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Color"], db, "hoverHighlightColor", false, nil, function() DF:LightweightUpdateHighlight("hover") end, true), 35)
         hoverCol.hideOn = HideHoverOptions
         AddToSection(hoverGroup, nil, 1)
+        
+        currentSection = nil
+        AddSpace(10, "both")
+        
+        -- ========================================
+        -- FOCUS HIGHLIGHT SECTION
+        -- ========================================
+        local focusSection = Add(GUI:CreateCollapsibleSection(self.child, L["Focus Highlight"], true), 36, "both")
+        currentSection = focusSection
+        
+        local function HideFocusOptions(d) return d.focusHighlightMode == "NONE" end
+        
+        local focusGroup = GUI:CreateSettingsGroup(self.child, 260)
+        focusGroup:AddWidget(GUI:CreateHeader(self.child, L["Focus Settings"]), 40)
+        focusGroup:AddWidget(GUI:CreateDropdown(self.child, L["Mode"], highlightModes, db, "focusHighlightMode", function()
+            self:RefreshStates()
+        end), 55)
+        local focusThick = focusGroup:AddWidget(GUI:CreateSlider(self.child, L["Thickness"], 1, 10, 1, db, "focusHighlightThickness", nil, function() DF:LightweightUpdateHighlight("focus") end, true), 55)
+        focusThick.hideOn = HideFocusOptions
+        local focusInset = focusGroup:AddWidget(GUI:CreateSlider(self.child, L["Inset"], -10, 10, 1, db, "focusHighlightInset", nil, function() DF:LightweightUpdateHighlight("focus") end, true), 55)
+        focusInset.hideOn = HideFocusOptions
+        local focusAlpha = focusGroup:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "focusHighlightAlpha", nil, function() DF:LightweightUpdateHighlight("focus") end, true), 55)
+        focusAlpha.hideOn = HideFocusOptions
+        local focusCol = focusGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Color"], db, "focusHighlightColor", false, nil, function() DF:LightweightUpdateHighlight("focus") end, true), 35)
+        focusCol.hideOn = HideFocusOptions
+        AddToSection(focusGroup, nil, 1)
         
         currentSection = nil
         AddSpace(10, "both")

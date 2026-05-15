@@ -1298,6 +1298,13 @@ DF.PartyDefaults = {
     hidePlayerFrame = false,
     showBlizzardSideMenu = true,
 
+    -- Focus Highlight
+    focusHighlightAlpha = 1,
+    focusHighlightColor = {r = 0, g = 0, b = 1, a = 1},
+    focusHighlightInset = 0,
+    focusHighlightMode = "NONE",
+    focusHighlightThickness = 1,
+
     -- Hover Highlight
     hoverHighlightAlpha = 0.8,
     hoverHighlightColor = {r = 1, g = 1, b = 1, a = 1},
@@ -1860,7 +1867,9 @@ DF.PartyDefaults = {
     testShowBossDebuffs = false,
     testShowDispelGlow = false,
     testShowExternalDef = false,
+    testShowFocus = false,
     testShowHealPrediction = false,
+    testShowHover = false,
     testShowIcons = true,
     testShowMissingBuff = false,
     testShowMyBuffIndicator = false,
@@ -2616,6 +2625,13 @@ DF.RaidDefaults = {
     hidePlayerFrame = false,
     showBlizzardSideMenu = true,
 
+    -- Focus Highlight
+    focusHighlightAlpha = 1,
+    focusHighlightColor = {r = 0, g = 0, b = 1, a = 1},
+    focusHighlightInset = 0,
+    focusHighlightMode = "NONE",
+    focusHighlightThickness = 1,
+
     -- Hover Highlight
     hoverHighlightAlpha = 0.8,
     hoverHighlightColor = {r = 1, g = 1, b = 1, a = 1},
@@ -3096,8 +3112,10 @@ DF.RaidDefaults = {
     testShowAuras = false,
     testShowBossDebuffs = false,
     testShowDispelGlow = false,
-    testShowExternalDef = false,
-    testShowHealPrediction = false,
+    testShowExternalDef = false,    
+    testShowFocus = false,
+    testShowHealPrediction = false,    
+    testShowHover = false,
     testShowIcons = true,
     testShowMissingBuff = false,
     testShowMyBuffIndicator = false,

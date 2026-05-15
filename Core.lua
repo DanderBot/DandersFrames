@@ -884,6 +884,12 @@ function DF:LightweightUpdateHighlight(highlightType)
             inset = db.hoverHighlightInset or 0
             alpha = db.hoverHighlightAlpha or 0.8
             color = db.hoverHighlightColor or {r = 1, g = 1, b = 1}
+        elseif highlightType == "focus" then
+            highlight = frame.focusHighlight or frame.dfFocusHighlight
+            thickness = db.focusHighlightThickness or 2
+            inset = db.focusHighlightInset or 0
+            alpha = db.focusHighlightAlpha or 1
+            color = db.focusHighlightColor or {r = 0, g = 0, b = 1}
         elseif highlightType == "aggro" then
             highlight = frame.aggroHighlight or frame.dfAggroHighlight
             thickness = db.aggroHighlightThickness or 2
@@ -930,6 +936,8 @@ function DF:LightweightUpdateHighlight(highlightType)
                 highlight = frame.selectionHighlight or frame.dfSelectionHighlight
             elseif highlightType == "hover" then
                 highlight = frame.hoverHighlight or frame.dfHoverHighlight
+            elseif highlightType == "focus" then
+                highlight = frame.focusHighlight or frame.dfFocusHighlight
             elseif highlightType == "aggro" then
                 highlight = frame.aggroHighlight or frame.dfAggroHighlight
             end
