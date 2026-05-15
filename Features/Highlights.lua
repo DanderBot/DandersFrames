@@ -998,6 +998,7 @@ DF.UpdateAllHighlights = UpdateAllHighlights
 -- PERFORMANCE: Converted from 0.1s timer (~450 calls/sec) to event-driven.
 -- Events used:
 --   PLAYER_TARGET_CHANGED - Update all frames (old target loses selection, new gains)
+--   PLAYER_FOCUS_CHANGED - Update all frames (old focus loses highlight, new gains)
 --   UNIT_THREAT_SITUATION_UPDATE - Update specific unit's frame for aggro changes
 --   PLAYER_REGEN_ENABLED - Safety refresh when leaving combat (clears any stuck highlights)
 --   GROUP_ROSTER_UPDATE - Safety refresh when group composition changes
@@ -1007,6 +1008,7 @@ DF.UpdateAllHighlights = UpdateAllHighlights
 
 local highlightEventFrame = CreateFrame("Frame")
 highlightEventFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
+highlightEventFrame:RegisterEvent("PLAYER_FOCUS_CHANGED")
 highlightEventFrame:RegisterEvent("UNIT_THREAT_SITUATION_UPDATE")
 highlightEventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 highlightEventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
@@ -1018,6 +1020,11 @@ highlightEventFrame:SetScript("OnEvent", function(self, event, ...)
     if event == "PLAYER_TARGET_CHANGED" then
         -- Target changed - need to update ALL frames
         -- (old target loses selection highlight, new target gains it)
+        UpdateAllHighlights()
+
+    elseif event == "PLAYER_FOCUS_CHANGED" then
+        -- Focus changed - need to update ALL frames
+        -- (old focus loses focus highlight, new focus gains it)
         UpdateAllHighlights()
         
     elseif event == "UNIT_THREAT_SITUATION_UPDATE" then
