@@ -2628,7 +2628,32 @@ end
 function DF:UpdateAuraIconsDirect(frame, icons, auraType, maxAuras)
     local unit = frame.unit
     local db = DF:GetFrameDB(frame)
-    
+
+    -- Dead/ghost units: hide all aura icons immediately. WoW does not fire
+    -- UNIT_AURA on death, so the cache may still hold pre-death auras —
+    -- suppress them visually rather than displaying stale data on a corpse.
+    if UnitIsDeadOrGhost(unit) then
+        for i = 1, #icons do
+            local icon = icons[i]
+            icon.auraData = nil
+            icon.testAuraData = nil
+            icon.expirationTime = nil
+            icon.auraDuration = nil
+            if icon.duration then icon.duration:Hide() end
+            if icon.expiringTint then icon.expiringTint:Hide() end
+            if icon.expiringBorderAlphaContainer then
+                icon.expiringBorderAlphaContainer:Hide()
+                if icon.expiringBorderPulse and icon.expiringBorderPulse:IsPlaying() then
+                    icon.expiringBorderPulse:Stop()
+                end
+            end
+            icon:Hide()
+        end
+        local countKey = auraType == "BUFF" and "buffDisplayedCount" or "debuffDisplayedCount"
+        frame[countKey] = 0
+        return
+    end
+
     -- Quick out: no cache = no approved auras = hide everything
     local cache = DF.BlizzardAuraCache[unit]
     local cacheSet = cache and (auraType == "BUFF" and cache.buffs or cache.debuffs)

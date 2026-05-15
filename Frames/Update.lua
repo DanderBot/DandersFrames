@@ -1062,6 +1062,10 @@ function DF:UpdateHealthFast(frame)
             if DF.RestoreHealthBarFromReducedMax then DF:RestoreHealthBarFromReducedMax(frame) end
         end
         DF:ApplyDeadFade(frame, "Dead")
+        -- Clear aura icons — WoW doesn't fire UNIT_AURA on death so the cache
+        -- stays stale. UpdateAuraIconsDirect now has a dead guard, so calling
+        -- UpdateAuras_Enhanced here flushes any pre-death icons from the frame.
+        if DF.UpdateAuras_Enhanced then DF:UpdateAuras_Enhanced(frame) end
         return
     end
 
