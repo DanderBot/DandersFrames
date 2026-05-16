@@ -325,6 +325,16 @@ function CC:CreateProfilesPanelContent()
     mountCb:SetScript("OnClick", function(self)
         local checked = not self:GetChecked()
         self:SetChecked(checked)
+    	-- ensure mounted & flight OR only flight are checked
+		local disableFlying = CC.db and CC.db.global and CC.db.global.disableWhileFlying
+		if disableFlying == nil then disableFlying = false end
+		if disableFlying and (disableFlying == checked) then
+			disableFlying = false
+			CC.flyingCb:SetChecked(disableFlying)
+			if CC.flyingCb.check then
+				CC.flyingCb.check:SetShown(disableFlying)
+			end
+		end
         if CC.db and CC.db.global then
             CC.db.global.disableWhileMounted = checked
         end
@@ -398,6 +408,16 @@ function CC:CreateProfilesPanelContent()
     flyingCb:SetScript("OnClick", function(self)
         local checked = not self:GetChecked()
         self:SetChecked(checked)
+		-- ensure mounted & flight OR only flight are checked
+		local disableMounted = CC.db and CC.db.global and CC.db.global.disableWhileMounted
+		if disableMounted == nil then disableMounted = false end
+		if disableMounted and (checked == disableMounted) then
+			disableMounted = false
+			CC.mountCb:SetChecked(disableMounted)
+			if CC.mountCb.check then
+				CC.mountCb.check:SetShown(disableMounted)
+			end
+		end
         if CC.db and CC.db.global then
             CC.db.global.disableWhileFlying = checked
         end
@@ -507,16 +527,6 @@ function CC:RefreshProfilesPanel()
         if self.mountCb.check then
             self.mountCb.check:SetShown(disableMounted)
         end
-		-- ensure mounted & flight OR only flight are checked
-        local disableFlying = self.db and self.db.global and self.db.global.disableWhileFlying
-        if disableFlying == nil then disableFlying = false end
-		if disableFlying and (disableFlying == disableMounted) then
-			disableFlying = false
-			self.flyingCb:SetChecked(disableFlying)
-			if self.flyingCb.check then
-				self.flyingCb.check:SetShown(disableFlying)
-			end
-		end
     end
     
     -- Update flying checkbox state
@@ -527,16 +537,6 @@ function CC:RefreshProfilesPanel()
         if self.flyingCb.check then
             self.flyingCb.check:SetShown(disableFlying)
         end
-		-- ensure mounted & flight OR only flight are checked
-        local disableMounted = self.db and self.db.global and self.db.global.disableWhileMounted
-        if disableMounted == nil then disableMounted = false end
-		if disableMounted and (disableFlying == disableMounted) then
-			disableMounted = false
-			self.mountCb:SetChecked(disableMounted)
-			if self.mountCb.check then
-				self.mountCb.check:SetShown(disableMounted)
-			end
-		end
     end
     
     -- Get profiles
