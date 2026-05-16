@@ -335,8 +335,10 @@ function CC:CreateProfilesPanelContent()
 				CC.flyingCb.check:SetShown(disableFlying)
 			end
 		end
+		-- end mutually exclusive check code
         if CC.db and CC.db.global then
             CC.db.global.disableWhileMounted = checked
+			CC.db.global.disableWhileFlying  = disableFlying  -- reset incase of update
         end
         if checked then
             print("|cff33cc33DandersFrames:|r Click-casting will be disabled while mounted/flying.")
@@ -418,8 +420,10 @@ function CC:CreateProfilesPanelContent()
 				CC.mountCb.check:SetShown(disableMounted)
 			end
 		end
+		-- end mutually exclusive check code
         if CC.db and CC.db.global then
-            CC.db.global.disableWhileFlying = checked
+            CC.db.global.disableWhileFlying  = checked
+			CC.db.global.disableWhileMounted = disableMounted -- ensure update if changed
         end
         if checked then
             print("|cff33cc33DandersFrames:|r Click-casting will be disabled only while flying.")
