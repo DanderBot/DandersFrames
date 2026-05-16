@@ -2526,6 +2526,17 @@ function AutoProfilesUI:EnterEditing(contentType, profileIndex)
         if DF.PositionTestRaidContainer then
             DF:PositionTestRaidContainer()
         end
+        -- If the mover is visible (frames unlocked), sync its position and scale
+        -- to match the freshly-positioned test container. The profile overrides
+        -- applied above may include a different raidAnchorX/Y or frameScale, so
+        -- the mover needs to follow the container or it will appear offset.
+        if DF.raidMoverFrame and DF.raidMoverFrame:IsShown() then
+            local moverDb = DF:GetRaidDB()
+            local moverScale = moverDb.frameScale or 1.0
+            DF.raidMoverFrame:SetScale(moverScale)
+            DF.raidMoverFrame:ClearAllPoints()
+            DF.raidMoverFrame:SetPoint("CENTER", UIParent, "CENTER", (moverDb.raidAnchorX or 0) / moverScale, (moverDb.raidAnchorY or 0) / moverScale)
+        end
         if DF.RefreshTestFramesWithLayout then
             DF:RefreshTestFramesWithLayout()
         end
@@ -2652,6 +2663,16 @@ function AutoProfilesUI:ExitEditing(skipUIUpdates)
     if DF.raidTestMode then
         if DF.PositionTestRaidContainer then
             DF:PositionTestRaidContainer()
+        end
+        -- Sync mover position/scale to match the restored base anchor.
+        -- EvaluateAndApply above may have re-applied a runtime overlay, so
+        -- DF:GetRaidDB() here reflects whichever values are now authoritative.
+        if DF.raidMoverFrame and DF.raidMoverFrame:IsShown() then
+            local moverDb = DF:GetRaidDB()
+            local moverScale = moverDb.frameScale or 1.0
+            DF.raidMoverFrame:SetScale(moverScale)
+            DF.raidMoverFrame:ClearAllPoints()
+            DF.raidMoverFrame:SetPoint("CENTER", UIParent, "CENTER", (moverDb.raidAnchorX or 0) / moverScale, (moverDb.raidAnchorY or 0) / moverScale)
         end
         if DF.RefreshTestFramesWithLayout then
             DF:RefreshTestFramesWithLayout()

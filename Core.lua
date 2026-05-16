@@ -5073,14 +5073,23 @@ function DF:FullProfileRefresh()
     end
 
     -- === UPDATE RAID CONTAINER POSITION ===
+    -- Use UpdateRaidContainerPosition so raidMoverFrame and testRaidContainer
+    -- are synced in the same call (and CENTER-anchor compensation is applied).
+    -- Falls back to direct SetPoint if the function isn't loaded yet.
     if DF.raidContainer then
         local scale = raidDB.frameScale or 1.0
         DF:Debug("RAIDPOS", "FullProfileRefresh: applying raid container pos (%.1f,%.1f) scale=%.3f autoActive=%s",
             raidDB.raidAnchorX or 0, raidDB.raidAnchorY or 0, scale,
             tostring(DF.AutoProfilesUI and DF.AutoProfilesUI.activeRuntimeProfile and DF.AutoProfilesUI.activeRuntimeProfile.name or "none"))
-        DF.raidContainer:SetScale(scale)
-        DF.raidContainer:ClearAllPoints()
-        DF.raidContainer:SetPoint("CENTER", UIParent, "CENTER", (raidDB.raidAnchorX or 0) / scale, (raidDB.raidAnchorY or 0) / scale)
+        if DF.UpdateRaidContainerPosition and not InCombatLockdown() then
+            DF:UpdateRaidContainerPosition()
+        else
+            -- Combat fallback: move only the secure container (mover/test container
+            -- can't be modified in combat anyway)
+            DF.raidContainer:SetScale(scale)
+            DF.raidContainer:ClearAllPoints()
+            DF.raidContainer:SetPoint("CENTER", UIParent, "CENTER", (raidDB.raidAnchorX or 0) / scale, (raidDB.raidAnchorY or 0) / scale)
+        end
     end
     
     -- === FORCE UPDATE INDIVIDUAL FRAMES VIA ITERATORS ===

@@ -689,9 +689,9 @@ function DF:CreateRaidMoverFrame()
     -- Parent to UIParent (not raidContainer) so strata works properly
     -- Position over the container
     local mover = CreateFrame("Frame", "DandersRaidFramesMover", UIParent, "BackdropTemplate")
-    mover:SetFrameStrata("TOOLTIP")  -- Very high strata to be above secure frames
-    mover:SetFrameLevel(100)
-    
+    mover:SetFrameStrata("MEDIUM")  -- Same strata as unit frames; SetFrameLevel(100) puts us above them
+    mover:SetFrameLevel(100)        -- Unit frame children are level 1-4; 100 renders above them
+
     -- Set initial size from container
     local cWidth, cHeight = DF.raidContainer:GetSize()
     mover:SetSize(math.max(cWidth, 100), math.max(cHeight, 100))
@@ -930,11 +930,10 @@ function DF:UnlockRaidFrames()
     DF.raidMoverFrame:SetScale(scale)
     DF.raidMoverFrame:ClearAllPoints()
     DF.raidMoverFrame:SetPoint("CENTER", UIParent, "CENTER", (db.raidAnchorX or 0) / scale, (db.raidAnchorY or 0) / scale)
-    DF.raidMoverFrame:SetFrameStrata("TOOLTIP")  -- Very high strata
-    DF.raidMoverFrame:SetFrameLevel(100)
+    DF.raidMoverFrame:SetFrameStrata("MEDIUM")  -- Keeps mover below DIALOG settings GUI
+    DF.raidMoverFrame:SetFrameLevel(100)        -- Above unit frame children (level 1-4)
     DF.raidMoverFrame:SetAlpha(1)
     DF.raidMoverFrame:Show()
-    DF.raidMoverFrame:Raise()
 
     -- Sync testRaidContainer position (and size only when not in test mode,
     -- since test mode already has the correct calculated size)
