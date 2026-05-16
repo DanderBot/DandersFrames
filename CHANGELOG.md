@@ -15,6 +15,7 @@
 * Fix locking frames while test mode is active turning off test mode. (PR #87 by Krathe)
 * (Pinned Frames) Fix pinned frame position resetting when clicking Edit on an active Auto Layout. (PR #90 by Krathe)
 * Fix orange and blue bounding boxes (raidMoverFrame / DandersFramesMover) rendering above the settings GUI when frames are unlocked; fix orange box position offset when clicking Edit on an Auto Layout while already unlocked. (PR #92 by Krathe)
+* (Auto Layouts) Fix position panel X/Y inputs not updating when clicking Edit on an Auto Layout while the panel is already open; panel now refreshes immediately on enter and exit editing. (PR #93 by Krathe)
 * (Defensive Icons) Fix icon borders missing on one or more sides when Pixel Perfect is enabled. (PR #79 by Krathe)
 * (Export Settings) Fix the "All" preset unchecking Pinned Frames, Aura Designer, and Auto Layouts. (PR #78 by Krathe)
 * (Global Fonts) Fix the Affected Elements list missing entries and being clipped. (PR #76 by Krathe)

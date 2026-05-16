@@ -2537,6 +2537,10 @@ function AutoProfilesUI:EnterEditing(contentType, profileIndex)
             DF.raidMoverFrame:ClearAllPoints()
             DF.raidMoverFrame:SetPoint("CENTER", UIParent, "CENTER", (moverDb.raidAnchorX or 0) / moverScale, (moverDb.raidAnchorY or 0) / moverScale)
         end
+        -- Refresh position panel inputs to reflect the newly-applied override anchor/scale
+        if DF.positionPanel and DF.positionPanel:IsShown() and DF.UpdatePositionPanel then
+            DF:UpdatePositionPanel()
+        end
         if DF.RefreshTestFramesWithLayout then
             DF:RefreshTestFramesWithLayout()
         end
@@ -2673,6 +2677,12 @@ function AutoProfilesUI:ExitEditing(skipUIUpdates)
             DF.raidMoverFrame:SetScale(moverScale)
             DF.raidMoverFrame:ClearAllPoints()
             DF.raidMoverFrame:SetPoint("CENTER", UIParent, "CENTER", (moverDb.raidAnchorX or 0) / moverScale, (moverDb.raidAnchorY or 0) / moverScale)
+        end
+        -- Refresh position panel inputs to reflect the restored anchor/scale values.
+        -- EvaluateAndApply above may have re-applied a runtime overlay, so
+        -- DF:GetRaidDB() is already authoritative at this point.
+        if DF.positionPanel and DF.positionPanel:IsShown() and DF.UpdatePositionPanel then
+            DF:UpdatePositionPanel()
         end
         if DF.RefreshTestFramesWithLayout then
             DF:RefreshTestFramesWithLayout()
