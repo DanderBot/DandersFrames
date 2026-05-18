@@ -738,7 +738,6 @@ end
 
 DF.GlobalDefaults = {
     notifyOutdated = true,
-    showAddOnCompartmentButton = false, -- Blizzard AddOn Compartment: Default to false, so as to not change anything on addition
 }
 
 -- ============================================================
@@ -1326,6 +1325,8 @@ DF.PartyDefaults = {
         minimapPos = 207.168514387028,
     },
     showMinimapButton = true,
+
+    showAddOnCompartmentButton = false, -- Blizzard AddOn Compartment: Default to false, so as to not change anything on addition
 
     -- Missing Buff
     missingBuffCheckAttackPower = true,

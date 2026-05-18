@@ -5373,11 +5373,11 @@ function DF:UpdateMinimapButton()
 end
 
 function DF:UpdateAddOnCompartmentButton()
-    local gdb = DF:GetGlobalDB()                                             -- Get the Global DB Options
-    if gdb.showAddOnCompartmentButton ~= nil then                            -- if set,
-        gdb.showAddOnCompartmentButton = not gdb.showAddOnCompartmentButton  -- invert choice
+    local db = DF:GetDB()                                                  -- Get the DB Options
+    if db.showAddOnCompartmentButton ~= nil then                           -- if set,
+        db.showAddOnCompartmentButton = not db.showAddOnCompartmentButton  -- invert choice
     else
-        gdb.showAddOnCompartmentButton = true                                -- else set true
+        db.showAddOnCompartmentButton = true                               -- else set true
     end
 end
 
