@@ -738,6 +738,7 @@ end
 
 DF.GlobalDefaults = {
     notifyOutdated = true,
+    showAddOnCompartmentButton = false, -- Blizzard AddOn Compartment: Default to false, so as to not change anything on addition
 }
 
 -- ============================================================

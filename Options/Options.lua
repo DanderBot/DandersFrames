@@ -381,7 +381,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     -- Display > Visibility
     local pageVisibility = CreateSubTab("display", "display_visibility", L["Visibility"])
     BuildPage(pageVisibility, function(self, db, Add, AddSpace, AddSyncPoint)
-        Add(CreateCopyButton(self.child, {"soloMode", "hidePlayerFrame", "hideDefaultPlayerFrame", "showMinimapButton", "restedIndicator"}, L["Visibility"], "display_visibility"), 25, 2)
+        Add(CreateCopyButton(self.child, {"soloMode", "hidePlayerFrame", "hideDefaultPlayerFrame", "showMinimapButton", "showAddOnCompartmentButton", "restedIndicator"}, L["Visibility"], "display_visibility"), 25, 2)
 
         -- ===== FRAME DISPLAY GROUP (Column 1) =====
         local frameDisplayGroup = GUI:CreateSettingsGroup(self.child, 280)
@@ -397,6 +397,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             DF:UpdateMinimapButton()
         end), 30)
         
+        local showAddOnCompartmentButton = frameDisplayGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show AddOnComparment Button"], db, "showAddOnCompartmentButton", function()
+            DF:UpdateAddOnCompartmentButton()
+        end), 30)
+        showAddOnCompartmentButton.tooltip = L["This displays an access button/icon in the Blizzard AddOnCompartment.\nThis is a Blizzard API 10.x+ feature and requires a UI Reload to take effect"]
+
         local restedIndicator = frameDisplayGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Rested Indicator"], db, "restedIndicator", function()
             DF:UpdateRestedIndicator()
         end), 30)

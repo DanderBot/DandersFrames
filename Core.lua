@@ -5372,6 +5372,15 @@ function DF:UpdateMinimapButton()
     end
 end
 
+function DF:UpdateAddOnCompartmentButton()
+    local gdb = DF:GetGlobalDB()                                             -- Get the Global DB Options
+    if gdb.showAddOnCompartmentButton ~= nil then                            -- if set,
+        gdb.showAddOnCompartmentButton = not gdb.showAddOnCompartmentButton  -- invert choice
+    else
+        gdb.showAddOnCompartmentButton = true                                -- else set true
+    end
+end
+
 -- ========================================
 -- Hide/Show Default Player Frame
 -- ========================================
