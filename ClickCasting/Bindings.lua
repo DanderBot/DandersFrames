@@ -1900,9 +1900,28 @@ end
 -- Build macro text for a single binding
 -- This handles all action types and conditions
 -- forGlobalBinding: if true, only use fallback settings (not appliesToFrames) for targeting
+-- Resolve whether a binding should also target the unit it casts on.
+-- A per-binding override (true/false) wins; otherwise inherit the global
+-- "Target unit when click-casting" setting. nil = inherit.
+function CC:GetEffectiveTargetOnCast(binding)
+    if binding and binding.targetOnCast ~= nil then
+        return binding.targetOnCast == true
+    end
+    return (self.db and self.db.global and self.db.global.targetOnCast) == true
+end
+
+-- Append a "/target the moused-over unit" line to a cast macro when enabled.
+-- The [@mouseover,exists] gate means clicking a frame targets that unit, while
+-- a target-fallback cast (nothing hovered) leaves the current target unchanged.
+function CC:AppendTargetOnCast(macroText, enabled)
+    if not macroText or not enabled then return macroText end
+    if macroText:find("/target %[@mouseover", 1) then return macroText end
+    return macroText .. "\n/target [@mouseover,exists] mouseover"
+end
+
 function CC:BuildMacroTextForBinding(binding, forGlobalBinding)
     if not binding then return nil end
-    
+
     local actionType = binding.actionType or self.ACTION_TYPES.SPELL
     local targetType = binding.targetType or "all"
     local fallback = binding.fallback or {}
@@ -2014,8 +2033,9 @@ function CC:BuildMacroTextForBinding(binding, forGlobalBinding)
         if fallbackTbl.stopSpellTarget then
             macroText = macroText .. "\n/stopspelltarget"
         end
+        macroText = self:AppendTargetOnCast(macroText, self:GetEffectiveTargetOnCast(binding))
         return macroText
-        
+
     elseif actionType == self.ACTION_TYPES.MACRO then
         -- For custom macros, just return the macro body
         local macro = self:GetMacroById(binding.macroId)
@@ -2080,12 +2100,12 @@ function CC:BuildMacroTextForBinding(binding, forGlobalBinding)
             -- Equipment slot: /use 13 (slot number)
             local slotNum = binding.itemSlot
             if not slotNum then return nil end
-            return "/use " .. slotNum
+            return self:AppendTargetOnCast("/use " .. slotNum, self:GetEffectiveTargetOnCast(binding))
         else
             -- Consumable item: /use ItemName (prefer name over ID for readability)
             local itemRef = binding.itemName or binding.itemId
             if not itemRef then return nil end
-            return "/use " .. itemRef
+            return self:AppendTargetOnCast("/use " .. itemRef, self:GetEffectiveTargetOnCast(binding))
         end
         
     elseif actionType == "menu" then
@@ -2304,6 +2324,18 @@ function CC:BuildCombinedMacroForBindings(bindings, forGlobalBinding)
     if useStopSpellTarget then
         macroText = macroText .. "\n/stopspelltarget"
     end
+
+    -- Target-on-cast: one macro, one /target line. Include it if ANY contributing
+    -- binding resolves to on (the line targets whatever frame you clicked).
+    local targetOnCast = false
+    for _, b in ipairs({friendlyBinding, hostileBinding, anyBinding}) do
+        if b and self:GetEffectiveTargetOnCast(b) then
+            targetOnCast = true
+            break
+        end
+    end
+    macroText = self:AppendTargetOnCast(macroText, targetOnCast)
+
     return macroText, friendlyBinding or hostileBinding or anyBinding
 end
 

@@ -366,6 +366,7 @@ local GLOBAL_SETTINGS_TEMPLATE = {
     autoCreateProfiles = true, -- Auto-create profiles when switching talent loadouts
     disableWhileMounted = false, -- Disable click casting while mounted or flying
     disableWhileFlying = false,  -- Disable click casting only while flying (not ground mounts)
+    targetOnCast = false,        -- Target the unit when click-casting on it (per-binding override available)
     -- UI positions can go here
 }
 CC.GLOBAL_SETTINGS_TEMPLATE = GLOBAL_SETTINGS_TEMPLATE

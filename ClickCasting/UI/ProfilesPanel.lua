@@ -441,6 +441,73 @@ function CC:CreateProfilesPanelContent()
 
     CC.flyingCb = flyingCb
 
+    -- Target unit when click-casting checkbox
+    local targetCb = CreateFrame("Button", nil, leftCol, "BackdropTemplate")
+    targetCb:SetSize(16, 16)
+    targetCb:SetPoint("TOPLEFT", flyingCb, "BOTTOMLEFT", 0, -8)
+    targetCb:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = 1,
+    })
+    targetCb:SetBackdropColor(0.1, 0.1, 0.1, 1)
+    targetCb:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.5)
+
+    local targetCheck = targetCb:CreateTexture(nil, "OVERLAY")
+    targetCheck:SetSize(10, 10)
+    targetCheck:SetPoint("CENTER")
+    targetCheck:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
+    targetCheck:SetVertexColor(themeColor.r, themeColor.g, themeColor.b)
+    targetCb.check = targetCheck
+
+    local targetLabel = leftCol:CreateFontString(nil, "OVERLAY", "DFFontNormal")
+    targetLabel:SetPoint("LEFT", targetCb, "RIGHT", 6, 0)
+    targetLabel:SetText(L["Target unit when click-casting"])
+    targetLabel:SetTextColor(C.text.r, C.text.g, C.text.b)
+
+    targetCb.SetChecked = function(self, checked)
+        self.isChecked = checked
+        self.check:SetShown(checked)
+    end
+    targetCb.GetChecked = function(self)
+        return self.isChecked
+    end
+
+    local targetOnCast = CC.db and CC.db.global and CC.db.global.targetOnCast or false
+    targetCb:SetChecked(targetOnCast)
+
+    targetCb:SetScript("OnClick", function(self)
+        local checked = not self:GetChecked()
+        self:SetChecked(checked)
+        if CC.db and CC.db.global then
+            CC.db.global.targetOnCast = checked
+        end
+        if checked then
+            print("|cff33cc33DandersFrames:|r Click-casting will now also target the unit you cast on.")
+        else
+            print("|cffff9900DandersFrames:|r Click-casting will no longer change your target.")
+        end
+        if not InCombatLockdown() then
+            CC:ApplyBindings()
+        else
+            CC.needsBindingRefresh = true
+        end
+    end)
+
+    targetCb:SetScript("OnEnter", function(self)
+        self:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine(L["Target unit when click-casting"], 1, 1, 1)
+        GameTooltip:AddLine(L["When enabled, click-casting a spell on a frame also makes that unit your target. Individual bindings can override this in the binding editor."], 0.7, 0.7, 0.7, true)
+        GameTooltip:Show()
+    end)
+    targetCb:SetScript("OnLeave", function(self)
+        self:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.5)
+        GameTooltip:Hide()
+    end)
+
+    CC.targetCb = targetCb
+
     -- ===== RIGHT COLUMN: Loadout Assignments =====
     local loadoutLabel = rightCol:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
     loadoutLabel:SetPoint("TOPLEFT", 0, 0)

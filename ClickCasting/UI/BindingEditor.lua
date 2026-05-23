@@ -1402,6 +1402,14 @@ function CC:CreateEditBindingPanel()
     end)
     panel.stopSpellTargetCB = stopSpellTargetCB
 
+    -- Target on cast checkbox (per-binding override of the global setting)
+    local targetOnCastCB = CreateCheckbox(advancedContent, L["Target on cast"], L["Also make this unit your target when you click-cast on it. Overrides the global 'Target unit when click-casting' setting."])
+    targetOnCastCB:SetPoint("TOPLEFT", 18, -150)
+    targetOnCastCB:SetScript("OnClick", function(self)
+        panel.pendingBinding.targetOnCast = self:GetChecked()
+    end)
+    panel.targetOnCastCB = targetOnCastCB
+
     -- Priority slider (inside advanced content)
     local priorityLabel = advancedContent:CreateFontString(nil, "OVERLAY", "DFFontNormal")
     priorityLabel:SetPoint("TOPLEFT", 0, -158)
@@ -1879,6 +1887,7 @@ function CC:ShowEditBindingPanel(spellData, existingBinding, existingIndex)
     -- Check if this binding has advanced options set (should auto-expand)
     local fallback = panel.pendingBinding.fallback or { mouseover = false, target = false, selfCast = false }
     local hasAdvancedOptions = fallback.mouseover or fallback.target or fallback.selfCast or fallback.stopSpellTarget
+        or panel.pendingBinding.targetOnCast ~= nil
     local currentPriority = panel.pendingBinding.priority or 5
     if currentPriority ~= 5 then
         hasAdvancedOptions = true
@@ -1901,6 +1910,7 @@ function CC:ShowEditBindingPanel(spellData, existingBinding, existingIndex)
         if panel.selfCB then panel.selfCB:Hide() end
         if panel.macroOptionsLabel then panel.macroOptionsLabel:Hide() end
         if panel.stopSpellTargetCB then panel.stopSpellTargetCB:Hide() end
+        if panel.targetOnCastCB then panel.targetOnCastCB:Hide() end
         
         -- Show Global Keybind section for macros/items (above Active section)
         -- Layout: Global Keybind: (heading) -> description -> checkbox
@@ -1956,6 +1966,7 @@ function CC:ShowEditBindingPanel(spellData, existingBinding, existingIndex)
         if panel.selfCB then panel.selfCB:Show() end
         if panel.macroOptionsLabel then panel.macroOptionsLabel:Show() end
         if panel.stopSpellTargetCB then panel.stopSpellTargetCB:Show() end
+        if panel.targetOnCastCB then panel.targetOnCastCB:Show() end
         
         -- Hide Global Keybind section for spells (they use fallback options instead)
         if panel.globalBindLabel then
@@ -1968,14 +1979,15 @@ function CC:ShowEditBindingPanel(spellData, existingBinding, existingIndex)
             panel.globalBindDesc:Hide()
         end
         
-        -- Reset priority slider position for spells
+        -- Reset priority slider position for spells (shifted down for the
+        -- Target on cast row added to Macro Options)
         if panel.priorityLabel then
             panel.priorityLabel:ClearAllPoints()
-            panel.priorityLabel:SetPoint("TOPLEFT", panel.advancedContent, "TOPLEFT", 0, -158)
+            panel.priorityLabel:SetPoint("TOPLEFT", panel.advancedContent, "TOPLEFT", 0, -182)
         end
         if panel.prioritySlider then
             panel.prioritySlider:ClearAllPoints()
-            panel.prioritySlider:SetPoint("TOPLEFT", panel.advancedContent, "TOPLEFT", 68, -155)
+            panel.prioritySlider:SetPoint("TOPLEFT", panel.advancedContent, "TOPLEFT", 68, -179)
         end
         
         -- Auto-expand if binding has advanced options
@@ -2071,6 +2083,9 @@ function CC:ShowEditBindingPanel(spellData, existingBinding, existingIndex)
         panel.targetFallbackCB:SetChecked(fallback.target == true)
         panel.selfCB:SetChecked(fallback.selfCast == true)
         panel.stopSpellTargetCB:SetChecked(fallback.stopSpellTarget == true)
+        -- Show the effective state (global default unless this binding overrides it).
+        -- Clicking writes an explicit override; leaving it untouched keeps inheriting.
+        panel.targetOnCastCB:SetChecked(CC:GetEffectiveTargetOnCast(panel.pendingBinding))
     end
     
     -- Update target type radios (only if not a macro)

@@ -6,6 +6,7 @@
 
 * (Heal Prediction) Added a "Show Heals From" option — All Incoming, My Heals, Others' Heals, or Split — letting you choose which incoming heals the bar shows. Split draws your heals and other healers' heals as separate coloured segments. (PR #109 by Krathe)
 * Added a `/df attached` command that lists other addons attaching castbars, cooldowns or auras to your frames — handy for telling apart DF features from another addon's. (PR #104 by Krathe)
+* (Click Casting) Added a **"Target unit when click-casting"** option — click-casting a spell on a frame can now also make that unit your target. Set it globally in the Click Casting profiles panel, or override it per-binding under Advanced → Macro Options. (PR #116 by Krathe)
 
 ### Bug Fixes
 
