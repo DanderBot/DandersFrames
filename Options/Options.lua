@@ -1037,13 +1037,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         Add(healthBarGroup, nil, 1)
         
         -- NAME TEXT GROUP (col1)
-        local outlineValues = {
-            [""]= L["None"],
-            OUTLINE = L["Outline"],
-            THICKOUTLINE = L["Thick Outline"],
-            SHADOW = L["Shadow"],
-            MONOCHROME = L["Monochrome"],
-        }
         local textAnchorValues = {
             TOPLEFT= L["Top Left"], TOP= L["Top"], TOPRIGHT= L["Top Right"],
             LEFT= L["Left"], CENTER= L["Center"], RIGHT= L["Right"],
@@ -1058,9 +1051,12 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         nameTextGroup:AddWidget(GUI:CreateSlider(self.child, L["Font Size"], 6, 16, 1, db, "petNameFontSize", function()
             if DF.ApplyPetSettings then DF:ApplyPetSettings() end
         end, function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end, true), 55)
-        nameTextGroup:AddWidget(GUI:CreateDropdown(self.child, L["Font Outline"], outlineValues, db, "petNameFontOutline", function()
+        nameTextGroup:AddWidget(GUI:CreateOutlineDropdown(self.child, L["Font Outline"], db, "petNameFontOutline", function()
             if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
         end), 55)
+        nameTextGroup:AddWidget(GUI:CreateShadowCheckbox(self.child, L["Shadow"], db, "petNameFontOutline", function()
+            if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
+        end), 30)
         nameTextGroup:AddWidget(GUI:CreateSlider(self.child, L["Max Name Length"], 4, 20, 1, db, "petNameMaxLength", function()
             if DF.ApplyPetSettings then DF:ApplyPetSettings() end
         end), 55)
@@ -1130,9 +1126,12 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         healthTextGroup:AddWidget(GUI:CreateSlider(self.child, L["Font Size"], 6, 14, 1, db, "petHealthFontSize", function()
             if DF.ApplyPetSettings then DF:ApplyPetSettings() end
         end, function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end, true), 55)
-        healthTextGroup:AddWidget(GUI:CreateDropdown(self.child, L["Font Outline"], outlineValues, db, "petHealthFontOutline", function()
+        healthTextGroup:AddWidget(GUI:CreateOutlineDropdown(self.child, L["Font Outline"], db, "petHealthFontOutline", function()
             if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
         end), 55)
+        healthTextGroup:AddWidget(GUI:CreateShadowCheckbox(self.child, L["Shadow"], db, "petHealthFontOutline", function()
+            if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
+        end), 30)
         healthTextGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Health Text Color"], db, "petHealthTextColor", false, function()
             if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
         end, function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end, true), 35)
@@ -1799,13 +1798,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         
         fontSelectGroup:AddWidget(GUI:CreateFontDropdown(self.child, L["Font"], DF.GlobalFontTemp, "font", function() end), 55)
         
-        local outlineOptions = {
-            NONE = L["None"],
-            OUTLINE = L["Outline"],
-            THICKOUTLINE = L["Thick Outline"],
-            SHADOW = L["Shadow"],
-        }
-        fontSelectGroup:AddWidget(GUI:CreateDropdown(self.child, L["Outline"], outlineOptions, DF.GlobalFontTemp, "outline", function() end), 55)
+        fontSelectGroup:AddWidget(GUI:CreateOutlineDropdown(self.child, L["Outline"], DF.GlobalFontTemp, "outline", function() end), 55)
+        fontSelectGroup:AddWidget(GUI:CreateShadowCheckbox(self.child, L["Shadow"], DF.GlobalFontTemp, "outline", function() end), 30)
         
         -- Themed Apply button
         local applyBtn = CreateFrame("Button", nil, self.child, "BackdropTemplate")
@@ -1902,9 +1896,18 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             print("|cff00ff00DandersFrames:|r Applied global font settings to all text elements.")
         end)
         fontSelectGroup:AddWidget(applyBtn, 35)
-        
+
+        fontSelectGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Crisp Font Rendering (SDF)"], DF.db, "fontSlug", function()
+            if DF.ClearFontCache then DF:ClearFontCache() end
+            DF:UpdateAllFrames()
+            if GUI.SelectedMode == "raid" and DF.UpdateRaidLayout then DF:UpdateRaidLayout() end
+            if DF.ApplyPetSettings then DF:ApplyPetSettings() end
+            if DF.RefreshTestFrames then DF:RefreshTestFrames() end
+        end), 30)
+        fontSelectGroup:AddWidget(GUI:CreateLabel(self.child, L["Renders text with signed-distance-field smoothing for sharper edges at any size. Applies to None and Outline styles only (not Monochrome, Thick, or Shadow)."], 250), 50)
+
         Add(fontSelectGroup, nil, 1)
-        
+
         -- ===== SHADOW SETTINGS GROUP (Column 1) =====
         local shadowGroup = GUI:CreateSettingsGroup(self.child, 280)
         shadowGroup:AddWidget(GUI:CreateHeader(self.child, L["Shadow Settings"]), 40)
@@ -1976,15 +1979,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         fontGroup:AddWidget(GUI:CreateFontDropdown(self.child, L["Font"], db, "groupLabelFont", UpdateLabels), 55)
         fontGroup:AddWidget(GUI:CreateSlider(self.child, L["Font Size"], 8, 24, 1, db, "groupLabelFontSize", UpdateLabels, function() DF:LightweightUpdateGroupLabels() end, true), 55)
         
-        local outlineOptions = {
-            ["NONE"] = L["None"],
-            ["OUTLINE"] = L["Outline"],
-            ["THICKOUTLINE"] = L["Thick Outline"],
-            ["SHADOW"] = L["Shadow"],
-        }
-        fontGroup:AddWidget(GUI:CreateDropdown(self.child, L["Outline"], outlineOptions, db, "groupLabelOutline", UpdateLabels), 55)
+        fontGroup:AddWidget(GUI:CreateOutlineDropdown(self.child, L["Outline"], db, "groupLabelOutline", UpdateLabels), 55)
+        fontGroup:AddWidget(GUI:CreateShadowCheckbox(self.child, L["Shadow"], db, "groupLabelOutline", UpdateLabels), 30)
         fontGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Label Color"], db, "groupLabelColor", true, UpdateLabels, function() DF:LightweightUpdateGroupLabelColor() end, true), 35)
-        fontGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Shadow"], db, "groupLabelShadow", UpdateLabels), 30)
         fontGroup.hideOn = HideGroupLabelOptions
         Add(fontGroup, nil, 1)
         
@@ -4194,8 +4191,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         fontGroup:AddWidget(GUI:CreateFontDropdown(self.child, L["Font"], db, "healthFont", function() DF:UpdateAllFrames() end), 55)
         fontGroup:AddWidget(GUI:CreateSlider(self.child, L["Font Size"], 6, 24, 1, db, "healthFontSize", nil, function() DF:LightweightUpdateFontSize("health") end, true), 55)
         
-        local outlineOptions = { NONE= L["None"], OUTLINE= L["Outline"], THICKOUTLINE= L["Thick Outline"], SHADOW= L["Shadow"] }
-        fontGroup:AddWidget(GUI:CreateDropdown(self.child, L["Outline"], outlineOptions, db, "healthTextOutline", function() DF:LightweightUpdateFontSize("health") end), 55)
+        fontGroup:AddWidget(GUI:CreateOutlineDropdown(self.child, L["Outline"], db, "healthTextOutline", function() DF:LightweightUpdateFontSize("health") end), 55)
+        fontGroup:AddWidget(GUI:CreateShadowCheckbox(self.child, L["Shadow"], db, "healthTextOutline", function() DF:LightweightUpdateFontSize("health") end), 30)
         fontGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Use Class Color"], db, "healthTextUseClassColor", function()
             self:RefreshStates()
             DF:RefreshAllVisibleFrames()
@@ -4252,8 +4249,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         fontGroup:AddWidget(GUI:CreateFontDropdown(self.child, L["Font"], db, "statusTextFont", function() DF:UpdateAllFrames() end), 55)
         fontGroup:AddWidget(GUI:CreateSlider(self.child, L["Font Size"], 6, 24, 1, db, "statusTextFontSize", nil, function() DF:LightweightUpdateFontSize("status") end, true), 55)
         
-        local outlineOptions = { NONE= L["None"], OUTLINE= L["Outline"], THICKOUTLINE= L["Thick Outline"], SHADOW= L["Shadow"] }
-        fontGroup:AddWidget(GUI:CreateDropdown(self.child, L["Outline"], outlineOptions, db, "statusTextOutline", function() DF:LightweightUpdateFontSize("status") end), 55)
+        fontGroup:AddWidget(GUI:CreateOutlineDropdown(self.child, L["Outline"], db, "statusTextOutline", function() DF:LightweightUpdateFontSize("status") end), 55)
+        fontGroup:AddWidget(GUI:CreateShadowCheckbox(self.child, L["Shadow"], db, "statusTextOutline", function() DF:LightweightUpdateFontSize("status") end), 30)
         fontGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Text Color"], db, "statusTextColor", true, nil, function() DF:LightweightUpdateTextColor("status") end, true), 35)
         Add(fontGroup, nil, 1)
         
@@ -4276,8 +4273,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         fontGroup:AddWidget(GUI:CreateFontDropdown(self.child, L["Font"], db, "nameFont", nil), 55)
         fontGroup:AddWidget(GUI:CreateSlider(self.child, L["Font Size"], 6, 24, 1, db, "nameFontSize", nil, function() DF:LightweightUpdateFontSize("name") end, true), 55)
         
-        local outlineOptions = { NONE= L["None"], OUTLINE= L["Outline"], THICKOUTLINE= L["Thick Outline"], SHADOW= L["Shadow"] }
-        fontGroup:AddWidget(GUI:CreateDropdown(self.child, L["Outline"], outlineOptions, db, "nameTextOutline", function() DF:LightweightUpdateFontSize("name") end), 55)
+        fontGroup:AddWidget(GUI:CreateOutlineDropdown(self.child, L["Outline"], db, "nameTextOutline", function() DF:LightweightUpdateFontSize("name") end), 55)
+        fontGroup:AddWidget(GUI:CreateShadowCheckbox(self.child, L["Shadow"], db, "nameTextOutline", function() DF:LightweightUpdateFontSize("name") end), 30)
         Add(fontGroup, nil, 1)
         
         -- ===== POSITION GROUP (Column 2) =====
@@ -4755,7 +4752,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             CENTER= L["Center"], TOP= L["Top"], BOTTOM= L["Bottom"], LEFT= L["Left"], RIGHT= L["Right"],
             TOPLEFT= L["Top Left"], TOPRIGHT= L["Top Right"], BOTTOMLEFT= L["Bottom Left"], BOTTOMRIGHT= L["Bottom Right"],
         }
-        local outlineOptions = { NONE= L["None"], OUTLINE= L["Outline"], THICKOUTLINE= L["Thick Outline"], SHADOW= L["Shadow"] }
 
         -- ===== LAYOUT SECTION =====
         local layoutSection = Add(GUI:CreateCollapsibleSection(self.child, L["Layout"], true), 36, "both")
@@ -4840,7 +4836,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         stackCountGroup:AddWidget(GUI:CreateHeader(self.child, L["Stack Count"]), 40)
         stackCountGroup:AddWidget(GUI:CreateFontDropdown(self.child, L["Font"], db, "buffStackFont", function() DF:LightweightUpdateAuraStackText("buff") end), 55)
         stackCountGroup:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.0, 0.05, db, "buffStackScale", nil, function() DF:LightweightUpdateAuraStackText("buff") end, true), 55)
-        stackCountGroup:AddWidget(GUI:CreateDropdown(self.child, L["Outline"], outlineOptions, db, "buffStackOutline", function() DF:LightweightUpdateAuraStackText("buff") end), 55)
+        stackCountGroup:AddWidget(GUI:CreateOutlineDropdown(self.child, L["Outline"], db, "buffStackOutline", function() DF:LightweightUpdateAuraStackText("buff") end), 55)
+        stackCountGroup:AddWidget(GUI:CreateShadowCheckbox(self.child, L["Shadow"], db, "buffStackOutline", function() DF:LightweightUpdateAuraStackText("buff") end), 30)
         stackCountGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "buffStackAnchor", function() DF:LightweightUpdateAuraStackText("buff") end), 55)
         stackCountGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -150, 150, 1, db, "buffStackX", nil, function() DF:LightweightUpdateAuraStackText("buff") end, true), 55)
         stackCountGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -150, 150, 1, db, "buffStackY", nil, function() DF:LightweightUpdateAuraStackText("buff") end, true), 55)
@@ -4858,8 +4855,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         durFont.disableOn = function(d) return not d.buffShowDuration end
         local durScale = durationGroup:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.0, 0.05, db, "buffDurationScale", nil, function() DF:LightweightUpdateAuraDurationText("buff") end, true), 55)
         durScale.disableOn = function(d) return not d.buffShowDuration end
-        local durOutline = durationGroup:AddWidget(GUI:CreateDropdown(self.child, L["Outline"], outlineOptions, db, "buffDurationOutline", function() DF:LightweightUpdateAuraDurationText("buff") end), 55)
+        local durOutline = durationGroup:AddWidget(GUI:CreateOutlineDropdown(self.child, L["Outline"], db, "buffDurationOutline", function() DF:LightweightUpdateAuraDurationText("buff") end), 55)
         durOutline.disableOn = function(d) return not d.buffShowDuration end
+        local durShadow = durationGroup:AddWidget(GUI:CreateShadowCheckbox(self.child, L["Shadow"], db, "buffDurationOutline", function() DF:LightweightUpdateAuraDurationText("buff") end), 30)
+        durShadow.disableOn = function(d) return not d.buffShowDuration end
         local durAnchor = durationGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "buffDurationAnchor", function() DF:LightweightUpdateAuraDurationText("buff") end), 55)
         durAnchor.disableOn = function(d) return not d.buffShowDuration end
         local durX = durationGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -150, 150, 1, db, "buffDurationX", nil, function() DF:LightweightUpdateAuraDurationText("buff") end, true), 55)
@@ -4965,7 +4964,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             CENTER= L["Center"], TOP= L["Top"], BOTTOM= L["Bottom"], LEFT= L["Left"], RIGHT= L["Right"],
             TOPLEFT= L["Top Left"], TOPRIGHT= L["Top Right"], BOTTOMLEFT= L["Bottom Left"], BOTTOMRIGHT= L["Bottom Right"],
         }
-        local outlineOptions = { NONE= L["None"], OUTLINE= L["Outline"], THICKOUTLINE= L["Thick Outline"], SHADOW= L["Shadow"] }
 
         -- ===== LAYOUT SECTION =====
         local layoutSection = Add(GUI:CreateCollapsibleSection(self.child, L["Layout"], true), 36, "both")
@@ -5074,7 +5072,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         stackCountGroup:AddWidget(GUI:CreateHeader(self.child, L["Stack Count"]), 40)
         stackCountGroup:AddWidget(GUI:CreateFontDropdown(self.child, L["Font"], db, "debuffStackFont", function() DF:LightweightUpdateAuraStackText("debuff") end), 55)
         stackCountGroup:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.0, 0.05, db, "debuffStackScale", nil, function() DF:LightweightUpdateAuraStackText("debuff") end, true), 55)
-        stackCountGroup:AddWidget(GUI:CreateDropdown(self.child, L["Outline"], outlineOptions, db, "debuffStackOutline", function() DF:LightweightUpdateAuraStackText("debuff") end), 55)
+        stackCountGroup:AddWidget(GUI:CreateOutlineDropdown(self.child, L["Outline"], db, "debuffStackOutline", function() DF:LightweightUpdateAuraStackText("debuff") end), 55)
+        stackCountGroup:AddWidget(GUI:CreateShadowCheckbox(self.child, L["Shadow"], db, "debuffStackOutline", function() DF:LightweightUpdateAuraStackText("debuff") end), 30)
         stackCountGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "debuffStackAnchor", function() DF:LightweightUpdateAuraStackText("debuff") end), 55)
         stackCountGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -150, 150, 1, db, "debuffStackX", nil, function() DF:LightweightUpdateAuraStackText("debuff") end, true), 55)
         stackCountGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -150, 150, 1, db, "debuffStackY", nil, function() DF:LightweightUpdateAuraStackText("debuff") end, true), 55)
@@ -5092,8 +5091,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         durFont.disableOn = function(d) return not d.debuffShowDuration end
         local durScale = durationGroup:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.0, 0.05, db, "debuffDurationScale", nil, function() DF:LightweightUpdateAuraDurationText("debuff") end, true), 55)
         durScale.disableOn = function(d) return not d.debuffShowDuration end
-        local durOutline = durationGroup:AddWidget(GUI:CreateDropdown(self.child, L["Outline"], outlineOptions, db, "debuffDurationOutline", function() DF:LightweightUpdateAuraDurationText("debuff") end), 55)
+        local durOutline = durationGroup:AddWidget(GUI:CreateOutlineDropdown(self.child, L["Outline"], db, "debuffDurationOutline", function() DF:LightweightUpdateAuraDurationText("debuff") end), 55)
         durOutline.disableOn = function(d) return not d.debuffShowDuration end
+        local durShadow = durationGroup:AddWidget(GUI:CreateShadowCheckbox(self.child, L["Shadow"], db, "debuffDurationOutline", function() DF:LightweightUpdateAuraDurationText("debuff") end), 30)
+        durShadow.disableOn = function(d) return not d.debuffShowDuration end
         local durAnchor = durationGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "debuffDurationAnchor", function() DF:LightweightUpdateAuraDurationText("debuff") end), 55)
         durAnchor.disableOn = function(d) return not d.debuffShowDuration end
         local durX = durationGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -150, 150, 1, db, "debuffDurationX", nil, function() DF:LightweightUpdateAuraDurationText("debuff") end, true), 55)
@@ -5573,11 +5574,14 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end, function() DF:LightweightUpdateDefensiveIcons() end, true), 55)
         diDurScale.hideOn = HideDefensiveDurationOptions
         
-        local outlineOptions = { NONE= L["None"], OUTLINE= L["Outline"], THICKOUTLINE= L["Thick Outline"], SHADOW= L["Shadow"] }
-        local diDurOutline = durationGroup:AddWidget(GUI:CreateDropdown(self.child, L["Duration Outline"], outlineOptions, db, "defensiveIconDurationOutline", function()
+        local diDurOutline = durationGroup:AddWidget(GUI:CreateOutlineDropdown(self.child, L["Duration Outline"], db, "defensiveIconDurationOutline", function()
             if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
         end), 55)
         diDurOutline.hideOn = HideDefensiveDurationOptions
+        local diDurShadow = durationGroup:AddWidget(GUI:CreateShadowCheckbox(self.child, L["Shadow"], db, "defensiveIconDurationOutline", function()
+            if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
+        end), 30)
+        diDurShadow.hideOn = HideDefensiveDurationOptions
 
         local diDurColor = durationGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Duration Color"], db, "defensiveIconDurationColor", false, function()
             if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
@@ -5674,7 +5678,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             CENTER= L["Center"], TOP= L["Top"], BOTTOM= L["Bottom"], LEFT= L["Left"], RIGHT= L["Right"],
             TOPLEFT= L["Top Left"], TOPRIGHT= L["Top Right"], BOTTOMLEFT= L["Bottom Left"], BOTTOMRIGHT= L["Bottom Right"],
         }
-        local outlineOptions = { NONE= L["None"], OUTLINE= L["Outline"], THICKOUTLINE= L["Thick Outline"], SHADOW= L["Shadow"] }
         local growthOptions = { UP= L["Up"], DOWN= L["Down"], LEFT= L["Left"], RIGHT= L["Right"], CENTER_H= L["Center (Horizontal)"], CENTER_V= L["Center (Vertical)"] }
         
         local function HideTargetedSpellOptions(d) return not d.targetedSpellEnabled end
@@ -5808,8 +5811,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         tsDurFont.disableOn = HideTargetedDurationOptions
         local tsDurScale = durationGroup:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.0, 0.05, db, "targetedSpellDurationScale", FullUpdate, TargetedSpellLightweightUpdate, true), 55)
         tsDurScale.disableOn = HideTargetedDurationOptions
-        local tsDurOutline = durationGroup:AddWidget(GUI:CreateDropdown(self.child, L["Outline"], outlineOptions, db, "targetedSpellDurationOutline", FullUpdate), 55)
+        local tsDurOutline = durationGroup:AddWidget(GUI:CreateOutlineDropdown(self.child, L["Outline"], db, "targetedSpellDurationOutline", FullUpdate), 55)
         tsDurOutline.disableOn = HideTargetedDurationOptions
+        local tsDurShadow = durationGroup:AddWidget(GUI:CreateShadowCheckbox(self.child, L["Shadow"], db, "targetedSpellDurationOutline", FullUpdate), 30)
+        tsDurShadow.disableOn = HideTargetedDurationOptions
         local tsDurX = durationGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -20, 20, 1, db, "targetedSpellDurationX", FullUpdate, TargetedSpellLightweightUpdate, true), 55)
         tsDurX.disableOn = HideTargetedDurationOptions
         local tsDurY = durationGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -20, 20, 1, db, "targetedSpellDurationY", FullUpdate, TargetedSpellLightweightUpdate, true), 55)
@@ -5998,7 +6003,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end
 
             local growthOptions = { UP = L["Up"], DOWN = L["Down"] }
-            local outlineOptions = { NONE = L["None"], OUTLINE = L["Outline"], THICKOUTLINE = L["Thick Outline"], SHADOW = L["Shadow"] }
             local iconPosOptions = { LEFT = L["Left"], RIGHT = L["Right"] }
             local stylePresetOptions = {
                 DEFAULT = L["Default"],
@@ -6187,8 +6191,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             tlFont.disableOn = HideTLOptions
             local tlFontSize = fontGroup:AddWidget(GUI:CreateSlider(self.child, L["Font Size"], 8, 24, 1, db, "targetedListFontSize", TargetedListUpdate, TargetedListUpdate, true), 55)
             tlFontSize.disableOn = HideTLOptions
-            local tlFontOutline = fontGroup:AddWidget(GUI:CreateDropdown(self.child, L["Font Outline"], outlineOptions, db, "targetedListFontOutline", TargetedListUpdate), 55)
+            local tlFontOutline = fontGroup:AddWidget(GUI:CreateOutlineDropdown(self.child, L["Font Outline"], db, "targetedListFontOutline", TargetedListUpdate), 55)
             tlFontOutline.disableOn = HideTLOptions
+            local tlFontShadow = fontGroup:AddWidget(GUI:CreateShadowCheckbox(self.child, L["Shadow"], db, "targetedListFontOutline", TargetedListUpdate), 30)
+            tlFontShadow.disableOn = HideTLOptions
             AddToSection(fontGroup, nil, 2)
 
             currentSection = nil
@@ -6310,7 +6316,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end
         
         local growthOptions = { UP= L["Up"], DOWN= L["Down"], LEFT= L["Left"], RIGHT= L["Right"], CENTER_H= L["Center (Horizontal)"], CENTER_V= L["Center (Vertical)"] }
-        local outlineOptions = { NONE= L["None"], OUTLINE= L["Outline"], THICKOUTLINE= L["Thick Outline"], SHADOW= L["Shadow"] }
         
         local function HidePersonalOptions(d) return not d.personalTargetedSpellEnabled end
         local function HidePersonalDurationOptions(d) return not d.personalTargetedSpellEnabled or not d.personalTargetedSpellShowDuration end
@@ -6419,8 +6424,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         ptsDurFont.disableOn = HidePersonalDurationOptions
         local ptsDurScale = durationGroup:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.0, 0.1, db, "personalTargetedSpellDurationScale", PersonalTargetedUpdate, PersonalTargetedUpdate, true), 55)
         ptsDurScale.disableOn = HidePersonalDurationOptions
-        local ptsDurOutline = durationGroup:AddWidget(GUI:CreateDropdown(self.child, L["Outline"], outlineOptions, db, "personalTargetedSpellDurationOutline", PersonalTargetedUpdate), 55)
+        local ptsDurOutline = durationGroup:AddWidget(GUI:CreateOutlineDropdown(self.child, L["Outline"], db, "personalTargetedSpellDurationOutline", PersonalTargetedUpdate), 55)
         ptsDurOutline.disableOn = HidePersonalDurationOptions
+        local ptsDurShadow = durationGroup:AddWidget(GUI:CreateShadowCheckbox(self.child, L["Shadow"], db, "personalTargetedSpellDurationOutline", PersonalTargetedUpdate), 30)
+        ptsDurShadow.disableOn = HidePersonalDurationOptions
         local ptsDurX = durationGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -20, 20, 1, db, "personalTargetedSpellDurationX", PersonalTargetedUpdate, PersonalTargetedUpdate, true), 55)
         ptsDurX.disableOn = HidePersonalDurationOptions
         local ptsDurY = durationGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -20, 20, 1, db, "personalTargetedSpellDurationY", PersonalTargetedUpdate, PersonalTargetedUpdate, true), 55)
@@ -6524,13 +6531,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             EXTERNAL = L["External"],
         }
         
-        local outlineOptions = {
-            [""]= L["None"],
-            ["OUTLINE"] = L["Outline"],
-            ["THICKOUTLINE"] = L["Thick Outline"],
-            ["SHADOW"] = L["Shadow"],
-        }
-        
         -- ============================================
         -- ICON TEXT SETTINGS (Collapsible, at top)
         -- ============================================
@@ -6545,12 +6545,15 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local textSize = Add(GUI:CreateSlider(self.child, L["Font Size"], 8, 24, 1, db, "statusIconFontSize", function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end, function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end, true), 55, 1)
         textSection:RegisterChild(textSize)
         
-        local textOutline = Add(GUI:CreateDropdown(self.child, L["Outline"], outlineOptions, db, "statusIconFontOutline", function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end), 55, 1)
+        local textOutline = Add(GUI:CreateOutlineDropdown(self.child, L["Outline"], db, "statusIconFontOutline", function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end), 55, 1)
         textSection:RegisterChild(textOutline)
-        
-        local shadowNote = Add(GUI:CreateLabel(self.child, L["Shadow settings are controlled in General > Global Fonts."], 240), 30, 1)
+
+        local textShadow = Add(GUI:CreateShadowCheckbox(self.child, L["Shadow"], db, "statusIconFontOutline", function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end), 30, 1)
+        textSection:RegisterChild(textShadow)
+
+        local shadowNote = Add(GUI:CreateLabel(self.child, L["Shadow offset and colour are controlled in General > Global Fonts."], 240), 30, 1)
         textSection:RegisterChild(shadowNote)
-        shadowNote.hideOn = function(d) return d.statusIconFontOutline ~= "SHADOW" end
+        shadowNote.hideOn = function(d) return not DF:OutlineHasShadow(d.statusIconFontOutline) end
         
         -- Text Colors header
         local colorsLabel = Add(GUI:CreateLabel(self.child, L["Text Colors:"], 240), 25, 1)

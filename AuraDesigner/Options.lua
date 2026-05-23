@@ -80,11 +80,6 @@ local BAR_ORIENT_OPTIONS = {
     _order = {"HORIZONTAL", "VERTICAL"},
 }
 
-local OUTLINE_OPTIONS = {
-    NONE = L["None"], OUTLINE = L["Outline"], THICKOUTLINE = L["Thick Outline"], SHADOW = L["Shadow"],
-    _order = {"NONE", "OUTLINE", "THICKOUTLINE", "SHADOW"},
-}
-
 -- ============================================================
 -- HELPERS
 -- ============================================================
@@ -2663,7 +2658,8 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateCheckbox(parent, L["Show Duration Text"], proxy, "showDuration"), 28)
             g:AddWidget(GUI:CreateFontDropdown(parent, L["Duration Font"], proxy, "durationFont"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Duration Scale"], 0.5, 2.0, 0.1, proxy, "durationScale"), 54)
-            g:AddWidget(GUI:CreateDropdown(parent, L["Duration Outline"], OUTLINE_OPTIONS, proxy, "durationOutline"), 54)
+            g:AddWidget(GUI:CreateOutlineDropdown(parent, L["Duration Outline"], proxy, "durationOutline"), 54)
+            g:AddWidget(GUI:CreateShadowCheckbox(parent, L["Shadow"], proxy, "durationOutline"), 28)
             g:AddWidget(GUI:CreateDropdown(parent, L["Duration Anchor"], ANCHOR_OPTIONS, proxy, "durationAnchor"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Duration Offset X"], -150, 150, 1, proxy, "durationX"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Duration Offset Y"], -150, 150, 1, proxy, "durationY"), 54)
@@ -2678,7 +2674,8 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateSlider(parent, L["Stack Minimum"], 1, 10, 1, proxy, "stackMinimum"), 54)
             g:AddWidget(GUI:CreateFontDropdown(parent, L["Stack Font"], proxy, "stackFont"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Stack Scale"], 0.5, 2.0, 0.1, proxy, "stackScale"), 54)
-            g:AddWidget(GUI:CreateDropdown(parent, L["Stack Outline"], OUTLINE_OPTIONS, proxy, "stackOutline"), 54)
+            g:AddWidget(GUI:CreateOutlineDropdown(parent, L["Stack Outline"], proxy, "stackOutline"), 54)
+            g:AddWidget(GUI:CreateShadowCheckbox(parent, L["Shadow"], proxy, "stackOutline"), 28)
             g:AddWidget(GUI:CreateDropdown(parent, L["Stack Anchor"], ANCHOR_OPTIONS, proxy, "stackAnchor"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Stack Offset X"], -150, 150, 1, proxy, "stackX"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Stack Offset Y"], -150, 150, 1, proxy, "stackY"), 54)
@@ -2733,7 +2730,8 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateCheckbox(parent, L["Show Duration Text"], proxy, "showDuration"), 28)
             g:AddWidget(GUI:CreateFontDropdown(parent, L["Duration Font"], proxy, "durationFont"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Duration Scale"], 0.5, 2.0, 0.1, proxy, "durationScale"), 54)
-            g:AddWidget(GUI:CreateDropdown(parent, L["Duration Outline"], OUTLINE_OPTIONS, proxy, "durationOutline"), 54)
+            g:AddWidget(GUI:CreateOutlineDropdown(parent, L["Duration Outline"], proxy, "durationOutline"), 54)
+            g:AddWidget(GUI:CreateShadowCheckbox(parent, L["Shadow"], proxy, "durationOutline"), 28)
             g:AddWidget(GUI:CreateDropdown(parent, L["Duration Anchor"], ANCHOR_OPTIONS, proxy, "durationAnchor"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Duration Offset X"], -150, 150, 1, proxy, "durationX"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Duration Offset Y"], -150, 150, 1, proxy, "durationY"), 54)
@@ -2748,7 +2746,8 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateSlider(parent, L["Stack Minimum"], 1, 10, 1, proxy, "stackMinimum"), 54)
             g:AddWidget(GUI:CreateFontDropdown(parent, L["Stack Font"], proxy, "stackFont"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Stack Scale"], 0.5, 2.0, 0.1, proxy, "stackScale"), 54)
-            g:AddWidget(GUI:CreateDropdown(parent, L["Stack Outline"], OUTLINE_OPTIONS, proxy, "stackOutline"), 54)
+            g:AddWidget(GUI:CreateOutlineDropdown(parent, L["Stack Outline"], proxy, "stackOutline"), 54)
+            g:AddWidget(GUI:CreateShadowCheckbox(parent, L["Shadow"], proxy, "stackOutline"), 28)
             g:AddWidget(GUI:CreateDropdown(parent, L["Stack Anchor"], ANCHOR_OPTIONS, proxy, "stackAnchor"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Stack Offset X"], -150, 150, 1, proxy, "stackX"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Stack Offset Y"], -150, 150, 1, proxy, "stackY"), 54)
@@ -2823,7 +2822,8 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateCheckbox(parent, L["Show Duration Text"], proxy, "showDuration"), 28)
             g:AddWidget(GUI:CreateFontDropdown(parent, L["Duration Font"], proxy, "durationFont"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Duration Scale"], 0.5, 2.0, 0.1, proxy, "durationScale"), 54)
-            g:AddWidget(GUI:CreateDropdown(parent, L["Duration Outline"], OUTLINE_OPTIONS, proxy, "durationOutline"), 54)
+            g:AddWidget(GUI:CreateOutlineDropdown(parent, L["Duration Outline"], proxy, "durationOutline"), 54)
+            g:AddWidget(GUI:CreateShadowCheckbox(parent, L["Shadow"], proxy, "durationOutline"), 28)
             g:AddWidget(GUI:CreateDropdown(parent, L["Duration Anchor"], ANCHOR_OPTIONS, proxy, "durationAnchor"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Duration Offset X"], -150, 150, 1, proxy, "durationX"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Duration Offset Y"], -150, 150, 1, proxy, "durationY"), 54)
@@ -3214,7 +3214,8 @@ local function BuildGlobalView(parent)
     AddGroup(L["Duration Text"], function(g)
         g:AddWidget(GUI:CreateFontDropdown(parent, L["Font"], defaults, "durationFont"), 50)
         g:AddWidget(GUI:CreateSlider(parent, L["Scale"], 0.5, 2.0, 0.1, defaults, "durationScale"), 50)
-        g:AddWidget(GUI:CreateDropdown(parent, L["Outline"], OUTLINE_OPTIONS, defaults, "durationOutline"), 54)
+        g:AddWidget(GUI:CreateOutlineDropdown(parent, L["Outline"], defaults, "durationOutline"), 54)
+        g:AddWidget(GUI:CreateShadowCheckbox(parent, L["Shadow"], defaults, "durationOutline"), 28)
         g:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], ANCHOR_OPTIONS, defaults, "durationAnchor"), 54)
         g:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 1, defaults, "durationX"), 50)
         g:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, defaults, "durationY"), 50)
@@ -3228,7 +3229,8 @@ local function BuildGlobalView(parent)
     AddGroup(L["Stack Text"], function(g)
         g:AddWidget(GUI:CreateFontDropdown(parent, L["Font"], defaults, "stackFont"), 50)
         g:AddWidget(GUI:CreateSlider(parent, L["Scale"], 0.5, 2.0, 0.1, defaults, "stackScale"), 50)
-        g:AddWidget(GUI:CreateDropdown(parent, L["Outline"], OUTLINE_OPTIONS, defaults, "stackOutline"), 54)
+        g:AddWidget(GUI:CreateOutlineDropdown(parent, L["Outline"], defaults, "stackOutline"), 54)
+        g:AddWidget(GUI:CreateShadowCheckbox(parent, L["Shadow"], defaults, "stackOutline"), 28)
         g:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], ANCHOR_OPTIONS, defaults, "stackAnchor"), 54)
         g:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 1, defaults, "stackX"), 50)
         g:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, defaults, "stackY"), 50)

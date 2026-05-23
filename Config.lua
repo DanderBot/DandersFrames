@@ -582,19 +582,75 @@ local FALLBACK_FONT = "Fonts\\FRIZQT__.TTF"
 -- Safely set a font on a fontstring with fallback
 -- Uses font families for multi-alphabet support (Cyrillic, CJK, etc.) when available
 -- Returns true if successful, false if had to use fallback
+-- Outline/shadow value helpers.
+-- A stored outline value is one of: a plain WoW flag ("", "NONE", "OUTLINE",
+-- "THICKOUTLINE", "MONOCHROME", "MONOCHROME, OUTLINE", "MONOCHROME, THICKOUTLINE"),
+-- the legacy "SHADOW" (shadow only), or a composite "SHADOW;<flag>" (shadow plus a
+-- flag). These let the GUI bind a flag dropdown and a shadow checkbox to a single
+-- stored value without a destructive migration of existing profiles.
+
+-- Returns the flag portion (always "NONE" rather than "" for dropdown matching).
+function DF:OutlineFlag(stored)
+    stored = stored or "NONE"
+    local rest = stored:match("^SHADOW;(.*)$")
+    if rest then stored = rest end
+    if stored == "" or stored == "SHADOW" then return "NONE" end
+    return stored
+end
+
+-- Returns true if the stored value includes a drop shadow.
+function DF:OutlineHasShadow(stored)
+    if not stored then return false end
+    return stored == "SHADOW" or stored:match("^SHADOW;") ~= nil
+end
+
+-- Builds a stored value from a flag token and a shadow boolean.
+function DF:ComposeOutline(flag, shadow)
+    if not flag or flag == "" then flag = "NONE" end
+    if shadow then return "SHADOW;" .. flag end
+    return flag
+end
+
 function DF:SafeSetFont(fontString, fontNameOrPath, fontSize, outline)
     if not fontString then return false end
-    
+
     fontSize = fontSize or 10
     outline = outline or ""
-    
+
+    -- The stored outline value may carry a "SHADOW;" prefix (Grid2-style: a drop
+    -- shadow combined with any flag, e.g. "SHADOW;MONOCHROME, OUTLINE"). The legacy
+    -- value "SHADOW" on its own means shadow with no outline. Shadow is rendered via
+    -- SetShadow* below, never as a font flag, so strip it out of the flag string.
+    local useShadow = false
+    local rest = outline:match("^SHADOW;(.*)$")
+    if rest then
+        useShadow = true
+        outline = rest
+    elseif outline == "SHADOW" then
+        useShadow = true
+        outline = ""
+    end
+
     -- Normalize "NONE" to empty string (NONE is not a valid WoW font flag)
     if outline == "NONE" then outline = "" end
-    
-    -- Handle shadow as a special case
-    local useShadow = (outline == "SHADOW")
-    local actualOutline = useShadow and "" or outline
-    
+
+    local actualOutline = outline
+
+    -- SDF / "slug" crisp rendering (opt-in, Retail). Only applies to plain
+    -- styles — not Monochrome, Thick Outline, or Shadow — since the SDF
+    -- renderer doesn't combine cleanly with those. Appending the SLUG flag
+    -- and switching the fontString to vertex scale animation gives sharper
+    -- text at any size.
+    local useSlug = DF.db and DF.db.fontSlug
+        and not useShadow
+        and (actualOutline == "" or actualOutline == "OUTLINE")
+    if useSlug then
+        actualOutline = (actualOutline == "") and "SLUG" or (actualOutline .. ", SLUG")
+    end
+    if fontString.SetScaleAnimationMode and FontStringScaleAnimationMode then
+        fontString:SetScaleAnimationMode(useSlug and FontStringScaleAnimationMode.Vertex or FontStringScaleAnimationMode.FontSize)
+    end
+
     local LSM = GetLSM()
     local fontPath
     

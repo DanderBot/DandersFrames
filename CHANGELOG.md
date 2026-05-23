@@ -6,6 +6,7 @@
 
 * (Heal Prediction) Added a "Show Heals From" option — All Incoming, My Heals, Others' Heals, or Split — letting you choose which incoming heals the bar shows. Split draws your heals and other healers' heals as separate coloured segments. (PR #109 by Krathe)
 * Added a `/df attached` command that lists other addons attaching castbars, cooldowns or auras to your frames — handy for telling apart DF features from another addon's. (PR #104 by Krathe)
+* (Fonts) Expanded text styling across every font setting: added **Monochrome**, **Monochrome Outline**, and **Monochrome Thick Outline** outline styles; a drop **shadow can now be combined with any outline** (each font now has its own Shadow checkbox) instead of being mutually exclusive; and a new **Crisp Font Rendering (SDF)** option in Global Fonts smooths text edges for sharper text. (PR #115 by Krathe)
 
 ### Bug Fixes
 

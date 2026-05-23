@@ -2967,7 +2967,7 @@ function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback
     return container
 end
 
-function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback)
+function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, customGet, customSet)
     local container = CreateFrame("Frame", nil, parent)
     container:SetSize(260, 50)
 
@@ -3020,8 +3020,8 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback)
     arrow:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     
     local function UpdateText()
-        if dbTable and dbKey then
-            local val = dbTable[dbKey]
+        if customGet or (dbTable and dbKey) then
+            local val = customGet and customGet() or dbTable[dbKey]
             local displayVal = options[val]
             -- Handle table format: {value = X, text = "text"} or {text = "text"}
             if type(displayVal) == "table" then
@@ -3104,11 +3104,15 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback)
                 return
             end
 
-            dbTable[dbKey] = opt.key
+            if customSet then
+                customSet(opt.key)
+            else
+                dbTable[dbKey] = opt.key
+            end
 
             -- If editing a profile, also set the override
             if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() and dbKey then
-                DF.AutoProfilesUI:SetProfileSetting(dbKey, opt.key)
+                DF.AutoProfilesUI:SetProfileSetting(dbKey, customGet and customGet() or opt.key)
             end
 
             UpdateText()
@@ -3140,9 +3144,10 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback)
         else
             -- Close any other open dropdown first
             CloseOpenDropdown()
+            local currentVal = customGet and customGet() or dbTable[dbKey]
             for i, menuBtn in ipairs(menuButtons) do
                 local opt = sortedOptions[i]
-                if dbTable[dbKey] == opt.key then
+                if currentVal == opt.key then
                     menuBtn.Text:SetTextColor(GetThemeColor().r, GetThemeColor().g, GetThemeColor().b)
                 else
                     menuBtn.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
@@ -3171,8 +3176,39 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback)
     if DF.Search and dbKey and type(dbKey) == "string" then
         container.searchEntry = DF.Search:RegisterDropdown(label, dbKey, options, nil, callback)
     end
-    
+
     return container
+end
+
+-- ============================================================
+-- OUTLINE + SHADOW CONTROLS
+-- A flag dropdown and a shadow checkbox that both bind to a single stored
+-- outline value (see DF:OutlineFlag / OutlineHasShadow / ComposeOutline in
+-- Config.lua). Shadow is decoupled from the outline flag so any flag can be
+-- combined with a drop shadow, mirroring Grid2's font options.
+-- ============================================================
+
+local OUTLINE_FLAG_ORDER = { "NONE", "OUTLINE", "THICKOUTLINE", "MONOCHROME", "MONOCHROME, OUTLINE", "MONOCHROME, THICKOUTLINE" }
+
+function GUI:CreateOutlineDropdown(parent, label, dbTable, dbKey, callback)
+    local options = {
+        NONE = L["None"],
+        OUTLINE = L["Outline"],
+        THICKOUTLINE = L["Thick Outline"],
+        MONOCHROME = L["Monochrome"],
+        ["MONOCHROME, OUTLINE"] = L["Monochrome Outline"],
+        ["MONOCHROME, THICKOUTLINE"] = L["Monochrome Thick Outline"],
+        _order = OUTLINE_FLAG_ORDER,
+    }
+    local get = function() return DF:OutlineFlag(dbTable[dbKey]) end
+    local set = function(flag) dbTable[dbKey] = DF:ComposeOutline(flag, DF:OutlineHasShadow(dbTable[dbKey])) end
+    return GUI:CreateDropdown(parent, label or L["Outline"], options, dbTable, dbKey, callback, get, set)
+end
+
+function GUI:CreateShadowCheckbox(parent, label, dbTable, dbKey, callback)
+    local get = function() return DF:OutlineHasShadow(dbTable[dbKey]) end
+    local set = function(val) dbTable[dbKey] = DF:ComposeOutline(DF:OutlineFlag(dbTable[dbKey]), val) end
+    return GUI:CreateCheckbox(parent, label or L["Shadow"], dbTable, dbKey, callback, get, set)
 end
 
 -- ============================================================
