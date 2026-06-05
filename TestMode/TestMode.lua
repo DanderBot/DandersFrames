@@ -6815,6 +6815,66 @@ function DF:CreateTestPanel()
         if DF.UpdateAllTestHighlights then DF:UpdateAllTestHighlights() end
     end, "indicators_highlights")
 
+    -- --- BOSS FRAMES ---
+    local secBoss = CreateSection(panel, "Boss Frames", "boss")
+    panel.showBossFramesCheck = secBoss:AddCheckbox("Show Boss Frames", "testShowBoss", function(enabled)
+        if DF.SetBossTestMode then
+            if enabled then
+                local isRaidMode = DF.GUI and DF.GUI.SelectedMode == "raid"
+                local db = isRaidMode and DF:GetRaidDB() or DF:GetDB()
+                local count = db.testBossCount or 3
+                DF:SetBossTestMode(count)
+            else
+                DF:SetBossTestMode(0)
+            end
+        end
+    end, "boss_layout")
+    panel.bossShowAurasCheck   = secBoss:AddCheckbox("Boss Auras",    "bossShowAuras",    function(enabled)
+        local bossDB = DF.GetRenderBossDB and DF:GetRenderBossDB()
+        if bossDB then bossDB.showAuras = enabled and true or false end
+        if DF.RefreshBossFrames then DF:RefreshBossFrames() end
+    end, "boss_auras")
+    panel.bossShowCastCheck    = secBoss:AddCheckbox("Boss Cast Bar", "bossShowCastBar",  function(enabled)
+        local bossDB = DF.GetRenderBossDB and DF:GetRenderBossDB()
+        if bossDB then bossDB.showCastBar = enabled and true or false end
+        if DF.RefreshBossFrames then DF:RefreshBossFrames() end
+    end, "boss_castbar")
+    panel.bossShowPowerCheck   = secBoss:AddCheckbox("Boss Power Bar","bossShowPower",    function(enabled)
+        local bossDB = DF.GetRenderBossDB and DF:GetRenderBossDB()
+        if bossDB then bossDB.showPowerBar = enabled and true or false end
+        if DF.RefreshBossFrames then DF:RefreshBossFrames() end
+    end, "boss_bars")
+    panel.bossShowRaidIconCheck = secBoss:AddCheckbox("Boss Raid Icon","bossShowRaidIcon",function(enabled)
+        local bossDB = DF.GetRenderBossDB and DF:GetRenderBossDB()
+        if bossDB then bossDB.showRaidTargetIcon = enabled and true or false end
+        if DF.RefreshBossFrames then DF:RefreshBossFrames() end
+    end, "boss_text")
+
+    -- Boss count slider
+    local bcRow = CreateFrame("Frame", nil, secBoss.content)
+    bcRow:SetHeight(28)
+    local bcLabel = bcRow:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    bcLabel:SetPoint("LEFT", 0, 0)
+    bcLabel:SetText("Boss Count")
+    bcLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+    local bcValue = bcRow:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    bcValue:SetPoint("LEFT", bcLabel, "RIGHT", 6, 0)
+    local bossSlider = CreateThemedSlider(bcRow, 140, 1, 5, 1)
+    bossSlider:SetPoint("LEFT", bcValue, "RIGHT", 8, 0)
+    bossSlider:HookScript("OnValueChanged", function(self, value)
+        local isRaidMode = DF.GUI and DF.GUI.SelectedMode == "raid"
+        local db = isRaidMode and DF:GetRaidDB() or DF:GetDB()
+        db.testBossCount = math.floor(value)
+        bcValue:SetText(tostring(db.testBossCount))
+        -- If boss test is currently on, update the count live
+        if DF.BossFrames and DF.BossFrames[1] and DF.BossFrames[1]._testMode and DF.SetBossTestMode then
+            DF:SetBossTestMode(db.testBossCount)
+        end
+    end)
+    panel.bossCountSlider = bossSlider
+    panel.bossCountValue = bcValue
+    secBoss:AddWidget(bcRow, 28)
+
     -- ============================================================
     -- PRESETS FOOTER
     -- ============================================================

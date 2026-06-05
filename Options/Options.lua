@@ -366,7 +366,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     GUI.CreateResetOnlyButton = CreateResetOnlyButton
 
     -- Define category order (updated structure)
-    GUI.CategoryOrder = {"general", "clickcast", "display", "bars", "text", "auras", "indicators", "profiles", "debug"}
+    GUI.CategoryOrder = {"general", "clickcast", "display", "bars", "text", "auras", "indicators", "boss", "profiles", "debug"}
     
     -- ========================================
     -- CATEGORY: General
@@ -8927,5 +8927,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         currentSection = nil
     end)
+
+    -- Boss Frames (external module) — pass the factories so the module
+    -- can register its own category and pages using the same system.
+    if DF.SetupBossPages then
+        DF:SetupBossPages(GUI, CreateCategory, CreateSubTab, BuildPage)
+    end
 
 end
