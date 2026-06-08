@@ -30,7 +30,12 @@ C.handlers = {}
 
 local function getPlayerFullName()
     local name = UnitName("player")
-    local realm = (GetRealmName() or ""):gsub("%s", "")
+    -- Use the server-normalised realm so this exactly matches the sender string
+    -- the game puts on our own CHAT_MSG_ADDON broadcasts (the self-message guard
+    -- compares against it). Space-stripping GetRealmName() can diverge on some
+    -- realms (apostrophes/hyphens/locales).
+    local realm = (GetNormalizedRealmName and GetNormalizedRealmName())
+        or (GetRealmName() or ""):gsub("%s", "")
     return name .. "-" .. realm
 end
 
