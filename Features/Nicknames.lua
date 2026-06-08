@@ -604,7 +604,11 @@ function NK:GetBnetCandidates()
     for i = 1, total do
         local acc = C_BattleNet.GetFriendAccountInfo(i)
         if acc and acc.bnetAccountID then
-            local label = (acc.accountName and acc.accountName ~= "" and acc.accountName)
+            -- NOTE: acc.accountName is a session-scoped |K...|k Battle.net name
+            -- token (it renders as a DIFFERENT friend after a relog), so it must
+            -- never be persisted. The BattleTag's name part is stable and reads
+            -- the same to the user.
+            local label = (acc.battleTag and acc.battleTag:match("^([^#]+)"))
                 or acc.battleTag or ("BNet " .. i)
             local currentChar, online
             local ng = (C_BattleNet.GetFriendNumGameAccounts and C_BattleNet.GetFriendNumGameAccounts(i)) or 0
@@ -694,7 +698,9 @@ function NK:AddBnet(battleTag, label, nickname)
     local entry = {
         kind = "bnet",
         battleTag = battleTag,
-        pattern = label or battleTag,
+        -- Display label MUST be stable across sessions — derive it from the
+        -- BattleTag, never from the caller's (possibly tokenised) label.
+        pattern = strmatch(battleTag, "^([^#]+)") or battleTag,
         nickname = nickname,
         source = "B.net",
     }
@@ -714,6 +720,21 @@ function NK:SetNickname(index, nickname)
     NK:RebuildBnetMap()
     NK:RefreshAllFrames()
     return true
+end
+
+-- Repair B.net rule display labels that were saved as a session-scoped
+-- |K...|k account-name token (which renders as a different friend each login).
+-- The BattleTag is stable, so re-derive the label from it. Cheap + idempotent.
+function NK:RepairBnetLabels()
+    local data = NK:GetDB()
+    if not data then return end
+    for _, e in ipairs(data.entries) do
+        if e.kind == "bnet" and e.battleTag then
+            if not e.pattern or e.pattern == "" or strfind(e.pattern, "|K", 1, true) then
+                e.pattern = strmatch(e.battleTag, "^([^#]+)") or e.battleTag
+            end
+        end
+    end
 end
 
 -- One-time migration of legacy B.net rules that stored the session-only
@@ -746,7 +767,9 @@ function NK:MigrateBnetEntries(data, total)
             local tag
             if e.bnetID and byId[e.bnetID] then
                 tag = byId[e.bnetID]
-            elseif e.pattern then
+            elseif e.pattern and not strfind(e.pattern, "|K", 1, true) then
+                -- A |K...|k token pattern is session-scoped and would mis-match a
+                -- different friend, so only match plain BattleTag/account labels.
                 if byTag[e.pattern] then
                     tag = e.pattern
                 elseif byName[e.pattern] then         -- false (ambiguous) leaves tag nil
@@ -1001,8 +1024,10 @@ function NK:Init()
 
     NK:InstallHook()
 
-    -- B.net "follow the account" map: build now and keep it fresh as friends
-    -- log in/out or switch characters.
+    -- Repair any B.net labels saved as a session-scoped name token (older bug),
+    -- then build the "follow the account" map and keep it fresh as friends log
+    -- in/out or switch characters.
+    NK:RepairBnetLabels()
     NK:RebuildBnetMap()
     local bf = CreateFrame("Frame")
     bf:RegisterEvent("BN_FRIEND_INFO_CHANGED")
