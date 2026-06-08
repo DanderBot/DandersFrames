@@ -102,6 +102,11 @@ function NK:GetDB()
     if nk.markEnabled == nil then nk.markEnabled = (nk.bracket ~= "off") end  -- marker on/off toggle
     if nk.markScope  == nil then nk.markScope = (nk.bracket == "received") and "received" or "all" end  -- all | mine | received
     if nk.rejected   == nil then nk.rejected   = {} end       -- [normName] = true (blocked senders)
+    -- Source-picker favourites (pin certain people to the top of the pickers).
+    -- chars keyed by normalised "name-realm"; bnet keyed by stable BattleTag.
+    if nk.favorites  == nil then nk.favorites  = { chars = {}, bnet = {} } end
+    nk.favorites.chars = nk.favorites.chars or {}
+    nk.favorites.bnet  = nk.favorites.bnet or {}
     return nk
 end
 
@@ -146,8 +151,8 @@ function NK:EntryMatches(entry, normName, normRealm, normFull)
     if entry.kind == "bnet" then
         local map = NK.bnetNameMap
         if not map then return false end
-        local id = (normFull and map[normFull]) or map[normName]
-        return id ~= nil and id == entry.bnetID
+        local tag = (normFull and map[normFull]) or map[normName]
+        return tag ~= nil and tag == entry.battleTag
     end
 
     -- Optional realm gate: if the rule names a realm, it must match.
@@ -179,8 +184,19 @@ function NK:Resolve(unit)
     local hasReceived = NK.received and next(NK.received) ~= nil
     if not hasCurated and not hasReceived then return nil end
 
+    -- Per-GUID resolve cache: skips re-normalising + re-scanning on every name
+    -- refresh for a unit we already resolved. Wiped wholesale in
+    -- RefreshAllFrames (the funnel for every change), so it can't go stale.
+    local cache = NK._resolveCache
+    if not cache then cache = {}; NK._resolveCache = cache end
+    local guid = UnitGUID(unit)
+    if guid then
+        local hit = cache[guid]
+        if hit ~= nil then return hit or nil end   -- `false` = cached "no match"
+    end
+
     local name, realm = UnitName(unit)
-    if not name or name == "" then return nil end
+    if not name or name == "" then return nil end  -- transient; don't cache
     -- UnitName returns "" / nil realm for same-realm units; fill in the
     -- player's own realm so "Name-MyRealm" rules still match them.
     if not realm or realm == "" then
@@ -194,29 +210,35 @@ function NK:Resolve(unit)
     local marking = data.markEnabled
     local scope = data.markScope or "all"
 
+    local result = nil
     -- Your curated rules win (priority order).
     if hasCurated then
         for _, entry in ipairs(data.entries) do
             if NK:EntryMatches(entry, normName, normRealm, normFull) then
                 local nick = entry.nickname
                 if marking and (scope == "all" or scope == "mine") then
-                    return decorateNick(nick, data.markStyle)
+                    result = decorateNick(nick, data.markStyle)
+                else
+                    result = nick
                 end
-                return nick
+                break
             end
         end
     end
     -- Fallback: a nickname someone shared with us (lowest priority).
-    if hasReceived then
+    if not result and hasReceived then
         local rec = NK:GetReceived(normFull, normName)
         if rec then
             if marking and (scope == "all" or scope == "received") then
-                return decorateNick(rec, data.markStyle)
+                result = decorateNick(rec, data.markStyle)
+            else
+                result = rec
             end
-            return rec
         end
     end
-    return nil
+
+    if guid then cache[guid] = result or false end
+    return result
 end
 
 -- ============================================================
@@ -358,6 +380,10 @@ end
 --     data source, whose GetName() calls our hooked DF:GetUnitName)
 -- Whichever one is active on the user's build, the nickname shows.
 function NK:RefreshAllFrames()
+    -- Invalidate the per-GUID resolve cache: this function is the single funnel
+    -- for every rule / roster / received / marker change, so wiping here keeps
+    -- the cache from ever going stale.
+    if NK._resolveCache then wipe(NK._resolveCache) end
     if DF.IterateCompactFrames then
         DF:IterateCompactFrames(function(frame)
             if DF.UpdateName then DF:UpdateName(frame) end
@@ -603,31 +629,72 @@ function NK:GetBnetCandidates()
 end
 
 -- ============================================================
+-- SOURCE-PICKER FAVOURITES
+-- Pin chosen people to the top of the "Add from" pickers. Stored account-wide
+-- in GetDB().favorites: characters keyed by normalised "name-realm", B.net
+-- friends by stable BattleTag. Group/guild/friend candidates may lack a realm
+-- (same-realm members), so we backfill the player's realm for a stable key.
+-- ============================================================
+
+-- Returns (bucket, key) for a candidate, or nil if it can't be favourited
+-- (e.g. a B.net friend with no BattleTag).
+function NK:FavoriteKey(c, isBnet)
+    local data = NK:GetDB()
+    if not data or not c then return nil end
+    if isBnet then
+        if c.battleTag and c.battleTag ~= "" then return data.favorites.bnet, c.battleTag end
+        return nil
+    end
+    local full = c.fullName
+    if not full or full == "" then return nil end
+    if not strfind(full, "-", 1, true) then
+        local realm = (GetNormalizedRealmName and GetNormalizedRealmName()) or ""
+        if realm ~= "" then full = full .. "-" .. realm end
+    end
+    return data.favorites.chars, NK:Normalize(full)
+end
+
+function NK:IsFavorite(c, isBnet)
+    local bucket, key = NK:FavoriteKey(c, isBnet)
+    return (bucket and key and bucket[key]) and true or false
+end
+
+-- Toggle a candidate's favourite state. Returns true if it changed.
+function NK:ToggleFavorite(c, isBnet)
+    local bucket, key = NK:FavoriteKey(c, isBnet)
+    if not bucket or not key then return false end
+    if bucket[key] then bucket[key] = nil else bucket[key] = true end
+    return true
+end
+
+-- ============================================================
 -- B.NET RULES (account-based; "follows the friend across characters")
--- A rule stores a stable bnetAccountID. We keep a live map of each
--- nicknamed friend's CURRENT WoW character name -> their account id,
--- rebuilt whenever B.net/roster info changes; EntryMatches consults it.
+-- A rule stores the friend's BattleTag, which is STABLE across sessions. (The
+-- older bnetAccountID is documented as session-only and must NOT be persisted.)
+-- We keep a live map of each nicknamed friend's CURRENT WoW character name ->
+-- their BattleTag, rebuilt whenever B.net/roster info changes; EntryMatches
+-- consults it.
 -- ============================================================
 
 NK.bnetNameMap = NK.bnetNameMap or {}
 
-function NK:HasBnetRule(bnetID)
+function NK:HasBnetRule(battleTag)
     local data = NK:GetDB()
-    if not data or not bnetID then return false end
+    if not data or not battleTag then return false end
     for _, e in ipairs(data.entries) do
-        if e.kind == "bnet" and e.bnetID == bnetID then return true end
+        if e.kind == "bnet" and e.battleTag == battleTag then return true end
     end
     return false
 end
 
--- Add a B.net rule. `label` is a display string (battleTag / account name).
-function NK:AddBnet(bnetID, label, nickname)
+-- Add a B.net rule. `battleTag` is the stable key; `label` is a display string.
+function NK:AddBnet(battleTag, label, nickname)
     local data = NK:GetDB()
-    if not data or not bnetID or not nickname or nickname == "" then return nil end
+    if not data or not battleTag or battleTag == "" or not nickname or nickname == "" then return nil end
     local entry = {
         kind = "bnet",
-        bnetID = bnetID,
-        pattern = label or tostring(bnetID),
+        battleTag = battleTag,
+        pattern = label or battleTag,
         nickname = nickname,
         source = "B.net",
     }
@@ -649,33 +716,98 @@ function NK:SetNickname(index, nickname)
     return true
 end
 
--- Rebuild the live "current character -> account id" map from B.net friends
--- who have a rule. Cheap no-op when there are no B.net rules.
+-- One-time migration of legacy B.net rules that stored the session-only
+-- bnetAccountID instead of a stable BattleTag. For each such rule we try to
+-- recover the BattleTag from the current friend list: first via the still-valid
+-- session id (only works if the rule was made this session), then by matching
+-- the stored display label against an account name or BattleTag. Anything we
+-- cannot resolve is flagged (needsRelink) so the UI can prompt a re-add rather
+-- than silently dropping it. Runs only when the friend list is populated.
+function NK:MigrateBnetEntries(data, total)
+    local byId, byName, byTag = {}, {}, {}
+    for i = 1, total do
+        local acc = C_BattleNet.GetFriendAccountInfo(i)
+        if acc and acc.battleTag then
+            if acc.bnetAccountID then byId[acc.bnetAccountID] = acc.battleTag end
+            byTag[acc.battleTag] = acc.battleTag
+            if acc.accountName and acc.accountName ~= "" then
+                -- nil = unseen, a tag = unique match, false = ambiguous (seen 2+)
+                if byName[acc.accountName] == nil then
+                    byName[acc.accountName] = acc.battleTag
+                else
+                    byName[acc.accountName] = false
+                end
+            end
+        end
+    end
+
+    for _, e in ipairs(data.entries) do
+        if e.kind == "bnet" and not e.battleTag then
+            local tag
+            if e.bnetID and byId[e.bnetID] then
+                tag = byId[e.bnetID]
+            elseif e.pattern then
+                if byTag[e.pattern] then
+                    tag = e.pattern
+                elseif byName[e.pattern] then         -- false (ambiguous) leaves tag nil
+                    tag = byName[e.pattern]
+                end
+            end
+            if tag then
+                e.battleTag = tag
+                e.bnetID = nil
+                e.needsRelink = nil
+            else
+                e.needsRelink = true
+            end
+        end
+    end
+end
+
+-- Rebuild the live "current character -> BattleTag" map from B.net friends who
+-- have a rule. Cheap no-op when there are no B.net rules.
 function NK:RebuildBnetMap()
     NK.bnetNameMap = NK.bnetNameMap or {}
     wipe(NK.bnetNameMap)
     local data = NK:GetDB()
     if not data then return end
 
-    local wanted, any = {}, false
+    local anyBnet = false
     for _, e in ipairs(data.entries) do
-        if e.kind == "bnet" and e.bnetID then wanted[e.bnetID] = true; any = true end
+        if e.kind == "bnet" then anyBnet = true break end
     end
-    if not any then return end
+    if not anyBnet then return end
     if not (BNGetNumFriends and C_BattleNet and C_BattleNet.GetFriendAccountInfo) then return end
 
     local total = BNGetNumFriends() or 0
+    -- Recover BattleTags for any legacy rules now that the friend list exists
+    -- (only when something actually needs it — normally a no-op).
+    if total > 0 then
+        for _, e in ipairs(data.entries) do
+            if e.kind == "bnet" and not e.battleTag then
+                NK:MigrateBnetEntries(data, total)
+                break
+            end
+        end
+    end
+
+    local wanted, any = {}, false
+    for _, e in ipairs(data.entries) do
+        if e.kind == "bnet" and e.battleTag then wanted[e.battleTag] = true; any = true end
+    end
+    if not any then return end
+
     for i = 1, total do
         local acc = C_BattleNet.GetFriendAccountInfo(i)
-        if acc and acc.bnetAccountID and wanted[acc.bnetAccountID] then
+        if acc and acc.battleTag and wanted[acc.battleTag] then
             local ng = (C_BattleNet.GetFriendNumGameAccounts and C_BattleNet.GetFriendNumGameAccounts(i)) or 0
             for g = 1, ng do
                 local ga = C_BattleNet.GetFriendGameAccountInfo(i, g)
                 if ga and ga.clientProgram == "WoW" and ga.characterName then
                     if ga.realmName and ga.realmName ~= "" then
-                        NK.bnetNameMap[NK:Normalize(ga.characterName .. "-" .. ga.realmName)] = acc.bnetAccountID
+                        NK.bnetNameMap[NK:Normalize(ga.characterName .. "-" .. ga.realmName)] = acc.battleTag
                     end
-                    NK.bnetNameMap[NK:Normalize(ga.characterName)] = acc.bnetAccountID
+                    NK.bnetNameMap[NK:Normalize(ga.characterName)] = acc.battleTag
                 end
             end
         end
@@ -776,8 +908,17 @@ function NK:AddReceived(fullName, nick, sender)
 
     NK.received = NK.received or {}
     local name = strsplit("-", fullName)
+    -- The full "name-realm" key is authoritative. The bare-name key is only a
+    -- best-effort fallback for units whose realm is unknown; don't let it clobber
+    -- a DIFFERENT sender's entry (two cross-realm players can share a first name).
     NK.received[NK:Normalize(fullName)] = entry
-    if name and name ~= "" then NK.received[NK:Normalize(name)] = entry end
+    if name and name ~= "" then
+        local shortKey = NK:Normalize(name)
+        local existing = NK.received[shortKey]
+        if not existing or existing.sender == entry.sender then
+            NK.received[shortKey] = entry
+        end
+    end
     -- Debounced: a group forming can deliver many of these at once.
     NK:ScheduleRefresh()
 end

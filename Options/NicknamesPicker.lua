@@ -51,6 +51,7 @@ local function styleEditBox(eb)
 end
 
 local ROW_H = 28
+local SEP_H = 11   -- height of the favourites/rest divider band
 
 local function buildPicker()
     local GUI = DF.GUI
@@ -121,6 +122,13 @@ local function buildPicker()
     scroll:SetScrollChild(content)
     f.content = content
 
+    -- Divider between the favourites block and the rest (Blizzard-style),
+    -- shown/positioned per Repopulate.
+    f.sep = content:CreateTexture(nil, "ARTWORK")
+    f.sep:SetHeight(1)
+    f.sep:SetColorTexture(0.95, 0.78, 0.25, 0.35)  -- faint gold, ties to star/tint
+    f.sep:Hide()
+
     f.empty = listBg:CreateFontString(nil, "OVERLAY", "DFFontDisableSmall")
     f.empty:SetPoint("CENTER", 0, 0)
 
@@ -133,9 +141,30 @@ local function buildPicker()
         r = CreateFrame("Frame", nil, content)
         r:SetSize(320, ROW_H)
 
+        -- Favourite-row tint (behind everything; shown only when favourited).
+        r.bg = r:CreateTexture(nil, "BACKGROUND")
+        r.bg:SetAllPoints()
+        r.bg:SetColorTexture(0.95, 0.78, 0.25, 0.10)  -- subtle warm gold
+        r.bg:Hide()
+
+        -- Favourite star toggle (leads the row).
+        r.fav = CreateFrame("Button", nil, r)
+        r.fav:SetSize(16, 16)
+        r.fav:SetPoint("LEFT", 4, 0)
+        r.favTex = r.fav:CreateTexture(nil, "ARTWORK")
+        r.favTex:SetAllPoints()
+        r.favTex:SetAtlas("PetJournal-FavoritesIcon")
+        r.fav:SetScript("OnClick", function() if r.DoFav then r.DoFav() end end)
+        r.fav:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText(L["Favourite"])
+            GameTooltip:Show()
+        end)
+        r.fav:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
         r.nameFS = r:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-        r.nameFS:SetPoint("LEFT", 6, 0)
-        r.nameFS:SetWidth(170)
+        r.nameFS:SetPoint("LEFT", r.fav, "RIGHT", 4, 0)
+        r.nameFS:SetWidth(150)
         r.nameFS:SetJustifyH("LEFT")
 
         r.nick = CreateFrame("EditBox", nil, r, "BackdropTemplate")
@@ -165,7 +194,17 @@ local function buildPicker()
 
         local isBnet = cfg.bnet
         local cands = NK[cfg.get](NK) or {}
+        -- Annotate favourite state, then sort into 3 tiers: favourites, then
+        -- online, then offline — alphabetical within each tier.
+        for _, c in ipairs(cands) do
+            local bucket, key = NK:FavoriteKey(c, isBnet)
+            c._favBucket, c._favKey = bucket, key
+            c._fav = (bucket and key and bucket[key]) and true or false
+        end
         tsort(cands, function(a, b)
+            if a._fav ~= b._fav then return a._fav end
+            local ao, bo = a.online and true or false, b.online and true or false
+            if ao ~= bo then return ao end
             return (a.fullName or a.label or "") < (b.fullName or b.label or "")
         end)
 
@@ -173,11 +212,32 @@ local function buildPicker()
         for _, r in ipairs(rows) do r:Hide() end
 
         local shown = 0
+        local yOff = 0
+        local sawFav, sepPlaced = false, false
+        f.sep:Hide()
         for _, c in ipairs(cands) do
             local display = isBnet and c.label or c.fullName
             if filter == "" or strfind(strlower(display or ""), filter, 1, true) then
                 shown = shown + 1
                 local r = getRow(shown)
+
+                -- Favourite star + row tint (hidden if this candidate can't be
+                -- favourited, e.g. a B.net friend with no BattleTag).
+                if c._favBucket and c._favKey then
+                    r.fav:Show()
+                    local favCand = c
+                    r.DoFav = function()
+                        NK:ToggleFavorite(favCand, isBnet)
+                        f:Repopulate()
+                    end
+                    if c._fav then
+                        r.favTex:SetDesaturated(false); r.favTex:SetAlpha(1.0); r.bg:Show()
+                    else
+                        r.favTex:SetDesaturated(true); r.favTex:SetAlpha(0.35); r.bg:Hide()
+                    end
+                else
+                    r.fav:Hide(); r.bg:Hide(); r.DoFav = nil
+                end
 
                 if isBnet then
                     local extra = c.currentChar and ("  |cff7f7f7f(" .. c.currentChar .. ")|r") or ""
@@ -192,7 +252,7 @@ local function buildPicker()
                     r.nameFS:SetTextColor(classColor(c.class))
                 end
 
-                local added = isBnet and NK:HasBnetRule(c.bnetID) or NK:HasRuleFor(c.name, c.realm)
+                local added = isBnet and NK:HasBnetRule(c.battleTag) or NK:HasRuleFor(c.name, c.realm)
                 if added then
                     r.nick:Hide(); r.add:Hide(); r.addedFS:Show()
                     r.DoAdd = nil
@@ -210,7 +270,7 @@ local function buildPicker()
                         local nick = r.nick:GetText()
                         if not nick or nick:gsub("%s", "") == "" then return end
                         if isBnet then
-                            NK:AddBnet(cand.bnetID, cand.label, nick)
+                            NK:AddBnet(cand.battleTag, cand.label, nick)
                         else
                             NK:AddTyped("exact", cand.fullName, nick, cfg.tag)
                         end
@@ -218,14 +278,27 @@ local function buildPicker()
                     end
                 end
 
+                -- Blizzard-style divider between the favourites block and the rest.
+                if c._fav then
+                    sawFav = true
+                elseif sawFav and not sepPlaced then
+                    f.sep:ClearAllPoints()
+                    f.sep:SetPoint("TOPLEFT", content, "TOPLEFT", 6, -(yOff + 4))
+                    f.sep:SetPoint("TOPRIGHT", content, "TOPRIGHT", -6, -(yOff + 4))
+                    f.sep:Show()
+                    sepPlaced = true
+                    yOff = yOff + SEP_H
+                end
+
                 r:ClearAllPoints()
-                r:SetPoint("TOPLEFT", 0, -(shown - 1) * ROW_H)
-                r:SetPoint("TOPRIGHT", 0, -(shown - 1) * ROW_H)
+                r:SetPoint("TOPLEFT", 0, -yOff)
+                r:SetPoint("TOPRIGHT", 0, -yOff)
                 r:Show()
+                yOff = yOff + ROW_H
             end
         end
 
-        content:SetHeight(mmax(1, shown * ROW_H))
+        content:SetHeight(mmax(1, yOff))
         self.empty:SetShown(shown == 0)
         self.empty:SetText(cfg.emptyText or L["No characters found."])
     end

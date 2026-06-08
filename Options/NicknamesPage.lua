@@ -558,7 +558,14 @@ function DF.BuildNicknamesPage(guiRef, pageRef, dbRef)
             row.srcFS:SetText(e.source or "")
 
             local c = conflicts[i]
-            if c and c.shadowedBy then
+            if e.needsRelink then
+                row.flag.tex:SetVertexColor(1, 0.55, 0.1)  -- orange = needs re-link
+                row.flag.tipTitle = L["Needs re-link"]
+                row.flag.tipBody = L["This Battle.net friend could not be matched after an update. Remove this rule and add them again."]
+                row.flag:Show()
+                row.charFS:SetTextColor(0.5, 0.5, 0.5)  -- dim: this rule is inactive
+                row.nickFS:SetTextColor(0.5, 0.5, 0.5)
+            elseif c and c.shadowedBy then
                 row.flag.tex:SetVertexColor(1, 0.35, 0.35)  -- red = overridden / never applies
                 row.flag.tipTitle = L["Overridden"]
                 row.flag.tipBody = format(
