@@ -16,6 +16,7 @@
 * (Icons) New **in-combat indicator** — a small crossed-swords icon lights up when a unit is in combat, so you can spot who's engaged at a glance. Off by default, with its own position and size controls. (by Krathe)
 * (Auto Layouts) Added `/df clearoverride <key|prefix|all>` to **remove a stuck per-layout override** directly — for overrides the settings UI can't reach (e.g. a pinned-players override while not in a raid). (by Krathe)
 * (Nicknames) New **Nicknames** feature — show custom names on your party and raid frames. Build a prioritised list from your friends, guild and group, or type names in by hand, and choose how matches are made. Optionally mark nicknamed players with brackets (or other styles) and share your own nickname with the group. Find it under **General → Nicknames**. (by Maelareth)
+* (Nicknames) The **Add from** lists (friends, guild, group, Battle.net) now put **online members first**, and you can **favourite** people with the star to pin them to the very top — so the people you nickname most are always right there. (by Maelareth)
 * (Resource Bar) Added a **Color Mode** (Power Type / Class / **Custom**) with a custom-colour picker, and a **Texture** dropdown so the resource bar can use any statusbar texture. (by Krathe)
 * (Aura Designer) New **Background Color** effect — colour a frame's background when an aura is active (Replace or Tint), with the same Expiring colour override, Pulsate and out-of-range handling as the other effects. (by Krathe)
 
@@ -38,6 +39,7 @@
 
 ### Bug Fixes
 
+* (Nicknames) **Battle.net nickname rules now stick across sessions** — they could previously stop applying after a full relog. Existing rules are upgraded automatically; any that can't be matched are flagged so you can quickly re-add them. (by Maelareth)
 * (Range) The frame border (and other element borders) now reliably **fade out of range**, preserved across border re-renders. (by Krathe)
 * (Missing Buff) The missing-buff icon no longer flags a **cross-faction group member in the open world** as needing a buff you can't actually cast on them — it only appears where the buff is castable (e.g. inside instances). (by Krathe)
 * (Defensive Icon) The defensive cooldown icon and its border now render **above auras** and stay co-planar with the icon. (by Krathe)
