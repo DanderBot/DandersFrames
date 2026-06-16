@@ -31,6 +31,84 @@ local function AddCombatConditional(frame, typeAttr, realType, combatCond)
     table.insert(frame.dfAttrDriverList, typeAttr)
 end
 
+-- ============================================================
+-- 12.0.7 CLICK GATE WORKAROUND (target / menu via ungated proxy)
+-- 12.0.7 added a gate inside SecureUnitButton_OnClick: when the resolved
+-- action is "target"/"menu"/"togglemenu" AND C_ClickBindings.GetBindingType
+-- for that button+modifier is None, the click is dropped. Only the default
+-- interaction buttons (plain left/right) pass, so target/menu bound to any
+-- other key or button silently stops working. SecureActionButton_OnClick is
+-- NOT gated, so we route those actions through a hidden SecureActionButton
+-- child via the secure "click" action: the unit button delegates with
+-- :Click(button), the proxy's ungated handler runs target/togglemenu, and
+-- the action fires. Credit: Ellesmere (EllesmereUI). Version-agnostic — the
+-- "click" action and an ungated SecureActionButton work on pre-12.0.7 too.
+
+-- Lazily create the per-frame proxy button (out of combat only). useparent-unit
+-- makes the proxy inherit the frame's real unit token (party1, raid3, ...), so
+-- targeting keeps working at any range. Returns nil if we're in combat.
+function CC:EnsureClickProxy(frame)
+    if frame.dfClickProxy then return frame.dfClickProxy end
+    if InCombatLockdown() then return nil end
+    local proxy = CreateFrame("Button", nil, frame, "SecureActionButtonTemplate")
+    proxy:EnableMouse(false)              -- only ever clicked programmatically
+    proxy:RegisterForClicks("AnyUp")      -- fire on the up stroke (menu-safe)
+    proxy:SetAttribute("useparent-unit", true)
+    proxy:SetAttribute("useOnKeyDown", false)
+    frame.dfClickProxy = proxy
+    return proxy
+end
+
+-- Route a gated action (target / togglemenu) on a DandersFrames frame through
+-- the proxy. typeAttr is the action attribute on the frame (e.g. "shift-type2"
+-- or "type-<vbtn>"); clickbuttonAttr is its matching clickbutton attribute. The
+-- proxy carries the real action under the SAME suffix, so the delegated
+-- :Click(button) resolves to it. Records the route on frame.dfProxyRoutes for
+-- cleanup.
+function CC:RouteProxyAction(frame, typeAttr, clickbuttonAttr, realAction, combatCond)
+    local proxy = self:EnsureClickProxy(frame)
+    if not proxy then
+        -- In combat the proxy can't be created. Emit the (gated) direct action
+        -- as a fallback; the whole binding set is reapplied after combat, which
+        -- installs the proxy and replaces this.
+        frame:SetAttribute(typeAttr, realAction)
+        if combatCond then AddCombatConditional(frame, typeAttr, realAction, combatCond) end
+        return
+    end
+    frame:SetAttribute(typeAttr, "click")
+    frame:SetAttribute(clickbuttonAttr, proxy)
+    if combatCond then
+        -- Gate on the proxy: the frame always delegates, the proxy decides
+        -- whether the action runs based on combat state.
+        AddCombatConditional(proxy, typeAttr, realAction, combatCond)
+    else
+        proxy:SetAttribute(typeAttr, realAction)
+    end
+    frame.dfProxyRoutes = frame.dfProxyRoutes or {}
+    frame.dfProxyRoutes[#frame.dfProxyRoutes + 1] = { typeAttr = typeAttr, clickbuttonAttr = clickbuttonAttr }
+end
+
+-- Clear proxy routes from a frame: wipe the frame's click/clickbutton attrs,
+-- the proxy's action attrs, and any combat drivers registered on the proxy.
+function CC:ClearClickProxyRoutes(frame)
+    if frame.dfProxyRoutes then
+        for _, r in ipairs(frame.dfProxyRoutes) do
+            frame:SetAttribute(r.typeAttr, "")
+            frame:SetAttribute(r.clickbuttonAttr, nil)
+            if frame.dfClickProxy then
+                frame.dfClickProxy:SetAttribute(r.typeAttr, "")
+            end
+        end
+        frame.dfProxyRoutes = nil
+    end
+    if frame.dfClickProxy and frame.dfClickProxy.dfAttrDriverList then
+        for _, attr in ipairs(frame.dfClickProxy.dfAttrDriverList) do
+            UnregisterAttributeDriver(frame.dfClickProxy, attr)
+        end
+        frame.dfClickProxy.dfAttrDriverList = nil
+    end
+end
+
 -- BINDING APPLICATION
 -- ============================================================
 
@@ -295,7 +373,10 @@ function CC:ClearBindingsFromFrame(frame)
         end
         frame.dfAttrDriverList = nil
     end
-    
+
+    -- 12.0.7 gate workaround: clear proxy click-action routes + proxy drivers.
+    self:ClearClickProxyRoutes(frame)
+
     -- Also clear any existing override bindings on this frame (but not if hovered)
     if not isCurrentlyHovered then
         pcall(function() ClearOverrideBindings(frame) end)
@@ -309,7 +390,10 @@ function CC:RestoreBlizzardDefaults(frame)
     
     -- Clear any custom bindings tracking first
     frame.dfAppliedBindings = nil
-    
+
+    -- 12.0.7 gate workaround: drop any proxy click-action routes too.
+    self:ClearClickProxyRoutes(frame)
+
     -- Clear ALL modifier combinations we may have set (but NOT the base type1/type2)
     -- Order must be: alt-ctrl-shift-meta (per WoW SecureActionButtonTemplate)
     local modifiers = {"alt-", "ctrl-", "shift-", "meta-", "alt-ctrl-", "alt-shift-", "alt-meta-", "ctrl-shift-", "ctrl-meta-", "shift-meta-", "alt-ctrl-shift-", "alt-ctrl-meta-", "alt-shift-meta-", "ctrl-shift-meta-", "alt-ctrl-shift-meta-"}
@@ -2605,41 +2689,63 @@ function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate)
                 if isSpecialAction then
                     -- Use direct attribute types for special actions
                     if actionType == "menu" or actionType == self.ACTION_TYPES.MENU then
-                        frame:SetAttribute(typeAttr, "togglemenu")
-                        local vBtn
-                        if needsVirtualBtn or needsMetaVirtualBtn then
-                            vBtn = self:GetVirtualButtonName(binding)
-                            frame:SetAttribute("type-" .. vBtn, "togglemenu")
-                        end
-                        -- BUG #10 FIX: state-driver-based combat conditional
-                        local combatCond = GetCombatCondition(binding)
-                        if combatCond then
-                            AddCombatConditional(frame, typeAttr, "togglemenu", combatCond)
-                            if vBtn then
-                                AddCombatConditional(frame, "type-" .. vBtn, "togglemenu", combatCond)
+                        if isDandersFrame then
+                            -- 12.0.7 gate workaround: route menu through the ungated proxy
+                            local combatCond = GetCombatCondition(binding)
+                            self:RouteProxyAction(frame, typeAttr, modPrefix .. "clickbutton" .. buttonNum, "togglemenu", combatCond)
+                            if needsMetaVirtualBtn then
+                                local vBtn = self:GetVirtualButtonName(binding)
+                                self:RouteProxyAction(frame, "type-" .. vBtn, "clickbutton-" .. vBtn, "togglemenu", combatCond)
+                            end
+                        else
+                            frame:SetAttribute(typeAttr, "togglemenu")
+                            local vBtn
+                            if needsVirtualBtn or needsMetaVirtualBtn then
+                                vBtn = self:GetVirtualButtonName(binding)
+                                frame:SetAttribute("type-" .. vBtn, "togglemenu")
+                            end
+                            -- BUG #10 FIX: state-driver-based combat conditional
+                            local combatCond = GetCombatCondition(binding)
+                            if combatCond then
+                                AddCombatConditional(frame, typeAttr, "togglemenu", combatCond)
+                                if vBtn then
+                                    AddCombatConditional(frame, "type-" .. vBtn, "togglemenu", combatCond)
+                                end
                             end
                         end
                     elseif actionType == "target" then
-                        frame:SetAttribute(typeAttr, "target")
-                        -- For Blizzard frames, also set unit="mouseover" to ensure targeting works.
-                        -- Native type="target" uses the frame's unit attribute, but some frames
-                        -- may not have it properly accessible.
-                        if frame.dfIsBlizzardFrame then
-                            local unitAttr = modPrefix .. "unit" .. buttonNum
-                            frame:SetAttribute(unitAttr, "mouseover")
-                        end
-                        local vBtn
-                        if needsVirtualBtn or needsMetaVirtualBtn then
-                            vBtn = self:GetVirtualButtonName(binding)
-                            frame:SetAttribute("type-" .. vBtn, "target")
-                            frame:SetAttribute("unit-" .. vBtn, "mouseover")
-                        end
-                        -- BUG #860 FIX: state-driver-based combat conditional
-                        local combatCond = GetCombatCondition(binding)
-                        if combatCond then
-                            AddCombatConditional(frame, typeAttr, "target", combatCond)
-                            if vBtn then
-                                AddCombatConditional(frame, "type-" .. vBtn, "target", combatCond)
+                        if isDandersFrame then
+                            -- 12.0.7 gate workaround: route target through the ungated proxy.
+                            -- The proxy inherits the frame's unit token via useparent-unit,
+                            -- so targeting still works at any range (no /target name limit).
+                            local combatCond = GetCombatCondition(binding)
+                            self:RouteProxyAction(frame, typeAttr, modPrefix .. "clickbutton" .. buttonNum, "target", combatCond)
+                            if needsMetaVirtualBtn then
+                                local vBtn = self:GetVirtualButtonName(binding)
+                                self:RouteProxyAction(frame, "type-" .. vBtn, "clickbutton-" .. vBtn, "target", combatCond)
+                            end
+                        else
+                            frame:SetAttribute(typeAttr, "target")
+                            -- For Blizzard frames, also set unit="mouseover" to ensure targeting works.
+                            -- Native type="target" uses the frame's unit attribute, but some frames
+                            -- may not have it properly accessible.
+                            if frame.dfIsBlizzardFrame then
+                                local unitAttr = modPrefix .. "unit" .. buttonNum
+                                frame:SetAttribute(unitAttr, "mouseover")
+                            end
+                            local vBtn
+                            if needsVirtualBtn or needsMetaVirtualBtn then
+                                vBtn = self:GetVirtualButtonName(binding)
+                                frame:SetAttribute("type-" .. vBtn, "target")
+                                frame:SetAttribute("unit-" .. vBtn, "mouseover")
+                            end
+                            -- BUG #860 FIX: state-driver-based combat conditional
+                            local combatCond = GetCombatCondition(binding)
+                            if combatCond then
+                                AddCombatConditional(frame, typeAttr, "target", combatCond)
+                                if vBtn then
+                                    AddCombatConditional(frame, "type-" .. vBtn, "target", combatCond)
+                                end
                             end
                         end
                     elseif actionType == "focus" or actionType == self.ACTION_TYPES.FOCUS then
@@ -2677,31 +2783,36 @@ function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate)
                 if isSpecialAction then
                     if actionType == "menu" or actionType == self.ACTION_TYPES.MENU then
                         local typeAttr = "type-" .. virtualBtn
-                        frame:SetAttribute(typeAttr, "togglemenu")
-                        -- BUG #10 FIX: state-driver-based combat conditional
-                        local combatCond = GetCombatCondition(binding)
-                        if combatCond then
-                            AddCombatConditional(frame, typeAttr, "togglemenu", combatCond)
+                        if isDandersFrame then
+                            -- 12.0.7 gate workaround: route menu through the ungated proxy
+                            self:RouteProxyAction(frame, typeAttr, "clickbutton-" .. virtualBtn, "togglemenu", GetCombatCondition(binding))
+                        else
+                            frame:SetAttribute(typeAttr, "togglemenu")
+                            -- BUG #10 FIX: state-driver-based combat conditional
+                            local combatCond = GetCombatCondition(binding)
+                            if combatCond then
+                                AddCombatConditional(frame, typeAttr, "togglemenu", combatCond)
+                            end
                         end
                     elseif actionType == "target" then
                         local typeAttr = "type-" .. virtualBtn
-                        frame:SetAttribute(typeAttr, "target")
-                        -- Mirror the mouse path: only set unit="mouseover" on
-                        -- Blizzard / third-party frames, where the frame's main
-                        -- "unit" attribute may not be reliably exposed.
-                        -- DandersFrames already have a real unit token (party1,
-                        -- raid3, etc.) on their "unit" attribute — the secure
-                        -- target action picks that up and targets via the unit
-                        -- token, which works at any range. Forcing unit-virtualBtn
-                        -- to "mouseover" routed through name-based targeting and
-                        -- reintroduced the /target out-of-range limitation.
-                        if not frame.dfIsDandersFrame then
+                        if isDandersFrame then
+                            -- 12.0.7 gate workaround: route target through the ungated proxy.
+                            -- The proxy inherits the frame's real unit token (party1,
+                            -- raid3, etc.) via useparent-unit, so targeting works at any
+                            -- range (no /target name-based out-of-range limitation).
+                            self:RouteProxyAction(frame, typeAttr, "clickbutton-" .. virtualBtn, "target", GetCombatCondition(binding))
+                        else
+                            frame:SetAttribute(typeAttr, "target")
+                            -- Mirror the mouse path: set unit="mouseover" on Blizzard /
+                            -- third-party frames, where the frame's main "unit" attribute
+                            -- may not be reliably exposed.
                             frame:SetAttribute("unit-" .. virtualBtn, "mouseover")
-                        end
-                        -- BUG #860 FIX: state-driver-based combat conditional
-                        local combatCond = GetCombatCondition(binding)
-                        if combatCond then
-                            AddCombatConditional(frame, typeAttr, "target", combatCond)
+                            -- BUG #860 FIX: state-driver-based combat conditional
+                            local combatCond = GetCombatCondition(binding)
+                            if combatCond then
+                                AddCombatConditional(frame, typeAttr, "target", combatCond)
+                            end
                         end
                     elseif actionType == "focus" or actionType == self.ACTION_TYPES.FOCUS then
                         frame:SetAttribute("type-" .. virtualBtn, "focus")
