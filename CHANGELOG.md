@@ -1,11 +1,11 @@
 # DandersFrames Changelog
 
-## [Unreleased]
+## [4.4.2]
 
 ### Bug Fixes
 
 * (Aura Filters) Removed the "Important Spells" buff and debuff filter, which Blizzard removed from the game.
-* (Click Casting) Fixed Target Unit and the unit menu not working when bound to a keyboard key or an extra mouse button since the 12.0.7 patch (left and right click were unaffected). Technique credit to Ellesmere (EllesmereUI).
+* (Click Casting) Fixed Target Unit and the unit menu not working when bound to a keyboard key or an extra mouse button since the 12.0.7 patch (left and right click were unaffected). Known issue: this still doesn't work on Blizzard's default frames — a fix is in progress. Technique credit to Ellesmere (EllesmereUI).
 
 ## [4.4.1]
 
