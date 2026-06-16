@@ -1,5 +1,11 @@
 # DandersFrames Changelog
 
+## [Unreleased]
+
+### Bug Fixes
+
+* (Aura Filters) Removed the "Important Spells" buff and debuff filter, which Blizzard removed from the game.
+
 ## [4.4.1]
 
 ### Bug Fixes

@@ -727,11 +727,10 @@ function DF:CheckBlizzardAuraSourceAvailable()
                         "directBuffShowAll", "directBuffOnlyMine",
                         "directBuffFilterRaid", "directBuffFilterRaidInCombat",
                         "directBuffFilterCancelable", "directBuffFilterNotCancelable",
-                        "directBuffFilterImportant", "directBuffFilterBigDefensive",
+                        "directBuffFilterBigDefensive",
                         "directBuffFilterExternalDefensive", "directBuffSortOrder",
                         "directDebuffShowAll", "directDebuffFilterRaid",
                         "directDebuffFilterRaidInCombat", "directDebuffFilterCrowdControl",
-                        "directDebuffFilterImportant",
                         "directDebuffDispellableMode",
                         "directDebuffSortOrder",
                     }
@@ -1178,9 +1177,6 @@ local function BuildDirectBuffFilters(db)
     end
     if db.directBuffFilterCancelable then filters[#filters + 1] = "HELPFUL|CANCELABLE" .. playerSuffix end
     if db.directBuffFilterNotCancelable then filters[#filters + 1] = "HELPFUL|NOT_CANCELABLE" .. playerSuffix end
-    if db.directBuffFilterImportant then
-        filters[#filters + 1] = "HELPFUL|" .. (AuraFilters.Important or "IMPORTANT") .. playerSuffix
-    end
     if db.directBuffFilterBigDefensive and AuraFilters.BigDefensive then
         filters[#filters + 1] = "HELPFUL|" .. AuraFilters.BigDefensive .. playerSuffix
     end
@@ -1205,9 +1201,6 @@ local function BuildDirectDebuffFilters(db)
     end
     if db.directDebuffFilterCrowdControl and AuraFilters.CrowdControl then
         filters[#filters + 1] = "HARMFUL|" .. AuraFilters.CrowdControl
-    end
-    if db.directDebuffFilterImportant then
-        filters[#filters + 1] = "HARMFUL|" .. (AuraFilters.Important or "IMPORTANT")
     end
     if db.directDebuffDispellableMode == "PLAYER" then
         filters[#filters + 1] = "HARMFUL|" .. (AuraFilters.RaidPlayerDispellable or "RAID_PLAYER_DISPELLABLE")

@@ -470,7 +470,6 @@ DF.ExportCategories = {
         "directBuffFilterRaidInCombat",
         "directBuffFilterCancelable",
         "directBuffFilterNotCancelable",
-        "directBuffFilterImportant",
         "directBuffFilterBigDefensive",
         "directBuffFilterExternalDefensive",
         "directBuffSortOrder",
@@ -478,7 +477,6 @@ DF.ExportCategories = {
         "directDebuffFilterRaid",
         "directDebuffFilterRaidInCombat",
         "directDebuffFilterCrowdControl",
-        "directDebuffFilterImportant",
         "directDebuffDispellableMode",
         "directDebuffSortOrder",
 

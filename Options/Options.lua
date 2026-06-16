@@ -4715,10 +4715,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         bfNotCancel.hideOn = HideBuffSubFilters
         bfNotCancel.tooltip = L["Buffs that cannot be cancelled by the player."]
 
-        local bfImportant = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Important Spells"], db, "directBuffFilterImportant", DirectFilterChanged), 30)
-        bfImportant.hideOn = HideBuffSubFilters
-        bfImportant.tooltip = L["Spells flagged as important by Blizzard."]
-
         local bfBigDef = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Big Defensives"], db, "directBuffFilterBigDefensive", DirectFilterChanged), 30)
         bfBigDef.hideOn = HideBuffSubFilters
         bfBigDef.tooltip = L["Major defensive cooldowns like Divine Shield, Ice Block, or Barkskin."]
@@ -4778,10 +4774,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local dfCC = debuffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Crowd Control"], db, "directDebuffFilterCrowdControl", DirectFilterChanged), 30)
         dfCC.hideOn = HideDebuffSubFilters
         dfCC.tooltip = L["CC effects like stuns, roots, and incapacitates."]
-
-        local dfImportant = debuffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Important Spells"], db, "directDebuffFilterImportant", DirectFilterChanged), 30)
-        dfImportant.hideOn = HideDebuffSubFilters
-        dfImportant.tooltip = L["Spells flagged as important by Blizzard."]
 
         local dfDispelToggle = debuffGroup:AddWidget(GUI:CreateToggleSwitch(self.child, L["Dispellable By Me"], L["All Dispellable"], db, "directDebuffDispellableMode", "PLAYER", "ALL", DirectFilterChanged), 30)
         dfDispelToggle.hideOn = HideDebuffSubFilters

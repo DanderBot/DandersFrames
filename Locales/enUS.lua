@@ -1400,7 +1400,6 @@ L["Static (No Reorder)"] = true
 L["Spark"] = true
 L["Specialization data not available."] = true
 L["Spell Name"] = true
-L["Spells flagged as important by Blizzard."] = true
 L["Split (Mine + Others)"] = true
 L["Stack Count"] = true
 L["Standalone"] = true
