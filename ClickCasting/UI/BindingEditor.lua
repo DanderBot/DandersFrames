@@ -1879,6 +1879,10 @@ function CC:ShowEditBindingPanel(spellData, existingBinding, existingIndex)
     -- Only macros hide the targeting section. Items use spell-style fallbacks
     -- (mouseover / target / self) because /use can take @mouseover etc.
     local hideTargeting = isMacro
+    -- Target / menu binds have no meaningful Advanced options (fallbacks, macro
+    -- options, global bind, priority are all spell/macro concepts), so the whole
+    -- Advanced section is hidden for them further below.
+    local isMenuOrTarget = (actionType == CC.ACTION_TYPES.TARGET or actionType == CC.ACTION_TYPES.MENU)
     
     -- Update frames checkboxes (always shown)
     local frames = panel.pendingBinding.frames or { dandersFrames = true, otherFrames = true }
@@ -2053,13 +2057,24 @@ function CC:ShowEditBindingPanel(spellData, existingBinding, existingIndex)
         panel.advancedToggle:ClearAllPoints()
         panel.advancedToggle:SetPoint("TOPLEFT", 12, -385)
     end
-    
+
+    -- Target / menu binds: hide the entire Advanced section. Its options do
+    -- nothing for these actions, so showing them only causes confusion. The Save/
+    -- Cancel/Delete buttons are anchored to the panel bottom, so the shorter
+    -- height below keeps them tucked under the visible content.
+    if isMenuOrTarget then
+        panel.advancedExpanded = false
+        if panel.advancedToggle then panel.advancedToggle:Hide() end
+        if panel.advancedContent then panel.advancedContent:Hide() end
+    end
+
     -- Adjust panel height based on macro/item vs spell, and Advanced expanded state
     local SPELL_COLLAPSED_HEIGHT = 502
     local SPELL_EXPANDED_HEIGHT = 685
     local MACRO_COLLAPSED_HEIGHT = 475  -- With Global Keybind section above Active
     local MACRO_EXPANDED_HEIGHT = 540   -- With Advanced expanded (just priority slider)
-    
+    local SPECIAL_COLLAPSED_HEIGHT = 450 -- Target/menu: target type + combat, no Advanced section
+
     if hideTargeting then
         -- For macros/items: no target type section
         if panel.advancedExpanded then
@@ -2067,6 +2082,9 @@ function CC:ShowEditBindingPanel(spellData, existingBinding, existingIndex)
         else
             panel:SetHeight(MACRO_COLLAPSED_HEIGHT)
         end
+    elseif isMenuOrTarget then
+        -- Target/menu: Advanced section hidden entirely
+        panel:SetHeight(SPECIAL_COLLAPSED_HEIGHT)
     elseif panel.advancedExpanded then
         panel:SetHeight(SPELL_EXPANDED_HEIGHT)
     else

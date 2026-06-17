@@ -2592,6 +2592,10 @@ function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate)
     local hasAnyBindings = false
     local isDandersFrame = frame.dfIsDandersFrame == true
     local isBlizzardFrame = frame.dfIsBlizzardFrame == true
+    -- 12.0.7 gate workaround applies to frames whose clicks run through Blizzard's
+    -- gated SecureUnitButton_OnClick: our own frames and Blizzard's. Third-party
+    -- frames keep their existing path (they use their own/ungated click handler).
+    local useProxy = isDandersFrame or isBlizzardFrame
 
     for keyString, data in pairs(self.unifiedMacroMap) do
         local binding = data.templateBinding
@@ -2689,7 +2693,7 @@ function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate)
                 if isSpecialAction then
                     -- Use direct attribute types for special actions
                     if actionType == "menu" or actionType == self.ACTION_TYPES.MENU then
-                        if isDandersFrame then
+                        if useProxy then
                             -- 12.0.7 gate workaround: route menu through the ungated proxy
                             local combatCond = GetCombatCondition(binding)
                             self:RouteProxyAction(frame, typeAttr, modPrefix .. "clickbutton" .. buttonNum, "togglemenu", combatCond)
@@ -2714,12 +2718,22 @@ function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate)
                             end
                         end
                     elseif actionType == "target" then
-                        if isDandersFrame then
+                        if useProxy then
                             -- 12.0.7 gate workaround: route target through the ungated proxy.
                             -- The proxy inherits the frame's unit token via useparent-unit,
                             -- so targeting still works at any range (no /target name limit).
+                            -- Plain unmodified left-click passes the gate natively (it has a
+                            -- default interaction binding), so leave it direct and only proxy
+                            -- the rebound cases.
                             local combatCond = GetCombatCondition(binding)
-                            self:RouteProxyAction(frame, typeAttr, modPrefix .. "clickbutton" .. buttonNum, "target", combatCond)
+                            if buttonNum == 1 and modPrefix == "" then
+                                frame:SetAttribute(typeAttr, "target")
+                                if combatCond then
+                                    AddCombatConditional(frame, typeAttr, "target", combatCond)
+                                end
+                            else
+                                self:RouteProxyAction(frame, typeAttr, modPrefix .. "clickbutton" .. buttonNum, "target", combatCond)
+                            end
                             if needsMetaVirtualBtn then
                                 local vBtn = self:GetVirtualButtonName(binding)
                                 self:RouteProxyAction(frame, "type-" .. vBtn, "clickbutton-" .. vBtn, "target", combatCond)
@@ -2783,7 +2797,7 @@ function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate)
                 if isSpecialAction then
                     if actionType == "menu" or actionType == self.ACTION_TYPES.MENU then
                         local typeAttr = "type-" .. virtualBtn
-                        if isDandersFrame then
+                        if useProxy then
                             -- 12.0.7 gate workaround: route menu through the ungated proxy
                             self:RouteProxyAction(frame, typeAttr, "clickbutton-" .. virtualBtn, "togglemenu", GetCombatCondition(binding))
                         else
@@ -2796,7 +2810,7 @@ function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate)
                         end
                     elseif actionType == "target" then
                         local typeAttr = "type-" .. virtualBtn
-                        if isDandersFrame then
+                        if useProxy then
                             -- 12.0.7 gate workaround: route target through the ungated proxy.
                             -- The proxy inherits the frame's real unit token (party1,
                             -- raid3, etc.) via useparent-unit, so targeting works at any

@@ -1,5 +1,16 @@
 # DandersFrames Changelog
 
+## [4.4.3]
+
+### Improvements
+
+* (Click Casting) The binding editor no longer shows the Advanced options section for Target Unit and Context Menu binds — those settings don't apply to those actions.
+* Refreshed the DandersFrames addon icon.
+
+### Bug Fixes
+
+* (Click Casting) Target Unit and the unit menu now work on Blizzard's default unit frames (player, target, focus, boss, arena) when bound to a keyboard key or an extra mouse button — completing the 12.0.7 fix that already covered DandersFrames' own frames. Left and right click were unaffected.
+
 ## [4.4.2]
 
 ### Bug Fixes
