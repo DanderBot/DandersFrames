@@ -110,7 +110,7 @@ These appear as GUI control labels, column headers, or dropdown options:
 | `"Group"` | Raid group | A WoW raid group (1-8), not a generic group. |
 | `"Handle"` | Drag handle | The UI element you click to drag/move the frame container. |
 | `"Health"` | Health points | A unit's hit points / life total. |
-| `"Highlight"` | Visual overlay | A colored glow or border shown on hover/selection/aggro. |
+| `"Highlight"` | Visual overlay | A colored glow or border shown on hover/selection/aggro/focus. |
 | `"Hook"` | Attachment method | How the pet frame connects to its owner frame. |
 | `"Horizontal"` | Direction | Left-to-right layout. |
 | `"Icon"` | Small image | A buff/debuff icon, role icon, or status icon. |

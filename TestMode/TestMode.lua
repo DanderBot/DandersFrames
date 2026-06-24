@@ -1206,7 +1206,7 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
         if ADEngine then ADEngine:ClearFrame(frame) end
     end
 
-    -- Update selection and aggro highlights for test mode
+    -- Update all highlights (selection, aggro, etc.) for test mode
     -- UpdateHighlights now handles test mode internally
     if DF.UpdateHighlights then
         DF:UpdateHighlights(frame)
@@ -6613,6 +6613,9 @@ function DF:CreateTestPanel()
     panel.showAggroCheck = secHighlights:AddCheckbox(L["Aggro"], "testShowAggro", function()
         if DF.UpdateAllTestHighlights then DF:UpdateAllTestHighlights() end
     end, "indicators_highlights")
+    panel.showFocusCheck = secHighlights:AddCheckbox("Focus", "testShowFocus", function()
+        if DF.UpdateAllTestHighlights then DF:UpdateAllTestHighlights() end
+    end, "indicators_highlights")
 
     -- ============================================================
     -- PRESETS FOOTER
@@ -6762,6 +6765,7 @@ function DF:CreateTestPanel()
         self.showStatusIconsCheck:SetChecked(db.testShowStatusIcons ~= false)
         self.showSelectionCheck:SetChecked(db.testShowSelection)
         self.showAggroCheck:SetChecked(db.testShowAggro)
+        self.showFocusCheck:SetChecked(db.testShowFocus)
 
         -- Buff/Debuff sliders
         local buffCount = db.testBuffCount or 3

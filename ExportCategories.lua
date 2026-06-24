@@ -1166,6 +1166,13 @@ DF.ExportCategories = {
         "hoverHighlightMode",
         "hoverHighlightThickness",
         
+        -- Focus Highlight
+        "focusHighlightAlpha",
+        "focusHighlightColor",
+        "focusHighlightInset",
+        "focusHighlightMode",
+        "focusHighlightThickness",
+        
         -- Health Threshold Fading
         "healthFadeEnabled",
         "healthFadeAlpha",
@@ -1328,6 +1335,8 @@ DF.ExportCategories = {
         "testShowHealPrediction",
         "testShowAggro",
         "testShowSelection",
+        "testShowHover",
+        "testShowFocus",
         "testShowOutOfRange",
         "testShowReducedMaxHealth",
         "testShowDispelGlow",
