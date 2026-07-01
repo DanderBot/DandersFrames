@@ -90,6 +90,7 @@ WizardBuilder.lua
 Frames\Core.lua
 Frames\Colors.lua
 Frames\Border.lua
+Frames\AuraContainer.lua
 Frames\Expiring.lua
 Frames\Create.lua
 Frames\Headers.lua

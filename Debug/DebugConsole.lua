@@ -64,8 +64,9 @@ local CATEGORY_GROUPS = {
     {
         name = "Auras",
         categories = {
-            { key = "AD",       desc = "Aura Designer" },
-            { key = "BLIZAURA", desc = "Blizzard aura source pipeline" },
+            { key = "AD",            desc = "Aura Designer" },
+            { key = "BLIZAURA",      desc = "Blizzard aura source pipeline" },
+            { key = "AURACONTAINER", desc = "12.1 AuraContainer factory (build, filters, capability gate)" },
         },
     },
     {
