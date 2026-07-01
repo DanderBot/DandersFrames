@@ -26,6 +26,7 @@ local addonName, DF = ...
 --   h:SetUnit(unit) / h:SetShown(b) / h:Enable() / h:Disable()
 --   h:ApplyStyle(style) -- in-place cosmetic restyle (no teardown)
 --   h:SetFilter(filter) / h:SetSort(sort) -- structural (rebuild) / PTR-4 no-op now
+--   h:Refresh() -- force a re-scan (Hide/Show bounce; for dynamic-unit consumers)
 --   h:GetFrame() -- the plain positioning frame DF anchors (SetPoint/SetSize on it)
 --   h:Destroy()
 --
@@ -494,6 +495,22 @@ function Handle:SetSort(sort)
     self.config.sort = sort
     if not AuraContainer.HasSort() then return end
     -- TODO(PTR-4): self.container:SetSortRule(...) / SetSortDirection(...)
+end
+
+-- Force a re-scan of the container. There is NO addon-callable Refresh() on b8f90f2a:
+-- container:UpdateAllAuras() is an empty stub on the inbound handle (the real refresh
+-- lives on the private mixin, reached only via OnShow/OnHide/OnEnabledChanged/
+-- OnUnitChanged), so the sanctioned trigger is a Hide();Show() bounce -> OnShow -> the
+-- secure refresh, with no filter rebuild or invalid-unit blip [Krathe, source-confirmed
+-- b8f90f2a]. Use on a dynamic-unit consumer (target/focus/mouseover) when the underlying
+-- unit changes but the token does not. (In-combat bounce safety is on the PTR audit
+-- list; a real Refresh() / wired UpdateAllAuras is a PTR-4 candidate.)
+function Handle:Refresh()
+    if not self.container then return end
+    pcall(function()
+        self.container:Hide()
+        self.container:Show()
+    end)
 end
 
 function Handle:Destroy()
