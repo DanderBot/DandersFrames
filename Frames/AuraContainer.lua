@@ -46,7 +46,7 @@ local addonName, DF = ...
 
 local CreateFrame = CreateFrame
 local pcall, ipairs, pairs, type = pcall, ipairs, pairs, type
-local wipe, tinsert = wipe, table.insert
+local wipe = wipe
 local select, GetBuildInfo = select, GetBuildInfo
 local InCombatLockdown = InCombatLockdown
 local C_Spell = C_Spell
@@ -162,6 +162,22 @@ local function resolveEnum(enumTable, name)
     return nil
 end
 
+-- Dynamic-unit tokens whose underlying unit changes WITHOUT the token changing, so
+-- OnUnitChanged never fires -> they need a Refresh() bounce on the matching event.
+-- Prefix-match so "targettarget"/"focustarget" are covered by their base event too.
+local DYN_EVENT = {
+    target    = "PLAYER_TARGET_CHANGED",
+    focus     = "PLAYER_FOCUS_CHANGED",
+    mouseover = "UPDATE_MOUSEOVER_UNIT",
+}
+local function dynPrefixOf(unit)
+    if type(unit) ~= "string" then return nil end
+    for prefix in pairs(DYN_EVENT) do
+        if unit:sub(1, #prefix) == prefix then return prefix end
+    end
+    return nil
+end
+
 -- Child holder frame at a raised frame level, so a text region drawn on it sits
 -- ABOVE the cooldown swipe (cross-frame draw order is by frame level, so a font
 -- string parented directly to the button would render UNDER the swipe). The holder
@@ -191,9 +207,12 @@ end
 -- ============================================================
 local function styleButton(button, config)
     local style = config.style or {}
+    -- Overlay = a presence box (tint + border + native dispel only); the icon and all
+    -- icon-content setters (cooldown/duration/stacks/bar/spellName) are ROW-only.
+    local isRow = config.mode ~= "overlay"
     local sx = config.layout and (config.layout.sizeX or config.layout.size) or 32
     local sy = config.layout and (config.layout.sizeY or config.layout.size) or sx
-    button:SetSize(sx, sy)
+    if isRow then button:SetSize(sx, sy) end   -- overlay is SetAllPoints(frame) in _build
 
     -- OVERLAY mode: no icon; a tint texture here + a static DF.Border from the shared
     -- border block below (style.border works in overlay too — "border the frame while the
@@ -260,7 +279,7 @@ local function styleButton(button, config)
 
     -- COOLDOWN swipe (Blizzard-driven off the secret duration).
     local cdSpec = style.cooldown
-    if (cdSpec == nil or cdSpec.show ~= false) and button.SetDurationCooldown then
+    if isRow and (cdSpec == nil or cdSpec.show ~= false) and button.SetDurationCooldown then
         if not button.dfCD then
             button.dfCD = CreateFrame("Cooldown", nil, button, "CooldownFrameTemplate")
             button:SetDurationCooldown(button.dfCD)
@@ -276,7 +295,7 @@ local function styleButton(button, config)
     -- build — guard it: try WITH the curve (self-heals when Blizzard fixes it), and
     -- on error re-register WITHOUT it so text still renders (static colour applies).
     local durSpec = style.duration
-    if durSpec and durSpec.show and button.SetDurationText then
+    if isRow and durSpec and durSpec.show and button.SetDurationText then
         if not button.dfDur then
             button.dfDurHolder = makeHolder(button, durSpec.level or 6)
             button.dfDur = button.dfDurHolder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -302,7 +321,7 @@ local function styleButton(button, config)
 
     -- STACK count (Blizzard-driven; supports a ">=N" via the display-count min/max).
     local stackSpec = style.stacks
-    if stackSpec and stackSpec.show and button.SetApplicationCount then
+    if isRow and stackSpec and stackSpec.show and button.SetApplicationCount then
         if not button.dfStack then
             button.dfStackHolder = makeHolder(button, stackSpec.level or 7)
             button.dfStack = button.dfStackHolder:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
@@ -315,7 +334,7 @@ local function styleButton(button, config)
 
     -- DURATION bar (draining, Blizzard-driven). Options are Enum member NAMES.
     local barSpec = style.bar
-    if barSpec and barSpec.show and button.SetDurationBar then
+    if isRow and barSpec and barSpec.show and button.SetDurationBar then
         if not button.dfBar then
             button.dfBar = CreateFrame("StatusBar", nil, button)
             button.dfBar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
@@ -334,7 +353,7 @@ local function styleButton(button, config)
 
     -- SPELL name (Blizzard sets secret text).
     local nameSpec = style.spellName
-    if nameSpec and nameSpec.show and button.SetSpellName then
+    if isRow and nameSpec and nameSpec.show and button.SetSpellName then
         if not button.dfName then
             button.dfNameHolder = makeHolder(button, 5)
             button.dfName = button.dfNameHolder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -468,6 +487,7 @@ end
 -- state, so defer if we're in combat.
 function Handle:SetUnit(unit)
     self.config.unit = unit
+    self:_updateDynRefresh()   -- re-evaluate dynamic-unit auto-refresh for the new token
     if InCombatLockdown() then self:_deferRebuild(); return end
     if self.container then self.container:SetUnit(unit) end
 end
@@ -513,8 +533,41 @@ function Handle:Refresh()
     end)
 end
 
+-- AUTO-REFRESH for dynamic-unit containers. Since there's no callable Refresh(), a
+-- target/focus/mouseover container would go silently stale on a unit swap unless the
+-- consumer remembers to bounce it (Krathe). The factory registers ONE shared event
+-- frame and bounces the matching handles itself. Default on for a dynamic token; opt
+-- out with config.autoRefresh = false. No-op for stable party/raid tokens. Refresh()
+-- is combat-safe (source-confirmed), so this works mid-combat on a target swap.
+function Handle:_updateDynRefresh()
+    local prefix = (self.config.autoRefresh ~= false) and dynPrefixOf(self.config.unit) or nil
+    self._dynPrefix = prefix
+    if prefix then
+        if not AuraContainer._dyn then
+            AuraContainer._dyn = CreateFrame("Frame")
+            AuraContainer._dyn._handles = {}
+            AuraContainer._dyn:RegisterEvent("PLAYER_TARGET_CHANGED")
+            AuraContainer._dyn:RegisterEvent("PLAYER_FOCUS_CHANGED")
+            AuraContainer._dyn:RegisterEvent("UPDATE_MOUSEOVER_UNIT")
+            AuraContainer._dyn:SetScript("OnEvent", function(self, event)
+                for h in pairs(self._handles) do
+                    if h._destroyed then
+                        self._handles[h] = nil
+                    elseif h._dynPrefix and DYN_EVENT[h._dynPrefix] == event then
+                        h:Refresh()
+                    end
+                end
+            end)
+        end
+        AuraContainer._dyn._handles[self] = true
+    elseif AuraContainer._dyn then
+        AuraContainer._dyn._handles[self] = nil
+    end
+end
+
 function Handle:Destroy()
     self._pendingOp = nil
+    if AuraContainer._dyn then AuraContainer._dyn._handles[self] = nil end
     if self.container then
         pcall(function() self.container:RemoveAllAuraFrames() end)
         self.container:Hide()
@@ -611,6 +664,8 @@ function Handle:_build()
         DF:Debug(DBG, "built unit=%s mode=%s filters=%d frames=%d",
             tostring(config.unit), tostring(config.mode or "row"), #filters, c:GetAuraFrameCount())
     end)
+
+    self:_updateDynRefresh()   -- auto-bounce on target/focus/mouseover change
 end
 
 -- ============================================================
@@ -626,6 +681,7 @@ end
 --   spellIDs = { 774, ... },                    -- PTR-4 only; accepted + no-op now
 --   max      = 5,
 --   enabled  = true,
+--   autoRefresh = true,                          -- default on for target/focus/mouseover units
 --   sort     = { rule, direction },             -- PTR-4 only; accepted + no-op now
 --   layout   = { anchor, growth, wrap, size|sizeX|sizeY, spacing|spacingX|spacingY, offsetX, offsetY },
 --   style    = { icon, border, cooldown, duration, stacks, bar, spellName, dispel, overlay },
