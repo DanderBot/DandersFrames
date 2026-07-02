@@ -385,12 +385,13 @@ function DF:InvalidateAbsorbLayout(frame)
 end
 
 -- Edge inset for absorb / heal-absorb overlays. Returns 0 (flush to the health
--- bar) when the frame border is off or fully OPAQUE — the border frame level is
--- well above the absorb bar, so an opaque border draws over a flush overlay and
--- the shield covers the health fill exactly with nothing showing through. Returns
--- the pixel-snapped border size when the border is TRANSLUCENT, so the shield
--- doesn't bleed through the border's edge band. dfReducedMaxHealthClipping => 0
--- (the clip edge is internal, no border there).
+-- bar) when the frame border is off or fully OPAQUE. This works by Z-ORDER, not
+-- geometry: the border frame draws at parent frame level +10 while the absorb
+-- overlay is only +2/+3, so an opaque border paints OVER a flush overlay and the
+-- shield covers the health fill exactly with nothing showing through — no inset
+-- needed. Returns the pixel-snapped border size only when the border is
+-- TRANSLUCENT, so the shield doesn't bleed through the border's edge band.
+-- dfReducedMaxHealthClipping => 0 (the clip edge is internal, no border there).
 function DF:GetAbsorbEdgeInset(frame, db)
     if not db or db.frameShowBorder == false then return 0 end
     local bc = db.frameBorderColor

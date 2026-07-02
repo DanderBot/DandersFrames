@@ -1318,18 +1318,29 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- are at their crispest. Tell the user that value (and whether they're already
         -- there) — purely informational, we never change their scale for them.
         do
-            local _, physH = GetPhysicalScreenSize()
-            local recScale = (physH and physH > 0) and (768 / physH) or 1
-            local pp = (DF.GetPixelScale and DF:GetPixelScale()) or 1
-            local hintText
-            if math.abs(pp - 1) < 0.01 then
-                hintText = L["Your UI Scale is already pixel-perfect for this resolution."]
-            else
-                hintText = string.format(
+            local function computeScaleHint()
+                local _, physH = GetPhysicalScreenSize()
+                local recScale = (physH and physH > 0) and (768 / physH) or 1
+                local pp = (DF.GetPixelScale and DF:GetPixelScale()) or 1
+                if math.abs(pp - 1) < 0.01 then
+                    return L["Your UI Scale is already pixel-perfect for this resolution."]
+                end
+                return string.format(
                     L["Tip: for the crispest result at this resolution, set your UI Scale to %.4f — type /console UIScale %.4f to apply it (it may be below the in-game slider's minimum)."],
                     recScale, recScale)
             end
-            renderingGroup:AddWidget(GUI:CreateLabel(self.child, hintText, 250), 45)
+            local scaleHint = GUI:CreateLabel(self.child, computeScaleHint(), 250)
+            -- Recompute on page refresh so the hint isn't stale after a resolution or
+            -- UI-scale change (GetPixelScale is re-cached on those events). Idempotent
+            -- SetText — only writes when the text actually changed — so no relayout loop.
+            scaleHint.refreshContent = function()
+                local t = computeScaleHint()
+                if t ~= scaleHint._dfLastHint then
+                    scaleHint._dfLastHint = t
+                    scaleHint:SetText(t)
+                end
+            end
+            renderingGroup:AddWidget(scaleHint, 45)
         end
         Add(renderingGroup, nil, 1)
 

@@ -1474,8 +1474,6 @@ L["Size & Spacing"] = true
 L["Skyfury (Shaman)"] = true
 L["Smooth Bar Animation"] = true
 L["Snaps sizes and borders to exact pixels for crisp rendering."] = true
-L["Your UI Scale is already pixel-perfect for this resolution."] = true
-L["Tip: for the crispest result at this resolution, set your UI Scale to %.4f — type /console UIScale %.4f to apply it (it may be below the in-game slider's minimum)."] = true
 L["Solid"] = true
 L["Solid (BLEND)"] = true
 L["Solid Border"] = true
@@ -1574,6 +1572,7 @@ L["Threat Colors"] = true
 L["Time Remaining"] = true
 L["Tint Color"] = true
 L["Tint Opacity"] = true
+L["Tip: for the crispest result at this resolution, set your UI Scale to %.4f — type /console UIScale %.4f to apply it (it may be below the in-game slider's minimum)."] = true
 L["to customise\nthis profile's settings"] = true
 L["To blacklist specific auras, see the Aura Blacklist tab."] = true
 L["To reposition: Unlock frames (/df unlock) and drag the mover."] = true
@@ -2065,6 +2064,7 @@ L["This Battle.net friend could not be matched after an update. Remove this rule
 L["This only changes who controls names on DandersFrames frames - you can change it later in Nicknames settings."] = true
 L["Use %s nicknames"] = true
 L["You are not in a guild."] = true
+L["Your UI Scale is already pixel-perfect for this resolution."] = true
 L["Your nickname (broadcast)"] = true
 
 -- Localization gap fixes (community zhTW pass): strings previously hardcoded in English
