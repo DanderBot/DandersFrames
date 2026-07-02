@@ -748,6 +748,11 @@ function DF:GetRoleIconTexture(db, role)
             return atlas  -- atlas name, no texcoords
         end
         local c = BLIZZARD_ROLE_COORDS[role]
+        -- Unknown/missing role (e.g. "NONE" or nil for a roleless unit): no icon.
+        -- Callers pass the result to SetIconTextureOrAtlas, which no-ops on nil.
+        -- Guard prevents indexing a nil coord table (a roleless test/raid unit
+        -- otherwise crashed GetRoleIconTexture).
+        if not c then return nil end
         return "Interface\\LFGFrame\\UI-LFG-ICON-PORTRAITROLES", c[1], c[2], c[3], c[4]
     end
 end

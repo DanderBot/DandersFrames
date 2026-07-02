@@ -1223,12 +1223,15 @@ function DF:UpdateTestIcons(frame, testData)
     -- Role Icon
     if frame.roleIcon then
         local role = testData.role
-        local shouldShow = true
-        
+        -- Only TANK/HEALER/DAMAGER have a role icon; a nil/"NONE" role shows none
+        -- (matches live StatusIcons and avoids GetRoleIconTexture indexing a nil
+        -- coord table for a roleless test unit).
+        local shouldShow = (role == "TANK" or role == "HEALER" or role == "DAMAGER")
+
         -- In test mode (out of combat), if "Only Apply Settings in Combat" is checked, show all icons
         local applySettings = not db.roleIconOnlyInCombat
-        
-        if applySettings then
+
+        if shouldShow and applySettings then
             if role == "TANK" then
                 shouldShow = db.roleIconShowTank ~= false
             elseif role == "HEALER" then
