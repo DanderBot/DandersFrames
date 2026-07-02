@@ -143,7 +143,7 @@ function CC:ShowAddBindingDialog(onComplete, existingBinding, existingIndex)
         macWarning:SetPoint("TOPLEFT", keyCaptureBtn, "BOTTOMLEFT", 0, -2)
         macWarning:SetWidth(390)
         macWarning:SetJustifyH("LEFT")
-        macWarning:SetText("|cFFFF4444Note:|r " .. L["Cmd + Left Click unavailable on Mac"])
+        macWarning:SetText(("|c" .. DF.GUI:ToneHex("caution") .. "Note:|r ") .. L["Cmd + Left Click unavailable on Mac"])
         macWarning:SetTextColor(0.6, 0.6, 0.6)
         yOffset = yOffset - 12  -- Extra space for the warning
     end
@@ -928,7 +928,7 @@ function CC:CreateEditBindingPanel()
     macWarning:SetPoint("RIGHT", clearBindBtn, "RIGHT", 0, 0)
     macWarning:SetJustifyH("LEFT")
     macWarning:SetWordWrap(false)
-    macWarning:SetText("|cFFFF4444Note:|r " .. L["Cmd + Left Click unavailable on Mac"])
+    macWarning:SetText(("|c" .. DF.GUI:ToneHex("caution") .. "Note:|r ") .. L["Cmd + Left Click unavailable on Mac"])
     macWarning:SetTextColor(0.6, 0.6, 0.6)
     if IsMacClient and IsMacClient() then
         macWarning:Show()
@@ -1182,7 +1182,7 @@ function CC:CreateEditBindingPanel()
     fallbackSubtitle:SetWidth(280)
     fallbackSubtitle:SetJustifyH("LEFT")
     fallbackSubtitle:SetWordWrap(true)
-    fallbackSubtitle:SetText(format(L["For nameplates & world units. %sDoes not work with action bar binds.%s"], "|cffff3333", "|r"))
+    fallbackSubtitle:SetText(format(L["For nameplates & world units. %sDoes not work with action bar binds.%s"], "|c" .. DF.GUI:ToneHex("caution"), "|r"))
     fallbackSubtitle:SetTextColor(0.5, 0.5, 0.5)
     panel.fallbackSubtitle = fallbackSubtitle
     
@@ -1498,11 +1498,11 @@ end
 -- Show warning about Mac Command+Left Click not working
 function CC:ShowMacMetaClickWarning()
     StaticPopupDialogs["DF_MAC_META_CLICK_WARNING"] = {
-        text = "|cffff9900" .. L["Mac Limitation"] .. "|r\n\n" ..
+        text = "|c" .. DF.GUI:ToneHex("caution") .. L["Mac Limitation"] .. "|r\n\n" ..
                L["Command + Left Click bindings do not work on macOS. "] ..
                L["This is a World of Warcraft client limitation, not an addon bug."] .. "\n\n" ..
                L["The binding will be saved, but it will not trigger in-game."] .. "\n\n" ..
-               "|cff88ff88" .. L["Recommendation:"] .. "|r " .. L["Use "] .. "|cffffffff" .. L["Option (Alt)"] .. "|r " .. L["or "] .. "|cffffffff" .. L["Control"] .. "|r " .. L["instead of Command for left click modifiers."],
+               "|c" .. DF.GUI:ToneHex("success") .. L["Recommendation:"] .. "|r " .. L["Use "] .. "|cffffffff" .. L["Option (Alt)"] .. "|r " .. L["or "] .. "|cffffffff" .. L["Control"] .. "|r " .. L["instead of Command for left click modifiers."],
         button1 = L["OK"],
         timeout = 0,
         whileDead = true,
@@ -1973,7 +1973,7 @@ function CC:FinalizeSaveBinding()
         
         -- Show warning popup
         StaticPopupDialogs["DF_KEY_CONFLICT_WARNING"] = {
-            text = "|cffff4444" .. L["Warning:"] .. "|r " .. keyText .. " " .. L["is already bound to:"] .. "\n\n" .. conflictDesc .. "\n\n" .. L["Multiple bindings on the same key may not work as expected. Save anyway?"],
+            text = "|c" .. DF.GUI:ToneHex("danger") .. L["Warning:"] .. "|r " .. keyText .. " " .. L["is already bound to:"] .. "\n\n" .. conflictDesc .. "\n\n" .. L["Multiple bindings on the same key may not work as expected. Save anyway?"],
             button1 = L["Save Anyway"],
             button2 = L["Cancel"],
             OnAccept = function()
@@ -2151,7 +2151,7 @@ function CC:ProcessKeybind(bindType, key)
         
         -- Show warning popup
         StaticPopupDialogs["DF_QUICKBIND_CONFLICT_WARNING"] = {
-            text = "|cffff4444" .. L["Warning:"] .. "|r " .. keyText .. " " .. L["is already bound to:"] .. "\n\n" .. conflictDesc .. "\n\n" .. L["Multiple bindings on the same key may not work as expected. Save anyway?"],
+            text = "|c" .. DF.GUI:ToneHex("danger") .. L["Warning:"] .. "|r " .. keyText .. " " .. L["is already bound to:"] .. "\n\n" .. conflictDesc .. "\n\n" .. L["Multiple bindings on the same key may not work as expected. Save anyway?"],
             button1 = L["Save Anyway"],
             button2 = L["Cancel"],
             OnAccept = function()

@@ -1974,7 +1974,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local infoGroup = GUI:CreateSettingsGroup(self.child, 280)
         infoGroup:AddWidget(GUI:CreateHeader(self.child, L["Affected Elements"]), 40)
         infoGroup:AddWidget(GUI:CreateLabel(self.child, L["• Text Designer (Name, Health, Status & custom text)\n• Buff Stack & Duration\n• Debuff Stack & Duration\n• Pet Frame Text\n• Targeted Spell Duration\n• Defensive Icon Duration\n• All Icon Text (Res, Summon, etc.)\n• Group Labels (Raid)\n• Targeted List\n• Personal Targeted Spell\n• Aura Designer Indicators\n• Pinned Frames"], 250), 235)
-        infoGroup:AddWidget(GUI:CreateLabel(self.child, "|cFFFF4444Note:|r " .. L["Font sizes are not changed. Adjust sizes in each element's page."], 250), 40)
+        infoGroup:AddWidget(GUI:CreateNote(self.child, L["Font sizes are not changed. Adjust sizes in each element's page."], {tone = "caution", prefix = "Note", width = 250}), 40)
         Add(infoGroup, nil, 2)
     end)
     
@@ -2058,7 +2058,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         partyMsg.hideOn = function() return GUI.SelectedMode == "raid" end
         
         -- Flat mode message
-        local flatMsg = Add(GUI:CreateLabel(self.child, L["Group labels are not available in Flat Grid layout.\n\nEnable 'Use Group-Based Layout' in Frame settings\nto use group labels."], 400), 80, "both")
+        local flatMsg = Add(GUI:CreateNote(self.child, L["Group labels are not available in Flat Grid layout.\n\nEnable 'Use Group-Based Layout' in Frame settings\nto use group labels."], {tone = "caution", width = 400}), 80, "both")
         flatMsg.hideOn = function() return GUI.SelectedMode ~= "raid" or db.raidUseGroups end
     end)
     
@@ -3906,7 +3906,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         if FrameSortApi then
             local frameSortGroup = GUI:CreateSettingsGroup(self.child, 280)
             frameSortGroup:AddWidget(GUI:CreateHeader(self.child, L["FrameSort Integration"]), 40)
-            frameSortGroup:AddWidget(GUI:CreateLabel(self.child, format(L["FrameSort addon detected. Enable to let FrameSort control frame ordering.\n\n%sExperimental:%s This feature is new and may not work perfectly in all scenarios. Please report any issues."], "|cFFFF8800", "|r"), 250), 70)
+            frameSortGroup:AddWidget(GUI:CreateLabel(self.child, format(L["FrameSort addon detected. Enable to let FrameSort control frame ordering.\n\n%sExperimental:%s This feature is new and may not work perfectly in all scenarios. Please report any issues."], "|c" .. GUI:ToneHex("caution"), "|r"), 250), 70)
             frameSortGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Use FrameSort Addon"], db, "useFrameSort", function()
                 -- Set both modes simultaneously
                 local partyDB = DF:GetDB("party")
@@ -4068,7 +4068,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end), 30)
         tsDisableMouse.disableOn = function(d) return not d.targetedSpellEnabled end
         
-        clickThroughGroup:AddWidget(GUI:CreateLabel(self.child, "|cFFFF4444Note:|r " .. L["Click-through icons will not show tooltips."], 250), 25)
+        clickThroughGroup:AddWidget(GUI:CreateNote(self.child, L["Click-through icons will not show tooltips."], {tone = "caution", prefix = "Note", width = 250}), 25)
         
         Add(clickThroughGroup, nil, 1)
         
@@ -5458,8 +5458,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- ===== WARNING BANNER: All Debuffs disabled =====
         local debuffWarningBanner = GUI:CreateInfoBanner(self.child, {
-            tone = "caution",
-            fontTemplate = "DFFontNormal",
+            tone = "info",
             text = L["Recommended: enable 'All Debuffs' to see all relevant debuffs, especially for healers."],
         })
         debuffWarningBanner.hideOn = function(d)
@@ -5682,7 +5681,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Border Group (col1)
         local borderGroup = GUI:CreateSettingsGroup(self.child, 260)
         borderGroup:AddWidget(GUI:CreateHeader(self.child, L["Border"]), 40)
-        local buffMasqueNote = borderGroup:AddWidget(GUI:CreateLabel(self.child, "|cffff9900" .. L["Borders controlled by Masque."] .. "|r " .. L["See Integrations."], 230), 30)
+        local buffMasqueNote = borderGroup:AddWidget(GUI:CreateNote(self.child, L["Borders controlled by Masque."] .. " " .. L["See Integrations."], {tone = "caution", width = 230}), 30)
         buffMasqueNote.hideOn = function(d) return not MasqueControlsBorders(d) end
         -- Full border toolkit via the unified helper (Stage 5.5 Phase 2).  No
         -- class/role colour (aura indicators aren't unit-class).  Hidden when
@@ -5899,7 +5898,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Border Group (col1)
         local borderGroup = GUI:CreateSettingsGroup(self.child, 260)
         borderGroup:AddWidget(GUI:CreateHeader(self.child, L["Border"]), 40)
-        local debuffMasqueNote = borderGroup:AddWidget(GUI:CreateLabel(self.child, "|cffff9900" .. L["Borders controlled by Masque."] .. "|r " .. L["See Integrations."], 230), 30)
+        local debuffMasqueNote = borderGroup:AddWidget(GUI:CreateNote(self.child, L["Borders controlled by Masque."] .. " " .. L["See Integrations."], {tone = "caution", width = 230}), 30)
         debuffMasqueNote.hideOn = function(d) return not MasqueControlsBorders(d) end
         -- Full border toolkit via the unified helper (Stage 5.5 Phase 2).  When
         -- "Color by Dispel Type" (below) is ON, the border is forced SOLID and
@@ -6116,7 +6115,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         stackNoteLabel:SetPoint("TOPLEFT", stackNoteContainer, "TOPLEFT", 0, 0)
         stackNoteLabel:SetWidth(250)
         stackNoteLabel:SetJustifyH("LEFT")
-        stackNoteLabel:SetText("|cFFFF4444Note:|r " .. L["Icons smaller than 30 may hide stack text behind duration text. At small sizes, consider disabling duration numbers."])
+        stackNoteLabel:SetText(("|c" .. GUI:ToneHex("caution") .. "Note:|r ") .. L["Icons smaller than 30 may hide stack text behind duration text. At small sizes, consider disabling duration numbers."])
+        -- Match the note look: gold "Note:" prefix + dim body (this font defaults to
+        -- gold, which made the whole body gold instead of the CreateNote dim body).
+        stackNoteLabel:SetTextColor(GUI.Colors.textDim.r, GUI.Colors.textDim.g, GUI.Colors.textDim.b)
         local showMeBtn = CreateFrame("Button", nil, stackNoteContainer, "BackdropTemplate")
         showMeBtn:SetPoint("TOPLEFT", stackNoteLabel, "BOTTOMLEFT", 0, -4)
         GUI:StyleButton(showMeBtn, { width = 55, height = 18, text = "|cFFFFFF00" .. L["Show me"] .. "|r" })
@@ -6131,7 +6133,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             if DF.PreviewPrivateAuraAnchors then DF:PreviewPrivateAuraAnchors() end
             if DF.UpdateAllTestBossDebuffs then DF:UpdateAllTestBossDebuffs() end
         end, true), 40)
-        sizeGroup:AddWidget(GUI:CreateLabel(self.child, "|cFFFFD100Tip:|r " .. L["Set border scale to a negative value to hide the border entirely."], 250), 50)
+        sizeGroup:AddWidget(GUI:CreateNote(self.child, L["Set border scale to a negative value to hide the border entirely."], {tone = "success", prefix = "Tip", width = 250}), 50)
         sizeGroup:AddWidget(GUI:CreateSlider(self.child, L["Spacing"], 0, 20, 1, db, "bossDebuffsSpacing", nil, function()
             if DF.UpdateAllPrivateAuraPositions then DF:UpdateAllPrivateAuraPositions() end
             if DF.UpdateAllTestBossDebuffs then DF:UpdateAllTestBossDebuffs() end
@@ -6550,7 +6552,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- ===== DISCLAIMER BANNER (full width) =====
         local tsDisclaimerBanner = GUI:CreateInfoBanner(self.child, {
-            tone = "info",
+            tone = "caution",
             text = L["Targeted Spells guesses who an enemy is targeting from their class, role, race, and sex. Members who share all four can't be told apart and won't show an icon."],
         })
         Add(tsDisclaimerBanner, tsDisclaimerBanner.layoutHeight, "both")
@@ -8585,7 +8587,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         Add(blizSection, 36, "both")
 
         local blizGroup = GUI:CreateSettingsGroup(self.child, 280)
-        blizGroup:AddWidget(GUI:CreateLabel(self.child, "|cFFFF4444Note:|r " .. L["This overlay is rendered by Blizzard and has limited customisation. It is separate from the DandersFrames overlay above."], 260), 60)
+        blizGroup:AddWidget(GUI:CreateNote(self.child, L["This overlay is rendered by Blizzard and has limited customisation. It is separate from the DandersFrames overlay above."], {tone = "caution", prefix = "Note", width = 260}), 60)
 
         local gradientDirOptions = {
             [0] = L["Top Edge"],
@@ -9377,7 +9379,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 confirmText = L["Create new profile '"] .. (profileName or L["Imported Profile"]) .. L["'?\n\nThis will copy your current settings, then apply the selected import categories on top."]
             else
                 local currentProfile = DF:GetCurrentProfile() or "Default"
-                confirmText = L["Import settings into current profile?\n\n"] .. "|cffff4444" .. L["WARNING: This will permanently overwrite settings in your '"] .. currentProfile .. L["' profile."] .. "|r\n\n" .. L["Tip: Check 'Create New Profile' to import without affecting your current settings."]
+                confirmText = L["Import settings into current profile?\n\n"] .. "|c" .. GUI:ToneHex("danger") .. L["WARNING: This will permanently overwrite settings in your '"] .. currentProfile .. L["' profile."] .. "|r\n\n" .. L["Tip: Check 'Create New Profile' to import without affecting your current settings."]
             end
             
             StaticPopupDialogs["DANDERSFRAMES_IMPORT_CONFIRM"] = {

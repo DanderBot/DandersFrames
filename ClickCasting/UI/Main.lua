@@ -1479,7 +1479,7 @@ function CC:CreateKeybindPopup()
     local isMac = IsMacClient and IsMacClient()
     local macWarning = popup:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     macWarning:SetPoint("TOP", instructions, "BOTTOM", 0, -4)
-    macWarning:SetText("|cFFFF4444Note:|r " .. L["Cmd + Left Click unavailable on Mac"])
+    macWarning:SetText("|c" .. DF.GUI:ToneHex("caution") .. "Note:|r " .. L["Cmd + Left Click unavailable on Mac"])
     macWarning:SetTextColor(0.6, 0.6, 0.6)
     if isMac then
         macWarning:Show()

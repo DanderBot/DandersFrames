@@ -799,6 +799,29 @@ function GUI:CreateLabel(parent, text, width, color)
     return frame
 end
 
+-- CreateNote: a lightweight LEVELLED note (NO box — that is CreateInfoBanner's
+-- job) for an inline caveat/tip attached to a field or section. It is the middle
+-- tier between a plain CreateLabel and a full banner.
+--   opts.tone    info | caution | danger | success — tints the note from the
+--                SAME palette as the banners (via ToneHex), so notes and banners
+--                speak one colour language. Omit for a neutral dim note.
+--   opts.prefix  optional lead word ("Note", "Warning", "Recommendation") shown
+--                in the tone colour, followed by ": " and the body in dim text.
+--   opts.width   wrap width.
+-- Returns a CreateLabel frame, so it is a drop-in anywhere a label goes.
+function GUI:CreateNote(parent, text, opts)
+    opts = opts or {}
+    local str
+    if opts.tone and opts.prefix then
+        str = "|c" .. self:ToneHex(opts.tone) .. opts.prefix .. ":|r " .. text
+    elseif opts.tone then
+        str = "|c" .. self:ToneHex(opts.tone) .. text .. "|r"
+    else
+        str = text
+    end
+    return self:CreateLabel(parent, str, opts.width)
+end
+
 -- Segmented button group: a row of mutually-exclusive buttons, one selected at
 -- a time. Each option shows a primary label and an optional subtitle on a
 -- second line. Selected button gets a themed border + tinted fill; unselected
@@ -944,11 +967,13 @@ end
 -- CreateInfoBanner
 -- ------------------------------------------------------------
 -- A self-resizing banner with an icon, body text, and a "tone"
--- (info / warning / caution / danger / success) that controls
--- background, border, default text colour, and default icon.
+-- (info / caution / danger / success) that controls background,
+-- border, default text colour, and default icon. ("warning" is a
+-- legacy alias of "caution".) Do NOT pass fontTemplate — banners
+-- share one font on purpose; only the tone should vary.
 --
 -- Usage:
---   local banner = GUI:CreateInfoBanner(parent, { tone = "warning", text = "..." })
+--   local banner = GUI:CreateInfoBanner(parent, { tone = "caution", text = "..." })
 --   Add(banner, banner.layoutHeight, "both")
 --
 -- Methods on the returned frame:
@@ -971,12 +996,8 @@ local INFO_BANNER_TONES = {
         icon = "info",
         textColor = {0.85, 0.85, 0.85},
     },
-    warning = {
-        bg = {0.25, 0.22, 0.10, 1},
-        border = {0.6, 0.55, 0.2, 0.6},
-        icon = "warning",
-        textColor = {1, 0.82, 0},
-    },
+    -- NOTE: "warning" was merged into "caution" (they were near-duplicate golds).
+    -- SetTone("warning") still resolves via the alias below for safety.
     caution = {
         bg = {0.5, 0.45, 0.1, 0.9},
         border = {0.7, 0.6, 0.1, 1},
@@ -986,7 +1007,8 @@ local INFO_BANNER_TONES = {
     danger = {
         bg = {0.6, 0.3, 0.1, 0.9},
         border = {0.8, 0.4, 0.1, 1},
-        icon = "warning", iconColor = {1, 0.6, 0.2},
+        -- icon kept a light warm (not the mid-orange bg hue) so the triangle pops
+        icon = "warning", iconColor = {1, 0.9, 0.72},
         textColor = {1, 0.85, 0.7},
     },
     success = {
@@ -996,6 +1018,22 @@ local INFO_BANNER_TONES = {
         textColor = {0.7, 1, 0.8},
     },
 }
+-- Legacy alias: "warning" was merged into "caution" (near-duplicate golds).
+INFO_BANNER_TONES.warning = INFO_BANNER_TONES.caution
+
+-- Hex accent ("ffRRGGBB", for inline |c...|r escapes) matching a banner tone, so
+-- inline caveat text (e.g. a warning word in a subtitle) reads as the SAME
+-- info/caution/danger/success language as the banners instead of an ad-hoc colour.
+-- Uses the tone's icon accent colour; defaults to caution.
+function GUI:ToneHex(toneName)
+    local t = INFO_BANNER_TONES[toneName] or INFO_BANNER_TONES.caution
+    local c = t.iconColor or t.textColor or {1, 1, 1}
+    return string.format("ff%02x%02x%02x",
+        math.floor((c[1] or 1) * 255 + 0.5),
+        math.floor((c[2] or 1) * 255 + 0.5),
+        math.floor((c[3] or 1) * 255 + 0.5))
+end
+
 local INFO_BANNER_ICON_PATH = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
 
 function GUI:CreateInfoBanner(parent, opts)
@@ -4533,7 +4571,7 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
     -- per active border, which adds up in 20-30 player raids.
     if showPerfBanner then
         local perfBanner = GUI:CreateInfoBanner(parent, {
-            tone = "warning",
+            tone = "caution",
             text = L["Animations run per-border and may impact FPS in larger raids. Use sparingly on high-priority alerts."],
             staticHeight = true,
             minHeight    = 56,
@@ -6426,18 +6464,14 @@ function GUI:CreateRoleOrderList(parent, dbTable, dbKey, callback, separateMelee
         local grip = CreateFrame("Frame", nil, parentFrame)
         grip:SetSize(12, 16)
         
-        for i = 1, 3 do
-            local line = grip:CreateTexture(nil, "ARTWORK")
-            line:SetSize(10, 2)
-            line:SetPoint("TOP", grip, "TOP", 0, -3 - (i - 1) * 5)
-            line:SetColorTexture(0.5, 0.5, 0.5, 1)
-            grip["line" .. i] = line
-        end
+        local icon = grip:CreateTexture(nil, "ARTWORK")
+        icon:SetAllPoints(grip)
+        icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\reorder")
+        icon:SetVertexColor(0.5, 0.5, 0.5, 1)
+        grip.icon = icon
         
         grip.SetGripColor = function(self, r, g, b)
-            for i = 1, 3 do
-                self["line" .. i]:SetColorTexture(r, g, b, 1)
-            end
+            self.icon:SetVertexColor(r, g, b, 1)
         end
         
         return grip
@@ -6751,18 +6785,14 @@ function GUI:CreateClassOrderList(parent, dbTable, dbKey, callback)
         local grip = CreateFrame("Frame", nil, parentFrame)
         grip:SetSize(10, 12)
         
-        for i = 1, 3 do
-            local line = grip:CreateTexture(nil, "ARTWORK")
-            line:SetSize(8, 1)
-            line:SetPoint("TOP", grip, "TOP", 0, -2 - (i - 1) * 4)
-            line:SetColorTexture(0.5, 0.5, 0.5, 1)
-            grip["line" .. i] = line
-        end
+        local icon = grip:CreateTexture(nil, "ARTWORK")
+        icon:SetAllPoints(grip)
+        icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\reorder")
+        icon:SetVertexColor(0.5, 0.5, 0.5, 1)
+        grip.icon = icon
         
         grip.SetGripColor = function(self, r, g, b)
-            for i = 1, 3 do
-                self["line" .. i]:SetColorTexture(r, g, b, 1)
-            end
+            self.icon:SetVertexColor(r, g, b, 1)
         end
         
         return grip
@@ -7057,18 +7087,14 @@ function GUI:CreateGroupOrderList(parent, dbTable, dbKey, callback, playerGroupF
         local grip = CreateFrame("Frame", nil, parentFrame)
         grip:SetSize(12, 14)
         
-        for i = 1, 3 do
-            local line = grip:CreateTexture(nil, "ARTWORK")
-            line:SetSize(10, 2)
-            line:SetPoint("TOP", grip, "TOP", 0, -2 - (i - 1) * 4)
-            line:SetColorTexture(0.5, 0.5, 0.5, 1)
-            grip["line" .. i] = line
-        end
+        local icon = grip:CreateTexture(nil, "ARTWORK")
+        icon:SetAllPoints(grip)
+        icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\reorder")
+        icon:SetVertexColor(0.5, 0.5, 0.5, 1)
+        grip.icon = icon
         
         grip.SetGripColor = function(self, r, g, b)
-            for i = 1, 3 do
-                self["line" .. i]:SetColorTexture(r, g, b, 1)
-            end
+            self.icon:SetVertexColor(r, g, b, 1)
         end
         
         return grip
@@ -7463,18 +7489,14 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
         local grip = CreateFrame("Frame", nil, parentFrame)
         grip:SetSize(12, 14)
         
-        for i = 1, 3 do
-            local line = grip:CreateTexture(nil, "ARTWORK")
-            line:SetSize(10, 2)
-            line:SetPoint("TOP", grip, "TOP", 0, -2 - (i - 1) * 4)
-            line:SetColorTexture(0.5, 0.5, 0.5, 1)
-            grip["line" .. i] = line
-        end
+        local icon = grip:CreateTexture(nil, "ARTWORK")
+        icon:SetAllPoints(grip)
+        icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\reorder")
+        icon:SetVertexColor(0.5, 0.5, 0.5, 1)
+        grip.icon = icon
         
         grip.SetGripColor = function(self, r, g, b)
-            for i = 1, 3 do
-                self["line" .. i]:SetColorTexture(r, g, b, 1)
-            end
+            self.icon:SetVertexColor(r, g, b, 1)
         end
         
         return grip
@@ -10361,7 +10383,7 @@ function DF:CreateGUI()
             -- of rendering any controls. Whitelisted pages (General, Profiles,
             -- Debug, Targeted List, Personal Targeted) always render normally.
             if GUI:IsTabDisabledForCurrentMode(self.tabName) then
-                local banner = GUI:CreateInfoBanner(parent, { tone = "warning" })
+                local banner = GUI:CreateInfoBanner(parent, { tone = "info" })
                 banner:SetText(GUI.SelectedMode == "raid"
                     and (L["Raid frames are currently disabled. Changes here will apply after re-enabling Raid in the General tab and reloading."])
                     or  (L["Party frames are currently disabled. Changes here will apply after re-enabling Party in the General tab and reloading."]))
