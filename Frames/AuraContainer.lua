@@ -669,6 +669,7 @@ function FakeBackend:build()
     end
     handle:_layoutSlots()
     self:_fill()
+    self:setEnabled(config.enabled ~= false)   -- honour disabled state (mirror Custom's SetEnabled)
     DF:Debug(DBG, "built (fake) unit=%s mode=%s slots=%d", tostring(config.unit), tostring(config.mode or "row"), n)
 end
 
@@ -779,8 +780,14 @@ function Handle:ApplyStyle(style)
         self.config.style = style
     end
     if self.config.mode ~= "overlay" then layoutRow(self) end
+    -- Re-run regions on every slot; re-bind natives only on a native backend (explicit via
+    -- isNativeSlots, not relying on plain frames incidentally lacking the setters).
+    local native = self.backend and self.backend:isNativeSlots()
     for _, b in ipairs(self.buttons) do
-        local ok, err = pcall(styleButton, b, self.config)
+        local ok, err = pcall(function()
+            styleButton_regions(b, self.config)
+            if native then bindNative(b, self.config) end
+        end)
         if not ok and not warnedRestyle then
             warnedRestyle = true
             DF:DebugWarn(DBG, "ApplyStyle restyle failed: %s", tostring(err))
@@ -841,7 +848,7 @@ function Handle:_updateDynRefresh()
     if prefix then
         if not AuraContainer._dyn then
             AuraContainer._dyn = CreateFrame("Frame")
-            AuraContainer._dyn._handles = {}
+            AuraContainer._dyn._handles = setmetatable({}, { __mode = "k" })
             AuraContainer._dyn:RegisterEvent("PLAYER_TARGET_CHANGED")
             AuraContainer._dyn:RegisterEvent("PLAYER_FOCUS_CHANGED")
             AuraContainer._dyn:RegisterEvent("UPDATE_MOUSEOVER_UNIT")
@@ -896,7 +903,7 @@ end
 function Handle:_registerRegen()
     if not AuraContainer._regen then
         AuraContainer._regen = CreateFrame("Frame")
-        AuraContainer._regen._handles = {}
+        AuraContainer._regen._handles = setmetatable({}, { __mode = "k" })
         AuraContainer._regen:RegisterEvent("PLAYER_REGEN_ENABLED")
         AuraContainer._regen:SetScript("OnEvent", function(self)
             for h in pairs(self._handles) do
@@ -1002,8 +1009,8 @@ function AuraContainer:Create(parent, config)
     cfg.mode = cfg.mode or "row"
 
     local h = setmetatable({ config = cfg, buttons = {} }, Handle)
-    AuraContainer._handles = AuraContainer._handles or {}
-    AuraContainer._handles[h] = true   -- registry so SetTestMode can rebuild every live handle
+    AuraContainer._handles = AuraContainer._handles or setmetatable({}, { __mode = "k" })
+    AuraContainer._handles[h] = true   -- weak-keyed registry so a dropped handle GCs (else rebuild-forever on test toggle)
     h.frame = CreateFrame("Frame", nil, parent)
     -- Both modes: h.frame occupies the unit-frame rect (row layout anchors are relative
     -- to it; overlay covers it). To reposition: h:ClearAllPoints() then h:SetPoint(...).
