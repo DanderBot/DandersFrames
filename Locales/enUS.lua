@@ -1572,6 +1572,7 @@ L["Threat Colors"] = true
 L["Time Remaining"] = true
 L["Tint Color"] = true
 L["Tint Opacity"] = true
+L["Tip: for the crispest result at this resolution, set your UI Scale to %.4f — type /console UIScale %.4f to apply it (it may be below the in-game slider's minimum)."] = true
 L["to customise\nthis profile's settings"] = true
 L["To blacklist specific auras, see the Aura Blacklist tab."] = true
 L["To reposition: Unlock frames (/df unlock) and drag the mover."] = true
@@ -1652,6 +1653,7 @@ L["X Mark"] = true
 L["X Size"] = true
 L["Yellow=high, Orange=highest, Red=tanking."] = true
 L["Yes"] = true
+L["Your UI Scale is already pixel-perfect for this resolution."] = true
 L["Z to A"] = true
 L["Zoom Icon"] = true
 L["%sGlobal: 80%s %s— Setting matches global, no override stored%s"] = true

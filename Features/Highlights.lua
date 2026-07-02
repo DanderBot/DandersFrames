@@ -301,6 +301,11 @@ local function ApplyHighlightStyle(ch, mode, thickness, inset, r, g, b, alpha, d
     local px = thickness * scale              -- desired thickness in pixels
     px = math.max(1, math.ceil(px - 0.01))    -- round up (with tiny epsilon for exact integers)
     thickness = px / scale
+    -- Snap the inset to whole screen pixels too, so the border edges land on the
+    -- physical grid (a fractional inset makes a 1px edge straddle two rows).
+    if inset and inset ~= 0 then
+        inset = math.floor(inset * scale + 0.5) / scale
+    end
     
     if mode == "NONE" then
         ch:Hide()

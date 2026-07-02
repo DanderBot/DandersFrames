@@ -28,6 +28,7 @@ A top-to-bottom rework of the configuration UI so every panel shares one consist
 * (Pinned Frames) Each set's **Horizontal/Vertical Spacing** now inherits from the based-on mode, overridable per set. (by Krathe)
 * (Options / Click Casting) Inline "Note:" labels are now consistent and no longer show a stray "?". (by Krathe)
 * (Click Casting) The binding **Priority** slider now reads left-to-right as High → Low and shows the priority number directly. The stored priority is unchanged — only the slider's display orientation changed. (by Krathe)
+* (Pixel Perfect) The Display page now shows the **UI Scale** that gives exact 1:1 pixel rendering at your resolution (or confirms you're already there) — purely informational, it never changes your scale. (by Krathe)
 
 ### Bug Fixes
 
@@ -36,6 +37,8 @@ A top-to-bottom rework of the configuration UI so every panel shares one consist
 * (Raid) Test mode and settings changes can no longer disturb your **live** raid frames — group order and positions are always driven by the secure layout, fixing the grouped-raid inversion that previously needed a `/reload`. (by Krathe)
 * (Raid) Retired an obsolete internal reverse-group-order setting that could invert raid groups; group order is controlled entirely by **Group Display Order** / **My Group First**. (by Krathe)
 * (Borders) **Border Inset** is now honoured by texture-style borders, and updates live. (by Krathe)
+* (Shields) Absorb and heal-absorb overlays now cover the health bar with **no gap** — flush to the edge when the frame border is opaque or off, keeping a small inset only when the border is translucent (so the shield doesn't show through it). (by Krathe)
+* (Pixel Perfect) **Center-aligned** frames now snap to the physical pixel grid, so borders stay crisp instead of doubling or dropping a side — party frames live, and raid frames in test mode (live raid keeps Blizzard's secure positioning). The overshield line indicator and the solid highlight border snap to whole pixels too. (by Krathe)
 * (Text) Fixed a stray health value (often a "%") appearing for users who never turned health text on. (by Krathe)
 * (Nicknames) Fixed an error matching nicknames against boss/NPC names on pinned frames in encounters.
 * (Localization) Test Mode, position, grid, Text/Aura Designer and auto-profile labels now translate properly.

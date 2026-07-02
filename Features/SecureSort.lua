@@ -3273,7 +3273,11 @@ function SecureSort:PositionFrameToSlot(frame, slotIndex, frameCount, layoutPara
     
     frame:ClearAllPoints()
     frame:SetPoint(anchor, container, relativeAnchor, x, y)
-    
+    -- Pixel-perfect: land the frame's edges on the physical grid. The CENTER growth
+    -- anchor computes offsets via /2, which can fall on a half-pixel and make a 1px
+    -- border straddle two physical rows; this nudges it back on-grid (bounded ≤0.5px).
+    DF:SnapPointToPixelGrid(frame, (DF:GetFrameDB(frame) or {}).pixelPerfect)
+
     DebugPrint("Positioned frame to slot " .. slotIndex .. " at (" .. x .. ", " .. y .. ")")
     return true
 end
@@ -3331,14 +3335,18 @@ function SecureSort:PositionRaidFrameToSlot(frame, slotIndex, frameCount, layout
     local currentAnchor, currentRelTo, currentRelAnchor, currentX, currentY = frame:GetPoint(1)
     if currentAnchor == anchor and currentRelAnchor == relativeAnchor 
        and currentX and currentY
-       and math.abs(currentX - x) < 0.5 and math.abs(currentY - y) < 0.5 then
+       and math.abs(currentX - x) <= 0.5 and math.abs(currentY - y) <= 0.5 then
         -- Frame is already in position, skip
         return false
     end
     
     frame:ClearAllPoints()
     frame:SetPoint(anchor, container, relativeAnchor, x, y)
-    
+    -- Pixel-perfect: land the frame's edges on the physical grid. The CENTER grid
+    -- anchor computes offsets via /2, which can fall on a half-pixel and make a 1px
+    -- border straddle two physical rows; this nudges it back on-grid (bounded ≤0.5px).
+    DF:SnapPointToPixelGrid(frame, (DF:GetFrameDB(frame) or {}).pixelPerfect)
+
     return true
 end
 
@@ -3848,12 +3856,16 @@ function SecureSort:PositionRaidFrameToGroupSlot(frame, groupNum, posInGroup, pl
     local currentAnchor, _, currentRelAnchor, currentX, currentY = frame:GetPoint(1)
     if currentAnchor == "TOPLEFT" and currentRelAnchor == "TOPLEFT"
        and currentX and currentY
-       and math.abs(currentX - x) < 0.5 and math.abs(currentY - y) < 0.5 then
+       and math.abs(currentX - x) <= 0.5 and math.abs(currentY - y) <= 0.5 then
         return false
     end
 
     frame:ClearAllPoints()
     frame:SetPoint("TOPLEFT", container, "TOPLEFT", x, y)
+    -- Pixel-perfect: land the frame's edges on the physical grid (no-op for the
+    -- TOPLEFT stride math, but keeps grouped test frames consistent with party/flat
+    -- and covers any CENTER growth-anchor offset that lands on a half-pixel).
+    DF:SnapPointToPixelGrid(frame, (DF:GetFrameDB(frame) or {}).pixelPerfect)
 
     return true
 end

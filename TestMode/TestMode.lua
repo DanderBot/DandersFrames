@@ -2456,6 +2456,7 @@ function DF:UpdateTestAbsorb(frame, testData)
             if db.frameShowBorder ~= false then
                 inset = frame.dfReducedMaxHealthClipping and 0 or (db.frameBorderSize or 1)  -- 0 when clipped: the clip edge is internal, no frame border there
             end
+            if db.pixelPerfect and DF.PixelPerfect then inset = DF:PixelPerfect(inset) end
             
             local barWidth = frame.healthBar:GetWidth() - (inset * 2)
             local barHeight = frame.healthBar:GetHeight() - (inset * 2)
@@ -2509,27 +2510,28 @@ function DF:UpdateTestAbsorb(frame, testData)
                 local texEnd = healthPercent + clampedAbsorbPercent
                 
                 if healthFillTexture then
+                    local edgeInset = DF:GetAbsorbEdgeInset(frame, db)
                     if healthOrient == "HORIZONTAL" then
-                        attachedTex:SetPoint("TOPLEFT", healthFillTexture, "TOPRIGHT", 0, 0)
-                        attachedTex:SetPoint("BOTTOMLEFT", healthFillTexture, "BOTTOMRIGHT", 0, 0)
+                        attachedTex:SetPoint("TOPLEFT", healthFillTexture, "TOPRIGHT", 0, -edgeInset)
+                        attachedTex:SetPoint("BOTTOMLEFT", healthFillTexture, "BOTTOMRIGHT", 0, edgeInset)
                         attachedTex:SetWidth(absorbWidth)
                         -- TexCoord: left, right, top, bottom
                         attachedTex:SetTexCoord(texStart, texEnd, 0, 1)
                     elseif healthOrient == "HORIZONTAL_INV" then
-                        attachedTex:SetPoint("TOPRIGHT", healthFillTexture, "TOPLEFT", 0, 0)
-                        attachedTex:SetPoint("BOTTOMRIGHT", healthFillTexture, "BOTTOMLEFT", 0, 0)
+                        attachedTex:SetPoint("TOPRIGHT", healthFillTexture, "TOPLEFT", 0, -edgeInset)
+                        attachedTex:SetPoint("BOTTOMRIGHT", healthFillTexture, "BOTTOMLEFT", 0, edgeInset)
                         attachedTex:SetWidth(absorbWidth)
                         -- For reversed, flip the texture coords
                         attachedTex:SetTexCoord(1 - texStart, 1 - texEnd, 0, 1)
                     elseif healthOrient == "VERTICAL" then
-                        attachedTex:SetPoint("BOTTOMLEFT", healthFillTexture, "TOPLEFT", 0, 0)
-                        attachedTex:SetPoint("BOTTOMRIGHT", healthFillTexture, "TOPRIGHT", 0, 0)
+                        attachedTex:SetPoint("BOTTOMLEFT", healthFillTexture, "TOPLEFT", edgeInset, 0)
+                        attachedTex:SetPoint("BOTTOMRIGHT", healthFillTexture, "TOPRIGHT", -edgeInset, 0)
                         attachedTex:SetHeight(absorbHeight)
                         -- Vertical: adjust top/bottom coords
                         attachedTex:SetTexCoord(0, 1, 1 - texEnd, 1 - texStart)
                     elseif healthOrient == "VERTICAL_INV" then
-                        attachedTex:SetPoint("TOPLEFT", healthFillTexture, "BOTTOMLEFT", 0, 0)
-                        attachedTex:SetPoint("TOPRIGHT", healthFillTexture, "BOTTOMRIGHT", 0, 0)
+                        attachedTex:SetPoint("TOPLEFT", healthFillTexture, "BOTTOMLEFT", edgeInset, 0)
+                        attachedTex:SetPoint("TOPRIGHT", healthFillTexture, "BOTTOMRIGHT", -edgeInset, 0)
                         attachedTex:SetHeight(absorbHeight)
                         attachedTex:SetTexCoord(0, 1, texStart, texEnd)
                     end
@@ -2639,6 +2641,7 @@ function DF:UpdateTestAbsorb(frame, testData)
             if db.frameShowBorder ~= false then
                 inset = frame.dfReducedMaxHealthClipping and 0 or (db.frameBorderSize or 1)  -- 0 when clipped: the clip edge is internal, no frame border there
             end
+            if db.pixelPerfect and DF.PixelPerfect then inset = DF:PixelPerfect(inset) end
             
             local barWidth = frame.healthBar:GetWidth() - (inset * 2)
             local barHeight = frame.healthBar:GetHeight() - (inset * 2)
@@ -2693,9 +2696,10 @@ function DF:UpdateTestAbsorb(frame, testData)
                     overflowTex:SetVertTile(false)
                 end
                 
-                -- Position like OVERLAY mode
-                overflowBar:SetPoint("TOPLEFT", frame.healthBar, "TOPLEFT", inset, -inset)
-                overflowBar:SetPoint("BOTTOMRIGHT", frame.healthBar, "BOTTOMRIGHT", -inset, inset)
+                -- Position like OVERLAY mode — flush when opaque/off, inset when translucent
+                local overflowInset = DF:GetAbsorbEdgeInset(frame, db)
+                overflowBar:SetPoint("TOPLEFT", frame.healthBar, "TOPLEFT", overflowInset, -overflowInset)
+                overflowBar:SetPoint("BOTTOMRIGHT", frame.healthBar, "BOTTOMRIGHT", -overflowInset, overflowInset)
                 
                 local maxHealth = testData.maxHealth or 100000
                 overflowBar:SetMinMaxValues(0, maxHealth)
@@ -2748,24 +2752,25 @@ function DF:UpdateTestAbsorb(frame, testData)
                     local texEnd = healthPercent + clampedAbsorbPercent
                     
                     if healthFillTexture then
+                        local edgeInset = DF:GetAbsorbEdgeInset(frame, db)
                         if healthOrient == "HORIZONTAL" then
-                            attachedTex:SetPoint("TOPLEFT", healthFillTexture, "TOPRIGHT", 0, 0)
-                            attachedTex:SetPoint("BOTTOMLEFT", healthFillTexture, "BOTTOMRIGHT", 0, 0)
+                            attachedTex:SetPoint("TOPLEFT", healthFillTexture, "TOPRIGHT", 0, -edgeInset)
+                            attachedTex:SetPoint("BOTTOMLEFT", healthFillTexture, "BOTTOMRIGHT", 0, edgeInset)
                             attachedTex:SetWidth(absorbWidth)
                             attachedTex:SetTexCoord(texStart, texEnd, 0, 1)
                         elseif healthOrient == "HORIZONTAL_INV" then
-                            attachedTex:SetPoint("TOPRIGHT", healthFillTexture, "TOPLEFT", 0, 0)
-                            attachedTex:SetPoint("BOTTOMRIGHT", healthFillTexture, "BOTTOMLEFT", 0, 0)
+                            attachedTex:SetPoint("TOPRIGHT", healthFillTexture, "TOPLEFT", 0, -edgeInset)
+                            attachedTex:SetPoint("BOTTOMRIGHT", healthFillTexture, "BOTTOMLEFT", 0, edgeInset)
                             attachedTex:SetWidth(absorbWidth)
                             attachedTex:SetTexCoord(1 - texStart, 1 - texEnd, 0, 1)
                         elseif healthOrient == "VERTICAL" then
-                            attachedTex:SetPoint("BOTTOMLEFT", healthFillTexture, "TOPLEFT", 0, 0)
-                            attachedTex:SetPoint("BOTTOMRIGHT", healthFillTexture, "TOPRIGHT", 0, 0)
+                            attachedTex:SetPoint("BOTTOMLEFT", healthFillTexture, "TOPLEFT", edgeInset, 0)
+                            attachedTex:SetPoint("BOTTOMRIGHT", healthFillTexture, "TOPRIGHT", -edgeInset, 0)
                             attachedTex:SetHeight(absorbHeight)
                             attachedTex:SetTexCoord(0, 1, 1 - texEnd, 1 - texStart)
                         elseif healthOrient == "VERTICAL_INV" then
-                            attachedTex:SetPoint("TOPLEFT", healthFillTexture, "BOTTOMLEFT", 0, 0)
-                            attachedTex:SetPoint("TOPRIGHT", healthFillTexture, "BOTTOMRIGHT", 0, 0)
+                            attachedTex:SetPoint("TOPLEFT", healthFillTexture, "BOTTOMLEFT", edgeInset, 0)
+                            attachedTex:SetPoint("TOPRIGHT", healthFillTexture, "BOTTOMRIGHT", -edgeInset, 0)
                             attachedTex:SetHeight(absorbHeight)
                             attachedTex:SetTexCoord(0, 1, texStart, texEnd)
                         end
@@ -2821,13 +2826,10 @@ function DF:UpdateTestAbsorb(frame, testData)
             local healthLevel = frame.healthBar:GetFrameLevel()
             customBar:SetFrameLevel(healthLevel + 2)
             
-            -- Inset by border size if frame border is enabled to avoid overlap
-            local inset = 0
-            if db.frameShowBorder ~= false then
-                inset = frame.dfReducedMaxHealthClipping and 0 or (db.frameBorderSize or 1)  -- 0 when clipped: the clip edge is internal, no frame border there
-            end
-            customBar:SetPoint("TOPLEFT", frame.healthBar, "TOPLEFT", inset, -inset)
-            customBar:SetPoint("BOTTOMRIGHT", frame.healthBar, "BOTTOMRIGHT", -inset, inset)
+            -- Cover the health fill: flush when opaque/off, inset when translucent.
+            local overlayInset = DF:GetAbsorbEdgeInset(frame, db)
+            customBar:SetPoint("TOPLEFT", frame.healthBar, "TOPLEFT", overlayInset, -overlayInset)
+            customBar:SetPoint("BOTTOMRIGHT", frame.healthBar, "BOTTOMRIGHT", -overlayInset, overlayInset)
             if customBar.bg then customBar.bg:Hide() end
             
             local healthOrient = db.healthOrientation or "HORIZONTAL"
@@ -2996,6 +2998,7 @@ function DF:UpdateTestHealAbsorb(frame, testData)
             if db.frameShowBorder ~= false then
                 inset = frame.dfReducedMaxHealthClipping and 0 or (db.frameBorderSize or 1)  -- 0 when clipped: the clip edge is internal, no frame border there
             end
+            if db.pixelPerfect and DF.PixelPerfect then inset = DF:PixelPerfect(inset) end
             
             local barWidth = frame.healthBar:GetWidth() - (inset * 2)
             local barHeight = frame.healthBar:GetHeight() - (inset * 2)
@@ -3044,28 +3047,29 @@ function DF:UpdateTestHealAbsorb(frame, testData)
                 local texEnd = healthPercent
                 
                 if healthFillTexture then
+                    local edgeInset = DF:GetAbsorbEdgeInset(frame, db)
                     if healthOrient == "HORIZONTAL" then
                         -- Heal absorb at right edge of health fill, extending left
-                        attachedTex:SetPoint("TOPRIGHT", healthFillTexture, "TOPRIGHT", 0, 0)
-                        attachedTex:SetPoint("BOTTOMRIGHT", healthFillTexture, "BOTTOMRIGHT", 0, 0)
+                        attachedTex:SetPoint("TOPRIGHT", healthFillTexture, "TOPRIGHT", 0, -edgeInset)
+                        attachedTex:SetPoint("BOTTOMRIGHT", healthFillTexture, "BOTTOMRIGHT", 0, edgeInset)
                         attachedTex:SetWidth(healAbsorbWidth)
                         attachedTex:SetTexCoord(texStart, texEnd, 0, 1)
                     elseif healthOrient == "HORIZONTAL_INV" then
                         -- Heal absorb at left edge of health fill, extending right
-                        attachedTex:SetPoint("TOPLEFT", healthFillTexture, "TOPLEFT", 0, 0)
-                        attachedTex:SetPoint("BOTTOMLEFT", healthFillTexture, "BOTTOMLEFT", 0, 0)
+                        attachedTex:SetPoint("TOPLEFT", healthFillTexture, "TOPLEFT", 0, -edgeInset)
+                        attachedTex:SetPoint("BOTTOMLEFT", healthFillTexture, "BOTTOMLEFT", 0, edgeInset)
                         attachedTex:SetWidth(healAbsorbWidth)
                         attachedTex:SetTexCoord(1 - texEnd, 1 - texStart, 0, 1)
                     elseif healthOrient == "VERTICAL" then
                         -- Heal absorb at top edge of health fill, extending down
-                        attachedTex:SetPoint("TOPLEFT", healthFillTexture, "TOPLEFT", 0, 0)
-                        attachedTex:SetPoint("TOPRIGHT", healthFillTexture, "TOPRIGHT", 0, 0)
+                        attachedTex:SetPoint("TOPLEFT", healthFillTexture, "TOPLEFT", edgeInset, 0)
+                        attachedTex:SetPoint("TOPRIGHT", healthFillTexture, "TOPRIGHT", -edgeInset, 0)
                         attachedTex:SetHeight(healAbsorbHeight)
                         attachedTex:SetTexCoord(0, 1, 1 - texEnd, 1 - texStart)
                     elseif healthOrient == "VERTICAL_INV" then
                         -- Heal absorb at bottom edge of health fill, extending up
-                        attachedTex:SetPoint("BOTTOMLEFT", healthFillTexture, "BOTTOMLEFT", 0, 0)
-                        attachedTex:SetPoint("BOTTOMRIGHT", healthFillTexture, "BOTTOMRIGHT", 0, 0)
+                        attachedTex:SetPoint("BOTTOMLEFT", healthFillTexture, "BOTTOMLEFT", edgeInset, 0)
+                        attachedTex:SetPoint("BOTTOMRIGHT", healthFillTexture, "BOTTOMRIGHT", -edgeInset, 0)
                         attachedTex:SetHeight(healAbsorbHeight)
                         attachedTex:SetTexCoord(0, 1, texStart, texEnd)
                     end
@@ -3117,13 +3121,10 @@ function DF:UpdateTestHealAbsorb(frame, testData)
             local healthLevel = frame.healthBar:GetFrameLevel()
             customBar:SetFrameLevel(healthLevel + 2)
             
-            -- Inset by border size if frame border is enabled to avoid overlap
-            local inset = 0
-            if db.frameShowBorder ~= false then
-                inset = frame.dfReducedMaxHealthClipping and 0 or (db.frameBorderSize or 1)  -- 0 when clipped: the clip edge is internal, no frame border there
-            end
-            customBar:SetPoint("TOPLEFT", frame.healthBar, "TOPLEFT", inset, -inset)
-            customBar:SetPoint("BOTTOMRIGHT", frame.healthBar, "BOTTOMRIGHT", -inset, inset)
+            -- Cover the health fill: flush when opaque/off, inset when translucent.
+            local overlayInset = DF:GetAbsorbEdgeInset(frame, db)
+            customBar:SetPoint("TOPLEFT", frame.healthBar, "TOPLEFT", overlayInset, -overlayInset)
+            customBar:SetPoint("BOTTOMRIGHT", frame.healthBar, "BOTTOMRIGHT", -overlayInset, overlayInset)
             if customBar.bg then customBar.bg:Hide() end
             
             -- Match real code logic exactly - heal absorbs fill from low HP side
@@ -3282,6 +3283,7 @@ function DF:UpdateTestHealPrediction(frame, testData)
             if db.frameShowBorder ~= false then
                 inset = frame.dfReducedMaxHealthClipping and 0 or (db.frameBorderSize or 1)  -- 0 when clipped: the clip edge is internal, no frame border there
             end
+            if db.pixelPerfect and DF.PixelPerfect then inset = DF:PixelPerfect(inset) end
             
             local barWidth = frame.healthBar:GetWidth() - (inset * 2)
             local barHeight = frame.healthBar:GetHeight() - (inset * 2)
