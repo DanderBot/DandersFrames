@@ -294,9 +294,12 @@ local function AbsorbLayoutStateChanged(frame, db)
     local col = db.absorbBarColor or DEFAULT_ABSORB_COLOR
     if s.colR ~= col.r or s.colG ~= col.g or s.colB ~= col.b or s.colA ~= (col.a or 0.7) then return true end
 
-    -- Border settings (affect inset calculations for attached/overlay modes)
+    -- Border settings (affect inset calculations for attached/overlay modes).
+    -- Alpha matters too: GetAbsorbEdgeInset flips flush(0) <-> inset at the
+    -- opaque<->translucent threshold, so a Border Alpha change must invalidate.
     if s.frameShowBorder ~= (db.frameShowBorder ~= false)                 then return true end
     if s.frameBorderSize ~= (db.frameBorderSize or 1)                     then return true end
+    if s.frameBorderAlpha ~= ((db.frameBorderColor and (db.frameBorderColor.a or db.frameBorderColor[4])) or 1) then return true end
 
     -- Floating-mode specific
     if s.orientation     ~= (db.absorbBarOrientation or "HORIZONTAL")     then return true end
@@ -352,6 +355,7 @@ local function CacheAbsorbLayoutState(frame, db)
     s.colR, s.colG, s.colB, s.colA = col.r, col.g, col.b, col.a or 0.7
     s.frameShowBorder = db.frameShowBorder ~= false
     s.frameBorderSize = db.frameBorderSize or 1
+    s.frameBorderAlpha = (db.frameBorderColor and (db.frameBorderColor.a or db.frameBorderColor[4])) or 1
     s.orientation     = db.absorbBarOrientation or "HORIZONTAL"
     s.width           = db.absorbBarWidth or 50
     s.height          = db.absorbBarHeight or 6

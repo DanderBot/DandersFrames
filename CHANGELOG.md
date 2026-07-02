@@ -34,7 +34,7 @@ A top-to-bottom rework of the configuration UI so every panel shares one consist
 
 * (Borders) **Border Inset** is now honoured by texture-style borders, and updates live. (by Krathe)
 * (Shields) Absorb and heal-absorb overlays now cover the health bar with **no gap** — flush to the edge when the frame border is opaque or off, keeping a small inset only when the border is translucent (so the shield doesn't show through it). (by Krathe)
-* (Pixel Perfect) **Center-aligned** party/raid frames now snap to the physical pixel grid, so borders stay crisp instead of doubling or dropping a side; the overshield line indicator and the solid highlight border snap to whole pixels too. (by Krathe)
+* (Pixel Perfect) **Center-aligned** frames now snap to the physical pixel grid, so borders stay crisp instead of doubling or dropping a side — party frames live, and raid frames in test mode (live raid keeps Blizzard's secure positioning). The overshield line indicator and the solid highlight border snap to whole pixels too. (by Krathe)
 * (Text) Fixed a stray health value (often a "%") appearing for users who never turned health text on. (by Krathe)
 * (Nicknames) Fixed an error matching nicknames against boss/NPC names on pinned frames in encounters.
 * (Localization) Test Mode, position, grid, Text/Aura Designer and auto-profile labels now translate properly.

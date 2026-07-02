@@ -1653,6 +1653,7 @@ L["X Mark"] = true
 L["X Size"] = true
 L["Yellow=high, Orange=highest, Red=tanking."] = true
 L["Yes"] = true
+L["Your UI Scale is already pixel-perfect for this resolution."] = true
 L["Z to A"] = true
 L["Zoom Icon"] = true
 L["%sGlobal: 80%s %s— Setting matches global, no override stored%s"] = true
@@ -2064,7 +2065,6 @@ L["This Battle.net friend could not be matched after an update. Remove this rule
 L["This only changes who controls names on DandersFrames frames - you can change it later in Nicknames settings."] = true
 L["Use %s nicknames"] = true
 L["You are not in a guild."] = true
-L["Your UI Scale is already pixel-perfect for this resolution."] = true
 L["Your nickname (broadcast)"] = true
 
 -- Localization gap fixes (community zhTW pass): strings previously hardcoded in English
