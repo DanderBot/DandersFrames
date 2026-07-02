@@ -45,6 +45,9 @@ function DF:NewAuraDesignerConfig()
     cfg.auras = {}
     cfg.layoutGroups = {}
     cfg.nextLayoutGroupID = 1
+    -- Born in the new higher-wins priority scale, so the lazy priority migration
+    -- never flips a freshly-created config (see MigrateAuraDesignerPrioritiesLazy).
+    cfg._priorityHigherWinsV1 = true
     return cfg
 end
 

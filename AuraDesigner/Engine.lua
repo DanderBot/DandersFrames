@@ -398,6 +398,7 @@ function Engine:UpdateFrame(frame)
     -- resolved table render actually reads, so a half-migrated block can't render
     -- via the stale legacy path.
     if DF.MigrateAuraDesignerBorderKeysLazy then DF.MigrateAuraDesignerBorderKeysLazy(adDB) end
+    if DF.MigrateAuraDesignerPrioritiesLazy then DF.MigrateAuraDesignerPrioritiesLazy(adDB) end
 
     -- Debug: throttled diagnostic dump
     local now = GetTime()
@@ -889,6 +890,7 @@ function Engine:UpdateTestFrame(frame)
     end
     if DF.MigrateAuraDesignerInstancesLazy then DF.MigrateAuraDesignerInstancesLazy(adDB) end
     if DF.MigrateAuraDesignerBorderKeysLazy then DF.MigrateAuraDesignerBorderKeysLazy(adDB) end
+    if DF.MigrateAuraDesignerPrioritiesLazy then DF.MigrateAuraDesignerPrioritiesLazy(adDB) end
 
     local specAuras = adDB.auras and adDB.auras[spec]
     if not specAuras then
@@ -1102,6 +1104,7 @@ function Engine:PreWarmIndicators(frame)
     if not adDB then return end
     if DF.MigrateAuraDesignerInstancesLazy then DF.MigrateAuraDesignerInstancesLazy(adDB) end
     if DF.MigrateAuraDesignerBorderKeysLazy then DF.MigrateAuraDesignerBorderKeysLazy(adDB) end
+    if DF.MigrateAuraDesignerPrioritiesLazy then DF.MigrateAuraDesignerPrioritiesLazy(adDB) end
 
     -- Resolve spec
     local spec = self:ResolveSpec(adDB)

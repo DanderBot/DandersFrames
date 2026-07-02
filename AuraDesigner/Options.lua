@@ -475,6 +475,46 @@ local function MigrateInstancesLazy(adDB)
 end
 DF.MigrateAuraDesignerInstancesLazy = MigrateInstancesLazy
 
+-- Lazy, flag-gated Priority-scale flip (old lower-wins → new higher-wins). Same
+-- resolve-time, once-per-table pattern as the border-key fold above: it runs on
+-- the EXACT adDB about to be rendered/edited, so auto-layout overlays, presets,
+-- and the legacy inline config are all covered AT POINT OF USE, gated by
+-- `_priorityHigherWinsV1`. Fresh configs are born flagged (NewAuraDesignerConfig)
+-- and exports/imports carry the flag on the copied table, so only genuine pre-4.6
+-- data is ever flipped — and exactly once. Replaces the old one-shot ADDON_LOADED
+-- walker, which misclassified flat auras with no indicators and double-flipped
+-- newly-created / imported profiles into corruption.
+local function FlipAuraPriority(auraCfg)
+    if type(auraCfg) == "table" and type(auraCfg.priority) == "number" then
+        local p = math.floor(auraCfg.priority + 0.5)
+        if p < 1 then p = 1 elseif p > 10 then p = 10 end
+        auraCfg.priority = 11 - p
+    end
+end
+local function MigratePrioritiesLazy(adDB)
+    if type(adDB) ~= "table" or adDB._priorityHigherWinsV1 then return end
+    local auras = adDB.auras
+    if type(auras) == "table" then
+        -- Shape detection off the first entry only, matching MigrateBorderKeysOnAurasTable.
+        for _, val in pairs(auras) do
+            if type(val) == "table" then
+                if val.priority ~= nil or val.indicators ~= nil or val.icon ~= nil then
+                    for _, auraCfg in pairs(auras) do FlipAuraPriority(auraCfg) end            -- flat: auras[name]
+                else
+                    for _, specAuras in pairs(auras) do                                         -- spec: auras[spec][name]
+                        if type(specAuras) == "table" then
+                            for _, auraCfg in pairs(specAuras) do FlipAuraPriority(auraCfg) end
+                        end
+                    end
+                end
+            end
+            break
+        end
+    end
+    adDB._priorityHigherWinsV1 = true
+end
+DF.MigrateAuraDesignerPrioritiesLazy = MigratePrioritiesLazy
+
 local function GetAuraDesignerDB()
     -- The editor is mode-tabbed: it edits the preset the active mode uses
     -- (party → its assigned preset, etc.). Because edited == used, live
@@ -493,6 +533,7 @@ local function GetAuraDesignerDB()
     end
     MigrateInstancesLazy(adDB)
     MigrateBorderKeysLazy(adDB)
+    MigratePrioritiesLazy(adDB)
     return adDB
 end
 
