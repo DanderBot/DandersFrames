@@ -533,8 +533,114 @@ end
 -- The object DF holds + positions. Public methods form the stable seam; the
 -- container/button internals swap under them at PTR-4 without callers changing.
 -- ============================================================
+-- ============================================================
+-- BACKENDS
+-- A backend PRODUCES slots (from a data source) and hands each to the layout half via
+-- handle:_acceptSlot; the handle owns positioning/styling/lifecycle and routes
+-- SetUnit/Enable/Refresh/teardown to the active backend. The public API is unchanged.
+--
+-- CustomBackend — the 12.1 CustomAuraContainer path: the addon creates the AuraButtons,
+-- Blizzard fills them. isNativeSlots = true. (PTR-4 adds a ManagedBackend; F3 adds a
+-- fake/test backend; both slot into the same interface.)
+-- ============================================================
+local CustomBackend = {}
+CustomBackend.__index = CustomBackend
+
+function CustomBackend.new(handle)
+    return setmetatable({ handle = handle }, CustomBackend)
+end
+
+function CustomBackend:isNativeSlots() return true end
+
+-- ORDER MATTERS: SetUnit -> AddAuraFilter -> (create + regions + bindNative + AddAuraFrame)
+-- each slot -> layout -> SetEnabled LAST. Native binds run BEFORE AddAuraFrame (register
+-- regions before handing over — the proven b8f90f2a pattern).
+function CustomBackend:build()
+    local handle = self.handle
+    local config = handle.config
+    checkUnwiredSeams(config)
+    local c = CreateFrame("AuraContainer", nil, handle.frame, "CustomAuraContainerTemplate")
+    c:SetAllPoints(handle.frame)
+    self.container = c
+
+    c:SetUnit(config.unit)
+
+    local filters = normalizeFilters(config.filter)
+    local maxCount = handle:_slotCount()
+    for _, f in ipairs(filters) do
+        if AuraUtil and AuraUtil.IsValidFilterString and not AuraUtil.IsValidFilterString(f) then
+            DF:DebugWarn(DBG, "filter rejected by IsValidFilterString: %s (container will be empty)", tostring(f))
+        else
+            c:AddAuraFilter(f, { maxFrameCount = maxCount })
+        end
+    end
+
+    local n = handle:_slotCount()
+    for i = 1, n do
+        local b = CreateFrame("AuraButton", nil, c, "CustomAuraButtonTemplate")
+        if config.mode == "overlay" then b:SetAllPoints(handle.frame) end
+        -- Backstop: a styling fault on one slot must never abort the build loop.
+        local ok, err = pcall(function()
+            handle:_acceptSlot(b, i)     -- cache + regions (source-agnostic)
+            handle:_bindNativeSlot(b)    -- native setters, BEFORE AddAuraFrame
+        end)
+        if not ok then DF:DebugWarn(DBG, "style slot %d failed: %s", i, tostring(err)) end
+        c:AddAuraFrame(b)                -- container adopts it (forbidden view) + binds
+    end
+    handle:_layoutSlots()
+
+    c:SetEnabled(config.enabled ~= false)   -- LAST -> parses + binds with filter + frames present
+
+    pcall(function()
+        DF:Debug(DBG, "built (custom) unit=%s mode=%s filters=%d frames=%d",
+            tostring(config.unit), tostring(config.mode or "row"), #filters, c:GetAuraFrameCount())
+    end)
+end
+
+function CustomBackend:setUnit(unit)
+    if self.container then self.container:SetUnit(unit) end
+end
+
+function CustomBackend:setEnabled(on)
+    if self.container then self.container:SetEnabled(on) end
+end
+
+-- Force a re-scan via the Hide();Show() bounce (no callable Refresh on b8f90f2a).
+function CustomBackend:refresh()
+    if not self.container then return end
+    self.container:Hide()
+    self.container:Show()
+end
+
+function CustomBackend:teardown()
+    if self.container then
+        pcall(function() self.container:RemoveAllAuraFrames() end)
+        self.container:Hide()
+        self.container = nil
+    end
+end
+
 local Handle = {}
 Handle.__index = Handle
+
+-- Backend contract (layout half): the backend calls these to hand produced slots in and
+-- to lay them out. The handle owns positioning/styling/lifecycle; the backend owns the
+-- source object + slot production.
+function Handle:_getConfig() return self.config end
+function Handle:_getAnchorFrame() return self.frame end
+function Handle:_slotCount()
+    return (self.config.mode == "overlay") and 1 or (self.config.max or 1)
+end
+function Handle:_acceptSlot(slot, index)
+    self.buttons[index] = slot                 -- cache first (mirror of the pre-split order)
+    styleButton_regions(slot, self.config)     -- source-agnostic region creation/styling
+end
+function Handle:_bindNativeSlot(slot)
+    bindNative(slot, self.config)              -- native setters (native slots only)
+end
+function Handle:_layoutSlots()
+    if self.config.mode ~= "overlay" then layoutRow(self) end
+end
 
 function Handle:GetFrame() return self.frame end
 
@@ -560,7 +666,7 @@ function Handle:_applyEnabled(on)
     on = on and true or false
     self.config.enabled = on
     if InCombatLockdown() then self:_queueOp("enable"); return end
-    if self.container then self.container:SetEnabled(on) end
+    if self.backend then self.backend:setEnabled(on) end
 end
 
 -- Retarget the container's unit. Guarded: retargeting touches secure container
@@ -571,7 +677,7 @@ function Handle:SetUnit(unit)
     -- In combat, defer JUST the retarget (a full rebuild would leak a container + N
     -- buttons every combat on roster churn); "retarget" re-runs SetUnit at regen.
     if InCombatLockdown() then self:_queueOp("retarget"); return end
-    if self.container then self.container:SetUnit(unit) end
+    if self.backend then self.backend:setUnit(unit) end
 end
 
 -- In-place cosmetic RESTYLE (colours / sizes / fonts / offsets / layout). NOTE: this
@@ -615,7 +721,7 @@ end
 function Handle:SetSort(sort)
     self.config.sort = sort
     if not AuraContainer.HasSort() then return end
-    -- TODO(PTR-4): self.container:SetSortRule(...) / SetSortDirection(...)
+    -- TODO(PTR-4): route to the managed backend's sort setter (rule + direction).
 end
 
 -- Force a re-scan of the container. There is NO addon-callable Refresh() on b8f90f2a:
@@ -627,11 +733,8 @@ end
 -- unit changes but the token does not. (In-combat bounce safety is on the PTR audit
 -- list; a real Refresh() / wired UpdateAllAuras is a PTR-4 candidate.)
 function Handle:Refresh()
-    if not self.container then return end
-    local ok, err = pcall(function()
-        self.container:Hide()
-        self.container:Show()
-    end)
+    if not self.backend then return end
+    local ok, err = pcall(function() self.backend:refresh() end)
     if not ok and not warnedRefresh then
         warnedRefresh = true
         DF:DebugWarn(DBG, "Refresh bounce failed: %s", tostring(err))
@@ -673,11 +776,7 @@ end
 -- Tear down the (secure) container + buttons. Combat-unsafe on its own, so callers
 -- gate it (Destroy defers this to regen in combat).
 function Handle:_teardownContainer()
-    if self.container then
-        pcall(function() self.container:RemoveAllAuraFrames() end)
-        self.container:Hide()
-        self.container = nil
-    end
+    if self.backend then self.backend:teardown(); self.backend = nil end
     wipe(self.buttons)
 end
 
@@ -698,12 +797,7 @@ end
 function Handle:_rebuild()
     if self._destroyed then return end
     if InCombatLockdown() then self:_deferRebuild(); return end
-    if self.container then
-        pcall(function() self.container:RemoveAllAuraFrames() end)
-        self.container:Hide()
-        self.container = nil
-    end
-    wipe(self.buttons)
+    self:_teardownContainer()
     self:_build()
 end
 
@@ -728,9 +822,9 @@ function Handle:_registerRegen()
                         if op == "rebuild" then
                             h:_rebuild()
                         elseif op == "retarget" then
-                            if h.container then h.container:SetUnit(h.config.unit) end
+                            if h.backend then h.backend:setUnit(h.config.unit) end
                         elseif op == "enable" then
-                            if h.container then h.container:SetEnabled(h.config.enabled ~= false) end
+                            if h.backend then h.backend:setEnabled(h.config.enabled ~= false) end
                         end
                     end)
                 end
@@ -764,50 +858,12 @@ function Handle:_deferRebuild()
     self:_queueOp("rebuild")
 end
 
--- The construction dance (the one place that knows the CustomAuraContainer API).
--- ORDER MATTERS: SetUnit -> AddAuraFilter -> create+style+AddAuraFrame -> SetEnabled LAST.
+-- Build via the active backend (only Custom today; a ManagedBackend and a fake/test
+-- backend join at PTR-4 / F3 behind the same interface). The backend owns the container
+-- + slot production; the handle owns styling/layout/lifecycle. Backend is picked here.
 function Handle:_build()
-    local config = self.config
-    checkUnwiredSeams(config)
-    local c = CreateFrame("AuraContainer", nil, self.frame, "CustomAuraContainerTemplate")
-    c:SetAllPoints(self.frame)
-    self.container = c
-
-    c:SetUnit(config.unit)
-
-    local filters = normalizeFilters(config.filter)
-    local maxCount = (config.mode == "overlay") and 1 or (config.max or 1)
-    for _, f in ipairs(filters) do
-        if AuraUtil and AuraUtil.IsValidFilterString and not AuraUtil.IsValidFilterString(f) then
-            DF:DebugWarn(DBG, "filter rejected by IsValidFilterString: %s (container will be empty)", tostring(f))
-        else
-            c:AddAuraFilter(f, { maxFrameCount = maxCount })
-        end
-    end
-
-    local n = (config.mode == "overlay") and 1 or (config.max or 1)
-    for i = 1, n do
-        local b = CreateFrame("AuraButton", nil, c, "CustomAuraButtonTemplate")
-        self.buttons[i] = b
-        if config.mode == "overlay" then b:SetAllPoints(self.frame) end
-        -- Backstop: a native-setter fault on one region must never abort the build
-        -- loop (which would leave the container un-Enabled and later buttons unbuilt).
-        -- A styling fault degrades to "that region missing" and is logged once.
-        local ok, err = pcall(styleButton, b, config)   -- register regions BEFORE handing over
-        if not ok then DF:DebugWarn(DBG, "styleButton failed on button %d: %s", i, tostring(err)) end
-        c:AddAuraFrame(b)               -- container adopts it (forbidden view) + binds
-    end
-    if config.mode ~= "overlay" then layoutRow(self) end
-
-    c:SetEnabled(config.enabled ~= false)   -- LAST -> parses + binds with filter + frames in place
-
-    -- Diagnostic only — our own frame count (NEVER read aura data here; iterating
-    -- GetUnitAuras would taint us and break the next forbidden-object access).
-    pcall(function()
-        DF:Debug(DBG, "built unit=%s mode=%s filters=%d frames=%d",
-            tostring(config.unit), tostring(config.mode or "row"), #filters, c:GetAuraFrameCount())
-    end)
-
+    self.backend = CustomBackend.new(self)
+    self.backend:build()
     self:_updateDynRefresh()   -- auto-bounce on target/focus/mouseover change
 end
 
