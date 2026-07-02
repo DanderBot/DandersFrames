@@ -3828,7 +3828,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 g:AddWidget(topSpacer, 4)
 
                 local banner = GUI:CreateInfoBanner(parent, {
-                    tone = "warning",
+                    tone = "caution",
                     text = L["Sound alerts only work when you are in a group."],
                 })
                 banner:SetWidth(contentWidth - 10)

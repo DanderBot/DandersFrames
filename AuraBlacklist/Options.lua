@@ -387,7 +387,7 @@ function DF.BuildAuraBlacklistPage(guiRef, pageRef, dbRef)
 
     -- ========== CURATED LIST NOTICE ==========
     local noticeBanner = GUI:CreateInfoBanner(parent, {
-        tone = "warning",
+        tone = "info",
         text = L["This is a curated list selected by Blizzard. Additional spells cannot be added as these are the only spells Blizzard has allowed. If more are permitted in the future, they will be added to this list."],
     })
     noticeBanner:SetPoint("TOPLEFT", 10, -10)

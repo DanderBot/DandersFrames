@@ -930,7 +930,7 @@ function CC:ShowClearAllConfirmation()
     end
     
     StaticPopupDialogs["DFCC_CLEAR_ALL_BINDINGS"] = {
-        text = format(L["Reset all bindings to defaults?\n\nThis will set:\n• Left Click = Target Unit\n• Right Click = Open Menu\n\n%sThis cannot be undone.%s"], "|cffff6666", "|r"),
+        text = format(L["Reset all bindings to defaults?\n\nThis will set:\n• Left Click = Target Unit\n• Right Click = Open Menu\n\n%sThis cannot be undone.%s"], "|c" .. DF.GUI:ToneHex("danger"), "|r"),
         button1 = L["Reset to Defaults"],
         button2 = L["Cancel"],
         OnAccept = function()
