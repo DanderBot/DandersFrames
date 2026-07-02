@@ -26,6 +26,7 @@ local addonName, DF = ...
 --   h:SetUnit(unit) / h:SetShown(b) / h:Enable() / h:Disable()
 --   h:ApplyStyle(style) -- in-place cosmetic restyle (no teardown)
 --   h:SetFilter(filter) / h:SetSort(sort) -- structural (rebuild) / PTR-4 no-op now
+--   h:Rebuild(configDelta) -- structural rebuild (max / region toggles / frozen opts)
 --   h:Refresh() -- force a re-scan (Hide/Show bounce; for dynamic-unit consumers)
 --   h:GetFrame() -- the plain positioning frame DF anchors (SetPoint/SetSize on it)
 --   h:Destroy()
@@ -61,6 +62,7 @@ local DBG = "AURACONTAINER"
 -- One-time-per-process warning latches so a guarded failure (curve bug, border
 -- taint, native dispel reject) logs ONCE, not once per button.
 local warnedCurve, warnedBorder, warnedNativeDispel = false, false, false
+local warnedRestyle, warnedRefresh = false, false
 
 -- ============================================================
 -- CAPABILITY DETECTION  (the version gate + PTR-4 feature gates)
@@ -116,17 +118,24 @@ local function managedAvailable()
     return _managed
 end
 
--- Per-Spell-ID filter (the Aura Designer's core). Gated on the managed path being live.
--- TODO(PTR-4, Krathe posts the exact symbol): refine to the precise filter option/method
--- once PTR-4 ships; the managed-template probe is the coarse "managed path is live" gate.
--- Consumers may pass config.spellIDs today; it is accepted and no-ops until this is true.
+-- ★ These stay FALSE until the factory actually WIRES the managed path — NOT merely when
+-- Blizzard's managed template resolves. Otherwise, the day PTR-4 lands, a consumer gating
+-- per-spell logic on "true" would get a container that still builds the Custom path and
+-- ignores config.spellIDs/sort → silently shows ALL auras instead of one spell.
+-- managedAvailable() is the capability probe; flip the WIRED flag when the PTR-4 managed
+-- filter/sort is implemented here (Krathe posts the exact symbol from the source sweep).
+local SPELL_FILTER_WIRED = false
+local SORT_WIRED = false
+
+-- Per-Spell-ID filter (the Aura Designer's core). Consumers may pass config.spellIDs
+-- today; it is accepted and no-ops until this returns true.
 function AuraContainer.HasSpellFilter()
-    return managedAvailable()
+    return SPELL_FILTER_WIRED and managedAvailable()
 end
 
--- Sort (rule + direction). Same managed-path gate; refine to the exact sort setter at PTR-4.
+-- Sort (rule + direction).
 function AuraContainer.HasSort()
-    return managedAvailable()
+    return SORT_WIRED and managedAvailable()
 end
 
 -- ============================================================
@@ -319,7 +328,8 @@ local function styleButton(button, config)
         if DF.SafeSetFont then DF:SafeSetFont(button.dfDur, durSpec.font, durSpec.size or 12, durSpec.outline or "NONE") end
     end
 
-    -- STACK count (Blizzard-driven; supports a ">=N" via the display-count min/max).
+    -- STACK count (Blizzard-driven). (A ">=N" threshold would need the separate
+    -- GetAuraApplicationDisplayCount min/max remap — not a SetApplicationCount option; not wired.)
     local stackSpec = style.stacks
     if isRow and stackSpec and stackSpec.show and button.SetApplicationCount then
         if not button.dfStack then
@@ -424,8 +434,8 @@ local function layoutRow(handle)
     local sy = (L.sizeY or L.size or sx)
     local spX = (L.spacingX or L.spacing or 4)
     local spY = (L.spacingY or L.spacing or 4)
-    local anchor = L.anchor or "TOPLEFT"
-    local growth = L.growth or "RIGHT_DOWN"
+    local anchor = (type(L.anchor) == "string" and L.anchor) or "TOPLEFT"
+    local growth = (type(L.growth) == "string" and L.growth) or "RIGHT_DOWN"
     local wrap = L.wrap or #handle.buttons
     if wrap < 1 then wrap = #handle.buttons end
 
@@ -456,7 +466,9 @@ Handle.__index = Handle
 
 function Handle:GetFrame() return self.frame end
 
--- Proxy positioning to the plain (non-secure) anchor frame.
+-- Proxy positioning to the plain (non-secure) anchor frame. NOTE: Create SetAllPoints
+-- the frame to its parent, so to reposition call h:ClearAllPoints() first; and h:SetSize
+-- is a no-op while the all-points anchor is live (size follows the parent until cleared).
 function Handle:SetPoint(...) self.frame:SetPoint(...) end
 function Handle:ClearAllPoints() self.frame:ClearAllPoints() end
 function Handle:SetSize(w, h) self.frame:SetSize(w, h) end
@@ -475,11 +487,7 @@ end
 function Handle:_applyEnabled(on)
     on = on and true or false
     self.config.enabled = on
-    if InCombatLockdown() then
-        if self._pendingOp ~= "rebuild" then self._pendingOp = "enable" end
-        self:_registerRegen()
-        return
-    end
+    if InCombatLockdown() then self:_queueOp("enable"); return end
     if self.container then self.container:SetEnabled(on) end
 end
 
@@ -488,24 +496,45 @@ end
 function Handle:SetUnit(unit)
     self.config.unit = unit
     self:_updateDynRefresh()   -- re-evaluate dynamic-unit auto-refresh for the new token
-    if InCombatLockdown() then self:_deferRebuild(); return end
+    -- In combat, defer JUST the retarget (a full rebuild would leak a container + N
+    -- buttons every combat on roster churn); "retarget" re-runs SetUnit at regen.
+    if InCombatLockdown() then self:_queueOp("retarget"); return end
     if self.container then self.container:SetUnit(unit) end
 end
 
--- In-place cosmetic restyle (colours / sizes / fonts / offsets). Does NOT toggle
--- regions on/off (that needs a rebuild — see styleButton note). Cheap enough for a
--- slider-drag tick.
-function Handle:ApplyStyle(styleDelta)
-    if type(styleDelta) == "table" then
-        self.config.style = styleDelta
+-- In-place cosmetic RESTYLE (colours / sizes / fonts / offsets / layout). NOTE: this
+-- REPLACES config.style (it is not a merge) and only re-applies always-updated props —
+-- it does NOT create/remove regions or change creation-frozen opts (duration
+-- expiredText/colorCurve, bar interpolation/direction, dispel show flags). To toggle a
+-- region on/off or change a frozen opt, use Rebuild(). pcall-guarded so a restyle fault
+-- can't escape into a GUI callback.
+function Handle:ApplyStyle(style)
+    if type(style) == "table" then
+        self.config.style = style
     end
     if self.config.mode ~= "overlay" then layoutRow(self) end
-    for _, b in ipairs(self.buttons) do styleButton(b, self.config) end
+    for _, b in ipairs(self.buttons) do
+        local ok, err = pcall(styleButton, b, self.config)
+        if not ok and not warnedRestyle then
+            warnedRestyle = true
+            DF:DebugWarn(DBG, "ApplyStyle restyle failed: %s", tostring(err))
+        end
+    end
 end
 
 -- Structural filter change -> full rebuild (can't mutate a live filter set safely).
 function Handle:SetFilter(filter)
     self.config.filter = filter
+    self:_rebuild()
+end
+
+-- Public structural rebuild — for changes ApplyStyle can't do live: max, toggling a
+-- region on/off, or a creation-frozen opt (bar direction, duration expiredText, dispel
+-- flags). Optionally merge a partial config first. Combat-guarded (defers to regen).
+function Handle:Rebuild(configDelta)
+    if type(configDelta) == "table" then
+        for k, v in pairs(configDelta) do self.config[k] = v end
+    end
     self:_rebuild()
 end
 
@@ -527,10 +556,14 @@ end
 -- list; a real Refresh() / wired UpdateAllAuras is a PTR-4 candidate.)
 function Handle:Refresh()
     if not self.container then return end
-    pcall(function()
+    local ok, err = pcall(function()
         self.container:Hide()
         self.container:Show()
     end)
+    if not ok and not warnedRefresh then
+        warnedRefresh = true
+        DF:DebugWarn(DBG, "Refresh bounce failed: %s", tostring(err))
+    end
 end
 
 -- AUTO-REFRESH for dynamic-unit containers. Since there's no callable Refresh(), a
@@ -565,17 +598,28 @@ function Handle:_updateDynRefresh()
     end
 end
 
-function Handle:Destroy()
-    self._pendingOp = nil
-    if AuraContainer._dyn then AuraContainer._dyn._handles[self] = nil end
+-- Tear down the (secure) container + buttons. Combat-unsafe on its own, so callers
+-- gate it (Destroy defers this to regen in combat).
+function Handle:_teardownContainer()
     if self.container then
         pcall(function() self.container:RemoveAllAuraFrames() end)
         self.container:Hide()
         self.container = nil
     end
     wipe(self.buttons)
-    if self.frame then self.frame:Hide() end
+end
+
+function Handle:Destroy()
+    if AuraContainer._dyn then AuraContainer._dyn._handles[self] = nil end
     self._destroyed = true
+    if self.frame then self.frame:Hide() end   -- plain frame; safe in combat, hides the container child too
+    if InCombatLockdown() then
+        -- Can't tear down secure container state in lockdown; defer to regen.
+        self:_queueOp("destroy")
+        return
+    end
+    self._pendingOp = nil
+    self:_teardownContainer()
 end
 
 -- Rebuild the container from scratch (structural changes). Combat-guarded.
@@ -591,8 +635,9 @@ function Handle:_rebuild()
     self:_build()
 end
 
--- Register this handle for a one-shot action the moment combat ends:
---   "rebuild" -> full _rebuild();  "enable" -> re-apply container:SetEnabled.
+-- Register this handle for a one-shot action the moment combat ends. Ops (precedence
+-- destroy > rebuild > retarget/enable): "destroy" tears down; "rebuild" full _rebuild;
+-- "retarget" re-runs container:SetUnit; "enable" re-applies container:SetEnabled.
 function Handle:_registerRegen()
     if not AuraContainer._regen then
         AuraContainer._regen = CreateFrame("Frame")
@@ -603,12 +648,19 @@ function Handle:_registerRegen()
                 self._handles[h] = nil
                 local op = h._pendingOp
                 h._pendingOp = nil
-                if not h._destroyed and op then
-                    if op == "rebuild" then
-                        h:_rebuild()
-                    elseif op == "enable" and h.container then
-                        h.container:SetEnabled(h.config.enabled ~= false)
-                    end
+                -- pcall each handle's op so one failure can't strand the rest.
+                if op == "destroy" then
+                    pcall(function() h:_teardownContainer() end)
+                elseif not h._destroyed and op then
+                    pcall(function()
+                        if op == "rebuild" then
+                            h:_rebuild()
+                        elseif op == "retarget" then
+                            if h.container then h.container:SetUnit(h.config.unit) end
+                        elseif op == "enable" then
+                            if h.container then h.container:SetEnabled(h.config.enabled ~= false) end
+                        end
+                    end)
                 end
             end
         end)
@@ -616,10 +668,28 @@ function Handle:_registerRegen()
     AuraContainer._regen._handles[self] = true
 end
 
+-- Queue a one-shot combat-end op with precedence: destroy wins outright; rebuild wins
+-- over retarget/enable; two DIFFERENT lesser ops upgrade to rebuild (it re-applies unit
+-- + enabled, covering both).
+function Handle:_queueOp(op)
+    local cur = self._pendingOp
+    if cur == "destroy" then
+        -- already terminal; nothing supersedes
+    elseif op == "destroy" then
+        self._pendingOp = "destroy"
+    elseif op == "rebuild" or cur == "rebuild" then
+        self._pendingOp = "rebuild"
+    elseif cur and cur ~= op then
+        self._pendingOp = "rebuild"
+    else
+        self._pendingOp = op
+    end
+    self:_registerRegen()
+end
+
 -- One-shot deferral of a full rebuild to combat-end.
 function Handle:_deferRebuild()
-    self._pendingOp = "rebuild"
-    self:_registerRegen()
+    self:_queueOp("rebuild")
 end
 
 -- The construction dance (the one place that knows the CustomAuraContainer API).
@@ -692,12 +762,20 @@ function AuraContainer:Create(parent, config)
         DF:DebugWarn(DBG, "Create called with bad args (parent/config)")
         return nil
     end
-    config.unit = config.unit or "player"
-    config.mode = config.mode or "row"
+    -- Shallow-copy so the factory OWNS its config and never mutates the caller's table
+    -- (SetShown writes config.enabled, etc. — a caller's db subtable must stay untouched).
+    -- Nested style/layout are shared by reference (read-only here; ApplyStyle swaps the
+    -- whole style ref rather than mutating the caller's nested tables).
+    local cfg = {}
+    for k, v in pairs(config) do cfg[k] = v end
+    cfg.unit = cfg.unit or "player"
+    cfg.mode = cfg.mode or "row"
 
-    local h = setmetatable({ config = config, buttons = {} }, Handle)
+    local h = setmetatable({ config = cfg, buttons = {} }, Handle)
     h.frame = CreateFrame("Frame", nil, parent)
-    h.frame:SetAllPoints(parent)   -- overlay default; row callers reposition via h:SetPoint
+    -- Both modes: h.frame occupies the unit-frame rect (row layout anchors are relative
+    -- to it; overlay covers it). To reposition: h:ClearAllPoints() then h:SetPoint(...).
+    h.frame:SetAllPoints(parent)
 
     if InCombatLockdown() then
         -- Can't safely stand up secure container state in combat; build on regen.
