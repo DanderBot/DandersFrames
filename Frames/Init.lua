@@ -303,6 +303,23 @@ function DF:UpdateRaidGroupedLayout()
         return
     end
     
+    -- DOOR-SHUT (live frames are never Lua-driven): in header mode the live unit
+    -- frames are children of the secure group headers and are positioned ONLY by
+    -- the secure header path. DF.raidFrames is a PROXY that resolves to those live
+    -- children (Frames/Core.lua), so the legacy Lua per-frame fallback below would
+    -- SetPoint them onto the container and fight the secure layout -- that is how
+    -- entering test mode or a GUI change could shove the LIVE frames around (e.g.
+    -- the group-order inversion). Route header mode to the secure path here; the Lua
+    -- fallback now only runs for genuinely headerless legacy frames (none in current
+    -- builds). TEST frames are positioned separately in TestMode.lua
+    -- (DF.testRaidFrames / DF.testRaidContainer) and never reach this live path.
+    if hasHeaders then
+        DF:UpdateRaidHeaderVisibility()
+        DF:PositionRaidHeaders()
+        DF:UpdateRaidGroupLabels()
+        return
+    end
+
     -- Sorting disabled OR test mode - use Lua-based positioning logic
     -- (Test mode has no real raid roster, so secure code can't query group membership)
     -- Update group layout params from current settings

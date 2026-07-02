@@ -3552,6 +3552,28 @@ function DF:MigrateBorderInsetFold()
     end
 end
 
+-- One-time cleanup: the legacy raidGroupOrder ("NORMAL"/"REVERSE") toggle is
+-- deprecated -- group order now comes solely from the Group Display Order /
+-- My Group First feature (raidGroupDisplayOrder), which every positioner honours.
+-- The live header path never applied raidGroupOrder, but the test/legacy Lua
+-- positioner did, so a stale "REVERSE" made test/legacy disagree with live. The
+-- reverse code is gone; NORMAL-ize any lingering value so it can't mislead
+-- exports/debug. Per-profile guarded; idempotent. (Re-reverse via Group Display Order.)
+function DF:MigrateDeprecateRaidGroupOrder()
+    if not DandersFramesDB_v2 or not DandersFramesDB_v2.profiles then return end
+    for _, profile in pairs(DandersFramesDB_v2.profiles) do
+        if type(profile) == "table" and not profile._raidGroupOrderRetiredV1 then
+            if type(profile.party) == "table" and profile.party.raidGroupOrder == "REVERSE" then
+                profile.party.raidGroupOrder = "NORMAL"
+            end
+            if type(profile.raid) == "table" and profile.raid.raidGroupOrder == "REVERSE" then
+                profile.raid.raidGroupOrder = "NORMAL"
+            end
+            profile._raidGroupOrderRetiredV1 = true
+        end
+    end
+end
+
 -- One-time: carry the old bespoke important-spell highlight settings
 -- (targetedSpellHighlightStyle/Color/Size/Inset) into the new Important Spell
 -- Border key set (targetedSpellImportantBorder*), which is a second DF.Border
@@ -5385,6 +5407,12 @@ DF._MainEventDispatcher = function(self, event, arg1)
             -- (Text Designer now renders all text). Per-profile guarded.
             if DF.MigrateOORTextAlpha then
                 DF:MigrateOORTextAlpha()
+            end
+
+            -- Retire the deprecated raidGroupOrder reverse toggle (NORMAL-ize any
+            -- stale "REVERSE"); group order now comes from Group Display Order.
+            if DF.MigrateDeprecateRaidGroupOrder then
+                DF:MigrateDeprecateRaidGroupOrder()
             end
 
             -- CRITICAL: Update power bars now that unit data is available
