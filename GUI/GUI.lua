@@ -813,7 +813,10 @@ function GUI:CreateNote(parent, text, opts)
     opts = opts or {}
     local str
     if opts.tone and opts.prefix then
-        str = "|c" .. self:ToneHex(opts.tone) .. opts.prefix .. ":|r " .. text
+        -- Route the prefix through L so "Note"/"Tip"/etc. are localizable (the
+        -- locale metatable returns the key unchanged when a locale lacks it).
+        local prefix = (L and L[opts.prefix]) or opts.prefix
+        str = "|c" .. self:ToneHex(opts.tone) .. prefix .. ":|r " .. text
     elseif opts.tone then
         str = "|c" .. self:ToneHex(opts.tone) .. text .. "|r"
     else
@@ -989,12 +992,23 @@ end
 -- or shrinks the banner to fit. The host page is re-laid out so widgets
 -- below the banner reposition.
 -- ============================================================
+-- Each tone carries FOUR colour roles so all three consumers (banners,
+-- inline ToneHex text, and tooltips) stay in sync:
+--   bg / border / textColor / icon+iconColor  drive the BANNER box itself.
+--   accent                                     is the vivid emphasis colour
+--     used for INLINE text (ToneHex) and tooltip titles, read against the
+--     dark GUI background rather than the banner's own tinted bg. It is a
+--     SEPARATE role from iconColor: e.g. the danger icon is a light warm so
+--     the triangle pops on the orange banner, but inline "Warning" text must
+--     be a real red to out-rank a caution — deriving one from the other
+--     (the original bug) made inline danger paler than caution.
 local INFO_BANNER_TONES = {
     info = {
         bg = {0.15, 0.18, 0.28, 1},
         useThemeBorder = true, borderAlpha = 0.5,
         icon = "info",
         textColor = {0.85, 0.85, 0.85},
+        accent = {0.6, 0.8, 1},          -- light blue
     },
     -- NOTE: "warning" was merged into "caution" (they were near-duplicate golds).
     -- SetTone("warning") still resolves via the alias below for safety.
@@ -1003,6 +1017,7 @@ local INFO_BANNER_TONES = {
         border = {0.7, 0.6, 0.1, 1},
         icon = "warning", iconColor = {1, 0.9, 0.3},
         textColor = {1, 0.95, 0.7},
+        accent = {1, 0.82, 0},           -- gold
     },
     danger = {
         bg = {0.6, 0.3, 0.1, 0.9},
@@ -1010,12 +1025,14 @@ local INFO_BANNER_TONES = {
         -- icon kept a light warm (not the mid-orange bg hue) so the triangle pops
         icon = "warning", iconColor = {1, 0.9, 0.72},
         textColor = {1, 0.85, 0.7},
+        accent = {1, 0.27, 0.27},        -- real red (destructive), NOT the pale icon warm
     },
     success = {
         bg = {0.1, 0.4, 0.2, 0.9},
         border = {0.2, 0.6, 0.3, 1},
         icon = "check", iconColor = {0.3, 1, 0.5},
         textColor = {0.7, 1, 0.8},
+        accent = {0.4, 0.85, 0.5},       -- green
     },
 }
 -- Legacy alias: "warning" was merged into "caution" (near-duplicate golds).
@@ -1024,10 +1041,11 @@ INFO_BANNER_TONES.warning = INFO_BANNER_TONES.caution
 -- Hex accent ("ffRRGGBB", for inline |c...|r escapes) matching a banner tone, so
 -- inline caveat text (e.g. a warning word in a subtitle) reads as the SAME
 -- info/caution/danger/success language as the banners instead of an ad-hoc colour.
--- Uses the tone's icon accent colour; defaults to caution.
+-- Uses the tone's dedicated inline `accent` (NOT the banner iconColor, which is
+-- tuned to sit on the banner's own bg and would make danger paler than caution).
 function GUI:ToneHex(toneName)
     local t = INFO_BANNER_TONES[toneName] or INFO_BANNER_TONES.caution
-    local c = t.iconColor or t.textColor or {1, 1, 1}
+    local c = t.accent or t.iconColor or t.textColor or {1, 1, 1}
     return string.format("ff%02x%02x%02x",
         math.floor((c[1] or 1) * 255 + 0.5),
         math.floor((c[2] or 1) * 255 + 0.5),
@@ -1533,10 +1551,12 @@ end
 function GUI:ShowTooltip(owner, opts)
     if not owner or not opts or not opts.title then return end
     GameTooltip:SetOwner(owner, opts.anchor or "ANCHOR_RIGHT")
-    if opts.tone == "warning" then
-        GameTooltip:SetText(opts.title, 1, 0.82, 0)      -- caution gold
-    elseif opts.tone == "danger" then
-        GameTooltip:SetText(opts.title, 1, 0.27, 0.27)   -- destructive red (FF4444)
+    -- Title colour is single-sourced from the tone's inline accent so a tooltip
+    -- title reads the same as inline ToneHex text of the same tone. Untoned = white.
+    local toneDef = opts.tone and INFO_BANNER_TONES[opts.tone]
+    local ac = toneDef and toneDef.accent
+    if ac then
+        GameTooltip:SetText(opts.title, ac[1], ac[2], ac[3])
     else
         GameTooltip:SetText(opts.title, 1, 1, 1)
     end
