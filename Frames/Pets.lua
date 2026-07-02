@@ -886,9 +886,7 @@ function DF:UpdatePetGroupLayout()
     -- Only use group layout if in GROUPED mode and pets are enabled/shown
     local petsEnabled = isTestMode and (db.petEnabled and db.testShowPets ~= false) or (not isTestMode and db.petEnabled)
     if db.petGroupMode ~= "GROUPED" or not petsEnabled then
-        if DF.petGroupContainer then
-            DF.petGroupContainer:Hide()
-        end
+        DF:HidePetGroupContainer(DF.petGroupContainer)
         return
     end
 
@@ -1135,9 +1133,7 @@ function DF:UpdateRaidPetGroupLayout()
     -- Only use group layout if in GROUPED mode and pets are enabled/shown
     local petsEnabled = isTestMode and (db.petEnabled and db.testShowPets ~= false) or (not isTestMode and db.petEnabled)
     if db.petGroupMode ~= "GROUPED" or not petsEnabled then
-        if DF.raidPetGroupContainer then
-            DF.raidPetGroupContainer:Hide()
-        end
+        DF:HidePetGroupContainer(DF.raidPetGroupContainer)
         return
     end
 
