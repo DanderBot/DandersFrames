@@ -138,6 +138,30 @@ function AuraContainer.HasSort()
     return SORT_WIRED and managedAvailable()
 end
 
+-- Forward-seam guard. PTR-4 adds filtering by dispel type / stealable / max duration
+-- (plus the Spell-ID filter + sort above). Consumers may pass these config seams TODAY;
+-- they are accepted and no-op until the managed path wires each one. This warns ONCE per
+-- seam when a consumer sets one the factory can't honor yet — so nothing silently shows
+-- everything. Each lights up when its capability is wired.
+local warnedSeam = {}
+local function warnUnwiredSeam(name, note)
+    if not warnedSeam[name] then
+        warnedSeam[name] = true
+        DF:DebugWarn(DBG, "config.%s is set but not wired yet — ignored (%s)", name, note)
+    end
+end
+local function checkUnwiredSeams(config)
+    if config.spellIDs and not AuraContainer.HasSpellFilter() then
+        warnUnwiredSeam("spellIDs", "per-Spell-ID filter arrives at PTR-4")
+    end
+    if config.sort and not AuraContainer.HasSort() then
+        warnUnwiredSeam("sort", "sort rule/direction arrives at PTR-4")
+    end
+    if config.dispelTypes then warnUnwiredSeam("dispelTypes", "dispel-type filter arrives at PTR-4") end
+    if config.maxDuration then warnUnwiredSeam("maxDuration", "max-duration filter arrives at PTR-4") end
+    if config.stealable then warnUnwiredSeam("stealable", "stealable filter arrives at PTR-4") end
+end
+
 -- ============================================================
 -- HELPERS
 -- ============================================================
@@ -696,6 +720,7 @@ end
 -- ORDER MATTERS: SetUnit -> AddAuraFilter -> create+style+AddAuraFrame -> SetEnabled LAST.
 function Handle:_build()
     local config = self.config
+    checkUnwiredSeams(config)
     local c = CreateFrame("AuraContainer", nil, self.frame, "CustomAuraContainerTemplate")
     c:SetAllPoints(self.frame)
     self.container = c
@@ -748,11 +773,14 @@ end
 --   unit     = "raid5",
 --   mode     = "row" | "overlay",              -- default "row"
 --   filter   = "HELPFUL" | { "HARMFUL|RAID_PLAYER_DISPELLABLE", ... },  -- category (now)
---   spellIDs = { 774, ... },                    -- PTR-4 only; accepted + no-op now
+--   spellIDs = { 774, ... },                    -- PTR-4 only; accepted + no-op now (warns if set)
+--   dispelTypes = { "Magic", "Curse" },         -- PTR-4 only; accepted + no-op now (warns if set)
+--   maxDuration = 30,                            -- PTR-4 only; accepted + no-op now (warns if set)
+--   stealable   = true,                          -- PTR-4 only; accepted + no-op now (warns if set)
 --   max      = 5,
 --   enabled  = true,
 --   autoRefresh = true,                          -- default on for target/focus/mouseover units
---   sort     = { rule, direction },             -- PTR-4 only; accepted + no-op now
+--   sort     = { rule, direction },             -- PTR-4 only; accepted + no-op now (warns if set)
 --   layout   = { anchor, growth, wrap, size|sizeX|sizeY, spacing|spacingX|spacingY, offsetX, offsetY },
 --   style    = { icon, border, cooldown, duration, stacks, bar, spellName, dispel, overlay },
 -- }
