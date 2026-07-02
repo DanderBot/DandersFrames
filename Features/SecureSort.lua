@@ -2717,7 +2717,6 @@ function SecureSort:PushRaidGroupLayoutConfig()
         raidGroupLayoutConfig.horizontal = %s
         raidGroupLayoutConfig.groupAnchor = "%s"
         raidGroupLayoutConfig.playerAnchor = "%s"
-        raidGroupLayoutConfig.reverseGroupOrder = %s
         raidUseGroups = %s
     ]],
         lp.frameWidth,
@@ -2729,7 +2728,6 @@ function SecureSort:PushRaidGroupLayoutConfig()
         tostring(lp.horizontal),
         lp.groupAnchor or "CENTER",
         lp.playerAnchor or "START",
-        tostring(lp.reverseGroupOrder or false),
         tostring(useGroups)
     )
     
@@ -3344,41 +3342,6 @@ function SecureSort:PositionRaidFrameToSlot(frame, slotIndex, frameCount, layout
     return true
 end
 
--- Position all visible raid frames to grid slots (insecure - for test mode)
--- @param frameCount: number of visible frames to position
--- @param layoutParams: raid layout configuration
--- @param container: the container frame
--- @return number of frames actually moved
-function SecureSort:PositionAllRaidFramesToSlots(frameCount, layoutParams, container)
-    if not container then
-        DebugPrint("ERROR: PositionAllRaidFramesToSlots - container is nil")
-        return 0
-    end
-    
-    if not DF.IterateRaidFrames then
-        return 0
-    end
-    
-    local moved = 0
-    local frameIndex = 0
-    DF:IterateRaidFrames(function(frame, idx)
-        frameIndex = frameIndex + 1
-        if frameIndex > frameCount then return true end  -- Stop iteration
-        
-        if frame and frame:IsShown() then
-            local slotIndex = frameIndex - 1  -- Convert to 0-based
-            if self:PositionRaidFrameToSlot(frame, slotIndex, frameCount, layoutParams, container) then
-                moved = moved + 1
-            end
-        end
-    end)
-    
-    if moved > 0 then
-        DebugPrint("Positioned " .. moved .. "/" .. frameCount .. " raid frames")
-    end
-    return moved
-end
-
 -- ============================================================
 -- LAYOUT PARAMETERS
 -- ============================================================
@@ -3573,7 +3536,6 @@ SecureSort.raidGroupLayoutParams = {
     horizontal = true,           -- Direction players fill within group (HORIZONTAL = left-to-right)
     groupAnchor = "CENTER",      -- How groups are anchored (START/CENTER/END)
     playerAnchor = "START",      -- How players are anchored within group slot (START/CENTER/END)
-    reverseGroupOrder = false,   -- Whether to reverse group order
 }
 
 -- Update raid GROUP layout parameters from DF settings
@@ -3610,7 +3572,6 @@ function SecureSort:UpdateRaidGroupLayoutParams()
         horizontal = db.growDirection == "HORIZONTAL",
         groupAnchor = db.raidGroupAnchor or "START",
         playerAnchor = db.raidPlayerAnchor or "START",
-        reverseGroupOrder = db.raidGroupOrder == "REVERSE",
         groupRowGrowth = db.raidGroupRowGrowth or "START",
     }
     
