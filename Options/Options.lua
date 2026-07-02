@@ -3855,7 +3855,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- (the combat banner is only meaningful while our sorting is enabled).
         -- Without the sortEnabled check, the page's RefreshStates re-showed the
         -- banner after UpdateCombatBanner had hidden it -- a white, tone-less box.
-        combatBanner.hideOn = function(d) return (d.useFrameSort and FrameSortApi) or not d.sortEnabled end
+        combatBanner.hideOn = function(d) return HideSortOptions(d) or not d.sortEnabled end
         -- Reapply tone + text on every page refresh. RefreshStates calls
         -- refreshContent (not the old custom UpdateBanner method), so the banner
         -- never shows without a tone (the backdrop defaults to white until toned).
