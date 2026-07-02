@@ -389,6 +389,9 @@ end
 -- Register each region with its Blizzard inbound setter. NATIVE slots only (a plain
 -- fake/legacy slot lacks these methods, so each bind is skipped and its backend pushes
 -- data to the regions instead). Bind-once per region so ApplyStyle re-runs don't re-register.
+-- INVARIANT: regions are create-once (styleButton_regions) and never recreated, so each
+-- per-region _boundX flag stays valid for the life of the slot. If any code ever recreates
+-- a region, it MUST also clear that region's _boundX or the new region silently never binds.
 local function bindNative(slot, config)
     local style = config.style or {}
 
