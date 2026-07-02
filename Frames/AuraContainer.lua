@@ -228,80 +228,77 @@ local function makeHolder(button, levelOffset)
 end
 
 -- ============================================================
--- BUTTON STYLING
--- Maps a `style` spec -> the button's inbound setters. RE-RUNNABLE: every region
--- is created-once and cached on the button, then updated in place, so ApplyStyle
--- can re-run it on a slider drag WITHOUT tearing the container down.
+-- BUTTON STYLING — split into two source-agnostic halves (F1 two-halves design):
+--   styleButton_regions(slot, config) — creates/positions/fonts/colours EVERY region.
+--     No native setters here — only DF-owned region work (incl. the STATIC icon texture
+--     and DF.Border), so it runs IDENTICALLY on a native AuraButton or a plain Frame
+--     (the fake/legacy backends style plain frames and push their own data).
+--   bindNative(slot, config) — registers each region with its Blizzard inbound setter
+--     (SetIcon/SetDurationCooldown/SetDurationText/…). NATIVE slots only; a plain slot
+--     lacks these methods so each bind is skipped. Bind-once per region.
+--   styleButton(slot, config) — the Custom-path wrapper: regions then native bind,
+--     preserving the original behaviour. _build and ApplyStyle call this; increment 2
+--     will call the two halves separately per backend.
 --
--- IMPORTANT: it never Show()/Hide()s a region handed to a native setter — those
--- regions get a forbidden 'Shown' aspect from Blizzard (the native system owns
--- their visibility) so an addon Hide()/Show() taints. A feature that's OFF is
--- simply never created; toggling a region on/off goes through a full rebuild.
+-- RE-RUNNABLE: regions are created-once + updated in place (ApplyStyle re-runs it on a
+-- slider drag without teardown). NEVER Show()/Hide() a region handed to a native setter
+-- (Blizzard owns its 'Shown' aspect -> taint); an OFF feature is simply never created.
 -- ============================================================
-local function styleButton(button, config)
+local function styleButton_regions(slot, config)
     local style = config.style or {}
     -- Overlay = a presence box (tint + border + native dispel only); the icon and all
-    -- icon-content setters (cooldown/duration/stacks/bar/spellName) are ROW-only.
+    -- icon-content regions (cooldown/duration/stacks/bar/spellName) are ROW-only.
     local isRow = config.mode ~= "overlay"
     local sx = config.layout and (config.layout.sizeX or config.layout.size) or 32
     local sy = config.layout and (config.layout.sizeY or config.layout.size) or sx
-    if isRow then button:SetSize(sx, sy) end   -- overlay is SetAllPoints(frame) in _build
+    if isRow then slot:SetSize(sx, sy) end   -- overlay is SetAllPoints(frame) in _build
 
-    -- OVERLAY mode: no icon; a tint texture here + a static DF.Border from the shared
-    -- border block below (style.border works in overlay too — "border the frame while the
-    -- unit has X", e.g. the Atonement highlight) ride the box's secret SetShown, so
-    -- Blizzard shows them exactly while a matching aura is present.
+    -- OVERLAY tint / ROW icon. Static icon (known spell) is set here (source-agnostic —
+    -- it's also the fake backend's icon mechanism); the native SetIcon bind is in bindNative.
     if config.mode == "overlay" then
         local ov = style.overlay
         if ov and ov.tintColor then
-            if not button.dfTint then
-                button.dfTint = button:CreateTexture(nil, "OVERLAY")
-                button.dfTint:SetAllPoints(button)
+            if not slot.dfTint then
+                slot.dfTint = slot:CreateTexture(nil, "OVERLAY")
+                slot.dfTint:SetAllPoints(slot)
             end
-            button.dfTint:SetColorTexture(readColor(ov.tintColor))
+            slot.dfTint:SetColorTexture(readColor(ov.tintColor))
         end
     else
-        -- ROW mode: the aura icon. When the tracked spell is KNOWN (AD / a curated
-        -- list) set the icon STATICALLY so we never depend on the secret-wrapped one.
         local iconSpec = style.icon
         if iconSpec == nil or iconSpec.show ~= false then
-            if not button.dfIcon then
-                button.dfIcon = button:CreateTexture(nil, "BACKGROUND")
-                button.dfIcon:SetPoint("TOPLEFT", 1, -1)
-                button.dfIcon:SetPoint("BOTTOMRIGHT", -1, 1)
-                if button.SetIcon then button:SetIcon(button.dfIcon) end
+            if not slot.dfIcon then
+                slot.dfIcon = slot:CreateTexture(nil, "BACKGROUND")
+                slot.dfIcon:SetPoint("TOPLEFT", 1, -1)
+                slot.dfIcon:SetPoint("BOTTOMRIGHT", -1, 1)
             end
             local staticID = iconSpec and iconSpec.staticSpellID
             if staticID and C_Spell and C_Spell.GetSpellTexture then
                 local tex = C_Spell.GetSpellTexture(staticID)
-                if tex then button.dfIcon:SetTexture(tex) end
+                if tex then slot.dfIcon:SetTexture(tex) end
             end
             local zoom = not (iconSpec and iconSpec.zoom == false)
-            button.dfIcon:SetTexCoord(zoom and 0.08 or 0, zoom and 0.92 or 1, zoom and 0.08 or 0, zoom and 0.92 or 1)
+            slot.dfIcon:SetTexCoord(zoom and 0.08 or 0, zoom and 0.92 or 1, zoom and 0.08 or 0, zoom and 0.92 or 1)
         end
     end
 
-    -- BORDER via DF.Border (STATIC only — animated is forbidden on buttons). Reuses
-    -- the exact border engine every other DF feature uses. pcall-guarded because a
-    -- forbidden internal SetParent would taint the whole build; on failure we warn
-    -- once and carry on (icons still build).
+    -- BORDER via DF.Border (STATIC only — animated forbidden on buttons). DF-owned, so
+    -- source-agnostic (works on native + plain slots). pcall-guarded + warn-once.
     local borderSpec = style.border
     if borderSpec and DF.Border then
-        if not button.dfBorder then
-            local ok, w = pcall(function() return DF.Border:New(button, { solidOnly = true }) end)
-            if ok then button.dfBorder = w end
+        if not slot.dfBorder then
+            local ok, w = pcall(function() return DF.Border:New(slot, { solidOnly = true }) end)
+            if ok then slot.dfBorder = w end
         end
-        if button.dfBorder then
+        if slot.dfBorder then
             local ok, err = pcall(function()
                 local spec = borderSpec.spec
                 if not spec and borderSpec.db and borderSpec.prefix then
-                    -- Row = icon-border geometry; overlay = frame-border geometry (border
-                    -- the whole box). A consumer can force it via borderSpec.iconMode.
                     local iconMode = borderSpec.iconMode
                     if iconMode == nil then iconMode = (config.mode ~= "overlay") end
-                    spec = DF.Border:BuildSpec(borderSpec.db, borderSpec.prefix, { unit = config.unit, frame = button, iconMode = iconMode })
+                    spec = DF.Border:BuildSpec(borderSpec.db, borderSpec.prefix, { unit = config.unit, frame = slot, iconMode = iconMode })
                 end
-                if spec then DF.Border:Apply(button.dfBorder, spec) end
+                if spec then DF.Border:Apply(slot.dfBorder, spec) end
             end)
             if not ok and not warnedBorder then
                 warnedBorder = true
@@ -310,105 +307,148 @@ local function styleButton(button, config)
         end
     end
 
-    -- COOLDOWN swipe (Blizzard-driven off the secret duration).
+    -- COOLDOWN swipe region (native SetDurationCooldown bind is in bindNative).
     local cdSpec = style.cooldown
-    if isRow and (cdSpec == nil or cdSpec.show ~= false) and button.SetDurationCooldown then
-        if not button.dfCD then
-            button.dfCD = CreateFrame("Cooldown", nil, button, "CooldownFrameTemplate")
-            button:SetDurationCooldown(button.dfCD)
+    if isRow and (cdSpec == nil or cdSpec.show ~= false) then
+        if not slot.dfCD then
+            slot.dfCD = CreateFrame("Cooldown", nil, slot, "CooldownFrameTemplate")
         end
-        button.dfCD:SetAllPoints(button.dfIcon or button)
-        if button.dfCD.SetDrawEdge then button.dfCD:SetDrawEdge(cdSpec == nil or cdSpec.edge ~= false) end
-        if button.dfCD.SetHideCountdownNumbers then
-            button.dfCD:SetHideCountdownNumbers(not (cdSpec and cdSpec.numbers))
+        slot.dfCD:SetAllPoints(slot.dfIcon or slot)
+        if slot.dfCD.SetDrawEdge then slot.dfCD:SetDrawEdge(cdSpec == nil or cdSpec.edge ~= false) end
+        if slot.dfCD.SetHideCountdownNumbers then
+            slot.dfCD:SetHideCountdownNumbers(not (cdSpec and cdSpec.numbers))
         end
     end
 
-    -- DURATION text (Blizzard-driven). The textColorCurve option is bugged on this
-    -- build — guard it: try WITH the curve (self-heals when Blizzard fixes it), and
-    -- on error re-register WITHOUT it so text still renders (static colour applies).
+    -- DURATION text region (native SetDurationText bind is in bindNative).
     local durSpec = style.duration
-    if isRow and durSpec and durSpec.show and button.SetDurationText then
-        if not button.dfDur then
-            button.dfDurHolder = makeHolder(button, durSpec.level or 6)
-            button.dfDur = button.dfDurHolder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            local opts = {}
-            if durSpec.colorCurve then opts.textColorCurve = durSpec.colorCurve end
-            if durSpec.expiredText and durSpec.expiredText ~= "" then opts.expiredText = durSpec.expiredText end
-            if durSpec.zeroText and durSpec.zeroText ~= "" then opts.zeroDurationText = durSpec.zeroText end
-            local ok, err = pcall(function() button:SetDurationText(button.dfDur, opts) end)
-            if not ok then
-                opts.textColorCurve = nil
-                pcall(function() button:SetDurationText(button.dfDur, opts) end)
-                if not warnedCurve then
-                    warnedCurve = true
-                    DF:DebugWarn(DBG, "SetDurationText textColorCurve bugged (Blizzard, missing property) — text falls back to static colour: %s", tostring(err))
-                end
-            end
+    if isRow and durSpec and durSpec.show then
+        if not slot.dfDur then
+            slot.dfDurHolder = makeHolder(slot, durSpec.level or 6)
+            slot.dfDur = slot.dfDurHolder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         end
-        button.dfDur:ClearAllPoints()
-        button.dfDur:SetPoint(durSpec.anchor or "CENTER", button.dfDurHolder, durSpec.anchor or "CENTER", durSpec.offsetX or 0, durSpec.offsetY or 0)
-        button.dfDur:SetTextColor(readColor(durSpec.color, 1, 1, 1, 1))
-        if DF.SafeSetFont then DF:SafeSetFont(button.dfDur, durSpec.font, durSpec.size or 12, durSpec.outline or "NONE") end
+        slot.dfDur:ClearAllPoints()
+        slot.dfDur:SetPoint(durSpec.anchor or "CENTER", slot.dfDurHolder, durSpec.anchor or "CENTER", durSpec.offsetX or 0, durSpec.offsetY or 0)
+        slot.dfDur:SetTextColor(readColor(durSpec.color, 1, 1, 1, 1))
+        if DF.SafeSetFont then DF:SafeSetFont(slot.dfDur, durSpec.font, durSpec.size or 12, durSpec.outline or "NONE") end
     end
 
-    -- STACK count (Blizzard-driven). (A ">=N" threshold would need the separate
-    -- GetAuraApplicationDisplayCount min/max remap — not a SetApplicationCount option; not wired.)
+    -- STACK count region (native SetApplicationCount bind is in bindNative).
     local stackSpec = style.stacks
-    if isRow and stackSpec and stackSpec.show and button.SetApplicationCount then
-        if not button.dfStack then
-            button.dfStackHolder = makeHolder(button, stackSpec.level or 7)
-            button.dfStack = button.dfStackHolder:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
-            button:SetApplicationCount(button.dfStack, {})
+    if isRow and stackSpec and stackSpec.show then
+        if not slot.dfStack then
+            slot.dfStackHolder = makeHolder(slot, stackSpec.level or 7)
+            slot.dfStack = slot.dfStackHolder:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
         end
-        button.dfStack:ClearAllPoints()
-        button.dfStack:SetPoint(stackSpec.anchor or "BOTTOMRIGHT", button.dfStackHolder, stackSpec.anchor or "BOTTOMRIGHT", stackSpec.offsetX or -2, stackSpec.offsetY or 2)
-        if DF.SafeSetFont then DF:SafeSetFont(button.dfStack, stackSpec.font, stackSpec.size or 14, stackSpec.outline or "OUTLINE") end
+        slot.dfStack:ClearAllPoints()
+        slot.dfStack:SetPoint(stackSpec.anchor or "BOTTOMRIGHT", slot.dfStackHolder, stackSpec.anchor or "BOTTOMRIGHT", stackSpec.offsetX or -2, stackSpec.offsetY or 2)
+        if DF.SafeSetFont then DF:SafeSetFont(slot.dfStack, stackSpec.font, stackSpec.size or 14, stackSpec.outline or "OUTLINE") end
     end
 
-    -- DURATION bar (draining, Blizzard-driven). Options are Enum member NAMES.
+    -- DURATION bar region (native SetDurationBar bind is in bindNative).
     local barSpec = style.bar
-    if isRow and barSpec and barSpec.show and button.SetDurationBar then
-        if not button.dfBar then
-            button.dfBar = CreateFrame("StatusBar", nil, button)
-            button.dfBar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
-            button.dfBar:SetPoint("TOPLEFT", button, "BOTTOMLEFT", 0, -2)
-            button.dfBar:SetPoint("TOPRIGHT", button, "BOTTOMRIGHT", 0, -2)
-            local o = {}
-            local interp = resolveEnum(Enum and Enum.StatusBarInterpolation, barSpec.interpolation)
-            local dir = resolveEnum(Enum and Enum.StatusBarTimerDirection, barSpec.direction)
-            if interp ~= nil then o.interpolation = interp end
-            if dir ~= nil then o.direction = dir end
-            button:SetDurationBar(button.dfBar, o)
+    if isRow and barSpec and barSpec.show then
+        if not slot.dfBar then
+            slot.dfBar = CreateFrame("StatusBar", nil, slot)
+            slot.dfBar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
+            slot.dfBar:SetPoint("TOPLEFT", slot, "BOTTOMLEFT", 0, -2)
+            slot.dfBar:SetPoint("TOPRIGHT", slot, "BOTTOMRIGHT", 0, -2)
         end
-        button.dfBar:SetStatusBarColor(readColor(barSpec.color, 0.2, 0.9, 0.3, 1))
-        button.dfBar:SetHeight(barSpec.height or 4)
+        slot.dfBar:SetStatusBarColor(readColor(barSpec.color, 0.2, 0.9, 0.3, 1))
+        slot.dfBar:SetHeight(barSpec.height or 4)
     end
 
-    -- SPELL name (Blizzard sets secret text).
+    -- SPELL name region (native SetSpellName bind is in bindNative).
     local nameSpec = style.spellName
-    if isRow and nameSpec and nameSpec.show and button.SetSpellName then
-        if not button.dfName then
-            button.dfNameHolder = makeHolder(button, 5)
-            button.dfName = button.dfNameHolder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            button:SetSpellName(button.dfName)
+    if isRow and nameSpec and nameSpec.show then
+        if not slot.dfName then
+            slot.dfNameHolder = makeHolder(slot, 5)
+            slot.dfName = slot.dfNameHolder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         end
-        button.dfName:ClearAllPoints()
-        button.dfName:SetPoint(nameSpec.anchor or "TOP", button.dfNameHolder, nameSpec.anchor or "TOP", nameSpec.offsetX or 0, nameSpec.offsetY or 16)
-        if DF.SafeSetFont then DF:SafeSetFont(button.dfName, nameSpec.font, nameSpec.size or 10, nameSpec.outline or "NONE") end
+        slot.dfName:ClearAllPoints()
+        slot.dfName:SetPoint(nameSpec.anchor or "TOP", slot.dfNameHolder, nameSpec.anchor or "TOP", nameSpec.offsetX or 0, nameSpec.offsetY or 16)
+        if DF.SafeSetFont then DF:SafeSetFont(slot.dfName, nameSpec.font, nameSpec.size or 10, nameSpec.outline or "NONE") end
     end
 
-    -- NATIVE dispel border / symbol (Blizzard colours by dispel type; secret-safe).
-    -- pcall-guarded + warn-once: on some builds these throw inside Blizzard's
-    -- forbidden-object validation and could otherwise abort the whole build loop.
+    -- NATIVE dispel border / symbol REGIONS (the SetAuraBorder/SetAuraSymbol bind is in bindNative).
     local dispelSpec = style.dispel
     if dispelSpec then
-        if dispelSpec.nativeBorder and button.SetAuraBorder and not button.dfAuraBorder then
-            button.dfAuraBorder = button:CreateTexture(nil, "OVERLAY")
-            button.dfAuraBorder:SetPoint("TOPLEFT", -2, 2)
-            button.dfAuraBorder:SetPoint("BOTTOMRIGHT", 2, -2)
+        if dispelSpec.nativeBorder and not slot.dfAuraBorder then
+            slot.dfAuraBorder = slot:CreateTexture(nil, "OVERLAY")
+            slot.dfAuraBorder:SetPoint("TOPLEFT", -2, 2)
+            slot.dfAuraBorder:SetPoint("BOTTOMRIGHT", 2, -2)
+        end
+        if dispelSpec.nativeSymbol and not slot.dfSymbol then
+            slot.dfSymbolHolder = makeHolder(slot, 7)
+            slot.dfSymbol = slot.dfSymbolHolder:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+            slot.dfSymbol:SetPoint("CENTER")
+        end
+    end
+end
+
+-- Register each region with its Blizzard inbound setter. NATIVE slots only (a plain
+-- fake/legacy slot lacks these methods, so each bind is skipped and its backend pushes
+-- data to the regions instead). Bind-once per region so ApplyStyle re-runs don't re-register.
+local function bindNative(slot, config)
+    local style = config.style or {}
+
+    if slot.dfIcon and slot.SetIcon and not slot._boundIcon then
+        slot._boundIcon = true
+        slot:SetIcon(slot.dfIcon)
+    end
+
+    if slot.dfCD and slot.SetDurationCooldown and not slot._boundCD then
+        slot._boundCD = true
+        slot:SetDurationCooldown(slot.dfCD)
+    end
+
+    if slot.dfDur and slot.SetDurationText and not slot._boundDur then
+        slot._boundDur = true
+        -- SetDurationText's textColorCurve is bugged on this build — try WITH it
+        -- (self-heals if Blizzard fixes it), fall back WITHOUT it so text still renders.
+        local durSpec = style.duration or {}
+        local opts = {}
+        if durSpec.colorCurve then opts.textColorCurve = durSpec.colorCurve end
+        if durSpec.expiredText and durSpec.expiredText ~= "" then opts.expiredText = durSpec.expiredText end
+        if durSpec.zeroText and durSpec.zeroText ~= "" then opts.zeroDurationText = durSpec.zeroText end
+        local ok, err = pcall(function() slot:SetDurationText(slot.dfDur, opts) end)
+        if not ok then
+            opts.textColorCurve = nil
+            pcall(function() slot:SetDurationText(slot.dfDur, opts) end)
+            if not warnedCurve then
+                warnedCurve = true
+                DF:DebugWarn(DBG, "SetDurationText textColorCurve bugged (Blizzard, missing property) — text falls back to static colour: %s", tostring(err))
+            end
+        end
+    end
+
+    if slot.dfStack and slot.SetApplicationCount and not slot._boundStack then
+        slot._boundStack = true
+        slot:SetApplicationCount(slot.dfStack, {})
+    end
+
+    if slot.dfBar and slot.SetDurationBar and not slot._boundBar then
+        slot._boundBar = true
+        local barSpec = style.bar or {}
+        local o = {}
+        local interp = resolveEnum(Enum and Enum.StatusBarInterpolation, barSpec.interpolation)
+        local dir = resolveEnum(Enum and Enum.StatusBarTimerDirection, barSpec.direction)
+        if interp ~= nil then o.interpolation = interp end
+        if dir ~= nil then o.direction = dir end
+        slot:SetDurationBar(slot.dfBar, o)
+    end
+
+    if slot.dfName and slot.SetSpellName and not slot._boundName then
+        slot._boundName = true
+        slot:SetSpellName(slot.dfName)
+    end
+
+    local dispelSpec = style.dispel
+    if dispelSpec then
+        if slot.dfAuraBorder and slot.SetAuraBorder and not slot._boundAuraBorder then
+            slot._boundAuraBorder = true
             local ok, err = pcall(function()
-                button:SetAuraBorder(button.dfAuraBorder, {
+                slot:SetAuraBorder(slot.dfAuraBorder, {
                     style = (AuraButtonBorderStyle and AuraButtonBorderStyle[dispelSpec.style or "Atlas"]) or 0,
                     showWhenHarmful = dispelSpec.showWhenHarmful ~= false,
                     showWhenHelpful = dispelSpec.showWhenHelpful == true,
@@ -420,12 +460,10 @@ local function styleButton(button, config)
                 DF:DebugWarn(DBG, "SetAuraBorder failed (build still ok): %s", tostring(err))
             end
         end
-        if dispelSpec.nativeSymbol and button.SetAuraSymbol and not button.dfSymbol then
-            button.dfSymbolHolder = makeHolder(button, 7)
-            button.dfSymbol = button.dfSymbolHolder:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-            button.dfSymbol:SetPoint("CENTER")
+        if slot.dfSymbol and slot.SetAuraSymbol and not slot._boundSymbol then
+            slot._boundSymbol = true
             local ok, err = pcall(function()
-                button:SetAuraSymbol(button.dfSymbol, {
+                slot:SetAuraSymbol(slot.dfSymbol, {
                     showWhenHarmful = dispelSpec.showWhenHarmful ~= false,
                     showWhenHelpful = dispelSpec.showWhenHelpful == true,
                 })
@@ -436,6 +474,13 @@ local function styleButton(button, config)
             end
         end
     end
+end
+
+-- Custom-path wrapper: regions then native bind, preserving the original order + behaviour.
+-- (_build and ApplyStyle call this. Increment 2 calls the two halves separately per backend.)
+local function styleButton(slot, config)
+    styleButton_regions(slot, config)
+    bindNative(slot, config)
 end
 
 -- ============================================================
