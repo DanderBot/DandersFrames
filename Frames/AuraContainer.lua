@@ -162,6 +162,23 @@ local function checkUnwiredSeams(config)
     if config.stealable then warnUnwiredSeam("stealable", "stealable filter arrives at PTR-4") end
 end
 
+-- TEST MODE. A real CustomAuraContainer reads REAL unit auras, so it shows nothing on a
+-- fabricated test unit — DF's test mode must drive containers through the FakeBackend
+-- (plain frames + pushed fake data) so users can preview aura settings. DF's test mode
+-- calls SetTestMode(true/false) on toggle; every live handle rebuilds onto the right
+-- backend. Global (all frames are test frames when test mode is on).
+function AuraContainer.SetTestMode(on)
+    on = on and true or false
+    if (AuraContainer._testMode or false) == on then return end
+    AuraContainer._testMode = on
+    DF:Debug(DBG, "SetTestMode -> %s", tostring(on))
+    if AuraContainer._handles then
+        for h in pairs(AuraContainer._handles) do
+            if not h._destroyed then pcall(function() h:OnTestModeChanged() end) end
+        end
+    end
+end
+
 -- ============================================================
 -- HELPERS
 -- ============================================================
@@ -620,6 +637,77 @@ function CustomBackend:teardown()
     end
 end
 
+-- FakeBackend — test-mode / preview. Produces PLAIN Frame slots (not AuraButtons) so
+-- styleButton_regions renders them identically to live, and PUSHES fake data (a plain
+-- frame has no native setters). isNativeSlots = false. Used when test mode is active,
+-- because a real CustomAuraContainer reads REAL unit auras and shows nothing on a
+-- fabricated test unit. (PTR-4's EditMode data-provider is the eventual pixel-accurate
+-- replacement; until then this is the preview bridge.)
+local FAKE_HELPFUL = { 774, 139, 17, 1459, 21562, 33763 }
+local FAKE_HARMFUL = { 589, 980, 348, 172, 30108, 27243 }
+
+local FakeBackend = {}
+FakeBackend.__index = FakeBackend
+
+function FakeBackend.new(handle)
+    return setmetatable({ handle = handle, slots = {} }, FakeBackend)
+end
+
+function FakeBackend:isNativeSlots() return false end
+
+function FakeBackend:build()
+    local handle = self.handle
+    local config = handle.config
+    self.slots = {}
+    local n = handle:_slotCount()
+    for i = 1, n do
+        local slot = CreateFrame("Frame", nil, handle.frame)
+        if config.mode == "overlay" then slot:SetAllPoints(handle.frame) end
+        local ok, err = pcall(function() handle:_acceptSlot(slot, i) end)  -- regions only; NO native bind
+        if not ok then DF:DebugWarn(DBG, "fake slot %d failed: %s", i, tostring(err)) end
+        self.slots[i] = slot
+    end
+    handle:_layoutSlots()
+    self:_fill()
+    DF:Debug(DBG, "built (fake) unit=%s mode=%s slots=%d", tostring(config.unit), tostring(config.mode or "row"), n)
+end
+
+-- Push representative fake data so styling previews as it will live. The cooldown swipe
+-- animates itself off SetCooldown; other regions get static preview values.
+function FakeBackend:_fill()
+    local config = self.handle.config
+    if config.mode == "overlay" then return end   -- overlay shows tint/border via regions; no icon data
+    local harmful = false
+    for _, f in ipairs(normalizeFilters(config.filter)) do
+        if f:find("HARMFUL") then harmful = true; break end
+    end
+    local pool = harmful and FAKE_HARMFUL or FAKE_HELPFUL
+    local staticID = config.style and config.style.icon and config.style.icon.staticSpellID
+    for i, slot in ipairs(self.slots) do
+        if slot.dfIcon and not staticID and C_Spell and C_Spell.GetSpellTexture then
+            local tex = C_Spell.GetSpellTexture(pool[((i - 1) % #pool) + 1])
+            if tex then slot.dfIcon:SetTexture(tex) end
+        end
+        if slot.dfCD and slot.dfCD.SetCooldown then
+            slot.dfCD:SetCooldown(GetTime() - ((i * 3) % 18), 18)   -- self-animating fake swipe
+        end
+        if slot.dfStack then slot.dfStack:SetText(i > 1 and tostring(i) or "") end
+        if slot.dfDur then slot.dfDur:SetText("12") end
+        if slot.dfBar then slot.dfBar:SetMinMaxValues(0, 1); slot.dfBar:SetValue(0.65) end
+    end
+end
+
+function FakeBackend:setUnit(unit) end   -- fake data is unit-independent
+function FakeBackend:setEnabled(on)
+    on = on and true or false
+    for _, slot in ipairs(self.slots) do slot:SetShown(on) end
+end
+function FakeBackend:refresh() self:_fill() end
+function FakeBackend:teardown()
+    for _, slot in ipairs(self.slots) do slot:Hide() end
+    self.slots = {}
+end
+
 local Handle = {}
 Handle.__index = Handle
 
@@ -782,6 +870,7 @@ end
 
 function Handle:Destroy()
     if AuraContainer._dyn then AuraContainer._dyn._handles[self] = nil end
+    if AuraContainer._handles then AuraContainer._handles[self] = nil end
     self._destroyed = true
     if self.frame then self.frame:Hide() end   -- plain frame; safe in combat, hides the container child too
     if InCombatLockdown() then
@@ -862,9 +951,18 @@ end
 -- backend join at PTR-4 / F3 behind the same interface). The backend owns the container
 -- + slot production; the handle owns styling/layout/lifecycle. Backend is picked here.
 function Handle:_build()
-    self.backend = CustomBackend.new(self)
+    -- Pick the backend: fake/preview slots in test mode (a real container shows nothing on
+    -- a fabricated test unit), else the live CustomAuraContainer. (ManagedBackend at PTR-4.)
+    local BackendClass = AuraContainer._testMode and FakeBackend or CustomBackend
+    self.backend = BackendClass.new(self)
     self.backend:build()
     self:_updateDynRefresh()   -- auto-bounce on target/focus/mouseover change
+end
+
+-- Test mode toggled -> rebuild onto the other backend (fake <-> custom). Combat-guarded
+-- via _rebuild. Called by AuraContainer.SetTestMode for every live handle.
+function Handle:OnTestModeChanged()
+    self:_rebuild()
 end
 
 -- ============================================================
@@ -904,6 +1002,8 @@ function AuraContainer:Create(parent, config)
     cfg.mode = cfg.mode or "row"
 
     local h = setmetatable({ config = cfg, buttons = {} }, Handle)
+    AuraContainer._handles = AuraContainer._handles or {}
+    AuraContainer._handles[h] = true   -- registry so SetTestMode can rebuild every live handle
     h.frame = CreateFrame("Frame", nil, parent)
     -- Both modes: h.frame occupies the unit-frame rect (row layout anchors are relative
     -- to it; overlay covers it). To reposition: h:ClearAllPoints() then h:SetPoint(...).
