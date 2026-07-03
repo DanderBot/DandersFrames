@@ -1560,7 +1560,6 @@ L["These defaults apply to all text elements that haven't been individually cust
 L["These settings apply when using 'Shadow' outline style. Use larger offsets for more dramatic shadows."] = true
 L["Thick Outline"] = true
 L["Thickness"] = true
-L["Tip"] = true
 L["This setting differs from the global profile value. Click the reset button to revert."] = true
 L["This setting is being overridden by the active auto layout profile. To change it, edit the profile in the Auto Layouts tab."] = true
 L["This will clear all of your custom blacklist toggles."] = true
@@ -1573,6 +1572,7 @@ L["Threat Colors"] = true
 L["Time Remaining"] = true
 L["Tint Color"] = true
 L["Tint Opacity"] = true
+L["Tip"] = true
 L["Tip: for the crispest result at this resolution, set your UI Scale to %.4f — type /console UIScale %.4f to apply it (it may be below the in-game slider's minimum)."] = true
 L["to customise\nthis profile's settings"] = true
 L["To blacklist specific auras, see the Aura Blacklist tab."] = true
