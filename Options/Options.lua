@@ -6151,7 +6151,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         stackNoteLabel:SetPoint("TOPLEFT", stackNoteContainer, "TOPLEFT", 0, 0)
         stackNoteLabel:SetWidth(250)
         stackNoteLabel:SetJustifyH("LEFT")
-        stackNoteLabel:SetText(("|c" .. GUI:ToneHex("caution") .. "Note:|r ") .. L["Icons smaller than 30 may hide stack text behind duration text. At small sizes, consider disabling duration numbers."])
+        stackNoteLabel:SetText(("|c" .. GUI:ToneHex("caution") .. L["Note"] .. ":|r ") .. L["Icons smaller than 30 may hide stack text behind duration text. At small sizes, consider disabling duration numbers."])
         -- Match the note look: gold "Note:" prefix + dim body (this font defaults to
         -- gold, which made the whole body gold instead of the CreateNote dim body).
         stackNoteLabel:SetTextColor(GUI.Colors.textDim.r, GUI.Colors.textDim.g, GUI.Colors.textDim.b)

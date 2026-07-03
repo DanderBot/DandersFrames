@@ -143,7 +143,7 @@ function CC:ShowAddBindingDialog(onComplete, existingBinding, existingIndex)
         macWarning:SetPoint("TOPLEFT", keyCaptureBtn, "BOTTOMLEFT", 0, -2)
         macWarning:SetWidth(390)
         macWarning:SetJustifyH("LEFT")
-        macWarning:SetText(("|c" .. DF.GUI:ToneHex("caution") .. "Note:|r ") .. L["Cmd + Left Click unavailable on Mac"])
+        macWarning:SetText(("|c" .. DF.GUI:ToneHex("caution") .. L["Note"] .. ":|r ") .. L["Cmd + Left Click unavailable on Mac"])
         macWarning:SetTextColor(0.6, 0.6, 0.6)
         yOffset = yOffset - 12  -- Extra space for the warning
     end
@@ -928,7 +928,7 @@ function CC:CreateEditBindingPanel()
     macWarning:SetPoint("RIGHT", clearBindBtn, "RIGHT", 0, 0)
     macWarning:SetJustifyH("LEFT")
     macWarning:SetWordWrap(false)
-    macWarning:SetText(("|c" .. DF.GUI:ToneHex("caution") .. "Note:|r ") .. L["Cmd + Left Click unavailable on Mac"])
+    macWarning:SetText(("|c" .. DF.GUI:ToneHex("caution") .. L["Note"] .. ":|r ") .. L["Cmd + Left Click unavailable on Mac"])
     macWarning:SetTextColor(0.6, 0.6, 0.6)
     if IsMacClient and IsMacClient() then
         macWarning:Show()

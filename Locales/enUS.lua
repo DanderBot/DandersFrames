@@ -1135,6 +1135,7 @@ L["Not Cancelable"] = true
 L["Not in a raid group"] = true
 L["Cmd + Left Click unavailable on Mac"] = true
 L["Font sizes are not changed. Adjust sizes in each element's page."] = true
+L["Note"] = true
 L["Notifications"] = true
 L["Notify me when a newer version is available"] = true
 L["OOR"] = true
@@ -1560,6 +1561,7 @@ L["These defaults apply to all text elements that haven't been individually cust
 L["These settings apply when using 'Shadow' outline style. Use larger offsets for more dramatic shadows."] = true
 L["Thick Outline"] = true
 L["Thickness"] = true
+L["Tip"] = true
 L["This setting differs from the global profile value. Click the reset button to revert."] = true
 L["This setting is being overridden by the active auto layout profile. To change it, edit the profile in the Auto Layouts tab."] = true
 L["This will clear all of your custom blacklist toggles."] = true
