@@ -2612,7 +2612,7 @@ local function RefreshPreviewEffects()
     -- priority (higher number wins; first claim per type — see prioritySort and
     -- Indicators:Apply's `if state.X then return end`). Mirror that here so the
     -- preview is deterministic instead of pairs()-order-dependent: iterate auras
-    -- in ascending-priority order (tiebreak by name) and apply first-wins per type.
+    -- in descending-priority order (tiebreak by name) and apply first-wins per type.
     local sortedAuras = {}
     for auraName, auraCfg in pairs(GetSpecAuras()) do
         if type(auraCfg) == "table" then  -- skip corrupted entries

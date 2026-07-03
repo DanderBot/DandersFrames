@@ -107,6 +107,10 @@ function CC:InitializeSavedVariables()
             -- Migrate bindings
             if self.db.bindings then
                 defaultProfile.bindings = CopyTable(self.db.bindings)
+                -- These legacy bindings predate the higher-wins priority flip. The
+                -- template is born flagged, so clear the flag here to let
+                -- MigratePrioritiesLazy flip these old-scale values exactly once.
+                defaultProfile._priorityHigherWinsV1 = nil
             end
             
             -- Migrate custom macros

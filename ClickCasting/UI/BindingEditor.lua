@@ -1248,9 +1248,9 @@ function CC:CreateEditBindingPanel()
     -- written 1:1 via customGet/customSet and shown directly in the input box.
     -- Direction: HIGHER number = higher priority (10 wins over 1), matching every
     -- other slider (right = more). Thumb runs left = 1 (Low) .. right = 10 (High).
-    -- A one-time migration (DF:MigratePriorityHigherWins) remapped older saved
-    -- values, and the resolution comparators were flipped, so existing bindings
-    -- resolve the same.
+    -- A lazy per-profile migration (CC:MigratePrioritiesLazy) remaps older saved
+    -- values on first access, and the resolution comparators were flipped, so
+    -- existing bindings resolve the same.
     local prioritySlider = DF.GUI:CreateSlider(
         advancedContent,            -- parent
         "",                         -- label (priorityLabel handles the caption)

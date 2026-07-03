@@ -1102,6 +1102,12 @@ function Engine:PreWarmIndicators(frame)
     if not db then return end
     local adDB = DF:ResolveAuraDesigner(frame)
     if not adDB then return end
+    -- Spec-scope first (mirrors UpdateFrame): the priority flip's flat-vs-spec
+    -- detection needs the table already spec-scoped, or a still-flat adDB can be
+    -- misclassified and skip the flip.
+    if (not adDB._specScopedV1 or not adDB._specScopedV2) and DF.MigrateAuraDesignerSpecScope then
+        DF.MigrateAuraDesignerSpecScope(adDB)
+    end
     if DF.MigrateAuraDesignerInstancesLazy then DF.MigrateAuraDesignerInstancesLazy(adDB) end
     if DF.MigrateAuraDesignerBorderKeysLazy then DF.MigrateAuraDesignerBorderKeysLazy(adDB) end
     if DF.MigrateAuraDesignerPrioritiesLazy then DF.MigrateAuraDesignerPrioritiesLazy(adDB) end
