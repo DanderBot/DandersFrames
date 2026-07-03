@@ -678,8 +678,15 @@ end
 function DF:SafeSetFont(fontString, fontNameOrPath, fontSize, outline)
     if not fontString then return false end
 
-    fontSize = fontSize or 10
-    outline = outline or ""
+    -- Harden against wrong-typed profile values: raw db values reach here from
+    -- every caller, and a corrupted import can store a boolean/number/table in
+    -- a font key. Coerce instead of crashing (a bad outline once broke frame
+    -- layout addon-wide on login): bad font name -> fallback font, bad size ->
+    -- default, bad outline -> no flags.
+    if type(fontNameOrPath) ~= "string" then fontNameOrPath = nil end
+    fontSize = tonumber(fontSize) or 10
+    if fontSize <= 0 then fontSize = 10 end
+    if type(outline) ~= "string" then outline = "" end
 
     -- The stored outline value may carry a "SHADOW;" prefix (Grid2-style: a drop
     -- shadow combined with any flag, e.g. "SHADOW;MONOCHROME, OUTLINE"). The legacy
