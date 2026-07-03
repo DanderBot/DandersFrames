@@ -2262,7 +2262,7 @@ function CC:BuildCombinedMacroForBindings(bindings, forGlobalBinding)
     
     -- Sort each category by priority
     local function sortByPriority(a, b)
-        return (a.priority or 5) < (b.priority or 5)
+        return (a.priority or 5) > (b.priority or 5)  -- higher number = higher priority
     end
     table.sort(friendly, sortByPriority)
     table.sort(hostile, sortByPriority)
@@ -3063,7 +3063,7 @@ end
 function CC:FindBestKnownSpellBinding(bindings)
     -- Sort by priority first
     table.sort(bindings, function(a, b)
-        return (a.binding.priority or 5) < (b.binding.priority or 5)
+        return (a.binding.priority or 5) > (b.binding.priority or 5)  -- higher number = higher priority
     end)
     
     for _, item in ipairs(bindings) do

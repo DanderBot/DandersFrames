@@ -31,6 +31,7 @@ A top-to-bottom rework of the configuration UI so every panel shares one consist
 * (Interface) Drag-to-reorder lists (role, class and group order) now use a clearer reorder-handle icon. (by Krathe)
 * (Click Casting) The binding **Priority** slider now reads left-to-right as High → Low and shows the priority number directly. The stored priority is unchanged — only the slider's display orientation changed. (by Krathe)
 * (Pixel Perfect) The Display page now shows the **UI Scale** that gives exact 1:1 pixel rendering at your resolution (or confirms you're already there) — purely informational, it never changes your scale. (by Krathe)
+* (Click Casting / Aura Designer) The **Priority** sliders now read left-to-right as Low → High — **higher number wins**, matching every other slider (right = more). Your existing priorities are migrated automatically, so only the displayed number changes, not which binding or aura takes precedence. (by Krathe)
 
 ### Bug Fixes
 

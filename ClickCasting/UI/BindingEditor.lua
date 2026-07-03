@@ -94,7 +94,7 @@ function CC:ShowAddBindingDialog(onComplete, existingBinding, existingIndex)
         macroText = nil,
         loadSpec = nil,
         loadCombat = nil,
-        priority = 5,  -- Default priority (1=highest, 10=lowest)
+        priority = 5,  -- Default priority (10=highest, 1=lowest)
     }
     
     local yOffset = -45
@@ -1244,13 +1244,13 @@ function CC:CreateEditBindingPanel()
     priorityLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     panel.priorityLabel = priorityLabel
 
-    -- Shared slider builder. The stored field (panel.pendingBinding.priority,
-    -- 1 = High .. 10 = Low) is written 1:1 via customGet/customSet, so the saved
-    -- value is identical to the old hand-rolled slider (which also stored the raw
-    -- priority; its 11-value was only a display-geometry inversion). The slider's
-    -- internal value now equals the priority directly, so the builder's input box
-    -- shows the actual priority number. Thumb runs left = 1 (High) .. right = 10
-    -- (Low); the hint labels below are oriented to match.
+    -- Shared slider builder. The stored field (panel.pendingBinding.priority) is
+    -- written 1:1 via customGet/customSet and shown directly in the input box.
+    -- Direction: HIGHER number = higher priority (10 wins over 1), matching every
+    -- other slider (right = more). Thumb runs left = 1 (Low) .. right = 10 (High).
+    -- A one-time migration (DF:MigratePriorityHigherWins) remapped older saved
+    -- values, and the resolution comparators were flipped, so existing bindings
+    -- resolve the same.
     local prioritySlider = DF.GUI:CreateSlider(
         advancedContent,            -- parent
         "",                         -- label (priorityLabel handles the caption)
@@ -1274,16 +1274,14 @@ function CC:CreateEditBindingPanel()
     )
     prioritySlider:SetPoint("TOPLEFT", 68, -155)
 
-    -- Priority hint labels (1 = High on left, 10 = Low on right)
-    local highLabel = advancedContent:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
-    highLabel:SetPoint("TOPLEFT", prioritySlider, "BOTTOMLEFT", 0, -2)
-    highLabel:SetText(L["1 = High"])
-    highLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-
-    local lowLabel = advancedContent:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
-    lowLabel:SetPoint("TOPRIGHT", prioritySlider, "BOTTOMRIGHT", 0, -2)
-    lowLabel:SetText(L["10 = Low"])
-    lowLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    -- Direction note (standard GUI label style). The slider's container is 50px
+    -- tall (its bottom sits near the Delete/Cancel/Save row), so the note is placed
+    -- in the gap BELOW the visible bar — anchored ~28px down from the slider top and
+    -- shifted left to x=0 to sit under the "Priority:" caption. Anchored to the
+    -- slider so it tracks the macro/spell repositioning; the CreateLabel frame has
+    -- no background, so its lower extent over the button row is invisible.
+    local priNote = DF.GUI:CreateLabel(advancedContent, L["Higher priority wins"], 248)
+    priNote:SetPoint("TOPLEFT", prioritySlider, "TOPLEFT", -68, -28)
 
     panel.prioritySlider = prioritySlider
     
@@ -1558,7 +1556,7 @@ function CC:ShowEditBindingPanel(spellData, existingBinding, existingIndex)
             actionType = spellData.actionType or self.ACTION_TYPES.SPELL,
             spellId = spellData.spellId,
             spellName = spellData.spellName or spellData.name,
-            priority = 5,  -- Default priority (1=highest, 10=lowest)
+            priority = 5,  -- Default priority (10=highest, 1=lowest)
         }
         
         if spellData.isMacro then
@@ -1860,8 +1858,8 @@ function CC:ShowEditBindingPanel(spellData, existingBinding, existingIndex)
     end
     
     -- Update priority slider. The slider's internal value equals the stored
-    -- priority directly (1 = High .. 10 = Low); the builder's input box and fill
-    -- update off this value.
+    -- priority directly (1 = Low .. 10 = High; higher wins); the builder's input
+    -- box and fill update off this value.
     panel.prioritySlider.slider:SetValue(currentPriority)
     
     -- Update fallback checkboxes (only if not a macro)
@@ -2065,7 +2063,7 @@ function CC:ProcessKeybind(bindType, key)
         modifiers = mods,
         scope = defaultScope,
         combat = defaultCombat,
-        priority = 5,  -- Default priority (1=highest, 10=lowest)
+        priority = 5,  -- Default priority (10=highest, 1=lowest)
         -- Default to all frames
         frames = {
             dandersFrames = true,

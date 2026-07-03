@@ -3574,6 +3574,41 @@ function DF:MigrateDeprecateRaidGroupOrder()
     end
 end
 
+-- Transition shim (unreleased-only): an earlier iteration of the priority flip
+-- converted values to the new higher-wins scale and then stamped a COARSE flag —
+-- profile-level for Aura Designer, store-level for Click Casting. The replacement
+-- lazy migrations (DF.MigrateAuraDesignerPrioritiesLazy / CC:MigratePrioritiesLazy)
+-- key off a FINER flag (per resolved adDB table / per CC profile). Forward the
+-- coarse flags to the fine ones WITHOUT touching any value, so data already
+-- converted by the old pass is never double-flipped. Purely additive + idempotent
+-- (only sets flags); a no-op for anyone who never ran the old pass. Auto-layout
+-- overlays are intentionally left unstamped — the old pass never converted them,
+-- so the lazy migration must still flip those on first resolve.
+function DF:ForwardPriorityMigrationFlags()
+    local function stamp(adDB) if type(adDB) == "table" then adDB._priorityHigherWinsV1 = true end end
+    if DandersFramesDB_v2 and DandersFramesDB_v2.profiles then
+        for _, profile in pairs(DandersFramesDB_v2.profiles) do
+            if type(profile) == "table" and profile._priorityHigherWinsV1 then
+                if type(profile.party) == "table" then stamp(profile.party.auraDesigner) end
+                if type(profile.raid) == "table" then stamp(profile.raid.auraDesigner) end
+                if type(profile.auraDesignerPresets) == "table" then
+                    for _, presetCfg in pairs(profile.auraDesignerPresets) do stamp(presetCfg) end
+                end
+            end
+        end
+    end
+    local ccdb = DandersFramesClickCastingDB
+    if ccdb and ccdb._priorityHigherWinsV1 and type(ccdb.classes) == "table" then
+        for _, classData in pairs(ccdb.classes) do
+            if type(classData) == "table" and type(classData.profiles) == "table" then
+                for _, profile in pairs(classData.profiles) do
+                    if type(profile) == "table" then profile._priorityHigherWinsV1 = true end
+                end
+            end
+        end
+    end
+end
+
 -- One-time: carry the old bespoke important-spell highlight settings
 -- (targetedSpellHighlightStyle/Color/Size/Inset) into the new Important Spell
 -- Border key set (targetedSpellImportantBorder*), which is a second DF.Border
@@ -5413,6 +5448,15 @@ DF._MainEventDispatcher = function(self, event, arg1)
             -- stale "REVERSE"); group order now comes from Group Display Order.
             if DF.MigrateDeprecateRaidGroupOrder then
                 DF:MigrateDeprecateRaidGroupOrder()
+            end
+
+            -- Priority higher-wins flip is now lazy/at-point-of-use — see
+            -- DF.MigrateAuraDesignerPrioritiesLazy and CC:MigratePrioritiesLazy.
+            -- Only forward the old coarse migration flags to the new fine-grained
+            -- ones here (never flips a value), so data an earlier pass already
+            -- converted is not double-flipped.
+            if DF.ForwardPriorityMigrationFlags then
+                DF:ForwardPriorityMigrationFlags()
             end
 
             -- CRITICAL: Update power bars now that unit data is available

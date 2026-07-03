@@ -351,6 +351,9 @@ CC.IsDefaultProfile = IsDefaultProfile
 
 -- Default profile template (what goes inside each profile)
 local PROFILE_TEMPLATE = {
+    -- Born in the new higher-wins priority scale, so the lazy priority migration
+    -- (CC:MigratePrioritiesLazy) never flips a freshly-created / copied profile.
+    _priorityHigherWinsV1 = true,
     bindings = {},
     customMacros = {},
     consumables = {},  -- Saved consumable item IDs

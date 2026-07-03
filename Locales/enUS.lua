@@ -63,8 +63,7 @@ L["Pick an Aura Designer preset below for this layout. 'Inherit (Global)' follow
 L["Pick a Text Designer preset below for this layout. 'Inherit (Global)' follows your global one."] = true
 L["Clears this layout's Aura Designer preset override so it follows your global Aura Designer preset."] = true
 -- ClickCasting UI strings
-L["1 = High"] = true
-L["10 = Low"] = true
+L["Higher priority wins"] = true
 L["A few things to know:\n\n- Party only — raid frames aren't supported.\n\n- If two members share the same class, role, race and sex, they can't be told apart and won't show an icon (you'll be warned by name).\n\n- This relies on Blizzard behaviour that isn't officially supported. Blizzard could change it at any time — if they do, the feature simply stops working and there's no fix. There's no guarantee it stays."] = true
 L["A newer version is available (%s). Get it on CurseForge."] = true
 L["A-Z"] = true

@@ -196,7 +196,10 @@ function CC:InitializeSavedVariables()
     
     -- Get active profile
     self.profile = classData.profiles[classData.activeProfile]
-    
+    -- Flip legacy (pre-4.6) priorities to higher-wins on the active profile at
+    -- login, before the legacy references below feed the flipped comparators.
+    if self.MigratePrioritiesLazy then self:MigratePrioritiesLazy(self.profile) end
+
     -- Set up legacy references for compatibility (point to profile data)
     self.db.bindings = self.profile.bindings
     self.db.customMacros = self.profile.customMacros
