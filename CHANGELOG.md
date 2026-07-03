@@ -39,6 +39,7 @@ A top-to-bottom rework of the configuration UI so every panel shares one consist
 * (Sorting) Fixed the combat-status banner on the Sorting page sometimes appearing as a blank white box instead of its coloured status. (by Krathe)
 * (Raid) Test mode and settings changes can no longer disturb your **live** raid frames — group order and positions are always driven by the secure layout, fixing the grouped-raid inversion that previously needed a `/reload`. (by Krathe)
 * (Raid) Retired an obsolete internal reverse-group-order setting that could invert raid groups; group order is controlled entirely by **Group Display Order** / **My Group First**. (by Krathe)
+* (Pet Frames) Fixed a combat error (blocked action) when a pet appeared, died, or was dismissed during combat — pet frames now hide combat-safely. (by Krathe)
 * (Borders) **Border Inset** is now honoured by texture-style borders, and updates live. (by Krathe)
 * (Shields) Absorb and heal-absorb overlays now cover the health bar with **no gap** — flush to the edge when the frame border is opaque or off, keeping a small inset only when the border is translucent (so the shield doesn't show through it). (by Krathe)
 * (Pixel Perfect) **Center-aligned** frames now snap to the physical pixel grid, so borders stay crisp instead of doubling or dropping a side — party frames live, and raid frames in test mode (live raid keeps Blizzard's secure positioning). The overshield line indicator and the solid highlight border snap to whole pixels too. (by Krathe)
