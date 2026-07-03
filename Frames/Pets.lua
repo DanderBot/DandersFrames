@@ -927,7 +927,7 @@ function DF:UpdatePetGroupLayout()
     end
 
     if #petFrames == 0 then
-        container:Hide()
+        DF:HidePetGroupContainer(container)
         return
     end
 
@@ -1169,7 +1169,7 @@ function DF:UpdateRaidPetGroupLayout()
     end
 
     if #petFrames == 0 then
-        container:Hide()
+        DF:HidePetGroupContainer(container)
         return
     end
 
