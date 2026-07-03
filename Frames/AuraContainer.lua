@@ -62,19 +62,24 @@ local DBG = "AURACONTAINER"
 -- One-time-per-process warning latches so a guarded failure (curve bug, border
 -- taint, native dispel reject) logs ONCE, not once per button.
 local warnedCurve, warnedBorder, warnedNativeDispel = false, false, false
-local warnedRestyle, warnedRefresh = false, false
+local warnedRestyle, warnedRefresh, warnedMouse = false, false, false
 
 -- ============================================================
 -- CAPABILITY DETECTION  (the version gate + PTR-4 feature gates)
 -- Lazy + cached. IsSupported() is the primary gate every consumer checks; when it
 -- is false, Create() returns nil and the feature keeps its existing (pre-12.1)
 -- render path. This keeps the live 12.0.7 client completely unchanged.
+-- The probe creates a live AuraContainer, which hard-errors in combat (uncatchable
+-- by pcall) — so IsSupported()/managedAvailable() never probe in lockdown: on a cold
+-- cache they return false WITHOUT caching, and a login warm (below) primes the cache
+-- out of combat. A false/nil taken in that login-into-combat window is TRANSIENT;
+-- consumers must re-check, never latch it.
 -- ============================================================
 local _supported            -- tri-state: nil = not yet probed
 
 -- Definitive probe: the 12.1 widget types either exist or CreateFrame errors.
 -- Gated first on the interface number so we don't even attempt the probe on old
--- clients. The probe frame is parented to a hidden holder and never shown.
+-- clients. The probe frame is parented to UIParent and hidden immediately after.
 local function probeSupported()
     local toc = select(4, GetBuildInfo())
     if type(toc) ~= "number" or toc < 120100 then return false end
@@ -91,6 +96,12 @@ end
 
 function AuraContainer.IsSupported()
     if _supported == nil then
+        -- Never probe in combat: probeSupported creates a live AuraContainer, which fires
+        -- WoW's hard error dialog in lockdown and pcall does NOT catch it. Answer false for
+        -- THIS call but DON'T cache it, so a later out-of-combat call (or the login warm
+        -- below) probes for real. Caching false here would permanently disable a supported
+        -- client whose first check happened to land mid-combat.
+        if InCombatLockdown() then return false end
         local ok, res = pcall(probeSupported)
         _supported = (ok and res) and true or false
         DF:Debug(DBG, "IsSupported probe -> %s (toc=%s)", tostring(_supported), tostring(select(4, GetBuildInfo())))
@@ -106,6 +117,11 @@ end
 local _managed
 local function managedAvailable()
     if _managed == nil then
+        -- Same combat rule as IsSupported: never create the probe container in lockdown.
+        -- Guard only the UNCACHED probe (inside this nil branch) so a cached _managed still
+        -- answers normally — otherwise HasSort/HasSpellFilter would flap to false mid-combat
+        -- once the WIRED flags flip (Handle:SetSort reaches HasSort un-gated).
+        if InCombatLockdown() then return false end
         if not (AuraUtil and AuraUtil.IsValidFilterString) then
             _managed = false
         else
@@ -160,6 +176,24 @@ local function checkUnwiredSeams(config)
     if config.dispelTypes then warnUnwiredSeam("dispelTypes", "dispel-type filter arrives at PTR-4") end
     if config.maxDuration then warnUnwiredSeam("maxDuration", "max-duration filter arrives at PTR-4") end
     if config.stealable then warnUnwiredSeam("stealable", "stealable filter arrives at PTR-4") end
+end
+
+-- Warm the support probe once, out of combat, at login — so no consumer's first
+-- IsSupported() call ever lands the probe in combat (the probe creates a live
+-- AuraContainer, uncatchable-fatal in lockdown). If we log in / reload while already
+-- in combat (reconnect mid-fight), defer the warm to the next PLAYER_REGEN_ENABLED.
+do
+    local warm = CreateFrame("Frame")
+    warm:RegisterEvent("PLAYER_LOGIN")
+    warm:SetScript("OnEvent", function(self)
+        if InCombatLockdown() then
+            self:RegisterEvent("PLAYER_REGEN_ENABLED")   -- retry once combat drops
+            return
+        end
+        AuraContainer.IsSupported()   -- probes + caches while safe
+        -- (warm managedAvailable() here too once SPELL_FILTER_WIRED / SORT_WIRED flip)
+        self:UnregisterAllEvents()
+    end)
 end
 
 -- TEST MODE. A real CustomAuraContainer reads REAL unit auras, so it shows nothing on a
@@ -286,9 +320,13 @@ local function styleButton_regions(slot, config)
         if iconSpec == nil or iconSpec.show ~= false then
             if not slot.dfIcon then
                 slot.dfIcon = slot:CreateTexture(nil, "BACKGROUND")
-                slot.dfIcon:SetPoint("TOPLEFT", 1, -1)
-                slot.dfIcon:SetPoint("BOTTOMRIGHT", -1, 1)
             end
+            -- Art inset: 1px default; pass icon.inset=0 for full-bleed art (matches the
+            -- legacy Direct-row icons). Re-applied here (not create-once) so it's live.
+            local inset = (iconSpec and iconSpec.inset) or 1
+            slot.dfIcon:ClearAllPoints()
+            slot.dfIcon:SetPoint("TOPLEFT", inset, -inset)
+            slot.dfIcon:SetPoint("BOTTOMRIGHT", -inset, inset)
             local staticID = iconSpec and iconSpec.staticSpellID
             if staticID and C_Spell and C_Spell.GetSpellTexture then
                 local tex = C_Spell.GetSpellTexture(staticID)
@@ -332,6 +370,7 @@ local function styleButton_regions(slot, config)
         end
         slot.dfCD:SetAllPoints(slot.dfIcon or slot)
         if slot.dfCD.SetDrawEdge then slot.dfCD:SetDrawEdge(cdSpec == nil or cdSpec.edge ~= false) end
+        if slot.dfCD.SetReverse then slot.dfCD:SetReverse(cdSpec ~= nil and cdSpec.reverse == true) end
         if slot.dfCD.SetHideCountdownNumbers then
             slot.dfCD:SetHideCountdownNumbers(not (cdSpec and cdSpec.numbers))
         end
@@ -523,6 +562,7 @@ local function layoutRow(handle)
     local sy = (L.sizeY or L.size or sx)
     local spX = (L.spacingX or L.spacing or 4)
     local spY = (L.spacingY or L.spacing or 4)
+    local scale = tonumber(L.scale) or 1
     local anchor = (type(L.anchor) == "string" and L.anchor) or "TOPLEFT"
     local growth = (type(L.growth) == "string" and L.growth) or "RIGHT_DOWN"
     local wrap = L.wrap or #handle.buttons
@@ -532,14 +572,18 @@ local function layoutRow(handle)
     local pAxis = AXIS[primary] or AXIS.RIGHT
     local sAxis = AXIS[secondary] or AXIS.DOWN
 
+    -- Step matches the legacy Direct-row math: the icon-size term is pre-scaled and each
+    -- button is SetScale(scale)'d, so the icon, the step, and the button's children (fonts,
+    -- border, cooldown) all render at `scale` — pixel-matching DF's rows. scale=1 is a no-op.
+    local stepX = sx * scale + spX
+    local stepY = sy * scale + spY
     for i, b in ipairs(handle.buttons) do
         local idx = i - 1
         local col = idx % wrap
         local row = math.floor(idx / wrap)
-        -- Any horizontal movement steps by (sx+spX); any vertical by (sy+spY),
-        -- so non-square icons / asymmetric spacing still lay out correctly.
-        local x = (L.offsetX or 0) + (pAxis.x * col + sAxis.x * row) * (sx + spX)
-        local y = (L.offsetY or 0) + (pAxis.y * col + sAxis.y * row) * (sy + spY)
+        local x = (L.offsetX or 0) + (pAxis.x * col + sAxis.x * row) * stepX
+        local y = (L.offsetY or 0) + (pAxis.y * col + sAxis.y * row) * stepY
+        b:SetScale(scale)
         b:ClearAllPoints()
         b:SetPoint(anchor, handle.frame, anchor, x, y)
     end
@@ -596,6 +640,21 @@ function CustomBackend:build()
     for i = 1, n do
         local b = CreateFrame("AuraButton", nil, c, "CustomAuraButtonTemplate")
         if config.mode == "overlay" then b:SetAllPoints(handle.frame) end
+        -- Explicit click-through + tooltip opt-in. The AuraButton intrinsic already forces
+        -- input propagation (AlwaysPropagateInput), but click-off removes it from hit-testing
+        -- entirely so targeting/click-casting reaches the unit frame beneath; hover tooltips
+        -- are opt-in (default off — raid mouseover-healing). Own pcall (a setter throw on this
+        -- new intrinsic must not abort the build loop), separate from the styling pcall so a
+        -- styling fault still can't leave a button click-blocking.
+        -- TODO(PTR-4): the ManagedBackend (Blizzard-created buttons) must apply this too.
+        local okM, errM = pcall(function()
+            b:SetMouseClickEnabled(false)
+            b:SetMouseMotionEnabled(config.tooltips == true)
+        end)
+        if not okM and not warnedMouse then
+            warnedMouse = true
+            DF:DebugWarn(DBG, "mouse suppression failed: %s", tostring(errM))
+        end
         -- Backstop: a styling fault on one slot must never abort the build loop.
         local ok, err = pcall(function()
             handle:_acceptSlot(b, i)     -- cache + regions (source-agnostic)
@@ -732,6 +791,8 @@ function Handle:_layoutSlots()
 end
 
 function Handle:GetFrame() return self.frame end
+-- Returns the DESIRED unit; while in combat the backend retarget may still be deferred to regen.
+function Handle:GetUnit()  return self.config.unit end
 
 -- Proxy positioning to the plain (non-secure) anchor frame. NOTE: Create SetAllPoints
 -- the frame to its parent, so to reposition call h:ClearAllPoints() first; and h:SetSize
@@ -775,9 +836,12 @@ end
 -- expiredText/colorCurve, bar interpolation/direction, dispel show flags). To toggle a
 -- region on/off or change a frozen opt, use Rebuild(). pcall-guarded so a restyle fault
 -- can't escape into a GUI callback.
-function Handle:ApplyStyle(style)
+function Handle:ApplyStyle(style, layout)
     if type(style) == "table" then
         self.config.style = style
+    end
+    if type(layout) == "table" then
+        self.config.layout = layout   -- optional geometry swap (size/scale/spacing/growth/offsets)
     end
     if self.config.mode ~= "overlay" then layoutRow(self) end
     -- Re-run regions on every slot; re-bind natives only on a native backend (explicit via
@@ -989,9 +1053,13 @@ end
 --   max      = 5,
 --   enabled  = true,
 --   autoRefresh = true,                          -- default on for target/focus/mouseover units
+--   tooltips = false,                            -- boolean ONLY; hover = native aura tooltip. Default off
+--                                                -- (raid mouseover-healing). Change needs Rebuild(); in
+--                                                -- overlay mode the button covers the whole unit frame.
 --   sort     = { rule, direction },             -- PTR-4 only; accepted + no-op now (warns if set)
---   layout   = { anchor, growth, wrap, size|sizeX|sizeY, spacing|spacingX|spacingY, offsetX, offsetY },
---   style    = { icon, border, cooldown, duration, stacks, bar, spellName, dispel, overlay },
+--   layout   = { anchor, growth, wrap, scale, size|sizeX|sizeY, spacing|spacingX|spacingY, offsetX, offsetY },
+--   style    = { icon{show,zoom,inset,staticSpellID}, border, cooldown{show,edge,reverse,numbers},
+--                duration, stacks, bar, spellName, dispel, overlay },
 -- }
 function AuraContainer:Create(parent, config)
     if not AuraContainer.IsSupported() then return nil end

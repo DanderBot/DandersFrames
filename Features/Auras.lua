@@ -3188,6 +3188,171 @@ end
 -- REPLACEMENT UPDATE FUNCTION
 -- ============================================================
 
+-- ============================================================
+-- BUFF FACTORY BRIDGE (v1a — experimental, gated behind DF.db.buffUseFactory)
+-- Routes the Direct buff ROW through DF.AuraContainer (WoW 12.1 native aura widgets)
+-- instead of the legacy per-tick icon render. Hidden dev toggle; 12.1-only; DIRECT
+-- source mode only; OFF in test mode (which paints legacy icons directly).
+-- The legacy classification scan (DF.BlizzardAuraCache) keeps running regardless — it
+-- still feeds the defensive bar / dispel overlay / Aura Designer no matter who renders
+-- buffs. This replaces the buff RENDER only.
+-- NOT default-ready: on default settings the row visibly differs from legacy (sort order,
+-- expiring border, defensive dedup, missing-buff hide, pixel-perfect). Dev toggle only.
+-- Other known v1 layout divergences (deferred): out-of-range aura fade, buffWrapOffsetX/Y,
+-- CENTER growth (falls back to RIGHT), and vertical-primary growth pads by Y (legacy: X).
+-- ============================================================
+
+-- Is the factory buff path active for this frame right now?
+function DF:UseFactoryForBuffs(frame, db)
+    return DF.db and DF.db.buffUseFactory
+        and DF.AuraContainer and DF.AuraContainer.IsSupported()
+        and db.auraSourceMode == "DIRECT"
+        and not (DF.testMode or DF.raidTestMode)
+end
+
+-- Map a prefixed aura-row setting block (buff*/debuff*) -> DF.AuraContainer config.
+-- prefix = "buff" (debuff reuses this later). opts.filterList is the PRE-BUILT native
+-- filter list (buffs: BuildDirectBuffFilters); opts.unit is the initial unit token.
+-- Scale note: layoutRow SetScale(layout.scale)'s each button, so fonts / border / spacing
+-- all inherit the row scale — pass BASE (unscaled) sizes here, exactly as the db stores them.
+function DF:BuildAuraRowConfig(db, prefix, opts)
+    opts = opts or {}
+    prefix = prefix or "buff"
+    local function g(suffix) return db[prefix .. suffix] end
+    local filter = opts.filterList
+    if filter == nil then filter = (prefix == "debuff") and "HARMFUL" or "HELPFUL" end
+
+    local dur
+    if g("ShowDuration") ~= false then
+        dur = {
+            show    = true,
+            anchor  = g("DurationAnchor") or "CENTER",
+            offsetX = g("DurationX") or 0,
+            offsetY = g("DurationY") or 0,
+            font    = g("DurationFont"),
+            size    = 10 * (g("DurationScale") or 1),
+            outline = g("DurationOutline"),
+            -- (no static duration-colour key exists in the db; text renders white. Time-based
+            --  colouring is v2 via Krathe's numeric-rule formatter.)
+        }
+    end
+
+    return {
+        unit     = opts.unit,
+        mode     = "row",
+        filter   = filter,
+        max      = g("Max") or 5,
+        enabled  = true,
+        tooltips = not g("DisableMouse"),          -- factory buttons are always click-through
+        layout = {
+            size     = g("Size") or 20,
+            scale    = g("Scale") or 1,
+            spacingX = g("PaddingX") or 2,
+            spacingY = g("PaddingY") or 2,
+            anchor   = g("Anchor") or "BOTTOMRIGHT",
+            growth   = g("Growth") or "LEFT_UP",
+            wrap     = g("Wrap") or 3,
+            offsetX  = g("OffsetX") or 0,
+            offsetY  = g("OffsetY") or 0,
+        },
+        style = {
+            icon   = { show = true, zoom = true, inset = 0 },
+            border = g("ShowBorder") and { db = db, prefix = prefix } or nil,
+            cooldown = { show = not g("HideSwipe"), reverse = true, edge = false, numbers = false },
+            duration = dur,
+            stacks = {
+                show    = true,
+                anchor  = g("StackAnchor") or "BOTTOMRIGHT",
+                offsetX = g("StackX") or 2,
+                offsetY = g("StackY") or -1,
+                font    = g("StackFont"),
+                size    = 10 * (g("StackScale") or 1),
+                outline = g("StackOutline"),
+            },
+        },
+    }
+end
+
+-- Structural signature: a change here needs a Rebuild (new container); everything else is
+-- an in-place ApplyStyle (no frame leak — WoW never GCs frames).
+local function buffFactorySig(cfg)
+    local f = cfg.filter
+    if type(f) == "table" then f = table.concat(f, ";") end
+    -- Include region-presence toggles: ApplyStyle can't CREATE or REMOVE a region, so a
+    -- show/hide flip (duration / border / swipe) must take the Rebuild path.
+    local s = cfg.style
+    return table.concat({
+        tostring(cfg.max), tostring(f), tostring(cfg.tooltips),
+        tostring(s.duration ~= nil), tostring(s.border ~= nil),
+        tostring(s.cooldown and s.cooldown.show ~= false),
+    }, "|")
+end
+
+-- Drive the factory buff row for one frame. Creates the container lazily, hides the legacy
+-- icons (no double row), keeps it on the frame's unit, and applies setting changes. The
+-- container self-updates from UNIT_AURA, so there is no per-tick render here.
+function DF:DriveBuffFactory(frame, db)
+    local h = frame.buffFactory
+    if not h then
+        h = DF.AuraContainer:Create(frame, DF:BuildAuraRowConfig(db, "buff", {
+            unit = frame.unit,
+            filterList = BuildDirectBuffFilters(db),
+        }))
+        frame.buffFactory = h
+        frame.dfBuffFactoryVersion = DF.auraLayoutVersion or 0
+        if h then frame.buffFactorySig = buffFactorySig(h.config) end
+    end
+
+    -- No double row: legacy buff icons stay hidden while the factory owns the row.
+    if frame.buffIcons then
+        for _, icon in ipairs(frame.buffIcons) do icon:Hide() end
+    end
+    if not h then return end
+
+    -- Row-level opacity (legacy per-icon buffAlpha; container-frame children multiply it).
+    h:GetFrame():SetAlpha(db.buffAlpha or 1)
+
+    -- Keep the container on the frame's current unit. OOC retargets immediately; in combat
+    -- the factory defers the retarget, so hide the row until regen rather than show the
+    -- previous unit's buffs. Hide via the PLAIN anchor frame (GetFrame():SetShown), NOT
+    -- h:SetShown -- the latter also queues an 'enable' op which, paired with the queued
+    -- 'retarget', would upgrade to a full rebuild (frame leak). The container's own
+    -- OnShow/OnHide drive event (de)registration. (SetUnit combat-legality is queued for Krathe.)
+    if h:GetUnit() ~= frame.unit then
+        h:SetUnit(frame.unit)
+        frame.dfBuffFactoryHidden = InCombatLockdown() or nil
+    elseif frame.dfBuffFactoryHidden and not InCombatLockdown() then
+        frame.dfBuffFactoryHidden = nil
+    end
+    h:GetFrame():SetShown(not frame.dfBuffFactoryHidden)
+
+    -- Apply setting changes only when the layout version actually bumped.
+    local ver = DF.auraLayoutVersion or 0
+    if frame.dfBuffFactoryVersion ~= ver then
+        frame.dfBuffFactoryVersion = ver
+        local cfg = DF:BuildAuraRowConfig(db, "buff", {
+            unit = frame.unit,
+            filterList = BuildDirectBuffFilters(db),
+        })
+        local sig = buffFactorySig(cfg)
+        if frame.buffFactorySig ~= sig then
+            frame.buffFactorySig = sig
+            h:Rebuild(cfg)                      -- structural (max/filter/tooltips) — discrete, leak-safe
+        else
+            h:ApplyStyle(cfg.style, cfg.layout) -- cosmetics — in place, no leak
+        end
+    end
+end
+
+-- Dev toggle for the experimental factory buff path. /reload to apply cleanly.
+function DF:ToggleBuffFactory()
+    if not DF.db then return end
+    DF.db.buffUseFactory = not DF.db.buffUseFactory
+    local on = DF.db.buffUseFactory
+    print("|cffeda55fDandersFrames|r buff factory: " .. (on and "|cff00ff00ON|r" or "|cffff0000OFF|r") .. " — /reload to apply")
+    return on
+end
+
 function DF:UpdateAuras_Enhanced(frame)
     if not frame or not frame.unit then return end
 
@@ -3196,6 +3361,15 @@ function DF:UpdateAuras_Enhanced(frame)
 
     -- Use raid DB for raid frames, party DB for party frames
     local db = DF:GetFrameDB(frame)
+
+    -- Factory buff row (experimental). Compute once. If a container was built but the factory
+    -- path is no longer active (dev toggle off, test mode, BLIZZARD source, or showBuffs off),
+    -- hide it via its plain anchor frame (combat-safe, queues no backend op) so the legacy
+    -- render can't double up. DriveBuffFactory re-shows it when it drives.
+    local buffFactoryActive = db.showBuffs and DF:UseFactoryForBuffs(frame, db)
+    if frame.buffFactory and not buffFactoryActive then
+        frame.buffFactory:GetFrame():Hide()
+    end
 
     -- Aura Designer runs when enabled; standard buffs can coexist if showBuffs is on.
     local adEnabled = DF:IsAuraDesignerEnabled(frame)
@@ -3226,7 +3400,9 @@ function DF:UpdateAuras_Enhanced(frame)
     -- Buff display (standard buff icons)
     -- Shown when: AD is off, OR AD is on with showBuffs enabled (coexistence)
     if not adEnabled or db.showBuffs then
-        if db.showBuffs then
+        if buffFactoryActive then
+            DF:DriveBuffFactory(frame, db)         -- 12.1 native container (experimental); hides legacy icons
+        elseif db.showBuffs then
             DF:UpdateAuraIconsDirect(frame, frame.buffIcons, "BUFF", db.buffMax or 4)
         else
             if frame.buffIcons then
