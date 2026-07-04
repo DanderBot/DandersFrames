@@ -16,68 +16,6 @@ local WB = {}
 DF.WizardBuilder = WB
 
 -- ============================================================
--- DB KEY CACHE
--- Flattened list of all setting keys for the searchable dropdown
--- ============================================================
-
-local dbKeyCache = nil
-
-local function BuildDBKeyCache()
-    if dbKeyCache then return dbKeyCache end
-    dbKeyCache = {}
-
-    -- Get export categories if available for grouping
-    local catLookup = {}
-    if DF.GetSettingCategory then
-        -- Build from known keys
-    end
-
-    -- Party keys
-    if DF.PartyDefaults then
-        for key, val in pairs(DF.PartyDefaults) do
-            local cat = ""
-            if DF.GetSettingCategory then
-                cat = DF:GetSettingCategory(key) or "other"
-            end
-            tinsert(dbKeyCache, {
-                value = "party." .. key,
-                text = "party." .. key,
-                category = format(L["Party: %s"], cat),
-            })
-        end
-    end
-
-    -- Raid keys
-    if DF.RaidDefaults then
-        for key, val in pairs(DF.RaidDefaults) do
-            local cat = ""
-            if DF.GetSettingCategory then
-                cat = DF:GetSettingCategory(key) or "other"
-            end
-            tinsert(dbKeyCache, {
-                value = "raid." .. key,
-                text = "raid." .. key,
-                category = format(L["Raid: %s"], cat),
-            })
-        end
-    end
-
-    -- Sort by category then key
-    table.sort(dbKeyCache, function(a, b)
-        if a.category == b.category then
-            return a.text < b.text
-        end
-        return a.category < b.category
-    end)
-
-    return dbKeyCache
-end
-
-local function GetDBKeyOptions()
-    return BuildDBKeyCache()
-end
-
--- ============================================================
 -- WIZARD CONFIG HELPERS
 -- ============================================================
 
@@ -89,22 +27,6 @@ local function SaveWizardConfig(name, config)
     if not DandersFramesDB_v2 then return end
     if not DandersFramesDB_v2.wizardConfigs then DandersFramesDB_v2.wizardConfigs = {} end
     DandersFramesDB_v2.wizardConfigs[name] = config
-end
-
-local function DeleteWizardConfig(name)
-    if DandersFramesDB_v2 and DandersFramesDB_v2.wizardConfigs then
-        DandersFramesDB_v2.wizardConfigs[name] = nil
-    end
-end
-
-local function GetWizardNames()
-    local names = {}
-    local configs = GetWizardConfigs()
-    for name in pairs(configs) do
-        tinsert(names, { label = name, name = name })
-    end
-    table.sort(names, function(a, b) return a.name < b.name end)
-    return names
 end
 
 local function CreateNewWizard(name)

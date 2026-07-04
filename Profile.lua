@@ -869,10 +869,10 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
         local categoriesToImport = selectedCategories or importInfo.detectedCategories
         
         if importData.party and selectedFrameTypes.party then
-            self:MergeCategorySettings(DF.db.party, importData.party, categoriesToImport)
+            self:MergeCategorySettings(DF.db.party, importData.party, categoriesToImport, importData.categories)
         end
         if importData.raid and selectedFrameTypes.raid then
-            self:MergeCategorySettings(DF.db.raid, importData.raid, categoriesToImport)
+            self:MergeCategorySettings(DF.db.raid, importData.raid, categoriesToImport, importData.categories)
         end
         -- Auto layouts: top-level key, needs special handling
         local importCategorySet = {}

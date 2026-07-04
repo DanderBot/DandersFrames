@@ -156,12 +156,6 @@ local function CloseOpenDropdown()
     currentOpenDropdown = nil
 end
 
--- Set the currently open dropdown
-local function SetOpenDropdown(menuFrame)
-    CloseOpenDropdown()
-    currentOpenDropdown = menuFrame
-end
-
 -- Helper to get current theme color
 local function GetThemeColor()
     if GUI.SelectedMode == "raid" then return C_RAID else return C_ACCENT end

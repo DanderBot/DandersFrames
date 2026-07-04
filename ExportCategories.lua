@@ -255,8 +255,6 @@ DF.ExportCategories = {
     },
     -- Buff/debuff icons, filters (blacklist travels with this category)
     auras = {
-        "bossDebuffHighlight",
-        "bossDebuffScale",
         "buffAlpha",
         "buffAnchor",
         "buffBorderAnimationColor",
@@ -511,6 +509,8 @@ DF.ExportCategories = {
     },
     -- Boss debuffs (private auras)
     bossDebuffs = {
+        "bossDebuffHighlight",
+        "bossDebuffScale",
         "bossDebuffsAnchor",
         "bossDebuffsBorderScale",
         "bossDebuffsContainerOverlayAlpha",
@@ -1186,7 +1186,6 @@ DF.ExportCategories = {
         "fadeDeadPowerBar",
         "fadeDeadStatusText",
         "fadeDeadUseCustomColor",
-        "frame",
         "frameBorderAnimationColor",
         "frameBorderAnimationCornerLength",
         "frameBorderAnimationFrequency",
@@ -1571,20 +1570,44 @@ end
 -- carried Boss Debuffs, and "text" carried the Text Designer. Selecting one of
 -- those names on import must keep meaning what it meant when the string was
 -- created, so each old name expands to the categories its keys were re-filed
--- under. Safe to apply unconditionally: the merge only copies keys the payload
--- actually contains, so for post-split strings the extra categories are no-ops.
+-- under. The expansion only runs for PRE-SPLIT strings: a string whose stored
+-- category list names any post-split category was exported with the new lists,
+-- and expanding those would override a deliberately deselected sub-category
+-- (the payload carries its keys). Detection: post-split strings that select a
+-- parent without its carve-outs have nothing to expand anyway (their payload
+-- was trimmed by the new lists), so the stored-name check is the only case
+-- that needs the gate.
 local LEGACY_CATEGORY_EXPANSION = {
     auras = { "bossDebuffs" },
     icons = { "targetedSpells", "defensives", "missingBuffs", "dispel" },
     text  = { "textDesigner" },
 }
 
--- Merge imported settings into profile for specific categories
-function DF:MergeCategorySettings(profile, imported, categories)
+-- Category names that only exist post-split: any of these in a string's
+-- STORED category list marks it as exported with the new lists.
+local POST_SPLIT_CATEGORIES = {
+    bossDebuffs = true, dispel = true, missingBuffs = true, defensives = true,
+    myBuffs = true, targetedSpells = true, targetedList = true, textDesigner = true,
+}
+
+-- Merge imported settings into profile for specific categories.
+-- exportedCategories = the category list STORED IN THE STRING (not the user's
+-- selection) — used only to decide whether the legacy expansion applies.
+function DF:MergeCategorySettings(profile, imported, categories, exportedCategories)
+    local isLegacyString = true
+    if exportedCategories then
+        for _, cat in ipairs(exportedCategories) do
+            if POST_SPLIT_CATEGORIES[cat] then
+                isLegacyString = false
+                break
+            end
+        end
+    end
+
     local categorySet = {}
     for _, cat in ipairs(categories) do
         categorySet[cat] = true
-        local expand = LEGACY_CATEGORY_EXPANSION[cat]
+        local expand = isLegacyString and LEGACY_CATEGORY_EXPANSION[cat]
         if expand then
             for _, sub in ipairs(expand) do categorySet[sub] = true end
         end
