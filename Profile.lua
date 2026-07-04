@@ -938,11 +938,6 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
         DF:MigrateBorderInsetFold()
     end
 
-    -- Force DIRECT aura source mode — imported profiles may have BLIZZARD
-    -- which is no longer supported.
-    if DF.db.party then DF.db.party.auraSourceMode = "DIRECT" end
-    if DF.db.raid  then DF.db.raid.auraSourceMode  = "DIRECT" end
-
     DF:FullProfileRefresh()
     print("|cff00ff00DandersFrames:|r " .. L["Profile imported successfully!"])
 
@@ -995,11 +990,6 @@ function DF:ImportProfile(str)
         end
         DF:MigrateBorderInsetFold()
     end
-
-    -- Force DIRECT aura source mode — imported profiles may have BLIZZARD
-    -- which is no longer supported.
-    if DF.db.party then DF.db.party.auraSourceMode = "DIRECT" end
-    if DF.db.raid  then DF.db.raid.auraSourceMode  = "DIRECT" end
 
     DF:FullProfileRefresh()
     print("|cff00ff00DandersFrames:|r " .. L["Profile imported successfully!"])

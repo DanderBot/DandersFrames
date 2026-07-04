@@ -5303,10 +5303,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     -- Auras > Aura Filters (master switch for Blizzard vs Direct API mode)
     local pageAuraFilters = CreateSubTab("auras", "auras_filters", L["Aura Filters"])
     BuildPage(pageAuraFilters, function(self, db, Add, AddSpace, AddSyncPoint)
-        -- Setup wizard banner (hidden when Blizzard's aura pipeline is gone
-        -- on 12.0.5+: the wizard walks users through choosing between Blizzard
-        -- and Direct sources, which is meaningless when only Direct exists).
-        if not DF.BlizzardAuraSourceUnavailable then
+        -- Setup wizard banner: guided walkthrough of the aura filters.
+        do
             local banner = GUI:CreateInfoBanner(self.child, { tone = "info" })
             banner:SetText(L["Having trouble with buffs or debuffs? Run the setup wizard for guided help."])
             -- Reserve room on the right for the action button (the banner body
@@ -5332,7 +5330,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end
 
         -- Copy button at top
-        Add(CreateCopyButton(self.child, {"auraSourceMode", "directBuff", "directDebuff"}, L["Aura Filters"], "auras_filters"), 25, 2)
+        Add(CreateCopyButton(self.child, {"directBuff", "directDebuff"}, L["Aura Filters"], "auras_filters"), 25, 2)
 
         -- ===== INFO BANNER =====
         -- Explains that Aura Filters only affect buff/debuff bars, with inline
@@ -5372,11 +5370,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             AddSpace(4, "both")
         end
 
-        -- hideOn helper: only show Direct mode options when Direct is selected
-        local function HideDirectOptions(d)
-            return d.auraSourceMode ~= "DIRECT"
-        end
-
         -- Callback that rebuilds filter strings and rescans
         local function DirectFilterChanged()
             if DF.RebuildDirectFilterStrings then
@@ -5387,56 +5380,24 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end
         end
 
-        -- ===== MODE SELECTION (Column 1) =====
-        local modeGroup = GUI:CreateSettingsGroup(self.child, 280)
-        modeGroup:AddWidget(GUI:CreateHeader(self.child, L["Aura Data Source"]), 40)
-
-        local modeOptions = {
-            BLIZZARD = L["Blizzard (Default)"],
-            DIRECT = L["Direct API"],
-        }
-        local modeDropdown = modeGroup:AddWidget(GUI:CreateDropdown(self.child, L["Source Mode"], modeOptions, db, "auraSourceMode", function()
-            if DF.SetAuraSourceMode then
-                DF:SetAuraSourceMode(db.auraSourceMode)
-            end
-            self:RefreshStates()
-        end), 55)
-        -- Disable the dropdown when Blizzard's aura pipeline has been removed
-        -- (12.0.5+). The forced-DIRECT migration in Features/Auras.lua ensures
-        -- the value is correct; this just prevents the user from trying to
-        -- switch back to a source that no longer exists.
-        modeDropdown.disableOn = function() return DF.BlizzardAuraSourceUnavailable end
-
-        -- Warning note shown when the Blizzard source has been force-disabled.
-        -- Uses hideOn (not disableOn) since it's informational text.
-        local apiBlockedNote = modeGroup:AddWidget(GUI:CreateLabel(self.child,
-            "|cffffcc00" .. L["WoW 12.0.5 removed addon access to Blizzard's party-frame aura data. The Blizzard source is no longer available; DandersFrames has switched to Direct API automatically."] .. "|r", 250), 60)
-        apiBlockedNote.hideOn = function() return not DF.BlizzardAuraSourceUnavailable end
-
-        Add(modeGroup, nil, 1)
-
         -- ===== BUFF FILTERS (Column 2, Direct mode only) =====
         local function HideBuffSubFilters(d)
-            return d.auraSourceMode ~= "DIRECT" or d.directBuffShowAll
+            return d.directBuffShowAll
         end
 
         local buffGroup = GUI:CreateSettingsGroup(self.child, 280)
-        buffGroup.hideOn = HideDirectOptions
         local buffHeader = buffGroup:AddWidget(GUI:CreateHeader(self.child, L["Buff Filters"]), 40)
-        buffHeader.hideOn = HideDirectOptions
 
         local bfAll = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["All Buffs"], db, "directBuffShowAll", function()
             DirectFilterChanged()
             self:RefreshStates()
         end), 30)
-        bfAll.hideOn = HideDirectOptions
         bfAll.tooltip = L["Show every buff with no filtering."]
 
         local bfOnlyMine = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Only My Buffs"], db, "directBuffOnlyMine", function()
             DirectFilterChanged()
             self:RefreshStates()
         end), 30)
-        bfOnlyMine.hideOn = HideDirectOptions
         bfOnlyMine.tooltip = L["Only show buffs that you cast. Applies to all buff filters."]
 
         local buffSubInfo = buffGroup:AddWidget(GUI:CreateLabel(self.child, "|cff888888" .. L["Enabled filters are combined \226\128\148 buffs matching any selected filter will be shown."] .. "|r", 250), 35)
@@ -5472,24 +5433,20 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             NAME = L["Alphabetical"],
         }
         local bfSort = buffGroup:AddWidget(GUI:CreateDropdown(self.child, L["Sort Order"], buffSortOptions, db, "directBuffSortOrder", DirectFilterChanged), 55)
-        bfSort.hideOn = HideDirectOptions
         Add(buffGroup, nil, 2)
 
         -- ===== DEBUFF FILTERS (Column 1, Direct mode only) =====
         local function HideDebuffSubFilters(d)
-            return d.auraSourceMode ~= "DIRECT" or d.directDebuffShowAll
+            return d.directDebuffShowAll
         end
 
         local debuffGroup = GUI:CreateSettingsGroup(self.child, 280)
-        debuffGroup.hideOn = HideDirectOptions
         local debuffHeader = debuffGroup:AddWidget(GUI:CreateHeader(self.child, L["Debuff Filters"]), 40)
-        debuffHeader.hideOn = HideDirectOptions
 
         local dfAll = debuffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["All Debuffs"], db, "directDebuffShowAll", function()
             DirectFilterChanged()
             self:RefreshStates()
         end), 30)
-        dfAll.hideOn = HideDirectOptions
         dfAll.tooltip = L["Show every debuff with no filtering."]
 
         -- ===== WARNING BANNER: All Debuffs disabled =====
@@ -5498,7 +5455,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             text = L["Recommended: enable 'All Debuffs' to see all relevant debuffs, especially for healers."],
         })
         debuffWarningBanner.hideOn = function(d)
-            return d.auraSourceMode ~= "DIRECT" or d.directDebuffShowAll
+            return d.directDebuffShowAll
         end
         debuffGroup:AddWidget(debuffWarningBanner, debuffWarningBanner.layoutHeight)
 
@@ -5527,7 +5484,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             NAME = L["Alphabetical"],
         }
         local dfSort = debuffGroup:AddWidget(GUI:CreateDropdown(self.child, L["Sort Order"], debuffSortOptions, db, "directDebuffSortOrder", DirectFilterChanged), 55)
-        dfSort.hideOn = HideDirectOptions
         Add(debuffGroup, nil, 1)
 
         -- ===== AURA BLACKLIST (Column 2, under Buff Filters) =====

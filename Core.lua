@@ -4295,34 +4295,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
             end
         end
 
-        -- Force auraSourceMode to DIRECT for all existing profiles (v4.2.x)
-        -- One-time migration: sets flag so the popup only shows once.
-        if DandersFramesDB_v2 and DandersFramesDB_v2.profiles then
-            for profileName, profile in pairs(DandersFramesDB_v2.profiles) do
-                for _, mode in ipairs({"party", "raid"}) do
-                    if profile[mode] and not profile[mode]._auraSourceModeDirectForced then
-                        profile[mode].auraSourceMode = "DIRECT"
-                        profile[mode]._auraSourceModeDirectForced = true
-                    end
-                end
-            end
-        end
-
-        -- Unconditional safety net: force DIRECT on every login for all
-        -- profiles. Catches edge cases where BLIZZARD mode slips back in
-        -- via profile import, saved variable edits, or unknown code paths.
-        -- Runs after the flagged migration above so the popup still fires
-        -- on first encounter.
-        if DandersFramesDB_v2 and DandersFramesDB_v2.profiles then
-            for profileName, profile in pairs(DandersFramesDB_v2.profiles) do
-                for _, mode in ipairs({"party", "raid"}) do
-                    if profile[mode] and profile[mode].auraSourceMode ~= "DIRECT" then
-                        profile[mode].auraSourceMode = "DIRECT"
-                    end
-                end
-            end
-        end
-
         -- Reset seenTabs so "New" badges show for 4.3.0 features (one-time)
         if DandersFramesDB_v2 and not DandersFramesDB_v2._seenTabsReset_430 then
             DandersFramesDB_v2.seenTabs = nil
@@ -5432,11 +5404,9 @@ DF._MainEventDispatcher = function(self, event, arg1)
         end)
 
         -- Show Aura Filter Setup wizard for existing users on first login after update.
-        -- Skip entirely when Blizzard's aura pipeline has been removed (12.0.5+):
-        -- the wizard walks users through migrating from Blizzard → Direct API
-        -- filtering, which is meaningless when Blizzard source no longer exists.
-        -- The API-block popup already tells users what happened and points them
-        -- at the Aura Filters tab.
+        -- apiBlocked.blizzardAuraSource is a LEGACY flag (the Blizzard aura source
+        -- was removed in 4.6.1); it is only read here so long-time users who
+        -- already saw the 12.0.5 API-block popup don't get the wizard re-prompt.
         local blizzardAuraSourceGone =
             DandersFramesDB_v2 and DandersFramesDB_v2.apiBlocked
             and DandersFramesDB_v2.apiBlocked.blizzardAuraSource
@@ -5957,14 +5927,10 @@ function DF:FullProfileRefresh()
         DF:RebuildDirectFilterStrings()
     end
 
-    -- Re-initialize aura source mode for the new profile
-    -- Uses SetAuraSourceMode which forces a full teardown + reinit, clearing
-    -- stale caches and restoring Blizzard frame events when switching modes.
-    if DF.SetAuraSourceMode then
-        local partyMode = DF.db.party and DF.db.party.auraSourceMode
-        local raidMode = DF.db.raid and DF.db.raid.auraSourceMode
-        local needsDirect = (partyMode == "DIRECT") or (raidMode == "DIRECT")
-        DF:SetAuraSourceMode(needsDirect and "DIRECT" or "BLIZZARD")
+    -- Re-scan auras for the new profile's filters (direct is the only
+    -- aura source since 4.6.1; filter strings were rebuilt just above).
+    if DF.DirectScanAllUnits then
+        DF:DirectScanAllUnits()
     end
 
     -- Clear color curves (colors may have changed)

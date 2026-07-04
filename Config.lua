@@ -1118,7 +1118,6 @@ DF.PartyDefaults = {
     buffFilterRaid = false,
 
     -- Aura Source Mode
-    auraSourceMode = "DIRECT",                -- "BLIZZARD" or "DIRECT"
 
     -- Direct Mode: Buff Filters
     directBuffShowAll = false,                -- Show all buffs (ignores sub-filters)
