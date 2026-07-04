@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Bug Fixes
+
+* (Profiles) **Selective export/import no longer silently drops settings** — the category lists had drifted behind the addon's settings, so a selective export was missing the entire Targeted List page, the buff/debuff border style and animation families, permanent movers, My Buff Indicators, out-of-range alpha values and several more (~180 settings). All now travel with their categories, and an internal audit keeps the lists complete going forward. Full-profile export was never affected. (by Krathe)
+* (Profiles) **Export categories now match the addon's features** — the old "Icons" checkbox silently bundled five whole features (Targeted Spells, Targeted List, Missing Buffs, Defensives and the status icons); Text hid the Text Designer; Auras hid Boss Debuffs. The export/import picker now offers each feature as its own category — Dispel, Boss Debuffs, Missing Buffs, Defensives, My Buff Indicators, Targeted Spells, Targeted List, Text Designer and Status Icons included — so you can share exactly one feature's setup (or exclude one) honestly. Existing export strings keep working unchanged. (by Krathe)
+* (Text Designer) **Imported profiles keep their Text Designer configuration** — importing any modern profile with the Text category selected silently wiped the imported Text Designer elements and rebuilt them from the legacy text settings (the legacy-import converter misidentified every modern export as a legacy one). Modern imports now leave the imported Text Designer intact; genuinely old exports still convert as before. (by Krathe)
+* (Profiles) **Party/raid section-sync links now export and import** — the per-page "sync party & raid" toggles were left behind by both full and selective export (and reset when importing into a new profile). They now travel with full exports and with the Other category on selective exports. (by Krathe)
+
 ## [4.6.0]
 
 ### Interface Overhaul

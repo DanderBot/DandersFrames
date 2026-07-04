@@ -30,6 +30,12 @@ if not L then return end
 --@do-not-package@
 
 -- Search system strings
+L["Dispel"] = true
+L["Export for"] = true
+L["Frame Layout"] = true
+L["Import for"] = true
+L["My Buff Indicators"] = true
+L["Profiles include both Party and Raid settings. Exporting and importing always works on the profile as a whole, no matter which mode tab is selected above. Use the 'Export for' and 'Import for' checkboxes in each column to choose which mode's settings are included."] = true
 L["Search..."] = true
 L["Search Results"] = true
 L["Search unavailable during combat"] = true
@@ -43,6 +49,8 @@ L["Does NOT work in Mythic+ keystones. In combat, results may be slightly delaye
 -- Footer support links (Discord / PayPal / Patreon)
 L["Need support? Join our Discord"] = true
 L["Join the DandersFrames Discord"] = true
+L["Settings to include"] = true
+L["Status Icons"] = true
 L["Support with PayPal"] = true
 L["Support DandersFrames Development"] = true
 L["Support with Patreon"] = true

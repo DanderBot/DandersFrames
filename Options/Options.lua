@@ -9036,8 +9036,23 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         self.exportFrameTypes = {party = true, raid = true}
         self.importFrameTypes = {party = true, raid = true}
         
-        local categoryOrder = {"position", "layout", "bars", "auras", "text", "icons", "other", "pinnedFrames", "auraDesigner", "autoLayout"}
-        
+        -- Derived from the category registry (single source of truth) so this list
+        -- can never drift from DF.ExportCategories when categories change.
+        local categoryOrder = {}
+        for cat in pairs(DF.ExportCategoryInfo) do table.insert(categoryOrder, cat) end
+        table.sort(categoryOrder, function(a, b)
+            return (DF.ExportCategoryInfo[a].order or 99) < (DF.ExportCategoryInfo[b].order or 99)
+        end)
+
+        -- Page-scope note: unlike the rest of the settings window, this page is
+        -- NOT scoped by the party/raid tab -- exports and imports operate on the
+        -- whole profile, gated only by the Export for / Import for rows.
+        local scopeBanner = GUI:CreateInfoBanner(self.child, {
+            tone = "info",
+            text = L["Profiles include both Party and Raid settings. Exporting and importing always works on the profile as a whole, no matter which mode tab is selected above. Use the 'Export for' and 'Import for' checkboxes in each column to choose which mode's settings are included."],
+        })
+        Add(scopeBanner, scopeBanner.layoutHeight or 44, "both")
+
         -- Helper to add to section
         local function AddToSection(widget, col, colNum)
             widget.layoutCol = colNum or col
@@ -9097,11 +9112,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local presetRow = CreateFrame("Frame", nil, self.child)
         presetRow:SetSize(240, 24)
         
+        -- frameTypes: true = All checks Party+Raid, false = None clears them,
+        -- nil = Look/Layout leave the frame-type row alone.
         local presets = {
-            {name = "All", x = 0, cats = {"position", "layout", "bars", "auras", "text", "icons", "other", "pinnedFrames", "auraDesigner", "autoLayout"}},
-            {name = "Look", x = 60, cats = {"bars", "auras", "text", "icons", "other"}},
+            {name = "All", x = 0, frameTypes = true, cats = categoryOrder},
+            {name = "Look", x = 60, cats = {"bars", "auras", "dispel", "bossDebuffs", "missingBuffs", "defensives", "myBuffs", "targetedSpells", "targetedList", "text", "textDesigner", "icons", "other"}},
             {name = "Layout", x = 120, cats = {"position", "layout"}},
-            {name = "None", x = 180, cats = {}},
+            {name = "None", x = 180, frameTypes = false, cats = {}},
         }
         
         for _, p in ipairs(presets) do
@@ -9111,35 +9128,63 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 local sel = {}
                 for _, c in ipairs(p.cats) do sel[c] = true end
                 for cat, cb in pairs(self.exportCheckboxes) do cb:SetChecked(sel[cat] or false) end
+                -- All/None also drive the Party/Raid row -- keep the STATE table in
+                -- sync (SetChecked does not fire the checkbox OnClick handlers).
+                if p.frameTypes ~= nil and self.exportFrameTypeBoxes then
+                    for ft, box in pairs(self.exportFrameTypeBoxes) do
+                        box:SetChecked(p.frameTypes)
+                        self.exportFrameTypes[ft] = p.frameTypes
+                    end
+                    if self.UpdateExportCategoryState then self.UpdateExportCategoryState() end
+                end
             end)
         end
         exportSettingsGroup:AddWidget(presetRow, 28)
         
-        -- Frame types row
+        -- Frame types row ("Export for" -- the modes whose settings ship; the
+        -- category list below picks WHICH settings, this row picks WHOSE)
+        exportSettingsGroup:AddWidget(GUI:CreateLabel(self.child, L["Export for"], 240), 22)
         local ftRow = CreateFrame("Frame", nil, self.child)
         ftRow:SetSize(240, 20)
         
         local partyExp = CreateSmallCheckbox(ftRow, L["Party"], true)
         partyExp:SetPoint("LEFT", 0, 0)
-        partyExp.checkbox:SetScript("OnClick", function(s) self.exportFrameTypes.party = s:GetChecked() end)
+        partyExp.checkbox:SetScript("OnClick", function(s)
+            self.exportFrameTypes.party = s:GetChecked()
+            if self.UpdateExportCategoryState then self.UpdateExportCategoryState() end
+        end)
         
         local raidExp = CreateSmallCheckbox(ftRow, L["Raid"], true)
         raidExp:SetPoint("LEFT", 80, 0)
-        raidExp.checkbox:SetScript("OnClick", function(s) self.exportFrameTypes.raid = s:GetChecked() end)
+        raidExp.checkbox:SetScript("OnClick", function(s)
+            self.exportFrameTypes.raid = s:GetChecked()
+            if self.UpdateExportCategoryState then self.UpdateExportCategoryState() end
+        end)
+        self.exportFrameTypeBoxes = {party = partyExp, raid = raidExp}
         exportSettingsGroup:AddWidget(ftRow, 24)
         
-        -- Categories
+        -- Categories ("Settings to include" -- sub-settings of the modes above)
+        exportSettingsGroup:AddWidget(GUI:CreateLabel(self.child, L["Settings to include"], 240), 22)
         for _, cat in ipairs(categoryOrder) do
             local info = DF.ExportCategoryInfo[cat]
             local catRow = CreateFrame("Frame", nil, self.child)
             catRow:SetSize(240, 18)
             
-            local cb = CreateSmallCheckbox(catRow, info.name, true)
+            local cb = CreateSmallCheckbox(catRow, L[info.name], true)
             cb:SetPoint("LEFT", 0, 0)
             self.exportCheckboxes[cat] = cb
             exportSettingsGroup:AddWidget(catRow, 20)
         end
         
+        -- Grey the category list while no mode is selected (nothing would
+        -- export) -- the addon-wide disabled-means-dimmed convention.
+        self.UpdateExportCategoryState = function()
+            local enabled = self.exportFrameTypes.party or self.exportFrameTypes.raid
+            for _, cb in pairs(self.exportCheckboxes) do
+                if enabled then cb:Enable() else cb:Disable() end
+            end
+        end
+
         AddToSection(exportSettingsGroup, nil, 1)
         
         -- Export Actions Group
@@ -9341,7 +9386,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         self.createNewProfileCheck = createNewCheck
         importSettingsGroup:AddWidget(createNewRow, 24)
         
-        -- Frame types row
+        -- Frame types row ("Import for" -- which mode receives the settings)
+        importSettingsGroup:AddWidget(GUI:CreateLabel(self.child, L["Import for"], 240), 22)
         local ftRowImp = CreateFrame("Frame", nil, self.child)
         ftRowImp:SetSize(240, 20)
         
@@ -9358,13 +9404,14 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         self.importRaidCheck = raidImp
         importSettingsGroup:AddWidget(ftRowImp, 24)
         
-        -- Categories
+        -- Categories ("Settings to include")
+        importSettingsGroup:AddWidget(GUI:CreateLabel(self.child, L["Settings to include"], 240), 22)
         for _, cat in ipairs(categoryOrder) do
             local info = DF.ExportCategoryInfo[cat]
             local catRow = CreateFrame("Frame", nil, self.child)
             catRow:SetSize(240, 18)
             
-            local cb = CreateSmallCheckbox(catRow, info.name, false)
+            local cb = CreateSmallCheckbox(catRow, L[info.name], false)
             cb:SetPoint("LEFT", 0, 0)
             cb:Disable()
             self.importCheckboxes[cat] = cb

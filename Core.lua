@@ -5231,6 +5231,12 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 else
                     print("|cffff0000DandersFrames:|r Raid debug not available")
                 end
+            elseif msg == "exportaudit" then
+                -- Dev: verify every Config default is export-categorised or
+                -- declared local-only (guards against export-list drift).
+                if DF.AuditExportCategories then
+                    DF:AuditExportCategories()
+                end
             elseif msg == "auratimer" then
                 -- Show aura timer stats
                 if DF.PrintAuraTimerStats then

@@ -538,6 +538,10 @@ function DF:ExportProfile(categories, frameTypes, profileName)
         if DF.db.textDesignerPresets then
             exportData.textDesignerPresets = StripInternalKeys(DF:DeepCopy(DF.db.textDesignerPresets))
         end
+        -- Party/raid section-sync flags (profile-root, page-keyed)
+        if DF.db.linkedSections and next(DF.db.linkedSections) then
+            exportData.linkedSections = DF:DeepCopy(DF.db.linkedSections)
+        end
         exportData.categories = nil
     else
         -- Selective category export
@@ -564,8 +568,12 @@ function DF:ExportProfile(categories, frameTypes, profileName)
         if (categorySet.auraDesigner or categorySet.autoLayout or categorySet.pinnedFrames) and DF.db.auraDesignerPresets then
             exportData.auraDesignerPresets = StripInternalKeys(DF:DeepCopy(DF.db.auraDesignerPresets))
         end
-        if (categorySet.text or categorySet.autoLayout or categorySet.pinnedFrames) and DF.db.textDesignerPresets then
+        if (categorySet.textDesigner or categorySet.text or categorySet.autoLayout or categorySet.pinnedFrames) and DF.db.textDesignerPresets then
             exportData.textDesignerPresets = StripInternalKeys(DF:DeepCopy(DF.db.textDesignerPresets))
+        end
+        -- Party/raid section-sync flags: behaviour preference, travels with Other
+        if categorySet.other and DF.db.linkedSections and next(DF.db.linkedSections) then
+            exportData.linkedSections = DF:DeepCopy(DF.db.linkedSections)
         end
     end
 
@@ -707,8 +715,18 @@ function DF:GetImportInfo(importData)
     
     -- Detect categories if not explicitly stored (legacy imports)
     if info.isFullExport then
-        -- Full export contains all categories
-        info.detectedCategories = {"position", "layout", "bars", "auras", "text", "icons", "other", "pinnedFrames", "auraDesigner", "autoLayout"}
+        -- Full export contains all categories — derive the list from the
+        -- category registry (single source of truth) rather than keeping a
+        -- hand-maintained copy here that drifts when categories change.
+        info.detectedCategories = {}
+        for cat in pairs(DF.ExportCategories) do
+            table.insert(info.detectedCategories, cat)
+        end
+        table.sort(info.detectedCategories, function(a, b)
+            local ia = DF.ExportCategoryInfo[a] and DF.ExportCategoryInfo[a].order or 99
+            local ib = DF.ExportCategoryInfo[b] and DF.ExportCategoryInfo[b].order or 99
+            return ia < ib
+        end)
     else
         info.detectedCategories = importData.categories
     end
@@ -732,7 +750,15 @@ end
 local function ResetTDForLegacyImport(payloads)
     local any = false
     for mode, payload in pairs(payloads) do
+        -- A payload is LEGACY only if it carries neither the inline TD table
+        -- (pre-library exports) NOR a preset-name ref (post-library exports).
+        -- The old check looked only at the inline table — but the preset
+        -- migration deletes the inline table from mode DBs, so EVERY modern
+        -- export has textDesigner == nil while legacy keys (nameFont etc.)
+        -- are still present for pets. That misfired this reset on every
+        -- modern import and wiped the just-imported Text Designer elements.
         if type(payload) == "table" and payload.textDesigner == nil
+            and payload.textDesignerPreset == nil
             and (payload.nameFont ~= nil or payload.nameFontSize ~= nil
                 or payload.showHealthText ~= nil or payload.statusTextEnabled ~= nil) then
             local tdDB = DF.GetModeTextDesigner and DF:GetModeTextDesigner(mode)
@@ -804,7 +830,9 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
             -- profile with dangling refs → empty Default → all AD/TD gone.
             auraDesignerPresets = DF:DeepCopy(DF.db.auraDesignerPresets or {}),
             textDesignerPresets = DF:DeepCopy(DF.db.textDesignerPresets or {}),
-            linkedSections = {},
+            -- Copy of current, like everything else here — the import then
+            -- overwrites it when the payload carries linkedSections.
+            linkedSections = DF:DeepCopy(DF.db.linkedSections or {}),
             partyEnabled = DF.db.partyEnabled ~= false,
             raidEnabled  = DF.db.raidEnabled  ~= false,
         }
@@ -845,6 +873,10 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
         if importData.auraBlacklist then
             DF.db.auraBlacklist = importData.auraBlacklist
         end
+        -- Import party/raid section-sync flags if present
+        if importData.linkedSections then
+            DF.db.linkedSections = importData.linkedSections
+        end
     else
         -- Selective import: merge only selected categories
         local categoriesToImport = selectedCategories or importInfo.detectedCategories
@@ -864,6 +896,10 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
         -- Aura blacklist: top-level key, import with auras category
         if importCategorySet.auras and importData.auraBlacklist then
             DF.db.auraBlacklist = importData.auraBlacklist
+        end
+        -- Section-sync flags: top-level key, travel with the Other category
+        if importCategorySet.other and importData.linkedSections then
+            DF.db.linkedSections = importData.linkedSections
         end
     end
 
