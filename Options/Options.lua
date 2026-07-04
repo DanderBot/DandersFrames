@@ -6531,7 +6531,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         
         local function HideTargetedSpellOptions(d) return not d.targetedSpellEnabled end
         local function HideTargetedDurationOptions(d) return not d.targetedSpellEnabled or not d.targetedSpellShowDuration end
-        local function HideBorderOptions(d) return not d.targetedSpellEnabled or not d.targetedSpellShowBorder end
         
         local function TargetedSpellLightweightUpdate()
             if (DF.testMode or DF.raidTestMode) and DF.UpdateAllTestTargetedSpell then DF:UpdateAllTestTargetedSpell() end
@@ -6898,7 +6897,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
             local function HideTLOptions(d) return not d.targetedListEnabled end
             local function HideIconOptions(d) return not d.targetedListEnabled or not d.targetedListShowIcon end
-            local function HideBorderOptions(d) return not d.targetedListEnabled or not d.targetedListShowBorder end
             local function HideTargetNameOptions(d) return not d.targetedListEnabled or not d.targetedListShowTargetName end
 
             local function TargetedListUpdate()
@@ -7219,7 +7217,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         
         local function HidePersonalOptions(d) return not d.personalTargetedSpellEnabled end
         local function HidePersonalDurationOptions(d) return not d.personalTargetedSpellEnabled or not d.personalTargetedSpellShowDuration end
-        local function HideBorderOptions(d) return not d.personalTargetedSpellEnabled or not d.personalTargetedSpellShowBorder end
         
         local function PersonalTargetedUpdate()
             if DF.UpdatePersonalTargetedSpellsPosition then DF:UpdatePersonalTargetedSpellsPosition() end
