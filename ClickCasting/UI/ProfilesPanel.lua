@@ -38,13 +38,8 @@ function CC:CreateProfilesPanelContent()
     profileList:SetPoint("TOPLEFT", profilesLabel, "BOTTOMLEFT", 0, -4)
     profileList:SetPoint("RIGHT", 0, 0)
     profileList:SetHeight(180)
-    profileList:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    profileList:SetBackdropColor(0.06, 0.06, 0.06, 1)
-    profileList:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.5)
+    DF.GUI:CreatePanelBackdrop(profileList, { borderColor = { r = C.border.r, g = C.border.g, b = C.border.b, a = 0.5 } })
+    profileList:SetBackdropColor(0.06, 0.06, 0.06, 1)  -- darker than the shared panel fill
     CC.profileListFrame = profileList
     
     -- Profile list scroll frame
@@ -67,28 +62,8 @@ function CC:CreateProfilesPanelContent()
     
     local function CreateSmallButton(parent, text, width)
         local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
-        btn:SetSize(width, 22)
-        btn:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
-        })
-        btn:SetBackdropColor(C.element.r, C.element.g, C.element.b, 1)
-        btn:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.5)
-        
-        local btnText = btn:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
-        btnText:SetPoint("CENTER")
-        btnText:SetText(text)
-        btnText:SetTextColor(C.text.r, C.text.g, C.text.b)
-        btn.text = btnText
-        
-        btn:SetScript("OnEnter", function(self)
-            self:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
-        end)
-        btn:SetScript("OnLeave", function(self)
-            self:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.5)
-        end)
-        
+        DF.GUI:StyleButton(btn, { width = width, height = 22, text = text, accent = themeColor })
+        btn.text = btn.Text
         return btn
     end
     
@@ -96,15 +71,12 @@ function CC:CreateProfilesPanelContent()
     local newBtn = CreateSmallButton(btnRow, L["New"], 10)  -- Width will be set by anchors
     newBtn:SetPoint("LEFT", 0, 0)
     newBtn:SetPoint("RIGHT", btnRow, "CENTER", -2, 0)
-    newBtn:SetBackdropColor(themeColor.r * 0.3, themeColor.g * 0.3, themeColor.b * 0.3, 1)
-    -- Add icon
-    local newIcon = newBtn:CreateTexture(nil, "OVERLAY")
-    newIcon:SetPoint("LEFT", 8, 0)
-    newIcon:SetSize(12, 12)
-    newIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\add")
-    newIcon:SetVertexColor(C.text.r, C.text.g, C.text.b)
-    newBtn.text:ClearAllPoints()
-    newBtn.text:SetPoint("LEFT", newIcon, "RIGHT", 4, 0)
+    -- Leading icon + persistent accent tint (replaces the hand-rolled texture and
+    -- the post-StyleButton SetBackdropColor that used to clobber the styler).
+    DF.GUI:StyleButton(newBtn, {
+        text = L["New"], accent = themeColor, tinted = true,
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add", size = 12, color = C.text },
+    })
     newBtn:SetScript("OnClick", function()
         CC:ShowNewProfileDialog()
     end)
@@ -112,14 +84,10 @@ function CC:CreateProfilesPanelContent()
     local copyBtn = CreateSmallButton(btnRow, L["Copy"], 10)
     copyBtn:SetPoint("LEFT", btnRow, "CENTER", 2, 0)
     copyBtn:SetPoint("RIGHT", 0, 0)
-    -- Add icon
-    local copyIcon = copyBtn:CreateTexture(nil, "OVERLAY")
-    copyIcon:SetPoint("LEFT", 8, 0)
-    copyIcon:SetSize(12, 12)
-    copyIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\content_copy")
-    copyIcon:SetVertexColor(C.text.r, C.text.g, C.text.b)
-    copyBtn.text:ClearAllPoints()
-    copyBtn.text:SetPoint("LEFT", copyIcon, "RIGHT", 4, 0)
+    DF.GUI:StyleButton(copyBtn, {
+        text = L["Copy"], accent = themeColor,
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\content_copy", size = 12, color = C.text },
+    })
     copyBtn:SetScript("OnClick", function()
         if CC.selectedProfileName then
             CC:ShowCopyProfileDialog(CC.selectedProfileName)
@@ -136,14 +104,10 @@ function CC:CreateProfilesPanelContent()
     local renameBtn = CreateSmallButton(btnRow2, L["Rename"], 10)
     renameBtn:SetPoint("LEFT", 0, 0)
     renameBtn:SetPoint("RIGHT", btnRow2, "CENTER", -2, 0)
-    -- Add icon
-    local renameIcon = renameBtn:CreateTexture(nil, "OVERLAY")
-    renameIcon:SetPoint("LEFT", 8, 0)
-    renameIcon:SetSize(12, 12)
-    renameIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\edit")
-    renameIcon:SetVertexColor(C.text.r, C.text.g, C.text.b)
-    renameBtn.text:ClearAllPoints()
-    renameBtn.text:SetPoint("LEFT", renameIcon, "RIGHT", 4, 0)
+    DF.GUI:StyleButton(renameBtn, {
+        text = L["Rename"], accent = themeColor,
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\edit", size = 12, color = C.text },
+    })
     renameBtn:SetScript("OnClick", function()
         if CC.selectedProfileName then
             CC:ShowRenameProfileDialog(CC.selectedProfileName)
@@ -154,22 +118,14 @@ function CC:CreateProfilesPanelContent()
     local deleteBtn = CreateSmallButton(btnRow2, L["Delete"], 10)
     deleteBtn:SetPoint("LEFT", btnRow2, "CENTER", 2, 0)
     deleteBtn:SetPoint("RIGHT", 0, 0)
-    -- Add icon
-    local deleteIcon = deleteBtn:CreateTexture(nil, "OVERLAY")
-    deleteIcon:SetPoint("LEFT", 8, 0)
-    deleteIcon:SetSize(12, 12)
-    deleteIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\delete")
-    deleteIcon:SetVertexColor(1, 0.5, 0.5)
-    deleteBtn.text:ClearAllPoints()
-    deleteBtn.text:SetPoint("LEFT", deleteIcon, "RIGHT", 4, 0)
-    deleteBtn:SetBackdropBorderColor(0.8, 0.2, 0.2, 0.5)
+    -- Destructive styling via the shared helper (neutral-at-rest + red hover wash
+    -- and red hover border) plus the red trash icon. Replaces the hand-rolled red
+    -- border + hover scripts and the hand-attached icon texture.
+    DF.GUI:StyleButton(deleteBtn, {
+        text = L["Delete"], tone = "danger",
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\delete", size = 12, color = { r = 1, g = 0.5, b = 0.5 } },
+    })
     deleteBtn.text:SetTextColor(1, 0.5, 0.5)
-    deleteBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropBorderColor(1, 0.3, 0.3, 1)
-    end)
-    deleteBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropBorderColor(0.8, 0.2, 0.2, 0.5)
-    end)
     deleteBtn:SetScript("OnClick", function()
         if CC.selectedProfileName and not IsDefaultProfile(CC.selectedProfileName) then
             CC:ShowDeleteProfileDialog(CC.selectedProfileName)
@@ -191,15 +147,12 @@ function CC:CreateProfilesPanelContent()
     local exportBtn = CreateSmallButton(ioRow, L["Export"], 10)
     exportBtn:SetPoint("LEFT", 0, 0)
     exportBtn:SetPoint("RIGHT", ioRow, "CENTER", -2, 0)
-    exportBtn:SetBackdropColor(themeColor.r * 0.3, themeColor.g * 0.3, themeColor.b * 0.3, 1)
-    -- Add icon
-    local exportIcon = exportBtn:CreateTexture(nil, "OVERLAY")
-    exportIcon:SetPoint("LEFT", 8, 0)
-    exportIcon:SetSize(12, 12)
-    exportIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\upload")
-    exportIcon:SetVertexColor(C.text.r, C.text.g, C.text.b)
-    exportBtn.text:ClearAllPoints()
-    exportBtn.text:SetPoint("LEFT", exportIcon, "RIGHT", 4, 0)
+    -- Leading icon + persistent accent tint (replaces the hand-rolled texture and
+    -- the post-StyleButton SetBackdropColor that used to clobber the styler).
+    DF.GUI:StyleButton(exportBtn, {
+        text = L["Export"], accent = themeColor, tinted = true,
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\upload", size = 12, color = C.text },
+    })
     exportBtn:SetScript("OnClick", function()
         CC:ShowExportDialog()
     end)
@@ -207,14 +160,10 @@ function CC:CreateProfilesPanelContent()
     local importBtn = CreateSmallButton(ioRow, L["Import"], 10)
     importBtn:SetPoint("LEFT", ioRow, "CENTER", 2, 0)
     importBtn:SetPoint("RIGHT", 0, 0)
-    -- Add icon
-    local importIcon = importBtn:CreateTexture(nil, "OVERLAY")
-    importIcon:SetPoint("LEFT", 8, 0)
-    importIcon:SetSize(12, 12)
-    importIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\download")
-    importIcon:SetVertexColor(C.text.r, C.text.g, C.text.b)
-    importBtn.text:ClearAllPoints()
-    importBtn.text:SetPoint("LEFT", importIcon, "RIGHT", 4, 0)
+    DF.GUI:StyleButton(importBtn, {
+        text = L["Import"], accent = themeColor,
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\download", size = 12, color = C.text },
+    })
     importBtn:SetScript("OnClick", function()
         CC:ShowImportDialog()
     end)
@@ -222,25 +171,10 @@ function CC:CreateProfilesPanelContent()
     -- Auto-create profiles checkbox
     local autoCreateCb = CreateFrame("CheckButton", nil, leftCol, "BackdropTemplate")
     autoCreateCb:SetPoint("TOPLEFT", ioRow, "BOTTOMLEFT", 0, -12)
-    autoCreateCb:SetSize(14, 14)
-    autoCreateCb:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    autoCreateCb:SetBackdropColor(C.element.r, C.element.g, C.element.b, 1)
-    autoCreateCb:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.5)
-    
-    local autoCreateCheck = autoCreateCb:CreateTexture(nil, "OVERLAY")
-    autoCreateCheck:SetPoint("CENTER")
-    autoCreateCheck:SetSize(10, 10)
-    autoCreateCheck:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
-    autoCreateCheck:SetDesaturated(true)
-    autoCreateCheck:SetVertexColor(themeColor.r, themeColor.g, themeColor.b)
-    autoCreateCb.check = autoCreateCheck
+    autoCreateCb.check = DF.GUI:StyleCheckButton(autoCreateCb, { accent = CC.ACCENT, manualCheck = true })
     
     local autoCreateLabel = leftCol:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    autoCreateLabel:SetPoint("LEFT", autoCreateCb, "RIGHT", 5, 0)
+    autoCreateLabel:SetPoint("LEFT", autoCreateCb, "RIGHT", 8, 0)
     autoCreateLabel:SetText(L["Auto-create profiles for loadouts"])
     autoCreateLabel:SetTextColor(C.text.r, C.text.g, C.text.b)
     
@@ -248,7 +182,7 @@ function CC:CreateProfilesPanelContent()
     local autoCreate = CC.db and CC.db.global and CC.db.global.autoCreateProfiles
     if autoCreate == nil then autoCreate = true end
     autoCreateCb:SetChecked(autoCreate)
-    autoCreateCheck:SetShown(autoCreate)
+    autoCreateCb.check:SetShown(autoCreate)
     
     autoCreateCb:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
@@ -266,70 +200,52 @@ function CC:CreateProfilesPanelContent()
     end)
     
     autoCreateCb:SetScript("OnEnter", function(self)
-        self:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:AddLine(L["Auto-Create Profiles"], 1, 1, 1)
-        GameTooltip:AddLine(L["When enabled, a new profile will be automatically"], 0.7, 0.7, 0.7, true)
-        GameTooltip:AddLine("created when you switch to a talent loadout that", 0.7, 0.7, 0.7, true)
-        GameTooltip:AddLine("doesn't have a profile assigned.", 0.7, 0.7, 0.7, true)
-        GameTooltip:AddLine(" ", 0.7, 0.7, 0.7)
-        GameTooltip:AddLine("Disable this if you want to use the same profile", 0.7, 0.7, 0.7, true)
-        GameTooltip:AddLine("for all your loadouts.", 0.7, 0.7, 0.7, true)
-        GameTooltip:Show()
+        DF.GUI:ShowTooltip(self, {
+            title = L["Auto-Create Profiles"],
+            anchor = "ANCHOR_RIGHT",
+            lines = {
+                L["When enabled, a new profile will be automatically"],
+                L["created when you switch to a talent loadout that"],
+                L["doesn't have a profile assigned."],
+                " ",
+                L["Disable this if you want to use the same profile"],
+                L["for all your loadouts."],
+            },
+        })
     end)
     autoCreateCb:SetScript("OnLeave", function(self)
-        self:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.5)
-        GameTooltip:Hide()
+        DF.GUI:HideTooltip()
     end)
     
     CC.autoCreateCb = autoCreateCb
     
     -- Disable while mounted checkbox
-    local mountCb = CreateFrame("Button", nil, leftCol, "BackdropTemplate")
-    mountCb:SetSize(16, 16)
+    local mountCb = CreateFrame("CheckButton", nil, leftCol, "BackdropTemplate")
     mountCb:SetPoint("TOPLEFT", autoCreateCb, "BOTTOMLEFT", 0, -8)
-    mountCb:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    mountCb:SetBackdropColor(0.1, 0.1, 0.1, 1)
-    mountCb:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.5)
+    mountCb.check = DF.GUI:StyleCheckButton(mountCb, { accent = CC.ACCENT, manualCheck = true })
     
-    local mountCheck = mountCb:CreateTexture(nil, "OVERLAY")
-    mountCheck:SetSize(10, 10)
-    mountCheck:SetPoint("CENTER")
-    mountCheck:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
-    mountCheck:SetVertexColor(themeColor.r, themeColor.g, themeColor.b)
-    mountCb.check = mountCheck
-    
-    local mountLabel = leftCol:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    mountLabel:SetPoint("LEFT", mountCb, "RIGHT", 6, 0)
+    local mountLabel = leftCol:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    mountLabel:SetPoint("LEFT", mountCb, "RIGHT", 8, 0)
     mountLabel:SetText(L["Disable while mounted/flying"])
     mountLabel:SetTextColor(C.text.r, C.text.g, C.text.b)
-    
-    -- Define methods first
-    mountCb.SetChecked = function(self, checked)
-        self.isChecked = checked
-        self.check:SetShown(checked)
-    end
-    mountCb.GetChecked = function(self)
-        return self.isChecked
-    end
     
     -- Initialize checkbox state
     local disableMounted = CC.db and CC.db.global and CC.db.global.disableWhileMounted
     if disableMounted == nil then disableMounted = false end
     mountCb:SetChecked(disableMounted)
-    
+    mountCb.check:SetShown(disableMounted)
+
     mountCb:SetScript("OnClick", function(self)
-        local checked = not self:GetChecked()
-        self:SetChecked(checked)
+        local checked = self:GetChecked()
+        self.check:SetShown(checked)
         -- Mutually exclusive with fly-only: turning on mounted turns off fly-only
         local disableFlying = CC.db and CC.db.global and CC.db.global.disableWhileFlying or false
         if checked and disableFlying then
             disableFlying = false
-            if CC.flyingCb then CC.flyingCb:SetChecked(false) end
+            if CC.flyingCb then
+                CC.flyingCb:SetChecked(false)
+                CC.flyingCb.check:SetShown(false)
+            end
         end
         if CC.db and CC.db.global then
             CC.db.global.disableWhileMounted = checked
@@ -349,64 +265,47 @@ function CC:CreateProfilesPanelContent()
     end)
 
     mountCb:SetScript("OnEnter", function(self)
-        self:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:AddLine(L["Disable While Mounted"], 1, 1, 1)
-        GameTooltip:AddLine(L["When enabled, click-casting bindings will be temporarily disabled while you are mounted or in druid flight form."], 0.7, 0.7, 0.7, true)
-        GameTooltip:AddLine(" ", 0.7, 0.7, 0.7)
-        GameTooltip:AddLine(L["This allows normal clicking on unit frames to select targets while traveling."], 0.7, 0.7, 0.7, true)
-        GameTooltip:Show()
+        DF.GUI:ShowTooltip(self, {
+            title = L["Disable While Mounted"],
+            anchor = "ANCHOR_RIGHT",
+            lines = {
+                L["When enabled, click-casting bindings will be temporarily disabled while you are mounted or in druid flight form."],
+                " ",
+                L["This allows normal clicking on unit frames to select targets while traveling."],
+            },
+        })
     end)
     mountCb:SetScript("OnLeave", function(self)
-        self:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.5)
-        GameTooltip:Hide()
+        DF.GUI:HideTooltip()
     end)
 
     CC.mountCb = mountCb
 
     -- Disable while flying only checkbox
-    local flyingCb = CreateFrame("Button", nil, leftCol, "BackdropTemplate")
-    flyingCb:SetSize(16, 16)
+    local flyingCb = CreateFrame("CheckButton", nil, leftCol, "BackdropTemplate")
     flyingCb:SetPoint("TOPLEFT", mountCb, "BOTTOMLEFT", 0, -8)
-    flyingCb:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    flyingCb:SetBackdropColor(0.1, 0.1, 0.1, 1)
-    flyingCb:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.5)
+    flyingCb.check = DF.GUI:StyleCheckButton(flyingCb, { accent = CC.ACCENT, manualCheck = true })
 
-    local flightCheck = flyingCb:CreateTexture(nil, "OVERLAY")
-    flightCheck:SetSize(10, 10)
-    flightCheck:SetPoint("CENTER")
-    flightCheck:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
-    flightCheck:SetVertexColor(themeColor.r, themeColor.g, themeColor.b)
-    flyingCb.check = flightCheck
-
-    local flyingLabel = leftCol:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    flyingLabel:SetPoint("LEFT", flyingCb, "RIGHT", 6, 0)
-    flyingLabel:SetText(L["Disable only while flying"])
+    local flyingLabel = leftCol:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    flyingLabel:SetPoint("LEFT", flyingCb, "RIGHT", 8, 0)
+    flyingLabel:SetText(L["Disable Only While Flying"])
     flyingLabel:SetTextColor(C.text.r, C.text.g, C.text.b)
-
-    flyingCb.SetChecked = function(self, checked)
-        self.isChecked = checked
-        self.check:SetShown(checked)
-    end
-    flyingCb.GetChecked = function(self)
-        return self.isChecked
-    end
 
     local disableFlying = CC.db and CC.db.global and CC.db.global.disableWhileFlying or false
     flyingCb:SetChecked(disableFlying)
+    flyingCb.check:SetShown(disableFlying)
 
     flyingCb:SetScript("OnClick", function(self)
-        local checked = not self:GetChecked()
-        self:SetChecked(checked)
+        local checked = self:GetChecked()
+        self.check:SetShown(checked)
         -- Mutually exclusive with mounted: turning on fly-only turns off mounted
         local disableMounted = CC.db and CC.db.global and CC.db.global.disableWhileMounted or false
         if checked and disableMounted then
             disableMounted = false
-            if CC.mountCb then CC.mountCb:SetChecked(false) end
+            if CC.mountCb then
+                CC.mountCb:SetChecked(false)
+                CC.mountCb.check:SetShown(false)
+            end
         end
         if CC.db and CC.db.global then
             CC.db.global.disableWhileFlying  = checked
@@ -425,60 +324,40 @@ function CC:CreateProfilesPanelContent()
     end)
 
     flyingCb:SetScript("OnEnter", function(self)
-        self:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:AddLine(L["Disable Only While Flying"], 1, 1, 1)
-        GameTooltip:AddLine(L["When enabled, click-casting bindings will be temporarily disabled while you are in a flying state."], 0.7, 0.7, 0.7, true)
-        GameTooltip:AddLine(L["This includes druid flight form, but not ground mounts."], 0.7, 0.7, 0.7, true)
-        GameTooltip:AddLine(" ", 0.7, 0.7, 0.7)
-        GameTooltip:AddLine(L["This allows normal clicking on unit frames to select targets while traveling."], 0.7, 0.7, 0.7, true)
-        GameTooltip:Show()
+        DF.GUI:ShowTooltip(self, {
+            title = L["Disable Only While Flying"],
+            anchor = "ANCHOR_RIGHT",
+            lines = {
+                L["When enabled, click-casting bindings will be temporarily disabled while you are in a flying state."],
+                L["This includes druid flight form, but not ground mounts."],
+                " ",
+                L["This allows normal clicking on unit frames to select targets while traveling."],
+            },
+        })
     end)
     flyingCb:SetScript("OnLeave", function(self)
-        self:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.5)
-        GameTooltip:Hide()
+        DF.GUI:HideTooltip()
     end)
 
     CC.flyingCb = flyingCb
 
     -- Target unit when click-casting checkbox
-    local targetCb = CreateFrame("Button", nil, leftCol, "BackdropTemplate")
-    targetCb:SetSize(16, 16)
+    local targetCb = CreateFrame("CheckButton", nil, leftCol, "BackdropTemplate")
     targetCb:SetPoint("TOPLEFT", flyingCb, "BOTTOMLEFT", 0, -8)
-    targetCb:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    targetCb:SetBackdropColor(0.1, 0.1, 0.1, 1)
-    targetCb:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.5)
+    targetCb.check = DF.GUI:StyleCheckButton(targetCb, { accent = CC.ACCENT, manualCheck = true })
 
-    local targetCheck = targetCb:CreateTexture(nil, "OVERLAY")
-    targetCheck:SetSize(10, 10)
-    targetCheck:SetPoint("CENTER")
-    targetCheck:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
-    targetCheck:SetVertexColor(themeColor.r, themeColor.g, themeColor.b)
-    targetCb.check = targetCheck
-
-    local targetLabel = leftCol:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    targetLabel:SetPoint("LEFT", targetCb, "RIGHT", 6, 0)
+    local targetLabel = leftCol:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    targetLabel:SetPoint("LEFT", targetCb, "RIGHT", 8, 0)
     targetLabel:SetText(L["Target unit when click-casting"])
     targetLabel:SetTextColor(C.text.r, C.text.g, C.text.b)
 
-    targetCb.SetChecked = function(self, checked)
-        self.isChecked = checked
-        self.check:SetShown(checked)
-    end
-    targetCb.GetChecked = function(self)
-        return self.isChecked
-    end
-
     local targetOnCast = CC.db and CC.db.global and CC.db.global.targetOnCast or false
     targetCb:SetChecked(targetOnCast)
+    targetCb.check:SetShown(targetOnCast)
 
     targetCb:SetScript("OnClick", function(self)
-        local checked = not self:GetChecked()
-        self:SetChecked(checked)
+        local checked = self:GetChecked()
+        self.check:SetShown(checked)
         if CC.db and CC.db.global then
             CC.db.global.targetOnCast = checked
         end
@@ -495,15 +374,14 @@ function CC:CreateProfilesPanelContent()
     end)
 
     targetCb:SetScript("OnEnter", function(self)
-        self:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:AddLine(L["Target unit when click-casting"], 1, 1, 1)
-        GameTooltip:AddLine(L["When enabled, click-casting a spell on a frame also makes that unit your target. Individual bindings can override this in the binding editor."], 0.7, 0.7, 0.7, true)
-        GameTooltip:Show()
+        DF.GUI:ShowTooltip(self, {
+            title = L["Target unit when click-casting"],
+            anchor = "ANCHOR_RIGHT",
+            lines = { L["When enabled, click-casting a spell on a frame also makes that unit your target. Individual bindings can override this in the binding editor."] },
+        })
     end)
     targetCb:SetScript("OnLeave", function(self)
-        self:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.5)
-        GameTooltip:Hide()
+        DF.GUI:HideTooltip()
     end)
 
     CC.targetCb = targetCb
@@ -518,13 +396,8 @@ function CC:CreateProfilesPanelContent()
     loadoutContainer:SetPoint("TOPLEFT", loadoutLabel, "BOTTOMLEFT", 0, -4)
     loadoutContainer:SetPoint("RIGHT", 0, 0)
     loadoutContainer:SetPoint("BOTTOM", 0, 0)
-    loadoutContainer:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    loadoutContainer:SetBackdropColor(0.06, 0.06, 0.06, 1)
-    loadoutContainer:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.5)
+    DF.GUI:CreatePanelBackdrop(loadoutContainer, { borderColor = { r = C.border.r, g = C.border.g, b = C.border.b, a = 0.5 } })
+    loadoutContainer:SetBackdropColor(0.06, 0.06, 0.06, 1)  -- darker than the shared panel fill
     
     -- Loadout scroll frame
     local loadoutScroll = CreateFrame("ScrollFrame", nil, loadoutContainer, "ScrollFrameTemplate")
@@ -676,9 +549,7 @@ function CC:RefreshProfilesPanel()
             end
             -- Show tooltip with full profile name
             if self.fullProfileName and #self.fullProfileName > 20 then
-                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:SetText(self.fullProfileName, 1, 1, 1)
-                GameTooltip:Show()
+                DF.GUI:ShowTooltip(self, { title = self.fullProfileName, anchor = "ANCHOR_RIGHT" })
             end
         end)
         
@@ -690,7 +561,7 @@ function CC:RefreshProfilesPanel()
                     self:SetBackdropColor(0.1, 0.1, 0.1, 1)
                 end
             end
-            GameTooltip:Hide()
+            DF.GUI:HideTooltip()
         end)
         
         yOffset = yOffset + 30
@@ -812,57 +683,72 @@ end
 
 function CC:CreateLoadoutRow(parent, specIndex, configID, loadoutName, profiles, yOffset)
     local C = self.UI_COLORS
-    local themeColor = C.theme
-    
+
     local row = CreateFrame("Frame", nil, parent)
     row:SetPoint("TOPLEFT", 12, -yOffset)  -- Reduced indent
     row:SetPoint("RIGHT", -4, 0)
     row:SetHeight(22)
     
-    -- Profile dropdown button (create first so nameText can anchor to it)
+    -- Profile dropdown opener (create first so nameText can anchor to it)
     -- Use noFallback=true to only show specifically assigned profiles
     local assignedProfile = self:GetProfileForLoadout(specIndex, configID, true)
-    
-    local dropBtn = CreateFrame("Button", nil, row, "BackdropTemplate")
-    dropBtn:SetPoint("RIGHT", 0, 0)
-    dropBtn:SetSize(115, 18)  -- Reduced width to give more space for loadout name
-    dropBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    
-    if assignedProfile then
-        dropBtn:SetBackdropColor(themeColor.r * 0.2, themeColor.g * 0.2, themeColor.b * 0.2, 1)
-        dropBtn:SetBackdropBorderColor(themeColor.r * 0.6, themeColor.g * 0.6, themeColor.b * 0.6, 1)
-    else
-        dropBtn:SetBackdropColor(C.element.r, C.element.g, C.element.b, 1)
-        dropBtn:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.5)
-    end
-    
+
     -- Truncate text helper
     local function TruncText(text, maxLen)
         if not text or #text <= maxLen then return text or "" end
         return string.sub(text, 1, maxLen - 2) .. ".."
     end
-    
-    local dropText = dropBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    dropText:SetPoint("LEFT", 4, 0)
-    dropText:SetPoint("RIGHT", -14, 0)
-    dropText:SetJustifyH("LEFT")
-    dropText:SetWordWrap(false)
-    local displayText = assignedProfile and TruncText(assignedProfile, 14) or L["Not Set"]
-    dropText:SetText(displayText)
-    dropText:SetTextColor(assignedProfile and themeColor.r or C.textDim.r, assignedProfile and themeColor.g or C.textDim.g, assignedProfile and themeColor.b or C.textDim.b)
-    
-    -- Dropdown arrow
-    local arrow = dropBtn:CreateTexture(nil, "OVERLAY")
-    arrow:SetPoint("RIGHT", -4, 0)
-    arrow:SetSize(12, 12)
-    arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
-    arrow:SetVertexColor(C.textDim.r, C.textDim.g, C.textDim.b)
-    
-    -- Name text (constrained to not overlap button)
+
+    -- Sentinel key for the "no assignment" / "Clear Assignment" entry
+    -- (table keys can't be nil). Its display text doubles as the opener label
+    -- when the loadout has no specific profile assigned ("Not Set").
+    local CLEAR_KEY = "\0__df_clear__"
+
+    -- Build the current profile option set fresh on each open (dynamic list).
+    -- The sentinel is keyed by assignment state: "Clear Assignment" when there
+    -- is something to clear, otherwise the inert "Not Set" opener label.
+    local function BuildProfileOptions()
+        local options = {}
+        local order = {}
+        local hasAssignment = self:GetProfileForLoadout(specIndex, configID, true)
+        if hasAssignment then
+            options[CLEAR_KEY] = { text = "|cff888888"..L["Clear Assignment"].."|r" }
+            table.insert(order, CLEAR_KEY)
+        else
+            -- Inert entry so the opener can render "Not Set"; selecting it is a no-op.
+            options[CLEAR_KEY] = { text = L["Not Set"] }
+            table.insert(order, CLEAR_KEY)
+        end
+        for _, profileName in ipairs(self:GetProfileList()) do
+            -- Truncate the opener/menu label but keep the full name as the key.
+            options[profileName] = { text = TruncText(profileName, 14) }
+            table.insert(order, profileName)
+        end
+        options._order = order
+        return options
+    end
+
+    -- Opener text reflects the assigned profile, or the sentinel ("Not Set").
+    local function GetAssigned()
+        return self:GetProfileForLoadout(specIndex, configID, true) or CLEAR_KEY
+    end
+
+    local dropdown = DF.GUI:CreateDropdown(row, nil, BuildProfileOptions(), nil, nil,
+        nil,  -- callback
+        GetAssigned,  -- customGet
+        function(key)  -- customSet: assign (or clear) then rebuild the rows
+            local profileName = (key ~= CLEAR_KEY) and key or nil
+            CC:AssignProfileToLoadout(specIndex, configID, profileName)
+            CC:RefreshLoadoutAssignments()
+        end,
+        { accent = CC.ACCENT, inline = true, optionsFunc = BuildProfileOptions })
+
+    local dropBtn = dropdown
+    dropBtn:ClearAllPoints()
+    dropBtn:SetPoint("RIGHT", 0, 0)
+    dropBtn:SetSize(115, 18)  -- Reduced width to give more space for loadout name
+
+    -- Name text (constrained to not overlap opener)
     local nameText = row:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     nameText:SetPoint("LEFT", 0, 0)
     nameText:SetPoint("RIGHT", dropBtn, "LEFT", -4, 0)
@@ -876,145 +762,40 @@ function CC:CreateLoadoutRow(parent, specIndex, configID, loadoutName, profiles,
     nameText:SetText(displayName)
     nameText:SetTextColor(C.text.r, C.text.g, C.text.b)
     
-    dropBtn:SetScript("OnClick", function(self)
-        -- Close any existing dropdown
-        if CC.loadoutDropdownMenu and CC.loadoutDropdownMenu:IsShown() then
-            CC.loadoutDropdownMenu:Hide()
-            if CC.loadoutDropdownMenu.forButton == self then
-                return  -- Toggle off
-            end
-        end
-        
-        -- Create dropdown menu
-        local menu = CC.loadoutDropdownMenu
-        if not menu then
-            menu = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
-            menu:SetFrameStrata("FULLSCREEN_DIALOG")
-            menu:SetBackdrop({
-                bgFile = "Interface\\Buttons\\WHITE8x8",
-                edgeFile = "Interface\\Buttons\\WHITE8x8",
-                edgeSize = 1,
-            })
-            menu:SetBackdropColor(0.1, 0.1, 0.1, 0.98)
-            menu:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 1)
-            menu:SetClampedToScreen(true)
-            menu.items = {}
-            CC.loadoutDropdownMenu = menu
-            
-            -- Close when clicking elsewhere
-            menu:SetScript("OnShow", function()
-                menu:SetPropagateKeyboardInput(true)
-            end)
-        end
-        
-        -- Clear existing items
-        for _, item in ipairs(menu.items) do
-            item:Hide()
-        end
-        wipe(menu.items)
-        
-        -- Build menu items
-        local menuItems = {}
-        -- Only show "Clear Assignment" if there's currently an assignment
-        if assignedProfile then
-            table.insert(menuItems, { text = "|cff888888Clear Assignment|r", value = nil, isClear = true })
-        end
-        for _, profileName in ipairs(profiles) do
-            table.insert(menuItems, { text = profileName, value = profileName })
-        end
-        
-        local itemHeight = 20
-        local maxWidth = 140
-        
-        for i, itemData in ipairs(menuItems) do
-            local item = CreateFrame("Button", nil, menu, "BackdropTemplate")
-            item:SetHeight(itemHeight)
-            item:SetPoint("TOPLEFT", 2, -2 - (i-1) * itemHeight)
-            item:SetPoint("RIGHT", -2, 0)
-            
-            local itemText = item:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-            itemText:SetPoint("LEFT", 6, 0)
-            itemText:SetPoint("RIGHT", -6, 0)
-            itemText:SetJustifyH("LEFT")
-            itemText:SetText(itemData.text)
-            
-            local isSelected = (itemData.value == assignedProfile) or (itemData.value == nil and assignedProfile == nil)
-            if isSelected then
-                itemText:SetTextColor(themeColor.r, themeColor.g, themeColor.b)
+    -- Hover tooltip on the opener (assignment state + hint). Hook the builder's
+    -- internal button (the container's sole frame child) so we add the tooltip
+    -- without clobbering the builder's own hover/click handling.
+    local openerBtn = select(1, dropBtn:GetChildren())
+    if openerBtn then
+        openerBtn:HookScript("OnEnter", function(btn)
+            if assignedProfile then
+                DF.GUI:ShowTooltip(btn, {
+                    title = format(L["Profile: %s"], assignedProfile),
+                    anchor = "ANCHOR_TOP",
+                    lines = { L["Click to change assignment"] },
+                })
+            elseif configID == 0 then
+                DF.GUI:ShowTooltip(btn, {
+                    title = L["No default profile set"],
+                    anchor = "ANCHOR_TOP",
+                    lines = {
+                        L["Click to assign a profile that activates"],
+                        L["when switching to this spec"],
+                    },
+                })
             else
-                itemText:SetTextColor(C.text.r, C.text.g, C.text.b)
-            end
-            
-            item:SetScript("OnEnter", function(self)
-                self:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
-                self:SetBackdropColor(themeColor.r * 0.3, themeColor.g * 0.3, themeColor.b * 0.3, 1)
-            end)
-            item:SetScript("OnLeave", function(self)
-                self:SetBackdrop(nil)
-            end)
-            item:SetScript("OnClick", function()
-                CC:AssignProfileToLoadout(specIndex, configID, itemData.value)
-                CC:RefreshLoadoutAssignments()
-                menu:Hide()
-            end)
-            
-            table.insert(menu.items, item)
-        end
-        
-        -- Size and position the menu
-        menu:SetSize(maxWidth, #menuItems * itemHeight + 4)
-        menu:ClearAllPoints()
-        menu:SetPoint("TOPRIGHT", self, "BOTTOMRIGHT", 0, -2)
-        menu.forButton = self
-        menu:Show()
-        menu:Raise()
-        
-        -- Close on any click outside
-        local closeFrame = CreateFrame("Button", nil, UIParent)
-        closeFrame:SetAllPoints(UIParent)
-        closeFrame:SetFrameStrata("FULLSCREEN")
-        closeFrame:SetScript("OnClick", function()
-            menu:Hide()
-            closeFrame:Hide()
-        end)
-        closeFrame:Show()
-        menu.closeFrame = closeFrame
-        menu:SetScript("OnHide", function()
-            if menu.closeFrame then
-                menu.closeFrame:Hide()
+                DF.GUI:ShowTooltip(btn, {
+                    title = L["Using spec default"],
+                    anchor = "ANCHOR_TOP",
+                    lines = { L["Click to assign a specific profile"] },
+                })
             end
         end)
-    end)
-    
-    dropBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
-        if assignedProfile then
-            GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:SetText(format(L["Profile: %s"], assignedProfile), 1, 1, 1)
-            GameTooltip:AddLine(L["Click to change assignment"], 0.7, 0.7, 0.7)
-            GameTooltip:Show()
-        else
-            GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            if configID == 0 then
-                GameTooltip:SetText(L["No default profile set"], 1, 1, 1)
-                GameTooltip:AddLine("Click to assign a profile that activates", 0.7, 0.7, 0.7)
-                GameTooltip:AddLine("when switching to this spec", 0.7, 0.7, 0.7)
-            else
-                GameTooltip:SetText(L["Using spec default"], 1, 1, 1)
-                GameTooltip:AddLine("Click to assign a specific profile", 0.7, 0.7, 0.7)
-            end
-            GameTooltip:Show()
-        end
-    end)
-    dropBtn:SetScript("OnLeave", function(self)
-        GameTooltip:Hide()
-        if assignedProfile then
-            self:SetBackdropBorderColor(themeColor.r * 0.6, themeColor.g * 0.6, themeColor.b * 0.6, 1)
-        else
-            self:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.5)
-        end
-    end)
-    
+        openerBtn:HookScript("OnLeave", function()
+            DF.GUI:HideTooltip()
+        end)
+    end
+
     return row
 end
 
@@ -1149,7 +930,7 @@ function CC:ShowClearAllConfirmation()
     end
     
     StaticPopupDialogs["DFCC_CLEAR_ALL_BINDINGS"] = {
-        text = format(L["Reset all bindings to defaults?\n\nThis will set:\n• Left Click = Target Unit\n• Right Click = Open Menu\n\n%sThis cannot be undone.%s"], "|cffff6666", "|r"),
+        text = format(L["Reset all bindings to defaults?\n\nThis will set:\n• Left Click = Target Unit\n• Right Click = Open Menu\n\n%sThis cannot be undone.%s"], "|c" .. DF.GUI:ToneHex("danger"), "|r"),
         button1 = L["Reset to Defaults"],
         button2 = L["Cancel"],
         OnAccept = function()

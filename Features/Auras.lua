@@ -3101,8 +3101,9 @@ function DF:RepositionCenterGrowthIcons(frame, icons, auraType, visibleCount)
     local offsetY = db[prefix .. "OffsetY"] or 0
     local paddingX = db[prefix .. "PaddingX"] or 2
     local paddingY = db[prefix .. "PaddingY"] or 2
-    local borderThickness = db[prefix .. "BorderThickness"] or 1
-    
+    -- Canonical key is <prefix>BorderSize; <prefix>BorderThickness is a legacy fallback only.
+    local borderThickness = db[prefix .. "BorderSize"] or db[prefix .. "BorderThickness"] or 1
+
     -- Apply pixel-perfect sizing
     if db.pixelPerfect then
         size, scale, borderThickness = DF:PixelPerfectSizeAndScaleForBorder(size, scale, borderThickness)

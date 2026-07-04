@@ -1,5 +1,72 @@
 # DandersFrames Changelog
 
+## [4.6.0]
+
+### Interface Overhaul
+
+A top-to-bottom rework of the configuration UI so every panel shares one consistent look and behaviour.
+
+* (Interface) **One shared widget toolkit** — buttons, checkboxes, dropdowns, sliders, range sliders, text inputs, colour pickers, tooltips, info banners, tab strips and panel/section backdrops are now built from a single themed set of helpers instead of dozens of hand-rolled one-offs, so every control looks and behaves identically across the addon (consistent accent colour, hover and disabled states). (by Krathe)
+* (Interface) **Disabled settings grey out in place, addon-wide** — when a feature is turned off its options stay visible but dimmed and inactive (a consistent preview) instead of staying clickable or disappearing. (by Krathe)
+* (Aura Designer / Text Designer) **Unified look** — both designers now share the same panel layout, preview frame, tab strip and column styling as the rest of the UI, so they no longer feel like separate tools. (by Krathe)
+* (Pinned Frames) **Reworked to match the standard UI** — the tab/sub-tab strip, designer-preset bar and grouped settings boxes now use the shared styling. (by Krathe)
+* (Nicknames) **Page rebuilt** — restructured into grouped section boxes (Add / Saved / Received / Marker / Name Precedence) consistent with the other feature pages. (by Krathe)
+* (Interface) **Consistent tabs, tooltips, banners & section boxes everywhere** — Options, Click Casting, Search, Auto Profiles, Test Mode and the icon library now share one tab style, one tooltip system, and the same info banners and settings-group boxes. (by Krathe)
+* (Interface) **Material Symbol icons** normalised to a consistent size and padding, with new icons added. (by Krathe)
+* (Interface) **Wording & value consistency** — standardised inconsistent labels and dropdown values across the settings UI; the Settings-panel font outline now offers its full option set. (by Krathe)
+* (Localization) Wrapped the remaining hardcoded UI text so settings labels and Click Casting messages translate properly. (by Krathe)
+
+### New Features
+
+* (Highlights) New **Hide on Tanks** option — suppresses the aggro highlight on tanks so it only flags when a DPS/healer pulls. Off by default. (by Krathe)
+* (Pet Frames) Added an optional **power bar** for pet frames, with adjustable height and colour. Off by default. (by Krathe)
+* (Pinned Frames) Pinned sets can now **anchor to your raid/party frames** instead of the screen, tracking them as they move or resize. (by Krathe)
+
+### Improvements
+
+* (Auto Layouts) Moving raid frames while an auto layout is active now edits **that layout**, via its own Unlock button. (by Krathe)
+* (Pinned Frames) Each set's **Horizontal/Vertical Spacing** now inherits from the based-on mode, overridable per set. (by Krathe)
+* (Options / Click Casting) Inline "Note:" labels are now consistent and no longer show a stray "?". (by Krathe)
+* (Interface) **Notes, tips and banners now share one colour system** — caveats, tips, recommendations and warnings across the settings UI are coloured from a single set of tones (info, caution, danger, success) instead of assorted one-off colours, so a note's importance reads the same everywhere. (by Krathe)
+* (Interface) Drag-to-reorder lists (role, class and group order) now use a clearer reorder-handle icon. (by Krathe)
+* (Pixel Perfect) The Display page now shows the **UI Scale** that gives exact 1:1 pixel rendering at your resolution (or confirms you're already there) — purely informational, it never changes your scale. (by Krathe)
+* (Click Casting / Aura Designer) The **Priority** sliders now read left-to-right as Low → High — **higher number wins**, matching every other slider (right = more). Your existing priorities are migrated automatically, so only the displayed number changes, not which binding or aura takes precedence. (by Krathe)
+
+### Bug Fixes
+
+* (Fonts) **A corrupted font setting can no longer break the addon on login** — font name, size and outline values are validated before use, so a bad value in an imported or hand-edited profile now degrades to default text styling instead of erroring out the entire frame layout (which showed up as missing debuffs, broken test mode and blank settings values). (by Krathe)
+* (Pinned Frames / Test Mode) Fixed a Lua error that spammed and froze the UI (forcing a reload) when previewing pinned frames containing NPC/boss units — role icons no longer error on units without a role. (by Krathe)
+* (Sorting) Fixed the combat-status banner on the Sorting page sometimes appearing as a blank white box instead of its coloured status. (by Krathe)
+* (Raid) Test mode and settings changes can no longer disturb your **live** raid frames — group order and positions are always driven by the secure layout, fixing the grouped-raid inversion that previously needed a `/reload`. (by Krathe)
+* (Raid) Retired an obsolete internal reverse-group-order setting that could invert raid groups; group order is controlled entirely by **Group Display Order** / **My Group First**. (by Krathe)
+* (Pet Frames) Fixed a combat error (blocked action) when a pet appeared, died, or was dismissed during combat — pet frames now hide combat-safely. (by Krathe)
+* (Borders) **Border Inset** is now honoured by texture-style borders, and updates live. (by Krathe)
+* (Shields) Absorb and heal-absorb overlays now cover the health bar with **no gap** — flush to the edge when the frame border is opaque or off, keeping a small inset only when the border is translucent (so the shield doesn't show through it). (by Krathe)
+* (Pixel Perfect) **Center-aligned** frames now snap to the physical pixel grid, so borders stay crisp instead of doubling or dropping a side — party frames live, and raid frames in test mode (live raid keeps Blizzard's secure positioning). The overshield line indicator and the solid highlight border snap to whole pixels too. (by Krathe)
+* (Text) Fixed a stray health value (often a "%") appearing for users who never turned health text on. (by Krathe)
+* (Nicknames) Fixed an error matching nicknames against boss/NPC names on pinned frames in encounters.
+* (Localization) Test Mode, position, grid, Text/Aura Designer and auto-profile labels now translate properly.
+* (Raid) Test mode now matches live raid frame positions in flat and grouped layouts, including Center alignment. (by Krathe)
+* (Raid) Group labels no longer linger over the flat raid grid after switching from a grouped layout. (by Krathe)
+* (Defensive Icons) Fixed click-through not applying to stacked defensives that appear mid-combat. (by Krathe)
+* (Aura Designer) Health-bar **Tint** now fills the whole bar instead of leaving an edge gap under a border. (by Krathe)
+* (Aura Designer) Fixed aura **borders** showing the wrong colour/thickness on imported or older profiles. (by Krathe)
+* (Aura Designer) Fixed imported/older auras sometimes showing **no indicators** until re-saved. (by Krathe)
+* (Aura Designer) The fill-**Bar** indicator's expiring **Tint** controls are now available in the editor. (by Krathe)
+* (Aura Designer) Fixed **Import Buffs Tab Defaults** not carrying the buff border toggle to new icon auras. (by Krathe)
+* (Resource Bar) **Smooth Bar Animation** now actually smooths the bar's fill. (by Krathe)
+* (Buffs / Debuffs) Fixed pixel-perfect aura icons being mis-sized when a custom **Border Thickness** was set. (by Krathe)
+* (Status Icons) The **Frame Level** slider now previews live while dragging. (by Krathe)
+* (Profiles) The **Border Color Source** (Class/Role) for Missing Buff/Defensive icons is now kept on single-category export/import. (by Krathe)
+* (Click Casting) A binding's **combat condition** now shows in the list immediately instead of after a reload. (by Krathe)
+* (Debuffs) Removed the defunct **Highlight Dispellable** toggle (handled by Dispel Overlay). (by Krathe)
+* (Pet Frames) Pet **name and health text show again** (font/anchor/colour settings now apply). (by Krathe)
+* (Pet Frames) An empty party pet frame no longer lingers over the raid frames when a member summons a pet in a raid. (by Krathe)
+* (Global Font) **Apply to All** now also restyles the Text Designer text (Name / Health / Status and custom elements); the Affected Elements list was updated to match. (by Krathe)
+* (Raid) The frame **Unlock/Lock** toolbar button now updates its label correctly in raid mode (it previously stayed on "Unlock" after unlocking). (by Krathe)
+* (Auto Layouts) The Mythic layout's fixed-range badge no longer overflows its button. (by Krathe)
+* (General) Fixed the doubled "v" in the version line printed on login. (by Krathe)
+
 ## [4.5.0]
 
 ### New Features

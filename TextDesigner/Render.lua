@@ -345,6 +345,14 @@ function DF:UpdateTextDesigner(frame, hint)
         DF:Debug("TD", "UpdateTextDesigner: frame has no .unit")
         return
     end
+    -- Pet frames are not part of the Text Designer; they render their own legacy
+    -- name/health text with pet-specific settings. Pets inherit their owner mode's
+    -- TD preset, so without this guard an enabled TD would stamp party/raid-styled
+    -- text onto pet frames. Keep TD off them entirely.
+    if frame.isPetFrame then
+        DF:Debug("TD", "UpdateTextDesigner: skipping pet frame %s", tostring(frame.unit))
+        return
+    end
     local db = DF:GetFrameDB(frame)
     if not db then
         DF:Debug("TD", "UpdateTextDesigner: no db for frame.unit=%s", tostring(frame.unit))

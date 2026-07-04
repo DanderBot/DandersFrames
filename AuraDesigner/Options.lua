@@ -26,60 +26,81 @@ local Adapter
 -- State
 local selectedSpec = nil         -- Current spec key being viewed
 
--- Reusable color constants (mirrors GUI.lua)
-local C_BACKGROUND = {r = 0.08, g = 0.08, b = 0.08, a = 0.95}
-local C_PANEL      = {r = 0.12, g = 0.12, b = 0.12, a = 1}
-local C_ELEMENT    = {r = 0.18, g = 0.18, b = 0.18, a = 1}
-local C_BORDER     = {r = 0.25, g = 0.25, b = 0.25, a = 1}
-local C_HOVER      = {r = 0.22, g = 0.22, b = 0.22, a = 1}
-local C_TEXT       = {r = 0.9, g = 0.9, b = 0.9, a = 1}
-local C_TEXT_DIM   = {r = 0.6, g = 0.6, b = 0.6, a = 1}
+-- Reusable color constants: reference the shared GUI palette (same numeric
+-- values, zero visual change) so they track any future palette change in
+-- lockstep. GUI.lua loads before this file (see .toc), so DF.GUI.Colors is
+-- populated at parse time.
+local C_BACKGROUND = DF.GUI.Colors.background
+local C_PANEL      = DF.GUI.Colors.panel
+local C_ELEMENT    = DF.GUI.Colors.element
+local C_BORDER     = DF.GUI.Colors.border
+local C_HOVER      = DF.GUI.Colors.hover
+local C_TEXT       = DF.GUI.Colors.text
+local C_TEXT_DIM   = DF.GUI.Colors.textDim
 
 -- Indicator type definitions
-local INDICATOR_TYPES = {
-    { key = "icon",       label = L["Icon"],             placed = true  },
-    { key = "square",     label = L["Square"],           placed = true  },
-    { key = "bar",        label = L["Bar"],              placed = true  },
-    { key = "border",     label = L["Border"],           placed = false },
-    { key = "healthbar",  label = L["Health Bar Color"], placed = false },
-    { key = "background", label = L["Background Color"],  placed = false },
-    { key = "nametext",   label = L["Name Text Color"],  placed = false },
-    { key = "healthtext", label = L["Health Text Color"], placed = false },
-    { key = "framealpha", label = L["Frame Alpha"],      placed = false },
-    { key = "sound",      label = L["Sound Alert"],      placed = false },
-}
+-- These option/label tables read L["..."]; at file scope that returns the enUS
+-- baseline (the languageOverride overlay runs later, at ADDON_LOADED). Build
+-- them in a registered refresh fn so Core rebuilds them after the overlay —
+-- otherwise these dropdowns stay English. Value-keys (CENTER, RIGHT, …) and
+-- the _order arrays are raw identifiers and must NOT be localized.
+local INDICATOR_TYPES = {}
+local ANCHOR_OPTIONS = {}
+local GROWTH_OPTIONS = {}
+local FRAME_STRATA_OPTIONS = {}
+local BORDER_STYLE_OPTIONS = {}
+local HEALTHBAR_MODE_OPTIONS = {}
+local BAR_ORIENT_OPTIONS = {}
 
-local ANCHOR_OPTIONS = {
-    CENTER = L["Center"], TOP = L["Top"], BOTTOM = L["Bottom"], LEFT = L["Left"], RIGHT = L["Right"],
-    TOPLEFT = L["Top Left"], TOPRIGHT = L["Top Right"], BOTTOMLEFT = L["Bottom Left"], BOTTOMRIGHT = L["Bottom Right"],
-    _order = {"TOPLEFT", "TOP", "TOPRIGHT", "LEFT", "CENTER", "RIGHT", "BOTTOMLEFT", "BOTTOM", "BOTTOMRIGHT"},
-}
+local function RefreshLocaleStrings()
+    INDICATOR_TYPES = {
+        { key = "icon",       label = L["Icon"],             placed = true  },
+        { key = "square",     label = L["Square"],           placed = true  },
+        { key = "bar",        label = L["Bar"],              placed = true  },
+        { key = "border",     label = L["Border"],           placed = false },
+        { key = "healthbar",  label = L["Health Bar Color"], placed = false },
+        { key = "background", label = L["Background Color"],  placed = false },
+        { key = "nametext",   label = L["Name Text Color"],  placed = false },
+        { key = "healthtext", label = L["Health Text Color"], placed = false },
+        { key = "framealpha", label = L["Frame Alpha"],      placed = false },
+        { key = "sound",      label = L["Sound Alert"],      placed = false },
+    }
 
-local GROWTH_OPTIONS = {
-    RIGHT = L["Right"], LEFT = L["Left"], UP = L["Up"], DOWN = L["Down"],
-    _order = {"RIGHT", "LEFT", "UP", "DOWN"},
-}
+    ANCHOR_OPTIONS = {
+        CENTER = L["Center"], TOP = L["Top"], BOTTOM = L["Bottom"], LEFT = L["Left"], RIGHT = L["Right"],
+        TOPLEFT = L["Top Left"], TOPRIGHT = L["Top Right"], BOTTOMLEFT = L["Bottom Left"], BOTTOMRIGHT = L["Bottom Right"],
+        _order = {"TOPLEFT", "TOP", "TOPRIGHT", "LEFT", "CENTER", "RIGHT", "BOTTOMLEFT", "BOTTOM", "BOTTOMRIGHT"},
+    }
 
-local FRAME_STRATA_OPTIONS = {
-    INHERIT = L["Inherit (Frame)"], BACKGROUND = L["Background"], LOW = L["Low"], MEDIUM = L["Medium"], HIGH = L["High"],
-    _order = {"INHERIT", "BACKGROUND", "LOW", "MEDIUM", "HIGH"},
-}
+    GROWTH_OPTIONS = {
+        RIGHT = L["Right"], LEFT = L["Left"], UP = L["Up"], DOWN = L["Down"],
+        _order = {"RIGHT", "LEFT", "UP", "DOWN"},
+    }
 
-local BORDER_STYLE_OPTIONS = {
-    SOLID = L["Solid Border"], ANIMATED = L["Animated Border"], DASHED = L["Dashed Border"],
-    GLOW = L["Glow"], CORNERS = L["Corners Only"],
-    _order = {"SOLID", "ANIMATED", "DASHED", "GLOW", "CORNERS"},
-}
+    FRAME_STRATA_OPTIONS = {
+        INHERIT = L["Inherit (Frame)"], BACKGROUND = L["Background"], LOW = L["Low"], MEDIUM = L["Medium"], HIGH = L["High"],
+        _order = {"INHERIT", "BACKGROUND", "LOW", "MEDIUM", "HIGH"},
+    }
 
-local HEALTHBAR_MODE_OPTIONS = {
-    Replace = L["Replace"], Tint = L["Tint"],
-    _order = {"Replace", "Tint"},
-}
+    BORDER_STYLE_OPTIONS = {
+        SOLID = L["Solid Border"], ANIMATED = L["Animated Border"], DASHED = L["Dashed Border"],
+        GLOW = L["Glow"], CORNERS = L["Corners Only"],
+        _order = {"SOLID", "ANIMATED", "DASHED", "GLOW", "CORNERS"},
+    }
 
-local BAR_ORIENT_OPTIONS = {
-    HORIZONTAL = L["Horizontal"], VERTICAL = L["Vertical"],
-    _order = {"HORIZONTAL", "VERTICAL"},
-}
+    HEALTHBAR_MODE_OPTIONS = {
+        Replace = L["Replace"], Tint = L["Tint"],
+        _order = {"Replace", "Tint"},
+    }
+
+    BAR_ORIENT_OPTIONS = {
+        HORIZONTAL = L["Horizontal"], VERTICAL = L["Vertical"],
+        _order = {"HORIZONTAL", "VERTICAL"},
+    }
+end
+
+RefreshLocaleStrings()
+DF:RegisterLocaleRefresh(RefreshLocaleStrings)
 
 -- ============================================================
 -- HELPERS
@@ -216,24 +237,32 @@ DF.MigrateAuraDesignerSpecScope = MigrateToSpecScoped
 -- `showBorder`; both fold to canonical `ShowBorder`.
 -- ============================================================
 
+-- Backfill canonical ONLY when absent, but ALWAYS strip the legacy key — even
+-- when the canonical key already exists.  A block edited in the new GUI writes
+-- canonical keys but leaves the legacy ones behind; the old "swap-and-nil only
+-- if canonical == nil" form then skipped the strip, leaving the legacy key to
+-- linger forever (the half-migrated state).  Mirrors renameBorderTypeKeys.
 local function renameIconBorderKeys(t)
     if type(t) ~= "table" then return end
-    if t.borderEnabled ~= nil and t.ShowBorder == nil then
-        t.ShowBorder, t.borderEnabled = t.borderEnabled, nil
+    if t.borderEnabled ~= nil then
+        if t.ShowBorder == nil then t.ShowBorder = t.borderEnabled end
+        t.borderEnabled = nil
     end
-    if t.borderThickness ~= nil and t.BorderSize == nil then
-        t.BorderSize, t.borderThickness = t.borderThickness, nil
+    if t.borderThickness ~= nil then
+        if t.BorderSize == nil then t.BorderSize = t.borderThickness end
+        t.borderThickness = nil
     end
-    if t.borderInset ~= nil and t.BorderInset == nil then
-        t.BorderInset, t.borderInset = t.borderInset, nil
+    if t.borderInset ~= nil then
+        if t.BorderInset == nil then t.BorderInset = t.borderInset end
+        t.borderInset = nil
     end
     -- Stage 5.1d.2: legacy expiringPulsate (boolean) → ExpiringAnimationType
     -- (string).  expiringPulsate = true means the user wanted the AD legacy
     -- alpha-fade pulse during expiring; that effect is now first-class as
     -- DF_PULSATE.  False just clears the boolean — the new key defaults to
     -- "NONE" which means no expiring animation override.
-    if t.expiringPulsate ~= nil and t.ExpiringAnimationType == nil then
-        if t.expiringPulsate == true then
+    if t.expiringPulsate ~= nil then
+        if t.ExpiringAnimationType == nil and t.expiringPulsate == true then
             t.ExpiringAnimationType = "DF_PULSATE"
         end
         t.expiringPulsate = nil
@@ -246,14 +275,18 @@ end
 -- from the icon's border DF_PULSATE, so it stays a boolean.
 local function renameSquareBorderKeys(t)
     if type(t) ~= "table" then return end
-    if t.showBorder ~= nil and t.ShowBorder == nil then
-        t.ShowBorder, t.showBorder = t.showBorder, nil
+    -- Always strip legacy (see renameIconBorderKeys); backfill canonical if absent.
+    if t.showBorder ~= nil then
+        if t.ShowBorder == nil then t.ShowBorder = t.showBorder end
+        t.showBorder = nil
     end
-    if t.borderThickness ~= nil and t.BorderSize == nil then
-        t.BorderSize, t.borderThickness = t.borderThickness, nil
+    if t.borderThickness ~= nil then
+        if t.BorderSize == nil then t.BorderSize = t.borderThickness end
+        t.borderThickness = nil
     end
-    if t.borderInset ~= nil and t.BorderInset == nil then
-        t.BorderInset, t.borderInset = t.borderInset, nil
+    if t.borderInset ~= nil then
+        if t.BorderInset == nil then t.BorderInset = t.borderInset end
+        t.borderInset = nil
     end
 end
 
@@ -262,14 +295,18 @@ end
 -- `BorderColor`.  The bar has no legacy inset key.
 local function renameBarBorderKeys(t)
     if type(t) ~= "table" then return end
-    if t.showBorder ~= nil and t.ShowBorder == nil then
-        t.ShowBorder, t.showBorder = t.showBorder, nil
+    -- Always strip legacy (see renameIconBorderKeys); backfill canonical if absent.
+    if t.showBorder ~= nil then
+        if t.ShowBorder == nil then t.ShowBorder = t.showBorder end
+        t.showBorder = nil
     end
-    if t.borderThickness ~= nil and t.BorderSize == nil then
-        t.BorderSize, t.borderThickness = t.borderThickness, nil
+    if t.borderThickness ~= nil then
+        if t.BorderSize == nil then t.BorderSize = t.borderThickness end
+        t.borderThickness = nil
     end
-    if t.borderColor ~= nil and t.BorderColor == nil then
-        t.BorderColor, t.borderColor = t.borderColor, nil
+    if t.borderColor ~= nil then
+        if t.BorderColor == nil then t.BorderColor = t.borderColor end
+        t.borderColor = nil
     end
 end
 
@@ -279,32 +316,55 @@ end
 -- it runs once.
 local function renameBorderTypeKeys(t)
     if type(t) ~= "table" then return end
-    if t.style == nil or t.BorderStyle ~= nil then return end
+    -- The legacy `style` key is what forces the old render path (Indicators.lua's
+    -- `config.style and BuildBorderTypeSpec(...)`), so its presence is what we key
+    -- on.  Crucially we run EVEN WHEN BorderStyle already exists: a block edited in
+    -- the new GUI writes canonical keys but leaves `style` behind, so it must still
+    -- get stripped or it keeps rendering via the legacy builder (the half-migrated
+    -- bug — legacy color/thickness shadowing the GUI's BorderColor/BorderSize).
+    if t.style == nil then return end
     local thickness = t.thickness or 2
     local inset     = t.inset or 0
     local color     = t.color or { r = 0, g = 0, b = 0, a = 1 }
     local legacy    = { Solid = "SOLID", Glow = "GLOW", Pulse = "SOLID" }
     local style     = legacy[t.style] or t.style or "SOLID"
-    t.ShowBorder  = true
-    t.BorderInset = inset
-    t.BorderColor = color
-    if style == "GLOW" then
-        t.BorderStyle = "TEXTURE"; t.BorderTexture = "DF Glow"; t.BorderSize = thickness
-    elseif style == "DASHED" or style == "ANIMATED" then
-        t.BorderStyle = "SOLID"; t.BorderSize = 0
-        t.BorderAnimationType      = "DF_DASH"
-        t.BorderAnimationFrequency = (style == "ANIMATED") and 1 or 0
-        t.BorderAnimationThickness = thickness
-        t.BorderAnimationColor     = color
-        t.BorderAnimationInset     = inset
-    elseif style == "CORNERS" then
-        t.BorderStyle = "SOLID"; t.BorderSize = 0
-        t.BorderAnimationType      = "CORNERS_ONLY"
-        t.BorderAnimationThickness = thickness
-        t.BorderAnimationColor     = color
-    else  -- SOLID (and anything unknown)
-        t.BorderStyle = "SOLID"; t.BorderSize = thickness
+    -- Fold legacy → canonical ONLY where the canonical key is absent, so we never
+    -- overwrite edits the user already made in the new GUI (BorderColor/BorderSize).
+    if t.ShowBorder  == nil then t.ShowBorder  = true  end
+    if t.BorderInset == nil then t.BorderInset = inset end
+    if t.BorderColor == nil then t.BorderColor = color end
+    if t.BorderStyle == nil then
+        if style == "GLOW" then
+            t.BorderStyle = "TEXTURE"
+            if t.BorderTexture == nil then t.BorderTexture = "DF Glow" end
+            if t.BorderSize    == nil then t.BorderSize    = thickness end
+        elseif style == "DASHED" or style == "ANIMATED" then
+            t.BorderStyle = "SOLID"
+            if t.BorderSize == nil then t.BorderSize = 0 end
+            if t.BorderAnimationType == nil then
+                t.BorderAnimationType      = "DF_DASH"
+                t.BorderAnimationFrequency = (style == "ANIMATED") and 1 or 0
+                t.BorderAnimationThickness = thickness
+                t.BorderAnimationColor     = color
+                t.BorderAnimationInset     = inset
+            end
+        elseif style == "CORNERS" then
+            t.BorderStyle = "SOLID"
+            if t.BorderSize == nil then t.BorderSize = 0 end
+            if t.BorderAnimationType == nil then
+                t.BorderAnimationType      = "CORNERS_ONLY"
+                t.BorderAnimationThickness = thickness
+                t.BorderAnimationColor     = color
+            end
+        else  -- SOLID (and anything unknown)
+            t.BorderStyle = "SOLID"
+            if t.BorderSize == nil then t.BorderSize = thickness end
+        end
+    elseif t.BorderSize == nil then
+        -- BorderStyle already set (by the GUI); just backfill size from legacy.
+        t.BorderSize = thickness
     end
+    -- Strip legacy keys so rendering routes through DF.Border:BuildSpec.
     t.style = nil; t.thickness = nil; t.inset = nil; t.color = nil
 end
 
@@ -336,21 +396,19 @@ local function MigrateIconBorderKeysOnAuras(specAuras)
     end
 end
 
-local function MigrateAuraDesignerIconBorderKeys(modeDb)
-    local adDB = modeDb and modeDb.auraDesigner
-    if not adDB or not adDB.auras then return end
-
-    -- Detect shape: pre-spec-scoping (flat aura configs) vs spec-scoped.
-    -- Mirrors MigrateAuraDesignerToInstances' detection so we stay correct
-    -- whether the spec-scope migration ran before us or not.
-    for _, val in pairs(adDB.auras) do
+-- Run the icon/square/bar/border key renames over one `.auras` table, handling
+-- both the flat ({ auraName → auraCfg }) and spec-scoped
+-- ({ specKey → { auraName → auraCfg } }) shapes.  Mirrors
+-- MigrateAuraDesignerToInstances' shape detection so we stay correct whether the
+-- spec-scope migration ran before us or not.
+local function MigrateBorderKeysOnAurasTable(auras)
+    if type(auras) ~= "table" then return end
+    for _, val in pairs(auras) do
         if type(val) == "table" then
             if val.priority ~= nil or val.indicators ~= nil or val.icon ~= nil then
-                -- Flat: adDB.auras is { auraName → auraCfg }
-                MigrateIconBorderKeysOnAuras(adDB.auras)
+                MigrateIconBorderKeysOnAuras(auras)             -- flat
             else
-                -- Spec-scoped: adDB.auras is { specKey → { auraName → auraCfg } }
-                for _, specAuras in pairs(adDB.auras) do
+                for _, specAuras in pairs(auras) do             -- spec-scoped
                     MigrateIconBorderKeysOnAuras(specAuras)
                 end
             end
@@ -359,7 +417,103 @@ local function MigrateAuraDesignerIconBorderKeys(modeDb)
     end
 end
 
-DF.MigrateAuraDesignerIconBorderKeys = MigrateAuraDesignerIconBorderKeys
+local function MigrateAuraDesignerIconBorderKeys(modeDb)
+    local adDB = modeDb and modeDb.auraDesigner
+    if adDB and adDB.auras then
+        MigrateBorderKeysOnAurasTable(adDB.auras)
+    end
+end
+
+-- The Designer Presets rework relocated AD aura configs into
+-- profile.auraDesignerPresets[name].auras.  MigrateAuraDesignerIconBorderKeys
+-- only walks the legacy per-mode modeDb.auraDesigner location, so preset-nested
+-- border blocks were never folded — they kept their legacy `style` (rendering via
+-- the old builder) while the GUI wrote canonical keys onto them (the half-migrated
+-- state).  Walk every preset's auras so those blocks get folded + `style` stripped.
+local function MigrateAuraDesignerPresetBorderKeys(profile)
+    local presets = profile and profile.auraDesignerPresets
+    if type(presets) ~= "table" then return end
+    for _, preset in pairs(presets) do
+        if type(preset) == "table" then
+            MigrateBorderKeysOnAurasTable(preset.auras)
+        end
+    end
+end
+
+DF.MigrateAuraDesignerIconBorderKeys   = MigrateAuraDesignerIconBorderKeys
+DF.MigrateAuraDesignerPresetBorderKeys = MigrateAuraDesignerPresetBorderKeys
+
+-- Lazy, flag-gated border-key fold.  This is the one that actually matters for
+-- live frames: the ADDON_LOADED passes above clean the STORED tables (modeDb
+-- auraDesigner + presets), but render resolves its config through
+-- DF:ResolveAuraDesigner / GetModeBaseAuraDesigner, which can hand back a
+-- resolved / auto-layout-overlay table the load-time passes never touched.
+-- Mirroring MigrateToSpecScoped's lazy-on-access pattern, we fold the border keys
+-- on the EXACT adDB about to be rendered/edited, gated by `_borderKeysFoldedV1`
+-- so it runs once per table.  (Idempotent if the table is rebuilt each access.)
+local function MigrateBorderKeysLazy(adDB)
+    if type(adDB) ~= "table" or adDB._borderKeysFoldedV1 then return end
+    if adDB.auras then MigrateBorderKeysOnAurasTable(adDB.auras) end
+    adDB._borderKeysFoldedV1 = true
+end
+DF.MigrateAuraDesignerBorderKeysLazy = MigrateBorderKeysLazy
+
+-- Same lazy-on-access pattern for the type-keyed → instances[] migration.  It
+-- only ran at ADDON_LOADED on modeDb.auraDesigner, so an imported preset still in
+-- the legacy type-keyed shape (icon/square/bar sub-tables, no `indicators`) would
+-- render NOTHING — the engine reads `auraCfg.indicators`.  Reuses the existing,
+-- idempotent DF.MigrateAuraDesignerToInstances (guarded per-aura by `not
+-- auraCfg.indicators`) via a thin modeDb wrapper, so there's no duplicated
+-- conversion logic.  The resolved adDB IS the preset by reference, so folding it
+-- also cleans the stored data.  Runs before the border fold to match load order.
+local function MigrateInstancesLazy(adDB)
+    if type(adDB) ~= "table" or adDB._instancesFoldedV1 then return end
+    if DF.MigrateAuraDesignerToInstances and adDB.auras then
+        DF.MigrateAuraDesignerToInstances({ auraDesigner = adDB })
+    end
+    adDB._instancesFoldedV1 = true
+end
+DF.MigrateAuraDesignerInstancesLazy = MigrateInstancesLazy
+
+-- Lazy, flag-gated Priority-scale flip (old lower-wins → new higher-wins). Same
+-- resolve-time, once-per-table pattern as the border-key fold above: it runs on
+-- the EXACT adDB about to be rendered/edited, so auto-layout overlays, presets,
+-- and the legacy inline config are all covered AT POINT OF USE, gated by
+-- `_priorityHigherWinsV1`. Fresh configs are born flagged (NewAuraDesignerConfig)
+-- and exports/imports carry the flag on the copied table, so only genuine pre-4.6
+-- data is ever flipped — and exactly once. Replaces the old one-shot ADDON_LOADED
+-- walker, which misclassified flat auras with no indicators and double-flipped
+-- newly-created / imported profiles into corruption.
+local function FlipAuraPriority(auraCfg)
+    if type(auraCfg) == "table" and type(auraCfg.priority) == "number" then
+        local p = math.floor(auraCfg.priority + 0.5)
+        if p < 1 then p = 1 elseif p > 10 then p = 10 end
+        auraCfg.priority = 11 - p
+    end
+end
+local function MigratePrioritiesLazy(adDB)
+    if type(adDB) ~= "table" or adDB._priorityHigherWinsV1 then return end
+    local auras = adDB.auras
+    if type(auras) == "table" then
+        -- Shape detection off the first entry only, matching MigrateBorderKeysOnAurasTable.
+        for _, val in pairs(auras) do
+            if type(val) == "table" then
+                if val.priority ~= nil or val.indicators ~= nil or val.icon ~= nil then
+                    for _, auraCfg in pairs(auras) do FlipAuraPriority(auraCfg) end            -- flat: auras[name]
+                else
+                    for _, specAuras in pairs(auras) do                                         -- spec: auras[spec][name]
+                        if type(specAuras) == "table" then
+                            for _, auraCfg in pairs(specAuras) do FlipAuraPriority(auraCfg) end
+                        end
+                    end
+                end
+            end
+            break
+        end
+    end
+    adDB._priorityHigherWinsV1 = true
+end
+DF.MigrateAuraDesignerPrioritiesLazy = MigratePrioritiesLazy
 
 local function GetAuraDesignerDB()
     -- The editor is mode-tabbed: it edits the preset the active mode uses
@@ -377,6 +531,9 @@ local function GetAuraDesignerDB()
     if adDB and (not adDB._specScopedV1 or not adDB._specScopedV2) then
         MigrateToSpecScoped(adDB)
     end
+    MigrateInstancesLazy(adDB)
+    MigrateBorderKeysLazy(adDB)
+    MigratePrioritiesLazy(adDB)
     return adDB
 end
 
@@ -461,19 +618,9 @@ local function ShowBuffCoexistPopup(onConfirm, onCancel)
 
         local function MakeButton(parent, text, xOff)
             local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
-            btn:SetSize(170, 28)
             btn:SetPoint("BOTTOM", parent, "BOTTOM", xOff, 14)
-            ApplyBackdrop(btn, C_ELEMENT, C_BORDER)
-            btn.text = btn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-            btn.text:SetPoint("CENTER")
-            btn.text:SetText(text)
-            btn:SetScript("OnEnter", function(self)
-                local tc = GetThemeColor()
-                self:SetBackdropBorderColor(tc.r, tc.g, tc.b, 1)
-            end)
-            btn:SetScript("OnLeave", function(self)
-                self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, C_BORDER.a)
-            end)
+            DF.GUI:StyleButton(btn, { width = 170, height = 28, text = text })
+            btn.text = btn.Text
             return btn
         end
 
@@ -596,7 +743,9 @@ local function EnsureTypeConfig(auraName, typeKey)
                 -- aura's icon sub-config; everything else (style, colour,
                 -- gradient, shadow, offset, blend) reads from TYPE_DEFAULTS
                 -- via proxy fall-through until the user overrides it.
-                ShowBorder = true, BorderSize = 1, BorderInset = 0,
+                -- Seed Show/Size from the global icon-border defaults so the
+                -- "Import Buffs Tab Defaults" border toggle actually carries over.
+                ShowBorder = (gd.iconBorderEnabled ~= false), BorderSize = gd.iconBorderThickness or 1, BorderInset = 0,
                 hideSwipe = false,
                 -- Duration text
                 showDuration = gd.showDuration ~= false,
@@ -1419,11 +1568,9 @@ local function AttachWarningBadge(host, warnKey, opts)
         tex:SetTexture(WARNING_TEXTURE)
         badge.texture = tex
         badge:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText(self.tooltipText or "", 1, 1, 1, 1, true)
-            GameTooltip:Show()
+            GUI:ShowTooltip(self, { title = self.tooltipText or "" })
         end)
-        badge:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        badge:SetScript("OnLeave", function() GUI:HideTooltip() end)
         host.dfWarningBadge = badge
     end
 
@@ -1738,21 +1885,32 @@ local effectCardPool = {}   -- Reusable card frames
 
 local FRAME_LEVEL_TYPE_KEYS = { "border", "healthbar", "background", "nametext", "healthtext", "framealpha", "sound" }
 
-local FRAME_LEVEL_LABELS = {
-    border     = L["Border"],
-    healthbar  = L["Health Bar"],
-    background  = L["Background"],
-    nametext   = L["Name Text"],
-    healthtext = L["Health Text"],
-    framealpha = L["Frame Alpha"],
-    sound      = L["Sound Alert"],
-}
+-- Effect-type display labels. Same file-scope-vs-overlay timing issue as the
+-- option tables near the top of this file: build them in a registered refresh
+-- fn so they pick up the active locale.
+local FRAME_LEVEL_LABELS = {}
+local PLACED_TYPE_LABELS = {}
 
-local PLACED_TYPE_LABELS = {
-    icon   = L["Icon"],
-    square = L["Square"],
-    bar    = L["Bar"],
-}
+local function RefreshEffectLabels()
+    FRAME_LEVEL_LABELS = {
+        border     = L["Border"],
+        healthbar  = L["Health Bar"],
+        background  = L["Background"],
+        nametext   = L["Name Text"],
+        healthtext = L["Health Text"],
+        framealpha = L["Frame Alpha"],
+        sound      = L["Sound Alert"],
+    }
+
+    PLACED_TYPE_LABELS = {
+        icon   = L["Icon"],
+        square = L["Square"],
+        bar    = L["Bar"],
+    }
+end
+
+RefreshEffectLabels()
+DF:RegisterLocaleRefresh(RefreshEffectLabels)
 
 local BADGE_COLORS = {
     icon       = { r = 0.36, g = 0.72, b = 0.94 },  -- Blue
@@ -1932,10 +2090,11 @@ local function StartDrag(auraName, auraInfo, specKey, indicatorType)
     end
 
     -- Show and enlarge all anchor dots to signal they are drop targets
+    local dc = GetThemeColor()
     for _, dotFrame in pairs(anchorDots) do
         dotFrame:Show()
         dotFrame.dot:SetSize(10, 10)
-        dotFrame.dot:SetColorTexture(0.45, 0.45, 0.95, 0.5)
+        dotFrame.dot:SetColorTexture(dc.r, dc.g, dc.b, 0.5)
     end
 
     -- Start cursor following
@@ -2010,10 +2169,11 @@ local function StartMoveDrag(auraName, indicatorID, specKey)
     end
 
     -- Show and enlarge all anchor dots
+    local dc = GetThemeColor()
     for _, dotFrame in pairs(anchorDots) do
         dotFrame:Show()
         dotFrame.dot:SetSize(10, 10)
-        dotFrame.dot:SetColorTexture(0.45, 0.45, 0.95, 0.5)
+        dotFrame.dot:SetColorTexture(dc.r, dc.g, dc.b, 0.5)
     end
 
     -- Start cursor following
@@ -2072,10 +2232,11 @@ EndDrag = function()
     end
 
     -- Hide anchor dots (only visible during drag)
+    local dc = GetThemeColor()
     for _, dotFrame in pairs(anchorDots) do
         dotFrame:Hide()
         dotFrame.dot:SetSize(6, 6)
-        dotFrame.dot:SetColorTexture(0.45, 0.45, 0.95, 0.3)
+        dotFrame.dot:SetColorTexture(dc.r, dc.g, dc.b, 0.3)
     end
 
     -- Process the drop
@@ -2448,10 +2609,10 @@ local function RefreshPreviewEffects()
     -- Frame-level effects all draw onto the SAME single preview elements (one
     -- healthFill / healthBg / nameText / etc.), so when more than one aura
     -- configures the same type they conflict. The runtime resolves this by
-    -- priority (lower number wins; first claim per type — see prioritySort and
+    -- priority (higher number wins; first claim per type — see prioritySort and
     -- Indicators:Apply's `if state.X then return end`). Mirror that here so the
     -- preview is deterministic instead of pairs()-order-dependent: iterate auras
-    -- in ascending-priority order (tiebreak by name) and apply first-wins per type.
+    -- in descending-priority order (tiebreak by name) and apply first-wins per type.
     local sortedAuras = {}
     for auraName, auraCfg in pairs(GetSpecAuras()) do
         if type(auraCfg) == "table" then  -- skip corrupted entries
@@ -2459,7 +2620,7 @@ local function RefreshPreviewEffects()
         end
     end
     sort(sortedAuras, function(a, b)
-        if a.priority ~= b.priority then return a.priority < b.priority end
+        if a.priority ~= b.priority then return a.priority > b.priority end  -- higher number = higher priority
         return a.name < b.name
     end)
 
@@ -2734,20 +2895,22 @@ local function CreateExpiringThresholdRow(parent, proxy, width)
     modeText:SetPoint("CENTER", 0, 0)
     modeText:SetText(isSeconds and L["Seconds"] or L["Percent"])
     modeText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    ApplyBackdrop(modeBtn,
-        {r = 0.14, g = 0.14, b = 0.17, a = 1},
-        {r = 0.30, g = 0.30, b = 0.35, a = 0.8})
+    -- Shared styler (rest + accent-wash hover). It's a two-state toggle whose
+    -- label shows the current mode; mark active when on Seconds so the engaged
+    -- state reads via the shared accent border (page rebuilds on click).
+    GUI:StyleButton(modeBtn)
+    modeBtn:SetActive(isSeconds)
 
-    modeBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(0.18, 0.18, 0.22, 1)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText(L["Threshold Mode"])
-        GameTooltip:AddLine(isSeconds and L["Currently: Seconds. Click for Percent."] or L["Currently: Percent. Click for Seconds."], 0.8, 0.8, 0.8, true)
-        GameTooltip:Show()
+    modeBtn:HookScript("OnEnter", function(self)
+        GUI:ShowTooltip(self, {
+            title = L["Threshold Mode"],
+            lines = {
+                isSeconds and L["Currently: Seconds. Click for Percent."] or L["Currently: Percent. Click for Seconds."],
+            },
+        })
     end)
-    modeBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(0.14, 0.14, 0.17, 1)
-        GameTooltip:Hide()
+    modeBtn:HookScript("OnLeave", function()
+        GUI:HideTooltip()
     end)
     modeBtn:SetScript("OnClick", function()
         if proxy.expiringThresholdMode == "SECONDS" then
@@ -2791,26 +2954,24 @@ local function CreateExpiringDurationPriorityRow(parent, auraName, typeKey, widt
     local durW = durText:GetStringWidth() + 16
     if durW < 80 then durW = 80 end
     durBtn:SetWidth(durW)
-    ApplyBackdrop(durBtn,
-        {r = 0.14, g = 0.14, b = 0.17, a = 1},
-        {r = 0.30, g = 0.30, b = 0.35, a = 0.8})
+    -- Shared styler (rest + accent-wash hover). Two-state toggle; mark active
+    -- when tracking Highest so the engaged state reads via the accent border
+    -- (page rebuilds on click).
+    GUI:StyleButton(durBtn)
+    durBtn:SetActive(isHighest)
 
-    durBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(0.18, 0.18, 0.22, 1)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        if isHighest then
-            GameTooltip:SetText(L["Using highest duration trigger"])
-            GameTooltip:AddLine(L["Expiring indicator tracks the trigger with the most time remaining."], 0.8, 0.8, 0.8, true)
-        else
-            GameTooltip:SetText(L["Using lowest duration trigger"])
-            GameTooltip:AddLine(L["Expiring indicator tracks the trigger with the least time remaining."], 0.8, 0.8, 0.8, true)
-        end
-        GameTooltip:AddLine(L["Click to toggle"], 0.6, 0.6, 0.6)
-        GameTooltip:Show()
+    durBtn:HookScript("OnEnter", function(self)
+        GUI:ShowTooltip(self, {
+            title = isHighest and L["Using highest duration trigger"] or L["Using lowest duration trigger"],
+            lines = {
+                isHighest and L["Expiring indicator tracks the trigger with the most time remaining."]
+                    or L["Expiring indicator tracks the trigger with the least time remaining."],
+                { text = L["Click to toggle"], hint = true },
+            },
+        })
     end)
-    durBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(0.14, 0.14, 0.17, 1)
-        GameTooltip:Hide()
+    durBtn:HookScript("OnLeave", function()
+        GUI:HideTooltip()
     end)
     durBtn:SetScript("OnClick", function()
         local cfg = GetSpecAuras()[auraName]
@@ -2948,41 +3109,19 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         copyLabel:SetText(L["COPY APPEARANCE FROM"])
         copyLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
-        local copyBtn = CreateFrame("Button", nil, copyContainer, "BackdropTemplate")
-        copyBtn:SetHeight(20)
-        copyBtn:SetPoint("TOPLEFT", 0, -12)
-        copyBtn:SetPoint("RIGHT", copyContainer, "RIGHT", 0, 0)
-        ApplyBackdrop(copyBtn,
-            {r = 0.12, g = 0.12, b = 0.12, a = 1},
-            {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.6})
-
-        local copyBtnText = copyBtn:CreateFontString(nil, "OVERLAY")
-        GUI:SetSettingsFont(copyBtnText, 9, "")
-        copyBtnText:SetPoint("LEFT", 6, 0)
-        copyBtnText:SetText(L["Select indicator..."])
-        copyBtnText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-
-        local chevron = copyBtn:CreateTexture(nil, "OVERLAY")
-        chevron:SetSize(10, 10)
-        chevron:SetPoint("RIGHT", -6, 0)
-        chevron:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
-        chevron:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-
-        copyBtn:SetScript("OnEnter", function(self)
-            self:SetBackdropColor(0.18, 0.18, 0.18, 1)
-            copyBtnText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-        end)
-        copyBtn:SetScript("OnLeave", function(self)
-            self:SetBackdropColor(0.12, 0.12, 0.12, 1)
-            copyBtnText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-        end)
-
         local capturedAuraName = auraName
         local capturedIndicatorID = indicatorID
         local capturedTypeKey = typeKey
 
-        copyBtn:SetScript("OnClick", function()
-            -- Build list of other placed indicators of the same type
+        -- Build the list of other placed indicators of the same type as the
+        -- dropdown's options (rebuilt on each open via optionsFunc so newly-added
+        -- indicators appear). Keyed by a synthetic id -> a captured source table;
+        -- picking one copies its appearance. The opener stays "Select indicator..."
+        -- (it's an action picker, not a value selector), achieved by a customGet
+        -- that always returns that label string (no matching option key).
+        local copySources = {}
+        local function BuildCopyFromOptions()
+            wipe(copySources)
             local spec = ResolveSpec()
             local trackable = spec and Adapter and Adapter:GetTrackableAuras(spec)
             local displayNames = {}
@@ -3009,67 +3148,34 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                     end
                 end
             end
-
-            if #sources == 0 then return end
             sort(sources, function(a, b) return a.displayName < b.displayName end)
 
-            -- Create or reuse picker dropdown
-            local dropName = "DFADCopyFromPicker"
-            local drop = _G[dropName]
-            if not drop then
-                drop = CreateFrame("Frame", dropName, UIParent, "BackdropTemplate")
-                drop:SetFrameStrata("FULLSCREEN_DIALOG")
-                drop:SetClampedToScreen(true)
+            local options = { _order = {} }
+            for i, src in ipairs(sources) do
+                local key = "src" .. i
+                copySources[key] = src
+                options[key] = { text = src.displayName }
+                options._order[i] = key
             end
-            if drop:IsShown() and drop._ownerBtn == copyBtn then
-                drop:Hide()
-                return
-            end
-            drop._ownerBtn = copyBtn
+            return options
+        end
 
-            -- Clear previous children
-            for _, child in ipairs({drop:GetChildren()}) do child:Hide(); child:SetParent(nil) end
-            for _, rgn in ipairs({drop:GetRegions()}) do
-                if rgn:GetObjectType() == "FontString" then rgn:Hide() end
-            end
-
-            drop:SetWidth(200)
-            ApplyBackdrop(drop, C_BACKGROUND, C_BORDER)
-
-            local dy = -4
-            for _, src in ipairs(sources) do
-                local btn = CreateFrame("Button", nil, drop)
-                btn:SetHeight(20)
-                btn:SetPoint("TOPLEFT", 4, dy)
-                btn:SetPoint("RIGHT", drop, "RIGHT", -4, 0)
-
-                local lbl = btn:CreateFontString(nil, "OVERLAY")
-                GUI:SetSettingsFont(lbl, 9, "")
-                lbl:SetPoint("LEFT", 6, 0)
-                lbl:SetText(src.displayName)
-                lbl:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-
-                local hl = btn:CreateTexture(nil, "HIGHLIGHT")
-                hl:SetAllPoints()
-                hl:SetColorTexture(1, 1, 1, 0.05)
-
-                local capturedSrc = src
-                btn:SetScript("OnClick", function()
-                    CopyIndicatorAppearance(capturedSrc.auraName, capturedSrc.indicatorID, capturedAuraName, capturedIndicatorID)
-                    drop:Hide()
+        local copyDrop = GUI:CreateDropdown(
+            copyContainer, "", BuildCopyFromOptions(),
+            nil, nil, nil,
+            function() return L["Select indicator..."] end,   -- customGet (static opener)
+            function(key)                                      -- customSet (action)
+                local src = copySources[key]
+                if src then
+                    CopyIndicatorAppearance(src.auraName, src.indicatorID, capturedAuraName, capturedIndicatorID)
                     DF:AuraDesigner_RefreshPage()
-                end)
-
-                dy = dy - 20
-            end
-            drop:SetHeight(-dy + 4)
-
-            drop:ClearAllPoints()
-            drop:SetPoint("TOPLEFT", copyBtn, "BOTTOMLEFT", 0, -2)
-            drop:Show()
-
-            drop:SetScript("OnHide", function() drop._ownerBtn = nil end)
-        end)
+                end
+            end,
+            { inline = true, optionsFunc = BuildCopyFromOptions }
+        )
+        copyDrop:SetPoint("TOPLEFT", 0, -12)
+        copyDrop:SetPoint("RIGHT", copyContainer, "RIGHT", 0, 0)
+        copyDrop:SetHeight(20)
 
         AddWidget(copyContainer, 38)
     end
@@ -3147,7 +3253,10 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                     -- draw, so hide it there too (no border = nowhere to attach).
                     animation     = not iconTextOnly,
                     iconEffects   = opts.iconEffects,
-                    tint          = true,  -- secret-safe; works on all auras
+                    -- secret-safe; works on all auras. Opt out via opts.tint=false
+                    -- for indicator types whose render can't apply a tint (e.g. the
+                    -- border type draws no fill, so SetupExpiringTint is never called).
+                    tint          = (opts.tint ~= false),
                 },
                 lightTint = RPL,
             })
@@ -3188,17 +3297,25 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- Show When Missing
         AddGroup(L["Show When Missing"], function(g)
             local desatCb
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Show When Missing"], proxy, "showWhenMissing", function()
-                if desatCb then
-                    if proxy.showWhenMissing then desatCb:Show() else desatCb:Hide() end
+            local function UpdateDesatState()
+                if not desatCb then return end
+                if proxy.showWhenMissing then
+                    desatCb:SetAlpha(1)
+                    desatCb:EnableMouse(true)
+                else
+                    desatCb:SetAlpha(0.4)
+                    desatCb:EnableMouse(false)
                 end
+            end
+            g:AddWidget(GUI:CreateCheckbox(parent, L["Show When Missing"], proxy, "showWhenMissing", function()
+                UpdateDesatState()
                 DF.AuraDesigner.Engine:ForceRefreshAllFrames()
             end), 28)
             desatCb = GUI:CreateCheckbox(parent, L["Desaturate When Missing"], proxy, "missingDesaturate", function()
                 DF.AuraDesigner.Engine:ForceRefreshAllFrames()
             end)
             g:AddWidget(desatCb, 28)
-            if not proxy.showWhenMissing then desatCb:Hide() end
+            UpdateDesatState()
         end)
         -- Border (Stage 5.1c — unified controls via CreateBorderControls).
         -- Show / Thickness / Inset are the same widgets as before; the helper
@@ -3268,30 +3385,43 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         })
         -- Duration Text
         AddGroup(L["Duration Text"], function(g)
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Show Duration Text"], proxy, "showDuration"), 28)
+            g:AddWidget(GUI:CreateCheckbox(parent, L["Show Duration"], proxy, "showDuration"), 28)
             g:AddWidget(GUI:CreateFontDropdown(parent, L["Duration Font"], proxy, "durationFont"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Duration Scale"], 0.5, 2.0, 0.1, proxy, "durationScale"), 54)
-            g:AddWidget(GUI:CreateOutlineDropdown(parent, L["Duration Outline"], proxy, "durationOutline"), 54)
+            g:AddWidget(GUI:CreateOutlineDropdown(parent, L["Outline"], proxy, "durationOutline"), 54)
             g:AddWidget(GUI:CreateShadowCheckbox(parent, L["Shadow"], proxy, "durationOutline"), 28)
             g:AddWidget(GUI:CreateDropdown(parent, L["Duration Anchor"], ANCHOR_OPTIONS, proxy, "durationAnchor"), 54)
-            g:AddWidget(GUI:CreateSlider(parent, L["Duration Offset X"], -150, 150, 1, proxy, "durationX"), 54)
-            g:AddWidget(GUI:CreateSlider(parent, L["Duration Offset Y"], -150, 150, 1, proxy, "durationY"), 54)
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Color Duration by Time"], proxy, "durationColorByTime"), 28)
+            g:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 1, proxy, "durationX"), 54)
+            g:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, proxy, "durationY"), 54)
+            g:AddWidget(GUI:CreateCheckbox(parent, L["Color by Time Remaining"], proxy, "durationColorByTime"), 28)
             g:AddWidget(GUI:CreateColorPicker(parent, L["Duration Text Color"], proxy, "durationColor", true, RPL, RPL, true), 28)
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Duration Above Threshold"], proxy, "durationHideAboveEnabled"), 28)
-            g:AddWidget(GUI:CreateSlider(parent, L["Hide Above (seconds)"], 1, 60, 1, proxy, "durationHideAboveThreshold"), 54)
+            local hideAboveSlider
+            local function UpdateHideAboveState()
+                if not hideAboveSlider then return end
+                if proxy.durationHideAboveEnabled then
+                    hideAboveSlider:SetAlpha(1)
+                    hideAboveSlider:EnableMouse(true)
+                else
+                    hideAboveSlider:SetAlpha(0.4)
+                    hideAboveSlider:EnableMouse(false)
+                end
+            end
+            g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Duration Above Threshold"], proxy, "durationHideAboveEnabled", UpdateHideAboveState), 28)
+            hideAboveSlider = GUI:CreateSlider(parent, L["Hide Above (seconds)"], 1, 60, 1, proxy, "durationHideAboveThreshold")
+            g:AddWidget(hideAboveSlider, 54)
+            UpdateHideAboveState()
         end)
         -- Stack Count
         AddGroup(L["Stack Count"], function(g)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Show Stacks"], proxy, "showStacks"), 28)
-            g:AddWidget(GUI:CreateSlider(parent, L["Stack Minimum"], 1, 10, 1, proxy, "stackMinimum"), 54)
+            g:AddWidget(GUI:CreateSlider(parent, L["Min Stacks to Show"], 1, 10, 1, proxy, "stackMinimum"), 54)
             g:AddWidget(GUI:CreateFontDropdown(parent, L["Stack Font"], proxy, "stackFont"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Stack Scale"], 0.5, 2.0, 0.1, proxy, "stackScale"), 54)
             g:AddWidget(GUI:CreateOutlineDropdown(parent, L["Stack Outline"], proxy, "stackOutline"), 54)
             g:AddWidget(GUI:CreateShadowCheckbox(parent, L["Shadow"], proxy, "stackOutline"), 28)
             g:AddWidget(GUI:CreateDropdown(parent, L["Stack Anchor"], ANCHOR_OPTIONS, proxy, "stackAnchor"), 54)
-            g:AddWidget(GUI:CreateSlider(parent, L["Stack Offset X"], -150, 150, 1, proxy, "stackX"), 54)
-            g:AddWidget(GUI:CreateSlider(parent, L["Stack Offset Y"], -150, 150, 1, proxy, "stackY"), 54)
+            g:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 1, proxy, "stackX"), 54)
+            g:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, proxy, "stackY"), 54)
             g:AddWidget(GUI:CreateColorPicker(parent, L["Stack Text Color"], proxy, "stackColor", true, RPL, RPL, true), 28)
         end)
 
@@ -3362,30 +3492,43 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         })
         -- Duration Text
         AddGroup(L["Duration Text"], function(g)
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Show Duration Text"], proxy, "showDuration"), 28)
+            g:AddWidget(GUI:CreateCheckbox(parent, L["Show Duration"], proxy, "showDuration"), 28)
             g:AddWidget(GUI:CreateFontDropdown(parent, L["Duration Font"], proxy, "durationFont"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Duration Scale"], 0.5, 2.0, 0.1, proxy, "durationScale"), 54)
-            g:AddWidget(GUI:CreateOutlineDropdown(parent, L["Duration Outline"], proxy, "durationOutline"), 54)
+            g:AddWidget(GUI:CreateOutlineDropdown(parent, L["Outline"], proxy, "durationOutline"), 54)
             g:AddWidget(GUI:CreateShadowCheckbox(parent, L["Shadow"], proxy, "durationOutline"), 28)
             g:AddWidget(GUI:CreateDropdown(parent, L["Duration Anchor"], ANCHOR_OPTIONS, proxy, "durationAnchor"), 54)
-            g:AddWidget(GUI:CreateSlider(parent, L["Duration Offset X"], -150, 150, 1, proxy, "durationX"), 54)
-            g:AddWidget(GUI:CreateSlider(parent, L["Duration Offset Y"], -150, 150, 1, proxy, "durationY"), 54)
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Color Duration by Time"], proxy, "durationColorByTime"), 28)
+            g:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 1, proxy, "durationX"), 54)
+            g:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, proxy, "durationY"), 54)
+            g:AddWidget(GUI:CreateCheckbox(parent, L["Color by Time Remaining"], proxy, "durationColorByTime"), 28)
             g:AddWidget(GUI:CreateColorPicker(parent, L["Duration Text Color"], proxy, "durationColor", true, RPL, RPL, true), 28)
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Duration Above Threshold"], proxy, "durationHideAboveEnabled"), 28)
-            g:AddWidget(GUI:CreateSlider(parent, L["Hide Above (seconds)"], 1, 60, 1, proxy, "durationHideAboveThreshold"), 54)
+            local hideAboveSlider
+            local function UpdateHideAboveState()
+                if not hideAboveSlider then return end
+                if proxy.durationHideAboveEnabled then
+                    hideAboveSlider:SetAlpha(1)
+                    hideAboveSlider:EnableMouse(true)
+                else
+                    hideAboveSlider:SetAlpha(0.4)
+                    hideAboveSlider:EnableMouse(false)
+                end
+            end
+            g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Duration Above Threshold"], proxy, "durationHideAboveEnabled", UpdateHideAboveState), 28)
+            hideAboveSlider = GUI:CreateSlider(parent, L["Hide Above (seconds)"], 1, 60, 1, proxy, "durationHideAboveThreshold")
+            g:AddWidget(hideAboveSlider, 54)
+            UpdateHideAboveState()
         end)
         -- Stack Count
         AddGroup(L["Stack Count"], function(g)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Show Stacks"], proxy, "showStacks"), 28)
-            g:AddWidget(GUI:CreateSlider(parent, L["Stack Minimum"], 1, 10, 1, proxy, "stackMinimum"), 54)
+            g:AddWidget(GUI:CreateSlider(parent, L["Min Stacks to Show"], 1, 10, 1, proxy, "stackMinimum"), 54)
             g:AddWidget(GUI:CreateFontDropdown(parent, L["Stack Font"], proxy, "stackFont"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Stack Scale"], 0.5, 2.0, 0.1, proxy, "stackScale"), 54)
             g:AddWidget(GUI:CreateOutlineDropdown(parent, L["Stack Outline"], proxy, "stackOutline"), 54)
             g:AddWidget(GUI:CreateShadowCheckbox(parent, L["Shadow"], proxy, "stackOutline"), 28)
             g:AddWidget(GUI:CreateDropdown(parent, L["Stack Anchor"], ANCHOR_OPTIONS, proxy, "stackAnchor"), 54)
-            g:AddWidget(GUI:CreateSlider(parent, L["Stack Offset X"], -150, 150, 1, proxy, "stackX"), 54)
-            g:AddWidget(GUI:CreateSlider(parent, L["Stack Offset Y"], -150, 150, 1, proxy, "stackY"), 54)
+            g:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 1, proxy, "stackX"), 54)
+            g:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, proxy, "stackY"), 54)
             g:AddWidget(GUI:CreateColorPicker(parent, L["Stack Text Color"], proxy, "stackColor", true, RPL, RPL, true), 28)
         end)
 
@@ -3457,24 +3600,61 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         end)
         -- Expiring
         AddGroup(L["Expiring"], function(g)
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Color Bar by Duration"], proxy, "barColorByTime"), 28)
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Expiring Color Override"], proxy, "expiringEnabled"), 28)
+            g:AddWidget(GUI:CreateCheckbox(parent, L["Color by Time Remaining"], proxy, "barColorByTime"), 28)
+            -- Expiring Color Override gates the Expiring Color picker; grey it when off.
+            local expColorPicker
+            local function UpdateExpColorGrey()
+                if not expColorPicker then return end
+                expColorPicker:SetEnabled(proxy.expiringEnabled and true or false)
+            end
+            g:AddWidget(GUI:CreateCheckbox(parent, L["Expiring Color Override"], proxy, "expiringEnabled", UpdateExpColorGrey), 28)
             g:AddWidget(CreateExpiringThresholdRow(parent, proxy, contentWidth - 10), 54)
-            g:AddWidget(GUI:CreateColorPicker(parent, L["Expiring Color"], proxy, "expiringColor", true, RPL, RPL, true), 28)
+            expColorPicker = GUI:CreateColorPicker(parent, L["Expiring Color"], proxy, "expiringColor", true, RPL, RPL, true)
+            g:AddWidget(expColorPicker, 28)
+            -- Expiring tint overlay: the bar render (ConfigureBar/UpdateBar) is fully
+            -- wired for these keys via SetupExpiringTint, but the hand-built bar group
+            -- never exposed them. Surface them so the wired feature is reachable.
+            -- Show Expiring Tint gates the Tint Color picker; grey it when off.
+            local tintColorPicker
+            local function UpdateTintColorGrey()
+                if not tintColorPicker then return end
+                tintColorPicker:SetEnabled(proxy.expiringTintEnabled and true or false)
+            end
+            g:AddWidget(GUI:CreateCheckbox(parent, L["Show Expiring Tint"], proxy, "expiringTintEnabled", function()
+                UpdateTintColorGrey()
+                RPL()
+            end), 28)
+            tintColorPicker = GUI:CreateColorPicker(parent, L["Tint Color"], proxy, "expiringTintColor", true, RPL, RPL, true)
+            g:AddWidget(tintColorPicker, 28)
+            UpdateExpColorGrey()
+            UpdateTintColorGrey()
         end)
         -- Duration Text
         AddGroup(L["Duration Text"], function(g)
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Show Duration Text"], proxy, "showDuration"), 28)
+            g:AddWidget(GUI:CreateCheckbox(parent, L["Show Duration"], proxy, "showDuration"), 28)
             g:AddWidget(GUI:CreateFontDropdown(parent, L["Duration Font"], proxy, "durationFont"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Duration Scale"], 0.5, 2.0, 0.1, proxy, "durationScale"), 54)
-            g:AddWidget(GUI:CreateOutlineDropdown(parent, L["Duration Outline"], proxy, "durationOutline"), 54)
+            g:AddWidget(GUI:CreateOutlineDropdown(parent, L["Outline"], proxy, "durationOutline"), 54)
             g:AddWidget(GUI:CreateShadowCheckbox(parent, L["Shadow"], proxy, "durationOutline"), 28)
             g:AddWidget(GUI:CreateDropdown(parent, L["Duration Anchor"], ANCHOR_OPTIONS, proxy, "durationAnchor"), 54)
-            g:AddWidget(GUI:CreateSlider(parent, L["Duration Offset X"], -150, 150, 1, proxy, "durationX"), 54)
-            g:AddWidget(GUI:CreateSlider(parent, L["Duration Offset Y"], -150, 150, 1, proxy, "durationY"), 54)
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Color Duration by Time"], proxy, "durationColorByTime"), 28)
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Duration Above Threshold"], proxy, "durationHideAboveEnabled"), 28)
-            g:AddWidget(GUI:CreateSlider(parent, L["Hide Above (seconds)"], 1, 60, 1, proxy, "durationHideAboveThreshold"), 54)
+            g:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 1, proxy, "durationX"), 54)
+            g:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, proxy, "durationY"), 54)
+            g:AddWidget(GUI:CreateCheckbox(parent, L["Color by Time Remaining"], proxy, "durationColorByTime"), 28)
+            local hideAboveSlider
+            local function UpdateHideAboveState()
+                if not hideAboveSlider then return end
+                if proxy.durationHideAboveEnabled then
+                    hideAboveSlider:SetAlpha(1)
+                    hideAboveSlider:EnableMouse(true)
+                else
+                    hideAboveSlider:SetAlpha(0.4)
+                    hideAboveSlider:EnableMouse(false)
+                end
+            end
+            g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Duration Above Threshold"], proxy, "durationHideAboveEnabled", UpdateHideAboveState), 28)
+            hideAboveSlider = GUI:CreateSlider(parent, L["Hide Above (seconds)"], 1, 60, 1, proxy, "durationHideAboveThreshold")
+            g:AddWidget(hideAboveSlider, 54)
+            UpdateHideAboveState()
         end)
 
     elseif typeKey == "border" then
@@ -3515,9 +3695,13 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- effect below threshold (e.g. solid → marching DF Dash).
         -- Bar: single Expiring Colour, thicker max (8), a duration-priority row,
         -- and no Icon-Effects (bars don't pulse/bounce the whole icon).
+        -- The border type draws no fill, so the expiring "tint" overlay has nothing
+        -- to tint and ApplyBorderToOverlay never calls SetupExpiringTint — hide the
+        -- otherwise-dead "Show Expiring Tint" / "Tint Color" controls for this type.
         AddExpiringBorderGroup({
             thicknessMax = 8,
             durationPriority = true,
+            tint = false,
         })
 
     elseif typeKey == "healthbar" then
@@ -3547,12 +3731,23 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         end)
         -- Expiring
         AddGroup(L["Expiring"], function(g)
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Expiring Color Override"], proxy, "expiringEnabled"), 28)
+            -- Expiring Color Override gates the Expiring Color picker + Pulsate;
+            -- grey them when off.
+            local expColorPicker, pulsateCheck
+            local function UpdateExpGrey()
+                local on = proxy.expiringEnabled and true or false
+                if expColorPicker then expColorPicker:SetEnabled(on) end
+                if pulsateCheck then pulsateCheck:SetEnabled(on) end
+            end
+            g:AddWidget(GUI:CreateCheckbox(parent, L["Expiring Color Override"], proxy, "expiringEnabled", UpdateExpGrey), 28)
             g:AddWidget(CreateExpiringThresholdRow(parent, proxy, contentWidth - 10), 54)
             do local dpRow, dpH = CreateExpiringDurationPriorityRow(parent, auraName, typeKey, contentWidth - 10)
             if dpRow then g:AddWidget(dpRow, dpH) end end
-            g:AddWidget(GUI:CreateColorPicker(parent, L["Expiring Color"], proxy, "expiringColor", true, RPL, RPL, true), 28)
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Pulsate"], proxy, "expiringPulsate"), 24)
+            expColorPicker = GUI:CreateColorPicker(parent, L["Expiring Color"], proxy, "expiringColor", true, RPL, RPL, true)
+            g:AddWidget(expColorPicker, 28)
+            pulsateCheck = GUI:CreateCheckbox(parent, L["Pulsate"], proxy, "expiringPulsate")
+            g:AddWidget(pulsateCheck, 24)
+            UpdateExpGrey()
         end)
 
     elseif typeKey == "background" then
@@ -3573,12 +3768,23 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         end)
         -- Expiring
         AddGroup(L["Expiring"], function(g)
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Expiring Color Override"], proxy, "expiringEnabled"), 28)
+            -- Expiring Color Override gates the Expiring Color picker + Pulsate;
+            -- grey them when off.
+            local expColorPicker, pulsateCheck
+            local function UpdateExpGrey()
+                local on = proxy.expiringEnabled and true or false
+                if expColorPicker then expColorPicker:SetEnabled(on) end
+                if pulsateCheck then pulsateCheck:SetEnabled(on) end
+            end
+            g:AddWidget(GUI:CreateCheckbox(parent, L["Expiring Color Override"], proxy, "expiringEnabled", UpdateExpGrey), 28)
             g:AddWidget(CreateExpiringThresholdRow(parent, proxy, contentWidth - 10), 54)
             do local dpRow, dpH = CreateExpiringDurationPriorityRow(parent, auraName, typeKey, contentWidth - 10)
             if dpRow then g:AddWidget(dpRow, dpH) end end
-            g:AddWidget(GUI:CreateColorPicker(parent, L["Expiring Color"], proxy, "expiringColor", true, RPL, RPL, true), 28)
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Pulsate"], proxy, "expiringPulsate"), 24)
+            expColorPicker = GUI:CreateColorPicker(parent, L["Expiring Color"], proxy, "expiringColor", true, RPL, RPL, true)
+            g:AddWidget(expColorPicker, 28)
+            pulsateCheck = GUI:CreateCheckbox(parent, L["Pulsate"], proxy, "expiringPulsate")
+            g:AddWidget(pulsateCheck, 24)
+            UpdateExpGrey()
         end)
 
     elseif typeKey == "nametext" then
@@ -3591,11 +3797,18 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         end)
         -- Expiring
         AddGroup(L["Expiring"], function(g)
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Expiring Color Override"], proxy, "expiringEnabled"), 28)
+            -- Expiring Color Override gates the Expiring Color picker; grey it when off.
+            local expColorPicker
+            local function UpdateExpColorGrey()
+                if expColorPicker then expColorPicker:SetEnabled(proxy.expiringEnabled and true or false) end
+            end
+            g:AddWidget(GUI:CreateCheckbox(parent, L["Expiring Color Override"], proxy, "expiringEnabled", UpdateExpColorGrey), 28)
             g:AddWidget(CreateExpiringThresholdRow(parent, proxy, contentWidth - 10), 54)
             do local dpRow, dpH = CreateExpiringDurationPriorityRow(parent, auraName, typeKey, contentWidth - 10)
             if dpRow then g:AddWidget(dpRow, dpH) end end
-            g:AddWidget(GUI:CreateColorPicker(parent, L["Expiring Color"], proxy, "expiringColor", true, RPL, RPL, true), 28)
+            expColorPicker = GUI:CreateColorPicker(parent, L["Expiring Color"], proxy, "expiringColor", true, RPL, RPL, true)
+            g:AddWidget(expColorPicker, 28)
+            UpdateExpColorGrey()
         end)
 
     elseif typeKey == "healthtext" then
@@ -3608,11 +3821,18 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         end)
         -- Expiring
         AddGroup(L["Expiring"], function(g)
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Expiring Color Override"], proxy, "expiringEnabled"), 28)
+            -- Expiring Color Override gates the Expiring Color picker; grey it when off.
+            local expColorPicker
+            local function UpdateExpColorGrey()
+                if expColorPicker then expColorPicker:SetEnabled(proxy.expiringEnabled and true or false) end
+            end
+            g:AddWidget(GUI:CreateCheckbox(parent, L["Expiring Color Override"], proxy, "expiringEnabled", UpdateExpColorGrey), 28)
             g:AddWidget(CreateExpiringThresholdRow(parent, proxy, contentWidth - 10), 54)
             do local dpRow, dpH = CreateExpiringDurationPriorityRow(parent, auraName, typeKey, contentWidth - 10)
             if dpRow then g:AddWidget(dpRow, dpH) end end
-            g:AddWidget(GUI:CreateColorPicker(parent, L["Expiring Color"], proxy, "expiringColor", true, RPL, RPL, true), 28)
+            expColorPicker = GUI:CreateColorPicker(parent, L["Expiring Color"], proxy, "expiringColor", true, RPL, RPL, true)
+            g:AddWidget(expColorPicker, 28)
+            UpdateExpColorGrey()
         end)
 
     elseif typeKey == "framealpha" then
@@ -3625,11 +3845,18 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         end)
         -- Expiring
         AddGroup(L["Expiring"], function(g)
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Expiring Alpha Override"], proxy, "expiringEnabled"), 28)
+            -- Expiring Alpha Override gates the Expiring Alpha slider; grey it when off.
+            local expAlphaSlider
+            local function UpdateExpAlphaGrey()
+                if expAlphaSlider then expAlphaSlider:SetEnabled(proxy.expiringEnabled and true or false) end
+            end
+            g:AddWidget(GUI:CreateCheckbox(parent, L["Expiring Alpha Override"], proxy, "expiringEnabled", UpdateExpAlphaGrey), 28)
             g:AddWidget(CreateExpiringThresholdRow(parent, proxy, contentWidth - 10), 54)
             do local dpRow, dpH = CreateExpiringDurationPriorityRow(parent, auraName, typeKey, contentWidth - 10)
             if dpRow then g:AddWidget(dpRow, dpH) end end
-            g:AddWidget(GUI:CreateSlider(parent, L["Expiring Alpha"], 0, 1, 0.05, proxy, "expiringAlpha"), 54)
+            expAlphaSlider = GUI:CreateSlider(parent, L["Expiring Alpha"], 0, 1, 0.05, proxy, "expiringAlpha")
+            g:AddWidget(expAlphaSlider, 54)
+            UpdateExpAlphaGrey()
         end)
 
     elseif typeKey == "sound" then
@@ -3642,7 +3869,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 g:AddWidget(topSpacer, 4)
 
                 local banner = GUI:CreateInfoBanner(parent, {
-                    tone = "warning",
+                    tone = "caution",
                     text = L["Sound alerts only work when you are in a group."],
                 })
                 banner:SetWidth(contentWidth - 10)
@@ -3653,24 +3880,28 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 g:AddWidget(spacer, 6)
             end
 
+            local soundOn = proxy.enabled ~= false
             g:AddWidget(GUI:CreateCheckbox(parent, L["Enable Sound Alert"], proxy, "enabled", function()
                 -- Stop sound immediately when disabled
                 if not proxy.enabled and DF.AuraDesigner.SoundEngine then
                     DF.AuraDesigner.SoundEngine:StopAura(auraName)
                 end
+                DF:AuraDesigner_RefreshPage()
             end), 28)
 
             -- Sound picker (searchable scrollable dropdown)
-            g:AddWidget(GUI:CreateSoundDropdown(parent, L["Sound"], proxy, "soundLSMKey", function()
+            local soundDD = GUI:CreateSoundDropdown(parent, L["Sound"], proxy, "soundLSMKey", function()
                 -- Update soundFile path when LSM key changes
                 local path = DF:GetSoundPath(proxy.soundLSMKey)
                 if path then
                     proxy.soundFile = path
                 end
-            end), 54)
+            end)
+            g:AddWidget(soundDD, 54)
 
             -- Custom file path (overrides LSM selection)
-            g:AddWidget(GUI:CreateEditBox(parent, L["Custom Sound Path"], proxy, "soundFile", nil, 280), 44)
+            local soundPathEB = GUI:CreateEditBox(parent, L["Custom Sound Path"], proxy, "soundFile", nil, 280)
+            g:AddWidget(soundPathEB, 44)
 
             -- Preview button
             local previewBtn = GUI:CreateButton(parent, L["Preview Sound"], 120, 22, function()
@@ -3690,7 +3921,20 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(previewBtn, 28)
 
             -- Volume slider
-            g:AddWidget(GUI:CreateSlider(parent, L["Volume"], 0, 1, 0.05, proxy, "volume"), 54)
+            local volumeSlider = GUI:CreateSlider(parent, L["Volume"], 0, 1, 0.05, proxy, "volume")
+            g:AddWidget(volumeSlider, 54)
+
+            -- Grey out sound sub-controls when sound alert is disabled
+            if not soundOn then
+                soundDD:SetAlpha(0.4)
+                soundDD:EnableMouse(false)
+                soundPathEB:SetAlpha(0.4)
+                soundPathEB:EnableMouse(false)
+                previewBtn:SetAlpha(0.4)
+                previewBtn:EnableMouse(false)
+                volumeSlider:SetAlpha(0.4)
+                volumeSlider:EnableMouse(false)
+            end
         end)
 
         -- Missing Trigger
@@ -3721,10 +3965,10 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             local combatModeDD = GUI:CreateDropdown(parent, L["Combat Mode"], combatModeOptions, proxy, "combatMode")
             g:AddWidget(combatModeDD, 54)
 
-            local startDelaySlider = GUI:CreateSlider(parent, L["Start Delay (sec)"], 0, 10, 0.5, proxy, "startDelay")
+            local startDelaySlider = GUI:CreateSlider(parent, L["Start Delay (seconds)"], 0, 10, 0.5, proxy, "startDelay")
             g:AddWidget(startDelaySlider, 54)
 
-            local loopIntervalSlider = GUI:CreateSlider(parent, L["Loop Interval (sec)"], 1, 30, 0.5, proxy, "loopInterval")
+            local loopIntervalSlider = GUI:CreateSlider(parent, L["Loop Interval (seconds)"], 1, 30, 0.5, proxy, "loopInterval")
             g:AddWidget(loopIntervalSlider, 54)
 
             -- Grey out trigger/timing controls when missing trigger is disabled
@@ -3742,6 +3986,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
 
         -- Expire Alert
         AddGroup(L["Expire Alert"], function(g)
+            local expireOn = proxy.expireEnabled ~= false
             g:AddWidget(GUI:CreateCheckbox(parent, L["Enable Alert When Expiring"], proxy, "expireEnabled", function()
                 if not proxy.expireEnabled and DF.AuraDesigner.SoundEngine then
                     DF.AuraDesigner.SoundEngine:StopAura(auraName)
@@ -3781,20 +4026,21 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             thModeText:SetPoint("CENTER", 0, 0)
             thModeText:SetText(isSeconds and L["Seconds"] or L["Percent"])
             thModeText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-            ApplyBackdrop(thModeBtn,
-                {r = 0.14, g = 0.14, b = 0.17, a = 1},
-                {r = 0.30, g = 0.30, b = 0.35, a = 0.8})
+            -- Shared styler (rest + accent-wash hover). Two-state mode toggle;
+            -- mark active on Seconds (page rebuilds on click).
+            GUI:StyleButton(thModeBtn)
+            thModeBtn:SetActive(isSeconds)
 
-            thModeBtn:SetScript("OnEnter", function(self)
-                self:SetBackdropColor(0.18, 0.18, 0.22, 1)
-                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:SetText(L["Threshold Mode"])
-                GameTooltip:AddLine(isSeconds and L["Currently: Seconds. Click for Percent."] or L["Currently: Percent. Click for Seconds."], 0.8, 0.8, 0.8, true)
-                GameTooltip:Show()
+            thModeBtn:HookScript("OnEnter", function(self)
+                GUI:ShowTooltip(self, {
+                    title = L["Threshold Mode"],
+                    lines = {
+                        isSeconds and L["Currently: Seconds. Click for Percent."] or L["Currently: Percent. Click for Seconds."],
+                    },
+                })
             end)
-            thModeBtn:SetScript("OnLeave", function(self)
-                self:SetBackdropColor(0.14, 0.14, 0.17, 1)
-                GameTooltip:Hide()
+            thModeBtn:HookScript("OnLeave", function()
+                GUI:HideTooltip()
             end)
             thModeBtn:SetScript("OnClick", function()
                 if proxy.expireThresholdMode == "SECONDS" then
@@ -3811,15 +4057,28 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
 
             -- Play Once toggle
             local playOnceOn = proxy.expirePlayOnce == true
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Play Once"], proxy, "expirePlayOnce", function()
+            local playOnceCB = GUI:CreateCheckbox(parent, L["Play Once"], proxy, "expirePlayOnce", function()
                 DF:AuraDesigner_RefreshPage()
-            end), 28)
+            end)
+            g:AddWidget(playOnceCB, 28)
 
             -- Expire loop interval (greyed out when Play Once is enabled)
             if proxy.expireLoopInterval == nil then proxy.expireLoopInterval = 3 end
-            local expireLoopSlider = GUI:CreateSlider(parent, L["Loop Interval (sec)"], 1, 30, 0.5, proxy, "expireLoopInterval")
+            local expireLoopSlider = GUI:CreateSlider(parent, L["Loop Interval (seconds)"], 1, 30, 0.5, proxy, "expireLoopInterval")
             g:AddWidget(expireLoopSlider, 54)
-            if playOnceOn then
+
+            -- Grey out expire sub-controls when expire alert is disabled.
+            -- Loop interval is also greyed when Play Once is enabled.
+            if not expireOn then
+                thSlider:SetAlpha(0.4)
+                thSlider:EnableMouse(false)
+                thModeBtn:SetAlpha(0.4)
+                thModeBtn:EnableMouse(false)
+                playOnceCB:SetAlpha(0.4)
+                playOnceCB:EnableMouse(false)
+                expireLoopSlider:SetAlpha(0.4)
+                expireLoopSlider:EnableMouse(false)
+            elseif playOnceOn then
                 expireLoopSlider:SetAlpha(0.4)
                 expireLoopSlider:EnableMouse(false)
             end
@@ -3918,10 +4177,23 @@ local function BuildGlobalView(parent)
         g:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], ANCHOR_OPTIONS, defaults, "durationAnchor"), 54)
         g:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 1, defaults, "durationX"), 50)
         g:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, defaults, "durationY"), 50)
-        g:AddWidget(GUI:CreateCheckbox(parent, L["Color by Time"], defaults, "durationColorByTime"), 24)
+        g:AddWidget(GUI:CreateCheckbox(parent, L["Color by Time Remaining"], defaults, "durationColorByTime"), 24)
         g:AddWidget(GUI:CreateColorPicker(parent, L["Duration Text Color"], defaults, "durationColor", true, RPL, RPL, true), 32)
-        g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Duration Above Threshold"], defaults, "durationHideAboveEnabled"), 24)
-        g:AddWidget(GUI:CreateSlider(parent, L["Hide Above (seconds)"], 1, 60, 1, defaults, "durationHideAboveThreshold"), 50)
+        local hideAboveSlider
+        local function UpdateHideAboveState()
+            if not hideAboveSlider then return end
+            if defaults.durationHideAboveEnabled then
+                hideAboveSlider:SetAlpha(1)
+                hideAboveSlider:EnableMouse(true)
+            else
+                hideAboveSlider:SetAlpha(0.4)
+                hideAboveSlider:EnableMouse(false)
+            end
+        end
+        g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Duration Above Threshold"], defaults, "durationHideAboveEnabled", UpdateHideAboveState), 24)
+        hideAboveSlider = GUI:CreateSlider(parent, L["Hide Above (seconds)"], 1, 60, 1, defaults, "durationHideAboveThreshold")
+        g:AddWidget(hideAboveSlider, 50)
+        UpdateHideAboveState()
     end)
 
     -- ── STACK TEXT ──
@@ -3974,14 +4246,7 @@ local function BuildGlobalView(parent)
 
         -- Import button
         local importBtn = CreateFrame("Button", nil, parent, "BackdropTemplate")
-        importBtn:SetHeight(26)
-        ApplyBackdrop(importBtn, C_ELEMENT, C_BORDER)
-        local importBtnText = importBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-        importBtnText:SetPoint("CENTER", 0, 0)
-        importBtnText:SetText(L["Import Buffs Tab Defaults"])
-        importBtnText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-        importBtn:SetScript("OnEnter", function(self) self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1) end)
-        importBtn:SetScript("OnLeave", function(self) self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1) end)
+        DF.GUI:StyleButton(importBtn, { height = 26, text = L["Import Buffs Tab Defaults"] })
         importBtn:SetScript("OnClick", function()
             local mode = (GUI and GUI.SelectedMode) or "party"
             local buffsDB = DF:GetDB(mode)
@@ -3998,8 +4263,8 @@ local function BuildGlobalView(parent)
                 if buffsDB.buffStackScale then defaults.stackScale = buffsDB.buffStackScale end
                 if buffsDB.buffStackOutline then defaults.stackOutline = buffsDB.buffStackOutline end
                 DF:Debug("Aura Designer: Imported Buffs tab defaults")
-                importBtnText:SetText(L["Imported!"])
-                C_Timer.After(1.5, function() importBtnText:SetText(L["Import Buffs Tab Defaults"]) end)
+                importBtn.Text:SetText(L["Imported!"])
+                C_Timer.After(1.5, function() importBtn.Text:SetText(L["Import Buffs Tab Defaults"]) end)
                 DF:AuraDesigner_RefreshPage()
             end
         end)
@@ -4014,14 +4279,7 @@ local function BuildGlobalView(parent)
         local targetLabel = (targetMode == "raid") and L["Raid"] or L["Party"]
 
         local copyBtn = CreateFrame("Button", nil, parent, "BackdropTemplate")
-        copyBtn:SetHeight(26)
-        ApplyBackdrop(copyBtn, C_ELEMENT, C_BORDER)
-        local copyText = copyBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-        copyText:SetPoint("CENTER", 0, 0)
-        copyText:SetText(format(L["Copy Settings to %s"], targetLabel))
-        copyText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-        copyBtn:SetScript("OnEnter", function(self) self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1) end)
-        copyBtn:SetScript("OnLeave", function(self) self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1) end)
+        DF.GUI:StyleButton(copyBtn, { height = 26, text = format(L["Copy Settings to %s"], targetLabel) })
         copyBtn:SetScript("OnClick", function()
             local srcMode = (GUI and GUI.SelectedMode) or "party"
             local dstMode = (srcMode == "party") and "raid" or "party"
@@ -4055,18 +4313,26 @@ local function BuildGlobalView(parent)
         -- Reset All button
         local resetBtn = CreateFrame("Button", nil, parent, "BackdropTemplate")
         resetBtn:SetHeight(26)
-        ApplyBackdrop(resetBtn, {r = 0.3, g = 0.12, b = 0.12, a = 1}, {r = 0.5, g = 0.2, b = 0.2, a = 1})
-        local resetText = resetBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-        resetText:SetPoint("CENTER", 0, 0)
-        resetText:SetText(L["Reset All Aura Configs"])
-        resetText:SetTextColor(1, 0.7, 0.7)
-        resetBtn:SetScript("OnEnter", function(self) self:SetBackdropColor(0.4, 0.15, 0.15, 1) end)
-        resetBtn:SetScript("OnLeave", function(self) self:SetBackdropColor(0.3, 0.12, 0.12, 1) end)
+        -- Persistent-red destructive button via the shared styler, now gated by a
+        -- confirmation (was a one-click wipe).
+        DF.GUI:StyleButton(resetBtn, { height = 26, primary = true, accent = { r = 0.8, g = 0.25, b = 0.25 }, text = L["Reset All Aura Configs"] })
         resetBtn:SetScript("OnClick", function()
-            wipe(GetAuraDesignerDB().auras)
-            DF:AuraDesigner_RefreshPage()
-            RefreshLiveFramesThrottled()
-            DF:Debug("Aura Designer: Reset all aura configurations")
+            DF:ShowPopupAlert({
+                title = L["Reset All Aura Configs"],
+                message = L["Reset ALL aura configurations to defaults?\n\nThis cannot be undone."],
+                buttons = {
+                    {
+                        label = L["Reset"],
+                        onClick = function()
+                            wipe(GetAuraDesignerDB().auras)
+                            DF:AuraDesigner_RefreshPage()
+                            RefreshLiveFramesThrottled()
+                            DF:Debug("Aura Designer: Reset all aura configurations")
+                        end,
+                    },
+                    { label = L["Cancel"] },
+                },
+            })
         end)
         g:AddWidget(resetBtn, 32)
     end)
@@ -4092,7 +4358,7 @@ local function CreateEnableBanner(parent)
     banner:SetHeight(68)
     banner:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, 0)
     banner:SetPoint("TOPRIGHT", parent, "TOPRIGHT", 0, 0)
-    ApplyBackdrop(banner, {r = 0.14, g = 0.14, b = 0.14, a = 1}, {r = 0.30, g = 0.30, b = 0.30, a = 0.5})
+    GUI:CreatePanelBackdrop(banner, {borderColor = {r = 0.30, g = 0.30, b = 0.30, a = 0.5}})
 
     -- Subtle divider between the two rows
     local rowDivider = banner:CreateTexture(nil, "BACKGROUND")
@@ -4105,17 +4371,9 @@ local function CreateEnableBanner(parent)
     -- Row 1 centre = 18px from top. Banner centre = 34px from top.
     -- Offset from banner centre to row 1 centre = +16.
     local cb = CreateFrame("CheckButton", nil, banner, "BackdropTemplate")
-    cb:SetSize(18, 18)
     cb:SetPoint("LEFT", banner, "LEFT", 10, 16)
-    ApplyBackdrop(cb, C_ELEMENT, {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5})
-
-    cb.Check = cb:CreateTexture(nil, "OVERLAY")
-    cb.Check:SetTexture("Interface\\Buttons\\WHITE8x8")
     local tc = GetThemeColor()
-    cb.Check:SetVertexColor(tc.r, tc.g, tc.b)
-    cb.Check:SetPoint("CENTER")
-    cb.Check:SetSize(10, 10)
-    cb:SetCheckedTexture(cb.Check)
+    DF.GUI:StyleCheckButton(cb)
 
     local adDB = GetAuraDesignerDB()
     cb:SetChecked(adDB and adDB.enabled)
@@ -4170,134 +4428,78 @@ local function CreateEnableBanner(parent)
     specLabel:SetText(L["Spec:"])
     specLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
-    local specBtn = CreateFrame("Button", nil, banner, "BackdropTemplate")
-    specBtn:SetSize(130, 22)
-    specBtn:SetPoint("LEFT", specLabel, "RIGHT", 4, 0)
-    ApplyBackdrop(specBtn, C_ELEMENT, C_BORDER)
-
-    specBtn.text = specBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    specBtn.text:SetPoint("LEFT", 6, 0)
-    specBtn.text:SetPoint("RIGHT", -16, 0)
-    specBtn.text:SetJustifyH("LEFT")
-
-    local arrow = specBtn:CreateTexture(nil, "OVERLAY")
-    arrow:SetPoint("RIGHT", -4, 0)
-    arrow:SetSize(10, 10)
-    arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
-    arrow:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-
-    local function UpdateSpecText()
-        local adDB = GetAuraDesignerDB()
-        local resolvedSpec
-        if adDB.spec == "auto" then
+    -- Spec selector. Ported to the shared GUI:CreateDropdown (inline mode, so the
+    -- container is just the opener button — the "Spec:" label above is hand-placed
+    -- to match the banner row). optionsFunc rebuilds the list each open so the
+    -- "Auto (Spec Name)" text always reflects the live detected spec.
+    -- The shared dropdown supports per-option colour (the `color` field), so the
+    -- class-coloured menu entries are preserved. (The OPENER text stays standard
+    -- colour — the shared opener isn't per-value colourable.)
+    local SPEC_ORDER = {
+        "auto",
+        "PreservationEvoker", "AugmentationEvoker", "RestorationDruid",
+        "DisciplinePriest", "HolyPriest", "MistweaverMonk",
+        "RestorationShaman", "HolyPaladin",
+    }
+    local function SpecOptionText(specKey)
+        if specKey == "auto" then
             local autoSpec = Adapter:GetPlayerSpec()
             if autoSpec then
-                specBtn.text:SetText(format(L["Auto (%s)"], Adapter:GetSpecDisplayName(autoSpec)))
-                resolvedSpec = autoSpec
-            else
-                specBtn.text:SetText(L["Auto (detect)"])
+                return format(L["Auto (%s)"], Adapter:GetSpecDisplayName(autoSpec))
             end
-        else
-            specBtn.text:SetText(Adapter:GetSpecDisplayName(adDB.spec))
-            resolvedSpec = adDB.spec
+            return L["Auto (detect spec)"]
         end
-        -- Color the button text by class color
-        local specInfoEntry = resolvedSpec and DF.AuraDesigner.SpecInfo[resolvedSpec]
-        local cc = specInfoEntry and RAID_CLASS_COLORS[specInfoEntry.class]
-        if cc then
-            specBtn.text:SetTextColor(cc.r, cc.g, cc.b)
-        else
-            specBtn.text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+        return Adapter:GetSpecDisplayName(specKey)
+    end
+    local function SpecOptionColor(specKey)
+        local resolved = specKey
+        if specKey == "auto" then resolved = Adapter:GetPlayerSpec() end
+        local info = resolved and DF.AuraDesigner.SpecInfo and DF.AuraDesigner.SpecInfo[resolved]
+        local cc = info and info.class and RAID_CLASS_COLORS[info.class]
+        if cc then return { r = cc.r, g = cc.g, b = cc.b } end
+        return nil
+    end
+    local function BuildSpecOptions()
+        local options = { _order = SPEC_ORDER }
+        for _, specKey in ipairs(SPEC_ORDER) do
+            options[specKey] = {
+                value = specKey,
+                text = SpecOptionText(specKey),
+                color = SpecOptionColor(specKey),
+            }
         end
+        return options
     end
 
-    local specMenu = CreateFrame("Frame", nil, specBtn, "BackdropTemplate")
-    specMenu:SetFrameStrata("FULLSCREEN_DIALOG")
-    specMenu:SetPoint("TOPLEFT", specBtn, "BOTTOMLEFT", 0, -1)
-    specMenu:SetWidth(200)
-    ApplyBackdrop(specMenu, C_PANEL, {r = 0.35, g = 0.35, b = 0.35, a = 1})
-    specMenu:Hide()
+    local specDrop = GUI:CreateDropdown(
+        banner, "", BuildSpecOptions(),
+        nil, nil, nil,
+        function() return GetAuraDesignerDB().spec or "auto" end,   -- customGet
+        function(key)                                                -- customSet
+            GetAuraDesignerDB().spec = key
+            -- Clear expanded cards (auras change with spec)
+            wipe(expandedCards)
+            DF:AuraDesigner_RefreshPage()
+        end,
+        { inline = true, optionsFunc = BuildSpecOptions }
+    )
+    specDrop:SetSize(130, 22)
+    specDrop:SetPoint("LEFT", specLabel, "RIGHT", 4, 0)
 
-    local function BuildSpecMenu()
-        for _, child in ipairs({specMenu:GetChildren()}) do
-            child:Hide()
-            child:SetParent(nil)
-        end
-
-        local yOffset = -4
-        local options = {{"auto", L["Auto (detect spec)"]}}
-        for _, specKey in ipairs({
-            "PreservationEvoker", "AugmentationEvoker", "RestorationDruid",
-            "DisciplinePriest", "HolyPriest", "MistweaverMonk",
-            "RestorationShaman", "HolyPaladin"
-        }) do
-            options[#options + 1] = {specKey, Adapter:GetSpecDisplayName(specKey)}
-        end
-
-        for _, opt in ipairs(options) do
-            local btn = CreateFrame("Button", nil, specMenu)
-            btn:SetHeight(20)
-            btn:SetPoint("TOPLEFT", 4, yOffset)
-            btn:SetPoint("TOPRIGHT", -4, yOffset)
-
-            local label = btn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-            label:SetPoint("LEFT", 4, 0)
-            label:SetText(opt[2])
-
-            -- Color by class for spec entries, default for "auto"
-            local specInfoEntry = DF.AuraDesigner.SpecInfo[opt[1]]
-            local cc = specInfoEntry and RAID_CLASS_COLORS[specInfoEntry.class]
-            local baseR, baseG, baseB = C_TEXT.r, C_TEXT.g, C_TEXT.b
-            if cc then
-                baseR, baseG, baseB = cc.r, cc.g, cc.b
-            end
-            label:SetTextColor(baseR, baseG, baseB)
-
-            btn:SetScript("OnEnter", function()
-                if cc then
-                    label:SetTextColor(min(baseR + 0.2, 1), min(baseG + 0.2, 1), min(baseB + 0.2, 1))
-                else
-                    label:SetTextColor(1, 1, 1)
-                end
-            end)
-            btn:SetScript("OnLeave", function() label:SetTextColor(baseR, baseG, baseB) end)
-            btn:SetScript("OnClick", function()
-                GetAuraDesignerDB().spec = opt[1]
-                specMenu:Hide()
-                UpdateSpecText()
-                -- Clear expanded cards (auras change with spec)
-                wipe(expandedCards)
-                DF:AuraDesigner_RefreshPage()
-            end)
-
-            yOffset = yOffset - 20
-        end
-        specMenu:SetHeight(-yOffset + 4)
+    -- Back-compat shim: external code (CreateCopyButton block, UpdateSpecText
+    -- callers) used to drive the raw opener button. Keep `specBtn` pointing at
+    -- the dropdown container (a Frame, so SetSize/SetPoint still work) and map
+    -- UpdateSpecText onto the shared dropdown's text refresh.
+    local specBtn = specDrop
+    local function UpdateSpecText()
+        if specDrop.RebuildOptions then specDrop:RebuildOptions(BuildSpecOptions()) end
+        if specDrop.UpdateText then specDrop:UpdateText() end
     end
-
-    specBtn:SetScript("OnClick", function()
-        if specMenu:IsShown() then
-            specMenu:Hide()
-        else
-            BuildSpecMenu()
-            specMenu:Show()
-        end
-    end)
 
     -- Mute Sound Alerts checkbox — row 2 left side, same size as Enable checkbox.
-    local muteCb = CreateFrame("CheckButton", nil, banner)
-    muteCb:SetSize(18, 18)
+    local muteCb = CreateFrame("CheckButton", nil, banner, "BackdropTemplate")
     muteCb:SetPoint("LEFT", banner, "LEFT", 10, -18)
-
-    -- Use the same ApplyBackdrop treatment as the Enable checkbox so both look identical.
-    ApplyBackdrop(muteCb, C_ELEMENT, {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5})
-
-    local muteCheck = muteCb:CreateTexture(nil, "OVERLAY")
-    muteCheck:SetTexture("Interface\\Buttons\\WHITE8x8")
-    muteCheck:SetVertexColor(tc.r, tc.g, tc.b)
-    muteCheck:SetPoint("CENTER")
-    muteCheck:SetSize(10, 10)
-    muteCb:SetCheckedTexture(muteCheck)
+    DF.GUI:StyleCheckButton(muteCb)
 
     -- soundEnabled = true/nil means NOT muted, so checked = not muted.
     -- nil (older profiles without this field) is treated as enabled by default.
@@ -4319,85 +4521,34 @@ local function CreateEnableBanner(parent)
 
     -- Sound output channel dropdown (Master default: alerts should stay
     -- audible when the player mutes Sound Effects/Music to cut combat noise).
-    -- Mirrors the Spec dropdown's construction (label + 22px backdrop button +
-    -- expand_more arrow + 20px-row menu) so it reads like every other dropdown.
     local SOUND_CHANNELS = {
-        { "Master",   L["Master"] },
-        { "SFX",      L["Sound Effects"] },
-        { "Music",    L["Music"] },
-        { "Ambience", L["Ambience"] },
-        { "Dialog",   L["Dialog"] },
+        Master   = L["Master"],
+        SFX      = L["Sound Effects"],
+        Music    = L["Music"],
+        Ambience = L["Ambience"],
+        Dialog   = L["Dialog"],
+        _order   = { "Master", "SFX", "Music", "Ambience", "Dialog" },
     }
-    local function ChannelLabel(key)
-        for _, opt in ipairs(SOUND_CHANNELS) do
-            if opt[1] == key then return opt[2] end
-        end
-        return L["Master"]
-    end
 
     local channelLabel = banner:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     channelLabel:SetPoint("LEFT", muteLabel, "RIGHT", 12, 0)
     channelLabel:SetText(L["Channel:"])
     channelLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
-    local channelBtn = CreateFrame("Button", nil, banner, "BackdropTemplate")
+    -- Sound channel selector. Ported to the shared GUI:CreateDropdown (inline
+    -- mode + customGet/customSet so the read/write always hit the live AD DB,
+    -- defaulting to Master). NOTE: the bespoke hover tooltip the old opener had
+    -- ("Which audio channel alert sounds play on...") is dropped — the shared
+    -- dropdown owns the opener button's OnEnter/OnLeave and isn't exposed.
+    local channelBtn = GUI:CreateDropdown(
+        banner, "", SOUND_CHANNELS,
+        nil, nil, nil,
+        function() return (GetAuraDesignerDB().soundChannel) or "Master" end,  -- customGet
+        function(key) GetAuraDesignerDB().soundChannel = key end,              -- customSet
+        { inline = true }
+    )
     channelBtn:SetSize(110, 22)
     channelBtn:SetPoint("LEFT", channelLabel, "RIGHT", 4, 0)
-    ApplyBackdrop(channelBtn, C_ELEMENT, C_BORDER)
-
-    channelBtn.text = channelBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    channelBtn.text:SetPoint("LEFT", 6, 0)
-    channelBtn.text:SetPoint("RIGHT", -16, 0)
-    channelBtn.text:SetJustifyH("LEFT")
-    channelBtn.text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    channelBtn.text:SetText(ChannelLabel((adDB and adDB.soundChannel) or "Master"))
-
-    local channelArrow = channelBtn:CreateTexture(nil, "OVERLAY")
-    channelArrow:SetPoint("RIGHT", -4, 0)
-    channelArrow:SetSize(10, 10)
-    channelArrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
-    channelArrow:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-
-    channelBtn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText(L["Sound Channel"], 1, 1, 1)
-        GameTooltip:AddLine(L["Which audio channel alert sounds play on. Master keeps alerts audible even with Sound Effects or Music muted."], 0.7, 0.7, 0.7, true)
-        GameTooltip:Show()
-    end)
-    channelBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-
-    local channelMenu = CreateFrame("Frame", nil, channelBtn, "BackdropTemplate")
-    channelMenu:SetFrameStrata("FULLSCREEN_DIALOG")
-    channelMenu:SetPoint("TOPLEFT", channelBtn, "BOTTOMLEFT", 0, -1)
-    channelMenu:SetWidth(110)
-    ApplyBackdrop(channelMenu, C_PANEL, {r = 0.35, g = 0.35, b = 0.35, a = 1})
-    channelMenu:Hide()
-    do
-        local yOffset = -4
-        for _, opt in ipairs(SOUND_CHANNELS) do
-            local key, text = opt[1], opt[2]
-            local btn = CreateFrame("Button", nil, channelMenu)
-            btn:SetHeight(20)
-            btn:SetPoint("TOPLEFT", 4, yOffset)
-            btn:SetPoint("TOPRIGHT", -4, yOffset)
-            local lbl = btn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-            lbl:SetPoint("LEFT", 4, 0)
-            lbl:SetText(text)
-            lbl:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-            btn:SetScript("OnEnter", function() lbl:SetTextColor(1, 1, 1) end)
-            btn:SetScript("OnLeave", function() lbl:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b) end)
-            btn:SetScript("OnClick", function()
-                GetAuraDesignerDB().soundChannel = key
-                channelBtn.text:SetText(text)
-                channelMenu:Hide()
-            end)
-            yOffset = yOffset - 20
-        end
-        channelMenu:SetHeight(-yOffset + 4)
-    end
-    channelBtn:SetScript("OnClick", function()
-        if channelMenu:IsShown() then channelMenu:Hide() else channelMenu:Show() end
-    end)
 
     -- Grey out Sound Alerts when Aura Designer is disabled.
     UpdateMuteEnabled = function(enabled)
@@ -4415,7 +4566,6 @@ local function CreateEnableBanner(parent)
             channelLabel:SetTextColor(C_TEXT_DIM.r * 0.4, C_TEXT_DIM.g * 0.4, C_TEXT_DIM.b * 0.4)
             channelBtn:SetEnabled(false)
             channelBtn:SetAlpha(0.35)
-            channelMenu:Hide()
         end
     end
     UpdateMuteEnabled(adDB and adDB.enabled or false)
@@ -4459,7 +4609,18 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef)
     container:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -rightInset, yOffset)
     container:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT", 0, 0)
     container:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -rightInset, 0)
-    ApplyBackdrop(container, {r = 0.12, g = 0.12, b = 0.12, a = 1}, C_BORDER)
+    -- Dark bg + DIM border (matches Text Designer; no solid white outline).
+    ApplyBackdrop(container, {r = 0.10, g = 0.10, b = 0.10, a = 1}, {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5})
+    -- Apply the subtle spec class-color hint immediately. CreateFramePreview runs
+    -- on every page build — including a party/raid rebuild (page:Refresh always
+    -- rebuilds) — so without this the new preview falls back to the dim default
+    -- border until the next AuraDesigner_RefreshPage (spec change / tab revisit).
+    local cbSpec = ResolveSpec()
+    local cbInfo = cbSpec and DF.AuraDesigner.SpecInfo and DF.AuraDesigner.SpecInfo[cbSpec]
+    local cbColor = cbInfo and cbInfo.class and RAID_CLASS_COLORS[cbInfo.class]
+    if cbColor then
+        container:SetBackdropBorderColor(cbColor.r, cbColor.g, cbColor.b, 0.5)
+    end
 
     -- "Frame Preview" label
     local previewLabel = container:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
@@ -4595,10 +4756,11 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef)
         dotFrame:SetPoint(pos.ax, mockFrame, pos.ay, 0, 0)
 
         -- The visible dot
+        local dc = GetThemeColor()
         local dot = dotFrame:CreateTexture(nil, "OVERLAY")
         dot:SetSize(6, 6)
         dot:SetPoint("CENTER", 0, 0)
-        dot:SetColorTexture(0.45, 0.45, 0.95, 0.3)
+        dot:SetColorTexture(dc.r, dc.g, dc.b, 0.3)
         dotFrame.dot = dot
 
         -- Hover zone (invisible button) -- also acts as drop target during drag
@@ -4617,25 +4779,27 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef)
                     dragHintText:SetText(format(L["Place %s at %s"], dragState.auraInfo.display, capturedAnchorName))
                 end
             else
+                local tc = GetThemeColor()
                 dot:SetSize(10, 10)
-                dot:SetColorTexture(0.45, 0.45, 0.95, 0.7)
+                dot:SetColorTexture(tc.r, tc.g, tc.b, 0.7)
             end
         end)
         hoverBtn:SetScript("OnLeave", function()
             if dragState.isDragging then
                 -- Revert to drag-active state (not default)
+                local tc = GetThemeColor()
                 dot:SetSize(10, 10)
-                dot:SetColorTexture(0.45, 0.45, 0.95, 0.5)
+                dot:SetColorTexture(tc.r, tc.g, tc.b, 0.5)
                 dragState.dropAnchor = nil
                 -- Revert hint to generic drag message
                 if dragHintText and dragState.auraInfo then
-                    local tc = GetThemeColor()
                     dragHintText:SetText(format(L["Drop on an anchor point to place %s"], dragState.auraInfo.display))
                     dragHintText:SetTextColor(tc.r, tc.g, tc.b, 0.9)
                 end
             else
+                local tc = GetThemeColor()
                 dot:SetSize(6, 6)
-                dot:SetColorTexture(0.45, 0.45, 0.95, 0.3)
+                dot:SetColorTexture(tc.r, tc.g, tc.b, 0.3)
             end
         end)
 
@@ -4793,13 +4957,7 @@ SwitchTab = function(tabKey)
     end
 
     for key, btn in pairs(tabButtons) do
-        if key == tabKey then
-            btn.accent:Show()
-            btn.label:SetTextColor(btn.tabColor.r, btn.tabColor.g, btn.tabColor.b)
-        else
-            btn.accent:Hide()
-            btn.label:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-        end
+        btn:SetActive(key == tabKey)  -- underline + accent/dim label (tab mode)
     end
 
     ClearTabContent()
@@ -5100,8 +5258,8 @@ CreateEffectCard = function(parent, yPos, effect)
 
     -- Card container
     local card = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    card:SetPoint("TOPLEFT", 6, yPos)
-    card:SetPoint("RIGHT", parent, "RIGHT", -6, 0)
+    card:SetPoint("TOPLEFT", 8, yPos)
+    card:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
 
     -- ── HEADER ──
     local header = CreateFrame("Button", nil, card, "BackdropTemplate")
@@ -5194,8 +5352,8 @@ CreateEffectCard = function(parent, yPos, effect)
         if #triggers > 1 then
             local auraCfg = GetSpecAuras()[effect.auraName]
             local typeCfg = auraCfg and auraCfg[effect.typeKey]
-            local opLabel = (typeCfg and typeCfg.triggerOperator == "AND") and " (AND)" or ""
-            infoStr = infoStr .. "  -  +" .. (#triggers - 1) .. " trigger" .. (#triggers > 2 and "s" or "") .. opLabel
+            local opLabel = (typeCfg and typeCfg.triggerOperator == "AND") and (" (" .. L["AND"] .. ")") or ""
+            infoStr = infoStr .. "  -  " .. format(L["+%d triggers"], #triggers - 1) .. opLabel
         end
     end
     local infoText = header:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
@@ -5216,45 +5374,23 @@ CreateEffectCard = function(parent, yPos, effect)
 
     -- Delete button — hidden for grouped indicators (managed by layout group)
     if not indicatorGroup then
-        local delBtn = CreateFrame("Button", nil, header, "BackdropTemplate")
-        delBtn:SetSize(22, 22)
+        local delBtn = GUI:CreateCloseButton(header, {
+            size = 22,
+            onClick = function()
+                if isPlaced then
+                    RemoveIndicatorInstance(effect.auraName, effect.indicatorID)
+                else
+                    local auraCfg = GetSpecAuras()[effect.auraName]
+                    if auraCfg then auraCfg[effect.typeKey] = nil end
+                end
+                expandedCards[cardKey] = nil
+                SwitchTab("effects")
+                RefreshPlacedIndicators()
+                RefreshPreviewEffects()
+            end,
+        })
         delBtn:SetPoint("RIGHT", -4, 0)
         delBtn:SetFrameLevel(header:GetFrameLevel() + 2)
-
-        -- Draw a thick × using two rotated texture lines
-        local xSize = 12
-        local xThick = 2
-        local line1 = delBtn:CreateTexture(nil, "OVERLAY")
-        line1:SetSize(xSize, xThick)
-        line1:SetPoint("CENTER", 0, 0)
-        line1:SetColorTexture(0.55, 0.20, 0.20, 1)
-        line1:SetRotation(math.rad(45))
-        local line2 = delBtn:CreateTexture(nil, "OVERLAY")
-        line2:SetSize(xSize, xThick)
-        line2:SetPoint("CENTER", 0, 0)
-        line2:SetColorTexture(0.55, 0.20, 0.20, 1)
-        line2:SetRotation(math.rad(-45))
-
-        delBtn:SetScript("OnEnter", function()
-            line1:SetColorTexture(1, 0.35, 0.35, 1)
-            line2:SetColorTexture(1, 0.35, 0.35, 1)
-        end)
-        delBtn:SetScript("OnLeave", function()
-            line1:SetColorTexture(0.55, 0.20, 0.20, 1)
-            line2:SetColorTexture(0.55, 0.20, 0.20, 1)
-        end)
-        delBtn:SetScript("OnClick", function()
-            if isPlaced then
-                RemoveIndicatorInstance(effect.auraName, effect.indicatorID)
-            else
-                local auraCfg = GetSpecAuras()[effect.auraName]
-                if auraCfg then auraCfg[effect.typeKey] = nil end
-            end
-            expandedCards[cardKey] = nil
-            SwitchTab("effects")
-            RefreshPlacedIndicators()
-            RefreshPreviewEffects()
-        end)
     end
 
     -- Header click → toggle expansion
@@ -5325,24 +5461,22 @@ CreateEffectCard = function(parent, yPos, effect)
                 local opW = opText:GetStringWidth() + 16
                 if opW < 52 then opW = 52 end
                 opBtn:SetWidth(opW)
-                ApplyBackdrop(opBtn,
-                    {r = 0.14, g = 0.14, b = 0.17, a = 1},
-                    {r = 0.30, g = 0.30, b = 0.35, a = 0.8})
+                -- Shared styler (rest + accent-wash hover). Two-state operator
+                -- toggle; keep the custom AND/OR label colour (set above) and
+                -- mark active on AND (row rebuilds on click).
+                GUI:StyleButton(opBtn)
+                opBtn:SetActive(isAnd)
 
-                opBtn:SetScript("OnEnter", function(self)
-                    self:SetBackdropColor(0.18, 0.18, 0.22, 1)
-                    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                    if isAnd then
-                        GameTooltip:SetText(L["ALL triggers must be active"])
-                    else
-                        GameTooltip:SetText(L["ANY trigger activates the effect"])
-                    end
-                    GameTooltip:AddLine(L["Click to toggle"], 0.6, 0.6, 0.6)
-                    GameTooltip:Show()
+                opBtn:HookScript("OnEnter", function(self)
+                    GUI:ShowTooltip(self, {
+                        title = isAnd and L["ALL triggers must be active"] or L["ANY trigger activates the effect"],
+                        lines = {
+                            { text = L["Click to toggle"], hint = true },
+                        },
+                    })
                 end)
-                opBtn:SetScript("OnLeave", function(self)
-                    self:SetBackdropColor(0.14, 0.14, 0.17, 1)
-                    GameTooltip:Hide()
+                opBtn:HookScript("OnLeave", function()
+                    GUI:HideTooltip()
                 end)
                 opBtn:SetScript("OnClick", function()
                     local cfg = EnsureTypeConfig(effect.auraName, effect.typeKey)
@@ -5404,33 +5538,18 @@ CreateEffectCard = function(parent, yPos, effect)
 
                 -- Remove × button on each tag (unless it's the last one)
                 if canRemove then
-                    local removeBtn = CreateFrame("Button", nil, tagFrame)
-                    removeBtn:SetSize(14, 14)
-                    removeBtn:SetPoint("RIGHT", -2, 0)
-                    local rx1 = removeBtn:CreateTexture(nil, "OVERLAY")
-                    rx1:SetSize(8, 1.5)
-                    rx1:SetPoint("CENTER", 0, 0)
-                    rx1:SetColorTexture(0.50, 0.30, 0.30, 1)
-                    rx1:SetRotation(math.rad(45))
-                    local rx2 = removeBtn:CreateTexture(nil, "OVERLAY")
-                    rx2:SetSize(8, 1.5)
-                    rx2:SetPoint("CENTER", 0, 0)
-                    rx2:SetColorTexture(0.50, 0.30, 0.30, 1)
-                    rx2:SetRotation(math.rad(-45))
-                    removeBtn:SetScript("OnEnter", function()
-                        rx1:SetColorTexture(1, 0.40, 0.40, 1)
-                        rx2:SetColorTexture(1, 0.40, 0.40, 1)
-                    end)
-                    removeBtn:SetScript("OnLeave", function()
-                        rx1:SetColorTexture(0.50, 0.30, 0.30, 1)
-                        rx2:SetColorTexture(0.50, 0.30, 0.30, 1)
-                    end)
                     local capturedTrigName = trigName
-                    removeBtn:SetScript("OnClick", function()
-                        RemoveFrameEffectTrigger(effect.auraName, effect.typeKey, capturedTrigName)
-                        SwitchTab("effects")
-                        RefreshPreviewEffects()
-                    end)
+                    -- Shared red-at-rest "×" (tone="danger") on each removable tag.
+                    local removeBtn = DF.GUI:CreateCloseButton(tagFrame, {
+                        size = 14,
+                        tone = "danger",
+                        onClick = function()
+                            RemoveFrameEffectTrigger(effect.auraName, effect.typeKey, capturedTrigName)
+                            SwitchTab("effects")
+                            RefreshPreviewEffects()
+                        end,
+                    })
+                    removeBtn:SetPoint("RIGHT", -2, 0)
                 end
 
                 tagX = tagX + tagW + TAG_GAP
@@ -5443,24 +5562,11 @@ CreateEffectCard = function(parent, yPos, effect)
                 tagY = tagY - (TAG_H + TAG_ROW_GAP)
             end
             local addTrigBtn = CreateFrame("Button", nil, trigContainer, "BackdropTemplate")
-            addTrigBtn:SetSize(addTrigW, TAG_H)
             addTrigBtn:SetPoint("TOPLEFT", trigContainer, "TOPLEFT", tagX, tagY)
-            ApplyBackdrop(addTrigBtn,
-                {r = 0.10, g = 0.12, b = 0.10, a = 1},
-                {r = 0.25, g = 0.40, b = 0.25, a = 0.8})
-            local addTrigText = addTrigBtn:CreateFontString(nil, "OVERLAY")
-            GUI:SetSettingsFont(addTrigText, 9, "")
-            addTrigText:SetPoint("CENTER", 0, 0)
-            addTrigText:SetText(L["+ Add Trigger"])
-            addTrigText:SetTextColor(0.5, 0.8, 0.5)
-            addTrigBtn:SetScript("OnEnter", function(self)
-                self:SetBackdropColor(0.15, 0.20, 0.15, 1)
-                addTrigText:SetTextColor(0.7, 1.0, 0.7)
-            end)
-            addTrigBtn:SetScript("OnLeave", function(self)
-                self:SetBackdropColor(0.10, 0.12, 0.10, 1)
-                addTrigText:SetTextColor(0.5, 0.8, 0.5)
-            end)
+            GUI:StyleButton(addTrigBtn, { width = addTrigW, height = TAG_H, primary = true, accent = { r = 0.25, g = 0.40, b = 0.25 }, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add", size = 11 }, text = L["Add Trigger"] })
+            GUI:SetSettingsFont(addTrigBtn.Text, 9, "")
+            addTrigBtn.Text:SetTextColor(0.5, 0.8, 0.5)
+            addTrigBtn.Icon:SetVertexColor(0.5, 0.8, 0.5)
 
             -- Trigger picker dropdown
             addTrigBtn:SetScript("OnClick", function()
@@ -5562,7 +5668,6 @@ CreateEffectCard = function(parent, yPos, effect)
 
                 -- Shared button
                 local sharedBtn = CreateFrame("Button", nil, bmContainer, "BackdropTemplate")
-                sharedBtn:SetHeight(20)
                 sharedBtn:SetPoint("LEFT", bmLabel, "RIGHT", 6, 0)
 
                 local sharedText = sharedBtn:CreateFontString(nil, "OVERLAY")
@@ -5571,11 +5676,12 @@ CreateEffectCard = function(parent, yPos, effect)
                 sharedText:SetText(L["Shared"])
                 local sharedW = sharedText:GetStringWidth() + 16
                 if sharedW < 50 then sharedW = 50 end
-                sharedBtn:SetWidth(sharedW)
+                -- Shared styler: rest + accent-wash hover + SetActive selection state.
+                -- Keep the manual (small) label; size to the computed text width.
+                GUI:StyleButton(sharedBtn, { width = sharedW, height = 20 })
 
                 -- Custom button
                 local customBtn = CreateFrame("Button", nil, bmContainer, "BackdropTemplate")
-                customBtn:SetHeight(20)
                 customBtn:SetPoint("LEFT", sharedBtn, "RIGHT", 4, 0)
 
                 local customText = customBtn:CreateFontString(nil, "OVERLAY")
@@ -5584,27 +5690,18 @@ CreateEffectCard = function(parent, yPos, effect)
                 customText:SetText(L["Custom"])
                 local customW = customText:GetStringWidth() + 16
                 if customW < 50 then customW = 50 end
-                customBtn:SetWidth(customW)
+                GUI:StyleButton(customBtn, { width = customW, height = 20 })
 
-                -- Style the active/inactive states
+                -- Drive the selection state via the shared styler's SetActive (active =
+                -- toned accent border + subtle accent fill). Keep a bright/dim label cue.
                 local function StyleBorderModeButtons(customActive)
+                    sharedBtn:SetActive(not customActive)
+                    customBtn:SetActive(customActive)
                     if customActive then
-                        ApplyBackdrop(customBtn,
-                            {r = 0.18, g = 0.22, b = 0.18, a = 1},
-                            {r = 0.40, g = 0.60, b = 0.40, a = 0.9})
-                        customText:SetTextColor(0.7, 1.0, 0.7)
-                        ApplyBackdrop(sharedBtn,
-                            {r = 0.14, g = 0.14, b = 0.17, a = 1},
-                            {r = 0.30, g = 0.30, b = 0.35, a = 0.6})
+                        customText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
                         sharedText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
                     else
-                        ApplyBackdrop(sharedBtn,
-                            {r = 0.18, g = 0.22, b = 0.18, a = 1},
-                            {r = 0.40, g = 0.60, b = 0.40, a = 0.9})
-                        sharedText:SetTextColor(0.7, 1.0, 0.7)
-                        ApplyBackdrop(customBtn,
-                            {r = 0.14, g = 0.14, b = 0.17, a = 1},
-                            {r = 0.30, g = 0.30, b = 0.35, a = 0.6})
+                        sharedText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
                         customText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
                     end
                 end
@@ -5623,20 +5720,25 @@ CreateEffectCard = function(parent, yPos, effect)
                     RefreshPreviewEffects()
                 end)
 
-                sharedBtn:SetScript("OnEnter", function()
-                    GameTooltip:SetOwner(sharedBtn, "ANCHOR_RIGHT")
-                    GameTooltip:SetText(L["Shared Border"])
-                    GameTooltip:AddLine(L["Uses a single border per frame. Highest priority wins."], 0.8, 0.8, 0.8, true)
-                    GameTooltip:Show()
+                -- Tooltips via HookScript so they compose with the styler's hover wash.
+                sharedBtn:HookScript("OnEnter", function()
+                    GUI:ShowTooltip(sharedBtn, {
+                        title = L["Shared Border"],
+                        lines = {
+                            L["Uses a single border per frame. Highest priority wins."],
+                        },
+                    })
                 end)
-                sharedBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-                customBtn:SetScript("OnEnter", function()
-                    GameTooltip:SetOwner(customBtn, "ANCHOR_RIGHT")
-                    GameTooltip:SetText(L["Custom Border"])
-                    GameTooltip:AddLine(L["Gets its own independent border overlay. Multiple custom borders can be visible at the same time."], 0.8, 0.8, 0.8, true)
-                    GameTooltip:Show()
+                sharedBtn:HookScript("OnLeave", function() GUI:HideTooltip() end)
+                customBtn:HookScript("OnEnter", function()
+                    GUI:ShowTooltip(customBtn, {
+                        title = L["Custom Border"],
+                        lines = {
+                            L["Gets its own independent border overlay. Multiple custom borders can be visible at the same time."],
+                        },
+                    })
                 end)
-                customBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+                customBtn:HookScript("OnLeave", function() GUI:HideTooltip() end)
 
                 triggersH = triggersH + 36
             end
@@ -5647,10 +5749,16 @@ CreateEffectCard = function(parent, yPos, effect)
             local priSlider = GUI:CreateSlider(body, L["Priority"], 1, 10, 1, auraProxy, "priority")
             -- Extra gap above (was +4) so the slider isn't squished against the
             -- triggers / Add Trigger row, plus a little breathing room below before
-            -- the effect's Appearance group (increment 54 → 68).
-            priSlider:SetPoint("TOPLEFT", body, "TOPLEFT", 5, -(triggersH + 14))
-            priSlider:SetWidth(bodyWidth - 10)
-            triggersH = triggersH + 68
+            -- the effect's Appearance group (increment 54 → 68 → 84 with the note).
+            -- x=8 matches the "TRIGGERED BY" section above (Options.lua trigContainer)
+            -- so the Priority slider + note line up with the card's other elements.
+            priSlider:SetPoint("TOPLEFT", body, "TOPLEFT", 8, -(triggersH + 14))
+            priSlider:SetWidth(bodyWidth - 16)
+            -- Direction note in the standard GUI label style (dim, wrapped) so it
+            -- matches every other settings note: HIGHER number = higher priority.
+            local priNote = GUI:CreateLabel(body, L["Higher priority wins"], bodyWidth - 16)
+            priNote:SetPoint("TOPLEFT", priSlider, "BOTTOMLEFT", 0, -2)
+            triggersH = triggersH + 84
         end
 
         local _, bodyH = BuildTypeContent(body, effect.typeKey, effect.auraName, bodyWidth, proxy, triggersH, indicatorGroup, effect.indicatorID)
@@ -5706,28 +5814,9 @@ BuildEffectsTab = function()
     addBtn:SetHeight(32)
     addBtn:SetPoint("TOPLEFT", 8, yPos)
     addBtn:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
-    ApplyBackdrop(addBtn,
-        {r = tc.r * 0.10, g = tc.g * 0.10, b = tc.b * 0.10, a = 1},
-        {r = tc.r * 0.50, g = tc.g * 0.50, b = tc.b * 0.50, a = 1})
-
-    local addBtnText = addBtn:CreateFontString(nil, "OVERLAY")
-    GUI:SetSettingsFont(addBtnText, 11, "OUTLINE")
-    addBtnText:SetPoint("CENTER", 0, 0)
-    addBtnText:SetText(L["+ Add Indicator"])
-    addBtnText:SetTextColor(tc.r, tc.g, tc.b)
-
-    addBtn:SetScript("OnEnter", function(self)
-        local c = GetThemeColor()
-        self:SetBackdropColor(c.r * 0.20, c.g * 0.20, c.b * 0.20, 1)
-        self:SetBackdropBorderColor(c.r * 0.80, c.g * 0.80, c.b * 0.80, 1)
-        addBtnText:SetTextColor(1, 1, 1)
-    end)
-    addBtn:SetScript("OnLeave", function(self)
-        local c = GetThemeColor()
-        self:SetBackdropColor(c.r * 0.10, c.g * 0.10, c.b * 0.10, 1)
-        self:SetBackdropBorderColor(c.r * 0.50, c.g * 0.50, c.b * 0.50, 1)
-        addBtnText:SetTextColor(c.r, c.g, c.b)
-    end)
+    -- Shared primary CTA: accent fill + white label via the styler (was a bespoke
+    -- fontstring, which is why AD's and TD's hero labels didn't match).
+    GUI:StyleButton(addBtn, { height = 32, primary = true, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add", size = 14 }, text = L["Add Indicator"], font = "DFFontHighlight" })
 
     -- Dropdown menu for add button
     local menuFrame = CreateFrame("Frame", nil, addBtn, "BackdropTemplate")
@@ -5840,7 +5929,7 @@ BuildEffectsTab = function()
     -- ── ACTIVE INDICATORS heading ──
     local activeHeader = parent:CreateFontString(nil, "OVERLAY")
     GUI:SetSettingsFont(activeHeader, 9, "")
-    activeHeader:SetPoint("TOPLEFT", 10, yPos)
+    activeHeader:SetPoint("TOPLEFT", 8, yPos)  -- align with chips/cards/add button
     activeHeader:SetText(L["ACTIVE INDICATORS"])
     activeHeader:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     yPos = yPos - 16
@@ -5875,36 +5964,20 @@ BuildEffectsTab = function()
         GUI:SetSettingsFont(chipTxt, 10, "OUTLINE")
         chipTxt:SetPoint("CENTER", 0, 0)
         chipTxt:SetText(chip.label)
+        chipTxt:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
 
         local tw = chipTxt:GetStringWidth()
         chipBtn:SetWidth(max(tw + 16, 32))
 
-        if activeFilter == chip.key then
-            ApplyBackdrop(chipBtn,
-                {r = tc.r * 0.20, g = tc.g * 0.20, b = tc.b * 0.20, a = 1},
-                {r = tc.r * 0.50, g = tc.g * 0.50, b = tc.b * 0.50, a = 1})
-            chipTxt:SetTextColor(tc.r, tc.g, tc.b)
-        else
-            ApplyBackdrop(chipBtn,
-                {r = 0.14, g = 0.14, b = 0.14, a = 1},
-                {r = 0.25, g = 0.25, b = 0.25, a = 1})
-            chipTxt:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-        end
+        -- Shared styling: standard hover + an active (selected) state marked by a
+        -- prominent accent border. The row rebuilds on click, so set active here.
+        GUI:StyleButton(chipBtn)
+        chipBtn:SetActive(activeFilter == chip.key)
 
         local capturedKey = chip.key
         chipBtn:SetScript("OnClick", function()
             activeFilter = capturedKey
             SwitchTab("effects")
-        end)
-        chipBtn:SetScript("OnEnter", function(self)
-            if activeFilter ~= capturedKey then
-                self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
-            end
-        end)
-        chipBtn:SetScript("OnLeave", function(self)
-            if activeFilter ~= capturedKey then
-                self:SetBackdropColor(0.14, 0.14, 0.14, 1)
-            end
         end)
 
         tinsert(chipBtns, chipBtn)
@@ -5988,29 +6061,12 @@ BuildLayoutGroupsTab = function()
     }
 
     -- "+ Create Group" button (prominent, theme-colored)
+    local gc = { r = 0.91, g = 0.66, b = 0.25 }  -- Layout Groups tab color
     local addBtn = CreateFrame("Button", nil, parent, "BackdropTemplate")
     addBtn:SetHeight(32)
     addBtn:SetPoint("TOPLEFT", 8, yPos)
     addBtn:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
-    local gc = { r = 0.91, g = 0.66, b = 0.25 }  -- Layout Groups tab color
-    ApplyBackdrop(addBtn,
-        {r = gc.r * 0.10, g = gc.g * 0.10, b = gc.b * 0.10, a = 1},
-        {r = gc.r * 0.50, g = gc.g * 0.50, b = gc.b * 0.50, a = 1})
-    local addBtnText = addBtn:CreateFontString(nil, "OVERLAY")
-    GUI:SetSettingsFont(addBtnText, 11, "OUTLINE")
-    addBtnText:SetPoint("CENTER", 0, 0)
-    addBtnText:SetText(L["+ Create Group"])
-    addBtnText:SetTextColor(gc.r, gc.g, gc.b)
-    addBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(gc.r * 0.20, gc.g * 0.20, gc.b * 0.20, 1)
-        self:SetBackdropBorderColor(gc.r * 0.80, gc.g * 0.80, gc.b * 0.80, 1)
-        addBtnText:SetTextColor(1, 1, 1)
-    end)
-    addBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(gc.r * 0.10, gc.g * 0.10, gc.b * 0.10, 1)
-        self:SetBackdropBorderColor(gc.r * 0.50, gc.g * 0.50, gc.b * 0.50, 1)
-        addBtnText:SetTextColor(gc.r, gc.g, gc.b)
-    end)
+    GUI:StyleButton(addBtn, { height = 32, primary = true, accent = gc, text = L["+ Create Group"], font = "DFFontHighlight" })
     addBtn:SetScript("OnClick", function()
         local group = CreateLayoutGroup()
         if group then
@@ -6020,6 +6076,15 @@ BuildLayoutGroupsTab = function()
         end
     end)
     yPos = yPos - 42
+
+    -- ── LAYOUT GROUPS heading — mirrors the Effects tab's ACTIVE INDICATORS
+    -- caption and the Text Designer's group caption so every list tab has one. ──
+    local groupsHeader = parent:CreateFontString(nil, "OVERLAY")
+    GUI:SetSettingsFont(groupsHeader, 9, "")
+    groupsHeader:SetPoint("TOPLEFT", 8, yPos)
+    groupsHeader:SetText(L["LAYOUT GROUPS"])
+    groupsHeader:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    yPos = yPos - 16
 
     -- Get groups for current spec
     local groups = GetSpecLayoutGroups()
@@ -6050,8 +6115,8 @@ BuildLayoutGroupsTab = function()
 
             -- Card container
             local card = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-            card:SetPoint("TOPLEFT", 6, yPos)
-            card:SetPoint("RIGHT", parent, "RIGHT", -6, 0)
+            card:SetPoint("TOPLEFT", 8, yPos)
+            card:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
 
             -- ── HEADER ──
             local header = CreateFrame("Button", nil, card, "BackdropTemplate")
@@ -6081,35 +6146,17 @@ BuildLayoutGroupsTab = function()
             nameText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
 
             -- Delete button
-            local delBtn = CreateFrame("Button", nil, header, "BackdropTemplate")
-            delBtn:SetSize(22, 22)
+            local capturedGroupID = group.id
+            local delBtn = GUI:CreateCloseButton(header, {
+                size = 22,
+                onClick = function()
+                    DeleteLayoutGroup(capturedGroupID)
+                    SwitchTab("layout")
+                    RefreshPlacedIndicators()
+                end,
+            })
             delBtn:SetPoint("RIGHT", -4, 0)
             delBtn:SetFrameLevel(header:GetFrameLevel() + 2)
-            local xSize, xThick = 12, 2
-            local line1 = delBtn:CreateTexture(nil, "OVERLAY")
-            line1:SetSize(xSize, xThick)
-            line1:SetPoint("CENTER", 0, 0)
-            line1:SetColorTexture(0.55, 0.20, 0.20, 1)
-            line1:SetRotation(math.rad(45))
-            local line2 = delBtn:CreateTexture(nil, "OVERLAY")
-            line2:SetSize(xSize, xThick)
-            line2:SetPoint("CENTER", 0, 0)
-            line2:SetColorTexture(0.55, 0.20, 0.20, 1)
-            line2:SetRotation(math.rad(-45))
-            delBtn:SetScript("OnEnter", function()
-                line1:SetColorTexture(1, 0.35, 0.35, 1)
-                line2:SetColorTexture(1, 0.35, 0.35, 1)
-            end)
-            delBtn:SetScript("OnLeave", function()
-                line1:SetColorTexture(0.55, 0.20, 0.20, 1)
-                line2:SetColorTexture(0.55, 0.20, 0.20, 1)
-            end)
-            local capturedGroupID = group.id
-            delBtn:SetScript("OnClick", function()
-                DeleteLayoutGroup(capturedGroupID)
-                SwitchTab("layout")
-                RefreshPlacedIndicators()
-            end)
 
             -- Header click → toggle expansion
             header:SetScript("OnClick", function()
@@ -6149,12 +6196,10 @@ BuildLayoutGroupsTab = function()
                 nameEdit:SetHeight(22)
                 nameEdit:SetPoint("TOPLEFT", 8, by)
                 nameEdit:SetPoint("RIGHT", body, "RIGHT", -8, 0)
-                nameEdit:SetFontObject("DFFontHighlightSmall")
                 nameEdit:SetAutoFocus(false)
                 nameEdit:SetText(group.name)
                 nameEdit:SetMaxLetters(30)
-                ApplyBackdrop(nameEdit, {r = 0.12, g = 0.12, b = 0.12, a = 1}, C_BORDER)
-                nameEdit:SetTextInsets(6, 6, 0, 0)
+                GUI:StyleEditBox(nameEdit, {})
                 nameEdit:SetScript("OnEnterPressed", function(self)
                     local val = self:GetText()
                     if val and val ~= "" then
@@ -6306,23 +6351,16 @@ BuildLayoutGroupsTab = function()
                         end)
 
                         -- Customise button (navigates to Effects tab for this indicator)
+                        -- Accent-tinted action button: persistent accent fill +
+                        -- accent border + accent label at rest, accent-wash hover.
                         local custBtn = CreateFrame("Button", nil, memberRow, "BackdropTemplate")
-                        custBtn:SetSize(56, 18)
                         custBtn:SetPoint("RIGHT", remBtn, "LEFT", -4, 0)
-                        local custTC = GetThemeColor()
-                        ApplyBackdrop(custBtn,
-                            {r = custTC.r * 0.15, g = custTC.g * 0.15, b = custTC.b * 0.15, a = 1},
-                            {r = custTC.r * 0.35, g = custTC.g * 0.35, b = custTC.b * 0.35, a = 0.6})
-                        local custText = custBtn:CreateFontString(nil, "OVERLAY")
-                        GUI:SetSettingsFont(custText, 8, "OUTLINE")
-                        custText:SetPoint("CENTER", 0, 0)
-                        custText:SetText(L["Customise"])
-                        custText:SetTextColor(custTC.r, custTC.g, custTC.b)
-                        custBtn:SetScript("OnEnter", function() custText:SetTextColor(1, 1, 1) end)
-                        custBtn:SetScript("OnLeave", function()
-                            local tc2 = GetThemeColor()
-                            custText:SetTextColor(tc2.r, tc2.g, tc2.b)
-                        end)
+                        GUI:StyleButton(custBtn, {
+                            width = 56, height = 18,
+                            text = L["Customise"],
+                            tinted = true,
+                            accent = GetThemeColor(),
+                        })
                         local capturedAuraName = member.auraName
                         local capturedIndID = member.indicatorID
                         custBtn:SetScript("OnClick", function()
@@ -6357,22 +6395,8 @@ BuildLayoutGroupsTab = function()
                 addMemBtn:SetHeight(22)
                 addMemBtn:SetPoint("TOPLEFT", 8, by)
                 addMemBtn:SetPoint("RIGHT", body, "RIGHT", -8, 0)
-                ApplyBackdrop(addMemBtn,
-                    {r = 0.10, g = 0.12, b = 0.10, a = 1},
-                    {r = 0.25, g = 0.40, b = 0.25, a = 0.6})
-                local addMemText = addMemBtn:CreateFontString(nil, "OVERLAY")
-                GUI:SetSettingsFont(addMemText, 9, "")
-                addMemText:SetPoint("CENTER", 0, 0)
-                addMemText:SetText(L["+ Add aura"])
-                addMemText:SetTextColor(0.5, 0.8, 0.5)
-                addMemBtn:SetScript("OnEnter", function(self)
-                    self:SetBackdropColor(0.15, 0.20, 0.15, 1)
-                    addMemText:SetTextColor(0.7, 1.0, 0.7)
-                end)
-                addMemBtn:SetScript("OnLeave", function(self)
-                    self:SetBackdropColor(0.10, 0.12, 0.10, 1)
-                    addMemText:SetTextColor(0.5, 0.8, 0.5)
-                end)
+                GUI:StyleButton(addMemBtn, { height = 22, primary = true, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add", size = 11 }, text = L["Add aura"] })
+                GUI:SetSettingsFont(addMemBtn.Text, 9, "")
                 addMemBtn:SetScript("OnClick", function()
                     -- Show ALL trackable auras with type buttons (Icon/Square/Bar)
                     local spec = ResolveSpec()
@@ -6769,7 +6793,7 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
         DF:AuraDesigner_RefreshPage()
     end
 
-    local yPos = 0
+    local yPos = -8  -- top gap; kept equal to the Text Designer's _tdTopY for a consistent header gap
     -- While editing a raid auto-layout, the AutoProfiles editing banner is a ~50px
     -- overlay anchored to the top of the content frame; this custom AD page lays
     -- its own content out from the top too, so push everything down to clear it
@@ -6787,7 +6811,7 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     enableBanner.UpdateSpecText()
 
     if GUI.CreateCopyButton then
-        local copyBtn = GUI.CreateCopyButton(enableBanner, {"auraDesigner"}, "Aura Designer", "auras_auradesigner", true)
+        local copyBtn = GUI.CreateCopyButton(enableBanner, {"auraDesigner"}, L["Aura Designer"], "auras_auradesigner", true)
         copyBtn:ClearAllPoints()
         -- Row 1 centre is 16px above banner centre, so y = +16.
         copyBtn:SetPoint("RIGHT", enableBanner, "RIGHT", -5, 16)
@@ -6823,8 +6847,8 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
                 end
             end,
         })
-        presetBar:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 10, yPos)
-        presetBar:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", -10, yPos)
+        presetBar:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 0, yPos)
+        presetBar:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", 0, yPos)
         enableBanner.presetBar = presetBar
         yPos = yPos - (24 + SECTION_GAP)
     end
@@ -6840,26 +6864,22 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     coexistBanner:SetHeight(COEXIST_BANNER_H)
     coexistBanner:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 0, yPos)
     coexistBanner:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", 0, yPos)
-    ApplyBackdrop(coexistBanner, {r = 0.14, g = 0.14, b = 0.14, a = 1}, {r = 0.30, g = 0.30, b = 0.30, a = 0.5})
+    GUI:CreatePanelBackdrop(coexistBanner, {borderColor = {r = 0.30, g = 0.30, b = 0.30, a = 0.5}})
 
     local coexistText = coexistBanner:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     coexistText:SetPoint("LEFT", 10, 0)
     coexistText:SetText(L["Standard Buffs are also visible on frames."])
     coexistText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
-    local tc = GetThemeColor()
-    local disableBuffsBtn = CreateFrame("Button", nil, coexistBanner)
-    disableBuffsBtn:SetSize(90, 18)
+    -- Quiet inline text-link action: ghost style (accent label + faint hover
+    -- wash, no resting fill/border).
+    local disableBuffsBtn = CreateFrame("Button", nil, coexistBanner, "BackdropTemplate")
     disableBuffsBtn:SetPoint("LEFT", coexistText, "RIGHT", 8, 0)
-    disableBuffsBtn.text = disableBuffsBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    disableBuffsBtn.text:SetAllPoints()
-    disableBuffsBtn.text:SetText(L["Disable Buffs"])
-    disableBuffsBtn.text:SetTextColor(tc.r, tc.g, tc.b)
-    disableBuffsBtn:SetScript("OnEnter", function(self) self.text:SetTextColor(1, 1, 1) end)
-    disableBuffsBtn:SetScript("OnLeave", function(self)
-        local tc2 = GetThemeColor()
-        self.text:SetTextColor(tc2.r, tc2.g, tc2.b)
-    end)
+    GUI:StyleButton(disableBuffsBtn, {
+        width = 90, height = 18,
+        text = L["Disable Buffs"],
+        ghost = true,
+    })
     disableBuffsBtn:SetScript("OnClick", function()
         db.showBuffs = false
         DF:AuraDesigner_RefreshPage()
@@ -6882,8 +6902,10 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     leftPanel = CreateFrame("Frame", nil, splitContainer, "BackdropTemplate")
     leftPanel:SetPoint("TOPLEFT", 0, 0)
     leftPanel:SetPoint("BOTTOMLEFT", 0, 0)
-    leftPanel:SetPoint("RIGHT", splitContainer, "CENTER", -2, 0)
-    ApplyBackdrop(leftPanel, C_PANEL, C_BORDER)
+    leftPanel:SetPoint("RIGHT", splitContainer, "CENTER", -3, 0)
+    -- NO border here — the inner preview container (CreateFramePreview) draws the
+    -- visible dim border. A border on both stacked to a brighter doubled line.
+    GUI:CreatePanelBackdrop(leftPanel, {border = false})
 
     -- Frame preview (reuses existing CreateFramePreview with adapted anchoring)
     origY_framePreview = 0
@@ -6894,57 +6916,53 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     rightPanel = CreateFrame("Frame", nil, splitContainer, "BackdropTemplate")
     rightPanel:SetPoint("TOPRIGHT", 0, 0)
     rightPanel:SetPoint("BOTTOMRIGHT", 0, 0)
-    rightPanel:SetPoint("LEFT", splitContainer, "CENTER", 2, 0)
-    ApplyBackdrop(rightPanel, {r = 0.10, g = 0.10, b = 0.10, a = 1}, {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5})
+    rightPanel:SetPoint("LEFT", splitContainer, "CENTER", 3, 0)  -- 6px split gap (matches Text Designer)
+    GUI:CreatePanelBackdrop(rightPanel, {borderColor = {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5}})
 
-    -- ── TAB BAR ──
+    -- ── TAB BAR ── (shared underline-tab style, mirroring the Pinned Frames
+    -- tabs: a transparent strip with a baseline; each tab is a StyleButton in
+    -- `tab` mode — faint cell when inactive, accent fill + underline + accent
+    -- label when active. Per-tab accent preserves each section's identity.)
     tabBar = CreateFrame("Frame", nil, rightPanel, "BackdropTemplate")
     tabBar:SetHeight(28)
-    tabBar:SetPoint("TOPLEFT", 0, 0)
-    tabBar:SetPoint("TOPRIGHT", 0, 0)
-    ApplyBackdrop(tabBar, {r = 0.09, g = 0.09, b = 0.09, a = 1}, {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5})
+    -- Inset just inside the panel's border so the tabs don't overlap/overrun it.
+    tabBar:SetPoint("TOPLEFT", 4, -4)
+    tabBar:SetPoint("TOPRIGHT", -4, -4)
 
+    -- Baseline under the whole strip; the active tab's underline sits on it.
+    local tabBaseline = tabBar:CreateTexture(nil, "ARTWORK")
+    tabBaseline:SetTexture("Interface\\Buttons\\WHITE8x8")
+    tabBaseline:SetHeight(1)
+    tabBaseline:SetPoint("BOTTOMLEFT", 0, 0)
+    tabBaseline:SetPoint("BOTTOMRIGHT", 0, 0)
+    tabBaseline:SetColorTexture(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
+
+    local TAB_GAP = 4
     local TAB_DEFS = {
-        { key = "effects", label = L["Effects"],        color = GetThemeColor() },
-        { key = "layout",  label = L["Layout Groups"],  color = { r = 0.91, g = 0.66, b = 0.25 } },
-        { key = "global",  label = L["Global"],         color = { r = 0.51, g = 0.86, b = 0.51 } },
+        { key = "effects", label = L["Effects"],       accent = nil },  -- theme-tracking
+        { key = "layout",  label = L["Layout Groups"], accent = { r = 0.91, g = 0.66, b = 0.25 } },
+        { key = "global",  label = L["Global"],        accent = { r = 0.51, g = 0.86, b = 0.51 } },
     }
 
     wipe(tabButtons)
     for i, def in ipairs(TAB_DEFS) do
-        local btn = CreateFrame("Button", nil, tabBar)
+        local btn = CreateFrame("Button", nil, tabBar, "BackdropTemplate")
         btn:SetHeight(28)
         if i == 1 then
             btn:SetPoint("TOPLEFT", 0, 0)
         else
-            btn:SetPoint("TOPLEFT", tabButtons[TAB_DEFS[i-1].key], "TOPRIGHT", 0, 0)
+            btn:SetPoint("TOPLEFT", tabButtons[TAB_DEFS[i-1].key], "TOPRIGHT", TAB_GAP, 0)
         end
         local provW = parent:GetWidth()
         if provW < 100 and GUI and GUI.contentFrame then provW = GUI.contentFrame:GetWidth() end
         if provW < 100 then provW = 600 end
-        local provTabW = max(60, floor((provW / 2) / #TAB_DEFS))
-        btn:SetWidth(provTabW)
+        btn:SetWidth(max(60, floor(((provW / 2) - (#TAB_DEFS - 1) * TAB_GAP) / #TAB_DEFS)))
 
-        -- Bottom accent line
-        btn.accent = btn:CreateTexture(nil, "OVERLAY")
-        btn.accent:SetHeight(2)
-        btn.accent:SetPoint("BOTTOMLEFT", 0, 0)
-        btn.accent:SetPoint("BOTTOMRIGHT", 0, 0)
-        btn.accent:SetColorTexture(def.color.r, def.color.g, def.color.b, 1)
-        btn.accent:Hide()
-
-        btn.label = btn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-        btn.label:SetPoint("CENTER", 0, 1)
-        btn.label:SetText(def.label)
-        btn.label:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-
-        -- Highlight
-        local hl = btn:CreateTexture(nil, "HIGHLIGHT")
-        hl:SetAllPoints()
-        hl:SetColorTexture(1, 1, 1, 0.03)
+        -- Shared underline-tab styling; SwitchTab drives SetActive. label = btn.Text.
+        GUI:StyleButton(btn, { tab = true, text = def.label, accent = def.accent, font = "DFFontHighlight" })
+        btn.label = btn.Text
 
         btn.tabKey = def.key
-        btn.tabColor = def.color
         btn:SetScript("OnClick", function(self)
             SwitchTab(self.tabKey)
         end)
@@ -6952,9 +6970,10 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
         tabButtons[def.key] = btn
     end
 
-    -- Make tab buttons equal width on parent resize
+    -- Equal-width tabs (accounting for the gaps) on parent resize.
     tabBar:SetScript("OnSizeChanged", function(self, w, h)
-        local tabW = w / #TAB_DEFS
+        local n = #TAB_DEFS
+        local tabW = (w - (n - 1) * TAB_GAP) / n
         for _, def in ipairs(TAB_DEFS) do
             local btn = tabButtons[def.key]
             if btn then btn:SetWidth(tabW) end
@@ -7001,7 +7020,7 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     spellPickerView = CreateFrame("Frame", nil, rightPanel, "BackdropTemplate")
     spellPickerView:SetPoint("TOPLEFT", 0, 0)
     spellPickerView:SetPoint("BOTTOMRIGHT", 0, 0)
-    ApplyBackdrop(spellPickerView, {r = 0.10, g = 0.10, b = 0.10, a = 1}, {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5})
+    GUI:CreatePanelBackdrop(spellPickerView, {borderColor = {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5}})
     spellPickerView:Hide()
 
     -- Spell picker header
@@ -7009,20 +7028,23 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     pickerHeader:SetHeight(28)
     pickerHeader:SetPoint("TOPLEFT", 0, 0)
     pickerHeader:SetPoint("TOPRIGHT", 0, 0)
-    ApplyBackdrop(pickerHeader, {r = 0.09, g = 0.09, b = 0.09, a = 1}, {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5})
+    GUI:CreatePanelBackdrop(pickerHeader, {borderColor = {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5}})
 
-    local backBtn = CreateFrame("Button", nil, pickerHeader)
-    backBtn:SetSize(24, 24)
+    -- Icon-only back chevron. Shared styler supplies the backdrop + accent-wash
+    -- hover; the chevron_right glyph is rotated 180° to point left (StyleButton
+    -- has no rotation knob, so re-apply it after styling).
+    local backBtn = CreateFrame("Button", nil, pickerHeader, "BackdropTemplate")
     backBtn:SetPoint("LEFT", 4, 0)
-    backBtn.icon = backBtn:CreateTexture(nil, "OVERLAY")
-    backBtn.icon:SetSize(14, 14)
-    backBtn.icon:SetPoint("CENTER", 0, 0)
-    backBtn.icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
-    backBtn.icon:SetRotation(math.rad(180))  -- flip to point left
-    backBtn.icon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    GUI:StyleButton(backBtn, {
+        width = 24, height = 24,
+        icon = {
+            texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right",
+            size = 14,
+            color = C_TEXT_DIM,
+        },
+    })
+    backBtn.Icon:SetRotation(math.rad(180))  -- flip to point left
     backBtn:SetScript("OnClick", function() HideSpellPicker() end)
-    backBtn:SetScript("OnEnter", function(self) self.icon:SetVertexColor(1, 1, 1) end)
-    backBtn:SetScript("OnLeave", function(self) self.icon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b) end)
 
     spellPickerView.title = pickerHeader:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     spellPickerView.title:SetPoint("LEFT", backBtn, "RIGHT", 4, 0)
@@ -7077,7 +7099,7 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     SwitchTab("effects")
     C_Timer.After(0, function()
         if tabBar and tabBar:IsVisible() and tabBar:GetWidth() > 10 then
-            local tabW = tabBar:GetWidth() / #TAB_DEFS
+            local tabW = (tabBar:GetWidth() - (#TAB_DEFS - 1) * TAB_GAP) / #TAB_DEFS
             for _, def in ipairs(TAB_DEFS) do
                 if tabButtons[def.key] then
                     tabButtons[def.key]:SetWidth(tabW)
@@ -7111,16 +7133,18 @@ function DF:AuraDesigner_RefreshPage()
         selectedSpec = currentSpec
     end
 
-    -- Update frame preview container border to class color of current spec
+    -- Subtle class-color hint on the preview border, dimmed to 0.5 alpha so it
+    -- stays as quiet as the Text Designer's neutral border (just tinted to the
+    -- spec). Was previously full alpha = the harsh "white line" (white for Priest).
     if framePreview then
         local resolvedSpec = currentSpec or selectedSpec
         local specInfoEntry = resolvedSpec and DF.AuraDesigner.SpecInfo[resolvedSpec]
         local classToken = specInfoEntry and specInfoEntry.class
         local classColor = classToken and RAID_CLASS_COLORS[classToken]
         if classColor then
-            framePreview:SetBackdropBorderColor(classColor.r, classColor.g, classColor.b, 1)
+            framePreview:SetBackdropBorderColor(classColor.r, classColor.g, classColor.b, 0.5)
         else
-            framePreview:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
+            framePreview:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
         end
     end
 

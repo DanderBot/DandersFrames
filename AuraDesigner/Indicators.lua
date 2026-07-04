@@ -1082,9 +1082,14 @@ end
 -- Shared logic for applying border style, change detection, and expiring
 -- registration to a border overlay frame. Used by both shared and custom borders.
 local function ApplyBorderToOverlay(ch, frame, config, auraData)
-    -- Legacy configs (still carrying the old `style` enum, pre-migration or a
-    -- fresh import) map via BuildBorderTypeSpec; migrated configs build the
-    -- canonical spec directly.  Both produce the same DF.Border spec shape.
+    -- Legacy configs (still carrying the old `style` enum) map via
+    -- BuildBorderTypeSpec; migrated configs build the canonical spec directly.
+    -- The lazy border-key fold (DF.MigrateAuraDesignerBorderKeysLazy) runs on the
+    -- resolved adDB at every render/test entry BEFORE we get here, so a config
+    -- reaching this line with `style` still set is genuinely un-folded — we let it
+    -- use the legacy builder rather than masking the fold gap.  (A half-migrated
+    -- block that carries both `style` and canonical keys can only appear if the
+    -- fold failed to run; that should surface visibly, not be papered over.)
     local spec = config.style and BuildBorderTypeSpec(config) or DF.Border:BuildSpec(config, "")
     -- AD config has no pixelPerfect key of its own; inherit the frame's so the
     -- border thickness snaps. (This border SetAllPoints the frame, which is already
@@ -1388,22 +1393,15 @@ function Indicators:ApplyHealthBar(frame, config, auraData)
         -- ============================================================
         local overlay = GetOrCreateTintOverlay(frame)
         if overlay then
-            -- Keep the AD overlay off the frame border. With framePadding 0 the health
-            -- bar fills the whole frame and the border is drawn inward over its edge, so
-            -- a full-bar overlay sits *under* the border. Out of range the border fades
-            -- to its OOR alpha and the AD tint beneath shows through it, tinting the
-            -- border. Inset the overlay by the border thickness so it never reaches
-            -- under the border. (Replace mode doesn't need this — the real bar already
-            -- sits under the inward border exactly like a normal class-coloured bar.)
-            local _fdb = DF:GetFrameDB(frame)
-            local _bInset = (frame.border and frame.border:IsShown() and _fdb and _fdb.frameBorderSize) or 0
+            -- Full-size. The frame border (frame level +10) draws inward over the health
+            -- bar's edge and sits ABOVE the overlay, so it covers the overlay's outer ring
+            -- and the tint fills the whole visible bar — no missing edge pixels, matching
+            -- replace mode. (Out of range the faded border can let a faint tint show
+            -- through it; gating an inset on the OOR flag proved unreliable — UnitInRange
+            -- returns secret/stale values in instances, sticking the flag and insetting in
+            -- range — so we keep it simple and full-size.)
             overlay:ClearAllPoints()
-            if _bInset > 0 then
-                overlay:SetPoint("TOPLEFT", healthBar, "TOPLEFT", _bInset, -_bInset)
-                overlay:SetPoint("BOTTOMRIGHT", healthBar, "BOTTOMRIGHT", -_bInset, _bInset)
-            else
-                overlay:SetAllPoints(healthBar)
-            end
+            overlay:SetAllPoints(healthBar)
 
             -- Re-sync texture in case the health bar's texture changed since the overlay
             -- was first created (frame recycled to a different unit can swap textures).
@@ -2029,7 +2027,7 @@ function Indicators:ConfigureIcon(frame, config, defaults, auraName, priority)
     -- Frame level: base from frame (not contentOverlay) + per-indicator level + small priority tiebreaker
     local level = config.frameLevel or (defaults and defaults.indicatorFrameLevel) or 2
     local baseLevel = frame:GetFrameLevel()
-    local priorityBoost = math.floor((20 - (priority or 5)) / 4)  -- 0-5 range for tiebreaking
+    local priorityBoost = math.floor((9 + (priority or 5)) / 4)  -- higher priority = higher frame level
     icon:SetFrameLevel(math.max(0, baseLevel + level + priorityBoost))
 
     -- Frame strata: per-indicator override, falls back to global default.
@@ -2896,7 +2894,7 @@ function Indicators:ConfigureSquare(frame, config, defaults, auraName, priority)
     -- Frame level: base from frame (not contentOverlay) + per-indicator level + small priority tiebreaker
     local level = config.frameLevel or (defaults and defaults.indicatorFrameLevel) or 2
     local baseLevel = frame:GetFrameLevel()
-    local priorityBoost = math.floor((20 - (priority or 5)) / 4)  -- 0-5 range for tiebreaking
+    local priorityBoost = math.floor((9 + (priority or 5)) / 4)  -- higher priority = higher frame level
     sq:SetFrameLevel(math.max(0, baseLevel + level + priorityBoost))
 
     -- Frame strata: per-indicator override, falls back to global default.
@@ -3974,7 +3972,7 @@ function Indicators:ConfigureBar(frame, config, defaults, auraName, priority)
     -- Frame level: base from frame (not contentOverlay) + per-indicator level + small priority tiebreaker
     local level = config.frameLevel or (defaults and defaults.indicatorFrameLevel) or 2
     local baseLevel = frame:GetFrameLevel()
-    local priorityBoost = math.floor((20 - (priority or 5)) / 4)  -- 0-5 range for tiebreaking
+    local priorityBoost = math.floor((9 + (priority or 5)) / 4)  -- higher priority = higher frame level
     bar:SetFrameLevel(math.max(0, baseLevel + level + priorityBoost))
 
     -- Frame strata: per-indicator override, falls back to global default.

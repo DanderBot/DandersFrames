@@ -62,12 +62,12 @@ local function GetFallbackDisplayText(fallback)
     if not fallback then return nil end
     
     local parts = {}
-    if fallback.mouseover then table.insert(parts, "Mouseover") end
-    if fallback.target then table.insert(parts, "Target") end
-    if fallback.selfCast then table.insert(parts, "Self") end
-    
+    if fallback.mouseover then table.insert(parts, L["Mouseover"]) end
+    if fallback.target then table.insert(parts, L["Target"]) end
+    if fallback.selfCast then table.insert(parts, L["Self"]) end
+
     if #parts == 0 then return nil end
-    return table.concat(parts, " then ")
+    return table.concat(parts, L[" then "])
 end
 
 -- Export to CC namespace for use in other UI files
@@ -78,13 +78,17 @@ function CC:CreateClickCastUI(parent)
     clickCastUIFrame = parent
     CC.clickCastUIFrame = parent
     
-    local themeColor = {r = 0.2, g = 0.8, b = 0.4}
-    local C_BACKGROUND = {r = 0.08, g = 0.08, b = 0.08}
-    local C_PANEL = {r = 0.12, g = 0.12, b = 0.12}
-    local C_ELEMENT = {r = 0.18, g = 0.18, b = 0.18}
-    local C_BORDER = {r = 0.25, g = 0.25, b = 0.25}
-    local C_TEXT = {r = 0.9, g = 0.9, b = 0.9}
-    local C_TEXT_DIM = {r = 0.6, g = 0.6, b = 0.6}
+    local themeColor = CC.ACCENT
+    -- Neutral chrome colours alias the shared GUI palette (identical RGB values),
+    -- so theme tweaks stay in one place. The CC accent is green (themeColor) and
+    -- the combat/no-combat status colours are CC-specific, so those stay local.
+    local Colors = DF.GUI.Colors
+    local C_BACKGROUND = Colors.background
+    local C_PANEL = Colors.panel
+    local C_ELEMENT = Colors.element
+    local C_BORDER = Colors.border
+    local C_TEXT = Colors.text
+    local C_TEXT_DIM = Colors.textDim
     local C_COMBAT = {r = 1.0, g = 0.3, b = 0.3}
     local C_NOCOMBAT = {r = 0.3, g = 1.0, b = 0.3}
     
@@ -125,21 +129,7 @@ function CC:CreateClickCastUI(parent)
     -- Enable checkbox (next to title)
     local enableCb = CreateFrame("CheckButton", nil, row1, "BackdropTemplate")
     enableCb:SetPoint("LEFT", title, "RIGHT", 15, 0)
-    enableCb:SetSize(14, 14)
-    enableCb:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    enableCb:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    enableCb:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-    
-    local enableCheck = enableCb:CreateTexture(nil, "OVERLAY")
-    enableCheck:SetTexture("Interface\\Buttons\\WHITE8x8")
-    enableCheck:SetVertexColor(themeColor.r, themeColor.g, themeColor.b)
-    enableCheck:SetPoint("CENTER")
-    enableCheck:SetSize(8, 8)
-    enableCb:SetCheckedTexture(enableCheck)
+    DF.GUI:StyleCheckButton(enableCb, { accent = themeColor })
     
     local enableLabel = row1:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     enableLabel:SetPoint("LEFT", enableCb, "RIGHT", 3, 0)
@@ -192,32 +182,23 @@ function CC:CreateClickCastUI(parent)
     local profileCogwheel = CreateFrame("Button", nil, row1, "BackdropTemplate")
     profileCogwheel:SetPoint("RIGHT", 0, 0)
     profileCogwheel:SetSize(18, 18)
-    profileCogwheel:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    -- Icon-only button: shared styler owns the backdrop + accent-wash hover and
+    -- builds the centred icon. The hook adds the icon-brighten + tooltip.
+    DF.GUI:StyleButton(profileCogwheel, {
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\settings", size = 18, color = C_TEXT_DIM },
     })
-    profileCogwheel:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    profileCogwheel:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-    
-    local cogwheelIcon = profileCogwheel:CreateTexture(nil, "OVERLAY")
-    cogwheelIcon:SetPoint("CENTER", 0, 0)
-    cogwheelIcon:SetSize(14, 14)
-    cogwheelIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\settings")
-    cogwheelIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    
-    profileCogwheel:SetScript("OnEnter", function(self)
-        self:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
-        cogwheelIcon:SetVertexColor(themeColor.r, themeColor.g, themeColor.b)
-        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-        GameTooltip:SetText(L["Profile Settings"], 1, 1, 1)
-        GameTooltip:AddLine(L["Open the Profiles tab to manage profiles"], 0.7, 0.7, 0.7)
-        GameTooltip:Show()
+
+    profileCogwheel:HookScript("OnEnter", function(self)
+        self.Icon:SetVertexColor(themeColor.r, themeColor.g, themeColor.b)
+        DF.GUI:ShowTooltip(self, {
+            title = L["Profile Settings"],
+            anchor = "ANCHOR_BOTTOM",
+            lines = { L["Open the Profiles tab to manage profiles"] },
+        })
     end)
-    profileCogwheel:SetScript("OnLeave", function(self)
-        self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-        cogwheelIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-        GameTooltip:Hide()
+    profileCogwheel:HookScript("OnLeave", function(self)
+        self.Icon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+        DF.GUI:HideTooltip()
     end)
     profileCogwheel:SetScript("OnClick", function()
         if CC.SetActiveTab then
@@ -225,143 +206,51 @@ function CC:CreateClickCastUI(parent)
         end
     end)
     
-    -- Profile dropdown (to the left of cogwheel)
-    local profileDropdown = CreateFrame("Frame", nil, row1, "BackdropTemplate")
+    -- Profile dropdown (to the left of cogwheel) -- DYNAMIC list.
+    -- Ported to the shared DF.GUI:CreateDropdown builder (inline opener, CC
+    -- green accent). The profile list changes at runtime, so opts.optionsFunc
+    -- rebuilds the options on every open. customGet = active profile name;
+    -- customSet = switch + load the profile (with combat guard).
+    local function GetProfileOptions()
+        local opts = { _order = {} }
+        for _, profileName in ipairs(CC:GetProfileList()) do
+            opts[profileName] = profileName
+            table.insert(opts._order, profileName)
+        end
+        return opts
+    end
+
+    local profileDropdown = DF.GUI:CreateDropdown(row1, nil, GetProfileOptions(), nil, nil, nil,
+        function()
+            return CC:GetActiveProfileName()
+        end,
+        function(profileName)
+            if InCombatLockdown() then
+                print("|cffff9900DandersFrames:|r " .. L["Cannot switch profiles during combat"])
+                return
+            end
+            if profileName ~= CC:GetActiveProfileName() then
+                if CC:SetActiveProfile(profileName) then
+                    CC:ApplyBindings()
+                    CC:RefreshClickCastingUI()
+                end
+            end
+        end,
+        { inline = true, accent = CC.ACCENT, optionsFunc = GetProfileOptions })
     profileDropdown:SetPoint("RIGHT", profileCogwheel, "LEFT", -4, 0)
     profileDropdown:SetSize(140, 18)
-    profileDropdown:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    profileDropdown:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    profileDropdown:SetBackdropBorderColor(themeColor.r * 0.6, themeColor.g * 0.6, themeColor.b * 0.6, 1)
-    
-    local profileDropText = profileDropdown:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    profileDropText:SetPoint("LEFT", 6, 0)
-    profileDropText:SetPoint("RIGHT", -16, 0)
-    profileDropText:SetJustifyH("LEFT")
-    profileDropText:SetTextColor(themeColor.r, themeColor.g, themeColor.b)
-    profileDropText:SetWordWrap(false)
-    
-    local profileDropArrow = profileDropdown:CreateTexture(nil, "OVERLAY")
-    profileDropArrow:SetPoint("RIGHT", -4, 0)
-    profileDropArrow:SetSize(12, 12)
-    profileDropArrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
-    profileDropArrow:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    
+
     local profileLabel = row1:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     profileLabel:SetPoint("RIGHT", profileDropdown, "LEFT", -4, 0)
     profileLabel:SetText(L["Profile:"])
     profileLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    
-    local profileMenu = CreateFrame("Frame", nil, profileDropdown, "BackdropTemplate")
-    profileMenu:SetPoint("TOPRIGHT", profileDropdown, "BOTTOMRIGHT", 0, -2)
-    profileMenu:SetWidth(180)
-    profileMenu:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    profileMenu:SetBackdropColor(0.1, 0.1, 0.1, 0.98)
-    profileMenu:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
-    profileMenu:SetFrameStrata("FULLSCREEN_DIALOG")
-    profileMenu:SetFrameLevel(200)
-    profileMenu:Hide()
-    
-    -- Helper to truncate text
-    local function TruncateText(text, maxLen)
-        if not text then return "" end
-        if #text <= maxLen then return text end
-        return string.sub(text, 1, maxLen - 2) .. ".."
-    end
-    
+
+    -- External refreshers expect this to repaint the button text only.
     local function UpdateProfileDropdown()
-        local activeProfile = CC:GetActiveProfileName()
-        profileDropText:SetText(TruncateText(activeProfile, 20))
+        profileDropdown:UpdateText()
     end
-    
-    local function ShowProfileMenu()
-        for _, child in ipairs({profileMenu:GetChildren()}) do
-            child:Hide()
-            child:SetParent(nil)
-        end
-        
-        local profiles = CC:GetProfileList()
-        local activeProfile = CC:GetActiveProfileName()
-        local yOff = -4
-        
-        for _, profileName in ipairs(profiles) do
-            local item = CreateFrame("Button", nil, profileMenu)
-            item:SetPoint("TOPLEFT", 4, yOff)
-            item:SetPoint("RIGHT", -4, 0)
-            item:SetHeight(18)
-            
-            local itemText = item:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-            itemText:SetPoint("LEFT", 4, 0)
-            itemText:SetText(profileName)
-            
-            if profileName == activeProfile then
-                itemText:SetTextColor(themeColor.r, themeColor.g, themeColor.b)
-            else
-                itemText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-            end
-            
-            item:SetScript("OnEnter", function()
-                itemText:SetTextColor(1, 1, 1)
-            end)
-            item:SetScript("OnLeave", function()
-                if profileName == activeProfile then
-                    itemText:SetTextColor(themeColor.r, themeColor.g, themeColor.b)
-                else
-                    itemText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-                end
-            end)
-            item:SetScript("OnClick", function()
-                if not InCombatLockdown() and profileName ~= activeProfile then
-                    if CC:SetActiveProfile(profileName) then
-                        CC:ApplyBindings()
-                        CC:RefreshClickCastingUI()
-                        UpdateProfileDropdown()
-                    end
-                elseif InCombatLockdown() then
-                    print("|cffff9900DandersFrames:|r Cannot switch profiles during combat")
-                end
-                profileMenu:Hide()
-            end)
-            
-            yOff = yOff - 18
-        end
-        
-        profileMenu:SetHeight(-yOff + 4)
-        profileMenu:Show()
-    end
-    
-    profileDropdown:SetScript("OnMouseDown", function()
-        if profileMenu:IsShown() then
-            profileMenu:Hide()
-        else
-            ShowProfileMenu()
-        end
-    end)
-    
-    profileDropdown:SetScript("OnEnter", function(self)
-        self:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
-    end)
-    profileDropdown:SetScript("OnLeave", function(self)
-        self:SetBackdropBorderColor(themeColor.r * 0.6, themeColor.g * 0.6, themeColor.b * 0.6, 1)
-    end)
-    
-    profileMenu:SetScript("OnLeave", function(self)
-        C_Timer.After(0.1, function()
-            if not profileDropdown:IsMouseOver() and not profileMenu:IsMouseOver() then
-                profileMenu:Hide()
-            end
-        end)
-    end)
-    
+
     CC.profileDropdown = profileDropdown
-    CC.profileDropText = profileDropText
     CC.UpdateProfileDropdown = UpdateProfileDropdown
     
     -- === ROW 2: Options (Cast on DOWN, Quick Bind, Smart Res, Search) ===
@@ -373,21 +262,7 @@ function CC:CreateClickCastUI(parent)
     -- Cast on down checkbox
     local downCb = CreateFrame("CheckButton", nil, row2, "BackdropTemplate")
     downCb:SetPoint("LEFT", 0, 0)
-    downCb:SetSize(14, 14)
-    downCb:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    downCb:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    downCb:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-    
-    local downCheck = downCb:CreateTexture(nil, "OVERLAY")
-    downCheck:SetTexture("Interface\\Buttons\\WHITE8x8")
-    downCheck:SetVertexColor(themeColor.r, themeColor.g, themeColor.b)
-    downCheck:SetPoint("CENTER")
-    downCheck:SetSize(8, 8)
-    downCb:SetCheckedTexture(downCheck)
+    DF.GUI:StyleCheckButton(downCb, { accent = themeColor })
     
     local downLabel = row2:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     downLabel:SetPoint("LEFT", downCb, "RIGHT", 3, 0)
@@ -399,31 +274,18 @@ function CC:CreateClickCastUI(parent)
         CC:ApplyBindings()
     end)
     downCb:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:AddLine(L["Cast on mouse down"], 1, 1, 1)
-        GameTooltip:AddLine(L["Click-casting on a unit frame fires when you press the mouse button (down) instead of releasing it (up). Applies to mouse clicks on frames only — keyboard binds are unaffected."], 0.7, 0.7, 0.7, true)
-        GameTooltip:Show()
+        DF.GUI:ShowTooltip(self, {
+            title = L["Cast on mouse down"],
+            anchor = "ANCHOR_RIGHT",
+            lines = { L["Click-casting on a unit frame fires when you press the mouse button (down) instead of releasing it (up). Applies to mouse clicks on frames only — keyboard binds are unaffected."] },
+        })
     end)
-    downCb:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    downCb:SetScript("OnLeave", function() DF.GUI:HideTooltip() end)
     
     -- Quick Bind toggle
     local quickBindCb = CreateFrame("CheckButton", nil, row2, "BackdropTemplate")
     quickBindCb:SetPoint("LEFT", downLabel, "RIGHT", 15, 0)
-    quickBindCb:SetSize(14, 14)
-    quickBindCb:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    quickBindCb:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    quickBindCb:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-    
-    local quickBindCheck = quickBindCb:CreateTexture(nil, "OVERLAY")
-    quickBindCheck:SetTexture("Interface\\Buttons\\WHITE8x8")
-    quickBindCheck:SetVertexColor(themeColor.r, themeColor.g, themeColor.b)
-    quickBindCheck:SetPoint("CENTER")
-    quickBindCheck:SetSize(8, 8)
-    quickBindCb:SetCheckedTexture(quickBindCheck)
+    DF.GUI:StyleCheckButton(quickBindCb, { accent = themeColor })
     
     local quickBindLabel = row2:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     quickBindLabel:SetPoint("LEFT", quickBindCb, "RIGHT", 3, 0)
@@ -431,13 +293,16 @@ function CC:CreateClickCastUI(parent)
     quickBindLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
     
     quickBindCb:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText(L["Quick Bind Mode"], 1, 1, 1)
-        GameTooltip:AddLine(L["When enabled: Click spell, press key to bind instantly."], 0.7, 0.7, 0.7)
-        GameTooltip:AddLine(L["When disabled: Click spell to open Binding Editor."], 0.7, 0.7, 0.7)
-        GameTooltip:Show()
+        DF.GUI:ShowTooltip(self, {
+            title = L["Quick Bind Mode"],
+            anchor = "ANCHOR_TOP",
+            lines = {
+                L["When enabled: Click spell, press key to bind instantly."],
+                L["When disabled: Click spell to open Binding Editor."],
+            },
+        })
     end)
-    quickBindCb:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    quickBindCb:SetScript("OnLeave", function() DF.GUI:HideTooltip() end)
     
     quickBindCb:SetScript("OnClick", function(self)
         CC.db.options.quickBindEnabled = self:GetChecked()
@@ -449,167 +314,79 @@ function CC:CreateClickCastUI(parent)
     smartResLabel:SetText(L["Smart Res:"])
     smartResLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
     
-    local smartResDropdown = CreateFrame("Frame", nil, row2, "BackdropTemplate")
+    -- Smart Res options are fixed; what changes is the CURRENT value source
+    -- (CC.profile.options.smartResurrection — the active-profile reference
+    -- swaps when profiles change). The shared builder reads that via customGet
+    -- on every open / UpdateText, so the displayed selection always tracks the
+    -- active profile without rebuilding the (static) option list.
+    local smartResOptions = {
+        disabled = L["Disabled"],
+        normal = L["Res + Mass"],
+        ["normal+combat"] = L["Res + Mass + Combat"],
+        _order = { "disabled", "normal", "normal+combat" },
+    }
+
+    local smartResDropdown = DF.GUI:CreateDropdown(row2, nil, smartResOptions, nil, nil, nil,
+        function()
+            return CC.profile and CC.profile.options and CC.profile.options.smartResurrection or "disabled"
+        end,
+        function(value)
+            if CC.profile and CC.profile.options then
+                CC.profile.options.smartResurrection = value
+            end
+            CC:ApplyBindings()
+        end,
+        { inline = true, accent = CC.ACCENT })
     smartResDropdown:SetPoint("LEFT", smartResLabel, "RIGHT", 4, 0)
     smartResDropdown:SetSize(110, 16)
-    smartResDropdown:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    smartResDropdown:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    smartResDropdown:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-    
-    local smartResText = smartResDropdown:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    smartResText:SetPoint("LEFT", 6, 0)
-    smartResText:SetPoint("RIGHT", -14, 0)
-    smartResText:SetJustifyH("LEFT")
-    smartResText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    smartResText:SetWordWrap(false)
-    
-    local smartResArrow = smartResDropdown:CreateTexture(nil, "OVERLAY")
-    smartResArrow:SetPoint("RIGHT", -4, 0)
-    smartResArrow:SetSize(12, 12)
-    smartResArrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
-    smartResArrow:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    
-    local smartResOptions = {
-        { value = "disabled", text = L["Disabled"] },
-        { value = "normal", text = L["Res + Mass"] },
-        { value = "normal+combat", text = L["Res + Mass + Combat"] },
-    }
-    
+
+    -- External refreshers expect this to repaint the button text only.
     local function UpdateSmartResText()
-        local current = CC.profile and CC.profile.options and CC.profile.options.smartResurrection or "disabled"
-        for _, opt in ipairs(smartResOptions) do
-            if opt.value == current then
-                smartResText:SetText(opt.text)
-                return
-            end
-        end
-        smartResText:SetText(L["Disabled"])
+        smartResDropdown:UpdateText()
     end
-    
-    local smartResMenu = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
-    smartResMenu:SetSize(130, #smartResOptions * 20 + 4)
-    smartResMenu:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    smartResMenu:SetBackdropColor(0.1, 0.1, 0.1, 0.98)
-    smartResMenu:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
-    smartResMenu:SetFrameStrata("FULLSCREEN_DIALOG")
-    smartResMenu:SetFrameLevel(100)
-    smartResMenu:SetClampedToScreen(true)
-    smartResMenu:Hide()
-    
-    for i, opt in ipairs(smartResOptions) do
-        local optBtn = CreateFrame("Button", nil, smartResMenu)
-        optBtn:SetPoint("TOPLEFT", 2, -2 - (i-1) * 20)
-        optBtn:SetSize(126, 20)
-        
-        local optText = optBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-        optText:SetPoint("LEFT", 4, 0)
-        optText:SetText(opt.text)
-        optText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-        
-        optBtn:SetScript("OnEnter", function()
-            optText:SetTextColor(1, 1, 1)
+
+    -- Re-attach the rich Smart Res tooltip. The builder puts its hover scripts
+    -- on the inner button (the container's sole child since dbKey is nil), so
+    -- hook the tooltip there to ride alongside the builder's backdrop hover.
+    local smartResBtn = select(1, smartResDropdown:GetChildren())
+    if smartResBtn then
+        smartResBtn:HookScript("OnEnter", function(self)
+            -- ANCHOR_RIGHT, not TOP: this dropdown sits near the frame top, so a
+            -- tall ANCHOR_TOP tooltip gets clamped down over the dropdown itself.
+            -- Sub-headers use the CC green accent explicitly (color=themeColor)
+            -- rather than the shared accent line, which tracks the mode colour.
+            DF.GUI:ShowTooltip(self, {
+                title = L["Smart Resurrection"],
+                anchor = "ANCHOR_RIGHT",
+                lines = {
+                    L["When using any spell binding on a dead target,"],
+                    L["cast a resurrection spell instead."],
+                    " ",
+                    { text = L["Disabled"] .. ":", color = themeColor },
+                    L["Bindings only cast their assigned spell"],
+                    " ",
+                    { text = L["Res + Mass"] .. ":", color = themeColor },
+                    L["Dead + Out of combat: Cast Mass Res or normal Res"],
+                    " ",
+                    { text = L["Res + Mass + Combat"] .. ":", color = themeColor },
+                    L["Dead + In combat: Cast Battle Res (Rebirth, etc.)"],
+                    L["Dead + Out of combat: Cast Mass Res or normal Res"],
+                },
+            })
         end)
-        optBtn:SetScript("OnLeave", function()
-            optText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-        end)
-        optBtn:SetScript("OnClick", function()
-            if CC.profile and CC.profile.options then
-                CC.profile.options.smartResurrection = opt.value
-            end
-            UpdateSmartResText()
-            smartResMenu:Hide()
-            CC:ApplyBindings()
+        smartResBtn:HookScript("OnLeave", function()
+            DF.GUI:HideTooltip()
         end)
     end
-    
-    smartResDropdown:SetScript("OnMouseDown", function()
-        if smartResMenu:IsShown() then
-            smartResMenu:Hide()
-            if smartResMenu.closeFrame then
-                smartResMenu.closeFrame:Hide()
-            end
-        else
-            UpdateSmartResText()
-            -- Position menu below the dropdown
-            smartResMenu:ClearAllPoints()
-            smartResMenu:SetPoint("TOPLEFT", smartResDropdown, "BOTTOMLEFT", 0, -2)
-            smartResMenu:Show()
-            smartResMenu:Raise()
-            
-            -- Close on any click outside
-            if not smartResMenu.closeFrame then
-                smartResMenu.closeFrame = CreateFrame("Button", nil, UIParent)
-                smartResMenu.closeFrame:SetFrameStrata("FULLSCREEN")
-                smartResMenu.closeFrame:SetScript("OnClick", function()
-                    smartResMenu:Hide()
-                    smartResMenu.closeFrame:Hide()
-                end)
-            end
-            smartResMenu.closeFrame:SetAllPoints(UIParent)
-            smartResMenu.closeFrame:Show()
-        end
-    end)
-    
-    smartResMenu:SetScript("OnHide", function()
-        if smartResMenu.closeFrame then
-            smartResMenu.closeFrame:Hide()
-        end
-    end)
-    
-    smartResDropdown:SetScript("OnEnter", function(self)
-        self:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText(L["Smart Resurrection"], 1, 1, 1)
-        GameTooltip:AddLine("When using any spell binding on a dead target,", 0.7, 0.7, 0.7)
-        GameTooltip:AddLine("cast a resurrection spell instead.", 0.7, 0.7, 0.7)
-        GameTooltip:AddLine(" ")
-        GameTooltip:AddLine(L["Disabled"] .. ":", themeColor.r, themeColor.g, themeColor.b)
-        GameTooltip:AddLine(L["Bindings only cast their assigned spell"], 0.7, 0.7, 0.7)
-        GameTooltip:AddLine(" ")
-        GameTooltip:AddLine(L["Res + Mass"] .. ":", themeColor.r, themeColor.g, themeColor.b)
-        GameTooltip:AddLine(L["Dead + Out of combat: Cast Mass Res or normal Res"], 0.7, 0.7, 0.7)
-        GameTooltip:AddLine(" ")
-        GameTooltip:AddLine(L["Res + Mass + Combat"] .. ":", themeColor.r, themeColor.g, themeColor.b)
-        GameTooltip:AddLine(L["Dead + In combat: Cast Battle Res (Rebirth, etc.)"], 0.7, 0.7, 0.7)
-        GameTooltip:AddLine(L["Dead + Out of combat: Cast Mass Res or normal Res"], 0.7, 0.7, 0.7)
-        GameTooltip:Show()
-    end)
-    smartResDropdown:SetScript("OnLeave", function(self)
-        self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-        GameTooltip:Hide()
-    end)
-    
-    smartResMenu:SetScript("OnLeave", function()
-        C_Timer.After(0.1, function()
-            if not smartResDropdown:IsMouseOver() and not smartResMenu:IsMouseOver() then
-                smartResMenu:Hide()
-            end
-        end)
-    end)
-    
+
     CC.smartResDropdown = smartResDropdown
-    CC.smartResMenu = smartResMenu
     CC.UpdateSmartResText = UpdateSmartResText
     
     -- Search box (right side of row 2)
     local searchBox = CreateFrame("EditBox", nil, row2, "BackdropTemplate")
     searchBox:SetPoint("RIGHT", 0, 0)
     searchBox:SetSize(120, 16)
-    searchBox:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    searchBox:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    searchBox:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
+    DF.GUI:StyleEditBox(searchBox, { skipFont = true })
     DF.GUI:SetSettingsFont(searchBox, 10, "")
     searchBox:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
     searchBox:SetTextInsets(18, 6, 0, 0)
@@ -657,13 +434,10 @@ function CC:CreateClickCastUI(parent)
     leftPanel:SetPoint("TOPLEFT", 0, 0)
     leftPanel:SetPoint("BOTTOMLEFT", 0, 0)
     leftPanel:SetWidth(LEFT_PANEL_WIDTH)
-    leftPanel:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreatePanelBackdrop(leftPanel, {
+        bgColor = DF.GUI.Colors.background, bgAlpha = 0.95,
+        borderColor = {C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.8},
     })
-    leftPanel:SetBackdropColor(C_BACKGROUND.r, C_BACKGROUND.g, C_BACKGROUND.b, 0.95)
-    leftPanel:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.8)
     CC.leftPanel = leftPanel
     CC.bindingsSection = leftPanel  -- Alias for compatibility
     
@@ -723,42 +497,23 @@ function CC:CreateClickCastUI(parent)
     -- Clear All button
     local clearAllBtn = CreateFrame("Button", nil, bindingsHeader, "BackdropTemplate")
     clearAllBtn:SetPoint("RIGHT", -6, 0)
-    clearAllBtn:SetSize(65, 18)
-    clearAllBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    -- Destructive Clear: shared danger tone (red label/icon + red hover) + delete
+    -- icon; tooltip via HookScript so it composes with the styler's hover.
+    DF.GUI:StyleButton(clearAllBtn, {
+        width = 72, height = 18,
+        tone = "danger",
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\delete", size = 12 },
+        text = L["Clear All"],
     })
-    clearAllBtn:SetBackdropColor(0.3, 0.1, 0.1, 0.8)
-    clearAllBtn:SetBackdropBorderColor(0.5, 0.2, 0.2, 0.8)
-    
-    local clearAllIcon = clearAllBtn:CreateTexture(nil, "OVERLAY")
-    clearAllIcon:SetPoint("LEFT", 6, 0)
-    clearAllIcon:SetSize(10, 10)
-    clearAllIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\delete")
-    clearAllIcon:SetVertexColor(0.9, 0.6, 0.6)
-    local clearAllText = clearAllBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    clearAllText:SetPoint("LEFT", clearAllIcon, "RIGHT", 3, 0)
-    clearAllText:SetText(L["Clear"])
-    clearAllText:SetTextColor(0.9, 0.6, 0.6)
-    
-    clearAllBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(0.4, 0.15, 0.15, 1)
-        self:SetBackdropBorderColor(0.7, 0.3, 0.3, 1)
-        clearAllText:SetTextColor(1, 0.7, 0.7)
-        clearAllIcon:SetVertexColor(1, 0.7, 0.7)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine(L["Clear All Bindings"], 1, 0.3, 0.3)
-        GameTooltip:AddLine(L["Remove all bindings from the current profile."], 0.7, 0.7, 0.7, true)
-        GameTooltip:Show()
+    clearAllBtn:HookScript("OnEnter", function(self)
+        DF.GUI:ShowTooltip(self, {
+            title = L["Clear All Bindings"],
+            anchor = "ANCHOR_TOP",
+            tone = "danger",
+            lines = { L["Remove all bindings from the current profile."] },
+        })
     end)
-    clearAllBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(0.3, 0.1, 0.1, 0.8)
-        self:SetBackdropBorderColor(0.5, 0.2, 0.2, 0.8)
-        clearAllText:SetTextColor(0.9, 0.6, 0.6)
-        clearAllIcon:SetVertexColor(0.9, 0.6, 0.6)
-        GameTooltip:Hide()
-    end)
+    clearAllBtn:HookScript("OnLeave", function() DF.GUI:HideTooltip() end)
     clearAllBtn:SetScript("OnClick", function()
         CC:ShowClearAllConfirmation()
     end)
@@ -857,10 +612,8 @@ function CC:CreateClickCastUI(parent)
     selectionHeader:SetPoint("TOPLEFT", 0, 0)
     selectionHeader:SetPoint("TOPRIGHT", 0, 0)
     selectionHeader:SetHeight(60)  -- Two rows: 28 + 28 + spacing
-    selectionHeader:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-    })
-    selectionHeader:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 1)
+    -- Solid panel fill, no border (matches the original bgFile-only backdrop).
+    DF.GUI:CreatePanelBackdrop(selectionHeader, { bgAlpha = 1, border = false })
     selectionHeader:SetFrameLevel(rightPanel:GetFrameLevel() + 1)
     CC.selectionHeader = selectionHeader
     
@@ -869,6 +622,14 @@ function CC:CreateClickCastUI(parent)
     tabsRow:SetPoint("TOPLEFT", 0, 0)
     tabsRow:SetPoint("TOPRIGHT", 0, 0)
     tabsRow:SetHeight(28)
+
+    -- Baseline under the tabs (the active tab's underline sits on it) — matches AD/TD/Pinned.
+    local tabBaseline = tabsRow:CreateTexture(nil, "ARTWORK")
+    tabBaseline:SetTexture("Interface\\Buttons\\WHITE8x8")
+    tabBaseline:SetHeight(1)
+    tabBaseline:SetPoint("BOTTOMLEFT", 0, 0)
+    tabBaseline:SetPoint("BOTTOMRIGHT", 0, 0)
+    tabBaseline:SetColorTexture(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
     
     -- ROW 2: Filters and view controls
     local filterRow = CreateFrame("Frame", nil, selectionHeader)
@@ -880,241 +641,121 @@ function CC:CreateClickCastUI(parent)
     -- Helper to create a tab button
     local function CreateTabButton(parent, text, width)
         local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
-        btn:SetSize(width, 24)
-        btn:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
-        })
-        btn:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-        btn:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
+        -- Shared underline-tab style (CC green accent), matching the Aura/Text
+        -- Designer + Pinned Frames tabs. StyleButton provides :SetActive.
+        DF.GUI:StyleButton(btn, { tab = true, text = text, width = width, height = 28, accent = CC.ACCENT, font = "DFFontHighlight" })
         
-        local btnText = btn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-        btnText:SetPoint("CENTER")
-        btnText:SetText(text)
-        btnText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-        btn.text = btnText
+        -- (label handled by StyleButton)
         
-        btn:SetScript("OnEnter", function(self)
-            if not self.isActive then
-                self:SetBackdropColor(C_ELEMENT.r + 0.05, C_ELEMENT.g + 0.05, C_ELEMENT.b + 0.05, 1)
-            end
-        end)
-        btn:SetScript("OnLeave", function(self)
-            if not self.isActive then
-                self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-            end
-        end)
+        -- (hover handled by StyleButton)
         
-        function btn:SetActive(active)
-            self.isActive = active
-            if active then
-                self:SetBackdropColor(themeColor.r * 0.3, themeColor.g * 0.3, themeColor.b * 0.3, 1)
-                self:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 0.8)
-                self.text:SetTextColor(themeColor.r, themeColor.g, themeColor.b)
-            else
-                self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-                self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-                self.text:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-            end
-        end
+        -- (active state handled by StyleButton tab mode)
         
         return btn
     end
     
-    -- Helper to create a dropdown button
+    -- Helper to create a dropdown button.
+    -- Delegates to the shared DF.GUI:CreateDropdown builder (inline opener,
+    -- CC green accent). Preserves the legacy signature
+    -- (parent, defaultText, width, {{key=,label=},...}, onSelect) and the
+    -- return contract: callers do :Hide()/:SetShown()/:SetPoint()/:SetValue(key).
+    -- Note: this file shadows the global CreateDropdown, so the shared builder
+    -- must be called explicitly as DF.GUI:CreateDropdown.
     local function CreateDropdown(parent, defaultText, width, options, onSelect)
-        local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
-        btn:SetSize(width, 22)
-        btn:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
-        })
-        btn:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-        btn:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-        
-        local btnText = btn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-        btnText:SetPoint("LEFT", 6, 0)
-        btnText:SetPoint("RIGHT", -16, 0)
-        btnText:SetJustifyH("LEFT")
-        btnText:SetText(defaultText)
-        btnText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-        btn.text = btnText
-        
-        local arrow = btn:CreateTexture(nil, "OVERLAY")
-        arrow:SetPoint("RIGHT", -4, 0)
-        arrow:SetSize(12, 12)
-        arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
-        arrow:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-        
-        btn:SetScript("OnEnter", function(self)
-            self:SetBackdropColor(C_ELEMENT.r + 0.05, C_ELEMENT.g + 0.05, C_ELEMENT.b + 0.05, 1)
-        end)
-        btn:SetScript("OnLeave", function(self)
-            self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-        end)
-        
-        -- Create dropdown menu (parented to UIParent for proper z-ordering)
-        local menu = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
-        menu:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
-        })
-        menu:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 1)
-        menu:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
-        menu:SetFrameStrata("FULLSCREEN_DIALOG")
-        menu:SetFrameLevel(100)
-        menu:SetWidth(width)
-        menu:SetClampedToScreen(true)
-        menu:Hide()
-        btn.menu = menu
-        
-        local menuHeight = 4
-        for i, opt in ipairs(options) do
-            local item = CreateFrame("Button", nil, menu)
-            item:SetHeight(20)
-            item:SetPoint("TOPLEFT", 2, -(2 + (i-1) * 20))
-            item:SetPoint("TOPRIGHT", -2, -(2 + (i-1) * 20))
-            
-            local itemText = item:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-            itemText:SetPoint("LEFT", 4, 0)
-            itemText:SetText(opt.label)
-            itemText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-            
-            item:SetScript("OnEnter", function(self)
-                itemText:SetTextColor(themeColor.r, themeColor.g, themeColor.b)
-            end)
-            item:SetScript("OnLeave", function(self)
-                itemText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-            end)
-            item:SetScript("OnClick", function()
-                btnText:SetText(opt.label)
-                menu:Hide()
-                if onSelect then onSelect(opt.key) end
-            end)
-            
-            menuHeight = menuHeight + 20
+        -- Map the {key,label} array into the builder's value->display table
+        -- plus an explicit _order so menu order matches the source array.
+        local builderOptions = { _order = {} }
+        for _, opt in ipairs(options) do
+            builderOptions[opt.key] = opt.label
+            table.insert(builderOptions._order, opt.key)
         end
-        menu:SetHeight(menuHeight)
-        
-        btn:SetScript("OnClick", function()
-            if menu:IsShown() then
-                menu:Hide()
-                if menu.closeFrame then
-                    menu.closeFrame:Hide()
-                end
-            else
-                -- Position menu below the button
-                menu:ClearAllPoints()
-                menu:SetPoint("TOPLEFT", btn, "BOTTOMLEFT", 0, -2)
-                menu:Show()
-                menu:Raise()
-                
-                -- Close on any click outside
-                if not menu.closeFrame then
-                    menu.closeFrame = CreateFrame("Button", nil, UIParent)
-                    menu.closeFrame:SetFrameStrata("FULLSCREEN")
-                    menu.closeFrame:SetScript("OnClick", function()
-                        menu:Hide()
-                        menu.closeFrame:Hide()
-                    end)
-                end
-                menu.closeFrame:SetAllPoints(UIParent)
-                menu.closeFrame:Show()
-            end
-        end)
-        
-        -- Close menu when it hides
-        menu:SetScript("OnHide", function()
-            if menu.closeFrame then
-                menu.closeFrame:Hide()
-            end
-        end)
-        
-        btn.SetValue = function(self, key)
-            for _, opt in ipairs(options) do
-                if opt.key == key then
-                    btnText:SetText(opt.label)
-                    break
-                end
-            end
+
+        -- Current selection lives locally; seed from the option whose label
+        -- matches defaultText, else the first option. customGet/customSet keep
+        -- the button text + selected-item highlight in sync and fire onSelect.
+        local currentKey = options[1] and options[1].key
+        for _, opt in ipairs(options) do
+            if opt.label == defaultText then currentKey = opt.key break end
         end
-        
-        return btn
+
+        local container = DF.GUI:CreateDropdown(parent, nil, builderOptions, nil, nil, nil,
+            function() return currentKey end,
+            function(key)
+                currentKey = key
+                if onSelect then onSelect(key) end
+            end,
+            { inline = true, accent = CC.ACCENT })
+
+        container:SetWidth(width)
+
+        -- Legacy contract: callers (e.g. BindingEditor) call dropdown:SetValue(key)
+        -- to set the selection without firing onSelect.
+        container.SetValue = function(_, key)
+            currentKey = key
+            container:UpdateText()
+        end
+
+        return container
     end
     
     -- Helper to create view toggle buttons
     local function CreateViewButton(parent, tooltip)
         local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
-        btn:SetSize(22, 22)
-        btn:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
-        })
-        btn:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-        btn:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
+        -- Shared styler: backdrop + accent-wash hover + the active/selected look.
+        -- Icon-only (no text=); the icon textures/text are added by callers.
+        DF.GUI:StyleButton(btn, { width = 22, height = 22, accent = CC.ACCENT })
         btn.iconLines = {}
-        
-        btn:SetScript("OnEnter", function(self)
-            if not self.isActive then
-                self:SetBackdropColor(C_ELEMENT.r + 0.08, C_ELEMENT.g + 0.08, C_ELEMENT.b + 0.08, 1)
-            end
-            if tooltip then
-                GameTooltip:SetOwner(self, "ANCHOR_TOP")
-                GameTooltip:SetText(tooltip, 1, 1, 1)
-                GameTooltip:Show()
-            end
-        end)
-        btn:SetScript("OnLeave", function(self)
-            if not self.isActive then
-                self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-            end
-            GameTooltip:Hide()
-        end)
-        
+
+        -- Tooltip rides on top of the styler's own hover scripts.
+        if tooltip then
+            btn:HookScript("OnEnter", function(self)
+                DF.GUI:ShowTooltip(self, { title = tooltip, anchor = "ANCHOR_TOP" })
+            end)
+            btn:HookScript("OnLeave", function()
+                DF.GUI:HideTooltip()
+            end)
+        end
+
+        -- Route the selected state through the styler's SetActive (accent fill +
+        -- toned accent border), then tint the icon lines / AZ text to match.
+        local styleSetActive = btn.SetActive
         function btn:SetActive(active)
             self.isActive = active
+            styleSetActive(self, active)
             if active then
-                self:SetBackdropColor(themeColor.r * 0.3, themeColor.g * 0.3, themeColor.b * 0.3, 1)
-                self:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 0.8)
                 for _, line in ipairs(self.iconLines) do
                     line:SetColorTexture(themeColor.r, themeColor.g, themeColor.b, 1)
                 end
                 if self.azText then self.azText:SetTextColor(themeColor.r, themeColor.g, themeColor.b) end
             else
-                self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-                self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
                 for _, line in ipairs(self.iconLines) do
                     line:SetColorTexture(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 1)
                 end
                 if self.azText then self.azText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b) end
             end
         end
-        
+
         return btn
     end
     
     -- Create tabs (in tabs row)
-    local spellsTab = CreateTabButton(tabsRow, L["Spells"], 55)
-    spellsTab:SetPoint("LEFT", 4, 0)
+    local spellsTab = CreateTabButton(tabsRow, L["Spells"], 58)
+    spellsTab:SetPoint("BOTTOMLEFT", 4, 0)
     spellsTab:SetActive(true)
     CC.spellsTab = spellsTab
     
-    local macrosTab = CreateTabButton(tabsRow, L["Macros"], 55)
-    macrosTab:SetPoint("LEFT", spellsTab, "RIGHT", 2, 0)
+    local macrosTab = CreateTabButton(tabsRow, L["Macros"], 60)
+    macrosTab:SetPoint("BOTTOMLEFT", spellsTab, "BOTTOMRIGHT", 4, 0)
     macrosTab:SetActive(false)
     CC.macrosTab = macrosTab
     
-    local itemsTab = CreateTabButton(tabsRow, L["Items"], 50)
-    itemsTab:SetPoint("LEFT", macrosTab, "RIGHT", 2, 0)
+    local itemsTab = CreateTabButton(tabsRow, L["Items"], 52)
+    itemsTab:SetPoint("BOTTOMLEFT", macrosTab, "BOTTOMRIGHT", 4, 0)
     itemsTab:SetActive(false)
     CC.itemsTab = itemsTab
     
-    local profilesTab = CreateTabButton(tabsRow, L["Profiles"], 60)
-    profilesTab:SetPoint("LEFT", itemsTab, "RIGHT", 2, 0)
+    local profilesTab = CreateTabButton(tabsRow, L["Profiles"], 66)
+    profilesTab:SetPoint("BOTTOMLEFT", itemsTab, "BOTTOMRIGHT", 4, 0)
     profilesTab:SetActive(false)
     CC.profilesTab = profilesTab
     
@@ -1132,36 +773,19 @@ function CC:CreateClickCastUI(parent)
         CC.selectedMacroSource = key
         CC:RefreshSpellGrid()
     end)
-    macroSourceDropdown:SetPoint("LEFT", 4, 0)
     macroSourceDropdown:Hide()
     CC.macroSourceDropdown = macroSourceDropdown
     
     -- New Macro button (green, prominent)
     local newMacroBtn = CreateFrame("Button", nil, filterRow, "BackdropTemplate")
-    newMacroBtn:SetSize(55, 20)
-    newMacroBtn:SetPoint("LEFT", macroSourceDropdown, "RIGHT", 8, 0)
-    newMacroBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    -- Green primary CTA: shared styler owns fill/border/hover + the leading icon
+    -- and centred label. Force white icon/label to match the original.
+    DF.GUI:StyleButton(newMacroBtn, {
+        width = 55, height = 20, primary = true, accent = CC.ACCENT,
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add", size = 12, color = { r = 1, g = 1, b = 1 } },
+        text = L["New"],
     })
-    newMacroBtn:SetBackdropColor(themeColor.r * 0.3, themeColor.g * 0.3, themeColor.b * 0.3, 1)
-    newMacroBtn:SetBackdropBorderColor(themeColor.r * 0.6, themeColor.g * 0.6, themeColor.b * 0.6, 1)
-    local newMacroIcon = newMacroBtn:CreateTexture(nil, "OVERLAY")
-    newMacroIcon:SetPoint("LEFT", 6, 0)
-    newMacroIcon:SetSize(12, 12)
-    newMacroIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\add")
-    newMacroIcon:SetVertexColor(1, 1, 1)
-    local newMacroBtnText = newMacroBtn:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
-    newMacroBtnText:SetPoint("LEFT", newMacroIcon, "RIGHT", 3, 0)
-    newMacroBtnText:SetText(L["New"])
-    newMacroBtnText:SetTextColor(1, 1, 1)
-    newMacroBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(themeColor.r * 0.5, themeColor.g * 0.5, themeColor.b * 0.5, 1)
-    end)
-    newMacroBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(themeColor.r * 0.3, themeColor.g * 0.3, themeColor.b * 0.3, 1)
-    end)
+    newMacroBtn.Text:SetTextColor(1, 1, 1)
     newMacroBtn:SetScript("OnClick", function()
         CC:ShowMacroEditorDialog()
     end)
@@ -1170,30 +794,13 @@ function CC:CreateClickCastUI(parent)
     
     -- Import button
     local importMacroBtn = CreateFrame("Button", nil, filterRow, "BackdropTemplate")
-    importMacroBtn:SetSize(60, 20)
-    importMacroBtn:SetPoint("LEFT", newMacroBtn, "RIGHT", 4, 0)
-    importMacroBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    -- Shared styler owns fill/border/hover + the leading icon and centred label
+    -- (neutral C_TEXT icon/label is the styler default).
+    DF.GUI:StyleButton(importMacroBtn, {
+        width = 60, height = 20, accent = CC.ACCENT,
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\download", size = 12, color = C_TEXT },
+        text = L["Import"],
     })
-    importMacroBtn:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    importMacroBtn:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-    local importMacroIcon = importMacroBtn:CreateTexture(nil, "OVERLAY")
-    importMacroIcon:SetPoint("LEFT", 6, 0)
-    importMacroIcon:SetSize(12, 12)
-    importMacroIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\download")
-    importMacroIcon:SetVertexColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    local importMacroBtnText = importMacroBtn:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
-    importMacroBtnText:SetPoint("LEFT", importMacroIcon, "RIGHT", 3, 0)
-    importMacroBtnText:SetText(L["Import"])
-    importMacroBtnText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    importMacroBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
-    end)
-    importMacroBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-    end)
     importMacroBtn:SetScript("OnClick", function()
         CC:ShowImportMacroDialog()
     end)
@@ -1202,34 +809,21 @@ function CC:CreateClickCastUI(parent)
     
     -- Quick Macro button
     local quickMacroBtn = CreateFrame("Button", nil, filterRow, "BackdropTemplate")
-    quickMacroBtn:SetSize(62, 20)
-    quickMacroBtn:SetPoint("LEFT", importMacroBtn, "RIGHT", 4, 0)
-    quickMacroBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    -- Shared styler owns fill/border/hover + the leading icon and centred label.
+    DF.GUI:StyleButton(quickMacroBtn, {
+        width = 86, height = 20, accent = CC.ACCENT,
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\edit", size = 12, color = C_TEXT },
+        text = L["Quick Macro"],
     })
-    quickMacroBtn:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    quickMacroBtn:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-    local quickMacroIcon = quickMacroBtn:CreateTexture(nil, "OVERLAY")
-    quickMacroIcon:SetPoint("LEFT", 6, 0)
-    quickMacroIcon:SetSize(12, 12)
-    quickMacroIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\edit")
-    quickMacroIcon:SetVertexColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    local quickMacroBtnText = quickMacroBtn:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
-    quickMacroBtnText:SetPoint("LEFT", quickMacroIcon, "RIGHT", 3, 0)
-    quickMacroBtnText:SetText(L["Quick Macro"])
-    quickMacroBtnText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    quickMacroBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText(L["Quick Macro"], 1, 1, 1)
-        GameTooltip:AddLine("Create a simple macro without opening the full editor.", 0.7, 0.7, 0.7)
-        GameTooltip:Show()
+    quickMacroBtn:HookScript("OnEnter", function(self)
+        DF.GUI:ShowTooltip(self, {
+            title = L["Quick Macro"],
+            anchor = "ANCHOR_TOP",
+            lines = { L["Create a simple macro without opening the full editor."] },
+        })
     end)
-    quickMacroBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-        GameTooltip:Hide()
+    quickMacroBtn:HookScript("OnLeave", function(self)
+        DF.GUI:HideTooltip()
     end)
     quickMacroBtn:SetScript("OnClick", function()
         CC:ShowQuickMacroDialog()
@@ -1239,7 +833,6 @@ function CC:CreateClickCastUI(parent)
     
     -- Macro hint (after buttons)
     local macroHint = filterRow:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    macroHint:SetPoint("LEFT", quickMacroBtn, "RIGHT", 12, 0)
     macroHint:SetText(L["Click macro to bind"])
     macroHint:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     macroHint:Hide()
@@ -1264,8 +857,8 @@ function CC:CreateClickCastUI(parent)
     -- Show dropdown
     local showDropdown = CreateDropdown(filterRow, L["All"], 70, {
         {key = "all", label = L["All"]},
-        {key = "helpful", label = "Helpful"},
-        {key = "harmful", label = "Harmful"},
+        {key = "helpful", label = L["Helpful"]},
+        {key = "harmful", label = L["Harmful"]},
     }, function(key)
         CC.selectedSpellType = key
         CC:RefreshSpellGrid()
@@ -1436,8 +1029,14 @@ function CC:CreateClickCastUI(parent)
     showDropdown:SetPoint("RIGHT", bindHint, "LEFT", -8, 0)
     showLabel:SetPoint("RIGHT", showDropdown, "LEFT", -4, 0)
     itemsHint:SetPoint("RIGHT", listViewBtn, "LEFT", -15, 0)
-    
-    -- Macro controls are already positioned from LEFT inline above
+
+    -- Macro controls: right-aligned to match the Spells/Items tabs. Anchored
+    -- here (after the view buttons exist) and chained leftward from the hint.
+    macroHint:SetPoint("RIGHT", listViewBtn, "LEFT", -15, 0)
+    quickMacroBtn:SetPoint("RIGHT", macroHint, "LEFT", -12, 0)
+    importMacroBtn:SetPoint("RIGHT", quickMacroBtn, "LEFT", -4, 0)
+    newMacroBtn:SetPoint("RIGHT", importMacroBtn, "LEFT", -4, 0)
+    macroSourceDropdown:SetPoint("RIGHT", newMacroBtn, "LEFT", -8, 0)
     
     -- Load saved preferences
     CC.viewLayout = CC.db.options.viewLayout or "grid"
@@ -1449,13 +1048,10 @@ function CC:CreateClickCastUI(parent)
     local gridContainer = CreateFrame("Frame", nil, selectionSection, "BackdropTemplate")
     gridContainer:SetPoint("TOPLEFT", selectionHeader, "BOTTOMLEFT", 0, -2)
     gridContainer:SetPoint("BOTTOMRIGHT", 0, 0)
-    gridContainer:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreatePanelBackdrop(gridContainer, {
+        bgColor = DF.GUI.Colors.background, bgAlpha = 0.5,
+        borderColor = {C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5},
     })
-    gridContainer:SetBackdropColor(C_BACKGROUND.r, C_BACKGROUND.g, C_BACKGROUND.b, 0.5)
-    gridContainer:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
     CC.gridContainer = gridContainer
     
     -- Scroll frame for spell grid
@@ -1519,13 +1115,10 @@ function CC:CreateClickCastUI(parent)
     local profilesPanel = CreateFrame("Frame", nil, selectionSection, "BackdropTemplate")
     profilesPanel:SetPoint("TOPLEFT", selectionHeader, "BOTTOMLEFT", 0, -2)
     profilesPanel:SetPoint("BOTTOMRIGHT", 0, 0)
-    profilesPanel:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreatePanelBackdrop(profilesPanel, {
+        bgColor = DF.GUI.Colors.background, bgAlpha = 0.5,
+        borderColor = {C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5},
     })
-    profilesPanel:SetBackdropColor(C_BACKGROUND.r, C_BACKGROUND.g, C_BACKGROUND.b, 0.5)
-    profilesPanel:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
     profilesPanel:Hide()
     CC.profilesPanel = profilesPanel
     
@@ -1803,11 +1396,9 @@ end
 function CC:CreateKeybindPopup()
     if self.keybindPopup then return end
     
-    local themeColor = {r = 0.2, g = 0.8, b = 0.4}
-    local C_BACKGROUND = {r = 0.08, g = 0.08, b = 0.08}
-    local C_ELEMENT = {r = 0.18, g = 0.18, b = 0.18}
-    local C_BORDER = {r = 0.25, g = 0.25, b = 0.25}
-    
+    local themeColor = CC.ACCENT
+    local C_BACKGROUND = DF.GUI.Colors.background  -- shared neutral (identical RGB)
+
     -- Global capture frame (invisible, captures input anywhere on screen)
     local captureFrame = CreateFrame("Frame", "DFKeybindCapture", UIParent)
     captureFrame:SetFrameStrata("FULLSCREEN_DIALOG")
@@ -1888,8 +1479,8 @@ function CC:CreateKeybindPopup()
     local isMac = IsMacClient and IsMacClient()
     local macWarning = popup:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     macWarning:SetPoint("TOP", instructions, "BOTTOM", 0, -4)
-    macWarning:SetText("|cffff9900" .. L["Note: Cmd + Left Click unavailable on Mac"] .. "|r")
-    macWarning:SetTextColor(0.9, 0.6, 0.2)
+    macWarning:SetText("|c" .. DF.GUI:ToneHex("caution") .. L["Note"] .. ":|r " .. L["Cmd + Left Click unavailable on Mac"])
+    macWarning:SetTextColor(0.6, 0.6, 0.6)
     if isMac then
         macWarning:Show()
     else
@@ -1905,30 +1496,12 @@ function CC:CreateKeybindPopup()
     
     -- Cancel button - create as separate frame at highest strata to avoid capture frame blocking
     local cancelBtn = CreateFrame("Button", "DFKeybindCancelBtn", UIParent, "BackdropTemplate")
-    cancelBtn:SetSize(80, 24)
     cancelBtn:SetFrameStrata("TOOLTIP")  -- Highest strata, above FULLSCREEN_DIALOG
     cancelBtn:SetFrameLevel(9999)  -- Very high frame level
     cancelBtn:EnableMouse(true)  -- Ensure mouse is enabled
-    cancelBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    cancelBtn:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    cancelBtn:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
+    DF.GUI:StyleButton(cancelBtn, { width = 80, height = 24, text = L["Cancel"], accent = CC.ACCENT })
     cancelBtn:Hide()
-    
-    local cancelText = cancelBtn:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    cancelText:SetPoint("CENTER")
-    cancelText:SetText(L["Cancel"])
-    cancelText:SetTextColor(0.9, 0.9, 0.9)
-    
-    cancelBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
-    end)
-    cancelBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
-    end)
+
     cancelBtn:SetScript("OnClick", function(self)
         CC:HideKeybindPopup()
     end)

@@ -21,12 +21,19 @@ local CreateFrame = CreateFrame
 local L = DF.L
 
 -- sourceKey -> { label, tag (Source column value), getter method name }
-local SOURCES = {
-    group   = { label = L["Group"],   tag = "Group",  get = "GetGroupCandidates" },
-    guild   = { label = L["Guild"],   tag = "Guild",  get = "GetGuildCandidates" },
-    friends = { label = L["Friends"], tag = "Friend", get = "GetFriendCandidates" },
-    bnet    = { label = L["B.net"],   tag = "B.net",  get = "GetBnetCandidates", bnet = true },
-}
+-- Labels read L["..."]; build them in a registered refresh fn so they pick up
+-- the active locale (the overlay is applied after this file's scope runs).
+local SOURCES = {}
+local function RefreshLocaleStrings()
+    SOURCES = {
+        group   = { label = L["Group"],   tag = "Group",  get = "GetGroupCandidates" },
+        guild   = { label = L["Guild"],   tag = "Guild",  get = "GetGuildCandidates" },
+        friends = { label = L["Friends"], tag = "Friend", get = "GetFriendCandidates" },
+        bnet    = { label = L["B.net"],   tag = "B.net",  get = "GetBnetCandidates", bnet = true },
+    }
+end
+RefreshLocaleStrings()
+DF:RegisterLocaleRefresh(RefreshLocaleStrings)
 
 local picker  -- single reusable frame, built on first use
 
@@ -156,9 +163,7 @@ local function buildPicker()
         r.favTex:SetAtlas("PetJournal-FavoritesIcon")
         r.fav:SetScript("OnClick", function() if r.DoFav then r.DoFav() end end)
         r.fav:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText(L["Favourite"])
-            GameTooltip:Show()
+            GUI:ShowTooltip(self, { title = L["Favourite"] })
         end)
         r.fav:SetScript("OnLeave", function() GameTooltip:Hide() end)
 

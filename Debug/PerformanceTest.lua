@@ -38,9 +38,9 @@ local frame = nil
 local allCheckboxes = {}
 
 local function CreateCheckbox(parent, label, key, x, yOffset)
-    local cb = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
+    local cb = CreateFrame("CheckButton", nil, parent, "BackdropTemplate")
     cb:SetPoint("TOPLEFT", parent, "TOPLEFT", x, yOffset)
-    cb:SetSize(24, 24)
+    DF.GUI:StyleCheckButton(cb)
     cb:SetChecked(DF.PerfTest[key])
     cb.key = key  -- Store key for OnShow refresh
     

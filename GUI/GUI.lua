@@ -17,6 +17,22 @@ local C_HOVER      = {r = 0.22, g = 0.22, b = 0.22, a = 1}
 local C_TEXT       = {r = 0.9, g = 0.9, b = 0.9, a = 1}
 local C_TEXT_DIM   = {r = 0.6, g = 0.6, b = 0.6, a = 1}
 
+-- Exported palette: other files should theme against these shared tables instead
+-- of re-declaring private copies or hardcoding the raw numbers. These are the
+-- SAME table references as the locals above. For the mode-aware accent, use
+-- GUI.GetThemeColor() (returns party purple or raid orange).
+GUI.Colors = {
+    background = C_BACKGROUND,
+    panel      = C_PANEL,
+    element    = C_ELEMENT,
+    border     = C_BORDER,
+    accent     = C_ACCENT,   -- party purple
+    raid       = C_RAID,     -- raid orange
+    hover      = C_HOVER,
+    text       = C_TEXT,
+    textDim    = C_TEXT_DIM,
+}
+
 DF.SectionRegistry = DF.SectionRegistry or {}
 
 -- Track selected mode
@@ -730,13 +746,23 @@ function GUI:CreateSettingsGroup(parent, width, opts)
         local db = DF.db[GUI.SelectedMode]
         if not db then return end
 
-        for _, entry in ipairs(self.groupChildren) do
+        -- Group-level grey-out: set self.disableChildrenOn = function(db) ... end to
+        -- grey EVERY child when it returns true, EXCEPT the header and any widget
+        -- flagged widget.keepEnabled (the feature's own Enable toggle). Saves putting a
+        -- disableOn on every control; composes with per-widget disableOn (a child is
+        -- disabled if either says so). CreateCheckbox auto-calls RefreshStates on
+        -- toggle, so the grey state updates live.
+        local hasGroupGate = self.disableChildrenOn ~= nil
+        local groupOff = hasGroupGate and self.disableChildrenOn(db) or false
+
+        for i, entry in ipairs(self.groupChildren) do
             local widget = entry.widget
-            if widget.disableOn then
-                local shouldDisable = widget.disableOn(db)
-                if widget.SetEnabled then
-                    widget:SetEnabled(not shouldDisable)
+            if widget.SetEnabled and (widget.disableOn or hasGroupGate) then
+                local shouldDisable = (widget.disableOn and widget.disableOn(db)) or false
+                if groupOff and i > 1 and not widget.keepEnabled then
+                    shouldDisable = true
                 end
+                widget:SetEnabled(not shouldDisable)
             end
             if widget.refreshContent and widget:IsShown() then
                 widget:refreshContent(db)
@@ -773,68 +799,30 @@ function GUI:CreateLabel(parent, text, width, color)
     return frame
 end
 
--- Themed info callout: neutral dark box with a theme-color border and a label
--- composed of a bold title prefix + body text. Used for settings explanations
--- that benefit from visual prominence without the red "warning" styling.
--- SetContent(title, body) updates both parts; SetText(text) remains available
--- for plain single-string use.
-function GUI:CreateInfoCallout(parent, width, height)
-    local frame = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    frame:SetSize(width or 560, height or 60)
-    frame:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-
-    local applyTheme = function()
-        local c = GetThemeColor()
-        -- Neutral element background with the theme colour only on the border
-        -- and (via SetContent below) on the bolded title prefix. Keeps the box
-        -- from looking like a big coloured panel.
-        frame:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 0.75)
-        frame:SetBackdropBorderColor(c.r, c.g, c.b, 0.7)
+-- CreateNote: a lightweight LEVELLED note (NO box — that is CreateInfoBanner's
+-- job) for an inline caveat/tip attached to a field or section. It is the middle
+-- tier between a plain CreateLabel and a full banner.
+--   opts.tone    info | caution | danger | success — tints the note from the
+--                SAME palette as the banners (via ToneHex), so notes and banners
+--                speak one colour language. Omit for a neutral dim note.
+--   opts.prefix  optional lead word ("Note", "Warning", "Recommendation") shown
+--                in the tone colour, followed by ": " and the body in dim text.
+--   opts.width   wrap width.
+-- Returns a CreateLabel frame, so it is a drop-in anywhere a label goes.
+function GUI:CreateNote(parent, text, opts)
+    opts = opts or {}
+    local str
+    if opts.tone and opts.prefix then
+        -- Route the prefix through L so "Note"/"Tip"/etc. are localizable (the
+        -- locale metatable returns the key unchanged when a locale lacks it).
+        local prefix = (L and L[opts.prefix]) or opts.prefix
+        str = "|c" .. self:ToneHex(opts.tone) .. prefix .. ":|r " .. text
+    elseif opts.tone then
+        str = "|c" .. self:ToneHex(opts.tone) .. text .. "|r"
+    else
+        str = text
     end
-    applyTheme()
-
-    local lbl = frame:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    lbl:SetPoint("TOPLEFT", 10, -10)
-    lbl:SetPoint("BOTTOMRIGHT", -10, 10)
-    lbl:SetJustifyH("LEFT")
-    lbl:SetJustifyV("TOP")
-    lbl:SetWordWrap(true)
-    lbl:SetNonSpaceWrap(true)
-    lbl:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-
-    local currentTitle, currentBody = nil, ""
-    local function render()
-        if currentTitle and currentTitle ~= "" then
-            local c = GetThemeColor()
-            local hex = string.format("ff%02x%02x%02x",
-                math.floor(c.r * 255), math.floor(c.g * 255), math.floor(c.b * 255))
-            lbl:SetText("|c" .. hex .. currentTitle .. ":|r " .. (currentBody or ""))
-        else
-            lbl:SetText(currentBody or "")
-        end
-    end
-
-    frame.SetContent = function(self, title, body)
-        currentTitle, currentBody = title, body
-        render()
-    end
-    frame.SetText = function(self, text)
-        currentTitle, currentBody = nil, text
-        render()
-    end
-
-    frame.UpdateTheme = function()
-        applyTheme()
-        render()
-    end
-    if not parent.ThemeListeners then parent.ThemeListeners = {} end
-    table.insert(parent.ThemeListeners, frame)
-
-    return frame
+    return self:CreateLabel(parent, str, opts.width)
 end
 
 -- Segmented button group: a row of mutually-exclusive buttons, one selected at
@@ -919,23 +907,10 @@ function GUI:CreateSegmentedButtonGroup(parent, options, dbTable, dbKey, callbac
 
     local function Refresh()
         local currentVal = dbTable and dbTable[dbKey]
-        local theme = GetThemeColor()
         for _, btn in ipairs(buttons) do
             local selected = (btn.value == currentVal)
             btn.selected = selected
-            if selected then
-                -- Border-only selection: same backdrop as unselected, themed
-                -- border, themed label. Subtle but unambiguous.
-                btn:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-                btn:SetBackdropBorderColor(theme.r, theme.g, theme.b, 1)
-                if btn.Label then btn.Label:SetTextColor(theme.r, theme.g, theme.b, 1) end
-                if btn.Subtitle then btn.Subtitle:SetTextColor(theme.r * 0.85, theme.g * 0.85, theme.b * 0.95, 1) end
-            else
-                btn:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-                btn:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.6)
-                if btn.Label then btn.Label:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b, 1) end
-                if btn.Subtitle then btn.Subtitle:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 1) end
-            end
+            btn:SetActive(selected)  -- shared toggle look (accent border + fill)
         end
     end
     container.Refresh = Refresh
@@ -948,18 +923,21 @@ function GUI:CreateSegmentedButtonGroup(parent, options, dbTable, dbKey, callbac
         btn:SetHeight(btnHeight)
         -- Width and position set by Relayout() below (called at end of setup
         -- and on every OnSizeChanged).
-        CreateElementBackdrop(btn)
+        -- Shared button styling: hover wash + SetActive() selection state.
+        GUI:StyleButton(btn)
 
         btn.value = opt.value
 
         btn.Label = btn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
         btn.Label:SetPoint("TOP", 0, -5)
         btn.Label:SetText(opt.label or "")
+        btn.Label:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
 
         if opt.subtitle and opt.subtitle ~= "" then
             btn.Subtitle = btn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
             btn.Subtitle:SetPoint("BOTTOM", 0, 5)
             btn.Subtitle:SetText(opt.subtitle)
+            btn.Subtitle:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
             -- Nudge subtitle down by ~1 pt for a clearer visual hierarchy.
             local fPath, fSize, fFlags = btn.Subtitle:GetFont()
             if fPath and fSize and fSize > 9 then
@@ -967,14 +945,6 @@ function GUI:CreateSegmentedButtonGroup(parent, options, dbTable, dbKey, callbac
             end
         end
 
-        btn:SetScript("OnEnter", function(self)
-            if not self.selected then
-                self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
-            end
-        end)
-        btn:SetScript("OnLeave", function(self)
-            Refresh()
-        end)
         btn:SetScript("OnClick", function(self)
             if dbTable[dbKey] == self.value then return end
             dbTable[dbKey] = self.value
@@ -996,40 +966,17 @@ function GUI:CreateSegmentedButtonGroup(parent, options, dbTable, dbKey, callbac
     return container
 end
 
-function GUI:CreateWarningBox(parent, text, width, height)
-    local frame = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    frame:SetSize(width or 280, height or 70)
-    frame:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    frame:SetBackdropColor(0.4, 0.1, 0.1, 0.7)  -- Dark red background
-    frame:SetBackdropBorderColor(0.8, 0.2, 0.2, 1)  -- Red border
-    
-    local lbl = frame:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    lbl:SetPoint("TOPLEFT", 8, -8)
-    lbl:SetPoint("BOTTOMRIGHT", -8, 8)
-    lbl:SetJustifyH("LEFT")
-    lbl:SetJustifyV("TOP")
-    lbl:SetWordWrap(true)
-    lbl:SetNonSpaceWrap(true)
-    lbl:SetText(text)
-    lbl:SetTextColor(1, 0.8, 0.8, 1)  -- Light red/pink text
-    
-    frame.SetText = function(self, newText) lbl:SetText(newText) end
-    return frame
-end
-
 -- ============================================================
 -- CreateInfoBanner
 -- ------------------------------------------------------------
 -- A self-resizing banner with an icon, body text, and a "tone"
--- (info / warning / caution / danger / success) that controls
--- background, border, default text colour, and default icon.
+-- (info / caution / danger / success) that controls background,
+-- border, default text colour, and default icon. ("warning" is a
+-- legacy alias of "caution".) Do NOT pass fontTemplate — banners
+-- share one font on purpose; only the tone should vary.
 --
 -- Usage:
---   local banner = GUI:CreateInfoBanner(parent, { tone = "warning", text = "..." })
+--   local banner = GUI:CreateInfoBanner(parent, { tone = "caution", text = "..." })
 --   Add(banner, banner.layoutHeight, "both")
 --
 -- Methods on the returned frame:
@@ -1045,38 +992,66 @@ end
 -- or shrinks the banner to fit. The host page is re-laid out so widgets
 -- below the banner reposition.
 -- ============================================================
+-- Each tone carries FOUR colour roles so all three consumers (banners,
+-- inline ToneHex text, and tooltips) stay in sync:
+--   bg / border / textColor / icon+iconColor  drive the BANNER box itself.
+--   accent                                     is the vivid emphasis colour
+--     used for INLINE text (ToneHex) and tooltip titles, read against the
+--     dark GUI background rather than the banner's own tinted bg. It is a
+--     SEPARATE role from iconColor: e.g. the danger icon is a light warm so
+--     the triangle pops on the orange banner, but inline "Warning" text must
+--     be a real red to out-rank a caution — deriving one from the other
+--     (the original bug) made inline danger paler than caution.
 local INFO_BANNER_TONES = {
     info = {
         bg = {0.15, 0.18, 0.28, 1},
         useThemeBorder = true, borderAlpha = 0.5,
         icon = "info",
         textColor = {0.85, 0.85, 0.85},
+        accent = {0.6, 0.8, 1},          -- light blue
     },
-    warning = {
-        bg = {0.25, 0.22, 0.10, 1},
-        border = {0.6, 0.55, 0.2, 0.6},
-        icon = "warning",
-        textColor = {1, 0.82, 0},
-    },
+    -- NOTE: "warning" was merged into "caution" (they were near-duplicate golds).
+    -- SetTone("warning") still resolves via the alias below for safety.
     caution = {
         bg = {0.5, 0.45, 0.1, 0.9},
         border = {0.7, 0.6, 0.1, 1},
         icon = "warning", iconColor = {1, 0.9, 0.3},
         textColor = {1, 0.95, 0.7},
+        accent = {1, 0.82, 0},           -- gold
     },
     danger = {
         bg = {0.6, 0.3, 0.1, 0.9},
         border = {0.8, 0.4, 0.1, 1},
-        icon = "warning", iconColor = {1, 0.6, 0.2},
+        -- icon kept a light warm (not the mid-orange bg hue) so the triangle pops
+        icon = "warning", iconColor = {1, 0.9, 0.72},
         textColor = {1, 0.85, 0.7},
+        accent = {1, 0.27, 0.27},        -- real red (destructive), NOT the pale icon warm
     },
     success = {
         bg = {0.1, 0.4, 0.2, 0.9},
         border = {0.2, 0.6, 0.3, 1},
         icon = "check", iconColor = {0.3, 1, 0.5},
         textColor = {0.7, 1, 0.8},
+        accent = {0.4, 0.85, 0.5},       -- green
     },
 }
+-- Legacy alias: "warning" was merged into "caution" (near-duplicate golds).
+INFO_BANNER_TONES.warning = INFO_BANNER_TONES.caution
+
+-- Hex accent ("ffRRGGBB", for inline |c...|r escapes) matching a banner tone, so
+-- inline caveat text (e.g. a warning word in a subtitle) reads as the SAME
+-- info/caution/danger/success language as the banners instead of an ad-hoc colour.
+-- Uses the tone's dedicated inline `accent` (NOT the banner iconColor, which is
+-- tuned to sit on the banner's own bg and would make danger paler than caution).
+function GUI:ToneHex(toneName)
+    local t = INFO_BANNER_TONES[toneName] or INFO_BANNER_TONES.caution
+    local c = t.accent or t.iconColor or t.textColor or {1, 1, 1}
+    return string.format("ff%02x%02x%02x",
+        math.floor((c[1] or 1) * 255 + 0.5),
+        math.floor((c[2] or 1) * 255 + 0.5),
+        math.floor((c[3] or 1) * 255 + 0.5))
+end
+
 local INFO_BANNER_ICON_PATH = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
 
 function GUI:CreateInfoBanner(parent, opts)
@@ -1096,19 +1071,24 @@ function GUI:CreateInfoBanner(parent, opts)
     -- Icon: top-left anchored so it stays put when content wraps to multiple lines.
     local icon = banner:CreateTexture(nil, "OVERLAY")
     icon:SetPoint("TOPLEFT", 12, -10)
-    icon:SetSize(18, 18)
+    icon:SetSize(22, 22)
     banner.icon = icon
 
     -- Plain-text body. Anchored top + right (no bottom) so the FontString
     -- auto-grows to its natural wrapped height; the banner then resizes
     -- to fit it via RecomputeHeight. SetWordWrap is on so long text wraps
     -- at the width defined by the LEFT/RIGHT anchors.
-    local fontTemplate = opts.fontTemplate or "DFFontHighlightSmall"
+    local fontTemplate = opts.fontTemplate or "DFFontHighlight"
     local body = banner:CreateFontString(nil, "OVERLAY", fontTemplate)
-    -- Y offset of -3 nudges the first line of text down so its visual centre
-    -- aligns with the icon's vertical centre (DFFont line height is ~12 px,
-    -- icon is 18 px; the 3 px offset closes most of the gap).
-    body:SetPoint("TOPLEFT", icon, "TOPRIGHT", 8, -3)
+    if not opts.fontTemplate then
+        -- Default body a touch below DFFontHighlight (12px) — 11px reads cleaner
+        -- in the banner while staying bigger than the old Small (10px). Icon stays 22.
+        GUI:SetSettingsFont(body, 11, "")
+    end
+    -- Y offset centres the first line on the icon (body 11px, icon 22px). The
+    -- text sits a few px below the icon's top so its centre lines up with the
+    -- icon's centre.
+    body:SetPoint("TOPLEFT", icon, "TOPRIGHT", 8, -5)
     body:SetPoint("RIGHT", banner, "RIGHT", -12, 0)
     body:SetJustifyH("LEFT")
     body:SetJustifyV("TOP")
@@ -1303,13 +1283,29 @@ function GUI:CreateInfoBanner(parent, opts)
     end
 
     function banner:SetText(text, color)
+        text = text or ""
+        -- Idempotent guard (same freeze class as SetHTML): when already showing this
+        -- exact plain text, skip the cachedH reset + RecomputeHeight + host relayout
+        -- so a refreshContent-driven SetText can't loop. Colour is cheap to re-apply
+        -- without a recompute. (SetContent bakes its themed title into `text`, so a
+        -- mode switch changes the string and correctly re-renders.)
+        if not self._isHTML and self._plainText == text then
+            if color then
+                local r = color[1] or color.r
+                local g = color[2] or color.g
+                local b = color[3] or color.b
+                if r then self.body:SetTextColor(r, g, b) end
+            end
+            return
+        end
+        self._plainText = text
         -- Hide any flow widgets from a previous SetHTML call.
         if self._flowWidgets then
             for _, w in ipairs(self._flowWidgets) do w:Hide() end
         end
         self._isHTML = false
         self.body:Show()
-        self.body:SetText(text or "")
+        self.body:SetText(text)
         if color then
             local r = color[1] or color.r
             local g = color[2] or color.g
@@ -1319,6 +1315,36 @@ function GUI:CreateInfoBanner(parent, opts)
         cachedH = nil
         banner._secondPassDone = false
         RecomputeHeight()
+    end
+
+    -- Theme-coloured "Title: body" content with a live-updating title colour +
+    -- theme border (folds in the old CreateInfoCallout). Registers the banner as
+    -- a ThemeListener so the title/border re-colour on party/raid mode switch.
+    function banner:SetContent(title, body)
+        self._contentTitle, self._contentBody = title, body
+        if title and title ~= "" then
+            local tc = (GUI.GetThemeColor and GUI.GetThemeColor()) or { r = 1, g = 1, b = 1 }
+            local hex = string.format("ff%02x%02x%02x",
+                math.floor(tc.r * 255), math.floor(tc.g * 255), math.floor(tc.b * 255))
+            self:SetText("|c" .. hex .. title .. ":|r " .. (body or ""))
+        else
+            self:SetText(body or "")
+        end
+        if not self._themeRegistered then
+            self._themeRegistered = true
+            local p = self:GetParent()
+            if p then
+                p.ThemeListeners = p.ThemeListeners or {}
+                table.insert(p.ThemeListeners, self)
+            end
+        end
+    end
+
+    function banner:UpdateTheme()
+        if self._tone then self:SetTone(self._tone) end
+        if self._contentTitle ~= nil or self._contentBody ~= nil then
+            self:SetContent(self._contentTitle, self._contentBody)
+        end
     end
 
     -- SetHTML renders text + clickable links using real Button widgets in a
@@ -1394,7 +1420,25 @@ function GUI:CreateInfoBanner(parent, opts)
     banner._DoFlowLayout = DoFlowLayout
 
     function banner:SetHTML(text, onLinkClick)
-        self._htmlText = text or ""
+        text = text or ""
+        -- The link words are tinted with the theme colour at render time (below),
+        -- NOT baked into `text`, so a party/raid mode switch must re-render even
+        -- when the text is identical — fold the theme into the dedupe key.
+        local _tc = GUI.GetThemeColor and GUI.GetThemeColor() or {r = 1, g = 0.82, b = 0}
+        local themeKey = string.format("%.3f,%.3f,%.3f", _tc.r or 1, _tc.g or 1, _tc.b or 1)
+        -- Idempotent guard (FREEZE FIX): tearing down + rebuilding the flow widgets
+        -- resets cachedH and re-fires RecomputeHeight -> TriggerHostRelayout ->
+        -- host:RefreshStates. This banner's SetHTML is driven from a refreshContent
+        -- hook that RefreshStates calls on EVERY pass, so an unguarded rebuild loops
+        -- forever (game freeze — seen on the Buffs page when the Aura Designer banner
+        -- is shown). Skip the rebuild when neither the text nor the link-tint theme
+        -- changed; just keep the click handler current.
+        if self._isHTML and self._htmlText == text and self._htmlThemeKey == themeKey then
+            self._onLinkClick = onLinkClick
+            return
+        end
+        self._htmlThemeKey = themeKey
+        self._htmlText = text
         self._onLinkClick = onLinkClick
         self._isHTML = true
         self.body:Hide()
@@ -1412,6 +1456,7 @@ function GUI:CreateInfoBanner(parent, opts)
         for _, seg in ipairs(segs) do
             if seg.type == "word" then
                 local fs = self:CreateFontString(nil, "OVERLAY", fontTemplate)
+                if not opts.fontTemplate then GUI:SetSettingsFont(fs, 11, "") end  -- match the 11px plain body
                 fs:SetText(seg.text)
                 fs:SetTextColor(0.85, 0.85, 0.85)
                 seg._w = fs:GetStringWidth()
@@ -1423,6 +1468,7 @@ function GUI:CreateInfoBanner(parent, opts)
             elseif seg.type == "link" then
                 local btn = CreateFrame("Button", nil, self)
                 local fs = btn:CreateFontString(nil, "OVERLAY", fontTemplate)
+                if not opts.fontTemplate then GUI:SetSettingsFont(fs, 11, "") end  -- match the 11px plain body
                 fs:SetAllPoints()
                 fs:SetText(seg.text)
                 fs:SetTextColor(tc.r, tc.g, tc.b)
@@ -1465,35 +1511,488 @@ function GUI:CreateInfoBanner(parent, opts)
     return banner
 end
 
-function GUI:CreateButton(parent, text, width, height, func)
-    local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
-    btn:SetSize(width or 120, height or 22)
-    CreateElementBackdrop(btn)
-    
-    btn.Text = btn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    btn.Text:SetPoint("CENTER")
-    btn.Text:SetText(text)
-    btn.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    
-    btn:SetScript("OnEnter", function(self)
-        if self:IsEnabled() then
-            self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
+-- Apply the standard button look to an existing Button frame — the single
+-- source of truth for button styling, shared by GUI:CreateButton AND by
+-- hand-rolled buttons that need the same look (the button analogue of
+-- GUI:StyleCheckButton). opts:
+--   width/height  resize the button
+--   text          create/set a centered DFFontHighlightSmall label (btn.Text)
+--   accent        {r,g,b} — fixes the accent colour (e.g. ClickCasting green).
+--                 Omit to use the mode accent (party purple / raid orange),
+--                 tracking the theme.
+--   primary       true → a prominent CTA: a persistent accent-tinted fill +
+--                 accent border at rest (the hover wash just brightens it). Use
+--                 for the main/confirming action; normal buttons are grey at rest.
+--   fadeActiveText true → on SetActive(true) dim btn.Text/btn.Icon to ~0.7 alpha
+--                 (back to full when inactive). For an "almost always on" status
+--                 toggle like Sync, where the active (synced) state is the resting
+--                 norm so the label can recede. Leave OFF for momentary toggles
+--                 (Test/Unlock) and selection toggles (chips/segmented), whose
+--                 active text should stay bright/white.
+-- Hover respects the isTab/isActive convention used by the tab bar. Hover uses
+-- SetScript (matching the original CreateButton); buttons that also need a
+-- tooltip should HookScript their OnEnter so it composes with the hover.
+-- ============================================================
+-- GUI TOOLTIP  (settings-UI tooltips only — NOT unit-frame/aura tooltips)
+-- Single source for our own widget tooltips. Call from OnEnter — use HookScript
+-- on StyleButton'd widgets so it composes with the hover wash; SetScript on
+-- plain frames. Pair with OnLeave -> GameTooltip:Hide().
+--   opts.title  (string)   white by default, or tone-coloured
+--   opts.tone   nil | "warning" (gold) | "danger" (red)
+--   opts.anchor "ANCHOR_RIGHT" (default; edge-safe — avoid ANCHOR_TOP which
+--               clamps over the owner near the frame top)
+--   opts.lines  array; each element is one of:
+--       "text"                     -> body grey (0.7), wrapped
+--       " "                        -> blank spacer
+--       { text = , hint = true }   -> dim grey (0.55) action hint, wrapped
+--       { text = , accent = true } -> mode/context accent colour, wrapped
+--       { text = , color = {r,g,b} } -> explicit colour, wrapped
+-- ============================================================
+function GUI:ShowTooltip(owner, opts)
+    if not owner or not opts or not opts.title then return end
+    GameTooltip:SetOwner(owner, opts.anchor or "ANCHOR_RIGHT")
+    -- Title colour is single-sourced from the tone's inline accent so a tooltip
+    -- title reads the same as inline ToneHex text of the same tone. Untoned = white.
+    local toneDef = opts.tone and INFO_BANNER_TONES[opts.tone]
+    local ac = toneDef and toneDef.accent
+    if ac then
+        GameTooltip:SetText(opts.title, ac[1], ac[2], ac[3])
+    else
+        GameTooltip:SetText(opts.title, 1, 1, 1)
+    end
+    if opts.lines then
+        local acc
+        for _, line in ipairs(opts.lines) do
+            if line == " " or line == "" then
+                GameTooltip:AddLine(" ")
+            elseif type(line) == "string" then
+                GameTooltip:AddLine(line, 0.7, 0.7, 0.7, true)
+            elseif type(line) == "table" and line.text then
+                local r, g, b = 0.7, 0.7, 0.7
+                if line.hint then
+                    r, g, b = 0.55, 0.55, 0.55
+                elseif line.accent then
+                    acc = acc or GetThemeColor()
+                    r, g, b = acc.r, acc.g, acc.b
+                elseif line.color then
+                    r, g, b = line.color.r, line.color.g, line.color.b
+                end
+                GameTooltip:AddLine(line.text, r, g, b, true)
+            end
         end
-    end)
-    btn:SetScript("OnLeave", function(self)
-        if self:IsEnabled() then
-            if self.isTab and self.isActive then
-                self:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 1)
+    end
+    GameTooltip:Show()
+end
+
+-- Counterpart to ShowTooltip: hide the shared GameTooltip. Wrapped so callers
+-- route through GUI instead of poking GameTooltip directly.
+function GUI:HideTooltip()
+    GameTooltip:Hide()
+end
+
+function GUI:StyleButton(btn, opts)
+    opts = opts or {}
+    if opts.width or opts.height then
+        btn:SetSize(opts.width or btn:GetWidth(), opts.height or btn:GetHeight())
+    end
+    CreateElementBackdrop(btn)  -- mixes in BackdropTemplate if needed
+
+    -- Optional label + leading icon. opts.icon = { texture, size (14),
+    -- color {r,g,b}, gap (4) }. opts.align controls layout:
+    --   "center" (default) — centre the icon+label as a GROUP (text-only centres
+    --     the label; icon-only centres the icon). Best for compact buttons whose
+    --     width ~ their content.
+    --   "left" — pin the icon at opts.leftPad (12) with the label after it. Best
+    --     for wide / full-width list-style buttons, where centred content floats
+    --     in a sea of empty space.
+    local iconOpt = opts.icon
+    local iconGap = (iconOpt and iconOpt.gap) or 4
+    local iconW = (iconOpt and (iconOpt.size or 18)) or 0
+    local hasText = opts.text ~= nil and opts.text ~= ""
+    local align = opts.align or "center"
+    local leftPad = opts.leftPad or 12
+    -- Toned buttons (danger / success): neutral at rest with an accent-coloured
+    -- label+icon — soft red for destructive, soft green for affirmative — plus the
+    -- accent hover wash. A coloured-text button, NOT a filled CTA (the accent set
+    -- below drives the hover). Mirrors each other so Delete/Save read as a pair.
+    local toneLabel = (opts.tone == "danger" and { 0.9, 0.45, 0.45 })
+        or (opts.tone == "success" and { 0.4, 0.85, 0.5 }) or nil
+
+    if opts.text ~= nil then
+        btn.Text = btn.Text or btn:CreateFontString(nil, "OVERLAY", opts.font or "DFFontHighlightSmall")
+        btn.Text:SetText(opts.text)
+        if toneLabel then
+            btn.Text:SetTextColor(toneLabel[1], toneLabel[2], toneLabel[3])
+        else
+            btn.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+        end
+    end
+
+    if iconOpt then
+        btn.Icon = btn.Icon or btn:CreateTexture(nil, "OVERLAY")
+        btn.Icon:SetTexture(iconOpt.texture)
+        btn.Icon:SetSize(iconW, iconW)
+        if iconOpt.color then
+            btn.Icon:SetVertexColor(iconOpt.color.r, iconOpt.color.g, iconOpt.color.b)
+        elseif toneLabel then
+            btn.Icon:SetVertexColor(toneLabel[1], toneLabel[2], toneLabel[3])
+        end
+    end
+
+    -- Anchor the icon/label per alignment.
+    if align == "left" then
+        if iconOpt then
+            btn.Icon:ClearAllPoints()
+            btn.Icon:SetPoint("LEFT", leftPad, 0)
+        end
+        if btn.Text then
+            btn.Text:ClearAllPoints()
+            if iconOpt then
+                btn.Text:SetPoint("LEFT", btn.Icon, "RIGHT", iconGap, 0)
             else
-                self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
+                btn.Text:SetPoint("LEFT", leftPad, 0)
+            end
+        end
+    else
+        if btn.Text then
+            btn.Text:ClearAllPoints()
+            -- Offset right by half the icon+gap so the icon+label GROUP centres.
+            btn.Text:SetPoint("CENTER", btn, "CENTER", (iconOpt and hasText) and (iconW + iconGap) / 2 or 0, 0)
+        end
+        if iconOpt then
+            btn.Icon:ClearAllPoints()
+            if hasText then
+                btn.Icon:SetPoint("RIGHT", btn.Text, "LEFT", -iconGap, 0)
+            else
+                btn.Icon:SetPoint("CENTER", btn, "CENTER", 0, 0)
+            end
+        end
+    end
+
+    -- Hover: an accent wash via the native HIGHLIGHT layer (auto-shown on
+    -- mouseover, like StyleCheckButton / the menu buttons) PLUS a darker accent
+    -- border for definition. `primary` buttons additionally keep a persistent
+    -- accent-tinted fill + accent border at rest. Accent = explicit opts.accent
+    -- (e.g. ClickCasting green) or the mode accent (party purple / raid orange).
+    local accent = opts.accent
+    -- tone presets: a destructive "danger" button reuses ALL the accent
+    -- machinery (hover wash, hover border, primary fill) with a fixed FF4444 red.
+    -- So a plain danger button is neutral-at-rest with a red hover, and
+    -- danger+primary is a filled red CTA. Fixed colour ⇒ it won't theme-track
+    -- (correct — destructive red shouldn't follow the party/raid accent).
+    if not accent then
+        if opts.tone == "danger" then
+            accent = { r = 1, g = 0.27, b = 0.27 }
+        elseif opts.tone == "success" then
+            accent = { r = 0.3, g = 0.8, b = 0.45 }
+        end
+    end
+    local primary = opts.primary
+    local fadeActiveText = opts.fadeActiveText
+    -- Underline TAB style (opts.tab): the button is transparent (no fill/border)
+    -- and its active cue is a 2px accent stripe along the bottom + an accent label
+    -- (dim label when inactive). Driven by SetActive, like a toggle. Distinct from
+    -- the legacy `isTab` filled-sidebar branch in restBackdrop.
+    local isTabStyle = opts.tab
+    -- Ghost action (opts.ghost): transparent like a tab but with no underline — an
+    -- accent label + faint hover wash. For quiet inline actions (e.g. "+ Add").
+    local ghost = opts.ghost
+    -- Persistent semantic accent (opts.tinted): the accent is meaningful and stays
+    -- ON at rest — faint accent fill + accent border + accent label — rather than
+    -- being a neutral button with an accent hover. For role quick-add buttons etc.
+    -- where the colour IS the button's identity. Pass a fixed opts.accent.
+    local tinted = opts.tinted
+    local hl = btn:GetHighlightTexture() or btn:CreateTexture(nil, "HIGHLIGHT")
+    hl:SetTexture("Interface\\Buttons\\WHITE8x8")
+    hl:SetAllPoints(btn)
+    btn.Highlight = hl
+
+    if isTabStyle then
+        local stripe = btn:CreateTexture(nil, "OVERLAY")
+        stripe:SetTexture("Interface\\Buttons\\WHITE8x8")
+        stripe:SetHeight(3)
+        stripe:SetPoint("BOTTOMLEFT", 0, 0)   -- full-width underline (no insets)
+        stripe:SetPoint("BOTTOMRIGHT", 0, 0)
+        stripe:Hide()
+        btn.dfTabStripe = stripe
+    end
+
+    -- The resting backdrop the button returns to on mouse-out (and that primary
+    -- buttons also wear permanently): accent-tinted for primary, the active-tab
+    -- panel colour for active tabs, otherwise the neutral element colour.
+    local function restBackdrop(self, a)
+        if isTabStyle then
+            -- Underline tab: a faint neutral cell when inactive (so every tab's
+            -- bounds stay visible and the active one doesn't appear to "grow"),
+            -- and a stronger accent fill when active (a held-hover highlight)
+            -- beneath its stripe.
+            if self.dfActive then
+                self:SetBackdropColor(a.r, a.g, a.b, 0.18)
+            else
+                self:SetBackdropColor(1, 1, 1, 0.05)
+            end
+            self:SetBackdropBorderColor(0, 0, 0, 0)
+            return
+        end
+        if ghost then
+            -- Ghost action: a faint neutral cell (matching inactive tabs) with an
+            -- accent label, so it sits consistently in a tab strip; the wash
+            -- brightens it on hover.
+            self:SetBackdropColor(1, 1, 1, 0.05)
+            self:SetBackdropBorderColor(0, 0, 0, 0)
+            return
+        end
+        if tinted then
+            -- Persistent semantic accent: faint accent fill + medium accent border
+            -- at rest (label/icon accent-coloured in ApplyThemeColor). Hover adds a
+            -- full-accent border + the wash brightens the fill.
+            self:SetBackdropColor(a.r * 0.15, a.g * 0.15, a.b * 0.15, 0.9)
+            self:SetBackdropBorderColor(a.r * 0.5, a.g * 0.5, a.b * 0.5, 0.8)
+            return
+        end
+        if self.dfActive then
+            -- Selected toggle/segmented button: a subtle accent fill + a clear
+            -- accent border (more than the muted hover border, but toned down from
+            -- full so it doesn't read as a heavy bright outline).
+            self:SetBackdropColor(a.r * 0.3, a.g * 0.3, a.b * 0.3, 1)
+            self:SetBackdropBorderColor(a.r * 0.6, a.g * 0.6, a.b * 0.6, 1)
+        elseif primary then
+            -- Filled accent CTA: a medium accent fill with a slightly darker
+            -- accent border (the same border-darker-than-fill relationship as the
+            -- standard hover) so it reads like an emphasised standard button, not
+            -- a dark fill ringed by a harsh bright outline.
+            self:SetBackdropColor(a.r * 0.5, a.g * 0.5, a.b * 0.5, 1)
+            self:SetBackdropBorderColor(a.r * 0.4, a.g * 0.4, a.b * 0.4, 1)
+        elseif self.isTab and self.isActive then
+            self:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 1)
+            self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
+        else
+            self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
+            self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
+        end
+    end
+
+    btn.ApplyThemeColor = function(c)
+        hl:SetVertexColor(c.r, c.g, c.b, (isTabStyle or ghost) and 0.15 or 0.30)
+        if isTabStyle then
+            restBackdrop(btn, c)  -- keep the tab transparent (no fill/border)
+            -- refresh the stripe colour + the active label to the new accent
+            if btn.dfTabStripe then btn.dfTabStripe:SetColorTexture(c.r, c.g, c.b, 1) end
+            if btn.dfActive and btn.Text then btn.Text:SetTextColor(c.r, c.g, c.b) end
+        elseif ghost or tinted then
+            restBackdrop(btn, c)  -- faint cell / tinted fill; accent-coloured label
+            if btn.Text then btn.Text:SetTextColor(c.r, c.g, c.b) end
+            if btn.Icon then btn.Icon:SetVertexColor(c.r, c.g, c.b) end  -- icon matches the accent label
+        elseif primary or btn.dfActive then
+            restBackdrop(btn, c)  -- refresh persistent accent
+        end
+    end
+
+    -- Toggle/segmented selection: btn:SetActive(true) marks the button as the
+    -- current selection (prominent accent border via restBackdrop); false returns
+    -- it to its normal rest. The owning group is responsible for clearing the
+    -- previously-active button. Works on any StyleButton'd button.
+    btn.SetActive = function(self, active)
+        self.dfActive = active and true or false
+        restBackdrop(self, accent or GetThemeColor())
+        if isTabStyle then
+            -- Underline tab: show the accent stripe + accent label when active,
+            -- dim label when inactive.
+            local a = accent or GetThemeColor()
+            if self.dfTabStripe then
+                self.dfTabStripe:SetColorTexture(a.r, a.g, a.b, 1)
+                self.dfTabStripe:SetShown(self.dfActive)
+            end
+            if self.Text then
+                if self.dfActive then
+                    self.Text:SetTextColor(a.r, a.g, a.b)
+                else
+                    self.Text:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+                end
+            end
+        end
+        if fadeActiveText then
+            -- Status toggles: the active fill+border carry the "on" emphasis, so
+            -- the label/icon recede slightly when active (settled) and stay bright
+            -- when inactive (a clearer call to action). Alpha keeps this
+            -- independent of whatever colour the owner sets on the text/icon.
+            local a = self.dfActive and 0.7 or 1
+            if self.Text then self.Text:SetAlpha(a) end
+            if self.Icon then self.Icon:SetAlpha(a) end
+        end
+    end
+
+    -- Disabled / "greyed out": a dim backdrop + faint border, label/icon dimmed
+    -- via alpha (keeps their own colour, just recedes), and the hover wash +
+    -- border suppressed. The button stays natively enabled so a HookScript
+    -- tooltip can still explain WHY it's disabled; the owner's OnClick must
+    -- early-out on self.dfDisabled. SetDisabled(false) restores the normal/
+    -- active/primary rest.
+    btn.SetDisabled = function(self, disabled)
+        self.dfDisabled = disabled and true or false
+        if self.dfDisabled then
+            self:SetBackdropColor(C_ELEMENT.r * 0.55, C_ELEMENT.g * 0.55, C_ELEMENT.b * 0.55, 0.6)
+            self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.25)
+            hl:SetAlpha(0)  -- kill the auto hover wash while disabled
+            if self.Text then self.Text:SetAlpha(0.35) end
+            if self.Icon then self.Icon:SetAlpha(0.35) end
+        else
+            hl:SetAlpha(1)
+            restBackdrop(self, accent or GetThemeColor())
+            if self.Text then self.Text:SetAlpha(1) end
+            if self.Icon then self.Icon:SetAlpha(1) end
+        end
+    end
+    -- The grey loop (RefreshChildStates) greys gated children via widget:SetEnabled.
+    -- Native Button:SetEnabled blocks clicks but won't dim a custom-backdrop button
+    -- (its backdrop/Text are custom, not native button regions), so layer a SetAlpha
+    -- dim on top. We route through native + SetAlpha, NOT SetDisabled — SetDisabled
+    -- stays natively clickable (it relies on an OnClick dfDisabled early-out the
+    -- consumer may not have) and fights the hover wash on SetActive toggles.
+    local nativeSetEnabled = btn.SetEnabled
+    btn.SetEnabled = function(self, enabled)
+        nativeSetEnabled(self, enabled)
+        self:SetAlpha(enabled and 1 or 0.4)
+    end
+
+    btn.ApplyThemeColor(accent or GetThemeColor())
+    if not accent then
+        btn.UpdateTheme = function() btn.ApplyThemeColor(GetThemeColor()) end
+        local root = opts.themeRoot or btn:GetParent()
+        if root then
+            root.ThemeListeners = root.ThemeListeners or {}
+            table.insert(root.ThemeListeners, btn)
+        end
+    end
+
+    btn:SetScript("OnEnter", function(self)
+        if isTabStyle or ghost then return end  -- tab/ghost: only the auto wash, no border
+        if self:IsEnabled() and not self.dfDisabled then
+            local a = accent or GetThemeColor()
+            if tinted then
+                self:SetBackdropBorderColor(a.r, a.g, a.b, 1)  -- full accent border on hover
+            elseif self.dfActive then
+                -- keep the active border on hover (the wash still brightens the
+                -- fill, giving the hover cue).
+                self:SetBackdropBorderColor(a.r * 0.6, a.g * 0.6, a.b * 0.6, 1)
+            else
+                -- border darkens to a shade of the accent; the HIGHLIGHT wash
+                -- brightens the fill. The wash is translucent (0.3), so the
+                -- full-opacity border still reads DARKER than the fill. Same for
+                -- primary — it keeps its edge and the brightening fill is the cue.
+                self:SetBackdropBorderColor(a.r * 0.4, a.g * 0.4, a.b * 0.4, 1)
             end
         end
     end)
+    btn:SetScript("OnLeave", function(self)
+        if isTabStyle or ghost then return end
+        if self:IsEnabled() and not self.dfDisabled then
+            restBackdrop(self, accent or GetThemeColor())
+        end
+    end)
+    return btn
+end
+
+function GUI:CreateButton(parent, text, width, height, func, iconName)
+    local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
+    local opts = { width = width or 120, height = height or 22, text = text }
+    -- Optional leading icon by Media\Icons name (14px to suit the small buttons).
+    if iconName then
+        opts.icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. iconName, size = 14 }
+    end
+    GUI:StyleButton(btn, opts)
     btn:SetScript("OnClick", function(self)
         if func then func(self) end
         PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
     end)
     return btn
+end
+
+-- Standard close/dismiss button: a small square danger-toned button showing a
+-- "×" glyph. Replaces the many hand-rolled red close buttons on dialogs/panels.
+-- opts = { size (20), onClick, tooltip, tone }.
+--   tone = nil      → dim grey "×" at rest → white on hover (close/dismiss; default)
+--   tone = "danger" → RED "×" at rest → brighter red on hover (inline destructive
+--                     removes: list-item / tag removes). Both keep the red hover wash.
+function GUI:CreateCloseButton(parent, opts)
+    opts = opts or {}
+    local size = opts.size or 20
+    -- Rest/hover glyph colours: grey→white for dismiss, red→brighter-red for inline
+    -- destructive removes. The StyleButton red wash + border is shared by both.
+    local restColor  = (opts.tone == "danger") and { r = 0.9, g = 0.45, b = 0.45 } or C_TEXT_DIM
+    local hoverColor = (opts.tone == "danger") and { r = 1, g = 0.4, b = 0.4 } or { r = 1, g = 1, b = 1 }
+    local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
+    GUI:StyleButton(btn, {
+        width = size, height = size,
+        tone = "danger",
+        icon = {
+            texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\close",
+            size = math.max(8, math.floor(size * 0.55)),
+            color = restColor,
+        },
+    })
+    btn:HookScript("OnEnter", function(self) self.Icon:SetVertexColor(hoverColor.r, hoverColor.g, hoverColor.b) end)
+    btn:HookScript("OnLeave", function(self) self.Icon:SetVertexColor(restColor.r, restColor.g, restColor.b) end)
+    btn:SetScript("OnClick", function(self)
+        if opts.onClick then opts.onClick(self) end
+        PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+    end)
+    if opts.tooltip then
+        btn:HookScript("OnEnter", function(self)
+            GUI:ShowTooltip(self, { title = opts.tooltip, anchor = "ANCHOR_TOP" })
+        end)
+        btn:HookScript("OnLeave", function() GUI:HideTooltip() end)
+    end
+    return btn
+end
+
+-- Shared panel/dialog root backdrop: a solid dark panel with an optional 1px
+-- border. Centralises the inline SetBackdrop blocks scattered across dialogs and
+-- floating panels. opts = { bgAlpha (0.95), border (true), borderColor {r,g,b,a}
+-- or {r,g,b,a array} }.
+function GUI:CreatePanelBackdrop(frame, opts)
+    opts = opts or {}
+    if not frame.SetBackdrop then Mixin(frame, BackdropTemplateMixin) end
+    -- Choose the edge with an explicit branch, NOT `cond and nil or X` — in Lua
+    -- that idiom always yields X (the `and nil` falls through the `or`), so
+    -- border=false would still draw an (untinted, i.e. WHITE) edge.
+    local edgeFile = "Interface\\Buttons\\WHITE8x8"
+    if opts.border == false then edgeFile = nil end
+    frame:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = edgeFile,
+        edgeSize = 1,
+    })
+    local bg = opts.bgColor or C_PANEL
+    frame:SetBackdropColor(bg.r or bg[1], bg.g or bg[2], bg.b or bg[3], opts.bgAlpha or bg.a or 0.95)
+    if opts.border ~= false then
+        local bc = opts.borderColor
+        if bc then
+            frame:SetBackdropBorderColor(bc.r or bc[1], bc.g or bc[2], bc.b or bc[3], bc.a or bc[4] or 1)
+        else
+            frame:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
+        end
+    end
+    return frame
+end
+
+-- Element backdrop as a GUI method (the file-local CreateElementBackdrop is used
+-- internally by the stylers; this exposes it to consumer files). Base look =
+-- C_ELEMENT fill + C_BORDER border. opts = { bgColor, borderColor } ({r,g,b[,a]})
+-- override either when an element panel wants a darker/custom fill or accent edge.
+function GUI:CreateElementBackdrop(frame, opts)
+    CreateElementBackdrop(frame)
+    if opts then
+        if opts.bgColor then
+            local c = opts.bgColor
+            frame:SetBackdropColor(c.r or c[1], c.g or c[2], c.b or c[3], c.a or c[4] or 1)
+        end
+        if opts.borderColor then
+            local c = opts.borderColor
+            frame:SetBackdropBorderColor(c.r or c[1], c.g or c[2], c.b or c[3], c.a or c[4] or 1)
+        end
+    end
+    return frame
 end
 
 -- ============================================================
@@ -1760,34 +2259,21 @@ end
 -- Creates a button with an icon and text
 -- iconName is the name of the icon file (without path/extension)
 -- iconSize is optional (defaults to 16)
-function GUI:CreateIconButton(parent, iconName, text, width, height, func, iconSize)
+-- align: "center" (default) or "left". Pass "left" for wide / full-width
+-- list-style buttons where centred content floats (see GUI:StyleButton).
+function GUI:CreateIconButton(parent, iconName, text, width, height, func, iconSize, align)
     local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
-    btn:SetSize(width or 120, height or 22)
-    CreateElementBackdrop(btn)
-    
-    local iSize = iconSize or 16
-    local icon = btn:CreateTexture(nil, "OVERLAY")
-    icon:SetPoint("LEFT", 8, 0)
-    icon:SetSize(iSize, iSize)
-    icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. iconName)
-    icon:SetVertexColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    btn.Icon = icon
-    
-    btn.Text = btn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    btn.Text:SetPoint("LEFT", icon, "RIGHT", 4, 0)
-    btn.Text:SetText(text)
-    btn.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    
-    btn:SetScript("OnEnter", function(self)
-        if self:IsEnabled() then
-            self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
-        end
-    end)
-    btn:SetScript("OnLeave", function(self)
-        if self:IsEnabled() then
-            self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-        end
-    end)
+    GUI:StyleButton(btn, {
+        width = width or 120, height = height or 22,
+        text = text,
+        align = align,
+        icon = {
+            texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. iconName,
+            size = iconSize or 18,
+            color = C_TEXT,
+        },
+    })
+
     btn:SetScript("OnClick", function(self)
         if func then func(self) end
         PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
@@ -2014,9 +2500,7 @@ local function AddOverrideIndicators(container, lbl, dbKey, onReset, verticalOff
     resetBtn:SetScript("OnEnter", function(self)
         self:SetBackdropBorderColor(1, 0.8, 0.2, 1)
         resetIcon:SetVertexColor(1, 0.8, 0.2)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText(L["Reset to Global"])
-        GameTooltip:Show()
+        GUI:ShowTooltip(self, { title = L["Reset to Global"] })
     end)
     resetBtn:SetScript("OnLeave", function(self)
         self:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
@@ -2049,17 +2533,12 @@ local function AddOverrideIndicators(container, lbl, dbKey, onReset, verticalOff
     starIcon:SetVertexColor(1, 0.8, 0.2)
     starBtn:SetScript("OnEnter", function(s)
         if s.tooltipText then
-            GameTooltip:SetOwner(s, "ANCHOR_RIGHT")
-            GameTooltip:SetText(s.tooltipText)
-            if s.tooltipSubText then
-                GameTooltip:AddLine(s.tooltipSubText, 1, 1, 1, true)
-            end
-            GameTooltip:Show()
+            GUI:ShowTooltip(s, { title = s.tooltipText, lines = s.tooltipSubText and { s.tooltipSubText } or nil })
         end
     end)
     starBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
     container.overrideStar = starBtn
-    
+
     -- Global value text (shown when in edit mode) - positioned inline after label
     local globalText = container:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     globalText:SetPoint("LEFT", lbl, "RIGHT", 4, 0)
@@ -2151,7 +2630,7 @@ local function AddOverrideIndicators(container, lbl, dbKey, onReset, verticalOff
                 globalDisplay = tostring(globalValue or L["None"])
             end
 
-            self.overrideGlobalText:SetText("(Global: " .. globalDisplay .. ")")
+            self.overrideGlobalText:SetText(string.format(L["(Global: %s)"], globalDisplay))
             self.overrideGlobalText:ClearAllPoints()
             self.overrideGlobalText:SetPoint("LEFT", lbl, "RIGHT", 4, 0)
             self.overrideGlobalText:SetTextColor(0.5, 0.5, 0.5)
@@ -2188,7 +2667,7 @@ local function AddOverrideIndicators(container, lbl, dbKey, onReset, verticalOff
         elseif type(globalValue) == "table" then
             -- Color table
             if globalValue.r then
-                globalDisplay = "Color"
+                globalDisplay = L["Color"]
             else
                 globalDisplay = "..."
             end
@@ -2204,7 +2683,7 @@ local function AddOverrideIndicators(container, lbl, dbKey, onReset, verticalOff
         end
 
         -- Show global value inline with label
-        self.overrideGlobalText:SetText("(Global: " .. globalDisplay .. ")")
+        self.overrideGlobalText:SetText(string.format(L["(Global: %s)"], globalDisplay))
         self.overrideGlobalText:ClearAllPoints()
         self.overrideGlobalText:SetPoint("LEFT", lbl, "RIGHT", 4, 0)
 
@@ -2252,9 +2731,7 @@ local function AddOrderListOverrideIndicators(container, dbKey, onReset)
     resetBtn:SetScript("OnEnter", function(self)
         self:SetBackdropBorderColor(1, 0.8, 0.2, 1)
         resetIcon:SetVertexColor(1, 0.8, 0.2)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText(L["Reset to Global Order"])
-        GameTooltip:Show()
+        GUI:ShowTooltip(self, { title = L["Reset to Global Order"] })
     end)
     resetBtn:SetScript("OnLeave", function(self)
         self:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
@@ -2285,17 +2762,12 @@ local function AddOrderListOverrideIndicators(container, dbKey, onReset)
     starIcon:SetVertexColor(1, 0.8, 0.2)
     starBtn:SetScript("OnEnter", function(s)
         if s.tooltipText then
-            GameTooltip:SetOwner(s, "ANCHOR_RIGHT")
-            GameTooltip:SetText(s.tooltipText)
-            if s.tooltipSubText then
-                GameTooltip:AddLine(s.tooltipSubText, 1, 1, 1, true)
-            end
-            GameTooltip:Show()
+            GUI:ShowTooltip(s, { title = s.tooltipText, lines = s.tooltipSubText and { s.tooltipSubText } or nil })
         end
     end)
     starBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
     container.overrideStar = starBtn
-    
+
     -- "Modified" text to the left of star
     local modifiedText = container:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     modifiedText:SetPoint("RIGHT", starIcon, "LEFT", -2, 0)
@@ -2354,30 +2826,92 @@ local function AddOrderListOverrideIndicators(container, dbKey, onReset)
     table.insert(overrideWidgets, container)
 end
 
+-- ============================================================
+-- SHARED CHECK / RADIO LOOK — single source of truth
+-- Applies the standard square look to a CheckButton: element
+-- backdrop + a pixel-snapped, themed WHITE8x8 check. Every box
+-- and radio (the full builders below AND the hand-rolled ones
+-- elsewhere) should call this, so a restyle is ONE edit.
+--   opts.size      box size (default 18)
+--   opts.checkSize check-square size (default 10)
+--   opts.accent    fixed tint {r,g,b} — e.g. ClickCasting's green.
+--                  Omit to follow the party/raid theme (and auto-
+--                  register a theme listener on opts.themeRoot).
+--   opts.themeRoot frame whose .ThemeListeners drive recolor
+--                  (default the button's parent); only used when
+--                  no accent is given.
+-- Returns the check texture (also stored as cb.Check).
+-- ============================================================
+function GUI:StyleCheckButton(cb, opts)
+    opts = opts or {}
+    PixelUtil.SetSize(cb, opts.size or 18, opts.size or 18)
+    CreateElementBackdrop(cb)
+
+    local check = cb.Check or cb:CreateTexture(nil, "OVERLAY")
+    check:SetTexture("Interface\\Buttons\\WHITE8x8")
+    local cs = opts.checkSize or 10
+    PixelUtil.SetSize(check, cs, cs)
+    PixelUtil.SetPoint(check, "CENTER", cb, "CENTER", 0, 0)
+
+    local accent = opts.accent
+    local col = accent or GetThemeColor()
+    cb.Check = check
+    -- Native checkboxes let WoW show/hide the check via the checked state; a few
+    -- consumers (and plain Button-based pseudo-checkboxes) drive it manually via
+    -- cb.Check:SetShown(). opts.manualCheck supports those without SetCheckedTexture.
+    if opts.manualCheck then
+        check:Hide()
+    else
+        cb:SetCheckedTexture(check)
+    end
+
+    -- Hover feedback: a subtle accent wash on the native HIGHLIGHT layer. WoW
+    -- shows it on mouseover automatically, so it works regardless of any OnEnter
+    -- the consumer sets (no clobbering), and it doesn't recolor the 1px border
+    -- (which can render unevenly at fractional UI scales).
+    local hl = cb:CreateTexture(nil, "HIGHLIGHT")
+    hl:SetTexture("Interface\\Buttons\\WHITE8x8")
+    hl:SetAllPoints(cb)
+    cb.Highlight = hl
+
+    -- Single source for the themed tint: check colour + hover-wash strength.
+    -- Consumers that drive their own theme refresh call cb.ApplyThemeColor(c) too,
+    -- so the wash alpha (0.35) is defined in exactly one place.
+    cb.ApplyThemeColor = function(c)
+        check:SetVertexColor(c.r, c.g, c.b)
+        hl:SetVertexColor(c.r, c.g, c.b, 0.35)
+    end
+    cb.ApplyThemeColor(col)
+
+    if not accent then
+        cb.UpdateTheme = function()
+            cb.ApplyThemeColor(GetThemeColor())
+        end
+        local root = opts.themeRoot or cb:GetParent()
+        if root then
+            root.ThemeListeners = root.ThemeListeners or {}
+            table.insert(root.ThemeListeners, cb)
+        end
+    end
+    return check
+end
+
 function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, customSet, overrideKey)
     local container = CreateFrame("Frame", nil, parent)
     container:SetSize(220, 24)
-    
+
     local cb = CreateFrame("CheckButton", nil, container, "BackdropTemplate")
-    cb:SetSize(18, 18)
     cb:SetPoint("LEFT", 0, 0)
-    CreateElementBackdrop(cb)
-    
-    -- Checkmark
-    cb.Check = cb:CreateTexture(nil, "OVERLAY")
-    cb.Check:SetTexture("Interface\\Buttons\\WHITE8x8")
-    local c = GetThemeColor()
-    cb.Check:SetVertexColor(c.r, c.g, c.b)
-    cb.Check:SetPoint("CENTER")
-    cb.Check:SetSize(10, 10)
-    cb:SetCheckedTexture(cb.Check)
-    
+    -- Box + themed check come from the shared styler (single source of truth).
+    GUI:StyleCheckButton(cb, { themeRoot = parent })
+
     -- Label
     local txt = container:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     txt:SetPoint("LEFT", cb, "RIGHT", 8, 0)
     txt:SetText(label)
     txt:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    
+    container.label = txt  -- exposed so callers can re-font / anchor a subtitle
+
     -- Determine the key to use for override indicators
     local effectiveOverrideKey = overrideKey or dbKey
     
@@ -2413,13 +2947,6 @@ function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, 
             container:UpdateOverrideIndicators(val)
         end
     end
-    
-    cb.UpdateTheme = function()
-        local nc = GetThemeColor()
-        cb.Check:SetVertexColor(nc.r, nc.g, nc.b)
-    end
-    if not parent.ThemeListeners then parent.ThemeListeners = {} end
-    table.insert(parent.ThemeListeners, cb)
     
     container:SetScript("OnShow", UpdateState)
     cb:SetScript("OnClick", function(self)
@@ -2463,6 +2990,10 @@ function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, 
     end)
     
     container.SetEnabled = function(self, enabled)
+        -- Dim the whole widget (box + check fill + label) so a disabled CHECKED
+        -- box greys too: native SetEnabled has no DisabledCheckedTexture, so the
+        -- accent check would otherwise stay full-bright.
+        self:SetAlpha(enabled and 1 or 0.4)
         cb:SetEnabled(enabled)
         if enabled then
             txt:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
@@ -2475,10 +3006,7 @@ function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, 
     container:EnableMouse(true)
     container:SetScript("OnEnter", function(self)
         if self.tooltip then
-            GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
-            GameTooltip:SetText(label, 1, 1, 1)
-            GameTooltip:AddLine(self.tooltip, 1, 0.82, 0, true)
-            GameTooltip:Show()
+            GUI:ShowTooltip(self, { title = label, anchor = "ANCHOR_CURSOR", lines = { self.tooltip } })
         end
     end)
     container:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -2647,10 +3175,7 @@ function GUI:CreateToggleSwitch(parent, labelA, labelB, dbTable, dbKey, valueA, 
     -- Tooltip support
     container:SetScript("OnEnter", function(self)
         if self.tooltip then
-            GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
-            GameTooltip:SetText(labelA .. " / " .. labelB, 1, 1, 1)
-            GameTooltip:AddLine(self.tooltip, 1, 0.82, 0, true)
-            GameTooltip:Show()
+            GUI:ShowTooltip(self, { title = labelA .. " / " .. labelB, anchor = "ANCHOR_CURSOR", lines = { self.tooltip } })
         end
         -- Hover highlight on track
         track:SetBackdropBorderColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 1)
@@ -2706,25 +3231,9 @@ function GUI:CreateDebugCategoryRow(parent, categoryKey, description, width)
 
     -- Checkbox
     local cb = CreateFrame("CheckButton", nil, row, "BackdropTemplate")
-    cb:SetSize(16, 16)
     cb:SetPoint("LEFT", 4, 0)
-    CreateElementBackdrop(cb)
-    cb.Check = cb:CreateTexture(nil, "OVERLAY")
-    cb.Check:SetTexture("Interface\\Buttons\\WHITE8x8")
-    local c = GetThemeColor()
-    cb.Check:SetVertexColor(c.r, c.g, c.b)
-    cb.Check:SetPoint("CENTER")
-    cb.Check:SetSize(9, 9)
-    cb:SetCheckedTexture(cb.Check)
+    GUI:StyleCheckButton(cb, { size = 16, checkSize = 9, themeRoot = parent })
     cb:EnableMouse(false)  -- forward clicks to the row
-
-    -- Theme listener so the checkmark colour stays in sync
-    cb.UpdateTheme = function()
-        local nc = GetThemeColor()
-        cb.Check:SetVertexColor(nc.r, nc.g, nc.b)
-    end
-    if not parent.ThemeListeners then parent.ThemeListeners = {} end
-    table.insert(parent.ThemeListeners, cb)
 
     -- Category name (bold, full opacity)
     local nameTxt = row:CreateFontString(nil, "OVERLAY", "DFFontHighlight")
@@ -2773,10 +3282,7 @@ function GUI:CreateDebugCategoryRow(parent, categoryKey, description, width)
     row:SetScript("OnEnter", function(self)
         self.hoverBg:Show()
         if description and description ~= "" then
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText(categoryKey, 1, 1, 1)
-            GameTooltip:AddLine(description, 0.8, 0.8, 0.8, true)
-            GameTooltip:Show()
+            GUI:ShowTooltip(self, { title = categoryKey, lines = { description } })
         end
     end)
     row:SetScript("OnLeave", function(self)
@@ -2788,6 +3294,34 @@ function GUI:CreateDebugCategoryRow(parent, categoryKey, description, width)
     row.RefreshState()
 
     return row
+end
+
+-- StyleEditBox: normalize a bare (label-less) EditBox to the standard input
+-- chrome used by CreateInput/CreateEditBox — translucent-black fill + dim border
+-- + standard font/insets. The caller still owns size/position/scripts. Pass
+-- opts.skipFont to keep a custom font (e.g. multi-line / monospace inputs).
+function GUI:StyleEditBox(eb, opts)
+    opts = opts or {}
+    if not eb.SetBackdrop then Mixin(eb, BackdropTemplateMixin) end
+    eb:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = 1,
+    })
+    eb:SetBackdropColor(0, 0, 0, 0.5)
+    eb:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
+    if not opts.skipFont then
+        eb:SetFontObject(DFFontHighlightSmall)
+        eb:SetTextInsets(5, 5, opts.multiline and 5 or 0, opts.multiline and 5 or 0)
+    end
+    -- Multiline mode: for text areas (export/import blobs, macro bodies). The
+    -- caller owns the ScrollFrame/sizing; this just flags the editbox + relaxes
+    -- the vertical insets. Enter inserts a newline (no auto clear-focus).
+    if opts.multiline then
+        eb:SetMultiLine(true)
+        eb:SetAutoFocus(false)
+    end
+    return eb
 end
 
 function GUI:CreateInput(parent, label, width)
@@ -2816,7 +3350,19 @@ function GUI:CreateInput(parent, label, width)
     editbox:SetAutoFocus(false)
     editbox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     editbox:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
-    
+
+    -- Grey-when-disabled parity with CreateEditBox (cheap insurance if ever placed
+    -- in a gated group): dim the whole widget + block editing.
+    frame.SetEnabled = function(self, enabled)
+        self:SetAlpha(enabled and 1 or 0.4)
+        editbox:SetEnabled(enabled)
+        if enabled then
+            lbl:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+        else
+            lbl:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+        end
+    end
+
     frame.EditBox = editbox
     return frame
 end
@@ -2933,6 +3479,19 @@ function GUI:CreateEditBox(parent, label, dbTable, dbKey, callback, width, place
         if editbox.UpdatePlaceholder then editbox.UpdatePlaceholder() end
     end)
 
+    -- Grey-when-disabled: the grey loop (RefreshChildStates) calls widget:SetEnabled,
+    -- but this frame had none, so a disabled group left the input full-bright AND
+    -- editable. Dim the whole widget + block editing, matching the other helpers.
+    frame.SetEnabled = function(self, enabled)
+        self:SetAlpha(enabled and 1 or 0.4)
+        editbox:SetEnabled(enabled)
+        if enabled then
+            lbl:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+        else
+            lbl:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+        end
+    end
+
     frame.EditBox = editbox
     return frame
 end
@@ -2945,7 +3504,9 @@ end
 -- Consumers that pass customSet typically pass dbKey = nil so the
 -- auto-profile override system doesn't track a key that doesn't exist at the
 -- top level of dbTable.
-function GUI:CreateSlider(parent, label, minVal, maxVal, step, dbTable, dbKey, callback, lightweightUpdate, usePreviewMode, customGet, customSet)
+-- accentColor (optional {r,g,b}): fixed thumb/fill colour instead of the mode
+-- theme — for ClickCasting (green) / Search (blue) which keep their identity.
+function GUI:CreateSlider(parent, label, minVal, maxVal, step, dbTable, dbKey, callback, lightweightUpdate, usePreviewMode, customGet, customSet, accentColor)
     local container = CreateFrame("Frame", nil, parent)
     container:SetSize(260, 50)
     
@@ -2987,7 +3548,7 @@ function GUI:CreateSlider(parent, label, minVal, maxVal, step, dbTable, dbKey, c
     local fill = track:CreateTexture(nil, "ARTWORK")
     fill:SetPoint("LEFT", 1, 0)
     fill:SetHeight(6)
-    local c = GetThemeColor()
+    local c = accentColor or GetThemeColor()
     fill:SetColorTexture(c.r, c.g, c.b, 0.8)
     
     -- Slider
@@ -3031,8 +3592,12 @@ function GUI:CreateSlider(parent, label, minVal, maxVal, step, dbTable, dbKey, c
     
     container.SetEnabled = function(self, enabled)
         slider:SetEnabled(enabled)
+        -- Grey the numeric value box too: it was only EnableMouse'd (clicks blocked
+        -- but still full-bright + typeable), so it stayed lit while the track dimmed.
         input:EnableMouse(enabled)
-        local tc = GetThemeColor()
+        input:SetEnabled(enabled)
+        input:SetAlpha(enabled and 1 or 0.4)
+        local tc = accentColor or GetThemeColor()
         if enabled then
             lbl:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
             thumb:SetColorTexture(tc.r, tc.g, tc.b, 1)
@@ -3045,7 +3610,7 @@ function GUI:CreateSlider(parent, label, minVal, maxVal, step, dbTable, dbKey, c
     end
     
     container.UpdateTheme = function()
-        local nc = GetThemeColor()
+        local nc = accentColor or GetThemeColor()
         if slider:IsEnabled() then
             thumb:SetColorTexture(nc.r, nc.g, nc.b, 1)
             fill:SetColorTexture(nc.r, nc.g, nc.b, 0.8)
@@ -3223,8 +3788,159 @@ function GUI:CreateSlider(parent, label, minVal, maxVal, step, dbTable, dbKey, c
     
     -- Expose label for dynamic updates
     container.label = lbl
-    
+
     return container
+end
+
+-- Dual-handle range slider: two draggable handles select a [lo, hi] sub-range of
+-- [minRange, maxRange]. Self-contained — the caller anchors the returned track
+-- frame and reads values via :GetValues() / the onChange callback. Drag is
+-- tracked on the track's own OnUpdate (no dependence on parent scripts), and a
+-- mouse-button check releases the drag even if the cursor leaves the handle.
+-- opts:
+--   width(336), accent({r,g,b}=theme), minRange, maxRange, lo, hi,
+--   scaleLabels({...} optional tick labels), scaleMin/scaleMax (label scale,
+--   default minRange/maxRange — lets ticks stay on a fixed scale while the
+--   handle range changes), display(FontString updated each change),
+--   formatRange(fn(lo,hi)->str), formatOne(fn(v)->str),
+--   onChange(fn(lo,hi) — fired on user-driven changes only, not SetValues).
+-- Methods on the returned frame: :SetRange(min,max), :SetValues(lo,hi),
+-- :GetValues()->lo,hi.
+function GUI:CreateRangeSlider(parent, opts)
+    opts = opts or {}
+    local width = opts.width or 336
+    local accent = opts.accent or GetThemeColor()
+
+    local track = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    track:SetSize(width, 12)
+    track:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = 1,
+    })
+    track:SetBackdropColor(0.03, 0.03, 0.03, 1)
+    track:SetBackdropBorderColor(0.2, 0.2, 0.2, 1)
+
+    track.minRange = opts.minRange or 1
+    track.maxRange = opts.maxRange or 40
+    track.lo = opts.lo or track.minRange
+    track.hi = opts.hi or track.maxRange
+
+    local rangeFill = track:CreateTexture(nil, "ARTWORK")
+    rangeFill:SetTexture("Interface\\Buttons\\WHITE8x8")
+    rangeFill:SetVertexColor(accent.r, accent.g, accent.b, 0.5)
+    rangeFill:SetHeight(10)
+    rangeFill:SetPoint("TOP", 0, -1)
+
+    local function MakeHandle()
+        local h = CreateFrame("Button", nil, track)
+        h:SetSize(8, 16)
+        h:EnableMouse(true)
+        local tex = h:CreateTexture(nil, "OVERLAY")
+        tex:SetAllPoints()
+        tex:SetTexture("Interface\\Buttons\\WHITE8x8")
+        tex:SetVertexColor(accent.r, accent.g, accent.b, 1)
+        return h
+    end
+    local minHandle, maxHandle = MakeHandle(), MakeHandle()
+    track.minHandle, track.maxHandle = minHandle, maxHandle
+
+    local function ValueToPos(value)
+        local pct = (value - track.minRange) / (track.maxRange - track.minRange)
+        return pct * (width - 4) + 2
+    end
+    local function PosToValue(pos)
+        local pct = (pos - 2) / (width - 4)
+        return math.floor(pct * (track.maxRange - track.minRange) + track.minRange + 0.5)
+    end
+
+    local function Redraw()
+        local minPos, maxPos = ValueToPos(track.lo), ValueToPos(track.hi)
+        minHandle:ClearAllPoints()
+        minHandle:SetPoint("CENTER", track, "LEFT", minPos, 0)
+        maxHandle:ClearAllPoints()
+        maxHandle:SetPoint("CENTER", track, "LEFT", maxPos, 0)
+        rangeFill:ClearAllPoints()
+        rangeFill:SetPoint("LEFT", track, "LEFT", minPos, 0)
+        rangeFill:SetWidth(math.max(maxPos - minPos, 2))
+        if opts.display then
+            if track.lo == track.hi then
+                opts.display:SetText(opts.formatOne and opts.formatOne(track.lo) or tostring(track.lo))
+            else
+                opts.display:SetText(opts.formatRange and opts.formatRange(track.lo, track.hi)
+                    or (track.lo .. " - " .. track.hi))
+            end
+        end
+    end
+
+    local dragging = nil
+    local function ApplyCursor()
+        local x = select(1, GetCursorPosition()) / UIParent:GetEffectiveScale()
+        local trackLeft = track:GetLeft()
+        if not trackLeft then return end
+        local pos = math.max(2, math.min(x - trackLeft, width - 2))
+        local value = math.max(track.minRange, math.min(PosToValue(pos), track.maxRange))
+        if dragging == "min" then
+            if value <= track.hi then track.lo = value end
+        elseif dragging == "max" then
+            if value >= track.lo then track.hi = value end
+        end
+        Redraw()
+        if opts.onChange then opts.onChange(track.lo, track.hi) end
+    end
+
+    minHandle:SetScript("OnMouseDown", function(_, b) if b == "LeftButton" then dragging = "min" end end)
+    maxHandle:SetScript("OnMouseDown", function(_, b) if b == "LeftButton" then dragging = "max" end end)
+    track:SetScript("OnUpdate", function()
+        if not dragging then return end
+        if not IsMouseButtonDown("LeftButton") then dragging = nil; return end
+        ApplyCursor()
+    end)
+
+    track:EnableMouse(true)
+    track:SetScript("OnMouseDown", function(_, b)
+        if b ~= "LeftButton" then return end
+        local x = select(1, GetCursorPosition()) / UIParent:GetEffectiveScale()
+        local trackLeft = track:GetLeft()
+        if not trackLeft then return end
+        local value = PosToValue(x - trackLeft)
+        if math.abs(value - track.lo) <= math.abs(value - track.hi) then
+            if value <= track.hi then track.lo = math.max(track.minRange, value) end
+        else
+            if value >= track.lo then track.hi = math.min(track.maxRange, value) end
+        end
+        Redraw()
+        if opts.onChange then opts.onChange(track.lo, track.hi) end
+    end)
+
+    if opts.scaleLabels then
+        local sMin = opts.scaleMin or track.minRange
+        local sMax = opts.scaleMax or track.maxRange
+        for _, num in ipairs(opts.scaleLabels) do
+            local pct = (num - sMin) / (sMax - sMin)
+            local xPos = pct * (width - 4) + 2
+            local lbl = track:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+            lbl:SetText(num)
+            lbl:SetTextColor(0.35, 0.35, 0.35)
+            lbl:SetPoint("TOP", track, "BOTTOM", xPos - width / 2, -2)
+        end
+    end
+
+    function track:SetRange(minR, maxR)
+        self.minRange, self.maxRange = minR, maxR
+        self.lo = math.max(minR, math.min(self.lo, maxR))
+        self.hi = math.max(minR, math.min(self.hi, maxR))
+        Redraw()
+    end
+    function track:SetValues(lo, hi)
+        self.lo = math.max(self.minRange, math.min(lo, self.maxRange))
+        self.hi = math.max(self.minRange, math.min(hi, self.maxRange))
+        Redraw()
+    end
+    function track:GetValues() return self.lo, self.hi end
+
+    Redraw()
+    return track
 end
 
 function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback, lightweightCallback, useLightweight)
@@ -3416,6 +4132,9 @@ function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback
     end)
     
     container.SetEnabled = function(self, enabled)
+        -- Dim the whole widget so the colour swatch greys even when it's a dark
+        -- colour (SetDesaturated alone is invisible on near-black swatches).
+        self:SetAlpha(enabled and 1 or 0.4)
         btn:SetEnabled(enabled)
         if enabled then
             txt:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
@@ -3437,9 +4156,13 @@ function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback
     return container
 end
 
-function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, customGet, customSet)
+function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, customGet, customSet, opts)
+    opts = opts or {}
+    local accentColor = opts.accent
+    local optionsFunc = opts.optionsFunc
+
     local container = CreateFrame("Frame", nil, parent)
-    container:SetSize(260, 50)
+    container:SetSize(260, opts.inline and 24 or 50)
 
     -- Label
     local lbl = container:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
@@ -3448,6 +4171,9 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
     lbl:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
     -- Expose label so helpers like AddSectionNewBadge can anchor a badge to it.
     container.label = lbl
+    if opts.inline then
+        lbl:Hide()
+    end
     
     -- Add override indicators if dbKey is provided (for auto profiles)
     if dbKey and type(dbKey) == "string" then
@@ -3471,11 +4197,18 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
 
     -- Button - use relative anchoring so it resizes with container
     local btn = CreateFrame("Button", nil, container, "BackdropTemplate")
-    btn:SetPoint("TOPLEFT", 0, -16)
-    btn:SetPoint("TOPRIGHT", 0, -16)
-    btn:SetHeight(24)
+    if opts.inline then
+        -- Fill the container so the caller's SetSize(w, h) controls the opener
+        -- size + vertical centering (inline callers add their own left label and
+        -- size the container to match the surrounding row, e.g. 140x18 / 110x16).
+        btn:SetAllPoints(container)
+    else
+        btn:SetPoint("TOPLEFT", 0, -16)
+        btn:SetPoint("TOPRIGHT", 0, -16)
+        btn:SetHeight(24)
+    end
     CreateElementBackdrop(btn)
-    
+
     btn.Text = btn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     btn.Text:SetPoint("LEFT", 8, 0)
     btn.Text:SetPoint("RIGHT", -20, 0)
@@ -3525,81 +4258,115 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
     local menuButtons = {}
     local menuHeight = 0
     local sortedOptions = {}
-    
-    -- Check for custom order array
-    if options._order then
-        -- Use specified order
-        for _, k in ipairs(options._order) do
-            if options[k] then
-                table.insert(sortedOptions, {key = k, value = options[k]})
+
+    -- Build (or rebuild) the menu buttons from the current `options` upvalue.
+    -- Hide + drop any previously-built buttons first so dynamic dropdowns can
+    -- regenerate their list. Static callers call this exactly once below.
+    local menuContentW = 0   -- widest item text; sizes the menu to fit long options
+    local function BuildMenuButtons()
+        for _, b in ipairs(menuButtons) do b:Hide() end
+        wipe(menuButtons)
+        wipe(sortedOptions)
+        menuHeight = 0
+
+        -- Check for custom order array
+        if options._order then
+            -- Use specified order
+            for _, k in ipairs(options._order) do
+                local v = options[k]
+                if v then
+                    -- Handle both formats: KEY = "text" or KEY = {value=, text=, color=}
+                    local displayValue = type(v) == "table" and (v.text or v.label or tostring(k)) or v
+                    local optColor = type(v) == "table" and v.color or nil
+                    table.insert(sortedOptions, {key = k, value = displayValue, color = optColor})
+                end
             end
+        else
+            -- Default: sort alphabetically by display value
+            for k, v in pairs(options) do
+                -- Handle both formats: KEY = "text" or KEY = {value = X, text = "text", color =}
+                local displayValue = type(v) == "table" and (v.text or v.label or tostring(k)) or v
+                local optColor = type(v) == "table" and v.color or nil
+                table.insert(sortedOptions, {key = k, value = displayValue, color = optColor})
+            end
+            table.sort(sortedOptions, function(a, b)
+                local aVal = type(a.value) == "string" and a.value or tostring(a.key)
+                local bVal = type(b.value) == "string" and b.value or tostring(b.key)
+                return aVal < bVal
+            end)
         end
-    else
-        -- Default: sort alphabetically by display value
-        for k, v in pairs(options) do
-            -- Handle both formats: KEY = "text" or KEY = {value = X, text = "text"}
-            local displayValue = type(v) == "table" and (v.text or v.label or tostring(k)) or v
-            table.insert(sortedOptions, {key = k, value = displayValue})
-        end
-        table.sort(sortedOptions, function(a, b)
-            local aVal = type(a.value) == "string" and a.value or tostring(a.key)
-            local bVal = type(b.value) == "string" and b.value or tostring(b.key)
-            return aVal < bVal
-        end)
-    end
-    
-    for i, opt in ipairs(sortedOptions) do
-        local menuBtn = CreateFrame("Button", nil, menuFrame)
-        menuBtn:SetPoint("TOPLEFT", 2, -2 - (i - 1) * 22)
-        menuBtn:SetPoint("TOPRIGHT", -2, -2 - (i - 1) * 22)
-        menuBtn:SetHeight(22)
-        
-        menuBtn.Text = menuBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-        menuBtn.Text:SetPoint("LEFT", 8, 0)
-        menuBtn.Text:SetText(opt.value)
-        menuBtn.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-        
-        menuBtn.Highlight = menuBtn:CreateTexture(nil, "HIGHLIGHT")
-        menuBtn.Highlight:SetAllPoints()
-        local c = GetThemeColor()
-        menuBtn.Highlight:SetColorTexture(c.r, c.g, c.b, 0.3)
-        
-        menuBtn:SetScript("OnClick", function()
-            -- Runtime override protection: redirect to baseline, skip refresh
-            if GUI.SelectedMode == "raid" and DF.AutoProfilesUI
-               and DF.AutoProfilesUI:HandleRuntimeWrite(dbKey, opt.key) then
+
+        for i, opt in ipairs(sortedOptions) do
+            local menuBtn = CreateFrame("Button", nil, menuFrame)
+            menuBtn:SetPoint("TOPLEFT", 2, -2 - (i - 1) * 22)
+            menuBtn:SetPoint("TOPRIGHT", -2, -2 - (i - 1) * 22)
+            menuBtn:SetHeight(22)
+
+            menuBtn.Text = menuBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+            menuBtn.Text:SetPoint("LEFT", 8, 0)
+            menuBtn.Text:SetText(opt.value)
+            if opt.color then
+                menuBtn.Text:SetTextColor(opt.color.r, opt.color.g, opt.color.b)
+            else
+                menuBtn.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+            end
+
+            menuBtn.Highlight = menuBtn:CreateTexture(nil, "HIGHLIGHT")
+            menuBtn.Highlight:SetAllPoints()
+            local c = accentColor or GetThemeColor()
+            menuBtn.Highlight:SetColorTexture(c.r, c.g, c.b, 0.3)
+
+            menuBtn:SetScript("OnClick", function()
+                -- Runtime override protection: redirect to baseline, skip refresh
+                if GUI.SelectedMode == "raid" and DF.AutoProfilesUI
+                   and DF.AutoProfilesUI:HandleRuntimeWrite(dbKey, opt.key) then
+                    UpdateText()
+                    menuFrame:Hide()
+                    if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators(opt.key) end
+                    return
+                end
+
+                if customSet then
+                    customSet(opt.key)
+                else
+                    dbTable[dbKey] = opt.key
+                end
+
+                -- If editing a profile, also set the override
+                if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() and dbKey then
+                    DF.AutoProfilesUI:SetProfileSetting(dbKey, customGet and customGet() or opt.key)
+                end
+
                 UpdateText()
                 menuFrame:Hide()
-                if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators(opt.key) end
-                return
-            end
+                DF:UpdateAll()
+                if callback then callback() end
+                if parent.RefreshStates then parent:RefreshStates() end
+            end)
 
-            if customSet then
-                customSet(opt.key)
-            else
-                dbTable[dbKey] = opt.key
-            end
+            table.insert(menuButtons, menuBtn)
+            menuHeight = menuHeight + 22
+        end
 
-            -- If editing a profile, also set the override
-            if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() and dbKey then
-                DF.AutoProfilesUI:SetProfileSetting(dbKey, customGet and customGet() or opt.key)
-            end
-
-            UpdateText()
-            menuFrame:Hide()
-            DF:UpdateAll()
-            if callback then callback() end
-            if parent.RefreshStates then parent:RefreshStates() end
-        end)
-        
-        table.insert(menuButtons, menuBtn)
-        menuHeight = menuHeight + 22
+        -- Width fits the widest item so long options aren't clipped by a narrow
+        -- opener (refined to max(opener, content) on open, once btn is sized).
+        menuContentW = 0
+        for _, mb in ipairs(menuButtons) do
+            menuContentW = math.max(menuContentW, mb.Text:GetStringWidth() or 0)
+        end
+        menuFrame:SetWidth(menuContentW + 24)
+        menuFrame:SetHeight(menuHeight + 4)
     end
-    
-    -- Menu frame width matches button width
-    menuFrame:SetPoint("TOPRIGHT", btn, "BOTTOMRIGHT", 0, -2)
-    menuFrame:SetHeight(menuHeight + 4)
-    
+
+    BuildMenuButtons()
+
+    -- Allow dynamic dropdowns to swap their option set and regenerate buttons.
+    container.RebuildOptions = function(_, newOptions)
+        if newOptions then options = newOptions end
+        BuildMenuButtons()
+        UpdateText()
+    end
+
     btn:SetScript("OnEnter", function(self)
         self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
     end)
@@ -3614,15 +4381,22 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
         else
             -- Close any other open dropdown first
             CloseOpenDropdown()
+            -- Dynamic dropdowns regenerate their option list each open.
+            if optionsFunc then container:RebuildOptions(optionsFunc()) end
             local currentVal = customGet and customGet() or dbTable[dbKey]
+            local selColor = accentColor or GetThemeColor()
             for i, menuBtn in ipairs(menuButtons) do
                 local opt = sortedOptions[i]
-                if currentVal == opt.key then
-                    menuBtn.Text:SetTextColor(GetThemeColor().r, GetThemeColor().g, GetThemeColor().b)
+                if opt.color then
+                    -- per-option colour (e.g. class-coloured spec list) always wins
+                    menuBtn.Text:SetTextColor(opt.color.r, opt.color.g, opt.color.b)
+                elseif currentVal == opt.key then
+                    menuBtn.Text:SetTextColor(selColor.r, selColor.g, selColor.b)
                 else
                     menuBtn.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
                 end
             end
+            menuFrame:SetWidth(math.max(btn:GetWidth() or 0, menuContentW + 24))
             menuFrame:Show()
             currentOpenDropdown = menuFrame
         end
@@ -3632,6 +4406,9 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
     UpdateText()
     
     container.SetEnabled = function(self, enabled)
+        -- Dim the whole widget so its preview/value (texture swatch, font preview,
+        -- selected text) greys with the label rather than staying full-bright.
+        self:SetAlpha(enabled and 1 or 0.4)
         btn:SetEnabled(enabled)
         if enabled then
             lbl:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
@@ -3814,7 +4591,7 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
     -- per active border, which adds up in 20-30 player raids.
     if showPerfBanner then
         local perfBanner = GUI:CreateInfoBanner(parent, {
-            tone = "warning",
+            tone = "caution",
             text = L["Animations run per-border and may impact FPS in larger raids. Use sparingly on high-priority alerts."],
             staticHeight = true,
             minHeight    = 56,
@@ -3826,7 +4603,7 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
     -- Animation colour applies to every effect except DF_PULSATE (which
     -- modulates the border's own edge alpha — no separate colour). lightColors
     -- is threaded through so AD's proxy gets live preview while dragging.
-    w.animationColor = group:AddWidget(GUI:CreateColorPicker(parent, L["Animation Colour"],
+    w.animationColor = group:AddWidget(GUI:CreateColorPicker(parent, L["Animation Color"],
         dbTable, aKey("Color"), true, fullUpdate, lightColors, lightColors ~= nil), 35)
     w.animationColor.hideOn = function()
         return animOff() or animType() == "DF_PULSATE"
@@ -3927,7 +4704,13 @@ function GUI:CreateBorderControls(group, dbTable, prefix, opts)
     -- the actual border state (e.g. proxy.BorderStyle, not the unrelated
     -- DF.db.party.BorderStyle which doesn't exist).
     local function hideShow() return hideWhen and hideWhen(dbTable) or false end
-    local function hideOff()  return hideShow() or dbTable[showKey] == false end
+    -- Show Border OFF no longer HIDES the border controls — they stay visible and
+    -- GREY OUT (disableOn = borderOff, applied by the loop at the end of this
+    -- function) so the panel previews them. `hideOff` now means "hidden by the
+    -- parent/variant gate only" (whatever the consumer passes via hideWhen); the
+    -- name is kept so the existing `.hideOn = hideOff` references read unchanged.
+    local function hideOff()  return hideShow() end
+    local function borderOff() return dbTable[showKey] == false end
 
     local w = {}
 
@@ -4003,10 +4786,10 @@ function GUI:CreateBorderControls(group, dbTable, prefix, opts)
     if include.gradient then
         local function gradHide() return hideOff() or not isGradient() end
 
-        w.gradientStart = group:AddWidget(GUI:CreateColorPicker(parent, L["Gradient Start Colour"],
+        w.gradientStart = group:AddWidget(GUI:CreateColorPicker(parent, L["Gradient Start Color"],
             dbTable, key("BorderGradientStartColor"), true, fullUpdate), 35)
         w.gradientStart.hideOn = gradHide
-        w.gradientEnd = group:AddWidget(GUI:CreateColorPicker(parent, L["Gradient End Colour"],
+        w.gradientEnd = group:AddWidget(GUI:CreateColorPicker(parent, L["Gradient End Color"],
             dbTable, key("BorderGradientEndColor"), true, fullUpdate), 35)
         w.gradientEnd.hideOn = gradHide
         w.gradientDirection = group:AddWidget(GUI:CreateDropdown(parent, L["Gradient Direction"],
@@ -4103,7 +4886,7 @@ function GUI:CreateBorderControls(group, dbTable, prefix, opts)
 
     if include.blendMode then
         w.blendMode = group:AddWidget(GUI:CreateDropdown(parent, L["Border Blend Mode"],
-            { BLEND = L["Blend"], ADD = L["Add"], MOD = L["Mod"], DISABLE = L["Disable"] },
+            { BLEND = L["Blend"], ADD = L["Add"], MOD = L["Modulate"], DISABLE = L["Disable"] },
             dbTable, key("BorderBlendMode"), fullUpdate), 55)
         w.blendMode.hideOn = hideOff
     end
@@ -4115,20 +4898,27 @@ function GUI:CreateBorderControls(group, dbTable, prefix, opts)
             fullUpdate()
         end), 30)
         w.shadowEnabled.hideOn = hideOff
-        local function shadowHide() return hideOff() or dbTable[shadowOnKey] == false end
+        -- Border Shadow OFF greys (not hides) its sub-controls — a nested boolean
+        -- toggle, same grey-everything rule. The end-of-function loop OR-composes
+        -- borderOff, so these also grey when Show Border is off.
+        local function shadowOff() return dbTable[shadowOnKey] == false end
 
-        w.shadowColor = group:AddWidget(GUI:CreateColorPicker(parent, L["Shadow Colour"],
+        w.shadowColor = group:AddWidget(GUI:CreateColorPicker(parent, L["Shadow Color"],
             dbTable, key("BorderShadowColor"), true, fullUpdate), 35)
-        w.shadowColor.hideOn = shadowHide
+        w.shadowColor.hideOn = hideOff
+        w.shadowColor.disableOn = shadowOff
         w.shadowSize = group:AddWidget(GUI:CreateSlider(parent, L["Shadow Size"], 0, 10, 1,
             dbTable, key("BorderShadowSize"), fullUpdate, lightUpdate, true), 55)
-        w.shadowSize.hideOn = shadowHide
+        w.shadowSize.hideOn = hideOff
+        w.shadowSize.disableOn = shadowOff
         w.shadowOffsetX = group:AddWidget(GUI:CreateSlider(parent, L["Shadow Offset X"], -10, 10, 1,
             dbTable, key("BorderShadowOffsetX"), fullUpdate, lightUpdate, true), 55)
-        w.shadowOffsetX.hideOn = shadowHide
+        w.shadowOffsetX.hideOn = hideOff
+        w.shadowOffsetX.disableOn = shadowOff
         w.shadowOffsetY = group:AddWidget(GUI:CreateSlider(parent, L["Shadow Offset Y"], -10, 10, 1,
             dbTable, key("BorderShadowOffsetY"), fullUpdate, lightUpdate, true), 55)
-        w.shadowOffsetY.hideOn = shadowHide
+        w.shadowOffsetY.hideOn = hideOff
+        w.shadowOffsetY.disableOn = shadowOff
     end
 
     -- ===== Animation (Stage 3) =====
@@ -4176,6 +4966,19 @@ function GUI:CreateBorderControls(group, dbTable, prefix, opts)
     if include.colorByType then
         w.colorByType = group:AddWidget(GUI:CreateCheckbox(parent, L["Color by Aura Type"], dbTable, key("BorderColorByType"), fullUpdate), 30)
         w.colorByType.hideOn = hideOff
+    end
+
+    -- Grey (don't hide) every border control when "Show Border" is OFF, so the panel
+    -- still previews the controls. Composes with each control's own disableOn (e.g.
+    -- the shadow sub-controls) and leaves the variant/parent hideOn untouched. Skips
+    -- the "Show Border" checkbox itself so it stays clickable. RefreshChildStates
+    -- applies disableOn to group children, and CreateCheckbox auto-refreshes on
+    -- toggle, so the grey updates live.
+    for k, widget in pairs(w) do
+        if k ~= "show" and type(widget) == "table" and widget.SetEnabled then
+            local prev = widget.disableOn
+            widget.disableOn = function(d) return borderOff() or (prev and prev(d)) end
+        end
     end
 
     return w
@@ -4239,30 +5042,21 @@ function GUI:CreateExpiringThresholdRow(parent, dbTable, opts)
     slider:SetWidth(width)
 
     local modeBtn = CreateFrame("Button", nil, container, "BackdropTemplate")
-    modeBtn:SetSize(56, 18)
     modeBtn:SetPoint("BOTTOMRIGHT", slider, "TOPRIGHT", -10, 2)
-    modeBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1,
+    GUI:StyleButton(modeBtn, {
+        width = 56, height = 18,
+        text = isSeconds and L["Seconds"] or L["Percent"],
     })
-    modeBtn:SetBackdropColor(0.14, 0.14, 0.17, 1)
-    modeBtn:SetBackdropBorderColor(0.30, 0.30, 0.35, 0.8)
+    GUI:SetSettingsFont(modeBtn.Text, 9, "")
+    modeBtn:SetActive(isSeconds)
 
-    local modeText = modeBtn:CreateFontString(nil, "OVERLAY")
-    GUI:SetSettingsFont(modeText, 9, "")
-    modeText:SetPoint("CENTER", 0, 0)
-    modeText:SetText(isSeconds and L["Seconds"] or L["Percent"])
-    modeText:SetTextColor(0.9, 0.9, 0.9)
-
-    modeBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(0.18, 0.18, 0.22, 1)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText(L["Threshold Mode"])
-        GameTooltip:AddLine(isSeconds and L["Currently: Seconds. Click for Percent."] or L["Currently: Percent. Click for Seconds."], 0.8, 0.8, 0.8, true)
-        GameTooltip:Show()
+    modeBtn:HookScript("OnEnter", function(self)
+        GUI:ShowTooltip(self, {
+            title = L["Threshold Mode"],
+            lines = { isSeconds and L["Currently: Seconds. Click for Percent."] or L["Currently: Percent. Click for Seconds."] },
+        })
     end)
-    modeBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(0.14, 0.14, 0.17, 1)
+    modeBtn:HookScript("OnLeave", function()
         GameTooltip:Hide()
     end)
     modeBtn:SetScript("OnClick", function()
@@ -4276,6 +5070,18 @@ function GUI:CreateExpiringThresholdRow(parent, dbTable, opts)
         end
         refresh()
     end)
+
+    -- Composite row: forward grey-out (disableOn) to its slider + mode button so the
+    -- whole row dims when the expiring feature is off. Dim the row uniformly via
+    -- SetAlpha and block interaction with slider:SetEnabled + modeBtn:EnableMouse —
+    -- NOT modeBtn:SetDisabled (which fights the hover wash) nor native
+    -- modeBtn:SetEnabled alone (blocks clicks but leaves the custom backdrop/label
+    -- full-brightness, so the toggle wouldn't visually grey with its row).
+    container.SetEnabled = function(_, enabled)
+        container:SetAlpha(enabled and 1 or 0.4)
+        if slider.SetEnabled then slider:SetEnabled(enabled) end
+        modeBtn:EnableMouse(enabled)
+    end
 
     return container
 end
@@ -4313,10 +5119,12 @@ function GUI:CreateExpiringControls(group, dbTable, opts)
         if K.borderEnable and dbTable[K.borderEnable] == false then return true end
         return false
     end
-    -- HIDE (not grey) rows that don't apply — the consumer's refreshStates
-    -- reflows the group so hidden rows collapse.
+    -- GREY (not hide) rows that don't apply, so the panel previews them. The gate
+    -- (masterOff / borderOff — both boolean enables) drives disableOn; refreshStates
+    -- + RefreshChildStates re-apply on toggle. Labels/subheaders have no SetEnabled
+    -- so they stay full-color (fine).
     local function addGated(widget, h, gate)
-        widget.hideOn = gate or masterOff
+        widget.disableOn = gate or masterOff
         return group:AddWidget(widget, h)
     end
 
@@ -4344,7 +5152,7 @@ function GUI:CreateExpiringControls(group, dbTable, opts)
         w.borderEnable = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Expiring Border"], dbTable, K.borderEnable, function()
             refreshStates(); fullUpdate()
         end), 30)
-        w.borderEnable.hideOn = masterOff
+        w.borderEnable.disableOn = masterOff
     end
 
     addGated(GUI:CreateExpiringSubheader(parent, L["State Overrides"]), 18, borderOff)
@@ -4376,11 +5184,11 @@ function GUI:CreateExpiringControls(group, dbTable, opts)
         -- a separate "Expiring Fill Color" above it.
         local label = opts.colorLabel or (inc.dualColor and L["Expiring Fill Color"] or L["Expiring Border Color"])
         local cp = GUI:CreateColorPicker(parent, label, dbTable, K.color, true, fullUpdate, lightColors, lightColors ~= nil)
-        -- Hidden when the border is off OR (buff) Color-by-Time owns the colour.
+        -- Greyed when the border is off; HIDDEN only when (buff) Color-by-Time owns
+        -- the colour (a variant — the time curve replaces this static picker).
+        cp.disableOn = borderOff
         cp.hideOn = function()
-            if borderOff() then return true end
-            if K.colorByTime and dbTable[K.colorByTime] then return true end
-            return false
+            return (K.colorByTime and dbTable[K.colorByTime]) and true or false
         end
         group:AddWidget(cp, 35)
         w.color = cp
@@ -4405,10 +5213,18 @@ function GUI:CreateExpiringControls(group, dbTable, opts)
             lightColors = lightColors,
             typeLabel   = L["Expiring Animation"],
             perfBanner  = true,
-            hideExtra   = borderOff,
+            -- No hideExtra gate: animation rows stay visible and GREY when the
+            -- expiring border is off (post-loop below); only their per-type variant
+            -- gating (internal to CreateAnimationControls) still hides.
             onTypeChange = function() refreshStates() end,
         })
-        for k, v in pairs(aw) do w[k] = v end
+        for k, v in pairs(aw) do
+            w[k] = v
+            if type(v) == "table" and v.SetEnabled then
+                local prev = v.disableOn
+                v.disableOn = function(d) return borderOff() or (prev and prev(d)) end
+            end
+        end
     end
 
     -- "Expiring Effects" — whole-element responses to the aura crossing its
@@ -4420,7 +5236,7 @@ function GUI:CreateExpiringControls(group, dbTable, opts)
         addGated(GUI:CreateExpiringSubheader(parent, L["Expiring Effects"]), 18)
     end
     if fx then
-        if fx.fillPulsate and K.fillPulsate then addGated(GUI:CreateCheckbox(parent, L["Fill Pulsate"], dbTable, K.fillPulsate, fullUpdate), 30) end
+        if fx.fillPulsate and K.fillPulsate then addGated(GUI:CreateCheckbox(parent, L["Pulsate"], dbTable, K.fillPulsate, fullUpdate), 30) end
         if fx.wholeAlpha and K.wholeAlpha then addGated(GUI:CreateCheckbox(parent, L["Whole Alpha Pulse"], dbTable, K.wholeAlpha, fullUpdate), 30) end
         if fx.bounce and K.bounce then addGated(GUI:CreateCheckbox(parent, L["Bounce"], dbTable, K.bounce, fullUpdate), 30) end
     end
@@ -4433,7 +5249,7 @@ function GUI:CreateExpiringControls(group, dbTable, opts)
         if K.tintColor then
             local lightTint = opts.lightTint
             local tc = GUI:CreateColorPicker(parent, L["Tint Color"], dbTable, K.tintColor, true, fullUpdate, lightTint, lightTint ~= nil)
-            tc.hideOn = function() return masterOff() or dbTable[K.tintEnable] == false end
+            tc.disableOn = function() return masterOff() or dbTable[K.tintEnable] == false end
             group:AddWidget(tc, 35)
         end
     end
@@ -4493,18 +5309,20 @@ function GUI:CreateGrowthControl(parent, db, dbKey, callback)
     local curOrientation, curWrap, curDirection = DecomposeGrowth(db[dbKey] or "LEFT_UP")
 
     -- Option tables per orientation
+    -- Display text is localized; the value-keys (HORIZONTAL, UP, …) and _order
+    -- arrays are raw identifiers and must NOT be localized.
     local ORIENT_OPTIONS = {
-        HORIZONTAL = "Horizontal",
-        VERTICAL = "Vertical",
+        HORIZONTAL = L["Horizontal"],
+        VERTICAL = L["Vertical"],
         _order = {"HORIZONTAL", "VERTICAL"},
     }
     local WRAP_OPTIONS = {
-        HORIZONTAL = { UP = "Up", DOWN = "Down", _order = {"UP", "DOWN"} },
-        VERTICAL = { LEFT = "Left", RIGHT = "Right", _order = {"LEFT", "RIGHT"} },
+        HORIZONTAL = { UP = L["Up"], DOWN = L["Down"], _order = {"UP", "DOWN"} },
+        VERTICAL = { LEFT = L["Left"], RIGHT = L["Right"], _order = {"LEFT", "RIGHT"} },
     }
     local DIR_OPTIONS = {
-        HORIZONTAL = { LEFT = "Left", CENTER = "Center", RIGHT = "Right", _order = {"LEFT", "CENTER", "RIGHT"} },
-        VERTICAL = { UP = "Up", CENTER = "Center", DOWN = "Down", _order = {"UP", "CENTER", "DOWN"} },
+        HORIZONTAL = { LEFT = L["Left"], CENTER = L["Center"], RIGHT = L["Right"], _order = {"LEFT", "CENTER", "RIGHT"} },
+        VERTICAL = { UP = L["Up"], CENTER = L["Center"], DOWN = L["Down"], _order = {"UP", "CENTER", "DOWN"} },
     }
 
     -- Shared write-back: recompose and save
@@ -4653,7 +5471,7 @@ function GUI:CreateGrowthControl(parent, db, dbKey, callback)
 
     -- Build the three dropdowns (forward-declare wrap/dir so orientation callback can reference them)
     local wrapDD, dirDD
-    local orientDD = BuildMiniDropdown(0, "Orientation", ORIENT_OPTIONS,
+    local orientDD = BuildMiniDropdown(0, L["Orientation"], ORIENT_OPTIONS,
         function() return curOrientation end,
         function(val)
             if val ~= curOrientation then
@@ -4668,12 +5486,12 @@ function GUI:CreateGrowthControl(parent, db, dbKey, callback)
         end
     )
 
-    wrapDD = BuildMiniDropdown(-50, "Wrap", WRAP_OPTIONS[curOrientation],
+    wrapDD = BuildMiniDropdown(-50, L["Wrap"], WRAP_OPTIONS[curOrientation],
         function() return curWrap end,
         function(val) curWrap = val end
     )
 
-    dirDD = BuildMiniDropdown(-100, "Direction", DIR_OPTIONS[curOrientation],
+    dirDD = BuildMiniDropdown(-100, L["Direction"], DIR_OPTIONS[curOrientation],
         function() return curDirection end,
         function(val) curDirection = val end
     )
@@ -4986,6 +5804,9 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
     end)
     
     container.SetEnabled = function(self, enabled)
+        -- Dim the whole widget so its preview/value (texture swatch, font preview,
+        -- selected text) greys with the label rather than staying full-bright.
+        self:SetAlpha(enabled and 1 or 0.4)
         btn:SetEnabled(enabled)
         if enabled then
             lbl:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
@@ -5296,6 +6117,9 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback, inherit
     end)
     
     container.SetEnabled = function(self, enabled)
+        -- Dim the whole widget so its preview/value (texture swatch, font preview,
+        -- selected text) greys with the label rather than staying full-bright.
+        self:SetAlpha(enabled and 1 or 0.4)
         btn:SetEnabled(enabled)
         if enabled then
             lbl:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
@@ -5660,18 +6484,14 @@ function GUI:CreateRoleOrderList(parent, dbTable, dbKey, callback, separateMelee
         local grip = CreateFrame("Frame", nil, parentFrame)
         grip:SetSize(12, 16)
         
-        for i = 1, 3 do
-            local line = grip:CreateTexture(nil, "ARTWORK")
-            line:SetSize(10, 2)
-            line:SetPoint("TOP", grip, "TOP", 0, -3 - (i - 1) * 5)
-            line:SetColorTexture(0.5, 0.5, 0.5, 1)
-            grip["line" .. i] = line
-        end
+        local icon = grip:CreateTexture(nil, "ARTWORK")
+        icon:SetAllPoints(grip)
+        icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\reorder")
+        icon:SetVertexColor(0.5, 0.5, 0.5, 1)
+        grip.icon = icon
         
         grip.SetGripColor = function(self, r, g, b)
-            for i = 1, 3 do
-                self["line" .. i]:SetColorTexture(r, g, b, 1)
-            end
+            self.icon:SetVertexColor(r, g, b, 1)
         end
         
         return grip
@@ -5731,8 +6551,9 @@ function GUI:CreateRoleOrderList(parent, dbTable, dbKey, callback, separateMelee
                 local itemTop = self:GetTop()
                 dragOffsetY = itemTop - cursorY
                 
-                self:SetBackdropColor(0.28, 0.28, 0.55, 0.9)
-                self:SetBackdropBorderColor(0.45, 0.45, 0.95, 1)
+                local tc = GetThemeColor()
+                self:SetBackdropColor(tc.r * 0.6, tc.g * 0.6, tc.b * 0.6, 0.9)
+                self:SetBackdropBorderColor(tc.r, tc.g, tc.b, 1)
                 self:SetFrameLevel(container:GetFrameLevel() + 10)
                 self.grip:SetGripColor(1, 1, 1)
             end
@@ -5984,18 +6805,14 @@ function GUI:CreateClassOrderList(parent, dbTable, dbKey, callback)
         local grip = CreateFrame("Frame", nil, parentFrame)
         grip:SetSize(10, 12)
         
-        for i = 1, 3 do
-            local line = grip:CreateTexture(nil, "ARTWORK")
-            line:SetSize(8, 1)
-            line:SetPoint("TOP", grip, "TOP", 0, -2 - (i - 1) * 4)
-            line:SetColorTexture(0.5, 0.5, 0.5, 1)
-            grip["line" .. i] = line
-        end
+        local icon = grip:CreateTexture(nil, "ARTWORK")
+        icon:SetAllPoints(grip)
+        icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\reorder")
+        icon:SetVertexColor(0.5, 0.5, 0.5, 1)
+        grip.icon = icon
         
         grip.SetGripColor = function(self, r, g, b)
-            for i = 1, 3 do
-                self["line" .. i]:SetColorTexture(r, g, b, 1)
-            end
+            self.icon:SetVertexColor(r, g, b, 1)
         end
         
         return grip
@@ -6054,8 +6871,9 @@ function GUI:CreateClassOrderList(parent, dbTable, dbKey, callback)
                 local itemTop = self:GetTop()
                 dragOffsetY = itemTop - cursorY
                 
-                self:SetBackdropColor(0.28, 0.28, 0.55, 0.9)
-                self:SetBackdropBorderColor(0.45, 0.45, 0.95, 1)
+                local tc = GetThemeColor()
+                self:SetBackdropColor(tc.r * 0.6, tc.g * 0.6, tc.b * 0.6, 0.9)
+                self:SetBackdropBorderColor(tc.r, tc.g, tc.b, 1)
                 self:SetFrameLevel(container:GetFrameLevel() + 10)
                 self.grip:SetGripColor(1, 1, 1)
             end
@@ -6289,18 +7107,14 @@ function GUI:CreateGroupOrderList(parent, dbTable, dbKey, callback, playerGroupF
         local grip = CreateFrame("Frame", nil, parentFrame)
         grip:SetSize(12, 14)
         
-        for i = 1, 3 do
-            local line = grip:CreateTexture(nil, "ARTWORK")
-            line:SetSize(10, 2)
-            line:SetPoint("TOP", grip, "TOP", 0, -2 - (i - 1) * 4)
-            line:SetColorTexture(0.5, 0.5, 0.5, 1)
-            grip["line" .. i] = line
-        end
+        local icon = grip:CreateTexture(nil, "ARTWORK")
+        icon:SetAllPoints(grip)
+        icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\reorder")
+        icon:SetVertexColor(0.5, 0.5, 0.5, 1)
+        grip.icon = icon
         
         grip.SetGripColor = function(self, r, g, b)
-            for i = 1, 3 do
-                self["line" .. i]:SetColorTexture(r, g, b, 1)
-            end
+            self.icon:SetVertexColor(r, g, b, 1)
         end
         
         return grip
@@ -6343,7 +7157,7 @@ function GUI:CreateGroupOrderList(parent, dbTable, dbKey, callback, playerGroupF
         -- Group name
         local text = item:CreateFontString(nil, "OVERLAY", "DFFontNormal")
         text:SetPoint("LEFT", swatch, "RIGHT", 6, 0)
-        text:SetText("Group " .. groupNum)
+        text:SetText(string.format(L["Group %d"], groupNum))
         text:SetTextColor(color[1], color[2], color[3])
         item.text = text
         
@@ -6358,8 +7172,9 @@ function GUI:CreateGroupOrderList(parent, dbTable, dbKey, callback, playerGroupF
                 local itemTop = self:GetTop()
                 dragOffsetY = itemTop - cursorY
                 
-                self:SetBackdropColor(0.28, 0.28, 0.55, 0.9)
-                self:SetBackdropBorderColor(0.45, 0.45, 0.95, 1)
+                local tc = GetThemeColor()
+                self:SetBackdropColor(tc.r * 0.6, tc.g * 0.6, tc.b * 0.6, 0.9)
+                self:SetBackdropBorderColor(tc.r, tc.g, tc.b, 1)
                 self:SetFrameLevel(container:GetFrameLevel() + 10)
                 self.grip:SetGripColor(1, 1, 1)
             end
@@ -6547,13 +7362,7 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
     local leftBg = CreateFrame("Frame", nil, container, "BackdropTemplate")
     leftBg:SetPoint("TOPLEFT", 0, -18)
     leftBg:SetSize(COL_WIDTH, 240)
-    leftBg:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    leftBg:SetBackdropColor(0.08, 0.08, 0.08, 0.95)
-    leftBg:SetBackdropBorderColor(0.2, 0.2, 0.2, 1)
+    GUI:CreateElementBackdrop(leftBg, { bgColor = GUI.Colors.background })
     
     local leftScroll = CreateFrame("ScrollFrame", nil, leftBg, "ScrollFrameTemplate")
     leftScroll:SetPoint("TOPLEFT", 4, -4)
@@ -6577,13 +7386,7 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
     local rightBg = CreateFrame("Frame", nil, container, "BackdropTemplate")
     rightBg:SetPoint("TOPLEFT", leftBg, "TOPRIGHT", COL_GAP, 0)
     rightBg:SetSize(COL_WIDTH, 240)
-    rightBg:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    rightBg:SetBackdropColor(0.08, 0.08, 0.08, 0.95)
-    rightBg:SetBackdropBorderColor(0.2, 0.2, 0.2, 1)
+    GUI:CreateElementBackdrop(rightBg, { bgColor = GUI.Colors.background })
     
     local rightScroll = CreateFrame("ScrollFrame", nil, rightBg, "ScrollFrameTemplate")
     rightScroll:SetPoint("TOPLEFT", 4, -4)
@@ -6706,18 +7509,14 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
         local grip = CreateFrame("Frame", nil, parentFrame)
         grip:SetSize(12, 14)
         
-        for i = 1, 3 do
-            local line = grip:CreateTexture(nil, "ARTWORK")
-            line:SetSize(10, 2)
-            line:SetPoint("TOP", grip, "TOP", 0, -2 - (i - 1) * 4)
-            line:SetColorTexture(0.5, 0.5, 0.5, 1)
-            grip["line" .. i] = line
-        end
+        local icon = grip:CreateTexture(nil, "ARTWORK")
+        icon:SetAllPoints(grip)
+        icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\reorder")
+        icon:SetVertexColor(0.5, 0.5, 0.5, 1)
+        grip.icon = icon
         
         grip.SetGripColor = function(self, r, g, b)
-            for i = 1, 3 do
-                self["line" .. i]:SetColorTexture(r, g, b, 1)
-            end
+            self.icon:SetVertexColor(r, g, b, 1)
         end
         
         return grip
@@ -7050,21 +7849,15 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
     
     local function CreateQuickAddButton(text, role, color, xOffset)
         local btn = CreateFrame("Button", nil, buttonRow, "BackdropTemplate")
-        btn:SetSize(68, 24)
         btn:SetPoint("LEFT", xOffset, 0)
-        btn:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
+        -- Persistent role colour via the shared tinted variant — the colour IS the
+        -- button's identity, so it stays on at rest and brightens on hover.
+        GUI:StyleButton(btn, {
+            width = 68, height = 24,
+            tinted = true,
+            accent = { r = color[1], g = color[2], b = color[3] },
+            text = text,
         })
-        btn:SetBackdropColor(color[1] * 0.15, color[2] * 0.15, color[3] * 0.15, 0.9)
-        btn:SetBackdropBorderColor(color[1] * 0.5, color[2] * 0.5, color[3] * 0.5, 0.8)
-        
-        btn.text = btn:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
-        btn.text:SetPoint("CENTER")
-        btn.text:SetText(text)
-        btn.text:SetTextColor(color[1], color[2], color[3])
-        
         btn:SetScript("OnClick", function()
             local players = getPlayersFunc()
             for _, player in ipairs(currentRoster) do
@@ -7078,75 +7871,38 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
             if onChangeCallback then onChangeCallback() end
             container:Refresh()
         end)
-        
-        btn:SetScript("OnEnter", function(self)
-            self:SetBackdropColor(color[1] * 0.25, color[2] * 0.25, color[3] * 0.25, 1)
-            self:SetBackdropBorderColor(color[1], color[2], color[3], 1)
-        end)
-        
-        btn:SetScript("OnLeave", function(self)
-            self:SetBackdropColor(color[1] * 0.15, color[2] * 0.15, color[3] * 0.15, 0.9)
-            self:SetBackdropBorderColor(color[1] * 0.5, color[2] * 0.5, color[3] * 0.5, 0.8)
-        end)
-        
         return btn
     end
     
-    local tankBtn = CreateQuickAddButton("+ Tanks", "TANK", ROLE_COLORS.TANK, 0)
-    local healerBtn = CreateQuickAddButton("+ Healers", "HEALER", ROLE_COLORS.HEALER, 72)
-    local dpsBtn = CreateQuickAddButton("+ DPS", "DAMAGER", ROLE_COLORS.DAMAGER, 144)
-    local allBtn = CreateQuickAddButton("+ All", "ALL", {0.6, 0.6, 0.6}, 216)
+    local tankBtn = CreateQuickAddButton("+ " .. L["Tanks"], "TANK", ROLE_COLORS.TANK, 0)
+    local healerBtn = CreateQuickAddButton("+ " .. L["Healers"], "HEALER", ROLE_COLORS.HEALER, 72)
+    local dpsBtn = CreateQuickAddButton("+ " .. L["DPS"], "DAMAGER", ROLE_COLORS.DAMAGER, 144)
+    local allBtn = CreateQuickAddButton("+ " .. L["All"], "ALL", {0.6, 0.6, 0.6}, 216)
     
-    -- Clear All button (right side)
+    -- Clear All button (right side) — persistent red via the tinted variant.
     local clearBtn = CreateFrame("Button", nil, buttonRow, "BackdropTemplate")
-    clearBtn:SetSize(68, 24)
     clearBtn:SetPoint("RIGHT", 0, 0)
-    clearBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    GUI:StyleButton(clearBtn, {
+        width = 68, height = 24,
+        tinted = true,
+        accent = { r = 0.85, g = 0.35, b = 0.35 },
+        text = L["Clear All"],
     })
-    clearBtn:SetBackdropColor(0.5, 0.15, 0.15, 0.5)
-    clearBtn:SetBackdropBorderColor(0.6, 0.25, 0.25, 0.8)
-    
-    clearBtn.text = clearBtn:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
-    clearBtn.text:SetPoint("CENTER")
-    clearBtn.text:SetText(L["Clear All"])
-    clearBtn.text:SetTextColor(0.8, 0.35, 0.35)
-    
     clearBtn:SetScript("OnClick", function()
         setPlayersFunc({})
         if onChangeCallback then onChangeCallback() end
         container:Refresh()
     end)
     
-    clearBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(0.6, 0.2, 0.2, 0.8)
-        self:SetBackdropBorderColor(0.8, 0.3, 0.3, 1)
-    end)
-    
-    clearBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(0.5, 0.15, 0.15, 0.5)
-        self:SetBackdropBorderColor(0.6, 0.25, 0.25, 0.8)
-    end)
-    
-    -- Remove Offline button (next to Clear All)
+    -- Remove Offline button (next to Clear All) — persistent gold via tinted.
     local removeOfflineBtn = CreateFrame("Button", nil, buttonRow, "BackdropTemplate")
-    removeOfflineBtn:SetSize(90, 24)
     removeOfflineBtn:SetPoint("RIGHT", clearBtn, "LEFT", -6, 0)
-    removeOfflineBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    GUI:StyleButton(removeOfflineBtn, {
+        width = 90, height = 24,
+        tinted = true,
+        accent = { r = 0.85, g = 0.65, b = 0.35 },
+        text = L["Remove Offline"],
     })
-    removeOfflineBtn:SetBackdropColor(0.4, 0.3, 0.15, 0.5)
-    removeOfflineBtn:SetBackdropBorderColor(0.5, 0.4, 0.2, 0.8)
-    
-    removeOfflineBtn.text = removeOfflineBtn:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
-    removeOfflineBtn.text:SetPoint("CENTER")
-    removeOfflineBtn.text:SetText(L["Remove Offline"])
-    removeOfflineBtn.text:SetTextColor(0.7, 0.55, 0.3)
-    
     removeOfflineBtn:SetScript("OnClick", function()
         local players = getPlayersFunc()
         local newPlayers = {}
@@ -7169,17 +7925,7 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
         if onChangeCallback then onChangeCallback() end
         container:Refresh()
     end)
-    
-    removeOfflineBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(0.5, 0.4, 0.2, 0.8)
-        self:SetBackdropBorderColor(0.7, 0.55, 0.3, 1)
-    end)
-    
-    removeOfflineBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(0.4, 0.3, 0.15, 0.5)
-        self:SetBackdropBorderColor(0.5, 0.4, 0.2, 0.8)
-    end)
-    
+
     -- ========== MANUAL PLAYER ENTRY ==========
     local themeColor = GetThemeColor()
     local manualHeader = container:CreateFontString(nil, "OVERLAY", "DFFontNormal")
@@ -7195,13 +7941,7 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
     local manualInput = CreateFrame("EditBox", nil, container, "BackdropTemplate")
     manualInput:SetPoint("TOPLEFT", manualHelp, "BOTTOMLEFT", 0, -6)
     manualInput:SetSize(380, 24)
-    manualInput:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    manualInput:SetBackdropColor(0.1, 0.1, 0.1, 0.9)
-    manualInput:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
+    GUI:StyleEditBox(manualInput, { skipFont = true })
     manualInput:SetFontObject(DFFontHighlight)
     manualInput:SetTextInsets(8, 8, 0, 0)
     manualInput:SetAutoFocus(false)
@@ -7227,20 +7967,11 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
     
     local addManualBtn = CreateFrame("Button", nil, container, "BackdropTemplate")
     addManualBtn:SetPoint("LEFT", manualInput, "RIGHT", 6, 0)
-    addManualBtn:SetSize(54, 24)
-    addManualBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    GUI:StyleButton(addManualBtn, {
+        width = 54, height = 24,
+        tinted = true,
+        text = L["Add"],
     })
-    addManualBtn:SetBackdropColor(themeColor.r * 0.2, themeColor.g * 0.2, themeColor.b * 0.2, 0.9)
-    addManualBtn:SetBackdropBorderColor(themeColor.r * 0.5, themeColor.g * 0.5, themeColor.b * 0.5, 0.8)
-    
-    addManualBtn.text = addManualBtn:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    addManualBtn.text:SetPoint("CENTER")
-    addManualBtn.text:SetText(L["Add"])
-    addManualBtn.text:SetTextColor(themeColor.r, themeColor.g, themeColor.b)
-    
     addManualBtn:SetScript("OnClick", function()
         local text = manualInput:GetText():trim()
         if text ~= "" then
@@ -7252,17 +7983,7 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
             container:Refresh()
         end
     end)
-    
-    addManualBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(themeColor.r * 0.3, themeColor.g * 0.3, themeColor.b * 0.3, 1)
-        self:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
-    end)
-    
-    addManualBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(themeColor.r * 0.2, themeColor.g * 0.2, themeColor.b * 0.2, 0.9)
-        self:SetBackdropBorderColor(themeColor.r * 0.5, themeColor.g * 0.5, themeColor.b * 0.5, 0.8)
-    end)
-    
+
     -- ========== REFRESH FUNCTION ==========
     function container:Refresh()
         -- Get current roster
@@ -7899,20 +8620,11 @@ function GUI:CreateKeyValueEditor(parent, width, keyOptionsFunc, onChanged)
             end)
             row.valueEdit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
 
-            row.valueCheck = CreateFrame("CheckButton", nil, row.valueFrame)
-            row.valueCheck:SetSize(20, 20)
+            row.valueCheck = CreateFrame("CheckButton", nil, row.valueFrame, "BackdropTemplate")
             row.valueCheck:SetPoint("TOPLEFT", 2, -2)
-            row.valueCheck:SetNormalTexture("Interface\\Buttons\\WHITE8x8")
-            row.valueCheck:GetNormalTexture():SetVertexColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-            local checkTex = row.valueCheck:CreateTexture(nil, "OVERLAY")
-            checkTex:SetSize(14, 14)
-            checkTex:SetPoint("CENTER")
-            checkTex:SetTexture("Interface\\Buttons\\WHITE8x8")
-            row.valueCheck.checkTex = checkTex
+            GUI:StyleCheckButton(row.valueCheck, { size = 20 })
             row.valueCheck:SetScript("OnClick", function(self)
                 data[index].value = self:GetChecked()
-                local tc = GetThemeColor()
-                self.checkTex:SetVertexColor(tc.r, tc.g, tc.b, data[index].value and 1 or 0)
                 NotifyChanged()
             end)
             row.valueCheck:Hide()
@@ -7937,8 +8649,6 @@ function GUI:CreateKeyValueEditor(parent, width, keyOptionsFunc, onChanged)
                     row.valueCheck:Show()
                     row.valueBoolLabel:Show()
                     row.valueCheck:SetChecked(val == true)
-                    local tc = GetThemeColor()
-                    row.valueCheck.checkTex:SetVertexColor(tc.r, tc.g, tc.b, val and 1 or 0)
                 else
                     row.valueCheck:Hide()
                     row.valueBoolLabel:Hide()
@@ -7951,10 +8661,10 @@ function GUI:CreateKeyValueEditor(parent, width, keyOptionsFunc, onChanged)
     end
 
     -- Add button
-    local addBtn = GUI:CreateButton(container, "+ Add Setting", 120, 22, function()
+    local addBtn = GUI:CreateButton(container, L["Add Setting"], 120, 22, function()
         tinsert(data, { key = "", value = "" })
         container:Refresh()
-    end)
+    end, "add")
 
     function container:Refresh()
         local keyOpts = keyOptionsFunc and keyOptionsFunc() or {}
@@ -8205,11 +8915,11 @@ function GUI:CreateBranchEditor(parent, width, onChanged)
     fallbackDD:SetPoint("LEFT", elseLabel, "RIGHT", 4, 0)
 
     -- Add button
-    local addBtn = GUI:CreateButton(container, "+ Add Rule", 100, 22, function()
+    local addBtn = GUI:CreateButton(container, L["Add Rule"], 100, 22, function()
         tinsert(branches, { condition = { step = "", equals = "" }, ["goto"] = "" })
         container:Refresh()
         NotifyChanged()
-    end)
+    end, "add")
 
     function container:SetStepOptions(opts)
         stepOptions = opts or {}
@@ -8409,60 +9119,28 @@ function DF:CreateGUI()
     end
     
     -- Close button with icon
-    local closeBtn = CreateFrame("Button", nil, frame, "BackdropTemplate")
-    closeBtn:SetSize(20, 20)
+    local closeBtn = GUI:CreateCloseButton(frame, { size = 20, onClick = function() frame:Hide() end })
     closeBtn:SetPoint("TOPRIGHT", -8, -5)
     closeBtn:SetFrameStrata("FULLSCREEN_DIALOG")
     closeBtn:SetFrameLevel(210)
-    closeBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    closeBtn:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    closeBtn:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-    local closeIcon = closeBtn:CreateTexture(nil, "OVERLAY")
-    closeIcon:SetPoint("CENTER")
-    closeIcon:SetSize(12, 12)
-    closeIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close")
-    closeIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    closeBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropBorderColor(1, 0.3, 0.3, 1)
-        closeIcon:SetVertexColor(1, 0.3, 0.3)
-    end)
-    closeBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-        closeIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    end)
-    closeBtn:SetScript("OnClick", function() frame:Hide() end)
 
     -- Info button (changelog)
     local infoBtn = CreateFrame("Button", nil, frame, "BackdropTemplate")
-    infoBtn:SetSize(20, 20)
     infoBtn:SetPoint("TOPRIGHT", -32, -5)
     infoBtn:SetFrameStrata("FULLSCREEN_DIALOG")
     infoBtn:SetFrameLevel(210)
-    infoBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    -- Icon-only changelog button via the shared styler (backdrop + hover); the hook
+    -- brightens the icon to the theme colour on hover.
+    GUI:StyleButton(infoBtn, {
+        width = 20, height = 20,
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\notes", size = 16, color = C_TEXT_DIM },
     })
-    infoBtn:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    infoBtn:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-    local infoIcon = infoBtn:CreateTexture(nil, "OVERLAY")
-    infoIcon:SetPoint("CENTER")
-    infoIcon:SetSize(16, 16)
-    infoIcon:SetAtlas("QuestNormal")
-    infoIcon:SetDesaturated(true)
-    infoIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    infoBtn:SetScript("OnEnter", function(self)
+    infoBtn:HookScript("OnEnter", function(self)
         local tc = GetThemeColor()
-        self:SetBackdropBorderColor(tc.r, tc.g, tc.b, 1)
-        infoIcon:SetVertexColor(tc.r, tc.g, tc.b)
+        self.Icon:SetVertexColor(tc.r, tc.g, tc.b)
     end)
-    infoBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-        infoIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    infoBtn:HookScript("OnLeave", function(self)
+        self.Icon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     end)
 
     -- Changelog overlay (covers full content area below title bar)
@@ -8483,24 +9161,12 @@ function DF:CreateGUI()
 
     local changelogTitle = changelogHeader:CreateFontString(nil, "OVERLAY", "DFFontNormal")
     changelogTitle:SetPoint("LEFT", 4, 0)
-    changelogTitle:SetText("Changelog — " .. versionStr)
+    changelogTitle:SetText(L["Changelog"] .. " — " .. versionStr)
     changelogTitle:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
 
     local backBtn = CreateFrame("Button", nil, changelogHeader, "BackdropTemplate")
-    backBtn:SetSize(60, 22)
     backBtn:SetPoint("RIGHT", 0, 0)
-    CreateElementBackdrop(backBtn)
-    local backText = backBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    backText:SetPoint("CENTER")
-    backText:SetText(L["Close"])
-    backText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    backBtn:SetScript("OnEnter", function(self)
-        local tc = GetThemeColor()
-        self:SetBackdropBorderColor(tc.r, tc.g, tc.b, 1)
-    end)
-    backBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-    end)
+    GUI:StyleButton(backBtn, { width = 60, height = 22, text = L["Close"] })
     backBtn:SetScript("OnClick", function() changelogOverlay:Hide() end)
 
     -- Convert markdown changelog to WoW color-coded plain text
@@ -8602,48 +9268,35 @@ function DF:CreateGUI()
     -- Party/Raid mode toggle buttons
     local btnParty = CreateFrame("Button", nil, frame, "BackdropTemplate")
     btnParty:SetPoint("TOPLEFT", 12, -32)
-    btnParty:SetSize(70, 24)
-    CreateElementBackdrop(btnParty)
-    btnParty.Text = btnParty:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    btnParty.Text:SetPoint("CENTER")
-    btnParty.Text:SetText(L["PARTY"])
+    -- Shared underline-tab style; SetActive (in UpdateThemeColors) drives it.
+    GUI:StyleButton(btnParty, { tab = true, text = L["PARTY"], accent = C_ACCENT, width = 70, height = 24, font = "DFFontHighlight" })
     GUI.PartyButton = btnParty  -- Store for external access
     
     local btnRaid = CreateFrame("Button", nil, frame, "BackdropTemplate")
     btnRaid:SetPoint("LEFT", btnParty, "RIGHT", 4, 0)
-    btnRaid:SetSize(70, 24)
-    CreateElementBackdrop(btnRaid)
-    btnRaid.Text = btnRaid:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    btnRaid.Text:SetPoint("CENTER")
-    btnRaid.Text:SetText(L["RAID"])
+    GUI:StyleButton(btnRaid, { tab = true, text = L["RAID"], accent = C_RAID, width = 70, height = 24, font = "DFFontHighlight" })
     GUI.RaidButton = btnRaid  -- Store for external access
     
     -- Click Casting tab button
     local btnClicks = CreateFrame("Button", nil, frame, "BackdropTemplate")
     btnClicks:SetPoint("LEFT", btnRaid, "RIGHT", 4, 0)
-    btnClicks:SetSize(70, 24)
-    CreateElementBackdrop(btnClicks)
-    btnClicks.Text = btnClicks:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    btnClicks.Text:SetPoint("CENTER")
-    btnClicks.Text:SetText(L["BINDS"])
+    GUI:StyleButton(btnClicks, { tab = true, text = L["BINDS"], accent = { r = 0.2, g = 0.8, b = 0.4 }, width = 70, height = 24, font = "DFFontHighlight" })
     GUI.ClicksButton = btnClicks
-    
+
     -- =========================================================================
     -- TEST MODE BUTTON (next to CLICKS tab)
     -- =========================================================================
     local btnTest = CreateFrame("Button", nil, frame, "BackdropTemplate")
     btnTest:SetPoint("LEFT", btnClicks, "RIGHT", 12, 0)
-    btnTest:SetSize(75, 24)
-    CreateElementBackdrop(btnTest)
-    btnTest.Icon = btnTest:CreateTexture(nil, "OVERLAY")
-    btnTest.Icon:SetPoint("LEFT", 6, 0)
-    btnTest.Icon:SetSize(14, 14)
-    btnTest.Icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\visibility")
-    btnTest.Icon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    btnTest.Text = btnTest:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    btnTest.Text:SetPoint("LEFT", btnTest.Icon, "RIGHT", 4, 0)
-    btnTest.Text:SetText(L["Test"])
+    GUI:StyleButton(btnTest, {
+        width = 75, height = 24,
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\preview_off", size = 18, color = C_TEXT_DIM },
+        text = L["Test"],
+    })
+    GUI:SetSettingsFont(btnTest.Text, 11, "")  -- 11px (between Small 10 and Highlight 12)
     btnTest.Text:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    -- Content-fit width (less dead space)
+    btnTest:SetWidth(math.ceil(btnTest.Text:GetStringWidth()) + 38)
     GUI.TestButton = btnTest
     
     -- =========================================================================
@@ -8651,16 +9304,16 @@ function DF:CreateGUI()
     -- =========================================================================
     local btnLock = CreateFrame("Button", nil, frame, "BackdropTemplate")
     btnLock:SetPoint("LEFT", btnTest, "RIGHT", 4, 0)
-    btnLock:SetSize(80, 24)
-    CreateElementBackdrop(btnLock)
-    btnLock.Icon = btnLock:CreateTexture(nil, "OVERLAY")
-    btnLock.Icon:SetPoint("LEFT", 6, 0)
-    btnLock.Icon:SetSize(14, 14)
-    btnLock.Icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\lock")
-    btnLock.Icon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    btnLock.Text = btnLock:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    btnLock.Text:SetPoint("LEFT", btnLock.Icon, "RIGHT", 4, 0)
+    GUI:StyleButton(btnLock, {
+        width = 80, height = 24,
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\lock", size = 18, color = C_TEXT_DIM },
+        text = L["Unlock"],
+    })
+    GUI:SetSettingsFont(btnLock.Text, 11, "")  -- 11px (between Small 10 and Highlight 12)
     btnLock.Text:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    -- Size to the wider "Unlock" label so toggling Lock/Unlock doesn't resize the
+    -- button (real label set in UpdateLockButtonState).
+    btnLock:SetWidth(math.ceil(btnLock.Text:GetStringWidth()) + 38)
     GUI.LockButton = btnLock
     
     -- Position override star (shown next to lock button when position is overridden)
@@ -8708,25 +9361,47 @@ function DF:CreateGUI()
     
     local function UpdateLockButtonState()
         local db = DF.db[GUI.SelectedMode]
-        -- Raid mode uses raidLocked, party mode uses locked
-        local isLocked = db and (GUI.SelectedMode == "raid" and db.raidLocked or db.locked)
-        local themeColor = GetThemeColor()
-        
+        -- Raid mode uses raidLocked, party mode uses locked. Use an explicit
+        -- branch (NOT `a and b or c`) so an unlocked raid (raidLocked=false)
+        -- doesn't fall through to the party `locked` value and read as locked.
+        local isLocked
+        if db then
+            if GUI.SelectedMode == "raid" then isLocked = db.raidLocked else isLocked = db.locked end
+        end
+
+        -- While an auto layout drives the raid frames, dragging the base position by
+        -- accident is the bug we're preventing: disable the toolbar Unlock and steer
+        -- users to the active layout's own Unlock button (Auto Layouts page). Only the
+        -- UNLOCK action is blocked (isLocked) — locking from here still works to finish
+        -- a session.
+        local layoutActive = (GUI.SelectedMode == "raid") and DF.AutoProfilesUI
+            and DF.AutoProfilesUI.IsLayoutActive and DF.AutoProfilesUI:IsLayoutActive()
+        if layoutActive and isLocked then
+            btnLock.dfDisabled = true
+            btnLock.Text:SetText(L["Unlock"])
+            btnLock.Icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\lock")
+            btnLock:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 0.5)
+            btnLock:SetBackdropBorderColor(0.3, 0.3, 0.3, 0.5)
+            btnLock.Text:SetTextColor(0.4, 0.4, 0.4)
+            btnLock.Icon:SetVertexColor(0.4, 0.4, 0.4)
+            UpdatePositionOverrideIndicator()
+            return
+        end
+        btnLock.dfDisabled = false
+
         btnLock.Text:SetText(isLocked and L["Unlock"] or L["Lock"])
         btnLock.Icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. (isLocked and "lock" or "lock_open"))
         
         if not isLocked then
-            -- Unlocked - highlight the button
-            btnLock:SetBackdropColor(themeColor.r * 0.3, themeColor.g * 0.3, themeColor.b * 0.3, 1)
-            btnLock:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
-            btnLock.Text:SetTextColor(themeColor.r, themeColor.g, themeColor.b)
-            btnLock.Icon:SetVertexColor(themeColor.r, themeColor.g, themeColor.b)
+            -- Unlocked - active/selected toggle look (white text/icon like the others)
+            btnLock:SetActive(true)
+            btnLock.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+            btnLock.Icon:SetVertexColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
         else
-            -- Locked - normal state
-            btnLock:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-            btnLock:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 0.5)
-            btnLock.Text:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-            btnLock.Icon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+            -- Locked - normal rest (white text/icon; state shown by the border/fill)
+            btnLock:SetActive(false)
+            btnLock.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+            btnLock.Icon:SetVertexColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
         end
         
         -- Update position override indicator
@@ -8734,12 +9409,36 @@ function DF:CreateGUI()
     end
     GUI.UpdateLockButtonState = UpdateLockButtonState
     
+    -- HookScript (not SetScript) so the disabled tooltip composes with the
+    -- StyleButton hover instead of clobbering it.
+    btnLock:HookScript("OnEnter", function(self)
+        if self.dfDisabled then
+            local name = DF.AutoProfilesUI and DF.AutoProfilesUI.GetActiveLayoutName
+                and DF.AutoProfilesUI:GetActiveLayoutName()
+            GUI:ShowTooltip(self, {
+                title = L["Locked by Auto Layout"],
+                tone = "warning",
+                lines = { format(L["Auto layout \"%s\" is active. Unlock it from the Auto Layouts page to move its frames."], name or "?") },
+            })
+        end
+    end)
+    btnLock:HookScript("OnLeave", function() GameTooltip:Hide() end)
+
     btnLock:SetScript("OnClick", function()
+        if btnLock.dfDisabled then
+            local name = DF.AutoProfilesUI and DF.AutoProfilesUI.GetActiveLayoutName
+                and DF.AutoProfilesUI:GetActiveLayoutName()
+            print("|cffff9900DandersFrames:|r " .. format(L["Auto layout \"%s\" is active. Unlock it from the Auto Layouts page to move its frames."], name or "?"))
+            return
+        end
+
         local db = DF.db[GUI.SelectedMode]
         if not db then return end
-        
-        -- Check current lock state using the correct key per mode
-        local isLocked = GUI.SelectedMode == "raid" and db.raidLocked or db.locked
+
+        -- Check current lock state using the correct key per mode (explicit
+        -- branch — `a and b or c` would misread an unlocked raid as locked).
+        local isLocked
+        if GUI.SelectedMode == "raid" then isLocked = db.raidLocked else isLocked = db.locked end
         
         if GUI.SelectedMode == "raid" then
             if isLocked then
@@ -8832,51 +9531,24 @@ function DF:CreateGUI()
     -- =========================================================================
     
     local function UpdateThemeColors()
-        local pc = C_ACCENT
-        local rc = C_RAID
-        local cc = {r = 0.2, g = 0.8, b = 0.4} -- Click casting green
-        
-        -- Reset all mode buttons first
-        btnParty:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-        btnParty:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-        btnParty.Text:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-        btnRaid:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-        btnRaid:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-        btnRaid.Text:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-        btnClicks:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-        btnClicks:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-        btnClicks.Text:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-        
-        -- Highlight the selected mode
-        if GUI.SelectedMode == "party" then
-            btnParty:SetBackdropColor(pc.r, pc.g, pc.b, 1)
-            btnParty:SetBackdropBorderColor(pc.r, pc.g, pc.b, 1)
-            btnParty.Text:SetTextColor(1, 1, 1)
-        elseif GUI.SelectedMode == "raid" then
-            btnRaid:SetBackdropColor(rc.r, rc.g, rc.b, 1)
-            btnRaid:SetBackdropBorderColor(rc.r, rc.g, rc.b, 1)
-            btnRaid.Text:SetTextColor(1, 1, 1)
-        elseif GUI.SelectedMode == "clicks" then
-            btnClicks:SetBackdropColor(cc.r, cc.g, cc.b, 1)
-            btnClicks:SetBackdropBorderColor(cc.r, cc.g, cc.b, 1)
-            btnClicks.Text:SetTextColor(1, 1, 1)
-        end
-        
-        -- Update Test button colors based on whether test panel is open
-        local testActive = DF.TestPanel and DF.TestPanel:IsShown()
-        local themeColor = GUI.SelectedMode == "party" and pc or (GUI.SelectedMode == "raid" and rc or cc)
-        
-        if testActive then
-            btnTest:SetBackdropColor(themeColor.r * 0.3, themeColor.g * 0.3, themeColor.b * 0.3, 1)
-            btnTest:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
-            btnTest.Text:SetTextColor(themeColor.r, themeColor.g, themeColor.b)
-            btnTest.Icon:SetVertexColor(themeColor.r, themeColor.g, themeColor.b)
-        else
-            btnTest:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-            btnTest:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 0.5)
-            btnTest.Text:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-            btnTest.Icon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-        end
+        -- Mode buttons use the shared underline-tab style; SetActive drives the
+        -- underline + accent label (each button's per-mode accent set at creation).
+        btnParty:SetActive(GUI.SelectedMode == "party")
+        btnRaid:SetActive(GUI.SelectedMode == "raid")
+        btnClicks:SetActive(GUI.SelectedMode == "clicks")
+
+        -- Test button look via the shared toggle styling (matches how the Lock
+        -- button is refreshed below). The old inline version painted a stray
+        -- theme-coloured border even at rest.
+        if UpdateTestButtonState then UpdateTestButtonState() end
+
+        -- Refresh the toolbar buttons' hover wash to the current mode accent.
+        -- They live on the main frame (not a page child), so the page
+        -- ThemeListeners loop below never reaches them — without this their hover
+        -- stays the party colour after switching to raid. (UpdateTestButtonState/
+        -- SetActive only fix the resting backdrop, not the HIGHLIGHT wash.)
+        if btnTest.UpdateTheme then btnTest.UpdateTheme() end
+        if btnLock.UpdateTheme then btnLock.UpdateTheme() end
         
         -- Show/hide Test and Lock buttons based on mode
         if GUI.SelectedMode == "clicks" then
@@ -8925,24 +9597,16 @@ function DF:CreateGUI()
     
     -- Function to update test button state (called externally)
     UpdateTestButtonState = function()
-        -- Highlight based on whether the test panel popup is visible
-        local pc = C_ACCENT
-        local rc = C_RAID
-        local cc = {r = 0.2, g = 0.8, b = 0.4}
+        -- Active toggle look based on whether the test panel is visible.
         local testActive = DF.TestPanel and DF.TestPanel:IsShown()
-        local themeColor = GUI.SelectedMode == "party" and pc or (GUI.SelectedMode == "raid" and rc or cc)
-        
-        if testActive then
-            btnTest:SetBackdropColor(themeColor.r * 0.3, themeColor.g * 0.3, themeColor.b * 0.3, 1)
-            btnTest:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
-            btnTest.Text:SetTextColor(themeColor.r, themeColor.g, themeColor.b)
-            btnTest.Icon:SetVertexColor(themeColor.r, themeColor.g, themeColor.b)
-        else
-            btnTest:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-            btnTest:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 0.5)
-            btnTest.Text:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-            btnTest.Icon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-        end
+        btnTest:SetActive(testActive)
+        -- Swap the framed-eye glyph: open (preview) when test mode is showing the
+        -- preview frames, slashed (preview_off) when it's off.
+        btnTest.Icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
+            .. (testActive and "preview" or "preview_off"))
+        -- White text/icon in both states (state shown by the toggle border/fill).
+        btnTest.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+        btnTest.Icon:SetVertexColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
     end
     GUI.UpdateTestButtonState = UpdateTestButtonState
     
@@ -8960,21 +9624,10 @@ function DF:CreateGUI()
         end
     end)
     
-    btnTest:SetScript("OnEnter", function(self)
-        local testActive = DF.TestPanel and DF.TestPanel:IsShown()
-        if not testActive then
-            local themeColor = GUI.SelectedMode == "party" and C_ACCENT or C_RAID
-            self:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 0.8)
-        end
-    end)
-    btnTest:SetScript("OnLeave", function(self)
-        local testActive = DF.TestPanel and DF.TestPanel:IsShown()
-        if not testActive then
-            local themeColor = GUI.SelectedMode == "party" and C_ACCENT or C_RAID
-            self:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 0.5)
-        end
-    end)
-    
+    -- Hover is handled by StyleButton (resets to grey on leave). The old manual
+    -- OnEnter/OnLeave left a stuck theme-coloured border because its OnLeave reset
+    -- to themeColor@0.5 rather than the neutral border.
+
     btnParty:SetScript("OnClick", function()
         DF:SyncLinkedSections()
 
@@ -9181,13 +9834,7 @@ function DF:CreateGUI()
             popup = CreateFrame("Frame", "DFURLPopup", UIParent, "BackdropTemplate")
             popup:SetSize(380, 80)
             popup:SetPoint("CENTER")
-            popup:SetBackdrop({
-                bgFile = "Interface\\Buttons\\WHITE8x8",
-                edgeFile = "Interface\\Buttons\\WHITE8x8",
-                edgeSize = 1,
-            })
-            popup:SetBackdropColor(0.1, 0.1, 0.1, 0.98)
-            popup:SetBackdropBorderColor(C_ACCENT.r, C_ACCENT.g, C_ACCENT.b, 1)
+            GUI:CreatePanelBackdrop(popup, { bgAlpha = 0.98, borderColor = C_ACCENT })
             popup:SetFrameStrata("FULLSCREEN_DIALOG")
             popup:SetFrameLevel(250)
             popup:EnableMouse(true)
@@ -9201,14 +9848,7 @@ function DF:CreateGUI()
             editBox:SetPoint("TOPLEFT", 12, -30)
             editBox:SetPoint("TOPRIGHT", -12, -30)
             editBox:SetHeight(22)
-            editBox:SetBackdrop({
-                bgFile = "Interface\\Buttons\\WHITE8x8",
-                edgeFile = "Interface\\Buttons\\WHITE8x8",
-                edgeSize = 1,
-            })
-            editBox:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-            editBox:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-            editBox:SetFontObject(DFFontHighlightSmall)
+            GUI:StyleEditBox(editBox)
             editBox:SetAutoFocus(true)
             editBox:SetScript("OnEscapePressed", function() popup:Hide() end)
             editBox:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
@@ -9257,8 +9897,8 @@ function DF:CreateGUI()
     
     -- Discord link
     local discordColor = { r = 0.45, g = 0.53, b = 0.85 }
-    local discordBtn = CreateFooterLink(footer, "Need support? Join our Discord", discordColor, 
-        "https://discord.gg/SDWtduCqnT", "Join the DandersFrames Discord")
+    local discordBtn = CreateFooterLink(footer, L["Need support? Join our Discord"], discordColor,
+        "https://discord.gg/SDWtduCqnT", L["Join the DandersFrames Discord"])
     discordBtn:SetPoint("LEFT", footer, "LEFT", 2, 0)
     
     -- Separator
@@ -9269,8 +9909,8 @@ function DF:CreateGUI()
     
     -- PayPal link
     local paypalColor = { r = 0.35, g = 0.65, b = 0.45 }
-    local donateBtn = CreateFooterLink(footer, "Support with PayPal", paypalColor,
-        "https://paypal.me/dandersframesaddon", "Support DandersFrames Development")
+    local donateBtn = CreateFooterLink(footer, L["Support with PayPal"], paypalColor,
+        "https://paypal.me/dandersframesaddon", L["Support DandersFrames Development"])
     donateBtn:SetPoint("LEFT", sep, "RIGHT", 8, 0)
 
     -- Separator 2
@@ -9281,8 +9921,8 @@ function DF:CreateGUI()
 
     -- Patreon link
     local patreonColor = { r = 0.90, g = 0.35, b = 0.30 }
-    local patreonBtn = CreateFooterLink(footer, "Support with Patreon", patreonColor,
-        "https://www.patreon.com/DandersFrames", "Support DandersFrames on Patreon")
+    local patreonBtn = CreateFooterLink(footer, L["Support with Patreon"], patreonColor,
+        "https://www.patreon.com/DandersFrames", L["Support DandersFrames on Patreon"])
     patreonBtn:SetPoint("LEFT", sep2, "RIGHT", 8, 0)
 
     -- Version on the right
@@ -9298,7 +9938,10 @@ function DF:CreateGUI()
     
     -- Store min width references for tab switching
     local normalMinWidth = minWidth  -- 520
-    local clicksMinWidth = 760  -- Clicks tab needs more space
+    -- Shared minimum width for the "wide" pages (Binds/Click Casting, Aura
+    -- Designer, Text Designer, Pinned Frames) — their two-panel / tab-strip
+    -- layouts squash below this.
+    local wideMinWidth = 850
     
     -- Function to show normal Party/Raid content
     function GUI:ShowNormalContent()
@@ -9319,12 +9962,12 @@ function DF:CreateGUI()
         if content then content:Hide() end
         
         -- Set larger minimum width for clicks tab
-        frame:SetResizeBounds(clicksMinWidth, minHeight, maxWidth, maxHeight)
+        frame:SetResizeBounds(wideMinWidth, minHeight, maxWidth, maxHeight)
         
         -- If current width is less than clicks min, expand it
         local currentWidth = frame:GetWidth()
-        if currentWidth < clicksMinWidth then
-            frame:SetWidth(clicksMinWidth)
+        if currentWidth < wideMinWidth then
+            frame:SetWidth(wideMinWidth)
         end
         
         if clickCastPanel then 
@@ -9400,6 +10043,34 @@ function DF:CreateGUI()
             end
         end
         
+        -- Wide pages (AD/TD/Pinned) need extra width; set the resize bounds +
+        -- expand BEFORE building the page so its content lays out at the final
+        -- width instead of building narrow then staying squashed until a resize.
+        local WIDE_PAGES = {
+            auras_auradesigner = true,    -- two-panel preview + controls
+            text_designer = true,         -- two-panel preview + controls
+            general_pinnedframes = true,  -- tab strip + active-set meter
+            general_nicknames = true,     -- wide add-row (Match+Char+Nick+Add) + list columns
+        }
+        if WIDE_PAGES[name] then
+            frame:SetResizeBounds(wideMinWidth, minHeight, maxWidth, maxHeight)
+            if frame:GetWidth() < wideMinWidth then
+                frame:SetWidth(wideMinWidth)
+            end
+            -- Belt-and-braces: re-assert the width next frame so size-dependent
+            -- layout settles without a manual resize. A page can build at a
+            -- pre-layout width (tabs overflow the panel / cards squashed); nudging
+            -- the width fires the same OnSizeChanged re-flows a resize would.
+            C_Timer.After(0, function()
+                if GUI.CurrentPageName ~= name or not frame:IsShown() then return end
+                local w = frame:GetWidth()
+                frame:SetWidth(w + 1)
+                frame:SetWidth(w)
+            end)
+        else
+            frame:SetResizeBounds(normalMinWidth, minHeight, maxWidth, maxHeight)
+        end
+
         if GUI.Pages[name] then
             -- Set current tab for Search registration
             if DF.Search then
@@ -9447,18 +10118,6 @@ function DF:CreateGUI()
                 end
             end
         end
-        -- Aura Designer needs the same minimum width as Click Casting to
-        -- prevent the two-row banner controls from overlapping.
-        local adMinWidth = 760
-        if name == "auras_auradesigner" then
-            frame:SetResizeBounds(adMinWidth, minHeight, maxWidth, maxHeight)
-            if frame:GetWidth() < adMinWidth then
-                frame:SetWidth(adMinWidth)
-            end
-        else
-            frame:SetResizeBounds(normalMinWidth, minHeight, maxWidth, maxHeight)
-        end
-
         GUI.CurrentPageName = name
         UpdateThemeColors()
     end
@@ -9744,25 +10403,11 @@ function DF:CreateGUI()
             -- of rendering any controls. Whitelisted pages (General, Profiles,
             -- Debug, Targeted List, Personal Targeted) always render normally.
             if GUI:IsTabDisabledForCurrentMode(self.tabName) then
-                local banner = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-                banner:SetBackdrop({
-                    bgFile = "Interface\\Buttons\\WHITE8x8",
-                    edgeFile = "Interface\\Buttons\\WHITE8x8",
-                    edgeSize = 1,
-                })
-                banner:SetBackdropColor(0.4, 0.2, 0.05, 0.5)
-                banner:SetBackdropBorderColor(1, 0.82, 0, 0.7)
-                local msg = banner:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-                msg:SetPoint("LEFT", 14, 0)
-                msg:SetPoint("RIGHT", -14, 0)
-                msg:SetJustifyH("LEFT")
-                msg:SetWordWrap(true)
-                msg:SetText(GUI.SelectedMode == "raid"
+                local banner = GUI:CreateInfoBanner(parent, { tone = "info" })
+                banner:SetText(GUI.SelectedMode == "raid"
                     and (L["Raid frames are currently disabled. Changes here will apply after re-enabling Raid in the General tab and reloading."])
                     or  (L["Party frames are currently disabled. Changes here will apply after re-enabling Party in the General tab and reloading."]))
                 table.insert(self.children, banner)
-                banner:SetParent(parent)
-                banner.layoutHeight = 60
                 banner.layoutCol = "both"
                 self.builtForMode = GUI.SelectedMode
                 self.builtForDisabled = true
@@ -9909,9 +10554,15 @@ function DF:CreateGUI()
                 end
             end
             
-            -- Determine column layout based on content area width
+            -- Determine column layout based on content area width.
+            -- Two-column settings groups are 280px wide and placed at x=5 (right
+            -- edge 285), while column 2 starts at contentWidth/2 — so they begin to
+            -- overlap once contentWidth drops below ~570. minColumnWidth must exceed
+            -- the 280 group width (was a stale 270) so the layout collapses to one
+            -- column BEFORE the columns touch, leaving a ~10px gutter at the cutover
+            -- instead of overlapping for the last ~10px.
             local contentWidth = GUI.contentFrame and GUI.contentFrame:GetWidth() or 540
-            local minColumnWidth = 270  -- Minimum width for each column
+            local minColumnWidth = 285  -- ≥ the 280 group width + a small gutter
             local usesTwoColumns = contentWidth >= (minColumnWidth * 2 + 20)
             
             -- Account for scrollbar and padding when calculating usable width

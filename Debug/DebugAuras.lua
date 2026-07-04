@@ -551,9 +551,11 @@ function DA:CreateOptionsPanel()
     
     -- Helper to create checkbox
     local function CreateCheckbox(parent, x, y, text, getter, setter)
-        local cb = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
+        local cb = CreateFrame("CheckButton", nil, parent, "BackdropTemplate")
         cb:SetPoint("TOPLEFT", x, y)
-        cb:SetSize(24, 24)
+        DF.GUI:StyleCheckButton(cb)
+        cb.text = cb:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
+        cb.text:SetPoint("LEFT", cb, "RIGHT", 4, 0)
         cb.text:SetText(text)
         cb.text:SetTextColor(0.9, 0.9, 0.9)
         cb:SetChecked(getter())

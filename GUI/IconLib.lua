@@ -41,12 +41,14 @@ local function CreateIconPreview()
         return
     end
     
-    -- Colors
-    local C_BG = {r = 0.08, g = 0.08, b = 0.08}
+    -- Colors. Neutrals that already match the shared GUI palette point at it
+    -- (zero visual change); C_BORDER/C_TEXT/C_ACCENT differ from GUI.Colors and
+    -- stay private (this static preview doesn't theme-track).
+    local C_BG = DF.GUI.Colors.background
     local C_BORDER = {r = 0.3, g = 0.3, b = 0.3}
     local C_ACCENT = {r = 0.6, g = 0.4, b = 0.8}
     local C_TEXT = {r = 1, g = 1, b = 1}
-    local C_TEXT_DIM = {r = 0.6, g = 0.6, b = 0.6}
+    local C_TEXT_DIM = DF.GUI.Colors.textDim
     
     -- Main frame
     local frame = CreateFrame("Frame", "DFIconPreview", UIParent, "BackdropTemplate")
@@ -69,43 +71,34 @@ local function CreateIconPreview()
     -- Title
     local title = frame:CreateFontString(nil, "OVERLAY", "DFFontNormalLarge")
     title:SetPoint("TOP", 0, -12)
-    title:SetText("Material Icons Preview")
+    title:SetText(DF.L["Material Icons Preview"])
     title:SetTextColor(C_ACCENT.r, C_ACCENT.g, C_ACCENT.b)
     
     -- Subtitle
     local subtitle = frame:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
     subtitle:SetPoint("TOP", title, "BOTTOM", 0, -4)
-    subtitle:SetText("25 icons from Google Material Symbols (Apache 2.0)")
+    subtitle:SetText(DF.L["25 icons from Google Material Symbols (Apache 2.0)"])
     subtitle:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     
     -- Close button
-    local closeBtn = CreateFrame("Button", nil, frame)
-    closeBtn:SetSize(20, 20)
+    local closeBtn = DF.GUI:CreateCloseButton(frame, { size = 20, onClick = function() frame:Hide() end })
     closeBtn:SetPoint("TOPRIGHT", -8, -8)
-    closeBtn:SetScript("OnClick", function() frame:Hide() end)
-    local closeIcon = closeBtn:CreateTexture(nil, "OVERLAY")
-    closeIcon:SetPoint("CENTER")
-    closeIcon:SetSize(12, 12)
-    closeIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close")
-    closeIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    closeBtn:SetScript("OnEnter", function() closeIcon:SetVertexColor(1, 0.3, 0.3) end)
-    closeBtn:SetScript("OnLeave", function() closeIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b) end)
     
     -- Color buttons for testing SetVertexColor
     local colorLabel = frame:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
     colorLabel:SetPoint("TOPLEFT", 16, -50)
-    colorLabel:SetText("Theme Color:")
+    colorLabel:SetText(DF.L["Theme Color:"])
     colorLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     
     local colors = {
-        {name = "White", r = 1, g = 1, b = 1},
-        {name = "Purple", r = 0.6, g = 0.4, b = 0.8},
-        {name = "Blue", r = 0.3, g = 0.5, b = 0.9},
-        {name = "Orange", r = 0.9, g = 0.5, b = 0.2},
-        {name = "Red", r = 0.9, g = 0.3, b = 0.3},
-        {name = "Green", r = 0.3, g = 0.8, b = 0.4},
-        {name = "Yellow", r = 1, g = 0.8, b = 0.2},
-        {name = "Gray", r = 0.5, g = 0.5, b = 0.5},
+        {name = DF.L["White"], r = 1, g = 1, b = 1},
+        {name = DF.L["Purple"], r = 0.6, g = 0.4, b = 0.8},
+        {name = DF.L["Blue"], r = 0.3, g = 0.5, b = 0.9},
+        {name = DF.L["Orange"], r = 0.9, g = 0.5, b = 0.2},
+        {name = DF.L["Red"], r = 0.9, g = 0.3, b = 0.3},
+        {name = DF.L["Green"], r = 0.3, g = 0.8, b = 0.4},
+        {name = DF.L["Yellow"], r = 1, g = 0.8, b = 0.2},
+        {name = DF.L["Gray"], r = 0.5, g = 0.5, b = 0.5},
     }
     
     local currentColor = colors[1]
@@ -142,9 +135,7 @@ local function CreateIconPreview()
             end
         end)
         btn:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:SetText(col.name)
-            GameTooltip:Show()
+            DF.GUI:ShowTooltip(self, { title = col.name })
         end)
         btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
         
@@ -200,12 +191,14 @@ local function CreateIconPreview()
         -- Hover and click
         container:SetScript("OnEnter", function(self)
             self:SetBackdropBorderColor(C_ACCENT.r, C_ACCENT.g, C_ACCENT.b, 1)
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:AddLine(iconName, 1, 1, 1)
-            GameTooltip:AddLine(ICONS_PATH .. iconName, 0.6, 0.6, 0.6)
-            GameTooltip:AddLine(" ")
-            GameTooltip:AddLine("Click to copy texture path", 0.4, 0.8, 0.4)
-            GameTooltip:Show()
+            DF.GUI:ShowTooltip(self, {
+                title = iconName,
+                lines = {
+                    { text = ICONS_PATH .. iconName, color = { r = 0.6, g = 0.6, b = 0.6 } },
+                    " ",
+                    { text = DF.L["Click to copy texture path"], hint = true },
+                },
+            })
         end)
         container:SetScript("OnLeave", function(self)
             self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
@@ -213,14 +206,14 @@ local function CreateIconPreview()
         end)
         container:SetScript("OnClick", function()
             local path = ICONS_PATH .. iconName
-            print("|cff9966ffDandersFrames:|r Copied: " .. path)
+            print("|cff9966ffDandersFrames:|r " .. DF.L["Copied: "] .. path)
         end)
     end
     
     -- Usage info at bottom
     local usage = frame:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
     usage:SetPoint("BOTTOM", 0, 12)
-    usage:SetText("Click icon to copy path • Icons are white and can be tinted with SetVertexColor()")
+    usage:SetText(DF.L["Click icon to copy path • Icons are white and can be tinted with SetVertexColor()"])
     usage:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     
     previewFrame = frame

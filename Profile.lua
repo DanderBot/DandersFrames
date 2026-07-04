@@ -256,7 +256,7 @@ function DF:SetProfile(name)
             partyEnabled = true,
             raidEnabled = true,
             settingsFont = "Friz Quadrata TT",
-            settingsFontOutline = "",
+            settingsFontOutline = "NONE",
         }
         print("|cff00ff00DandersFrames:|r " .. format(L["Created new profile: %s"], name))
     end
@@ -266,7 +266,7 @@ function DF:SetProfile(name)
     if p.partyEnabled        == nil then p.partyEnabled        = true end
     if p.raidEnabled         == nil then p.raidEnabled         = true end
     if p.settingsFont        == nil then p.settingsFont        = "Friz Quadrata TT" end
-    if p.settingsFontOutline == nil then p.settingsFontOutline = "" end
+    if p.settingsFontOutline == nil or p.settingsFontOutline == "" then p.settingsFontOutline = "NONE" end
 
     -- Switch to the profile (update both account-wide and per-character)
     DandersFramesDB_v2.currentProfile = name
@@ -298,6 +298,11 @@ function DF:SetProfile(name)
 
     if DF.MigrateTextDesignerFromLegacy then
         DF:MigrateTextDesignerFromLegacy()
+    end
+    -- One-time cleanup of stray health text the pre-fix migration injected onto
+    -- profiles that had health text off (idempotent, self-guarded).
+    if DF.CorrectStrayMigratedHealthText then
+        DF:CorrectStrayMigratedHealthText()
     end
 
     -- Strip orphaned legacy text overrides from raid auto-layouts now that TD

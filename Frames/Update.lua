@@ -1604,8 +1604,9 @@ function DF:ApplyAuraLayout(frame, auraType)
     local paddingX = db[prefix .. "PaddingX"] or 2
     local paddingY = db[prefix .. "PaddingY"] or 2
     
-    -- Get border thickness for this aura type (needed for pixel-perfect size calculation)
-    local borderThickness = db[prefix .. "BorderThickness"] or 1
+    -- Get border thickness for this aura type (needed for pixel-perfect size calculation).
+    -- Canonical key is <prefix>BorderSize; <prefix>BorderThickness is a legacy fallback only.
+    local borderThickness = db[prefix .. "BorderSize"] or db[prefix .. "BorderThickness"] or 1
     
     -- Apply pixel-perfect sizing to aura size and scale together, adjusting for border
     if db.pixelPerfect then

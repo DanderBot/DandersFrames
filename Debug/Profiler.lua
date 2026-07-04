@@ -1568,9 +1568,9 @@ function Profiler:CreateUI()
     hookText:SetTextColor(1, 0.8, 0.2)
     f.hookBannerText = hookText
 
-    local hookCheckbox = CreateFrame("CheckButton", nil, hookBanner, "UICheckButtonTemplate")
-    hookCheckbox:SetSize(22, 22)
+    local hookCheckbox = CreateFrame("CheckButton", nil, hookBanner, "BackdropTemplate")
     hookCheckbox:SetPoint("RIGHT", -6, 0)
+    DF.GUI:StyleCheckButton(hookCheckbox)
     hookCheckbox:SetChecked(self.onUpdateHookEnabled)
     hookCheckbox:SetScript("OnClick", function(cb)
         if not DandersFramesDB_v2 then DandersFramesDB_v2 = {} end

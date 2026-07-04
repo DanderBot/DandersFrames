@@ -2717,9 +2717,8 @@ function SecureSort:PushRaidGroupLayoutConfig()
         raidGroupLayoutConfig.horizontal = %s
         raidGroupLayoutConfig.groupAnchor = "%s"
         raidGroupLayoutConfig.playerAnchor = "%s"
-        raidGroupLayoutConfig.reverseGroupOrder = %s
         raidUseGroups = %s
-    ]], 
+    ]],
         lp.frameWidth,
         lp.frameHeight,
         lp.playerSpacing,
@@ -2729,7 +2728,6 @@ function SecureSort:PushRaidGroupLayoutConfig()
         tostring(lp.horizontal),
         lp.groupAnchor or "CENTER",
         lp.playerAnchor or "START",
-        tostring(lp.reverseGroupOrder or false),
         tostring(useGroups)
     )
     
@@ -3180,21 +3178,9 @@ function SecureSort:CalculateRaidSlotPosition(slotIndex, frameCount, layoutParam
     local frameAnchor = layoutParams.frameAnchor or "START"
     local columnAnchor = layoutParams.columnAnchor or "START"
 
-    -- Calculate row and column for this slot
-    local row, col
-    if horizontal then
-        -- Horizontal: fill columns first (left-to-right), then rows (top-to-bottom)
-        row = math.floor(slotIndex / playersPerRow)
-        col = slotIndex % playersPerRow
-    else
-        -- Vertical: fill rows first (top-to-bottom), then columns (left-to-right)
-        col = math.floor(slotIndex / playersPerRow)
-        row = slotIndex % playersPerRow
-    end
-
-    -- Reverse fill direction based on frameAnchor and columnAnchor
-    -- In horizontal mode: frameAnchor reverses columns, columnAnchor reverses rows
-    -- In vertical mode: frameAnchor reverses rows, columnAnchor reverses columns
+    -- Grid cell dimensions for the VISIBLE frames. Mirrors how the live secure
+    -- header wraps: playersPerRow units fill the primary axis, then wrap onto a
+    -- new line on the secondary axis.
     local numCols, numRows
     if horizontal then
         numCols = math.min(playersPerRow, frameCount)
@@ -3204,61 +3190,51 @@ function SecureSort:CalculateRaidSlotPosition(slotIndex, frameCount, layoutParam
         numCols = math.ceil(frameCount / playersPerRow)
     end
 
+    -- Which visual cell (column from the left, row from the top) this slot fills.
+    -- Fill direction is set ONLY by frameAnchor/columnAnchor — matching the live
+    -- secure header's point / columnAnchorPoint (FlatRaidFrames.ApplyLayoutSettings)
+    -- — and is INDEPENDENT of the growth anchor, which only decides where the whole
+    -- grid sits. The previous code folded the anchors into the growth-anchor branch
+    -- and mirrored END layouts, which is why test inverted vs live for End alignment.
+    local cellCol, cellRow
     if horizontal then
-        if frameAnchor == "END" then
-            col = (numCols - 1) - col
-        end
-        if columnAnchor == "END" then
-            row = (numRows - 1) - row
-        end
+        local u = slotIndex % playersPerRow                 -- position along the row (primary, X)
+        local line = math.floor(slotIndex / playersPerRow)  -- which row (secondary, Y)
+        cellCol = (frameAnchor == "END") and ((numCols - 1) - u) or u
+        cellRow = (columnAnchor == "END") and ((numRows - 1) - line) or line
     else
-        if frameAnchor == "END" then
-            row = (numRows - 1) - row
-        end
-        if columnAnchor == "END" then
-            col = (numCols - 1) - col
-        end
+        local u = slotIndex % playersPerRow                 -- position along the column (primary, Y)
+        local line = math.floor(slotIndex / playersPerRow)  -- which column (secondary, X)
+        cellRow = (frameAnchor == "END") and ((numRows - 1) - u) or u
+        cellCol = (columnAnchor == "END") and ((numCols - 1) - line) or line
     end
 
+    local cellX = cellCol * (frameWidth + hSpacing)   -- from the grid's left edge
+    local cellY = cellRow * (frameHeight + vSpacing)  -- from the grid's top edge
     local gridWidth = numCols * frameWidth + (numCols - 1) * hSpacing
+    local gridHeight = numRows * frameHeight + (numRows - 1) * vSpacing
 
-    -- Calculate position based on growthAnchor
+    -- Offset from the growth-anchor corner. The grid box is pinned by that corner to
+    -- the same corner of the container (GetRaidSlotAnchors returns growthAnchor for
+    -- both frame and container), exactly like the live inner container, so the grid
+    -- hugs that corner regardless of container size.
     local x, y
-
-    if growthAnchor == "TOP" then
-        -- TOP: Center horizontally, anchor at top
-        -- Frames grow down from top, centered horizontally
-        local baseX = col * (frameWidth + hSpacing)
-        y = -row * (frameHeight + vSpacing)
-        -- Offset X to center the grid horizontally
-        x = baseX - (gridWidth / 2) + (frameWidth / 2)
-    elseif growthAnchor == "CENTER" then
-        -- CENTER: Center both horizontally and vertically
-        local gridHeight = numRows * frameHeight + (numRows - 1) * vSpacing
-        local baseX = col * (frameWidth + hSpacing)
-        local baseY = -row * (frameHeight + vSpacing)
-        x = baseX - (gridWidth / 2) + (frameWidth / 2)
-        y = baseY + (gridHeight / 2) - (frameHeight / 2)
-    elseif growthAnchor == "TOPLEFT" then
-        -- Anchored at top-left: frames grow right (+x) and down (-y)
-        x = col * (frameWidth + hSpacing)
-        y = -row * (frameHeight + vSpacing)
+    if growthAnchor == "CENTER" then
+        x = cellX + (frameWidth / 2) - (gridWidth / 2)
+        y = (gridHeight / 2) - cellY - (frameHeight / 2)
     elseif growthAnchor == "TOPRIGHT" then
-        -- Anchored at top-right: frames grow left (-x) and down (-y)
-        x = -col * (frameWidth + hSpacing)
-        y = -row * (frameHeight + vSpacing)
+        x = -(gridWidth - cellX - frameWidth)
+        y = -cellY
     elseif growthAnchor == "BOTTOMLEFT" then
-        -- Anchored at bottom-left: frames grow right (+x) and up (+y)
-        x = col * (frameWidth + hSpacing)
-        y = row * (frameHeight + vSpacing)
+        x = cellX
+        y = gridHeight - cellY - frameHeight
     elseif growthAnchor == "BOTTOMRIGHT" then
-        -- Anchored at bottom-right: frames grow left (-x) and up (+y)
-        x = -col * (frameWidth + hSpacing)
-        y = row * (frameHeight + vSpacing)
+        x = -(gridWidth - cellX - frameWidth)
+        y = gridHeight - cellY - frameHeight
     else
-        -- Default to TOPLEFT
-        x = col * (frameWidth + hSpacing)
-        y = -row * (frameHeight + vSpacing)
+        -- TOPLEFT (and any legacy/default value)
+        x = cellX
+        y = -cellY
     end
 
     return x, y
@@ -3297,7 +3273,11 @@ function SecureSort:PositionFrameToSlot(frame, slotIndex, frameCount, layoutPara
     
     frame:ClearAllPoints()
     frame:SetPoint(anchor, container, relativeAnchor, x, y)
-    
+    -- Pixel-perfect: land the frame's edges on the physical grid. The CENTER growth
+    -- anchor computes offsets via /2, which can fall on a half-pixel and make a 1px
+    -- border straddle two physical rows; this nudges it back on-grid (bounded ≤0.5px).
+    DF:SnapPointToPixelGrid(frame, (DF:GetFrameDB(frame) or {}).pixelPerfect)
+
     DebugPrint("Positioned frame to slot " .. slotIndex .. " at (" .. x .. ", " .. y .. ")")
     return true
 end
@@ -3339,7 +3319,15 @@ function SecureSort:PositionRaidFrameToSlot(frame, slotIndex, frameCount, layout
     if not frame or not container then
         return false
     end
-    
+
+    -- DOOR-SHUT backstop (flat): mirror the grouped positioner. The live flat raid
+    -- frames are children of the FlatRaidFrames secure header; this Lua per-frame
+    -- positioner is for TEST frames (DF.testRaidContainer) only. Refuse any call
+    -- that targets the live container so test mode can never drive live frames.
+    if container == DF.raidContainer then
+        return false
+    end
+
     local x, y = self:CalculateRaidSlotPosition(slotIndex, frameCount, layoutParams)
     local anchor, relativeAnchor = self:GetRaidSlotAnchors(layoutParams)
     
@@ -3347,50 +3335,19 @@ function SecureSort:PositionRaidFrameToSlot(frame, slotIndex, frameCount, layout
     local currentAnchor, currentRelTo, currentRelAnchor, currentX, currentY = frame:GetPoint(1)
     if currentAnchor == anchor and currentRelAnchor == relativeAnchor 
        and currentX and currentY
-       and math.abs(currentX - x) < 0.5 and math.abs(currentY - y) < 0.5 then
+       and math.abs(currentX - x) <= 0.5 and math.abs(currentY - y) <= 0.5 then
         -- Frame is already in position, skip
         return false
     end
     
     frame:ClearAllPoints()
     frame:SetPoint(anchor, container, relativeAnchor, x, y)
-    
-    return true
-end
+    -- Pixel-perfect: land the frame's edges on the physical grid. The CENTER grid
+    -- anchor computes offsets via /2, which can fall on a half-pixel and make a 1px
+    -- border straddle two physical rows; this nudges it back on-grid (bounded ≤0.5px).
+    DF:SnapPointToPixelGrid(frame, (DF:GetFrameDB(frame) or {}).pixelPerfect)
 
--- Position all visible raid frames to grid slots (insecure - for test mode)
--- @param frameCount: number of visible frames to position
--- @param layoutParams: raid layout configuration
--- @param container: the container frame
--- @return number of frames actually moved
-function SecureSort:PositionAllRaidFramesToSlots(frameCount, layoutParams, container)
-    if not container then
-        DebugPrint("ERROR: PositionAllRaidFramesToSlots - container is nil")
-        return 0
-    end
-    
-    if not DF.IterateRaidFrames then
-        return 0
-    end
-    
-    local moved = 0
-    local frameIndex = 0
-    DF:IterateRaidFrames(function(frame, idx)
-        frameIndex = frameIndex + 1
-        if frameIndex > frameCount then return true end  -- Stop iteration
-        
-        if frame and frame:IsShown() then
-            local slotIndex = frameIndex - 1  -- Convert to 0-based
-            if self:PositionRaidFrameToSlot(frame, slotIndex, frameCount, layoutParams, container) then
-                moved = moved + 1
-            end
-        end
-    end)
-    
-    if moved > 0 then
-        DebugPrint("Positioned " .. moved .. "/" .. frameCount .. " raid frames")
-    end
-    return moved
+    return true
 end
 
 -- ============================================================
@@ -3587,7 +3544,6 @@ SecureSort.raidGroupLayoutParams = {
     horizontal = true,           -- Direction players fill within group (HORIZONTAL = left-to-right)
     groupAnchor = "CENTER",      -- How groups are anchored (START/CENTER/END)
     playerAnchor = "START",      -- How players are anchored within group slot (START/CENTER/END)
-    reverseGroupOrder = false,   -- Whether to reverse group order
 }
 
 -- Update raid GROUP layout parameters from DF settings
@@ -3616,15 +3572,14 @@ function SecureSort:UpdateRaidGroupLayoutParams()
 
     self.raidGroupLayoutParams = {
         frameWidth = db.frameWidth or 80,
-        frameHeight = db.frameHeight or 35,
+        frameHeight = db.frameHeight or 40,
         playerSpacing = db.frameSpacing or 2,
         groupSpacing = db.raidGroupSpacing or 10,
-        rowColSpacing = db.raidRowColSpacing or 15,
-        groupsPerRowCol = db.raidGroupsPerRow or 2,
+        rowColSpacing = db.raidRowColSpacing or 30,
+        groupsPerRowCol = db.raidGroupsPerRow or 8,
         horizontal = db.growDirection == "HORIZONTAL",
-        groupAnchor = db.raidGroupAnchor or "CENTER",
+        groupAnchor = db.raidGroupAnchor or "START",
         playerAnchor = db.raidPlayerAnchor or "START",
-        reverseGroupOrder = db.raidGroupOrder == "REVERSE",
         groupRowGrowth = db.raidGroupRowGrowth or "START",
     }
     
@@ -3664,174 +3619,148 @@ function SecureSort:CalculateRaidGroupPosition(groupNum, posInGroup, playersInGr
     local horizontal = lp.horizontal
     local groupAnchor = lp.groupAnchor
     local playerAnchor = lp.playerAnchor
-    local reverseGroupOrder = lp.reverseGroupOrder
-    
-    -- Calculate max group dimensions (size of one full group of 5 players)
-    local maxGroupWidth, maxGroupHeight
+
+    -- ============================================================
+    -- Mirror the LIVE grouped positioner exactly so test == live:
+    --   * the secure snippet (Headers.lua position snippet) anchors each group
+    --     header (groupAnchor Start/Center/End, groupRowGrowth flip over the full
+    --     8-group grid, and playerAnchor=END shifting the group's anchor corner to
+    --     BOTTOMLEFT (horizontal) / TOPRIGHT (vertical) so partial groups bottom/
+    --     right-align), and
+    --   * the SecureGroupHeaderTemplate stacks players WITHIN a header — always
+    --     top->down (horizontal) / left->right (vertical), regardless of playerAnchor.
+    -- Computed with y DOWN-positive, returned as a TOPLEFT offset (x, -yDown).
+    -- ============================================================
+    local groupW, groupH
     if horizontal then
-        -- In horizontal mode, players stack vertically within group
-        maxGroupWidth = frameWidth
-        maxGroupHeight = 5 * frameHeight + 4 * playerSpacing
+        groupW = frameWidth
+        groupH = 5 * frameHeight + 4 * playerSpacing
     else
-        -- In vertical mode, players stack horizontally within group
-        maxGroupWidth = 5 * frameWidth + 4 * playerSpacing
-        maxGroupHeight = frameHeight
+        groupW = 5 * frameWidth + 4 * playerSpacing
+        groupH = frameHeight
     end
-    
-    -- Build row/column structure from active groups
-    local numRowsCols
-    if horizontal then
-        numRowsCols = math.ceil(#activeGroupList / groupsPerRowCol)
-    else
-        numRowsCols = math.ceil(#activeGroupList / groupsPerRowCol)
-    end
-    
-    -- Find which row/column this group is in, and its position within that row/column
-    local groupIndex = 0
+
+    -- This group's display slot (1-based) among active groups
+    local slot = 0
     for idx, g in ipairs(activeGroupList) do
-        if g == groupNum then
-            groupIndex = idx
-            break
-        end
+        if g == groupNum then slot = idx; break end
     end
-    
-    if groupIndex == 0 then
-        -- Group not in active list
-        return 0, 0
-    end
-    
-    local rcIndex = math.floor((groupIndex - 1) / groupsPerRowCol) + 1  -- 1-based row/column index
-    local posInRC = (groupIndex - 1) % groupsPerRowCol  -- 0-based position within row/column
+    if slot == 0 then return 0, 0 end
+    local numPop = #activeGroupList
 
-    -- Calculate groups in this row/column BEFORE any row growth flipping
-    local groupsInThisRC = math.min(groupsPerRowCol, #activeGroupList - (rcIndex - 1) * groupsPerRowCol)
-
-    -- Apply row/column growth direction (use full 8-group grid so Row 1 never jumps)
-    local fullRowsCols = math.ceil(8 / groupsPerRowCol)
-    local groupRowGrowth = lp.groupRowGrowth or "START"
-    -- The XOR with playerAnchor only applies in horizontal mode. There, rcIndex
-    -- maps to the Y (row) axis, and playerAnchor=END triggers the test-mode
-    -- BOTTOMLEFT conversion that already flips Y — so the rcIndex flip must be
-    -- counter-inverted to avoid double-flipping when both are END. (#876)
-    -- In vertical mode rcIndex maps to the X (column) axis, there is no Y-flip
-    -- conversion, and playerAnchor=END only right-aligns within a group row, so
-    -- the flip must depend on groupRowGrowth alone — matching the live secure
-    -- snippet (Headers.lua), which flips purely on groupRowGrowth=="END".
-    local needsRowFlip
-    if lp.horizontal then
-        needsRowFlip = (groupRowGrowth == "END") ~= ((lp.playerAnchor or "START") == "END")
-    else
-        needsRowFlip = (groupRowGrowth == "END")
-    end
-    if needsRowFlip then
-        rcIndex = fullRowsCols - rcIndex + 1
-    end
-
-    -- Apply reverse group order if enabled
-    if reverseGroupOrder then
-        posInRC = groupsInThisRC - 1 - posInRC
-    end
-    
-    -- Calculate total container dimensions (use full grid when row growth is flipped)
-    local effectiveRowsCols = groupRowGrowth == "END" and fullRowsCols or numRowsCols
+    local fullGridRC = math.ceil(8 / groupsPerRowCol)
     local totalWidth, totalHeight
-    local maxCols = horizontal and groupsPerRowCol or effectiveRowsCols
-    local maxRows = horizontal and effectiveRowsCols or groupsPerRowCol
-    
     if horizontal then
-        totalWidth = maxCols * maxGroupWidth + (maxCols - 1) * groupSpacing
-        totalHeight = maxRows * maxGroupHeight + (maxRows - 1) * rowColSpacing
+        totalWidth = groupsPerRowCol * groupW + (groupsPerRowCol - 1) * groupSpacing
+        totalHeight = fullGridRC * groupH + (fullGridRC - 1) * rowColSpacing
     else
-        totalWidth = maxCols * maxGroupWidth + (maxCols - 1) * rowColSpacing
-        totalHeight = maxRows * maxGroupHeight + (maxRows - 1) * groupSpacing
+        totalWidth = fullGridRC * groupW + (fullGridRC - 1) * rowColSpacing
+        totalHeight = groupsPerRowCol * groupH + (groupsPerRowCol - 1) * groupSpacing
     end
-    
-    -- Calculate row/column container position
-    local rcWidth, rcHeight
+
+    -- Populated grid extent (drives CENTER alignment + the END-row offset), matching the snippet
+    local popRem = numPop % groupsPerRowCol
+    local popRows = (numPop > 0) and math.ceil(numPop / groupsPerRowCol) or 0
+    local popCols
+    if numPop > 0 and numPop < groupsPerRowCol then popCols = numPop
+    elseif numPop > 0 then popCols = groupsPerRowCol
+    else popCols = 0 end
+    local populatedWidth, populatedHeight
     if horizontal then
-        rcWidth = groupsInThisRC * maxGroupWidth + (groupsInThisRC - 1) * groupSpacing
-        rcHeight = maxGroupHeight
+        populatedWidth = (popCols > 0) and (popCols * groupW + (popCols - 1) * groupSpacing) or 0
+        populatedHeight = (popRows > 0) and (popRows * groupH + (popRows - 1) * rowColSpacing) or 0
     else
-        rcWidth = maxGroupWidth
-        rcHeight = groupsInThisRC * maxGroupHeight + (groupsInThisRC - 1) * groupSpacing
+        populatedWidth = (popRows > 0) and (popRows * groupW + (popRows - 1) * rowColSpacing) or 0
+        populatedHeight = (popCols > 0) and (popCols * groupH + (popCols - 1) * groupSpacing) or 0
     end
-    
-    local rcX, rcY = 0, 0
+
+    local slotIndex = slot - 1
+    local rcIdx = math.floor(slotIndex / groupsPerRowCol)
+    local posInRC = slotIndex % groupsPerRowCol
+    local isPartialRow = (popRem > 0 and rcIdx == popRows - 1)
+    local groupRowGrowth = lp.groupRowGrowth or "START"
+    if groupRowGrowth == "END" then
+        rcIdx = (fullGridRC - 1) - rcIdx
+    end
+    local gInRC = isPartialRow and popRem or groupsPerRowCol
+
+    -- Group order is driven SOLELY by activeGroupList (Group Display Order /
+    -- My Group First, via DF:GetEffectiveRaidGroupOrder). The legacy
+    -- raidGroupOrder == "REVERSE" toggle is deprecated (no GUI; superseded by the
+    -- display-order feature) and is intentionally NOT applied here -- the live
+    -- header positioner (Headers.lua:UpdateRaidPositionAttributes) never honoured
+    -- it, so honouring it here made test/legacy disagree with live. gInRC is still
+    -- the row/column population used by the groupAnchor END/CENTER offsets below.
+
+    local x, yDown
     if horizontal then
-        rcY = -(rcIndex - 1) * (maxGroupHeight + rowColSpacing)
-        -- groupAnchor controls horizontal alignment of the row
-        if groupAnchor == "START" then
-            rcX = 0
+        local xOff = posInRC * (groupW + groupSpacing)
+        local yOff = rcIdx * (groupH + rowColSpacing)
+        if groupAnchor == "END" then
+            local rcW = gInRC * groupW + (gInRC - 1) * groupSpacing
+            xOff = (totalWidth - rcW) + posInRC * (groupW + groupSpacing)
         elseif groupAnchor == "CENTER" then
-            rcX = (totalWidth - rcWidth) / 2
-        else -- END
-            rcX = totalWidth - rcWidth
+            local rcW = gInRC * groupW + (gInRC - 1) * groupSpacing
+            xOff = (totalWidth - rcW) / 2 + posInRC * (groupW + groupSpacing)
+            yOff = (totalHeight - populatedHeight) / 2 + rcIdx * (groupH + rowColSpacing)
         end
+        x = xOff
+        local hdrTop
+        if playerAnchor == "END" then
+            -- group anchored BOTTOMLEFT: header bottom sits at (totalHeight - yOff)
+            local actualGroupHeight = playersInGroup * frameHeight + (playersInGroup - 1) * playerSpacing
+            hdrTop = (totalHeight - yOff) - actualGroupHeight
+        else
+            hdrTop = yOff
+        end
+        yDown = hdrTop + posInGroup * (frameHeight + playerSpacing)
     else
-        rcX = (rcIndex - 1) * (maxGroupWidth + rowColSpacing)
-        -- groupAnchor controls vertical alignment of the column
-        if groupAnchor == "START" then
-            rcY = 0
+        local xOff = rcIdx * (groupW + rowColSpacing)
+        local yOff = posInRC * (groupH + groupSpacing)
+        if groupAnchor == "END" then
+            local rcH = gInRC * groupH + (gInRC - 1) * groupSpacing
+            yOff = (totalHeight - rcH) + posInRC * (groupH + groupSpacing)
         elseif groupAnchor == "CENTER" then
-            rcY = -(totalHeight - rcHeight) / 2
-        else -- END
-            rcY = -(totalHeight - rcHeight)
+            local rcH = gInRC * groupH + (gInRC - 1) * groupSpacing
+            yOff = (totalHeight - rcH) / 2 + posInRC * (groupH + groupSpacing)
+            xOff = (totalWidth - populatedWidth) / 2 + rcIdx * (groupW + rowColSpacing)
+        end
+        yDown = yOff
+        local hdrLeft
+        if playerAnchor == "END" then
+            -- group anchored TOPRIGHT: header right sits at (totalWidth - xOff)
+            local actualGroupWidth = playersInGroup * frameWidth + (playersInGroup - 1) * playerSpacing
+            hdrLeft = (totalWidth - xOff) - actualGroupWidth
+        else
+            hdrLeft = xOff
+        end
+        x = hdrLeft + posInGroup * (frameWidth + playerSpacing)
+    end
+
+    local retY = -yDown
+
+    -- Test-mode CENTER compensation (mirrors DF:ComputeRaidContainerCompensation, #867).
+    -- The secure snippet centres visible groups in the full-grid container via
+    -- (totalDim - populatedDim)/2; on LIVE the raid container is then shifted by the
+    -- same magnitude (relative to a single-populated-row reference) so the visible
+    -- content does not drift as the roster grows. That container shift lives in
+    -- DF:UpdateRaidContainerPosition and is applied to DF.raidContainer only — the
+    -- test container (DF.testRaidContainer) is intentionally left uncompensated. So in
+    -- test mode the frames carry the snippet's centring offset but nothing cancels the
+    -- drift, leaving test CENTER disagreeing with live whenever popRows > 1. Fold the
+    -- identical shift into the test frame offsets here (equivalent to shifting the
+    -- container, and keeping the test mover/centroid at the saved anchor exactly like
+    -- live). Gated on lp.testMode so the live sorting-disabled Lua path -- which uses the
+    -- already-compensated raidContainer -- is untouched.
+    if lp.testMode and groupAnchor == "CENTER" and popRows > 1 then
+        if horizontal then
+            retY = retY + (groupH - populatedHeight) / 2
+        else
+            x = x + (groupW - populatedWidth) / 2
         end
     end
-    
-    -- Calculate actual group dimensions (based on actual player count)
-    local actualGroupWidth, actualGroupHeight
-    if horizontal then
-        actualGroupWidth = frameWidth
-        actualGroupHeight = playersInGroup * frameHeight + (playersInGroup - 1) * playerSpacing
-    else
-        actualGroupWidth = playersInGroup * frameWidth + (playersInGroup - 1) * playerSpacing
-        actualGroupHeight = frameHeight
-    end
-    
-    -- Calculate group position within its row/column slot
-    local groupX, groupY = 0, 0
-    if horizontal then
-        -- Group slot position (horizontal offset in row)
-        groupX = posInRC * (maxGroupWidth + groupSpacing)
-        -- playerAnchor controls vertical alignment within group slot
-        if playerAnchor == "START" then
-            groupY = 0
-        elseif playerAnchor == "CENTER" then
-            groupY = -(maxGroupHeight - actualGroupHeight) / 2
-        else -- END
-            groupY = -(maxGroupHeight - actualGroupHeight)
-        end
-    else
-        -- Group slot position (vertical offset in column)
-        groupY = -posInRC * (maxGroupHeight + groupSpacing)
-        -- playerAnchor controls horizontal alignment within group slot
-        if playerAnchor == "START" then
-            groupX = 0
-        elseif playerAnchor == "CENTER" then
-            groupX = (maxGroupWidth - actualGroupWidth) / 2
-        else -- END
-            groupX = maxGroupWidth - actualGroupWidth
-        end
-    end
-    
-    -- Calculate frame position within group
-    -- Frames are always in order (first at top/left of the group's actual content)
-    -- groupX/groupY already positions the group content at START/CENTER/END of slot
-    local frameOffsetX, frameOffsetY
-    if horizontal then
-        frameOffsetX = 0
-        frameOffsetY = -posInGroup * (frameHeight + playerSpacing)
-    else
-        frameOffsetX = posInGroup * (frameWidth + playerSpacing)
-        frameOffsetY = 0
-    end
-    
-    -- Final position
-    local finalX = rcX + groupX + frameOffsetX
-    local finalY = rcY + groupY + frameOffsetY
-    
-    return finalX, finalY
+
+    return x, retY
 end
 
 -- Calculate container size for group-based layout
@@ -3906,58 +3835,37 @@ function SecureSort:PositionRaidFrameToGroupSlot(frame, groupNum, posInGroup, pl
     if not frame or not container then
         return false
     end
-    
-    local x, y = self:CalculateRaidGroupPosition(groupNum, posInGroup, playersInGroup, activeGroupList, layoutParams)
 
-    -- Test mode + playerAnchor=END: live frames get BOTTOMLEFT-anchored by the
-    -- secure snippet, but this Lua path is the only positioner test mode has,
-    -- so it must mirror that anchor behaviour itself. Convert the TOPLEFT
-    -- offset to its BOTTOMLEFT equivalent so the visible layout matches live.
-    -- (#875)
-    local lp = layoutParams
-    -- The BOTTOMLEFT conversion below only applies in horizontal mode, where
-    -- playerAnchor=END means players stack upward inside a tall 5-frame group.
-    -- In vertical mode playerAnchor=END only right-aligns a partial group row
-    -- (handled via groupX in CalculateRaidGroupPosition); the vertical axis is
-    -- the group-stacking axis and must stay TOPLEFT-anchored. Without the
-    -- horizontal guard the conversion fires in vertical mode and pushes every
-    -- group below the container. (#875 context, vertical-mode regression)
-    local useBottomLeft = lp and lp.testMode and lp.horizontal and (lp.playerAnchor or "START") == "END"
-
-    local bx, by = x, y
-    if useBottomLeft then
-        local frameHeight = lp.frameHeight or 40
-        local playerSpacing = lp.playerSpacing or 2
-        local groupsPerRowCol = lp.groupsPerRowCol or 8
-        local rowColSpacing = lp.rowColSpacing or 30
-        local fullRowsCols = math.ceil(8 / groupsPerRowCol)
-        local maxGroupHeight
-        if lp.horizontal then
-            maxGroupHeight = 5 * frameHeight + 4 * playerSpacing
-        else
-            maxGroupHeight = frameHeight
-        end
-        local totalHeight = fullRowsCols * maxGroupHeight + (fullRowsCols - 1) * rowColSpacing
-        -- y is negative (downward from TOPLEFT). Convert to upward from BOTTOMLEFT
-        -- by flipping origin and accounting for the frame's own height.
-        by = totalHeight + y - frameHeight
+    -- DOOR-SHUT backstop: this legacy Lua per-frame positioner must NEVER drive
+    -- LIVE raid frames. In header mode the live frames are children of the secure
+    -- group headers (positioned by the secure header path); only TEST frames
+    -- (passed with DF.testRaidContainer) or genuinely headerless legacy frames may
+    -- use this. The live container + active headers => a live header frame slipped
+    -- through; refuse it so test mode can never corrupt live.
+    if container == DF.raidContainer and DF.raidSeparatedHeaders then
+        return false
     end
 
-    -- Optimization: Check if frame is already at this position
-    local currentAnchor, currentRelTo, currentRelAnchor, currentX, currentY = frame:GetPoint(1)
-    local expectedAnchor = useBottomLeft and "BOTTOMLEFT" or "TOPLEFT"
-    if currentAnchor == expectedAnchor and currentRelAnchor == expectedAnchor
+    local x, y = self:CalculateRaidGroupPosition(groupNum, posInGroup, playersInGroup, activeGroupList, layoutParams)
+
+    -- Anchor TOPLEFT, identical to the in-combat secure snippet. (An older
+    -- test-only BOTTOMLEFT conversion lived here, meant to "mirror live" for
+    -- playerAnchor=END — but it resolved to an identical on-screen position, i.e.
+    -- a no-op, and was premised on a Y-flip that never actually happened. Removed,
+    -- so test and live use the exact same anchor and offset.)
+    local currentAnchor, _, currentRelAnchor, currentX, currentY = frame:GetPoint(1)
+    if currentAnchor == "TOPLEFT" and currentRelAnchor == "TOPLEFT"
        and currentX and currentY
-       and math.abs(currentX - bx) < 0.5 and math.abs(currentY - by) < 0.5 then
+       and math.abs(currentX - x) <= 0.5 and math.abs(currentY - y) <= 0.5 then
         return false
     end
 
     frame:ClearAllPoints()
-    if useBottomLeft then
-        frame:SetPoint("BOTTOMLEFT", container, "BOTTOMLEFT", bx, by)
-    else
-        frame:SetPoint("TOPLEFT", container, "TOPLEFT", bx, by)
-    end
+    frame:SetPoint("TOPLEFT", container, "TOPLEFT", x, y)
+    -- Pixel-perfect: land the frame's edges on the physical grid (no-op for the
+    -- TOPLEFT stride math, but keeps grouped test frames consistent with party/flat
+    -- and covers any CENTER growth-anchor offset that lands on a half-pixel).
+    DF:SnapPointToPixelGrid(frame, (DF:GetFrameDB(frame) or {}).pixelPerfect)
 
     return true
 end
@@ -4426,8 +4334,7 @@ function SecureSort:RegisterPhase25Snippets()
         local horizontal = lc.horizontal
         local groupAnchor = lc.groupAnchor or "CENTER"
         local playerAnchor = lc.playerAnchor or "START"
-        local reverseGroupOrder = lc.reverseGroupOrder
-        
+
         -- Get frame count
         local frameCount = self:GetAttribute("raidFrameCount") or 0
         self:CallMethod("DebugPrint", "RAID POS GROUPED: frameCount=" .. frameCount)
@@ -4552,13 +4459,13 @@ function SecureSort:RegisterPhase25Snippets()
                         -- Calculate which row/column this group is in
                         local rcIndex = math.floor((groupIndex - 1) / groupsPerRowCol) + 1
                         local posInRC = (groupIndex - 1) % groupsPerRowCol
-                        
-                        -- Apply reverse group order if enabled
+
+                        -- Group order comes solely from activeGroupList (display
+                        -- order / my-group-first). Legacy raidGroupOrder=="REVERSE"
+                        -- is deprecated and not applied (the header positioner never
+                        -- honoured it). groupsInThisRC is still needed for rc sizing.
                         local groupsInThisRC = math.min(groupsPerRowCol, activeGroupCount - (rcIndex - 1) * groupsPerRowCol)
-                        if reverseGroupOrder then
-                            posInRC = groupsInThisRC - 1 - posInRC
-                        end
-                        
+
                         -- Calculate row/column container dimensions
                         local rcWidth, rcHeight
                         if horizontal then

@@ -92,54 +92,66 @@ local CONTENT_CATEGORIES = {
     "group", "identity", "health", "power", "shields", "status", "threat",
 }
 
-local CONTENT_CATEGORY_LABELS = {
-    identity = L["Identity & Roster"],
-    health   = L["Health"],
-    power    = L["Power"],
-    shields  = L["Shields & Heals"],
-    status   = L["Status"],
-    threat   = L["Threat & Range"],
-    group    = L["Group"],
-}
+-- These label tables read L["..."], which at file-scope returns the enUS
+-- baseline (the languageOverride overlay is applied later, at ADDON_LOADED).
+-- Build them in a function we register with DF:RegisterLocaleRefresh so Core
+-- re-runs it after the overlay — otherwise the picker stays English.
+local CONTENT_CATEGORY_LABELS = {}
+local CONTENT_TYPES = {}
 
-local CONTENT_TYPES = {
-    -- Identity & Roster
-    { key = "name",              label = L["Name"],                       category = "identity" },
-    { key = "class",             label = L["Class"],                      category = "identity" },
-    { key = "group_number",      label = L["Group Number"],               category = "identity" },
-    { key = "level",             label = L["Level"],                      category = "identity" },
-    { key = "race",              label = L["Race"],                       category = "identity" },
-    { key = "faction",           label = L["Faction"],                    category = "identity" },
-    { key = "custom_static",     label = L["Custom Static Text"],         category = "identity" },
-    -- Health
-    { key = "hp_current",        label = L["Current HP"],                 category = "health"   },
-    { key = "hp_max",            label = L["Max HP"],                     category = "health"   },
-    { key = "hp_percent",        label = L["HP Percent"],                 category = "health"   },
-    { key = "hp_deficit",        label = L["HP Deficit"],                 category = "health"   },
-    { key = "hp_max_reduction",  label = L["Max HP Reduction %"],         category = "health"   },
-    -- Power
-    { key = "power_current",     label = L["Current Power"],              category = "power"    },
-    { key = "power_percent",     label = L["Power %"],                    category = "power"    },
-    { key = "power_deficit",     label = L["Power Deficit"],              category = "power"    },
-    { key = "power_type_string", label = L["Power Type String"],          category = "power"    },
-    -- Shields & Heals
-    { key = "absorb_amount",     label = L["Absorb Amount"],              category = "shields"  },
-    -- (overshield_amount removed — needs secret-value arithmetic that throws on Midnight)
-    { key = "heal_absorb_amount",label = L["Heal Absorb Amount"],         category = "shields"  },
-    { key = "incoming_heal",     label = L["Incoming Heal"],              category = "shields"  },
-    -- incoming_heal_mine removed from the picker: in practice it reads identical
-    -- to incoming_heal in-game. Resolver/getter left intact for any existing
-    -- elements; just not offered as a new choice.
-    -- { key = "incoming_heal_mine",label = L["Incoming Heal From Me Only"], category = "shields"  },
-    -- Status
-    { key = "status_text",       label = L["Dead / Offline / Ghost"],     category = "status"   },
-    -- Threat & Range
-    { key = "aggro_flag",        label = L["Aggro Flag"],                 category = "threat"   },
-    { key = "threat_percent",    label = L["Threat on Current Target"],   category = "threat"   },
-    { key = "range_text",        label = L["In-Range / OOR Text"],        category = "threat"   },
-    -- Group
-    { key = "group",             label = L["Text Group"],                 category = "group"    },
-}
+local function RefreshLocaleStrings()
+    CONTENT_CATEGORY_LABELS = {
+        identity = L["Identity & Roster"],
+        health   = L["Health"],
+        power    = L["Power"],
+        shields  = L["Shields & Heals"],
+        status   = L["Status"],
+        threat   = L["Threat & Range"],
+        group    = L["Group"],
+    }
+
+    CONTENT_TYPES = {
+        -- Identity & Roster
+        { key = "name",              label = L["Name"],                       category = "identity" },
+        { key = "class",             label = L["Class"],                      category = "identity" },
+        { key = "group_number",      label = L["Group Number"],               category = "identity" },
+        { key = "level",             label = L["Level"],                      category = "identity" },
+        { key = "race",              label = L["Race"],                       category = "identity" },
+        { key = "faction",           label = L["Faction"],                    category = "identity" },
+        { key = "custom_static",     label = L["Custom Static Text"],         category = "identity" },
+        -- Health
+        { key = "hp_current",        label = L["Current HP"],                 category = "health"   },
+        { key = "hp_max",            label = L["Max HP"],                     category = "health"   },
+        { key = "hp_percent",        label = L["HP Percent"],                 category = "health"   },
+        { key = "hp_deficit",        label = L["HP Deficit"],                 category = "health"   },
+        { key = "hp_max_reduction",  label = L["Max HP Reduction %"],         category = "health"   },
+        -- Power
+        { key = "power_current",     label = L["Current Power"],              category = "power"    },
+        { key = "power_percent",     label = L["Power %"],                    category = "power"    },
+        { key = "power_deficit",     label = L["Power Deficit"],              category = "power"    },
+        { key = "power_type_string", label = L["Power Type String"],          category = "power"    },
+        -- Shields & Heals
+        { key = "absorb_amount",     label = L["Absorb Amount"],              category = "shields"  },
+        -- (overshield_amount removed — needs secret-value arithmetic that throws on Midnight)
+        { key = "heal_absorb_amount",label = L["Heal Absorb Amount"],         category = "shields"  },
+        { key = "incoming_heal",     label = L["Incoming Heal"],              category = "shields"  },
+        -- incoming_heal_mine removed from the picker: in practice it reads identical
+        -- to incoming_heal in-game. Resolver/getter left intact for any existing
+        -- elements; just not offered as a new choice.
+        -- { key = "incoming_heal_mine",label = L["Incoming Heal From Me Only"], category = "shields"  },
+        -- Status
+        { key = "status_text",       label = L["Dead / Offline / Ghost"],     category = "status"   },
+        -- Threat & Range
+        { key = "aggro_flag",        label = L["Aggro Flag"],                 category = "threat"   },
+        { key = "threat_percent",    label = L["Threat on Current Target"],   category = "threat"   },
+        { key = "range_text",        label = L["In-Range / OOR Text"],        category = "threat"   },
+        -- Group
+        { key = "group",             label = L["Text Group"],                 category = "group"    },
+    }
+end
+
+RefreshLocaleStrings()
+DF:RegisterLocaleRefresh(RefreshLocaleStrings)
 
 local function FindContentType(key)
     for _, t in ipairs(CONTENT_TYPES) do
@@ -523,34 +535,17 @@ local function BuildContentSection(GUI, parent, elem, tdDB, state, page, card, y
                     end)
                 end
 
-                -- Remove button — hand-drawn X cross on the right.
-                local removeBtn = CreateFrame("Button", nil, itemRow, "BackdropTemplate")
-                removeBtn:SetSize(16, 16)
+                -- Remove button: shared red-at-rest "×" (tone="danger") on the right.
+                local removeBtn = DF.GUI:CreateCloseButton(itemRow, {
+                    size = 16,
+                    tone = "danger",
+                    onClick = function()
+                        if state and state.tdExpandedItems then state.tdExpandedItems[capturedItem] = nil end
+                        table.remove(elem.groupItems, capturedIdx)
+                        ReRender()
+                    end,
+                })
                 removeBtn:SetPoint("RIGHT", itemRow, "RIGHT", -6, 0)
-                local rxSize, rxThick = 10, 1.5
-                local rline1 = removeBtn:CreateTexture(nil, "OVERLAY")
-                rline1:SetSize(rxSize, rxThick)
-                rline1:SetPoint("CENTER", 0, 0)
-                rline1:SetColorTexture(C_DESTRUCTIVE.r, C_DESTRUCTIVE.g, C_DESTRUCTIVE.b, C_DESTRUCTIVE.a)
-                rline1:SetRotation(math.rad(45))
-                local rline2 = removeBtn:CreateTexture(nil, "OVERLAY")
-                rline2:SetSize(rxSize, rxThick)
-                rline2:SetPoint("CENTER", 0, 0)
-                rline2:SetColorTexture(C_DESTRUCTIVE.r, C_DESTRUCTIVE.g, C_DESTRUCTIVE.b, C_DESTRUCTIVE.a)
-                rline2:SetRotation(math.rad(-45))
-                removeBtn:SetScript("OnEnter", function()
-                    rline1:SetColorTexture(C_DESTRUCTIVE_HOVER.r, C_DESTRUCTIVE_HOVER.g, C_DESTRUCTIVE_HOVER.b, C_DESTRUCTIVE_HOVER.a)
-                    rline2:SetColorTexture(C_DESTRUCTIVE_HOVER.r, C_DESTRUCTIVE_HOVER.g, C_DESTRUCTIVE_HOVER.b, C_DESTRUCTIVE_HOVER.a)
-                end)
-                removeBtn:SetScript("OnLeave", function()
-                    rline1:SetColorTexture(C_DESTRUCTIVE.r, C_DESTRUCTIVE.g, C_DESTRUCTIVE.b, C_DESTRUCTIVE.a)
-                    rline2:SetColorTexture(C_DESTRUCTIVE.r, C_DESTRUCTIVE.g, C_DESTRUCTIVE.b, C_DESTRUCTIVE.a)
-                end)
-                removeBtn:SetScript("OnClick", function()
-                    if state and state.tdExpandedItems then state.tdExpandedItems[capturedItem] = nil end
-                    table.remove(elem.groupItems, capturedIdx)
-                    ReRender()
-                end)
 
                 -- Customise button (left of the remove X) — toggles the per-item
                 -- editor inline (AD-style). A text button instead of a chevron so
@@ -607,22 +602,40 @@ local function BuildContentSection(GUI, parent, elem, tdDB, state, page, card, y
                     local colorLight = function()
                         if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshThrottled() end
                     end
+                    -- The custom Color picker is gated by two booleans: it's only
+                    -- active when "Custom Color" is ON and "Use Class Color" is OFF
+                    -- (class colour takes precedence). When inactive it GREYS OUT
+                    -- (disabled + dimmed) but stays visible — never hidden. Forward
+                    -- declared so both checkbox callbacks can drive it.
+                    local colorPick
+                    local function UpdateItemColorGrey()
+                        if not colorPick then return end
+                        local active = capturedItem.useColor and not capturedItem.useClassColor
+                        if colorPick.SetEnabled then colorPick:SetEnabled(active) end
+                        colorPick:SetAlpha(active and 1 or 0.4)
+                    end
                     -- Use Class Color (takes precedence over a custom colour).
-                    local useClass = GUI:CreateCheckbox(parent, L["Use Class Color"], capturedItem, "useClassColor", colorCB)
+                    local useClass = GUI:CreateCheckbox(parent, L["Use Class Color"], capturedItem, "useClassColor", function()
+                        UpdateItemColorGrey()
+                        colorCB()
+                    end)
                     useClass:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, yEnd)
                     yEnd = yEnd - FIELD_ROW_HEIGHT
                     local useColor = GUI:CreateCheckbox(parent, L["Custom Color"], capturedItem, "useColor", function()
                         if capturedItem.useColor and not capturedItem.color then
                             capturedItem.color = {r = 1, g = 1, b = 1, a = 1}
                         end
+                        UpdateItemColorGrey()
                         colorCB()
                     end)
                     useColor:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, yEnd)
                     yEnd = yEnd - FIELD_ROW_HEIGHT
                     capturedItem.color = capturedItem.color or {r = 1, g = 1, b = 1, a = 1}
-                    local colorPick = GUI:CreateColorPicker(parent, L["Color"], capturedItem, "color", true, colorCB, colorLight, true)
+                    colorPick = GUI:CreateColorPicker(parent, L["Color"], capturedItem, "color", true, colorCB, colorLight, true)
                     colorPick:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, yEnd)
                     yEnd = yEnd - FIELD_ROW_HEIGHT
+                    -- Apply the initial grey state on build.
+                    UpdateItemColorGrey()
                     y = yEnd - 6
                 end
             end
@@ -632,7 +645,7 @@ local function BuildContentSection(GUI, parent, elem, tdDB, state, page, card, y
         -- (no nested groups). The picker is cached on the card so repeated
         -- clicks reuse the same frame instead of spawning new offscreen ones.
         local addItemBtn
-        addItemBtn = GUI:CreateButton(parent, "+ " .. L["Add Item"], 100, 22, function()
+        addItemBtn = GUI:CreateButton(parent, L["Add Item"], 100, 22, function()
             if not BuildPicker then return end
             if card and not card._addItemPicker then
                 card._addItemPicker = BuildPicker(GUI, parent, tdDB, function(typeKey)
@@ -651,7 +664,7 @@ local function BuildContentSection(GUI, parent, elem, tdDB, state, page, card, y
                 -- of the card body, so the dropdown extends RIGHT and DOWN.
                 picker:Open(addItemBtn, "left")
             end
-        end)
+        end, "add")
         -- Full-width CTA (matches AuraDesigner's "+ Add aura" button).
         addItemBtn:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
         addItemBtn:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -14, y)
@@ -820,25 +833,24 @@ local function BuildAppearanceSection(GUI, parent, elem, card, yStart)
     colorPicker:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
     y = y - FIELD_ROW_HEIGHT
 
+    -- "Use Class Color" boolean gates the custom Color picker: when ON, the
+    -- colour picker GREYS OUT (disabled + dimmed) but stays visible. Shared
+    -- updater so the toggle callback and the initial-state pass stay in sync.
+    local function UpdateColorGrey()
+        local active = not elem.useClassColor
+        if colorPicker.SetEnabled then colorPicker:SetEnabled(active) end
+        colorPicker:SetAlpha(active and 1 or 0.4)
+    end
     local classColorCheck = GUI:CreateCheckbox(parent, L["Use Class Color"], elem, "useClassColor", function()
         elem.overrides.useClassColor = true
-        if elem.useClassColor then
-            if colorPicker.Disable then colorPicker:Disable() end
-            colorPicker:SetAlpha(0.4)
-        else
-            if colorPicker.Enable then colorPicker:Enable() end
-            colorPicker:SetAlpha(1)
-        end
+        UpdateColorGrey()
         if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end
     end)
     classColorCheck:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
     y = y - FIELD_ROW_HEIGHT
 
     -- Apply initial grayed state if class color is on
-    if elem.useClassColor then
-        if colorPicker.Disable then colorPicker:Disable() end
-        colorPicker:SetAlpha(0.4)
-    end
+    UpdateColorGrey()
 
     return y - SECTION_GAP
 end
@@ -945,7 +957,10 @@ function BuildPicker(GUI, parent, tdDB, onPick, excludeKey)
     drop:SetFrameStrata("FULLSCREEN_DIALOG")
     drop:SetClampedToScreen(true)
     drop:SetSize(280, 380)
-    ApplyBackdrop(drop, C_BACKGROUND, C_BORDER)
+    GUI:CreatePanelBackdrop(drop, {
+        bgColor = C_BACKGROUND, bgAlpha = C_BACKGROUND.a,
+        borderColor = C_BORDER,
+    })
     drop:Hide()
 
     -- ── Click-outside overlay ────────────────────────────────
@@ -1045,27 +1060,16 @@ function BuildPicker(GUI, parent, tdDB, onPick, excludeKey)
 
     local function MakePill(label, key)
         local p = CreateFrame("Button", nil, pillRow, "BackdropTemplate")
-        p:SetHeight(CHIP_H)
-        ApplyBackdrop(p, C_PANEL, C_BORDER)
         local fs = p:CreateFontString(nil, "OVERLAY")
         GUI:SetSettingsFont(fs, 10, "")
         fs:SetPoint("CENTER")
         fs:SetText(label)
+        -- Shared styler: rest + accent-wash hover + SetActive selection look.
+        -- Keep the manual (custom-sized) label; only pass the height.
+        DF.GUI:StyleButton(p, { height = CHIP_H })
         p:SetWidth(fs:GetStringWidth() + 18)
         p.key = key
         p.fs = fs
-        p:SetScript("OnEnter", function(self)
-            if self.key ~= activePill then
-                self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
-                self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.8)
-            end
-        end)
-        p:SetScript("OnLeave", function(self)
-            if self.key ~= activePill then
-                self:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, C_PANEL.a)
-                self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-            end
-        end)
         return p
     end
 
@@ -1101,15 +1105,12 @@ function BuildPicker(GUI, parent, tdDB, onPick, excludeKey)
     pillRow:SetScript("OnSizeChanged", LayoutPills)
 
     local function ApplyPillState()
-        local tc = GUI:GetThemeColor()
         for _, p in ipairs(pills) do
-            if p.key == activePill then
-                p:SetBackdropColor(tc.r, tc.g, tc.b, 0.20)
-                p:SetBackdropBorderColor(tc.r, tc.g, tc.b, 0.50)
+            local active = p.key == activePill
+            p:SetActive(active)  -- shared toggle look (accent border + fill)
+            if active then
                 p.fs:SetTextColor(1, 1, 1)
             else
-                p:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, C_PANEL.a)
-                p:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, C_BORDER.a)
                 p.fs:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
             end
         end
@@ -1334,10 +1335,12 @@ end
 local function CreateTextElementCard(GUI, parent, yPos, elem, tdDB, state, page)
     local HEADER_HEIGHT = 30
 
-    -- Outer card: layout-only, no backdrop
+    -- Outer card: layout-only, no backdrop. Spans the scroll child fully so the
+    -- element rows line up with the add button + filter row above (their content
+    -- has its own inset). Mirrors Aura Designer's aligned column.
     local card = CreateFrame("Frame", nil, parent)
-    card:SetPoint("TOPLEFT", parent, "TOPLEFT", 6, yPos)
-    card:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -6, yPos)
+    card:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, yPos)
+    card:SetPoint("TOPRIGHT", parent, "TOPRIGHT", 0, yPos)
 
     card._tdDB = tdDB
     card._state = state
@@ -1411,32 +1414,36 @@ local function CreateTextElementCard(GUI, parent, yPos, elem, tdDB, state, page)
     card.meta = meta
 
     -- ── ACTION ICONS (right side of header) ──────────────────
-    -- Hand-drawn X delete (matches AD pattern)
+    -- Shared close glyph delete (matches AD's CreateEffectCard delete).
     local ICON_SIZE = 18
     local ICON_GAP = 4
 
-    local deleteBtn = CreateFrame("Button", nil, header)
-    deleteBtn:SetSize(22, 22)
+    -- Delete OnClick (instant, no popup). Defined here so the shared close
+    -- button can wire it; mirrors AD's CreateCloseButton usage.
+    local function DeleteThisElement()
+        local capturedTdDB = card._tdDB
+        local capturedState = card._state
+        local capturedGUI = card._GUI
+        local capturedPage = card._page
+        if not capturedTdDB or not capturedState then return end
+        for i, e in ipairs(capturedTdDB.elements) do
+            if e.id == elem.id then
+                table.remove(capturedTdDB.elements, i)
+                break
+            end
+        end
+        if DF.TextDesigner.FullRebuildCards then
+            DF.TextDesigner.FullRebuildCards(capturedGUI, capturedPage, capturedTdDB, capturedState)
+        end
+        DF:Debug("TD", "Deleted element id=%d (remaining=%d)",
+            elem.id, #capturedTdDB.elements)
+    end
+
+    local deleteBtn = GUI:CreateCloseButton(header, {
+        size = 22,
+        onClick = DeleteThisElement,
+    })
     deleteBtn:SetPoint("RIGHT", header, "RIGHT", -4, 0)
-    local dxSize, dxThick = 12, 2
-    local dline1 = deleteBtn:CreateTexture(nil, "OVERLAY")
-    dline1:SetSize(dxSize, dxThick)
-    dline1:SetPoint("CENTER")
-    dline1:SetColorTexture(C_DESTRUCTIVE.r, C_DESTRUCTIVE.g, C_DESTRUCTIVE.b, C_DESTRUCTIVE.a)
-    dline1:SetRotation(math.rad(45))
-    local dline2 = deleteBtn:CreateTexture(nil, "OVERLAY")
-    dline2:SetSize(dxSize, dxThick)
-    dline2:SetPoint("CENTER")
-    dline2:SetColorTexture(C_DESTRUCTIVE.r, C_DESTRUCTIVE.g, C_DESTRUCTIVE.b, C_DESTRUCTIVE.a)
-    dline2:SetRotation(math.rad(-45))
-    deleteBtn:SetScript("OnEnter", function()
-        dline1:SetColorTexture(C_DESTRUCTIVE_HOVER.r, C_DESTRUCTIVE_HOVER.g, C_DESTRUCTIVE_HOVER.b, C_DESTRUCTIVE_HOVER.a)
-        dline2:SetColorTexture(C_DESTRUCTIVE_HOVER.r, C_DESTRUCTIVE_HOVER.g, C_DESTRUCTIVE_HOVER.b, C_DESTRUCTIVE_HOVER.a)
-    end)
-    deleteBtn:SetScript("OnLeave", function()
-        dline1:SetColorTexture(C_DESTRUCTIVE.r, C_DESTRUCTIVE.g, C_DESTRUCTIVE.b, C_DESTRUCTIVE.a)
-        dline2:SetColorTexture(C_DESTRUCTIVE.r, C_DESTRUCTIVE.g, C_DESTRUCTIVE.b, C_DESTRUCTIVE.a)
-    end)
     card.deleteBtn = deleteBtn
 
     -- Eye icon (visibility toggle) — TD-specific, left of delete
@@ -1471,26 +1478,6 @@ local function CreateTextElementCard(GUI, parent, yPos, elem, tdDB, state, page)
         updateEyeIcon()
         DF:Debug("TD", "Element %d enabled=%s", elem.id, tostring(elem.enabled))
         if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end
-    end)
-
-    -- Delete OnClick (instant, no popup)
-    deleteBtn:SetScript("OnClick", function()
-        local capturedTdDB = card._tdDB
-        local capturedState = card._state
-        local capturedGUI = card._GUI
-        local capturedPage = card._page
-        if not capturedTdDB or not capturedState then return end
-        for i, e in ipairs(capturedTdDB.elements) do
-            if e.id == elem.id then
-                table.remove(capturedTdDB.elements, i)
-                break
-            end
-        end
-        if DF.TextDesigner.FullRebuildCards then
-            DF.TextDesigner.FullRebuildCards(capturedGUI, capturedPage, capturedTdDB, capturedState)
-        end
-        DF:Debug("TD", "Deleted element id=%d (remaining=%d)",
-            elem.id, #capturedTdDB.elements)
     end)
 
     -- ── BODY ─────────────────────────────────────────────────
@@ -1718,30 +1705,35 @@ end
 local function BuildTabStrip(GUI, parent, state, tdDB, page)
     -- BackdropTemplate so the strip gets a darker fill than the right-panel
     -- chrome — mirrors AuraDesigner/Options.lua:5996-6000 (its tabBar).
+    -- Shared underline-tab style (mirrors the Pinned Frames / Aura Designer tabs):
+    -- a transparent strip with a baseline; each tab is a StyleButton in `tab` mode.
     local strip = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     strip:SetHeight(28)
-    strip:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, 0)
-    strip:SetPoint("TOPRIGHT", parent, "TOPRIGHT", 0, 0)
-    ApplyBackdrop(strip, {r = 0.09, g = 0.09, b = 0.09, a = 1}, C_RIGHT_PANEL_BORDER)
+    -- Inset just inside the panel's border so the tabs don't overlap/overrun it.
+    strip:SetPoint("TOPLEFT", parent, "TOPLEFT", 4, -4)
+    strip:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -4, -4)
     state.tabStrip = strip
 
+    -- Baseline under the whole strip; the active tab's underline sits on it.
+    local tabBaseline = strip:CreateTexture(nil, "ARTWORK")
+    tabBaseline:SetTexture("Interface\\Buttons\\WHITE8x8")
+    tabBaseline:SetHeight(1)
+    tabBaseline:SetPoint("BOTTOMLEFT", 0, 0)
+    tabBaseline:SetPoint("BOTTOMRIGHT", 0, 0)
+    tabBaseline:SetColorTexture(C_RIGHT_PANEL_BORDER.r, C_RIGHT_PANEL_BORDER.g, C_RIGHT_PANEL_BORDER.b, 0.5)
+
+    local TAB_GAP = 4
     local tabDefs = {
-        { id = "texts",  label = L["Texts"],       color = GUI.GetThemeColor() },
-        { id = "groups", label = L["Text Groups"], color = {r = 0.91, g = 0.66, b = 0.25, a = 1} },  -- orange-ish (matches AD's layout-groups accent)
-        { id = "global", label = L["Global"],      color = {r = 0.51, g = 0.86, b = 0.51, a = 1} },  -- green (matches AD's global accent)
+        { id = "texts",  label = L["Texts"],       accent = nil },  -- theme-tracking
+        { id = "groups", label = L["Text Groups"], accent = { r = 0.91, g = 0.66, b = 0.25 } },  -- gold (matches AD's layout-groups)
+        { id = "global", label = L["Global"],      accent = { r = 0.51, g = 0.86, b = 0.51 } },  -- green (matches AD's global)
     }
 
     local function SelectTab(tabID)
         state.activeTab = tabID
         for _, def in ipairs(tabDefs) do
             local btn = strip[def.id]
-            if def.id == tabID then
-                btn.text:SetTextColor(def.color.r, def.color.g, def.color.b, 1)
-                btn.accent:Show()
-            else
-                btn.text:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 1)
-                btn.accent:Hide()
-            end
+            if btn then btn:SetActive(def.id == tabID) end  -- underline + accent/dim label
         end
         for id, contentFrame in pairs(state.tabContents or {}) do
             if id == tabID then contentFrame:Show() else contentFrame:Hide() end
@@ -1756,38 +1748,23 @@ local function BuildTabStrip(GUI, parent, state, tdDB, page)
     -- proportional.
     local tabButtons = {}
     for i, def in ipairs(tabDefs) do
-        local btn = CreateFrame("Button", nil, strip)
+        local btn = CreateFrame("Button", nil, strip, "BackdropTemplate")
         btn:SetHeight(28)
         if i == 1 then
             btn:SetPoint("TOPLEFT", strip, "TOPLEFT", 0, 0)
         else
-            btn:SetPoint("TOPLEFT", tabButtons[i-1], "TOPRIGHT", 0, 0)
+            btn:SetPoint("TOPLEFT", tabButtons[i-1], "TOPRIGHT", TAB_GAP, 0)
         end
-        -- Provisional width so SelectTab() has accurate dimensions before
-        -- the first OnSizeChanged fires (parent may have 0 width on first
-        -- build). Mirrors AD:6017-6021.
+        -- Provisional width so SelectTab() has accurate dimensions before the
+        -- first OnSizeChanged fires (parent may have 0 width on first build).
         local provW = parent:GetWidth()
         if provW < 100 and GUI and GUI.contentFrame then provW = GUI.contentFrame:GetWidth() end
         if provW < 100 then provW = 600 end
-        btn:SetWidth(math.max(60, math.floor((provW / 2) / #tabDefs)))
+        btn:SetWidth(math.max(60, math.floor(((provW / 2) - (#tabDefs - 1) * TAB_GAP) / #tabDefs)))
 
-        local text = btn:CreateFontString(nil, "OVERLAY")
-        GUI:SetSettingsFont(text, 11, "OUTLINE")
-        text:SetPoint("CENTER", btn, "CENTER", 0, 2)
-        text:SetText(def.label)
-        text:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 1)
-        btn.text = text
-        local accent = btn:CreateTexture(nil, "ARTWORK")
-        accent:SetHeight(2)
-        accent:SetPoint("BOTTOMLEFT", btn, "BOTTOMLEFT", 8, 0)
-        accent:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -8, 0)
-        accent:SetColorTexture(def.color.r, def.color.g, def.color.b, 1)
-        accent:Hide()
-        btn.accent = accent
-        -- Subtle white hover highlight (matches AD tabBar buttons:6037-6039).
-        local hl = btn:CreateTexture(nil, "HIGHLIGHT")
-        hl:SetAllPoints()
-        hl:SetColorTexture(1, 1, 1, 0.03)
+        -- Shared underline-tab styling; SelectTab drives SetActive. text = btn.Text.
+        GUI:StyleButton(btn, { tab = true, text = def.label, accent = def.accent, font = "DFFontHighlight" })
+        btn.text = btn.Text
         btn:SetScript("OnClick", function() SelectTab(def.id) end)
         strip[def.id] = btn
         tabButtons[i] = btn
@@ -1796,7 +1773,7 @@ local function BuildTabStrip(GUI, parent, state, tdDB, page)
     -- Resize tabs equally when the strip is resized (e.g. mode swap,
     -- first paint). Mirrors AD:6051-6057.
     strip:SetScript("OnSizeChanged", function(self, w, h)
-        local tabW = w / #tabDefs
+        local tabW = (w - (#tabDefs - 1) * TAB_GAP) / #tabDefs
         for _, btn in ipairs(tabButtons) do
             btn:SetWidth(tabW)
         end
@@ -1809,7 +1786,7 @@ local function BuildTabStrip(GUI, parent, state, tdDB, page)
     -- resync the same way AD does (AuraDesigner/Options.lua:6173-6182).
     C_Timer.After(0, function()
         if strip and strip:IsVisible() and strip:GetWidth() > 10 then
-            local tabW = strip:GetWidth() / #tabDefs
+            local tabW = (strip:GetWidth() - (#tabDefs - 1) * TAB_GAP) / #tabDefs
             for _, btn in ipairs(tabButtons) do
                 btn:SetWidth(tabW)
             end
@@ -1823,39 +1800,17 @@ end
 -- scrolling card list below. Mirrors AD's BuildEffectsTab structure
 -- (AuraDesigner/Options.lua:4882+).
 local function BuildTextsTab(GUI, parent, state, tdDB, page)
-    -- ── "+ Add Text Element" hero CTA (theme-tinted) ──
-    -- Raw BackdropTemplate Button so we get the same look as AD's hero CTA
-    -- (theme-colored text + theme-tinted backdrop) without GUI:CreateButton's
-    -- white text / default OnEnter handlers fighting us.
+    -- ── "+ Add Text Element" hero CTA ──
+    -- Shared primary CTA via the styler: accent fill + white label (matches AD's
+    -- "+ Add Indicator"; previously a bespoke theme-coloured fontstring, which is
+    -- why the two designers' hero labels didn't match).
     local addBtn = CreateFrame("Button", nil, parent, "BackdropTemplate")
     addBtn:SetHeight(32)
     addBtn:SetPoint("TOPLEFT", parent, "TOPLEFT", 8, -10)
-    addBtn:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
-    do
-        local tc = GUI:GetThemeColor()
-        ApplyBackdrop(addBtn,
-            {r = tc.r * CTA_BG_RESTING,     g = tc.g * CTA_BG_RESTING,     b = tc.b * CTA_BG_RESTING,     a = 1},
-            {r = tc.r * CTA_BORDER_RESTING, g = tc.g * CTA_BORDER_RESTING, b = tc.b * CTA_BORDER_RESTING, a = 1})
-
-        local addBtnText = addBtn:CreateFontString(nil, "OVERLAY")
-        GUI:SetSettingsFont(addBtnText, 11, "OUTLINE")
-        addBtnText:SetPoint("CENTER", 0, 0)
-        addBtnText:SetText("+ " .. L["Add Text Element"])
-        addBtnText:SetTextColor(tc.r, tc.g, tc.b)
-
-        addBtn:SetScript("OnEnter", function(self)
-            local c = GUI:GetThemeColor()
-            self:SetBackdropColor(c.r * CTA_BG_HOVER, c.g * CTA_BG_HOVER, c.b * CTA_BG_HOVER, 1)
-            self:SetBackdropBorderColor(c.r * CTA_BORDER_HOVER, c.g * CTA_BORDER_HOVER, c.b * CTA_BORDER_HOVER, 1)
-            addBtnText:SetTextColor(1, 1, 1)
-        end)
-        addBtn:SetScript("OnLeave", function(self)
-            local c = GUI:GetThemeColor()
-            self:SetBackdropColor(c.r * CTA_BG_RESTING, c.g * CTA_BG_RESTING, c.b * CTA_BG_RESTING, 1)
-            self:SetBackdropBorderColor(c.r * CTA_BORDER_RESTING, c.g * CTA_BORDER_RESTING, c.b * CTA_BORDER_RESTING, 1)
-            addBtnText:SetTextColor(c.r, c.g, c.b)
-        end)
-    end
+    -- Right edge aligns with the element list's scroll box (which is inset -22 for
+    -- the scrollbar) so the button doesn't overhang the element rows below it.
+    addBtn:SetPoint("RIGHT", parent, "RIGHT", -22, 0)
+    GUI:StyleButton(addBtn, { height = 32, primary = true, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add", size = 14 }, text = L["Add Text Element"], font = "DFFontHighlight" })
     state.addBtn = addBtn
 
     -- ── Section caption ──
@@ -1871,7 +1826,9 @@ local function BuildTextsTab(GUI, parent, state, tdDB, page)
     -- ── Filter chip row ──
     local chipRow = CreateFrame("Frame", nil, parent)
     chipRow:SetPoint("TOPLEFT", textsCaption, "BOTTOMLEFT", 0, -4)
-    chipRow:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
+    -- Right edge matches the add button + element list (scroll box, inset -22) so
+    -- the button / filters / rows form one aligned column (mirrors Aura Designer).
+    chipRow:SetPoint("RIGHT", parent, "RIGHT", -22, 0)
     chipRow:SetHeight(24)
     state.chipRow = chipRow
 
@@ -1882,12 +1839,13 @@ local function BuildTextsTab(GUI, parent, state, tdDB, page)
 
     local function MakeChip(label, key)
         local c = CreateFrame("Button", nil, chipRow, "BackdropTemplate")
-        c:SetHeight(CHIP_H)
-        ApplyBackdrop(c, C_PANEL, C_BORDER)
         local fs = c:CreateFontString(nil, "OVERLAY")
         GUI:SetSettingsFont(fs, 10, "OUTLINE")
         fs:SetPoint("CENTER")
         fs:SetText(label)
+        -- Shared styler: rest + accent-wash hover + SetActive selection look.
+        -- Keep the manual (custom-sized) label; only pass the height.
+        DF.GUI:StyleButton(c, { height = CHIP_H })
         c:SetWidth(fs:GetStringWidth() + 18)
         c.key = key
         c.fs = fs
@@ -1895,15 +1853,12 @@ local function BuildTextsTab(GUI, parent, state, tdDB, page)
     end
 
     local function ApplyChipState()
-        local tc = GUI:GetThemeColor()
         for _, c in ipairs(chips) do
-            if c.key == state.activeFilter then
-                c:SetBackdropColor(tc.r, tc.g, tc.b, 0.20)
-                c:SetBackdropBorderColor(tc.r, tc.g, tc.b, 0.50)
+            local active = c.key == state.activeFilter
+            c:SetActive(active)  -- shared toggle look (accent border + fill)
+            if active then
                 c.fs:SetTextColor(1, 1, 1)
             else
-                c:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, C_PANEL.a)
-                c:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
                 c.fs:SetTextColor(0.75, 0.75, 0.75)
             end
         end
@@ -1935,16 +1890,6 @@ local function BuildTextsTab(GUI, parent, state, tdDB, page)
             ApplyChipState()
             if DF.TextDesigner.RenderCardList then
                 DF.TextDesigner.RenderCardList(GUI, page, tdDB, state)
-            end
-        end)
-        c:SetScript("OnEnter", function(self)
-            if self.key ~= state.activeFilter then
-                self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
-            end
-        end)
-        c:SetScript("OnLeave", function(self)
-            if self.key ~= state.activeFilter then
-                self:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, C_PANEL.a)
             end
         end)
     end
@@ -2056,10 +2001,11 @@ end
 local function CreateGroupCard(GUI, parent, yPos, elem, tdDB, state, page)
     local HEADER_HEIGHT = 30
 
-    -- Outer card: layout-only, no backdrop (matches CreateTextElementCard).
+    -- Outer card: layout-only, no backdrop. Spans the scroll child fully so the
+    -- cards line up with the add button above (mirrors CreateTextElementCard).
     local card = CreateFrame("Frame", nil, parent)
-    card:SetPoint("TOPLEFT", parent, "TOPLEFT", 6, yPos)
-    card:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -6, yPos)
+    card:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, yPos)
+    card:SetPoint("TOPRIGHT", parent, "TOPRIGHT", 0, yPos)
 
     -- Group accent color used by both header (chip, arrow, title) and the
     -- header/body border tints — mirrors AuraDesigner/Options.lua:5245 and
@@ -2133,32 +2079,30 @@ local function CreateGroupCard(GUI, parent, yPos, elem, tdDB, state, page)
     card.meta = meta
 
     -- ── ACTION ICONS (right side of header) ──────────────────
-    -- Hand-drawn X delete (matches CreateTextElementCard).
+    -- Shared close glyph delete (matches CreateTextElementCard / AD).
     local ICON_SIZE = 18
     local ICON_GAP = 4
 
-    local deleteBtn = CreateFrame("Button", nil, header)
-    deleteBtn:SetSize(22, 22)
+    -- Delete OnClick (instant, no popup). Defined here so the shared close
+    -- button can wire it; mirrors AD's CreateCloseButton usage.
+    local function DeleteThisGroup()
+        for i, e in ipairs(tdDB.elements) do
+            if e.id == elem.id then
+                table.remove(tdDB.elements, i)
+                break
+            end
+        end
+        if DF.TextDesigner.FullRebuildCards then
+            DF.TextDesigner.FullRebuildCards(GUI, page, tdDB, state)
+        end
+        DF:Debug("TD", "Deleted group id=%d", elem.id)
+    end
+
+    local deleteBtn = GUI:CreateCloseButton(header, {
+        size = 22,
+        onClick = DeleteThisGroup,
+    })
     deleteBtn:SetPoint("RIGHT", header, "RIGHT", -4, 0)
-    local dxSize, dxThick = 12, 2
-    local dline1 = deleteBtn:CreateTexture(nil, "OVERLAY")
-    dline1:SetSize(dxSize, dxThick)
-    dline1:SetPoint("CENTER")
-    dline1:SetColorTexture(C_DESTRUCTIVE.r, C_DESTRUCTIVE.g, C_DESTRUCTIVE.b, C_DESTRUCTIVE.a)
-    dline1:SetRotation(math.rad(45))
-    local dline2 = deleteBtn:CreateTexture(nil, "OVERLAY")
-    dline2:SetSize(dxSize, dxThick)
-    dline2:SetPoint("CENTER")
-    dline2:SetColorTexture(C_DESTRUCTIVE.r, C_DESTRUCTIVE.g, C_DESTRUCTIVE.b, C_DESTRUCTIVE.a)
-    dline2:SetRotation(math.rad(-45))
-    deleteBtn:SetScript("OnEnter", function()
-        dline1:SetColorTexture(C_DESTRUCTIVE_HOVER.r, C_DESTRUCTIVE_HOVER.g, C_DESTRUCTIVE_HOVER.b, C_DESTRUCTIVE_HOVER.a)
-        dline2:SetColorTexture(C_DESTRUCTIVE_HOVER.r, C_DESTRUCTIVE_HOVER.g, C_DESTRUCTIVE_HOVER.b, C_DESTRUCTIVE_HOVER.a)
-    end)
-    deleteBtn:SetScript("OnLeave", function()
-        dline1:SetColorTexture(C_DESTRUCTIVE.r, C_DESTRUCTIVE.g, C_DESTRUCTIVE.b, C_DESTRUCTIVE.a)
-        dline2:SetColorTexture(C_DESTRUCTIVE.r, C_DESTRUCTIVE.g, C_DESTRUCTIVE.b, C_DESTRUCTIVE.a)
-    end)
     card.deleteBtn = deleteBtn
 
     -- Eye icon (visibility toggle) — left of delete.
@@ -2192,20 +2136,6 @@ local function CreateGroupCard(GUI, parent, yPos, elem, tdDB, state, page)
         btn:RegisterForClicks("LeftButtonUp")
         btn:SetFrameLevel(header:GetFrameLevel() + 5)
     end
-
-    -- Delete OnClick (instant, no popup)
-    deleteBtn:SetScript("OnClick", function()
-        for i, e in ipairs(tdDB.elements) do
-            if e.id == elem.id then
-                table.remove(tdDB.elements, i)
-                break
-            end
-        end
-        if DF.TextDesigner.FullRebuildCards then
-            DF.TextDesigner.FullRebuildCards(GUI, page, tdDB, state)
-        end
-        DF:Debug("TD", "Deleted group id=%d", elem.id)
-    end)
 
     -- ── BODY ─────────────────────────────────────────────────
     local body = CreateFrame("Frame", nil, card, "BackdropTemplate")
@@ -2333,37 +2263,15 @@ DF.TextDesigner.RenderGroupCardList = RenderGroupCardList
 -- No picker: there's only one element type on this tab ("group"), so clicking
 -- the button adds a new group element directly.
 local function BuildGroupsTab(GUI, parent, state, tdDB, page)
-    -- "+ Add Group" hero CTA — full-width, theme-tinted. Matches BuildTextsTab's
-    -- "+ Add Text Element" CTA construction so the two tabs look identical.
+    -- "+ Add Group" hero CTA — full-width. Shared primary CTA via the styler
+    -- (accent fill + white label), matching BuildTextsTab's "+ Add Text Element".
     local addBtn = CreateFrame("Button", nil, parent, "BackdropTemplate")
     addBtn:SetHeight(32)
     addBtn:SetPoint("TOPLEFT", parent, "TOPLEFT", 8, -10)
-    addBtn:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
-    do
-        local tc = GUI:GetThemeColor()
-        ApplyBackdrop(addBtn,
-            {r = tc.r * CTA_BG_RESTING,     g = tc.g * CTA_BG_RESTING,     b = tc.b * CTA_BG_RESTING,     a = 1},
-            {r = tc.r * CTA_BORDER_RESTING, g = tc.g * CTA_BORDER_RESTING, b = tc.b * CTA_BORDER_RESTING, a = 1})
-
-        local addBtnText = addBtn:CreateFontString(nil, "OVERLAY")
-        GUI:SetSettingsFont(addBtnText, 11, "OUTLINE")
-        addBtnText:SetPoint("CENTER", 0, 0)
-        addBtnText:SetText("+ " .. L["Add Group"])
-        addBtnText:SetTextColor(tc.r, tc.g, tc.b)
-
-        addBtn:SetScript("OnEnter", function(self)
-            local c = GUI:GetThemeColor()
-            self:SetBackdropColor(c.r * CTA_BG_HOVER, c.g * CTA_BG_HOVER, c.b * CTA_BG_HOVER, 1)
-            self:SetBackdropBorderColor(c.r * CTA_BORDER_HOVER, c.g * CTA_BORDER_HOVER, c.b * CTA_BORDER_HOVER, 1)
-            addBtnText:SetTextColor(1, 1, 1)
-        end)
-        addBtn:SetScript("OnLeave", function(self)
-            local c = GUI:GetThemeColor()
-            self:SetBackdropColor(c.r * CTA_BG_RESTING, c.g * CTA_BG_RESTING, c.b * CTA_BG_RESTING, 1)
-            self:SetBackdropBorderColor(c.r * CTA_BORDER_RESTING, c.g * CTA_BORDER_RESTING, c.b * CTA_BORDER_RESTING, 1)
-            addBtnText:SetTextColor(c.r, c.g, c.b)
-        end)
-    end
+    -- Right edge aligns with the group list's scroll box (inset -22 for the
+    -- scrollbar) so the button doesn't overhang the cards below — matches Texts.
+    addBtn:SetPoint("RIGHT", parent, "RIGHT", -22, 0)
+    GUI:StyleButton(addBtn, { height = 32, primary = true, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add", size = 14 }, text = L["Add Group"], font = "DFFontHighlight" })
 
     addBtn:SetScript("OnClick", function()
         -- Add a new group element directly (no picker — only one type)
@@ -2504,9 +2412,21 @@ local function BuildGlobalTab(GUI, parent, state, tdDB, page)
     colorPicker:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
     y = y - 44
 
-    local classColorCheck = GUI:CreateCheckbox(parent, L["Use Class Color"], defaults, "useClassColor", refreshCB)
+    -- "Use Class Color" boolean gates the custom Color picker: when ON, the
+    -- colour picker GREYS OUT (disabled + dimmed) but stays visible.
+    local function UpdateColorGrey()
+        local active = not defaults.useClassColor
+        if colorPicker.SetEnabled then colorPicker:SetEnabled(active) end
+        colorPicker:SetAlpha(active and 1 or 0.4)
+    end
+    local classColorCheck = GUI:CreateCheckbox(parent, L["Use Class Color"], defaults, "useClassColor", function()
+        UpdateColorGrey()
+        refreshCB()
+    end)
     classColorCheck:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
     y = y - 44
+    -- Apply the initial grey state on build.
+    UpdateColorGrey()
 
     -- LEGACY-TEXT-CLEANUP (v4.4.x): The "Hide Legacy Text" toggle is hidden via
     -- `if false` — legacy text is now force-hidden everywhere (see
@@ -2722,7 +2642,7 @@ function DF.BuildTextDesignerPage(GUI, page, db)
 
     -- While editing a raid auto-layout, the AutoProfiles editing banner (~50px)
     -- overlays the top of the content frame; push the top row down to clear it.
-    local _tdTopY = -10
+    local _tdTopY = -8  -- top gap; kept equal to the Aura Designer's yPos for a consistent header gap
     if DF.AutoProfilesUI and DF.AutoProfilesUI.IsEditing and DF.AutoProfilesUI:IsEditing() then
         _tdTopY = -56
     end
@@ -2748,24 +2668,22 @@ function DF.BuildTextDesignerPage(GUI, page, db)
                 end
             end,
         })
-        presetBar:SetPoint("TOPLEFT", page.child, "TOPLEFT", 10, _tdTopY)
-        presetBar:SetPoint("TOPRIGHT", page.child, "TOPRIGHT", -10, _tdTopY)
+        -- Anchored BELOW the controls box further down (after the box exists).
         state.presetBar = presetBar
     end
 
     -- ── TOP BANNER (one compact row) ───────────────────────────
-    -- Single-row banner: master toggle on the left, Copy / Sync trio on the
-    -- right. Saves vertical space vs. the original two-row layout (trio above
-    -- an otherwise empty bar).
-    local controlsBar = CreateFrame("Frame", nil, page.child)
-    controlsBar:SetHeight(32)
-    if presetBar then
-        controlsBar:SetPoint("TOPLEFT", presetBar, "BOTTOMLEFT", 0, -8)
-        controlsBar:SetPoint("TOPRIGHT", presetBar, "BOTTOMRIGHT", 0, -8)
-    else
-        controlsBar:SetPoint("TOPLEFT", page.child, "TOPLEFT", 10, _tdTopY)
-        controlsBar:SetPoint("TOPRIGHT", page.child, "TOPRIGHT", -10, _tdTopY)
-    end
+    -- Boxed banner: master Enable toggle (left) + Sync/Copy (right) in their own
+    -- bordered box at the TOP; the preset bar anchors BELOW it (further down) —
+    -- mirrors the Aura Designer header so the two designers match.
+    local controlsBar = CreateFrame("Frame", nil, page.child, "BackdropTemplate")
+    controlsBar:SetHeight(44)  -- room for the enable label + subtitle (matches AD)
+    controlsBar:SetPoint("TOPLEFT", page.child, "TOPLEFT", 0, _tdTopY)
+    controlsBar:SetPoint("TOPRIGHT", page.child, "TOPRIGHT", 0, _tdTopY)
+    GUI:CreatePanelBackdrop(controlsBar, {
+        bgColor = {r = 0.14, g = 0.14, b = 0.14}, bgAlpha = 1,
+        borderColor = {r = 0.30, g = 0.30, b = 0.30, a = 0.5},
+    })
     state.controlsBar = controlsBar
 
     -- Copy / Sync trio anchored to the right edge of the controls bar.
@@ -2778,7 +2696,7 @@ function DF.BuildTextDesignerPage(GUI, page, db)
         "text_designer",
         true
     )
-    copyBtnContainer:SetPoint("RIGHT", controlsBar, "RIGHT", 0, 0)
+    copyBtnContainer:SetPoint("RIGHT", controlsBar, "RIGHT", -8, 0)
     state.copyBtnContainer = copyBtnContainer
 
     -- Local refresher for the "disabled" overlay — defined after the overlay
@@ -2797,8 +2715,23 @@ function DF.BuildTextDesignerPage(GUI, page, db)
             if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end
         end
     )
-    enableCheck:SetPoint("LEFT", controlsBar, "LEFT", 0, 0)
+    enableCheck:SetPoint("LEFT", controlsBar, "LEFT", 10, 7)
     state.enableCheck = enableCheck
+    -- Match Aura Designer's enable header: larger label + a subtitle beneath it.
+    if enableCheck.label then enableCheck.label:SetFontObject(DFFontNormal) end
+    local enableSub = controlsBar:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    enableSub:SetPoint("TOPLEFT", enableCheck.label or enableCheck, "BOTTOMLEFT", 0, -1)
+    enableSub:SetText(L["Custom name, health and status text"])
+    enableSub:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+
+    -- Anchor the preset bar BELOW the controls box (done here, after the box
+    -- exists). Content below the header uses headerBottom = preset bar if present,
+    -- else the box.
+    if presetBar then
+        presetBar:SetPoint("TOPLEFT", controlsBar, "BOTTOMLEFT", 0, -8)
+        presetBar:SetPoint("TOPRIGHT", controlsBar, "BOTTOMRIGHT", 0, -8)
+    end
+    local headerBottom = presetBar or controlsBar
 
     -- ── PREVIEW PANEL (left half, below banner) ────────────────
     -- Visual clone of AD's frame preview. The mockFrame mirrors the current
@@ -2809,8 +2742,11 @@ function DF.BuildTextDesignerPage(GUI, page, db)
     -- the same chrome (mirrors AD's split: leftPanel uses C_PANEL while
     -- rightPanel uses {0.10,0.10,0.10}; here we keep both panels visually
     -- identical to avoid the "two different boxes" look from the screenshot).
-    ApplyBackdrop(previewPanel, C_RIGHT_PANEL_BG, C_RIGHT_PANEL_BORDER)
-    previewPanel:SetPoint("TOPLEFT", controlsBar, "BOTTOMLEFT", 0, -10)
+    GUI:CreatePanelBackdrop(previewPanel, {
+        bgColor = C_RIGHT_PANEL_BG, bgAlpha = C_RIGHT_PANEL_BG.a,
+        borderColor = C_RIGHT_PANEL_BORDER,
+    })
+    previewPanel:SetPoint("TOPLEFT", headerBottom, "BOTTOMLEFT", 0, -10)
     -- Bottom anchor matches rightAnchorFrame:BOTTOMRIGHT page.child 0,0 so
     -- the two panels end at exactly the same Y.
     previewPanel:SetPoint("BOTTOM", page.child, "BOTTOM", 0, 0)
@@ -2914,11 +2850,12 @@ function DF.BuildTextDesignerPage(GUI, page, db)
                 BOTTOM      = "BOTTOM",
                 BOTTOMRIGHT = "BOTTOMRIGHT",
             }
+            local dc = GUI:GetThemeColor()
             for _, anchorName in pairs(ANCHOR_POSITIONS) do
                 local dot = mockFrame:CreateTexture(nil, "OVERLAY")
                 dot:SetSize(6, 6)
                 dot:SetPoint("CENTER", mockFrame, anchorName, 0, 0)
-                dot:SetColorTexture(0.45, 0.45, 0.95, 0.3)
+                dot:SetColorTexture(dc.r, dc.g, dc.b, 0.3)
             end
         end
     end
@@ -2941,7 +2878,7 @@ function DF.BuildTextDesignerPage(GUI, page, db)
     -- Placeholder note so users know this panel is purely cosmetic for now.
     local previewNote = previewPanel:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     previewNote:SetPoint("BOTTOM", previewPanel, "BOTTOM", 0, 10)
-    previewNote:SetText("Preview placeholder (visual mockup)")
+    previewNote:SetText(L["Preview placeholder (visual mockup)"])
     previewNote:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.8)
 
     -- ── RIGHT-SIDE CONTAINER ───────────────────────────────────
@@ -2950,7 +2887,10 @@ function DF.BuildTextDesignerPage(GUI, page, db)
     local rightAnchorFrame = CreateFrame("Frame", nil, page.child, "BackdropTemplate")
     rightAnchorFrame:SetPoint("TOPLEFT", previewPanel, "TOPRIGHT", 6, 0)
     rightAnchorFrame:SetPoint("BOTTOMRIGHT", page.child, "BOTTOMRIGHT", 0, 0)
-    ApplyBackdrop(rightAnchorFrame, C_RIGHT_PANEL_BG, C_RIGHT_PANEL_BORDER)
+    GUI:CreatePanelBackdrop(rightAnchorFrame, {
+        bgColor = C_RIGHT_PANEL_BG, bgAlpha = C_RIGHT_PANEL_BG.a,
+        borderColor = C_RIGHT_PANEL_BORDER,
+    })
     state.rightAnchorFrame = rightAnchorFrame
 
     -- ── TAB STRIP ──────────────────────────────────────────────
@@ -2983,7 +2923,7 @@ function DF.BuildTextDesignerPage(GUI, page, db)
     -- panel when tdDB.enabled is false. Mirrors AuraDesigner/Options.lua:
     -- 6266-6297 (AD's splitContainer overlay).
     local disabledOverlay = CreateFrame("Frame", nil, page.child, "BackdropTemplate")
-    disabledOverlay:SetPoint("TOPLEFT", controlsBar, "BOTTOMLEFT", 0, 0)
+    disabledOverlay:SetPoint("TOPLEFT", headerBottom, "BOTTOMLEFT", 0, 0)
     disabledOverlay:SetPoint("BOTTOMRIGHT", page.child, "BOTTOMRIGHT", 0, 0)
     disabledOverlay:SetFrameLevel(page.child:GetFrameLevel() + 50)
     disabledOverlay:EnableMouse(true)

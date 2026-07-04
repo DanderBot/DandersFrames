@@ -25,32 +25,42 @@ local function DeepCopyValue(value)
 end
 
 -- Content type definitions
-local CONTENT_TYPES = {
-    {
-        key = "instanced",
-        title = L["Instanced / PvP"],
-        description = L["Raids, battlegrounds (1-40)"],
-        minRange = 1,
-        maxRange = 40,
-        isFixed = false,
-    },
-    {
-        key = "mythic",
-        title = L["Mythic"],
-        description = L["20 players (fixed)"],
-        minRange = 20,
-        maxRange = 20,
-        isFixed = true,
-    },
-    {
-        key = "openWorld",
-        title = L["Open World"],
-        description = L["World bosses, outdoor raids (1-40)"],
-        minRange = 1,
-        maxRange = 40,
-        isFixed = false,
-    },
-}
+-- title/description read L["..."]; at file scope that returns the enUS baseline
+-- (the languageOverride overlay runs later, at ADDON_LOADED). Build them in a
+-- registered refresh fn so Core rebuilds them after the overlay.
+local CONTENT_TYPES = {}
+
+local function RefreshContentTypes()
+    CONTENT_TYPES = {
+        {
+            key = "instanced",
+            title = L["Instanced / PvP"],
+            description = L["Raids, battlegrounds (1-40)"],
+            minRange = 1,
+            maxRange = 40,
+            isFixed = false,
+        },
+        {
+            key = "mythic",
+            title = L["Mythic"],
+            description = L["20 players (fixed)"],
+            minRange = 20,
+            maxRange = 20,
+            isFixed = true,
+        },
+        {
+            key = "openWorld",
+            title = L["Open World"],
+            description = L["World bosses, outdoor raids (1-40)"],
+            minRange = 1,
+            maxRange = 40,
+            isFixed = false,
+        },
+    }
+end
+
+RefreshContentTypes()
+DF:RegisterLocaleRefresh(RefreshContentTypes)
 
 -- ============================================================
 -- LOCAL HELPERS for db.raid access and snapshot lookups
@@ -85,15 +95,28 @@ local PINNED_OVERRIDABLE = {
     enabled = true,
 }
 
--- True unless `key` is a pinned key (pinned.N.setting) whose setting is NOT
--- overridable. Non-pinned keys are always allowed (governed elsewhere). This is
--- the single gate that keeps non-overridable pinned settings out of the layout
--- override store — used by SetProfileSetting / IsSettingOverridden below.
+-- Transient / UI-state keys that must NEVER become a layout override — they're
+-- not per-layout settings, so capturing them poisons the layout. raidLocked is the
+-- culprit: the per-layout Unlock button unlocks frames DURING an edit session, so
+-- raidLocked goes false; if editing exits while still unlocked, the diff-scan
+-- stored raidLocked=false and the layout then forced the frames unlocked whenever
+-- it activated (the Lock/Unlock button read backwards). `locked` is the party
+-- equivalent, listed for symmetry.
+local NON_OVERRIDABLE_KEYS = {
+    raidLocked = true,
+    locked = true,
+}
+
+-- True unless `key` is non-overridable: a pinned key (pinned.N.setting) whose
+-- setting isn't overridable, or a transient UI-state key. The single gate that
+-- keeps such keys out of the layout override store — used by SetProfileSetting /
+-- IsSettingOverridden / the ExitEditing diff-scan / ApplyRuntimeProfile.
 local function IsKeyOverridable(key)
     local _, setting = ParsePinnedKey(key)
     if setting then
         return PINNED_OVERRIDABLE[setting] == true
     end
+    if NON_OVERRIDABLE_KEYS[key] then return false end
     return true
 end
 
@@ -103,7 +126,13 @@ end
 -- Ordered most-specific first to avoid false matches
 -- (e.g. "healthText" before "health", "defensiveIcon" before "debuff").
 -- ============================================================
-local OVERRIDE_TAB_MAP = {
+-- The 3rd element of each row reads L["..."]; at file scope that returns the
+-- enUS baseline (the languageOverride overlay runs later, at ADDON_LOADED).
+-- Build the map in a registered refresh fn so the tab labels follow the locale.
+local OVERRIDE_TAB_MAP = {}
+
+local function RefreshOverrideTabMap()
+    OVERRIDE_TAB_MAP = {
     -- Display
     {"soloMode",            "display_visibility",   L["Visibility"]},
     {"showMinimapButton",   "display_visibility",   L["Visibility"]},
@@ -191,7 +220,11 @@ local OVERRIDE_TAB_MAP = {
     {"aggro",               "indicators_highlights", L["Highlights"]},
     -- Pinned frames (prefix match for "pinned.N.setting" format)
     {"pinned.",             "general_pinnedframes", L["Pinned Frames"]},
-}
+    }
+end
+
+RefreshOverrideTabMap()
+DF:RegisterLocaleRefresh(RefreshOverrideTabMap)
 
 -- Returns tabId, tabLabel for a given override key
 local function GetOverrideTabId(key)
@@ -568,6 +601,29 @@ function AutoProfilesUI:InitDefaults()
     if DF.db.raidAutoProfiles.howItWorksCollapsed == nil then
         DF.db.raidAutoProfiles.howItWorksCollapsed = false
     end
+
+    -- One-time cleanup: strip transient/never-override keys (raidLocked etc.) that
+    -- an earlier build's diff-scan may have captured into layout overrides. Such a
+    -- key forced the frames locked/unlocked whenever its layout activated (the
+    -- Lock/Unlock button read backwards). Runtime/edit paths now skip these keys,
+    -- but scrub the stored data so override counts are accurate too.
+    local ap = DF.db.raidAutoProfiles
+    if not ap.nonOverridableCleanupDone then
+        local function cleanOverrides(profile)
+            if profile and profile.overrides then
+                for key in pairs(NON_OVERRIDABLE_KEYS) do
+                    profile.overrides[key] = nil
+                end
+            end
+        end
+        if ap.mythic then cleanOverrides(ap.mythic.profile) end
+        for _, ct in ipairs({ "instanced", "openWorld" }) do
+            if ap[ct] and ap[ct].profiles then
+                for _, p in ipairs(ap[ct].profiles) do cleanOverrides(p) end
+            end
+        end
+        ap.nonOverridableCleanupDone = true
+    end
 end
 
 -- Get profiles for a content type
@@ -743,21 +799,33 @@ function AutoProfilesUI:BuildPage(GUI, pageFrame, db, Add, AddSpace)
         end
     )
     Add(enableCheck, 30, "both")
-    
+
     AddSpace(5, "both")
-    
+
+    -- Grey-when-disabled. When "Enable Raid Auto-Switching Layouts" is OFF, the
+    -- page stays VISIBLE but dependent content greys in place. The toggle's
+    -- callback runs pageFrame:Refresh() (a full rebuild), so reading autoDb.enabled
+    -- at build time is self-refreshing — no disableOn/RefreshStates wiring needed
+    -- for these raw frames (they have no SetEnabled, so the page gate loop skips
+    -- them anyway).
+    --
+    -- CONFIGURE-WHILE-OFF: the layout MANAGEMENT controls (the content-type
+    -- sections: add / edit / delete / rename / copy / range layouts) stay fully
+    -- interactive while off — users routinely build their layouts before switching
+    -- auto-switching on. Only the runtime auto-switch *behaviour* indicator (the
+    -- Current Status box) is greyed; the header and the "How it works"
+    -- documentation also stay full-colour/readable so the page is still usable.
+    local autoOff = not autoDb.enabled
+
     -- =============================================
     -- Current Status Box
     -- =============================================
-    local statusContainer = CreateFrame("Frame", nil, pageFrame.child, "BackdropTemplate")
+    local statusContainer = CreateFrame("Frame", nil, pageFrame.child)
     statusContainer:SetSize(500, 55)
-    statusContainer:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(statusContainer, {
+        bgColor = { 0.1, 0.1, 0.1, 0.8 },
+        borderColor = { 0.25, 0.25, 0.25, 1 },
     })
-    statusContainer:SetBackdropColor(0.1, 0.1, 0.1, 0.8)
-    statusContainer:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
     
     local statusTitle = statusContainer:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
     statusTitle:SetPoint("TOPLEFT", 10, -8)
@@ -811,7 +879,7 @@ function AutoProfilesUI:BuildPage(GUI, pageFrame, db, Add, AddSpace)
         if profile then
             local rangeText = ""
             if profileKey == "mythic" then
-                rangeText = L["20 players (fixed)"]
+                rangeText = L["20 (Fixed)"]
             elseif profile.min and profile.max then
                 rangeText = profile.min .. "-" .. profile.max
             end
@@ -822,8 +890,13 @@ function AutoProfilesUI:BuildPage(GUI, pageFrame, db, Add, AddSpace)
         end
     end
     
+    -- Grey the runtime status indicator in place when auto-switching is off; it
+    -- reports the auto-switch behaviour (which is inert when disabled). Stays
+    -- visible, just dimmed.
+    statusContainer:SetAlpha(autoOff and 0.4 or 1)
+
     Add(statusContainer, 60, "both")
-    
+
     AddSpace(5, "both")
     
     -- =============================================
@@ -1146,7 +1219,7 @@ function AutoProfilesUI:CreateProfileRow(GUI, pageFrame, parent, contentType, pr
     rangeText:SetPoint("CENTER")
     
     if contentType.isFixed then
-        rangeText:SetText(L["20 players (fixed)"])
+        rangeText:SetText(L["20 (Fixed)"])
         rangeText:SetTextColor(0.5, 0.5, 0.5)
     else
         rangeText:SetText((profile.min or 1) .. " - " .. (profile.max or 40))
@@ -1156,14 +1229,12 @@ function AutoProfilesUI:CreateProfileRow(GUI, pageFrame, parent, contentType, pr
         rangeBadge:SetScript("OnEnter", function(self)
             self:SetBackdropBorderColor(1, 0.5, 0.2, 1)
             rangeText:SetTextColor(1, 1, 1)
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText(L["Click to edit range"])
-            GameTooltip:Show()
+            GUI:ShowTooltip(self, { title = L["Click to edit range"] })
         end)
         rangeBadge:SetScript("OnLeave", function(self)
             self:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
             rangeText:SetTextColor(0.7, 0.7, 0.7)
-            GameTooltip:Hide()
+            GUI:HideTooltip()
         end)
         rangeBadge:SetScript("OnClick", function()
             -- Show edit range dialog
@@ -1291,61 +1362,98 @@ function AutoProfilesUI:CreateProfileRow(GUI, pageFrame, parent, contentType, pr
         end)
     end
 
-    -- Copy To button
+    -- Copy To button — normal styling with a white label. It's a raid-only
+    -- feature and the page is already saturated with raid orange, so this
+    -- secondary action doesn't need its own orange text.
     local copyBtn = CreateFrame("Button", nil, row, "BackdropTemplate")
-    copyBtn:SetSize(55, 20)
     copyBtn:SetPoint("RIGHT", -120, 0)
-    copyBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    copyBtn:SetBackdropColor(0.15, 0.15, 0.15, 1)
-    copyBtn:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
+    GUI:StyleButton(copyBtn, { width = 55, height = 20, text = L["Copy To"] })
 
-    local copyText = copyBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    copyText:SetPoint("CENTER")
-    copyText:SetText(L["Copy To"])
-    copyText:SetTextColor(1, 0.5, 0.2)
-
-    copyBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(0.25, 0.15, 0.1, 1)
-        self:SetBackdropBorderColor(1, 0.5, 0.2, 1)
-    end)
-    copyBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(0.15, 0.15, 0.15, 1)
-        self:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
-    end)
     copyBtn:SetScript("OnClick", function()
         AutoProfilesUI:ShowCopyDialog(contentType, profile, index, pageFrame)
     end)
 
-    -- Edit Settings button
+    -- Unlock button — ACTIVE layout only. Mirrors the main toolbar Lock/Unlock
+    -- toggle (icon + text) but scoped to this layout: clicking it edits THIS
+    -- (active) layout with the raid frames unlocked, so dragging saves the position
+    -- into the layout instead of the base. The main toolbar Unlock is disabled
+    -- while a layout is active (steering position edits here), same convention as
+    -- Edit Settings being active-layout-only.
+    if AutoProfilesUI.activeRuntimeProfile == profile then
+        local unlockBtn = CreateFrame("Button", nil, row, "BackdropTemplate")
+        unlockBtn:SetSize(80, 20)
+        unlockBtn:SetPoint("RIGHT", copyBtn, "LEFT", -6, 0)
+        -- Toggle on the shared styler (orange identity); SetActive while unlocked.
+        GUI:StyleButton(unlockBtn, { accent = { r = 1, g = 0.5, b = 0.2 } })
+
+        local unlockIcon = unlockBtn:CreateTexture(nil, "OVERLAY")
+        unlockIcon:SetSize(12, 12)
+        unlockBtn.Icon = unlockIcon
+
+        local unlockText = unlockBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+        unlockText:SetPoint("CENTER", unlockBtn, "CENTER", 8, 0)
+        unlockIcon:SetPoint("RIGHT", unlockText, "LEFT", -4, 0)
+        unlockText:SetTextColor(0.9, 0.9, 0.9)
+        unlockBtn.Text = unlockText
+
+        local function RefreshUnlockBtn()
+            local locked = DF:GetRaidDB().raidLocked
+            unlockText:SetText(locked and L["Unlock"] or L["Lock"])
+            unlockIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. (locked and "lock" or "lock_open"))
+            unlockIcon:SetVertexColor(0.9, 0.9, 0.9)
+            unlockBtn:SetActive(not locked)  -- accent fill/border while unlocked (editing)
+        end
+        RefreshUnlockBtn()
+
+        unlockBtn:HookScript("OnEnter", function(self)
+            GUI:ShowTooltip(self, {
+                title = L["Unlock to Move"],
+                tone = "warning",
+                lines = {
+                    L["Unlock this layout's frames to drag them. Changes save to this layout."],
+                },
+            })
+        end)
+        unlockBtn:HookScript("OnLeave", function()
+            GUI:HideTooltip()
+        end)
+        unlockBtn:SetScript("OnClick", function()
+            local locked = DF:GetRaidDB().raidLocked
+            if locked then
+                if InCombatLockdown() then
+                    print("|cffff0000DandersFrames:|r Cannot unlock during combat.")
+                    return
+                end
+                -- Edit THIS layout (already the active one) so drag-writes land on
+                -- it, then unlock for world dragging. Skip re-entering if Edit
+                -- Settings already opened this layout (don't steal that session).
+                local alreadyEditingThis = AutoProfilesUI:IsEditing()
+                    and AutoProfilesUI.editingProfile == profile
+                if not alreadyEditingThis then
+                    -- Refused (shouldn't happen for the active layout) → don't fall
+                    -- through to unlocking the BASE, which is the bug we're fixing.
+                    if AutoProfilesUI:EnterEditing(contentType.key, index) == false then return end
+                    DF.raidLayoutEditUnlock = true
+                end
+                if DF.UnlockRaidFrames then DF:UnlockRaidFrames() end
+            else
+                if DF.LockRaidFrames then DF:LockRaidFrames() end
+            end
+            RefreshUnlockBtn()
+        end)
+    end
+
+    -- Edit Settings button — AutoProfiles orange identity; greys out via
+    -- SetDisabled when this layout can't be edited (blockEdit below).
     local editBtn = CreateFrame("Button", nil, row, "BackdropTemplate")
     editBtn:SetSize(75, 20)
     editBtn:SetPoint("RIGHT", -40, 0)
-    editBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    GUI:StyleButton(editBtn, {
+        text = L["Edit Settings"],
+        accent = { r = 1, g = 0.5, b = 0.2 },
     })
-    editBtn:SetBackdropColor(0.15, 0.15, 0.15, 1)
-    editBtn:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
-    
-    local editText = editBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    editText:SetPoint("CENTER")
-    editText:SetText(L["Edit Settings"])
-    editText:SetTextColor(1, 0.5, 0.2)
-    
-    editBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(0.25, 0.15, 0.1, 1)
-        self:SetBackdropBorderColor(1, 0.5, 0.2, 1)
-    end)
-    editBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(0.15, 0.15, 0.15, 1)
-        self:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
-    end)
-    editBtn:SetScript("OnClick", function()
+    editBtn:SetScript("OnClick", function(self)
+        if self.dfDisabled then return end
         AutoProfilesUI:EnterEditing(contentType.key, index)
     end)
 
@@ -1368,52 +1476,39 @@ function AutoProfilesUI:CreateProfileRow(GUI, pageFrame, parent, contentType, pr
         else
             tipLine = L["While in a raid group you can only edit the active layout. Leave the raid group to edit other layouts."]
         end
-        editText:SetTextColor(0.3, 0.3, 0.3)
-        editBtn:SetBackdropColor(0.1, 0.1, 0.1, 0.5)
-        editBtn:SetBackdropBorderColor(0.2, 0.2, 0.2, 0.5)
-        editBtn:SetScript("OnEnter", function(btn)
-            GameTooltip:SetOwner(btn, "ANCHOR_RIGHT")
-            GameTooltip:SetText(L["Cannot Edit"], 1, 0.3, 0.3)
-            GameTooltip:AddLine(tipLine, 0.7, 0.7, 0.7, true)
-            GameTooltip:Show()
+        editBtn:SetDisabled(true)
+        editBtn:HookScript("OnEnter", function(btn)
+            GUI:ShowTooltip(btn, {
+                title = L["Cannot Edit"],
+                tone = "danger",
+                lines = { tipLine },
+            })
         end)
-        editBtn:SetScript("OnLeave", function()
-            GameTooltip:Hide()
+        editBtn:HookScript("OnLeave", function()
+            GUI:HideTooltip()
         end)
-        editBtn:SetScript("OnClick", function() end)
     end
 
-    -- Delete button
+    -- Delete button (destructive — red hover wash via the shared styler)
     local deleteBtn = CreateFrame("Button", nil, row, "BackdropTemplate")
     deleteBtn:SetSize(22, 20)
     deleteBtn:SetPoint("RIGHT", -10, 0)
-    deleteBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    GUI:StyleButton(deleteBtn, {
+        accent = { r = 0.8, g = 0.2, b = 0.2 },
+        icon = {
+            texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\delete",
+            size = 12,
+            color = { r = 0.6, g = 0.6, b = 0.6 },
+        },
     })
-    deleteBtn:SetBackdropColor(0.15, 0.15, 0.15, 1)
-    deleteBtn:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
-    
-    local deleteIcon = deleteBtn:CreateTexture(nil, "OVERLAY")
-    deleteIcon:SetPoint("CENTER")
-    deleteIcon:SetSize(12, 12)
-    deleteIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\delete")
-    deleteIcon:SetVertexColor(0.6, 0.6, 0.6)
-    
-    deleteBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(0.3, 0.1, 0.1, 1)
-        self:SetBackdropBorderColor(0.8, 0.2, 0.2, 1)
-        deleteIcon:SetVertexColor(1, 0.3, 0.3)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText(L["Delete Layout"])
-        GameTooltip:Show()
+
+    deleteBtn:HookScript("OnEnter", function(self)
+        self.Icon:SetVertexColor(1, 0.3, 0.3)
+        GUI:ShowTooltip(self, { title = L["Delete Layout"] })
     end)
-    deleteBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(0.15, 0.15, 0.15, 1)
-        self:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
-        deleteIcon:SetVertexColor(0.6, 0.6, 0.6)
-        GameTooltip:Hide()
+    deleteBtn:HookScript("OnLeave", function(self)
+        self.Icon:SetVertexColor(0.6, 0.6, 0.6)
+        GUI:HideTooltip()
     end)
     deleteBtn:SetScript("OnClick", function()
         -- Confirm deletion
@@ -1441,28 +1536,9 @@ function AutoProfilesUI:CreateAddButton(GUI, pageFrame, parent, contentType)
     
     local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
     btn:SetHeight(24)
-    btn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    btn:SetBackdropColor(0.08, 0.08, 0.08, 0)
-    btn:SetBackdropBorderColor(0.3, 0.3, 0.3, 0.5)
-    
-    -- Centered text
-    local btnText = btn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    btnText:SetPoint("CENTER", 0, 0)
-    btnText:SetText(L["+ Add Layout"])
-    btnText:SetTextColor(0.5, 0.5, 0.5)
-    
-    btn:SetScript("OnEnter", function(self)
-        self:SetBackdropBorderColor(1, 0.5, 0.2, 1)
-        btnText:SetTextColor(1, 0.5, 0.2)
-    end)
-    btn:SetScript("OnLeave", function(self)
-        self:SetBackdropBorderColor(0.3, 0.3, 0.3, 0.5)
-        btnText:SetTextColor(0.5, 0.5, 0.5)
-    end)
+
+    GUI:StyleButton(btn, { height = 24, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add", size = 14 }, text = L["Add Layout"] })
+
     btn:SetScript("OnClick", function()
         if contentType.key == "mythic" then
             -- Just create the mythic profile directly
@@ -1491,13 +1567,7 @@ function AutoProfilesUI:CreateProfileDialog()
     local dialog = CreateFrame("Frame", "DandersAutoProfileDialog", UIParent, "BackdropTemplate")
     dialog:SetSize(360, 240)
     dialog:SetPoint("CENTER", DF.GUIFrame or UIParent, "CENTER", 0, 0)
-    dialog:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    dialog:SetBackdropColor(0.06, 0.06, 0.06, 0.98)
-    dialog:SetBackdropBorderColor(0, 0, 0, 1)
+    DF.GUI:CreatePanelBackdrop(dialog, { bgAlpha = 0.98, borderColor = { 0, 0, 0, 1 } })
     dialog:SetFrameStrata("FULLSCREEN_DIALOG")
     dialog:SetFrameLevel(100)
     dialog:EnableMouse(true)
@@ -1506,40 +1576,16 @@ function AutoProfilesUI:CreateProfileDialog()
     dialog:SetScript("OnDragStart", dialog.StartMoving)
     dialog:SetScript("OnDragStop", dialog.StopMovingOrSizing)
     dialog:Hide()
-    
+
     -- Title
     local title = dialog:CreateFontString(nil, "OVERLAY", "DFFontNormal")
     title:SetPoint("TOPLEFT", 12, -12)
     title:SetTextColor(0.9, 0.9, 0.9)
     dialog.title = title
-    
+
     -- Close button
-    local closeBtn = CreateFrame("Button", nil, dialog, "BackdropTemplate")
-    closeBtn:SetSize(20, 20)
+    local closeBtn = DF.GUI:CreateCloseButton(dialog, { onClick = function() dialog:Hide() end })
     closeBtn:SetPoint("TOPRIGHT", -6, -6)
-    closeBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    closeBtn:SetBackdropColor(0.1, 0.1, 0.1, 1)
-    closeBtn:SetBackdropBorderColor(0.2, 0.2, 0.2, 1)
-    local closeIcon = closeBtn:CreateTexture(nil, "OVERLAY")
-    closeIcon:SetSize(12, 12)
-    closeIcon:SetPoint("CENTER")
-    closeIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close")
-    closeIcon:SetVertexColor(0.5, 0.5, 0.5)
-    closeBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropBorderColor(0.8, 0.2, 0.2, 1)
-        closeIcon:SetVertexColor(1, 0.3, 0.3)
-    end)
-    closeBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropBorderColor(0.2, 0.2, 0.2, 1)
-        closeIcon:SetVertexColor(0.5, 0.5, 0.5)
-    end)
-    closeBtn:SetScript("OnClick", function()
-        dialog:Hide()
-    end)
     
     -- =============================================
     -- Profile Name Section
@@ -1553,15 +1599,7 @@ function AutoProfilesUI:CreateProfileDialog()
     local nameInput = CreateFrame("EditBox", nil, dialog, "BackdropTemplate")
     nameInput:SetSize(336, 26)
     nameInput:SetPoint("TOPLEFT", 12, -56)
-    nameInput:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    nameInput:SetBackdropColor(0.03, 0.03, 0.03, 1)
-    nameInput:SetBackdropBorderColor(0.2, 0.2, 0.2, 1)
-    nameInput:SetFontObject("DFFontHighlight")
-    nameInput:SetTextInsets(8, 8, 0, 0)
+    DF.GUI:StyleEditBox(nameInput, {})
     nameInput:SetAutoFocus(false)
     nameInput:SetMaxLetters(30)
     nameInput:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
@@ -1586,198 +1624,32 @@ function AutoProfilesUI:CreateProfileDialog()
     rangeDisplay:SetTextColor(1, 0.5, 0.2)
     dialog.rangeDisplay = rangeDisplay
     
-    -- Slider track (thinner)
-    local sliderWidth = 336
-    local sliderTrack = CreateFrame("Frame", nil, dialog, "BackdropTemplate")
-    sliderTrack:SetSize(sliderWidth, 12)
-    sliderTrack:SetPoint("TOPLEFT", 12, -112)
-    sliderTrack:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    -- Dual-handle range slider (shared helper). Preserves the orange accent and
+    -- the original 1..40 scale labels; drag/track-click/dragging-state are all
+    -- handled internally by the helper.
+    local slider = DF.GUI:CreateRangeSlider(dialog, {
+        width = 336,
+        accent = { r = 1, g = 0.5, b = 0.2 },
+        minRange = 1, maxRange = 40,
+        lo = dialog.currentMin or 1, hi = dialog.currentMax or 40,
+        scaleLabels = {1, 10, 20, 30, 40}, scaleMin = 1, scaleMax = 40,
+        display = rangeDisplay,
+        formatOne   = function(v) return format(L["%d players"], v) end,
+        formatRange = function(lo, hi) return format(L["%d - %d players"], lo, hi) end,
+        onChange = function(lo, hi)
+            dialog.currentMin, dialog.currentMax = lo, hi
+            AutoProfilesUI:ValidateDialog()
+        end,
     })
-    sliderTrack:SetBackdropColor(0.03, 0.03, 0.03, 1)
-    sliderTrack:SetBackdropBorderColor(0.2, 0.2, 0.2, 1)
-    dialog.sliderTrack = sliderTrack
-    
-    -- Range fill (between handles)
-    local rangeFill = sliderTrack:CreateTexture(nil, "ARTWORK")
-    rangeFill:SetTexture("Interface\\Buttons\\WHITE8x8")
-    rangeFill:SetVertexColor(1, 0.5, 0.2, 0.5)
-    rangeFill:SetHeight(10)
-    rangeFill:SetPoint("TOP", 0, -1)
-    dialog.rangeFill = rangeFill
-    
-    -- Helper to calculate position from value
-    local function ValueToPos(value, minRange, maxRange)
-        local pct = (value - minRange) / (maxRange - minRange)
-        return pct * (sliderWidth - 4) + 2
-    end
-    
-    -- Helper to calculate value from position
-    local function PosToValue(pos, minRange, maxRange)
-        local pct = (pos - 2) / (sliderWidth - 4)
-        return math.floor(pct * (maxRange - minRange) + minRange + 0.5)
-    end
-    
-    -- Handle dragging state
-    local dragging = nil
-    
-    -- Min handle (thinner, more elegant)
-    local minHandle = CreateFrame("Button", nil, sliderTrack)
-    minHandle:SetSize(8, 16)
-    minHandle:SetPoint("CENTER", sliderTrack, "LEFT", 2, 0)
-    minHandle:EnableMouse(true)
-    local minHandleTex = minHandle:CreateTexture(nil, "OVERLAY")
-    minHandleTex:SetAllPoints()
-    minHandleTex:SetTexture("Interface\\Buttons\\WHITE8x8")
-    minHandleTex:SetVertexColor(1, 0.5, 0.2, 1)
-    dialog.minHandle = minHandle
-    
-    -- Max handle
-    local maxHandle = CreateFrame("Button", nil, sliderTrack)
-    maxHandle:SetSize(8, 16)
-    maxHandle:SetPoint("CENTER", sliderTrack, "LEFT", sliderWidth - 2, 0)
-    maxHandle:EnableMouse(true)
-    local maxHandleTex = maxHandle:CreateTexture(nil, "OVERLAY")
-    maxHandleTex:SetAllPoints()
-    maxHandleTex:SetTexture("Interface\\Buttons\\WHITE8x8")
-    maxHandleTex:SetVertexColor(1, 0.5, 0.2, 1)
-    dialog.maxHandle = maxHandle
-    
-    local function UpdateSliderVisuals()
-        local contentType = dialog.contentType
-        if not contentType then return end
-        
-        local minVal = dialog.currentMin or contentType.minRange
-        local maxVal = dialog.currentMax or contentType.maxRange
-        local minRange = contentType.minRange
-        local maxRange = contentType.maxRange
-        
-        local minPos = ValueToPos(minVal, minRange, maxRange)
-        local maxPos = ValueToPos(maxVal, minRange, maxRange)
-        
-        minHandle:ClearAllPoints()
-        minHandle:SetPoint("CENTER", sliderTrack, "LEFT", minPos, 0)
-        maxHandle:ClearAllPoints()
-        maxHandle:SetPoint("CENTER", sliderTrack, "LEFT", maxPos, 0)
-        
-        -- Update fill
-        rangeFill:ClearAllPoints()
-        rangeFill:SetPoint("LEFT", sliderTrack, "LEFT", minPos, 0)
-        rangeFill:SetWidth(math.max(maxPos - minPos, 2))
-        
-        -- Update display
-        if minVal == maxVal then
-            rangeDisplay:SetText(format(L["%d players"], minVal))
-        else
-            rangeDisplay:SetText(format(L["%d - %d players"], minVal, maxVal))
-        end
+    slider:SetPoint("TOPLEFT", 12, -112)
+    dialog.sliderTrack = slider
 
+    dialog.UpdateSliderVisuals = function()
+        local ct = dialog.contentType
+        if not ct then return end
+        slider:SetRange(ct.minRange, ct.maxRange)
+        slider:SetValues(dialog.currentMin or ct.minRange, dialog.currentMax or ct.maxRange)
         AutoProfilesUI:ValidateDialog()
-    end
-    dialog.UpdateSliderVisuals = UpdateSliderVisuals
-    
-    -- Use OnMouseDown/OnMouseUp for more responsive dragging
-    minHandle:SetScript("OnMouseDown", function(self, button)
-        if button == "LeftButton" then
-            dragging = "min"
-        end
-    end)
-    
-    maxHandle:SetScript("OnMouseDown", function(self, button)
-        if button == "LeftButton" then
-            dragging = "max"
-        end
-    end)
-    
-    minHandle:SetScript("OnMouseUp", function(self, button)
-        if button == "LeftButton" and dragging == "min" then
-            dragging = nil
-        end
-    end)
-    
-    maxHandle:SetScript("OnMouseUp", function(self, button)
-        if button == "LeftButton" and dragging == "max" then
-            dragging = nil
-        end
-    end)
-    
-    -- Global mouse up to catch releases outside handles
-    dialog:SetScript("OnMouseUp", function(self, button)
-        if button == "LeftButton" then
-            dragging = nil
-        end
-    end)
-    
-    -- OnUpdate on the dialog itself for smoother tracking
-    dialog:SetScript("OnUpdate", function(self)
-        if not dragging then return end
-        
-        local contentType = dialog.contentType
-        if not contentType then return end
-        
-        local x = select(1, GetCursorPosition()) / UIParent:GetEffectiveScale()
-        local trackLeft = sliderTrack:GetLeft()
-        if not trackLeft then return end
-        
-        local pos = x - trackLeft
-        pos = math.max(2, math.min(pos, sliderWidth - 2))
-        
-        local value = PosToValue(pos, contentType.minRange, contentType.maxRange)
-        value = math.max(contentType.minRange, math.min(value, contentType.maxRange))
-        
-        if dragging == "min" then
-            if value <= dialog.currentMax then
-                dialog.currentMin = value
-            end
-        elseif dragging == "max" then
-            if value >= dialog.currentMin then
-                dialog.currentMax = value
-            end
-        end
-        
-        UpdateSliderVisuals()
-    end)
-    
-    -- Click on track to move nearest handle
-    sliderTrack:EnableMouse(true)
-    sliderTrack:SetScript("OnMouseDown", function(self, button)
-        if button ~= "LeftButton" then return end
-        
-        local contentType = dialog.contentType
-        if not contentType then return end
-        
-        local x = select(1, GetCursorPosition()) / UIParent:GetEffectiveScale()
-        local trackLeft = sliderTrack:GetLeft()
-        local pos = x - trackLeft
-        local value = PosToValue(pos, contentType.minRange, contentType.maxRange)
-        
-        -- Move closest handle
-        local minDist = math.abs(value - dialog.currentMin)
-        local maxDist = math.abs(value - dialog.currentMax)
-        
-        if minDist <= maxDist then
-            if value <= dialog.currentMax then
-                dialog.currentMin = value
-            end
-        else
-            if value >= dialog.currentMin then
-                dialog.currentMax = value
-            end
-        end
-        
-        UpdateSliderVisuals()
-    end)
-    
-    -- Scale labels
-    local scaleLabels = {1, 10, 20, 30, 40}
-    for _, num in ipairs(scaleLabels) do
-        local label = sliderTrack:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-        label:SetText(num)
-        label:SetTextColor(0.35, 0.35, 0.35)
-        local xPos = ValueToPos(num, 1, 40)
-        label:SetPoint("TOP", sliderTrack, "BOTTOM", xPos - sliderWidth/2, -2)
     end
     
     -- =============================================
@@ -1798,64 +1670,25 @@ function AutoProfilesUI:CreateProfileDialog()
     -- Buttons
     -- =============================================
     local cancelBtn = CreateFrame("Button", nil, dialog, "BackdropTemplate")
-    cancelBtn:SetSize(80, 26)
     cancelBtn:SetPoint("BOTTOMLEFT", 12, 12)
-    cancelBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    cancelBtn:SetBackdropColor(0.1, 0.1, 0.1, 1)
-    cancelBtn:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
-    
-    local cancelText = cancelBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlight")
-    cancelText:SetPoint("CENTER")
-    cancelText:SetText(L["Cancel"])
-    cancelText:SetTextColor(0.6, 0.6, 0.6)
-
-    cancelBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
-        cancelText:SetTextColor(0.9, 0.9, 0.9)
-    end)
-    cancelBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
-        cancelText:SetTextColor(0.6, 0.6, 0.6)
-    end)
+    DF.GUI:StyleButton(cancelBtn, { width = 80, height = 26, text = L["Cancel"] })
     cancelBtn:SetScript("OnClick", function()
         dialog:Hide()
     end)
 
     local createBtn = CreateFrame("Button", nil, dialog, "BackdropTemplate")
-    createBtn:SetSize(100, 26)
     createBtn:SetPoint("BOTTOMRIGHT", -12, 12)
-    createBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    -- Primary CTA in the AutoProfiles orange identity; ValidateDialog drives its
+    -- greyed (disabled) state via SetDisabled below.
+    DF.GUI:StyleButton(createBtn, {
+        width = 100, height = 26, text = L["Create Layout"],
+        primary = true, accent = { r = 1, g = 0.5, b = 0.2 },
     })
-    createBtn:SetBackdropColor(0.15, 0.08, 0.03, 1)
-    createBtn:SetBackdropBorderColor(1, 0.5, 0.2, 1)
+    dialog.createBtnText = createBtn.Text
 
-    local createText = createBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlight")
-    createText:SetPoint("CENTER")
-    createText:SetText(L["Create Layout"])
-    createText:SetTextColor(1, 0.5, 0.2)
-    dialog.createBtnText = createText
-
-    createBtn:SetScript("OnEnter", function(self)
-        if self.enabled then
-            self:SetBackdropColor(0.22, 0.12, 0.05, 1)
-        end
-    end)
-    createBtn:SetScript("OnLeave", function(self)
-        if self.enabled then
-            self:SetBackdropColor(0.15, 0.08, 0.03, 1)
-        end
-    end)
     createBtn:SetScript("OnClick", function(self)
-        if self.enabled then
-            AutoProfilesUI:SubmitDialog()
-        end
+        if self.dfDisabled then return end
+        AutoProfilesUI:SubmitDialog()
     end)
     dialog.createBtn = createBtn
 
@@ -2012,19 +1845,10 @@ function AutoProfilesUI:ValidateDialog()
         dialog.validationMsg:SetText("")
     end
     
-    -- Update button state
-    local btn = dialog.createBtn
-    btn.enabled = isValid
-    if isValid then
-        btn:SetBackdropColor(0.15, 0.08, 0.03, 1)
-        btn:SetBackdropBorderColor(1, 0.5, 0.2, 1)
-        dialog.createBtnText:SetTextColor(1, 0.5, 0.2)
-    else
-        btn:SetBackdropColor(0.06, 0.06, 0.06, 1)
-        btn:SetBackdropBorderColor(0.2, 0.2, 0.2, 1)
-        dialog.createBtnText:SetTextColor(0.3, 0.3, 0.3)
-    end
-    
+    -- Greyed (disabled) while the input is invalid; SetDisabled handles the
+    -- dimmed backdrop + faded label.
+    dialog.createBtn:SetDisabled(not isValid)
+
     return isValid
 end
 
@@ -2071,13 +1895,7 @@ function AutoProfilesUI:CreateCopyDialog()
     local dialog = CreateFrame("Frame", "DandersAutoProfileCopyDialog", UIParent, "BackdropTemplate")
     dialog:SetSize(360, 280)
     dialog:SetPoint("CENTER", DF.GUIFrame or UIParent, "CENTER", 0, 0)
-    dialog:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    dialog:SetBackdropColor(0.06, 0.06, 0.06, 0.98)
-    dialog:SetBackdropBorderColor(0, 0, 0, 1)
+    DF.GUI:CreatePanelBackdrop(dialog, { bgAlpha = 0.98, borderColor = { 0, 0, 0, 1 } })
     dialog:SetFrameStrata("FULLSCREEN_DIALOG")
     dialog:SetFrameLevel(100)
     dialog:EnableMouse(true)
@@ -2095,32 +1913,8 @@ function AutoProfilesUI:CreateCopyDialog()
     dialog.title = title
 
     -- Close button
-    local closeBtn = CreateFrame("Button", nil, dialog, "BackdropTemplate")
-    closeBtn:SetSize(20, 20)
+    local closeBtn = DF.GUI:CreateCloseButton(dialog, { onClick = function() dialog:Hide() end })
     closeBtn:SetPoint("TOPRIGHT", -6, -6)
-    closeBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    closeBtn:SetBackdropColor(0.1, 0.1, 0.1, 1)
-    closeBtn:SetBackdropBorderColor(0.2, 0.2, 0.2, 1)
-    local closeIcon = closeBtn:CreateTexture(nil, "OVERLAY")
-    closeIcon:SetSize(12, 12)
-    closeIcon:SetPoint("CENTER")
-    closeIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close")
-    closeIcon:SetVertexColor(0.5, 0.5, 0.5)
-    closeBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropBorderColor(0.8, 0.2, 0.2, 1)
-        closeIcon:SetVertexColor(1, 0.3, 0.3)
-    end)
-    closeBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropBorderColor(0.2, 0.2, 0.2, 1)
-        closeIcon:SetVertexColor(0.5, 0.5, 0.5)
-    end)
-    closeBtn:SetScript("OnClick", function()
-        dialog:Hide()
-    end)
 
     -- =============================================
     -- Layout Name Section
@@ -2133,15 +1927,7 @@ function AutoProfilesUI:CreateCopyDialog()
     local nameInput = CreateFrame("EditBox", nil, dialog, "BackdropTemplate")
     nameInput:SetSize(336, 26)
     nameInput:SetPoint("TOPLEFT", 12, -56)
-    nameInput:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    nameInput:SetBackdropColor(0.03, 0.03, 0.03, 1)
-    nameInput:SetBackdropBorderColor(0.2, 0.2, 0.2, 1)
-    nameInput:SetFontObject("DFFontHighlight")
-    nameInput:SetTextInsets(8, 8, 0, 0)
+    DF.GUI:StyleEditBox(nameInput, {})
     nameInput:SetAutoFocus(false)
     nameInput:SetMaxLetters(30)
     nameInput:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
@@ -2166,15 +1952,10 @@ function AutoProfilesUI:CreateCopyDialog()
 
     for i, ct in ipairs(CONTENT_TYPES) do
         local btn = CreateFrame("Button", nil, dialog, "BackdropTemplate")
-        btn:SetSize(buttonWidth, 24)
+        -- Shared styler (rest + accent-wash hover; SetActive drives selection).
+        -- OMIT text: keep the custom label so its colour can track selection.
+        DF.GUI:StyleButton(btn, { width = buttonWidth, height = 24 })
         btn:SetPoint("TOPLEFT", startX + (i - 1) * (buttonWidth + buttonSpacing), -108)
-        btn:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
-        })
-        btn:SetBackdropColor(0.1, 0.1, 0.1, 1)
-        btn:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
 
         local btnText = btn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
         btnText:SetPoint("CENTER")
@@ -2191,29 +1972,25 @@ function AutoProfilesUI:CreateCopyDialog()
             AutoProfilesUI:ValidateCopyDialog()
         end)
 
-        btn:SetScript("OnEnter", function(self)
-            if dialog.selectedDest ~= self.contentType.key then
-                self:SetBackdropBorderColor(0.6, 0.6, 0.6, 1)
-                self.label:SetTextColor(0.8, 0.8, 0.8)
-            end
-            -- Show warning if mythic already has a profile
+        -- Mythic-overwrite warning tooltip: hooked so it rides alongside the
+        -- styler's own hover scripts instead of clobbering them.
+        btn:HookScript("OnEnter", function(self)
             if self.contentType.key == "mythic" then
                 local mythicProfile = DF.db.raidAutoProfiles.mythic.profile
                 if mythicProfile then
-                    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                    GameTooltip:SetText(L["Will replace existing Mythic layout"], 1, 0.67, 0)
-                    GameTooltip:AddLine(format(L["\"%s\" will be overwritten."], mythicProfile.name), 0.7, 0.7, 0.7, true)
-                    GameTooltip:Show()
+                    DF.GUI:ShowTooltip(self, {
+                        title = L["Will replace existing Mythic layout"],
+                        tone = "warning",
+                        lines = {
+                            format(L["\"%s\" will be overwritten."], mythicProfile.name),
+                        },
+                    })
                 end
             end
         end)
 
-        btn:SetScript("OnLeave", function(self)
-            GameTooltip:Hide()
-            if dialog.selectedDest ~= self.contentType.key then
-                self:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
-                self.label:SetTextColor(0.6, 0.6, 0.6)
-            end
+        btn:HookScript("OnLeave", function(self)
+            DF.GUI:HideTooltip()
         end)
 
         destButtons[i] = btn
@@ -2234,160 +2011,29 @@ function AutoProfilesUI:CreateCopyDialog()
     rangeDisplay:SetTextColor(1, 0.5, 0.2)
     dialog.rangeDisplay = rangeDisplay
 
-    local sliderWidth = 336
-    local sliderTrack = CreateFrame("Frame", nil, dialog, "BackdropTemplate")
-    sliderTrack:SetSize(sliderWidth, 12)
-    sliderTrack:SetPoint("TOPLEFT", 12, -164)
-    sliderTrack:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    -- Dual-handle range slider (shared helper). Copy dialog uses fixed 1..40
+    -- bounds (no contentType). Preserves the orange accent + scale labels.
+    local slider = DF.GUI:CreateRangeSlider(dialog, {
+        width = 336,
+        accent = { r = 1, g = 0.5, b = 0.2 },
+        minRange = 1, maxRange = 40,
+        lo = dialog.currentMin or 1, hi = dialog.currentMax or 40,
+        scaleLabels = {1, 10, 20, 30, 40}, scaleMin = 1, scaleMax = 40,
+        display = rangeDisplay,
+        formatOne   = function(v) return format(L["%d players"], v) end,
+        formatRange = function(lo, hi) return format(L["%d - %d players"], lo, hi) end,
+        onChange = function(lo, hi)
+            dialog.currentMin, dialog.currentMax = lo, hi
+            AutoProfilesUI:ValidateCopyDialog()
+        end,
     })
-    sliderTrack:SetBackdropColor(0.03, 0.03, 0.03, 1)
-    sliderTrack:SetBackdropBorderColor(0.2, 0.2, 0.2, 1)
-    dialog.sliderTrack = sliderTrack
+    slider:SetPoint("TOPLEFT", 12, -164)
+    dialog.sliderTrack = slider
 
-    local rangeFill = sliderTrack:CreateTexture(nil, "ARTWORK")
-    rangeFill:SetTexture("Interface\\Buttons\\WHITE8x8")
-    rangeFill:SetVertexColor(1, 0.5, 0.2, 0.5)
-    rangeFill:SetHeight(10)
-    rangeFill:SetPoint("TOP", 0, -1)
-    dialog.rangeFill = rangeFill
-
-    local function CopyValueToPos(value)
-        local pct = (value - 1) / (40 - 1)
-        return pct * (sliderWidth - 4) + 2
-    end
-
-    local function CopyPosToValue(pos)
-        local pct = (pos - 2) / (sliderWidth - 4)
-        return math.floor(pct * (40 - 1) + 1 + 0.5)
-    end
-
-    local dragging = nil
-
-    local minHandle = CreateFrame("Button", nil, sliderTrack)
-    minHandle:SetSize(8, 16)
-    minHandle:SetPoint("CENTER", sliderTrack, "LEFT", 2, 0)
-    minHandle:EnableMouse(true)
-    local minHandleTex = minHandle:CreateTexture(nil, "OVERLAY")
-    minHandleTex:SetAllPoints()
-    minHandleTex:SetTexture("Interface\\Buttons\\WHITE8x8")
-    minHandleTex:SetVertexColor(1, 0.5, 0.2, 1)
-    dialog.minHandle = minHandle
-
-    local maxHandle = CreateFrame("Button", nil, sliderTrack)
-    maxHandle:SetSize(8, 16)
-    maxHandle:SetPoint("CENTER", sliderTrack, "LEFT", sliderWidth - 2, 0)
-    maxHandle:EnableMouse(true)
-    local maxHandleTex = maxHandle:CreateTexture(nil, "OVERLAY")
-    maxHandleTex:SetAllPoints()
-    maxHandleTex:SetTexture("Interface\\Buttons\\WHITE8x8")
-    maxHandleTex:SetVertexColor(1, 0.5, 0.2, 1)
-    dialog.maxHandle = maxHandle
-
-    local function UpdateCopySliderVisuals()
-        local minVal = dialog.currentMin or 1
-        local maxVal = dialog.currentMax or 40
-
-        local minPos = CopyValueToPos(minVal)
-        local maxPos = CopyValueToPos(maxVal)
-
-        minHandle:ClearAllPoints()
-        minHandle:SetPoint("CENTER", sliderTrack, "LEFT", minPos, 0)
-        maxHandle:ClearAllPoints()
-        maxHandle:SetPoint("CENTER", sliderTrack, "LEFT", maxPos, 0)
-
-        rangeFill:ClearAllPoints()
-        rangeFill:SetPoint("LEFT", sliderTrack, "LEFT", minPos, 0)
-        rangeFill:SetWidth(math.max(maxPos - minPos, 2))
-
-        if minVal == maxVal then
-            rangeDisplay:SetText(format(L["%d players"], minVal))
-        else
-            rangeDisplay:SetText(format(L["%d - %d players"], minVal, maxVal))
-        end
-
+    dialog.UpdateSliderVisuals = function()
+        slider:SetRange(1, 40)
+        slider:SetValues(dialog.currentMin or 1, dialog.currentMax or 40)
         AutoProfilesUI:ValidateCopyDialog()
-    end
-    dialog.UpdateSliderVisuals = UpdateCopySliderVisuals
-
-    minHandle:SetScript("OnMouseDown", function(self, button)
-        if button == "LeftButton" then dragging = "min" end
-    end)
-    maxHandle:SetScript("OnMouseDown", function(self, button)
-        if button == "LeftButton" then dragging = "max" end
-    end)
-    minHandle:SetScript("OnMouseUp", function(self, button)
-        if button == "LeftButton" and dragging == "min" then dragging = nil end
-    end)
-    maxHandle:SetScript("OnMouseUp", function(self, button)
-        if button == "LeftButton" and dragging == "max" then dragging = nil end
-    end)
-
-    dialog:SetScript("OnMouseUp", function(self, button)
-        if button == "LeftButton" then dragging = nil end
-    end)
-
-    dialog:SetScript("OnUpdate", function(self)
-        if not dragging then return end
-
-        local x = select(1, GetCursorPosition()) / UIParent:GetEffectiveScale()
-        local trackLeft = sliderTrack:GetLeft()
-        if not trackLeft then return end
-
-        local pos = x - trackLeft
-        pos = math.max(2, math.min(pos, sliderWidth - 2))
-
-        local value = CopyPosToValue(pos)
-        value = math.max(1, math.min(value, 40))
-
-        if dragging == "min" then
-            if value <= dialog.currentMax then
-                dialog.currentMin = value
-            end
-        elseif dragging == "max" then
-            if value >= dialog.currentMin then
-                dialog.currentMax = value
-            end
-        end
-
-        UpdateCopySliderVisuals()
-    end)
-
-    sliderTrack:EnableMouse(true)
-    sliderTrack:SetScript("OnMouseDown", function(self, button)
-        if button ~= "LeftButton" then return end
-
-        local x = select(1, GetCursorPosition()) / UIParent:GetEffectiveScale()
-        local trackLeft = sliderTrack:GetLeft()
-        local pos = x - trackLeft
-        local value = CopyPosToValue(pos)
-
-        local minDist = math.abs(value - dialog.currentMin)
-        local maxDist = math.abs(value - dialog.currentMax)
-
-        if minDist <= maxDist then
-            if value <= dialog.currentMax then
-                dialog.currentMin = value
-            end
-        else
-            if value >= dialog.currentMin then
-                dialog.currentMax = value
-            end
-        end
-
-        UpdateCopySliderVisuals()
-    end)
-
-    -- Scale labels
-    local scaleLabels = {1, 10, 20, 30, 40}
-    for _, num in ipairs(scaleLabels) do
-        local label = sliderTrack:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-        label:SetText(num)
-        label:SetTextColor(0.35, 0.35, 0.35)
-        local xPos = CopyValueToPos(num)
-        label:SetPoint("TOP", sliderTrack, "BOTTOM", xPos - sliderWidth/2, -2)
     end
 
     -- Mythic fixed label (shown when mythic is selected destination)
@@ -2416,64 +2062,25 @@ function AutoProfilesUI:CreateCopyDialog()
     -- Buttons
     -- =============================================
     local cancelBtn = CreateFrame("Button", nil, dialog, "BackdropTemplate")
-    cancelBtn:SetSize(80, 26)
     cancelBtn:SetPoint("BOTTOMLEFT", 12, 12)
-    cancelBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    cancelBtn:SetBackdropColor(0.1, 0.1, 0.1, 1)
-    cancelBtn:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
-
-    local cancelText = cancelBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlight")
-    cancelText:SetPoint("CENTER")
-    cancelText:SetText(L["Cancel"])
-    cancelText:SetTextColor(0.6, 0.6, 0.6)
-
-    cancelBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
-        cancelText:SetTextColor(0.9, 0.9, 0.9)
-    end)
-    cancelBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
-        cancelText:SetTextColor(0.6, 0.6, 0.6)
-    end)
+    DF.GUI:StyleButton(cancelBtn, { width = 80, height = 26, text = L["Cancel"] })
     cancelBtn:SetScript("OnClick", function()
         dialog:Hide()
     end)
 
     local createBtn = CreateFrame("Button", nil, dialog, "BackdropTemplate")
-    createBtn:SetSize(100, 26)
     createBtn:SetPoint("BOTTOMRIGHT", -12, 12)
-    createBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    -- Primary CTA in the AutoProfiles orange identity; ValidateCopyDialog drives
+    -- its greyed (disabled) state via SetDisabled below.
+    DF.GUI:StyleButton(createBtn, {
+        width = 100, height = 26, text = L["Copy Layout"],
+        primary = true, accent = { r = 1, g = 0.5, b = 0.2 },
     })
-    createBtn:SetBackdropColor(0.15, 0.08, 0.03, 1)
-    createBtn:SetBackdropBorderColor(1, 0.5, 0.2, 1)
+    dialog.createBtnText = createBtn.Text
 
-    local createText = createBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlight")
-    createText:SetPoint("CENTER")
-    createText:SetText(L["Copy Layout"])
-    createText:SetTextColor(1, 0.5, 0.2)
-    dialog.createBtnText = createText
-
-    createBtn:SetScript("OnEnter", function(self)
-        if self.enabled then
-            self:SetBackdropColor(0.22, 0.12, 0.05, 1)
-        end
-    end)
-    createBtn:SetScript("OnLeave", function(self)
-        if self.enabled then
-            self:SetBackdropColor(0.15, 0.08, 0.03, 1)
-        end
-    end)
     createBtn:SetScript("OnClick", function(self)
-        if self.enabled then
-            AutoProfilesUI:SubmitCopyDialog()
-        end
+        if self.dfDisabled then return end
+        AutoProfilesUI:SubmitCopyDialog()
     end)
     dialog.createBtn = createBtn
 
@@ -2486,16 +2093,14 @@ function AutoProfilesUI:UpdateCopyDestButtons()
     if not dialog then return end
 
     for _, btn in ipairs(dialog.destButtons) do
-        local key = btn.contentType.key
-        if key == dialog.selectedDest then
-            -- Selected
-            btn:SetBackdropColor(0.2, 0.1, 0.05, 1)
-            btn:SetBackdropBorderColor(1, 0.5, 0.2, 1)
-            btn.label:SetTextColor(1, 0.5, 0.2)
+        local isSelected = btn.contentType.key == dialog.selectedDest
+        -- Backdrop selection state via the shared styler.
+        btn:SetActive(isSelected)
+        -- Custom label colour still tracks selection (styler leaves it alone).
+        if isSelected then
+            local a = (DF.GUI.GetThemeColor and DF.GUI.GetThemeColor()) or { r = 1, g = 0.5, b = 0.2 }
+            btn.label:SetTextColor(a.r, a.g, a.b)
         else
-            -- Available but not selected
-            btn:SetBackdropColor(0.1, 0.1, 0.1, 1)
-            btn:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
             btn.label:SetTextColor(0.6, 0.6, 0.6)
         end
     end
@@ -2628,18 +2233,9 @@ function AutoProfilesUI:ValidateCopyDialog()
         dialog.validationMsg:SetText("")
     end
 
-    -- Update button state
-    local btn = dialog.createBtn
-    btn.enabled = isValid
-    if isValid then
-        btn:SetBackdropColor(0.15, 0.08, 0.03, 1)
-        btn:SetBackdropBorderColor(1, 0.5, 0.2, 1)
-        dialog.createBtnText:SetTextColor(1, 0.5, 0.2)
-    else
-        btn:SetBackdropColor(0.06, 0.06, 0.06, 1)
-        btn:SetBackdropBorderColor(0.2, 0.2, 0.2, 1)
-        dialog.createBtnText:SetTextColor(0.3, 0.3, 0.3)
-    end
+    -- Greyed (disabled) while the input is invalid; SetDisabled handles the
+    -- dimmed backdrop + faded label.
+    dialog.createBtn:SetDisabled(not isValid)
 
     return isValid
 end
@@ -2714,6 +2310,17 @@ AutoProfilesUI.pendingAutoProfileEval = false -- Queued evaluation during combat
 
 function AutoProfilesUI:IsEditing()
     return self.editingProfile ~= nil
+end
+
+-- True when an auto layout is currently driving the live raid frames. Used to
+-- steer base-position edits (the toolbar Unlock + /df raidunlock) toward the
+-- active layout's own Unlock button so users don't move the base by accident.
+function AutoProfilesUI:IsLayoutActive()
+    return self.activeRuntimeProfile ~= nil
+end
+
+function AutoProfilesUI:GetActiveLayoutName()
+    return self.activeRuntimeProfile and self.activeRuntimeProfile.name or nil
 end
 
 function AutoProfilesUI:EnterEditing(contentType, profileIndex)
@@ -2845,6 +2452,10 @@ function AutoProfilesUI:EnterEditing(contentType, profileIndex)
         for key, value in pairs(self.editingProfile.overrides) do
             if key == "pinnedFrames" then
                 DF:DebugWarn("LAYOUT", "EnterEditing: skipping stale pinnedFrames direct override key")
+            elseif not IsKeyOverridable(key) then
+                -- transient/never-override key (e.g. a stale raidLocked) — don't
+                -- apply it to the live preview (ExitEditing self-heals it away).
+                DF:DebugWarn("LAYOUT", "EnterEditing: skipping non-overridable override \"%s\"", key)
             else
                 SetRaidValue(key, DeepCopyValue(value))
                 overrideCount = overrideCount + 1
@@ -2968,6 +2579,14 @@ function AutoProfilesUI:ExitEditing(skipUIUpdates)
                     overrides[key] = nil
                     autoCleaned = autoCleaned + 1
                     DF:DebugWarn("LAYOUT", "ExitEditing: removed stale pinnedFrames direct override key")
+                end
+            elseif not IsKeyOverridable(key) then
+                -- Transient/never-override key (e.g. raidLocked) — never store it,
+                -- and self-heal any override an earlier build captured.
+                if overrides[key] ~= nil then
+                    overrides[key] = nil
+                    autoCleaned = autoCleaned + 1
+                    DF:DebugWarn("LAYOUT", "ExitEditing: removed non-overridable override \"%s\"", key)
                 end
             else
                 local currentVal = GetRaidValue(key)
@@ -3215,29 +2834,10 @@ function AutoProfilesUI:CreateEditingBanner(parent)
     
     -- Exit Editing button
     local exitBtn = CreateFrame("Button", nil, banner, "BackdropTemplate")
-    exitBtn:SetSize(90, 26)
     exitBtn:SetPoint("RIGHT", -12, 0)
-    exitBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    exitBtn:SetBackdropColor(0.1, 0.1, 0.1, 1)
-    exitBtn:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
-
-    local exitText = exitBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlight")
-    exitText:SetPoint("CENTER")
-    exitText:SetText(L["Exit Editing"])
-    exitText:SetTextColor(0.8, 0.8, 0.8)
-
-    exitBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropBorderColor(1, 0.5, 0.2, 1)
-        exitText:SetTextColor(1, 0.5, 0.2)
-    end)
-    exitBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
-        exitText:SetTextColor(0.8, 0.8, 0.8)
-    end)
+    -- Fixed orange accent (raid-only feature identity) so the hover wash doesn't
+    -- track the party theme like an unscoped StyleButton would.
+    DF.GUI:StyleButton(exitBtn, { width = 90, height = 26, text = L["Exit Editing"], accent = { r = 1, g = 0.5, b = 0.2 } })
     exitBtn:SetScript("OnClick", function()
         AutoProfilesUI:ExitEditing()
     end)
@@ -3764,11 +3364,11 @@ end
 
 -- Get a display name for a content key
 local function GetContentDisplayName(contentKey)
-    if contentKey == "mythic" then return "Mythic"
-    elseif contentKey == "instanced" then return "Instanced/PvP"
-    elseif contentKey == "openWorld" then return "Open World"
+    if contentKey == "mythic" then return L["Mythic"]
+    elseif contentKey == "instanced" then return L["Instanced/PvP"]
+    elseif contentKey == "openWorld" then return L["Open World"]
     end
-    return contentKey or "Unknown"
+    return contentKey or L["Unknown"]
 end
 
 -- Apply a profile's overrides as a read-through overlay (does NOT mutate the real raid table)
@@ -3783,17 +3383,24 @@ function AutoProfilesUI:ApplyRuntimeProfile(profile, contentKey)
     local simpleKeys = {}    -- { [key] = value }
 
     for key, value in pairs(profile.overrides) do
-        local setIndex, setting = ParsePinnedKey(key)
-        if setIndex and setting then
-            if not pinnedGroups[setIndex] then pinnedGroups[setIndex] = {} end
-            pinnedGroups[setIndex][setting] = value
+        -- Defensive: never apply a transient/never-override key (e.g. a raidLocked
+        -- captured by an earlier build) to the live overlay, or the layout would
+        -- force the frames locked/unlocked whenever it activates.
+        if not IsKeyOverridable(key) then
+            -- skip
         else
-            local tableName, index = ParseTableKey(key)
-            if tableName and index then
-                if not tableGroups[tableName] then tableGroups[tableName] = {} end
-                tableGroups[tableName][index] = value
+            local setIndex, setting = ParsePinnedKey(key)
+            if setIndex and setting then
+                if not pinnedGroups[setIndex] then pinnedGroups[setIndex] = {} end
+                pinnedGroups[setIndex][setting] = value
             else
-                simpleKeys[key] = value
+                local tableName, index = ParseTableKey(key)
+                if tableName and index then
+                    if not tableGroups[tableName] then tableGroups[tableName] = {} end
+                    tableGroups[tableName][index] = value
+                else
+                    simpleKeys[key] = value
+                end
             end
         end
     end
@@ -3888,6 +3495,10 @@ function AutoProfilesUI:ApplyRuntimeProfile(profile, contentKey)
 
     -- Update tab override stars
     self:RefreshTabOverrideStars()
+
+    -- A layout going active greys the toolbar Unlock (it gates on IsLayoutActive);
+    -- refresh it if the GUI is open so the button state isn't stale.
+    if DF.GUI and DF.GUI.UpdateLockButtonState then DF.GUI.UpdateLockButtonState() end
 end
 
 -- Remove the active runtime profile overlay
@@ -3910,6 +3521,34 @@ function AutoProfilesUI:RemoveRuntimeProfile()
 
     print("|cff00ff00DandersFrames:|r " .. L["Auto-profile deactivated, using global settings"])
     self:RefreshTabOverrideStars()
+
+    -- A layout deactivating must re-enable the toolbar Unlock — otherwise it stays
+    -- greyed and its click wrongly steers to the Auto Layouts page (stuck state).
+    if DF.GUI and DF.GUI.UpdateLockButtonState then DF.GUI.UpdateLockButtonState() end
+end
+
+-- Write a raid position straight into the ACTIVE layout's override + live overlay,
+-- for direct world drags (the permanent mover) that shouldn't open the full editing
+-- GUI. Returns true when it handled the write (a layout is active and not being
+-- edited) so the caller skips the base write; false otherwise (no layout / editing
+-- — the caller writes base, or the editing-preview path captures it on lock).
+-- Mirrors what the toolbar Unlock flow persists, minus the snapshot/diff machinery
+-- (a single scalar position key needs none — ApplyRuntimeProfile rebuilds the
+-- overlay from profile.overrides on the next layout re-eval).
+function AutoProfilesUI:SetActiveLayoutRaidPosition(x, y)
+    if self:IsEditing() then return false end
+    local p = self.activeRuntimeProfile
+    if not p then return false end
+    p.overrides = p.overrides or {}
+    p.overrides.raidAnchorX = x
+    p.overrides.raidAnchorY = y
+    -- Reflect immediately so GetRaidDB() (overlay view) returns the new value.
+    if DF.raidOverrides then
+        DF.raidOverrides.raidAnchorX = x
+        DF.raidOverrides.raidAnchorY = y
+    end
+    if DF.UpdateRaidContainerPosition then DF:UpdateRaidContainerPosition() end
+    return true
 end
 
 -- ============================================================

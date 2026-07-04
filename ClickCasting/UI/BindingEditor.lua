@@ -50,12 +50,12 @@ function CC:ShowAddBindingDialog(onComplete, existingBinding, existingIndex)
     
     -- Theme colors (matching GUI/GUI.lua)
     local themeColor = DF.GUI and DF.GUI.GetThemeColor and DF.GUI.GetThemeColor() or {r = 0.45, g = 0.45, b = 0.95}
-    local C_BACKGROUND = {r = 0.08, g = 0.08, b = 0.08}
-    local C_PANEL = {r = 0.12, g = 0.12, b = 0.12}
-    local C_ELEMENT = {r = 0.18, g = 0.18, b = 0.18}
-    local C_BORDER = {r = 0.25, g = 0.25, b = 0.25}
-    local C_TEXT = {r = 0.9, g = 0.9, b = 0.9}
-    local C_TEXT_DIM = {r = 0.6, g = 0.6, b = 0.6}
+    -- Shared palette (same r/g/b as the GUI.lua locals; alpha is supplied per call site).
+    local C_BACKGROUND = DF.GUI.Colors.background
+    local C_ELEMENT = DF.GUI.Colors.element
+    local C_BORDER = DF.GUI.Colors.border
+    local C_TEXT = DF.GUI.Colors.text
+    local C_TEXT_DIM = DF.GUI.Colors.textDim
     
     -- Create dialog
     addBindingDialog = CreateFrame("Frame", "DFClickCastAddDialog", UIParent, "BackdropTemplate")
@@ -63,13 +63,7 @@ function CC:ShowAddBindingDialog(onComplete, existingBinding, existingIndex)
     addBindingDialog:SetPoint("CENTER", 0, 50)
     addBindingDialog:SetFrameStrata("FULLSCREEN_DIALOG")
     addBindingDialog:SetFrameLevel(100)
-    addBindingDialog:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    addBindingDialog:SetBackdropColor(C_BACKGROUND.r, C_BACKGROUND.g, C_BACKGROUND.b, 0.98)
-    addBindingDialog:SetBackdropBorderColor(0, 0, 0, 1)
+    DF.GUI:CreatePanelBackdrop(addBindingDialog, { bgAlpha = 0.98, borderColor = {0, 0, 0, 1} })
     addBindingDialog:EnableMouse(true)
     addBindingDialog:SetMovable(true)
     addBindingDialog:RegisterForDrag("LeftButton")
@@ -83,32 +77,12 @@ function CC:ShowAddBindingDialog(onComplete, existingBinding, existingIndex)
     title:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
     
     -- Close button
-    local closeBtn = CreateFrame("Button", nil, addBindingDialog, "BackdropTemplate")
-    closeBtn:SetPoint("TOPRIGHT", -6, -6)
-    closeBtn:SetSize(20, 20)
-    closeBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    local closeBtn = DF.GUI:CreateCloseButton(addBindingDialog, {
+        size = 20,
+        onClick = function() addBindingDialog:Hide() end,
     })
-    closeBtn:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    closeBtn:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-    
-    local closeIcon = closeBtn:CreateTexture(nil, "OVERLAY")
-    closeIcon:SetPoint("CENTER", 0, 0)
-    closeIcon:SetSize(12, 12)
-    closeIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close")
-    closeIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    closeBtn:SetScript("OnClick", function() addBindingDialog:Hide() end)
-    closeBtn:SetScript("OnEnter", function() 
-        closeBtn:SetBackdropBorderColor(1, 0.4, 0.4, 1)
-        closeIcon:SetVertexColor(1, 0.4, 0.4) 
-    end)
-    closeBtn:SetScript("OnLeave", function() 
-        closeBtn:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-        closeIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b) 
-    end)
-    
+    closeBtn:SetPoint("TOPRIGHT", -6, -6)
+
     -- Working binding data
     local bindingData = existingBinding and CopyTable(existingBinding) or {
         enabled = true,
@@ -120,7 +94,7 @@ function CC:ShowAddBindingDialog(onComplete, existingBinding, existingIndex)
         macroText = nil,
         loadSpec = nil,
         loadCombat = nil,
-        priority = 5,  -- Default priority (1=highest, 10=lowest)
+        priority = 5,  -- Default priority (10=highest, 1=lowest)
     }
     
     local yOffset = -45
@@ -134,17 +108,10 @@ function CC:ShowAddBindingDialog(onComplete, existingBinding, existingIndex)
     
     local keyCaptureBtn = CreateFrame("Button", nil, addBindingDialog, "BackdropTemplate")
     keyCaptureBtn:SetPoint("TOPLEFT", 15, yOffset)
-    keyCaptureBtn:SetSize(390, 32)
-    keyCaptureBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    keyCaptureBtn:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    keyCaptureBtn:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
+    DF.GUI:StyleButton(keyCaptureBtn, { width = 390, height = 32, accent = CC.ACCENT })
     keyCaptureBtn:RegisterForClicks("AnyDown", "AnyUp")
     
-    local keyText = keyCaptureBtn:CreateFontString(nil, "OVERLAY", "DFFontNormal")
+    local keyText = keyCaptureBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     keyText:SetPoint("CENTER")
     
     local function UpdateKeyText()
@@ -176,8 +143,8 @@ function CC:ShowAddBindingDialog(onComplete, existingBinding, existingIndex)
         macWarning:SetPoint("TOPLEFT", keyCaptureBtn, "BOTTOMLEFT", 0, -2)
         macWarning:SetWidth(390)
         macWarning:SetJustifyH("LEFT")
-        macWarning:SetText("|cffff9900" .. L["Note: Cmd + Left Click unavailable on Mac"])
-        macWarning:SetTextColor(0.9, 0.6, 0.2)
+        macWarning:SetText(("|c" .. DF.GUI:ToneHex("caution") .. L["Note"] .. ":|r ") .. L["Cmd + Left Click unavailable on Mac"])
+        macWarning:SetTextColor(0.6, 0.6, 0.6)
         yOffset = yOffset - 12  -- Extra space for the warning
     end
     
@@ -194,13 +161,7 @@ function CC:ShowAddBindingDialog(onComplete, existingBinding, existingIndex)
     local spellBox = CreateFrame("EditBox", nil, addBindingDialog, "BackdropTemplate")
     spellBox:SetPoint("TOPLEFT", 15, yOffset)
     spellBox:SetSize(390, 26)
-    spellBox:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    spellBox:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    spellBox:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
+    DF.GUI:StyleEditBox(spellBox, { skipFont = true })
     DF.GUI:SetSettingsFont(spellBox, 11, "")
     spellBox:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
     spellBox:SetTextInsets(24, 8, 0, 0)
@@ -231,13 +192,10 @@ function CC:ShowAddBindingDialog(onComplete, existingBinding, existingIndex)
     local selectionFrame = CreateFrame("Frame", nil, addBindingDialog, "BackdropTemplate")
     selectionFrame:SetPoint("TOPLEFT", 15, yOffset)
     selectionFrame:SetSize(390, 28)
-    selectionFrame:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(selectionFrame, {
+        bgColor = DF.GUI.Colors.panel,
+        borderColor = {C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5},
     })
-    selectionFrame:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 1)
-    selectionFrame:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
     
     local selectionIcon = selectionFrame:CreateTexture(nil, "ARTWORK")
     selectionIcon:SetPoint("LEFT", 6, 0)
@@ -266,7 +224,7 @@ function CC:ShowAddBindingDialog(onComplete, existingBinding, existingIndex)
             selectionText:SetText(L["Open Unit Menu"])
         else
             selectionIcon:SetTexture(icon or "Interface\\Icons\\INV_Misc_QuestionMark")
-            selectionText:SetText(spellName or "Unknown Spell")
+            selectionText:SetText(spellName or L["Unknown Spell"])
         end
         selectionText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
         selectionFrame:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
@@ -335,7 +293,7 @@ function CC:ShowAddBindingDialog(onComplete, existingBinding, existingIndex)
         
         -- Add Target Unit at top (if matches search or no search)
         if searchText == "" or ("target unit"):find(searchLower, 1, true) then
-            local btn = CreateActionButton(spellListContent, yPos, 132212, "|cff88ff88Target Unit|r", function()
+            local btn = CreateActionButton(spellListContent, yPos, 132212, "|cff88ff88"..L["Target Unit"].."|r", function()
                 UpdateSelection("target", nil, nil)
             end)
             table.insert(spellButtons, btn)
@@ -344,7 +302,7 @@ function CC:ShowAddBindingDialog(onComplete, existingBinding, existingIndex)
         
         -- Add Open Menu at top (if matches search or no search)
         if searchText == "" or ("open menu"):find(searchLower, 1, true) or ("unit menu"):find(searchLower, 1, true) then
-            local btn = CreateActionButton(spellListContent, yPos, 134331, "|cff88ff88Open Unit Menu|r", function()
+            local btn = CreateActionButton(spellListContent, yPos, 134331, "|cff88ff88"..L["Open Unit Menu"].."|r", function()
                 UpdateSelection("menu", nil, nil)
             end)
             table.insert(spellButtons, btn)
@@ -414,28 +372,20 @@ function CC:ShowAddBindingDialog(onComplete, existingBinding, existingIndex)
     local function UpdateCombatButtons()
         for key, b in pairs(combatButtons) do
             local isSelected = (key == "always" and not bindingData.loadCombat) or (key == bindingData.loadCombat)
+            b:SetActive(isSelected)
             if isSelected then
-                b:SetBackdropColor(themeColor.r * 0.3, themeColor.g * 0.3, themeColor.b * 0.3, 1)
-                b:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
                 b.label:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
             else
-                b:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-                b:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
                 b.label:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
             end
         end
     end
-    
+
     for _, opt in ipairs(combatOptions) do
         local btn = CreateFrame("Button", nil, addBindingDialog, "BackdropTemplate")
         btn:SetPoint("TOPLEFT", xPos, yOffset)
-        btn:SetSize(125, 26)
-        btn:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
-        })
-        
+        DF.GUI:StyleButton(btn, { width = 125, height = 26, accent = CC.ACCENT })
+
         local label = btn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
         label:SetPoint("CENTER")
         label:SetText(opt.label)
@@ -457,32 +407,12 @@ function CC:ShowAddBindingDialog(onComplete, existingBinding, existingIndex)
     -- SAVE / CANCEL BUTTONS
     local saveBtn = CreateFrame("Button", nil, addBindingDialog, "BackdropTemplate")
     saveBtn:SetPoint("BOTTOMRIGHT", -95, 12)
-    saveBtn:SetSize(80, 26)
-    saveBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:StyleButton(saveBtn, {
+        width = 80, height = 26, tone = "success", accent = CC.ACCENT,
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\save", size = 18 },
+        text = L["Save"],
     })
-    saveBtn:SetBackdropColor(themeColor.r * 0.3, themeColor.g * 0.3, themeColor.b * 0.3, 1)
-    saveBtn:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
-    
-    local saveIcon = saveBtn:CreateTexture(nil, "OVERLAY")
-    saveIcon:SetPoint("LEFT", 12, 0)
-    saveIcon:SetSize(14, 14)
-    saveIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\save")
-    saveIcon:SetVertexColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    local saveLabel = saveBtn:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    saveLabel:SetPoint("LEFT", saveIcon, "RIGHT", 4, 0)
-    saveLabel:SetText(L["Save"])
-    saveLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    
-    saveBtn:SetScript("OnEnter", function()
-        saveBtn:SetBackdropColor(themeColor.r * 0.5, themeColor.g * 0.5, themeColor.b * 0.5, 1)
-    end)
-    saveBtn:SetScript("OnLeave", function()
-        saveBtn:SetBackdropColor(themeColor.r * 0.3, themeColor.g * 0.3, themeColor.b * 0.3, 1)
-    end)
-    
+
     local function DoSave()
         local success = true
         if existingIndex then
@@ -526,29 +456,8 @@ function CC:ShowAddBindingDialog(onComplete, existingBinding, existingIndex)
     
     local cancelBtn = CreateFrame("Button", nil, addBindingDialog, "BackdropTemplate")
     cancelBtn:SetPoint("BOTTOMRIGHT", -10, 12)
-    cancelBtn:SetSize(80, 26)
-    cancelBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    cancelBtn:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    cancelBtn:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-    
-    local cancelLabel = cancelBtn:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    cancelLabel:SetPoint("CENTER")
-    cancelLabel:SetText(L["Cancel"])
-    cancelLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    
-    cancelBtn:SetScript("OnEnter", function()
-        cancelBtn:SetBackdropColor(0.25, 0.25, 0.25, 1)
-        cancelLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    end)
-    cancelBtn:SetScript("OnLeave", function()
-        cancelBtn:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-        cancelLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    end)
-    
+    DF.GUI:StyleButton(cancelBtn, { width = 80, height = 26, text = L["Cancel"], accent = CC.ACCENT })
+
     cancelBtn:SetScript("OnClick", function()
         addBindingDialog:Hide()
     end)
@@ -733,7 +642,12 @@ function CC:CreateBindingRow(parent, binding, index)
     local isMacro = (actionType == "macro") or (binding.macroId ~= nil)
     local fallback = binding.fallback or {}
     local fallbackText = isMacro and nil or GetFallbackDisplayText(fallback)
-    local combatSetting = binding.combat or "always"
+    -- Fall back to the legacy loadCombat field for freshly-added bindings (the
+    -- loadCombat -> combat migration only runs at profile load); map its vocabulary.
+    local combatSetting = binding.combat
+        or (binding.loadCombat == "combat" and "incombat")
+        or (binding.loadCombat == "nocombat" and "outofcombat")
+        or "always"
     
     local targetingInfo = row:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     targetingInfo:SetPoint("TOPLEFT", name, "BOTTOMLEFT", 0, -2)
@@ -863,25 +777,23 @@ end
 function CC:CreateEditBindingPanel()
     if self.editBindingPanel then return end
     
-    local themeColor = {r = 0.2, g = 0.8, b = 0.4}
-    local C_BACKGROUND = {r = 0.08, g = 0.08, b = 0.08}
-    local C_ELEMENT = {r = 0.18, g = 0.18, b = 0.18}
-    local C_BORDER = {r = 0.25, g = 0.25, b = 0.25}
-    local C_TEXT = {r = 0.9, g = 0.9, b = 0.9}
-    local C_TEXT_DIM = {r = 0.5, g = 0.5, b = 0.5}
-    
+    local themeColor = CC.ACCENT
+    -- Shared palette (same r/g/b as the GUI.lua locals; alpha is supplied per call site).
+    local C_BACKGROUND = DF.GUI.Colors.background
+    local C_ELEMENT = DF.GUI.Colors.element
+    local C_BORDER = DF.GUI.Colors.border
+    local C_TEXT = DF.GUI.Colors.text
+    local C_TEXT_DIM = DF.GUI.Colors.textDim  -- align with the norm (0.6) instead of a bespoke 0.5
+
     -- Main panel
     local panel = CreateFrame("Frame", "DFEditBindingPanel", UIParent, "BackdropTemplate")
     panel:SetSize(320, 480)  -- Start at collapsed height
     panel:SetFrameStrata("FULLSCREEN_DIALOG")
     panel:SetFrameLevel(100)
-    panel:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 2,
+    DF.GUI:CreatePanelBackdrop(panel, {
+        bgAlpha = 0.98,
+        borderColor = themeColor,
     })
-    panel:SetBackdropColor(C_BACKGROUND.r, C_BACKGROUND.g, C_BACKGROUND.b, 0.98)
-    panel:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
     panel:Hide()
     panel:SetMovable(true)
     panel:EnableMouse(true)
@@ -906,29 +818,20 @@ function CC:CreateEditBindingPanel()
     panel.title = title
     
     -- Close button
-    local closeBtn = CreateFrame("Button", nil, titleBar)
-    closeBtn:SetSize(20, 20)
+    local closeBtn = DF.GUI:CreateCloseButton(titleBar, {
+        size = 20,
+        onClick = function() CC:HideEditBindingPanel() end,
+    })
     closeBtn:SetPoint("RIGHT", -4, 0)
-    local closeIcon = closeBtn:CreateTexture(nil, "OVERLAY")
-    closeIcon:SetPoint("CENTER")
-    closeIcon:SetSize(12, 12)
-    closeIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close")
-    closeIcon:SetVertexColor(0.8, 0.8, 0.8)
-    closeBtn:SetScript("OnEnter", function() closeIcon:SetVertexColor(1, 0.3, 0.3) end)
-    closeBtn:SetScript("OnLeave", function() closeIcon:SetVertexColor(0.8, 0.8, 0.8) end)
-    closeBtn:SetScript("OnClick", function() CC:HideEditBindingPanel() end)
-    
+
     -- Spell icon and name section
     local iconFrame = CreateFrame("Frame", nil, panel, "BackdropTemplate")
     iconFrame:SetPoint("TOPLEFT", 12, -36)
     iconFrame:SetSize(36, 36)
-    iconFrame:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(iconFrame, {
+        bgColor = {0, 0, 0, 1},
+        borderColor = {C_BORDER.r, C_BORDER.g, C_BORDER.b, 1},
     })
-    iconFrame:SetBackdropColor(0, 0, 0, 1)
-    iconFrame:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
     
     local icon = iconFrame:CreateTexture(nil, "ARTWORK")
     icon:SetPoint("TOPLEFT", 2, -2)
@@ -956,29 +859,29 @@ function CC:CreateEditBindingPanel()
     bindLabel:SetText(L["Binding:"])
     bindLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     
+    -- Resting chrome + hover (accent border/wash) from the shared styler (Binds
+    -- keeps its green accent). This is ALSO a live key-capture target: the OnClick/
+    -- OnMouseWheel capture handlers and the green capturing-border hold are wired
+    -- below. The capture border (set directly in Start/StopBindingCapture) is
+    -- re-asserted in an OnLeave HOOK so StyleButton's neutral reset can't clobber
+    -- the hold while the mouse leaves mid-capture.
     local bindButton = CreateFrame("Button", nil, panel, "BackdropTemplate")
     bindButton:SetPoint("LEFT", bindLabel, "RIGHT", 10, 0)
-    bindButton:SetSize(150, 26)
-    bindButton:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:StyleButton(bindButton, {
+        width = 150, height = 26,
+        accent = CC.ACCENT,
+        text = L["Click to bind..."],
+        font = "DFFontHighlight",
     })
-    bindButton:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    bindButton:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
-    
-    local bindText = bindButton:CreateFontString(nil, "OVERLAY", "DFFontHighlight")
-    bindText:SetPoint("CENTER")
-    bindText:SetText(L["Click to bind..."])
+    local bindText = bindButton.Text
     bindText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     panel.bindText = bindText
-    
-    bindButton:SetScript("OnEnter", function(self)
-        self:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
-    end)
-    bindButton:SetScript("OnLeave", function(self)
-        if not panel.isCapturing then
-            self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
+
+    -- Compose with StyleButton's hover: after its OnLeave runs (which resets to the
+    -- neutral rest), re-paint the green capturing border if we're still capturing.
+    bindButton:HookScript("OnLeave", function(self)
+        if panel.isCapturing then
+            self:SetBackdropBorderColor(0.2, 0.8, 0.4, 1)
         end
     end)
     -- Register for all mouse buttons so we can capture them
@@ -1005,28 +908,11 @@ function CC:CreateEditBindingPanel()
     local clearBindBtn = CreateFrame("Button", nil, panel, "BackdropTemplate")
     clearBindBtn:SetPoint("LEFT", bindButton, "RIGHT", 6, 0)
     clearBindBtn:SetSize(60, 26)
-    clearBindBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:StyleButton(clearBindBtn, {
+        tone = "danger",
+        text = L["Unbind"],
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\close", size = 14 },
     })
-    clearBindBtn:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    clearBindBtn:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
-    local clearIcon = clearBindBtn:CreateTexture(nil, "OVERLAY")
-    clearIcon:SetPoint("LEFT", 8, 0)
-    clearIcon:SetSize(12, 12)
-    clearIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close")
-    clearIcon:SetVertexColor(0.8, 0.5, 0.5)
-    local clearText = clearBindBtn:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    clearText:SetPoint("LEFT", clearIcon, "RIGHT", 3, 0)
-    clearText:SetText(L["Clear"])
-    clearText:SetTextColor(0.8, 0.5, 0.5)
-    clearBindBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropBorderColor(1, 0.4, 0.4, 1)
-    end)
-    clearBindBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
-    end)
     clearBindBtn:SetScript("OnClick", function()
         panel.pendingBinding.bindType = nil
         panel.pendingBinding.button = nil
@@ -1042,8 +928,8 @@ function CC:CreateEditBindingPanel()
     macWarning:SetPoint("RIGHT", clearBindBtn, "RIGHT", 0, 0)
     macWarning:SetJustifyH("LEFT")
     macWarning:SetWordWrap(false)
-    macWarning:SetText("|cffff9900" .. L["Note: Cmd + Left Click unavailable on Mac"])
-    macWarning:SetTextColor(0.9, 0.6, 0.2)
+    macWarning:SetText(("|c" .. DF.GUI:ToneHex("caution") .. L["Note"] .. ":|r ") .. L["Cmd + Left Click unavailable on Mac"])
+    macWarning:SetTextColor(0.6, 0.6, 0.6)
     if IsMacClient and IsMacClient() then
         macWarning:Show()
     else
@@ -1054,24 +940,11 @@ function CC:CreateEditBindingPanel()
     -- Helper to create radio button
     local function CreateRadioButton(parent, text, yOffset, group)
         local radio = CreateFrame("CheckButton", nil, parent, "BackdropTemplate")
-        radio:SetSize(16, 16)
-        radio:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
-        })
-        radio:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-        radio:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
-        
-        local check = radio:CreateTexture(nil, "OVERLAY")
-        check:SetTexture("Interface\\Buttons\\WHITE8x8")
-        check:SetVertexColor(themeColor.r, themeColor.g, themeColor.b)
-        check:SetPoint("CENTER")
-        check:SetSize(8, 8)
-        radio:SetCheckedTexture(check)
-        
+        -- Box + themed check from the shared styler (Binds keeps its green accent).
+        DF.GUI:StyleCheckButton(radio, { accent = themeColor })
+
         local label = parent:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-        label:SetPoint("LEFT", radio, "RIGHT", 6, 0)
+        label:SetPoint("LEFT", radio, "RIGHT", 8, 0)
         label:SetText(text)
         label:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
         
@@ -1100,28 +973,14 @@ function CC:CreateEditBindingPanel()
     -- Helper to create custom themed checkbox with tick mark
     local function CreateCheckbox(parent, text, desc)
         local cb = CreateFrame("CheckButton", nil, parent, "BackdropTemplate")
-        cb:SetSize(18, 18)
-        cb:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
-        })
-        cb:SetBackdropColor(0.1, 0.1, 0.1, 0.9)
-        cb:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
         cb.desc = desc
-        
-        -- Checkmark texture (using Blizzard's standard checkmark)
-        local check = cb:CreateTexture(nil, "OVERLAY")
-        check:SetSize(20, 20)
-        check:SetPoint("CENTER", 0, 0)
-        check:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
-        check:SetVertexColor(themeColor.r, themeColor.g, themeColor.b, 1)
-        check:Hide()
-        cb.check = check
-        
+        -- Box + themed check from the shared styler; manualCheck because this
+        -- factory shows/hides cb.check itself (no native checked state).
+        cb.check = DF.GUI:StyleCheckButton(cb, { accent = themeColor, manualCheck = true })
+
         -- Text label
         local label = cb:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-        label:SetPoint("LEFT", cb, "RIGHT", 6, 0)
+        label:SetPoint("LEFT", cb, "RIGHT", 8, 0)
         label:SetText(text)
         cb.text = label
         
@@ -1146,52 +1005,33 @@ function CC:CreateEditBindingPanel()
             return self.isChecked
         end
         
-        -- Override SetChecked to update visuals
+        -- Override SetChecked to update visuals (show the green square only — the
+        -- dark border stays put, matching the radio buttons + the addon standard).
         cb.SetChecked = function(self, checked)
             self.isChecked = checked
-            if checked then
-                self.check:Show()
-                self:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
-            else
-                self.check:Hide()
-                self:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
-            end
+            self.check:SetShown(checked)
         end
-        
+
         -- Internal click behavior
         origSetScript(cb, "OnClick", function(self)
             self.isChecked = not self.isChecked
-            if self.isChecked then
-                self.check:Show()
-                self:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
-            else
-                self.check:Hide()
-                self:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
-            end
+            self.check:SetShown(self.isChecked)
             PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
             -- Call external handler if set
             if self.externalOnClick then
                 self:externalOnClick()
             end
         end)
-        
-        -- Hover effect
+
+        -- Tooltip on hover (no border recolor — keep it consistent with radios)
         origSetScript(cb, "OnEnter", function(self)
-            self:SetBackdropBorderColor(themeColor.r * 1.3, themeColor.g * 1.3, themeColor.b * 1.3, 1)
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText(text, 1, 1, 1)
-            if self.desc then
-                GameTooltip:AddLine(self.desc, 0.7, 0.7, 0.7, true)
-            end
-            GameTooltip:Show()
+            DF.GUI:ShowTooltip(self, {
+                title = text,
+                lines = self.desc and { self.desc } or nil,
+            })
         end)
-        origSetScript(cb, "OnLeave", function(self)
-            if self.isChecked then
-                self:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
-            else
-                self:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
-            end
-            GameTooltip:Hide()
+        origSetScript(cb, "OnLeave", function()
+            DF.GUI:HideTooltip()
         end)
         
         return cb
@@ -1243,13 +1083,10 @@ function CC:CreateEditBindingPanel()
         end)
         
         radio:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText(opt.text, 1, 1, 1)
-            GameTooltip:AddLine(opt.desc, 0.7, 0.7, 0.7, true)
-            GameTooltip:Show()
+            DF.GUI:ShowTooltip(self, { title = opt.text, lines = { opt.desc } })
         end)
-        radio:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        
+        radio:SetScript("OnLeave", function() DF.GUI:HideTooltip() end)
+
         table.insert(targetRadios, radio)
     end
     panel.targetRadios = targetRadios
@@ -1282,13 +1119,10 @@ function CC:CreateEditBindingPanel()
         end)
         
         radio:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText(opt.text, 1, 1, 1)
-            GameTooltip:AddLine(opt.desc, 0.7, 0.7, 0.7, true)
-            GameTooltip:Show()
+            DF.GUI:ShowTooltip(self, { title = opt.text, lines = { opt.desc } })
         end)
-        radio:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        
+        radio:SetScript("OnLeave", function() DF.GUI:HideTooltip() end)
+
         table.insert(combatRadios, radio)
     end
     panel.combatRadios = combatRadios
@@ -1303,34 +1137,27 @@ function CC:CreateEditBindingPanel()
     -- Advanced header/toggle button
     local advancedToggle = CreateFrame("Button", nil, panel, "BackdropTemplate")
     advancedToggle:SetPoint("TOPLEFT", 12, -385)
-    advancedToggle:SetSize(296, 22)
-    advancedToggle:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    -- Chrome + hover (accent border/wash) from the shared styler; the chevron icon
+    -- and "Advanced" label are owned by StyleButton (left-aligned, icon at 6px to
+    -- match the prior layout). Collapse/expand OnClick + chevron rotation are wired
+    -- below.
+    DF.GUI:StyleButton(advancedToggle, {
+        width = 296, height = 22,
+        accent = CC.ACCENT,
+        align = "left", leftPad = 6,
+        text = L["Advanced"],
+        font = "DFFontNormal",
+        icon = {
+            texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right",
+            size = 12,
+            color = C_TEXT_DIM,
+        },
     })
-    advancedToggle:SetBackdropColor(C_ELEMENT.r * 0.8, C_ELEMENT.g * 0.8, C_ELEMENT.b * 0.8, 1)
-    advancedToggle:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
-    
-    -- Use icon instead of text arrow
-    local advancedArrow = advancedToggle:CreateTexture(nil, "OVERLAY")
-    advancedArrow:SetPoint("LEFT", 6, 0)
-    advancedArrow:SetSize(12, 12)
-    advancedArrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
-    advancedArrow:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    
-    local advancedText = advancedToggle:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    advancedText:SetPoint("LEFT", advancedArrow, "RIGHT", 4, 0)
-    advancedText:SetText(L["Advanced"])
-    advancedText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    
-    advancedToggle:SetScript("OnEnter", function(self)
-        self:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
-    end)
-    advancedToggle:SetScript("OnLeave", function(self)
-        self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
-    end)
-    
+    -- StyleButton's icon is the chevron; keep the old local name for the rotation
+    -- handlers below (and the label colour dimmed to match the section-header look).
+    local advancedArrow = advancedToggle.Icon
+    advancedToggle.Text:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+
     panel.advancedToggle = advancedToggle
     panel.advancedArrow = advancedArrow
     panel.advancedExpanded = false
@@ -1355,7 +1182,7 @@ function CC:CreateEditBindingPanel()
     fallbackSubtitle:SetWidth(280)
     fallbackSubtitle:SetJustifyH("LEFT")
     fallbackSubtitle:SetWordWrap(true)
-    fallbackSubtitle:SetText(format(L["For nameplates & world units. %sDoes not work with action bar binds.%s"], "|cffff3333", "|r"))
+    fallbackSubtitle:SetText(format(L["For nameplates & world units. %sDoes not work with action bar binds.%s"], "|c" .. DF.GUI:ToneHex("caution"), "|r"))
     fallbackSubtitle:SetTextColor(0.5, 0.5, 0.5)
     panel.fallbackSubtitle = fallbackSubtitle
     
@@ -1416,53 +1243,46 @@ function CC:CreateEditBindingPanel()
     priorityLabel:SetText(L["Priority:"])
     priorityLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     panel.priorityLabel = priorityLabel
-    
-    local priorityValue = advancedContent:CreateFontString(nil, "OVERLAY", "DFFontHighlight")
-    priorityValue:SetPoint("LEFT", priorityLabel, "RIGHT", 5, 0)
-    priorityValue:SetText("5")
-    priorityValue:SetTextColor(themeColor.r, themeColor.g, themeColor.b)
-    panel.priorityValue = priorityValue
-    
-    local prioritySlider = CreateFrame("Slider", nil, advancedContent, "BackdropTemplate")
+
+    -- Shared slider builder. The stored field (panel.pendingBinding.priority) is
+    -- written 1:1 via customGet/customSet and shown directly in the input box.
+    -- Direction: HIGHER number = higher priority (10 wins over 1), matching every
+    -- other slider (right = more). Thumb runs left = 1 (Low) .. right = 10 (High).
+    -- A lazy per-profile migration (CC:MigratePrioritiesLazy) remaps older saved
+    -- values on first access, and the resolution comparators were flipped, so
+    -- existing bindings resolve the same.
+    local prioritySlider = DF.GUI:CreateSlider(
+        advancedContent,            -- parent
+        "",                         -- label (priorityLabel handles the caption)
+        1,                          -- minVal
+        10,                         -- maxVal
+        1,                          -- step
+        nil,                        -- dbTable (custom get/set used instead)
+        nil,                        -- dbKey
+        nil,                        -- callback
+        false,                      -- lightweightUpdate
+        false,                      -- usePreviewMode
+        function()                  -- customGet: return stored priority
+            -- Guard: the panel is built once (cached) and CreateSlider reads its
+            -- initial value here BEFORE ShowEditBindingPanel assigns pendingBinding.
+            return (panel.pendingBinding and panel.pendingBinding.priority) or 5
+        end,
+        function(v)                 -- customSet: store priority unchanged
+            if panel.pendingBinding then panel.pendingBinding.priority = v end
+        end,
+        CC.ACCENT                   -- accentColor (ClickCasting green)
+    )
     prioritySlider:SetPoint("TOPLEFT", 68, -155)
-    prioritySlider:SetSize(200, 16)
-    prioritySlider:SetOrientation("HORIZONTAL")
-    prioritySlider:SetMinMaxValues(1, 10)
-    prioritySlider:SetValueStep(1)
-    prioritySlider:SetObeyStepOnDrag(true)
-    prioritySlider:SetValue(6)  -- Inverted: slider 6 = priority 5
-    prioritySlider:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    prioritySlider:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    prioritySlider:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
-    
-    local sliderThumb = prioritySlider:CreateTexture(nil, "OVERLAY")
-    sliderThumb:SetSize(12, 16)
-    sliderThumb:SetColorTexture(themeColor.r, themeColor.g, themeColor.b, 1)
-    prioritySlider:SetThumbTexture(sliderThumb)
-    
-    -- Invert slider: left = 10 (low), right = 1 (high)
-    prioritySlider:SetScript("OnValueChanged", function(self, value)
-        local sliderValue = math.floor(value + 0.5)
-        local priority = 11 - sliderValue  -- Invert: slider 1 = priority 10, slider 10 = priority 1
-        priorityValue:SetText(tostring(priority))
-        panel.pendingBinding.priority = priority
-    end)
-    
-    -- Priority hint labels (10 = Low on left, 1 = High on right)
-    local lowLabel = advancedContent:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
-    lowLabel:SetPoint("TOPLEFT", prioritySlider, "BOTTOMLEFT", 0, -2)
-    lowLabel:SetText(L["10 = Low"])
-    lowLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    
-    local highLabel = advancedContent:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
-    highLabel:SetPoint("TOPRIGHT", prioritySlider, "BOTTOMRIGHT", 0, -2)
-    highLabel:SetText(L["1 = High"])
-    highLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    
+
+    -- Direction note (standard GUI label style). The slider's container is 50px
+    -- tall (its bottom sits near the Delete/Cancel/Save row), so the note is placed
+    -- in the gap BELOW the visible bar — anchored ~28px down from the slider top and
+    -- shifted left to x=0 to sit under the "Priority:" caption. Anchored to the
+    -- slider so it tracks the macro/spell repositioning; the CreateLabel frame has
+    -- no background, so its lower extent over the button row is invisible.
+    local priNote = DF.GUI:CreateLabel(advancedContent, L["Higher priority wins"], 248)
+    priNote:SetPoint("TOPLEFT", prioritySlider, "TOPLEFT", -68, -28)
+
     panel.prioritySlider = prioritySlider
     
     -- ============================================================
@@ -1529,86 +1349,32 @@ function CC:CreateEditBindingPanel()
     
     -- Bottom buttons
     local saveBtn = CreateFrame("Button", nil, panel, "BackdropTemplate")
-    saveBtn:SetSize(90, 28)
     saveBtn:SetPoint("BOTTOMRIGHT", -12, 12)
-    saveBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:StyleButton(saveBtn, {
+        width = 90, height = 28, tone = "success", accent = CC.ACCENT,
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\save", size = 18 },
+        text = L["Save"],
     })
-    saveBtn:SetBackdropColor(themeColor.r * 0.4, themeColor.g * 0.4, themeColor.b * 0.4, 1)
-    saveBtn:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
-    local saveIcon = saveBtn:CreateTexture(nil, "OVERLAY")
-    saveIcon:SetPoint("LEFT", 14, 0)
-    saveIcon:SetSize(14, 14)
-    saveIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\save")
-    saveIcon:SetVertexColor(1, 1, 1)
-    local saveText = saveBtn:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    saveText:SetPoint("LEFT", saveIcon, "RIGHT", 4, 0)
-    saveText:SetText(L["Save"])
-    saveText:SetTextColor(1, 1, 1)
-    saveBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(themeColor.r * 0.6, themeColor.g * 0.6, themeColor.b * 0.6, 1)
-    end)
-    saveBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(themeColor.r * 0.4, themeColor.g * 0.4, themeColor.b * 0.4, 1)
-    end)
     saveBtn:SetScript("OnClick", function()
         CC:SaveEditBindingPanel()
     end)
 
     local cancelBtn = CreateFrame("Button", nil, panel, "BackdropTemplate")
-    cancelBtn:SetSize(90, 28)
     cancelBtn:SetPoint("RIGHT", saveBtn, "LEFT", -8, 0)
-    cancelBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    cancelBtn:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    cancelBtn:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
-    local cancelText = cancelBtn:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    cancelText:SetPoint("CENTER")
-    cancelText:SetText(L["Cancel"])
-    cancelText:SetTextColor(0.8, 0.8, 0.8)
-    cancelBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropBorderColor(0.8, 0.4, 0.4, 1)
-    end)
-    cancelBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
-    end)
+    DF.GUI:StyleButton(cancelBtn, { width = 90, height = 28, text = L["Cancel"], accent = CC.ACCENT })
     cancelBtn:SetScript("OnClick", function()
         CC:HideEditBindingPanel()
     end)
 
     -- Delete button (only shown when editing existing binding)
     local deleteBtn = CreateFrame("Button", nil, panel, "BackdropTemplate")
-    deleteBtn:SetSize(80, 28)
     deleteBtn:SetPoint("BOTTOMLEFT", 12, 12)
-    deleteBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:StyleButton(deleteBtn, {
+        width = 80, height = 28,
+        tone = "danger",
+        text = L["Delete"],
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\delete", size = 18 },
     })
-    deleteBtn:SetBackdropColor(0.4, 0.1, 0.1, 1)
-    deleteBtn:SetBackdropBorderColor(0.6, 0.2, 0.2, 1)
-    local deleteIcon = deleteBtn:CreateTexture(nil, "OVERLAY")
-    deleteIcon:SetPoint("LEFT", 12, 0)
-    deleteIcon:SetSize(14, 14)
-    deleteIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\delete")
-    deleteIcon:SetVertexColor(1, 0.5, 0.5)
-    local deleteText = deleteBtn:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    deleteText:SetPoint("LEFT", deleteIcon, "RIGHT", 4, 0)
-    deleteText:SetText(L["Delete"])
-    deleteText:SetTextColor(1, 0.5, 0.5)
-    deleteBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(0.6, 0.15, 0.15, 1)
-        self:SetBackdropBorderColor(1, 0.3, 0.3, 1)
-    end)
-    deleteBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(0.4, 0.1, 0.1, 1)
-        self:SetBackdropBorderColor(0.6, 0.2, 0.2, 1)
-    end)
     deleteBtn:SetScript("OnClick", function()
         CC:DeleteFromEditBindingPanel()
     end)
@@ -1730,12 +1496,12 @@ end
 -- Show warning about Mac Command+Left Click not working
 function CC:ShowMacMetaClickWarning()
     StaticPopupDialogs["DF_MAC_META_CLICK_WARNING"] = {
-        text = "|cffff9900Mac Limitation|r\n\n" ..
-               "Command + Left Click bindings do not work on macOS. " ..
-               "This is a World of Warcraft client limitation, not an addon bug.\n\n" ..
-               "The binding will be saved, but it will not trigger in-game.\n\n" ..
-               "|cff88ff88Recommendation:|r Use |cffffffffOption (Alt)|r or |cffffffffControl|r instead of Command for left click modifiers.",
-        button1 = "OK",
+        text = "|c" .. DF.GUI:ToneHex("caution") .. L["Mac Limitation"] .. "|r\n\n" ..
+               L["Command + Left Click bindings do not work on macOS. "] ..
+               L["This is a World of Warcraft client limitation, not an addon bug."] .. "\n\n" ..
+               L["The binding will be saved, but it will not trigger in-game."] .. "\n\n" ..
+               "|c" .. DF.GUI:ToneHex("success") .. L["Recommendation:"] .. "|r " .. L["Use "] .. "|cffffffff" .. L["Option (Alt)"] .. "|r " .. L["or "] .. "|cffffffff" .. L["Control"] .. "|r " .. L["instead of Command for left click modifiers."],
+        button1 = L["OK"],
         timeout = 0,
         whileDead = true,
         hideOnEscape = true,
@@ -1790,7 +1556,7 @@ function CC:ShowEditBindingPanel(spellData, existingBinding, existingIndex)
             actionType = spellData.actionType or self.ACTION_TYPES.SPELL,
             spellId = spellData.spellId,
             spellName = spellData.spellName or spellData.name,
-            priority = 5,  -- Default priority (1=highest, 10=lowest)
+            priority = 5,  -- Default priority (10=highest, 1=lowest)
         }
         
         if spellData.isMacro then
@@ -1867,7 +1633,7 @@ function CC:ShowEditBindingPanel(spellData, existingBinding, existingIndex)
     elseif existingBinding and existingBinding.spellId then
         displayName = GetSpellDisplayInfo(existingBinding.spellId, existingBinding.spellName) or displayName
     end
-    panel.spellName:SetText(displayName or "Unknown")
+    panel.spellName:SetText(displayName or L["Unknown"])
     
     -- Update binding button
     CC:UpdateBindingButtonText()
@@ -2091,10 +1857,10 @@ function CC:ShowEditBindingPanel(spellData, existingBinding, existingIndex)
         panel:SetHeight(SPELL_COLLAPSED_HEIGHT)
     end
     
-    -- Update priority slider (inverted: slider value = 11 - priority)
-    local sliderValue = 11 - currentPriority  -- Invert for display
-    panel.prioritySlider:SetValue(sliderValue)
-    panel.priorityValue:SetText(tostring(currentPriority))
+    -- Update priority slider. The slider's internal value equals the stored
+    -- priority directly (1 = Low .. 10 = High; higher wins); the builder's input
+    -- box and fill update off this value.
+    panel.prioritySlider.slider:SetValue(currentPriority)
     
     -- Update fallback checkboxes (only if not a macro)
     if not isMacro then
@@ -2154,7 +1920,7 @@ function CC:SaveEditBindingPanel()
     
     -- Validate that we have a binding key
     if not binding.bindType or (not binding.button and not binding.key) then
-        print("|cffff6666DandersFrames:|r Please set a binding key first.")
+        print("|cffff6666DandersFrames:|r " .. L["Please set a binding key first."])
         return
     end
     
@@ -2181,10 +1947,10 @@ function CC:FinalizeSaveBinding()
     local excludeIndex = panel.isEditing and panel.existingIndex or nil
     local duplicateIndex = self:FindDuplicateBinding(binding, excludeIndex)
     if duplicateIndex then
-        print("|cffff9900DandersFrames:|r That binding already exists.")
+        print("|cffff9900DandersFrames:|r " .. L["That binding already exists."])
         return
     end
-    
+
     -- Check for key conflicts (same key combo, different action)
     local conflicts = self:FindKeyConflicts(binding, excludeIndex)
     if #conflicts > 0 then
@@ -2205,9 +1971,9 @@ function CC:FinalizeSaveBinding()
         
         -- Show warning popup
         StaticPopupDialogs["DF_KEY_CONFLICT_WARNING"] = {
-            text = "|cffff9900Warning:|r " .. keyText .. " is already bound to:\n\n" .. conflictDesc .. "\n\nMultiple bindings on the same key may not work as expected. Save anyway?",
-            button1 = "Save Anyway",
-            button2 = "Cancel",
+            text = "|c" .. DF.GUI:ToneHex("danger") .. L["Warning:"] .. "|r " .. keyText .. " " .. L["is already bound to:"] .. "\n\n" .. conflictDesc .. "\n\n" .. L["Multiple bindings on the same key may not work as expected. Save anyway?"],
+            button1 = L["Save Anyway"],
+            button2 = L["Cancel"],
             OnAccept = function()
                 CC:CommitBindingSave()
             end,
@@ -2254,9 +2020,9 @@ function CC:DeleteFromEditBindingPanel()
     if not binding then return end
     
     StaticPopupDialogs["DF_EDITPANEL_CONFIRM_DELETE"] = {
-        text = "Delete binding for " .. self:GetBindingKeyText(binding) .. "?",
-        button1 = "Yes",
-        button2 = "No",
+        text = format(L["Delete binding for %s?"], self:GetBindingKeyText(binding)),
+        button1 = L["Yes"],
+        button2 = L["No"],
         OnAccept = function()
             table.remove(CC.db.bindings, panel.existingIndex)
             CC:HideEditBindingPanel()
@@ -2297,7 +2063,7 @@ function CC:ProcessKeybind(bindType, key)
         modifiers = mods,
         scope = defaultScope,
         combat = defaultCombat,
-        priority = 5,  -- Default priority (1=highest, 10=lowest)
+        priority = 5,  -- Default priority (10=highest, 1=lowest)
         -- Default to all frames
         frames = {
             dandersFrames = true,
@@ -2356,10 +2122,10 @@ function CC:ProcessKeybind(bindType, key)
     -- Check for duplicate binding
     local duplicateIndex = self:FindDuplicateBinding(newBinding)
     if duplicateIndex then
-        print("|cffff9900DandersFrames:|r That binding already exists.")
+        print("|cffff9900DandersFrames:|r " .. L["That binding already exists."])
         return
     end
-    
+
     -- Check for key conflicts (same key combo, different action)
     local conflicts = self:FindKeyConflicts(newBinding, nil)
     if #conflicts > 0 then
@@ -2383,9 +2149,9 @@ function CC:ProcessKeybind(bindType, key)
         
         -- Show warning popup
         StaticPopupDialogs["DF_QUICKBIND_CONFLICT_WARNING"] = {
-            text = "|cffff9900Warning:|r " .. keyText .. " is already bound to:\n\n" .. conflictDesc .. "\n\nMultiple bindings on the same key may not work as expected. Save anyway?",
-            button1 = "Save Anyway",
-            button2 = "Cancel",
+            text = "|c" .. DF.GUI:ToneHex("danger") .. L["Warning:"] .. "|r " .. keyText .. " " .. L["is already bound to:"] .. "\n\n" .. conflictDesc .. "\n\n" .. L["Multiple bindings on the same key may not work as expected. Save anyway?"],
+            button1 = L["Save Anyway"],
+            button2 = L["Cancel"],
             OnAccept = function()
                 CC:CommitQuickBinding()
             end,
@@ -2516,11 +2282,11 @@ function CC:GetBindingsForAction(actionType)
 end
 
 function CC:CreateSpellCell(parent, spellData, index)
-    local themeColor = {r = 0.2, g = 0.8, b = 0.4}
-    local C_ELEMENT = {r = 0.18, g = 0.18, b = 0.18}
-    local C_BORDER = {r = 0.25, g = 0.25, b = 0.25}
-    local C_TEXT = {r = 0.9, g = 0.9, b = 0.9}
-    local C_TEXT_DIM = {r = 0.6, g = 0.6, b = 0.6}
+    local themeColor = CC.ACCENT
+    local C_ELEMENT = DF.GUI.Colors.element
+    local C_BORDER = DF.GUI.Colors.border
+    local C_TEXT = DF.GUI.Colors.text
+    local C_TEXT_DIM = DF.GUI.Colors.textDim
     
     local cellWidth = 85
     local cellHeight = 75
@@ -2737,28 +2503,28 @@ function CC:RefreshSpellGrid(skipScrollReset)
     if (not searchFilter or searchFilter == "") and spellTypeFilter == "all" then
         if viewLayout == "list" then
             -- List-style view special actions
-            local targetRow = self:CreateSpellListRow(self.scrollContent, {name = "Target Unit", icon = "Interface\\CURSOR\\Crosshairs", spellId = nil}, 1, true, "target")
+            local targetRow = self:CreateSpellListRow(self.scrollContent, {name = L["Target Unit"], icon = "Interface\\CURSOR\\Crosshairs", spellId = nil}, 1, true, "target")
             targetRow:SetPoint("TOPLEFT", 0, -yOffset)
             table.insert(CC.spellCells, targetRow)
             totalCells = totalCells + 1
             yOffset = yOffset + cellHeight + padding
             row = row + 1
             
-            local menuRow = self:CreateSpellListRow(self.scrollContent, {name = "Open Menu", icon = "Interface\\Buttons\\UI-GuildButton-OfficerNote-Up", spellId = nil}, 2, true, "menu")
+            local menuRow = self:CreateSpellListRow(self.scrollContent, {name = L["Open Menu"], icon = "Interface\\Buttons\\UI-GuildButton-OfficerNote-Up", spellId = nil}, 2, true, "menu")
             menuRow:SetPoint("TOPLEFT", 0, -yOffset)
             table.insert(CC.spellCells, menuRow)
             totalCells = totalCells + 1
             yOffset = yOffset + cellHeight + padding
             row = row + 1
             
-            local focusRow = self:CreateSpellListRow(self.scrollContent, {name = "Set Focus", icon = "Interface\\Icons\\Ability_Hunter_MasterMarksman", spellId = nil}, 3, true, "focus")
+            local focusRow = self:CreateSpellListRow(self.scrollContent, {name = L["Set Focus"], icon = "Interface\\Icons\\Ability_Hunter_MasterMarksman", spellId = nil}, 3, true, "focus")
             focusRow:SetPoint("TOPLEFT", 0, -yOffset)
             table.insert(CC.spellCells, focusRow)
             totalCells = totalCells + 1
             yOffset = yOffset + cellHeight + padding
             row = row + 1
             
-            local assistRow = self:CreateSpellListRow(self.scrollContent, {name = "Assist", icon = "Interface\\Icons\\Ability_Hunter_SniperShot", spellId = nil}, 4, true, "assist")
+            local assistRow = self:CreateSpellListRow(self.scrollContent, {name = L["Assist"], icon = "Interface\\Icons\\Ability_Hunter_SniperShot", spellId = nil}, 4, true, "assist")
             assistRow:SetPoint("TOPLEFT", 0, -yOffset)
             table.insert(CC.spellCells, assistRow)
             totalCells = totalCells + 1
@@ -2766,14 +2532,14 @@ function CC:RefreshSpellGrid(skipScrollReset)
             row = row + 1
         else
             -- Grid view special actions
-            local targetCell = self:CreateSpecialActionCell(self.scrollContent, "target", "Target Unit", "Interface\\CURSOR\\Crosshairs")
+            local targetCell = self:CreateSpecialActionCell(self.scrollContent, "target", L["Target Unit"], "Interface\\CURSOR\\Crosshairs")
             targetCell:SetPoint("TOPLEFT", col * (cellWidth + padding), -row * (cellHeight + padding))
             table.insert(CC.spellCells, targetCell)
             totalCells = totalCells + 1
             col = col + 1
             if col >= cols then col = 0; row = row + 1 end
             
-            local menuCell = self:CreateSpecialActionCell(self.scrollContent, "menu", "Open Menu", "Interface\\Buttons\\UI-GuildButton-OfficerNote-Up")
+            local menuCell = self:CreateSpecialActionCell(self.scrollContent, "menu", L["Open Menu"], "Interface\\Buttons\\UI-GuildButton-OfficerNote-Up")
             menuCell:SetPoint("TOPLEFT", col * (cellWidth + padding), -row * (cellHeight + padding))
             table.insert(CC.spellCells, menuCell)
             totalCells = totalCells + 1
@@ -2883,11 +2649,11 @@ function CC:RefreshSpellGrid(skipScrollReset)
     
     -- Category names for section headers (no Bound category - use Active Bindings for that)
     local categoryNames = {
-        [1] = "Specialization",
-        [2] = "Class",
-        [3] = "Racial",
-        [4] = "Other",
-        [5] = "Guild",
+        [1] = L["Specialization"],
+        [2] = L["Class"],
+        [3] = L["Racial"],
+        [4] = L["Other"],
+        [5] = L["Guild"],
     }
     
     -- Create spell cells based on layout and sort mode
@@ -2907,7 +2673,7 @@ function CC:RefreshSpellGrid(skipScrollReset)
                 -- Create section header if section changed
                 if sectionKey ~= currentSection then
                     currentSection = sectionKey
-                    local headerText = categoryNames[sectionKey] or "Other"
+                    local headerText = categoryNames[sectionKey] or L["Other"]
                     local header = CreateSectionHeader(self.scrollContent, headerText, yOffset)
                     table.insert(CC.spellCells, header)
                     yOffset = yOffset + headerHeight + padding
@@ -2942,7 +2708,7 @@ function CC:RefreshSpellGrid(skipScrollReset)
                     end
                     
                     currentSection = sectionKey
-                    local headerText = categoryNames[sectionKey] or "Other"
+                    local headerText = categoryNames[sectionKey] or L["Other"]
                     local header = CreateSectionHeader(self.scrollContent, headerText, gridYOffset)
                     table.insert(CC.spellCells, header)
                     gridYOffset = gridYOffset + gridHeaderHeight  -- Smaller spacing after header
@@ -3015,11 +2781,11 @@ end
 
 -- Refresh the macro grid (when Macros tab is active)
 function CC:RefreshMacroGrid(skipScrollReset)
-    local themeColor = DF.GUI and DF.GUI.GetThemeColor and DF.GUI.GetThemeColor() or {r = 0.2, g = 0.8, b = 0.4}
-    local C_ELEMENT = {r = 0.18, g = 0.18, b = 0.18}
-    local C_BORDER = {r = 0.25, g = 0.25, b = 0.25}
-    local C_TEXT = {r = 0.9, g = 0.9, b = 0.9}
-    local C_TEXT_DIM = {r = 0.6, g = 0.6, b = 0.6}
+    local themeColor = DF.GUI and DF.GUI.GetThemeColor and DF.GUI.GetThemeColor() or CC.ACCENT
+    local C_ELEMENT = DF.GUI.Colors.element
+    local C_BORDER = DF.GUI.Colors.border
+    local C_TEXT = DF.GUI.Colors.text
+    local C_TEXT_DIM = DF.GUI.Colors.textDim
     
     -- Get search filter
     local searchFilter = self.searchBox and self.searchBox:GetText() or ""
@@ -3104,9 +2870,9 @@ function CC:RefreshMacroGrid(skipScrollReset)
     -- Track current category for headers
     local currentSource = nil
     local sourceNames = {
-        custom = "Custom Macros",
-        global_import = "General Imports",
-        char_import = "Character Imports",
+        custom = L["Custom Macros"],
+        global_import = L["General Imports"],
+        char_import = L["Character Imports"],
     }
     
     -- Helper to create category header
@@ -3154,7 +2920,7 @@ function CC:RefreshMacroGrid(skipScrollReset)
             -- Add category header if source changed
             if showCategoryHeaders and macro.source ~= currentSource then
                 currentSource = macro.source
-                local headerText = sourceNames[macro.source] or "Other"
+                local headerText = sourceNames[macro.source] or L["Other"]
                 local header = CreateCategoryHeader(self.scrollContent, headerText, yOffset)
                 table.insert(CC.spellCells, header)
                 yOffset = yOffset + headerHeight
@@ -3178,7 +2944,7 @@ function CC:RefreshMacroGrid(skipScrollReset)
                 end
                 
                 currentSource = macro.source
-                local headerText = sourceNames[macro.source] or "Other"
+                local headerText = sourceNames[macro.source] or L["Other"]
                 local header = CreateCategoryHeader(self.scrollContent, headerText, gridYOffset)
                 table.insert(CC.spellCells, header)
                 gridYOffset = gridYOffset + headerHeight
@@ -3211,11 +2977,11 @@ end
 
 -- Refresh items grid
 function CC:RefreshItemsGrid(skipScrollReset)
-    local themeColor = DF.GUI and DF.GUI.GetThemeColor and DF.GUI.GetThemeColor() or {r = 0.2, g = 0.8, b = 0.4}
-    local C_ELEMENT = {r = 0.18, g = 0.18, b = 0.18}
-    local C_BORDER = {r = 0.25, g = 0.25, b = 0.25}
-    local C_TEXT = {r = 0.9, g = 0.9, b = 0.9}
-    local C_TEXT_DIM = {r = 0.6, g = 0.6, b = 0.6}
+    local themeColor = DF.GUI and DF.GUI.GetThemeColor and DF.GUI.GetThemeColor() or CC.ACCENT
+    local C_ELEMENT = DF.GUI.Colors.element
+    local C_BORDER = DF.GUI.Colors.border
+    local C_TEXT = DF.GUI.Colors.text
+    local C_TEXT_DIM = DF.GUI.Colors.textDim
     local C_BACKGROUND = {r = 0.12, g = 0.12, b = 0.12}
     
     -- Initialize view mode button states
@@ -3265,7 +3031,7 @@ function CC:RefreshItemsGrid(skipScrollReset)
     end
     
     -- Equipment Slots Section
-    local equipHeader = CreateSectionHeader(self.scrollContent, "Equipment Slots", yOffset)
+    local equipHeader = CreateSectionHeader(self.scrollContent, L["Equipment Slots"], yOffset)
     table.insert(CC.spellCells, equipHeader)
     yOffset = yOffset + 26
     col = 0
@@ -3305,7 +3071,7 @@ function CC:RefreshItemsGrid(skipScrollReset)
     yOffset = yOffset + 10
     
     -- Consumables Section
-    local consumHeader = CreateSectionHeader(self.scrollContent, "Consumables (Drag items here)", yOffset)
+    local consumHeader = CreateSectionHeader(self.scrollContent, L["Consumables (Drag items here)"], yOffset)
     table.insert(CC.spellCells, consumHeader)
     yOffset = yOffset + 26
     col = 0
@@ -3370,7 +3136,7 @@ function CC:RefreshItemsGrid(skipScrollReset)
     
     local dropText = dropZone:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     dropText:SetPoint("CENTER")
-    dropText:SetText("+ Drop Item")
+    dropText:SetText(L["+ Drop Item"])
     dropText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     
     -- Handle item drops
@@ -3385,14 +3151,14 @@ function CC:RefreshItemsGrid(skipScrollReset)
             -- Check if already saved
             for _, cons in ipairs(self.db.savedConsumables) do
                 if cons.itemId == itemId then
-                    print("|cff00ff00DandersFrames:|r Item already in list")
+                    print("|cff00ff00DandersFrames:|r " .. L["Item already in list"])
                     return
                 end
             end
             local itemName = C_Item.GetItemInfo(itemId)
             table.insert(self.db.savedConsumables, {
                 itemId = itemId,
-                name = itemName or "Unknown Item",
+                name = itemName or L["Unknown Item"],
             })
             self:RefreshSpellGrid(true)  -- Skip scroll reset to maintain position
         end
@@ -3408,14 +3174,14 @@ function CC:RefreshItemsGrid(skipScrollReset)
             end
             for _, cons in ipairs(self.db.savedConsumables) do
                 if cons.itemId == itemId then
-                    print("|cff00ff00DandersFrames:|r Item already in list")
+                    print("|cff00ff00DandersFrames:|r " .. L["Item already in list"])
                     return
                 end
             end
             local itemName = C_Item.GetItemInfo(itemId)
             table.insert(self.db.savedConsumables, {
                 itemId = itemId,
-                name = itemName or "Unknown Item",
+                name = itemName or L["Unknown Item"],
             })
             self:RefreshSpellGrid(true)  -- Skip scroll reset to maintain position
         end
@@ -3453,11 +3219,11 @@ end
 
 -- Create a grid cell for an equipment slot item
 function CC:CreateItemCell(parent, itemData, index)
-    local themeColor = DF.GUI and DF.GUI.GetThemeColor and DF.GUI.GetThemeColor() or {r = 0.2, g = 0.8, b = 0.4}
-    local C_ELEMENT = {r = 0.18, g = 0.18, b = 0.18}
-    local C_BORDER = {r = 0.25, g = 0.25, b = 0.25}
-    local C_TEXT = {r = 0.9, g = 0.9, b = 0.9}
-    local C_TEXT_DIM = {r = 0.6, g = 0.6, b = 0.6}
+    local themeColor = DF.GUI and DF.GUI.GetThemeColor and DF.GUI.GetThemeColor() or CC.ACCENT
+    local C_ELEMENT = DF.GUI.Colors.element
+    local C_BORDER = DF.GUI.Colors.border
+    local C_TEXT = DF.GUI.Colors.text
+    local C_TEXT_DIM = DF.GUI.Colors.textDim
     
     local cellWidth = 85
     local cellHeight = 75
@@ -3503,12 +3269,19 @@ function CC:CreateItemCell(parent, itemData, index)
         nameText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     end
     
-    -- On-Use indicator
+    -- On-Use indicator: a small corner badge. Give it a dark backing pill on a high
+    -- OVERLAY sublevel so it reads clearly instead of blending into the icon art.
     if itemInfo and itemInfo.hasOnUse then
         local onUseBadge = cell:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+        onUseBadge:SetDrawLayer("OVERLAY", 7)
         onUseBadge:SetPoint("TOPLEFT", 4, -4)
         onUseBadge:SetText(L["USE"])
         onUseBadge:SetTextColor(themeColor.r, themeColor.g, themeColor.b)
+        local onUseBg = cell:CreateTexture(nil, "OVERLAY")
+        onUseBg:SetDrawLayer("OVERLAY", 6)
+        onUseBg:SetColorTexture(0, 0, 0, 0.7)
+        onUseBg:SetPoint("TOPLEFT", onUseBadge, "TOPLEFT", -3, 2)
+        onUseBg:SetPoint("BOTTOMRIGHT", onUseBadge, "BOTTOMRIGHT", 3, -2)
     end
     
     -- Check for existing binding - just set border color (no text)
@@ -3567,11 +3340,11 @@ end
 
 -- Create a list row for an equipment slot item
 function CC:CreateItemListRow(parent, itemData, index)
-    local themeColor = DF.GUI and DF.GUI.GetThemeColor and DF.GUI.GetThemeColor() or {r = 0.2, g = 0.8, b = 0.4}
-    local C_ELEMENT = {r = 0.18, g = 0.18, b = 0.18}
-    local C_BORDER = {r = 0.25, g = 0.25, b = 0.25}
-    local C_TEXT = {r = 0.9, g = 0.9, b = 0.9}
-    local C_TEXT_DIM = {r = 0.6, g = 0.6, b = 0.6}
+    local themeColor = DF.GUI and DF.GUI.GetThemeColor and DF.GUI.GetThemeColor() or CC.ACCENT
+    local C_ELEMENT = DF.GUI.Colors.element
+    local C_BORDER = DF.GUI.Colors.border
+    local C_TEXT = DF.GUI.Colors.text
+    local C_TEXT_DIM = DF.GUI.Colors.textDim
     
     local containerWidth = self.gridContainer:GetWidth() - 35
     
@@ -3611,7 +3384,7 @@ function CC:CreateItemListRow(parent, itemData, index)
         nameText:SetText(itemInfo.name)
         nameText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
     else
-        nameText:SetText("(Empty)")
+        nameText:SetText(L["(Empty)"])
         nameText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     end
     
@@ -3619,7 +3392,7 @@ function CC:CreateItemListRow(parent, itemData, index)
     if itemInfo and itemInfo.hasOnUse then
         local onUseBadge = row:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
         onUseBadge:SetPoint("LEFT", nameText, "RIGHT", 8, 0)
-        onUseBadge:SetText("[USE]")
+        onUseBadge:SetText("[" .. L["USE"] .. "]")
         onUseBadge:SetTextColor(themeColor.r, themeColor.g, themeColor.b)
     end
     
@@ -3679,11 +3452,11 @@ end
 
 -- Create a grid cell for a consumable item
 function CC:CreateConsumableCell(parent, itemData, index)
-    local themeColor = DF.GUI and DF.GUI.GetThemeColor and DF.GUI.GetThemeColor() or {r = 0.2, g = 0.8, b = 0.4}
-    local C_ELEMENT = {r = 0.18, g = 0.18, b = 0.18}
-    local C_BORDER = {r = 0.25, g = 0.25, b = 0.25}
-    local C_TEXT = {r = 0.9, g = 0.9, b = 0.9}
-    local C_TEXT_DIM = {r = 0.6, g = 0.6, b = 0.6}
+    local themeColor = DF.GUI and DF.GUI.GetThemeColor and DF.GUI.GetThemeColor() or CC.ACCENT
+    local C_ELEMENT = DF.GUI.Colors.element
+    local C_BORDER = DF.GUI.Colors.border
+    local C_TEXT = DF.GUI.Colors.text
+    local C_TEXT_DIM = DF.GUI.Colors.textDim
     
     local cellWidth = 85
     local cellHeight = 75
@@ -3807,11 +3580,11 @@ end
 
 -- Create a list row for a consumable item
 function CC:CreateConsumableListRow(parent, itemData, index)
-    local themeColor = DF.GUI and DF.GUI.GetThemeColor and DF.GUI.GetThemeColor() or {r = 0.2, g = 0.8, b = 0.4}
-    local C_ELEMENT = {r = 0.18, g = 0.18, b = 0.18}
-    local C_BORDER = {r = 0.25, g = 0.25, b = 0.25}
-    local C_TEXT = {r = 0.9, g = 0.9, b = 0.9}
-    local C_TEXT_DIM = {r = 0.6, g = 0.6, b = 0.6}
+    local themeColor = DF.GUI and DF.GUI.GetThemeColor and DF.GUI.GetThemeColor() or CC.ACCENT
+    local C_ELEMENT = DF.GUI.Colors.element
+    local C_BORDER = DF.GUI.Colors.border
+    local C_TEXT = DF.GUI.Colors.text
+    local C_TEXT_DIM = DF.GUI.Colors.textDim
     
     local containerWidth = self.gridContainer:GetWidth() - 35
     
@@ -3965,7 +3738,7 @@ end
 -- Show keybind popup for consumable
 function CC:ShowConsumableKeybindPopup(itemData)
     local itemInfo = itemData.itemInfo
-    local displayName = (itemInfo and itemInfo.name) or "Unknown Item"
+    local displayName = (itemInfo and itemInfo.name) or L["Unknown Item"]
     local displayIcon = (itemInfo and itemInfo.icon) or "Interface\\Icons\\INV_Misc_QuestionMark"
     
     local itemAsSpell = {
@@ -3987,11 +3760,11 @@ end
 
 -- Create a grid cell for a macro
 function CC:CreateMacroCell(parent, macroData, index)
-    local themeColor = DF.GUI and DF.GUI.GetThemeColor and DF.GUI.GetThemeColor() or {r = 0.2, g = 0.8, b = 0.4}
-    local C_ELEMENT = {r = 0.18, g = 0.18, b = 0.18}
-    local C_BORDER = {r = 0.25, g = 0.25, b = 0.25}
-    local C_TEXT = {r = 0.9, g = 0.9, b = 0.9}
-    local C_TEXT_DIM = {r = 0.6, g = 0.6, b = 0.6}
+    local themeColor = DF.GUI and DF.GUI.GetThemeColor and DF.GUI.GetThemeColor() or CC.ACCENT
+    local C_ELEMENT = DF.GUI.Colors.element
+    local C_BORDER = DF.GUI.Colors.border
+    local C_TEXT = DF.GUI.Colors.text
+    local C_TEXT_DIM = DF.GUI.Colors.textDim
     
     local cellWidth = 85
     local cellHeight = 75
@@ -4029,13 +3802,13 @@ function CC:CreateMacroCell(parent, macroData, index)
     local sourceBadge = cell:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
     sourceBadge:SetPoint("TOPRIGHT", -3, -3)
     if macroData.source == "global_import" then
-        sourceBadge:SetText("[Gen]")
+        sourceBadge:SetText(L["[Gen]"])
         sourceBadge:SetTextColor(0.6, 0.8, 1)
     elseif macroData.source == "char_import" then
-        sourceBadge:SetText("[Char]")
+        sourceBadge:SetText(L["[Char]"])
         sourceBadge:SetTextColor(0.8, 0.6, 1)
     else
-        sourceBadge:SetText("[Cus]")
+        sourceBadge:SetText(L["[Cus]"])
         sourceBadge:SetTextColor(1, 0.9, 0.4)
     end
     
@@ -4126,11 +3899,11 @@ end
 
 -- Create a list row for a macro
 function CC:CreateMacroListRow(parent, macroData, index)
-    local themeColor = DF.GUI and DF.GUI.GetThemeColor and DF.GUI.GetThemeColor() or {r = 0.2, g = 0.8, b = 0.4}
-    local C_ELEMENT = {r = 0.18, g = 0.18, b = 0.18}
-    local C_BORDER = {r = 0.25, g = 0.25, b = 0.25}
-    local C_TEXT = {r = 0.9, g = 0.9, b = 0.9}
-    local C_TEXT_DIM = {r = 0.6, g = 0.6, b = 0.6}
+    local themeColor = DF.GUI and DF.GUI.GetThemeColor and DF.GUI.GetThemeColor() or CC.ACCENT
+    local C_ELEMENT = DF.GUI.Colors.element
+    local C_BORDER = DF.GUI.Colors.border
+    local C_TEXT = DF.GUI.Colors.text
+    local C_TEXT_DIM = DF.GUI.Colors.textDim
     
     local containerWidth = self.gridContainer:GetWidth() - 35
     local rowHeight = 28
@@ -4168,13 +3941,13 @@ function CC:CreateMacroListRow(parent, macroData, index)
     local sourceBadge = row:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
     sourceBadge:SetPoint("LEFT", icon, "RIGHT", 6, 0)
     if macroData.source == "global_import" then
-        sourceBadge:SetText("[Gen]")
+        sourceBadge:SetText(L["[Gen]"])
         sourceBadge:SetTextColor(0.6, 0.8, 1)
     elseif macroData.source == "char_import" then
-        sourceBadge:SetText("[Char]")
+        sourceBadge:SetText(L["[Char]"])
         sourceBadge:SetTextColor(0.8, 0.6, 1)
     else
-        sourceBadge:SetText("[Cus]")
+        sourceBadge:SetText(L["[Cus]"])
         sourceBadge:SetTextColor(1, 0.9, 0.4)
     end
     
@@ -4197,7 +3970,7 @@ function CC:CreateMacroListRow(parent, macroData, index)
     if (macroData.source == "global_import" or macroData.source == "char_import") and CC:IsMacroOutOfSync(macroData.id) then
         local syncIcon = row:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
         syncIcon:SetPoint("RIGHT", -8, 0)
-        syncIcon:SetText("⚠")
+        syncIcon:SetText("!")
         syncIcon:SetTextColor(1, 0.8, 0)
     end
     
@@ -4277,11 +4050,11 @@ end
 
 -- Create a list row for a spell
 function CC:CreateSpellListRow(parent, spellData, index, isSpecialAction, actionType)
-    local themeColor = {r = 0.2, g = 0.8, b = 0.4}
-    local C_ELEMENT = {r = 0.18, g = 0.18, b = 0.18}
-    local C_BORDER = {r = 0.25, g = 0.25, b = 0.25}
-    local C_TEXT = {r = 0.9, g = 0.9, b = 0.9}
-    local C_TEXT_DIM = {r = 0.6, g = 0.6, b = 0.6}
+    local themeColor = CC.ACCENT
+    local C_ELEMENT = DF.GUI.Colors.element
+    local C_BORDER = DF.GUI.Colors.border
+    local C_TEXT = DF.GUI.Colors.text
+    local C_TEXT_DIM = DF.GUI.Colors.textDim
     local specialColor = {r = 0.6, g = 0.6, b = 0.9}
     
     local containerWidth = self.gridContainer:GetWidth() - 35
@@ -4440,10 +4213,10 @@ function CC:CreateSpellListRow(parent, spellData, index, isSpecialAction, action
 end
 
 function CC:CreateSpecialActionCell(parent, actionType, label, iconPath)
-    local themeColor = {r = 0.2, g = 0.8, b = 0.4}
-    local C_ELEMENT = {r = 0.18, g = 0.18, b = 0.18}
-    local C_BORDER = {r = 0.25, g = 0.25, b = 0.25}
-    local C_TEXT = {r = 0.9, g = 0.9, b = 0.9}
+    local themeColor = CC.ACCENT
+    local C_ELEMENT = DF.GUI.Colors.element
+    local C_BORDER = DF.GUI.Colors.border
+    local C_TEXT = DF.GUI.Colors.text
     local specialColor = {r = 0.6, g = 0.6, b = 0.9} -- Purple-ish for special actions
     
     local cellWidth = 85

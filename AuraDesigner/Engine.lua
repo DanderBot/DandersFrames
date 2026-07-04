@@ -136,7 +136,7 @@ local groupLookup = {}       -- Reused: "auraName#indicatorID" → { group, memb
 local groupActiveMembers = {} -- Reused: groupID → { ordered active members }
 
 local function prioritySort(a, b)
-    return a.priority < b.priority  -- Lower number = higher priority (1 wins over 10)
+    return a.priority > b.priority  -- Higher number = higher priority (10 wins over 1)
 end
 
 -- Hoisted from an inline closure inside ResolveLayoutGroups' sort call.
@@ -391,6 +391,14 @@ function Engine:UpdateFrame(frame)
     if (not adDB._specScopedV1 or not adDB._specScopedV2) and DF.MigrateAuraDesignerSpecScope then
         DF.MigrateAuraDesignerSpecScope(adDB)
     end
+    -- Lazy migration: type-keyed → indicators[] (an imported legacy-shape preset
+    -- would otherwise render no indicators at all).  Runs before the border fold.
+    if DF.MigrateAuraDesignerInstancesLazy then DF.MigrateAuraDesignerInstancesLazy(adDB) end
+    -- Lazy migration: fold legacy border keys (style/color/thickness) on the
+    -- resolved table render actually reads, so a half-migrated block can't render
+    -- via the stale legacy path.
+    if DF.MigrateAuraDesignerBorderKeysLazy then DF.MigrateAuraDesignerBorderKeysLazy(adDB) end
+    if DF.MigrateAuraDesignerPrioritiesLazy then DF.MigrateAuraDesignerPrioritiesLazy(adDB) end
 
     -- Debug: throttled diagnostic dump
     local now = GetTime()
@@ -880,6 +888,9 @@ function Engine:UpdateTestFrame(frame)
     if (not adDB._specScopedV1 or not adDB._specScopedV2) and DF.MigrateAuraDesignerSpecScope then
         DF.MigrateAuraDesignerSpecScope(adDB)
     end
+    if DF.MigrateAuraDesignerInstancesLazy then DF.MigrateAuraDesignerInstancesLazy(adDB) end
+    if DF.MigrateAuraDesignerBorderKeysLazy then DF.MigrateAuraDesignerBorderKeysLazy(adDB) end
+    if DF.MigrateAuraDesignerPrioritiesLazy then DF.MigrateAuraDesignerPrioritiesLazy(adDB) end
 
     local specAuras = adDB.auras and adDB.auras[spec]
     if not specAuras then
@@ -1091,6 +1102,15 @@ function Engine:PreWarmIndicators(frame)
     if not db then return end
     local adDB = DF:ResolveAuraDesigner(frame)
     if not adDB then return end
+    -- Spec-scope first (mirrors UpdateFrame): the priority flip's flat-vs-spec
+    -- detection needs the table already spec-scoped, or a still-flat adDB can be
+    -- misclassified and skip the flip.
+    if (not adDB._specScopedV1 or not adDB._specScopedV2) and DF.MigrateAuraDesignerSpecScope then
+        DF.MigrateAuraDesignerSpecScope(adDB)
+    end
+    if DF.MigrateAuraDesignerInstancesLazy then DF.MigrateAuraDesignerInstancesLazy(adDB) end
+    if DF.MigrateAuraDesignerBorderKeysLazy then DF.MigrateAuraDesignerBorderKeysLazy(adDB) end
+    if DF.MigrateAuraDesignerPrioritiesLazy then DF.MigrateAuraDesignerPrioritiesLazy(adDB) end
 
     -- Resolve spec
     local spec = self:ResolveSpec(adDB)

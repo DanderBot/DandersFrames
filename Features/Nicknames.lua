@@ -205,14 +205,20 @@ function NK:Resolve(unit)
     end
 
     local name, realm = UnitName(unit)
+    -- Boss/arena units can return a SECRET name during encounters. It can't be
+    -- compared, normalised, or used as a match key — bail (don't cache) rather
+    -- than crash on the `==` below, same as the secret-GUID guard above.
+    if name and issecretvalue(name) then return nil end
     if not name or name == "" then return nil end  -- transient; don't cache
     -- Name not resolved yet (UNKNOWNOBJECT during zone-in/reload): treat as
     -- transient and DON'T cache, or we'd cache a "no match" that sticks until
     -- the next wholesale wipe and the real nickname would never appear.
     if name == UNKNOWNOBJECT then return nil end
     -- UnitName returns "" / nil realm for same-realm units; fill in the
-    -- player's own realm so "Name-MyRealm" rules still match them.
-    if not realm or realm == "" then
+    -- player's own realm so "Name-MyRealm" rules still match them. A secret
+    -- realm (same encounter masking as the name) also can't be compared, so
+    -- treat it like an empty realm — issecretvalue short-circuits before `==`.
+    if not realm or issecretvalue(realm) or realm == "" then
         realm = (GetNormalizedRealmName and GetNormalizedRealmName()) or ""
     end
 
@@ -1094,9 +1100,7 @@ function NK:ShowConflictPopup()
     popup:SetPoint("CENTER")
     popup:SetFrameStrata("FULLSCREEN_DIALOG")
     popup:SetFrameLevel(200)
-    popup:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 2 })
-    popup:SetBackdropColor(0.1, 0.1, 0.1, 0.98)
-    popup:SetBackdropBorderColor(theme.r, theme.g, theme.b, 1)
+    DF.GUI:CreatePanelBackdrop(popup, { bgAlpha = 0.98, borderColor = { theme.r, theme.g, theme.b, 1 } })
     popup:EnableMouse(true)
     popup:SetMovable(true)
     popup:RegisterForDrag("LeftButton")
@@ -1135,23 +1139,15 @@ function NK:ShowConflictPopup()
 
     local function makeButton(text, primary, onClick)
         local b = CreateFrame("Button", nil, popup, "BackdropTemplate")
-        b:SetSize(225, 42)
-        b:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
+        -- Word-wrapped label kept manual; StyleButton handles fill/border/hover.
         if primary then
-            b:SetBackdropColor(theme.r * 0.3, theme.g * 0.3, theme.b * 0.3, 1)
-            b:SetBackdropBorderColor(theme.r, theme.g, theme.b, 1)
+            DF.GUI:StyleButton(b, { width = 225, height = 42, primary = true })
         else
-            b:SetBackdropColor(0.15, 0.15, 0.15, 1)
-            b:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
+            DF.GUI:StyleButton(b, { width = 225, height = 42 })
         end
         local t = b:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
         t:SetPoint("LEFT", 6, 0); t:SetPoint("RIGHT", -6, 0); t:SetJustifyH("CENTER")
         t:SetWordWrap(true); t:SetText(text); t:SetTextColor(1, 1, 1)
-        b:SetScript("OnEnter", function(self) self:SetBackdropBorderColor(theme.r, theme.g, theme.b, 1) end)
-        b:SetScript("OnLeave", function(self)
-            if primary then self:SetBackdropBorderColor(theme.r, theme.g, theme.b, 1)
-            else self:SetBackdropBorderColor(0.4, 0.4, 0.4, 1) end
-        end)
         b:SetScript("OnClick", onClick)
         return b
     end

@@ -24,19 +24,33 @@ local Mixin = Mixin
 -- THEME COLORS (matching GUI/GUI.lua)
 -- ============================================================
 
+-- Neutral tones are shared with the main GUI palette (GUI.lua loads first) so
+-- they theme-track in lockstep and aren't re-declared here. Only colours that
+-- differ from GUI.Colors stay private: `background` (higher 0.97 dialog alpha),
+-- `accent` (kept as a fallback for GetThemeColor below), `selected`, `green`, `red`.
+local GUIColors = DF.GUI.Colors
 local C = {
     background = {r = 0.08, g = 0.08, b = 0.08, a = 0.97},
-    panel      = {r = 0.12, g = 0.12, b = 0.12, a = 1},
-    element    = {r = 0.18, g = 0.18, b = 0.18, a = 1},
-    border     = {r = 0.25, g = 0.25, b = 0.25, a = 1},
+    panel      = GUIColors.panel,
+    element    = GUIColors.element,
+    border     = GUIColors.border,
     accent     = {r = 0.45, g = 0.45, b = 0.95, a = 1},
-    hover      = {r = 0.22, g = 0.22, b = 0.22, a = 1},
+    hover      = GUIColors.hover,
     selected   = {r = 0.28, g = 0.28, b = 0.45, a = 1},
-    text       = {r = 0.9,  g = 0.9,  b = 0.9,  a = 1},
-    textDim    = {r = 0.6,  g = 0.6,  b = 0.6,  a = 1},
+    text       = GUIColors.text,
+    textDim    = GUIColors.textDim,
     green      = {r = 0.2,  g = 0.9,  b = 0.2},
     red        = {r = 0.9,  g = 0.25, b = 0.25},
 }
+
+-- Live theme accent (party purple / raid orange). The popup is a standalone
+-- dialog outside the settings page tree, so GUI ThemeListeners never reach it;
+-- instead we read the active theme at build/render time (the frame is rendered
+-- on every open) so highlights track the current mode instead of freezing on
+-- party purple. Falls back to C.accent if GUI isn't available yet.
+local function GetThemeColor()
+    return (DF.GUI and DF.GUI.GetThemeColor and DF.GUI.GetThemeColor()) or C.accent
+end
 
 -- ============================================================
 -- BACKDROP HELPERS
@@ -59,10 +73,9 @@ end
 
 local function CreatePopupButton(parent, text, width, height)
     local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
-    btn:SetSize(width or 120, height or 28)
-    ApplyBackdrop(btn, C.element, C.border)
+    DF.GUI:StyleButton(btn, { width = width or 120, height = height or 28 })
 
-    btn.Text = btn:CreateFontString(nil, "OVERLAY", "DFFontNormal")
+    btn.Text = btn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     -- Anchor to both left and right edges (with a small inset) so SetWordWrap
     -- can flow long labels onto multiple lines within the button.
     btn.Text:SetPoint("LEFT", 6, 0)
@@ -73,18 +86,6 @@ local function CreatePopupButton(parent, text, width, height)
     btn.Text:SetText(text)
     btn.Text:SetTextColor(C.text.r, C.text.g, C.text.b)
 
-    btn:SetScript("OnEnter", function(self)
-        if self:IsEnabled() then
-            self:SetBackdropColor(C.hover.r, C.hover.g, C.hover.b, 1)
-            self:SetBackdropBorderColor(C.accent.r, C.accent.g, C.accent.b, 1)
-        end
-    end)
-    btn:SetScript("OnLeave", function(self)
-        if self:IsEnabled() then
-            self:SetBackdropColor(C.element.r, C.element.g, C.element.b, 1)
-            self:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 1)
-        end
-    end)
     btn:SetScript("OnClick", function(self)
         PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
         if self.onClick then self.onClick(self) end
@@ -111,21 +112,14 @@ local function CreateOptionButton(parent, index)
 
     -- Checkbox square (for multi-select, hidden by default)
     local check = CreateFrame("Frame", nil, btn, "BackdropTemplate")
-    check:SetSize(14, 14)
     check:SetPoint("LEFT", 10, 0)
-    ApplyBackdrop(check, C.element, C.border)
     check:Hide()
     btn.CheckBox = check
-
-    local checkMark = check:CreateTexture(nil, "OVERLAY")
-    checkMark:SetPoint("CENTER")
-    checkMark:SetSize(8, 8)
-    checkMark:SetColorTexture(C.accent.r, C.accent.g, C.accent.b, 1)
-    checkMark:Hide()
-    btn.CheckMark = checkMark
+    btn.CheckMark = DF.GUI:StyleCheckButton(check, { size = 14, checkSize = 8, accent = C.accent, manualCheck = true })
+    btn.CheckMark:Hide()
 
     -- Label
-    local label = btn:CreateFontString(nil, "OVERLAY", "DFFontNormal")
+    local label = btn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     label:SetPoint("LEFT", 12, 0)
     label:SetPoint("RIGHT", -12, 0)
     label:SetJustifyH("LEFT")
@@ -151,9 +145,13 @@ end
 local function SetOptionSelected(btn, selected)
     btn.isSelected = selected
     if selected then
+        local ac = GetThemeColor()
         btn:SetBackdropColor(C.selected.r, C.selected.g, C.selected.b, 1)
-        btn:SetBackdropBorderColor(C.accent.r, C.accent.g, C.accent.b, 1)
-        if btn.CheckMark then btn.CheckMark:Show() end
+        btn:SetBackdropBorderColor(ac.r, ac.g, ac.b, 1)
+        if btn.CheckMark then
+            btn.CheckMark:SetVertexColor(ac.r, ac.g, ac.b)
+            btn.CheckMark:Show()
+        end
     else
         btn:SetBackdropColor(C.element.r, C.element.g, C.element.b, 1)
         btn:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 1)
@@ -210,8 +208,9 @@ local function CreateImageCard(parent, index)
     -- Hover effects
     card:SetScript("OnEnter", function(self)
         if not self.isSelected then
+            local ac = GetThemeColor()
             self:SetBackdropColor(C.hover.r, C.hover.g, C.hover.b, 1)
-            self:SetBackdropBorderColor(C.accent.r, C.accent.g, C.accent.b, 0.5)
+            self:SetBackdropBorderColor(ac.r, ac.g, ac.b, 0.5)
         end
     end)
     card:SetScript("OnLeave", function(self)
@@ -228,8 +227,10 @@ end
 local function SetImageCardSelected(card, selected)
     card.isSelected = selected
     if selected then
+        local ac = GetThemeColor()
         card:SetBackdropColor(C.selected.r, C.selected.g, C.selected.b, 1)
-        card:SetBackdropBorderColor(C.accent.r, C.accent.g, C.accent.b, 1)
+        card:SetBackdropBorderColor(ac.r, ac.g, ac.b, 1)
+        card.CheckBg:SetColorTexture(ac.r, ac.g, ac.b, 0.9)
         card.CheckBg:Show()
         card.CheckTex:Show()
     else
@@ -502,10 +503,13 @@ local function CreatePickerOverlay(widget, tabName, dbKey, controlType, callback
     overlay:SetScript("OnEnter", function()
         overlay.bg:SetColorTexture(PICKER_COLOR.r, PICKER_COLOR.g, PICKER_COLOR.b, 0.15)
         overlay.border:SetBackdropBorderColor(PICKER_COLOR.r, PICKER_COLOR.g, PICKER_COLOR.b, 0.8)
-        GameTooltip:SetOwner(overlay, "ANCHOR_CURSOR")
-        GameTooltip:SetText(L["Click to select this setting"], 1, 1, 1)
-        GameTooltip:AddLine(dbKey, PICKER_COLOR.r, PICKER_COLOR.g, PICKER_COLOR.b)
-        GameTooltip:Show()
+        DF.GUI:ShowTooltip(overlay, {
+            title = L["Click to select this setting"],
+            anchor = "ANCHOR_CURSOR",
+            lines = {
+                { text = dbKey, color = PICKER_COLOR },
+            },
+        })
     end)
     overlay:SetScript("OnLeave", function()
         overlay.bg:SetColorTexture(PICKER_COLOR.r, PICKER_COLOR.g, PICKER_COLOR.b, 0)
@@ -543,27 +547,10 @@ local function CreatePickerBanner()
     banner.text:SetTextColor(0, 0, 0)
 
     local cancelBtn = CreateFrame("Button", nil, banner, "BackdropTemplate")
-    cancelBtn:SetSize(80, 24)
     cancelBtn:SetPoint("RIGHT", -8, 0)
-    if not cancelBtn.SetBackdrop then Mixin(cancelBtn, BackdropTemplateMixin) end
-    cancelBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    cancelBtn:SetBackdropColor(0.15, 0.15, 0.15, 1)
-    cancelBtn:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
-    cancelBtn.text = cancelBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    cancelBtn.text:SetPoint("CENTER")
-    cancelBtn.text:SetText(L["Cancel"])
+    DF.GUI:StyleButton(cancelBtn, { width = 80, height = 24, text = L["Cancel"] })
     cancelBtn:SetScript("OnClick", function()
         DF:CancelSettingsPickerMode()
-    end)
-    cancelBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(0.25, 0.25, 0.25, 1)
-    end)
-    cancelBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(0.15, 0.15, 0.15, 1)
     end)
 
     banner:Hide()
@@ -935,24 +922,7 @@ local function CreatePopupFrame()
     f.TitleText = titleText
 
     -- Close button
-    local closeBtn = CreateFrame("Button", nil, titleBar)
-    closeBtn:SetSize(20, 20)
-    closeBtn:SetPoint("RIGHT", -6, 0)
-
-    local closeBg = closeBtn:CreateTexture(nil, "ARTWORK")
-    closeBg:SetAllPoints()
-    closeBg:SetColorTexture(0.8, 0.2, 0.2, 0.8)
-    closeBtn.bg = closeBg
-
-    local closeIcon = closeBtn:CreateTexture(nil, "OVERLAY")
-    closeIcon:SetPoint("CENTER")
-    closeIcon:SetSize(12, 12)
-    closeIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close")
-    closeIcon:SetVertexColor(1, 1, 1)
-
-    closeBtn:SetScript("OnEnter", function(self) self.bg:SetColorTexture(1, 0.3, 0.3, 1) end)
-    closeBtn:SetScript("OnLeave", function(self) self.bg:SetColorTexture(0.8, 0.2, 0.2, 0.8) end)
-    closeBtn:SetScript("OnClick", function()
+    local closeBtn = DF.GUI:CreateCloseButton(titleBar, { onClick = function()
         CancelAutoAdvance()
         DF:ClearSettingHighlights()
         local wasSubWizard = #wizardStack > 0
@@ -965,7 +935,8 @@ local function CreatePopupFrame()
             CleanupGUI()
             f:Hide()
         end
-    end)
+    end })
+    closeBtn:SetPoint("RIGHT", -6, 0)
 
     -- ============================================================
     -- CONTENT AREA
@@ -1156,7 +1127,8 @@ UpdateProgressDots = function()
         dot:SetPoint("CENTER", f.DotsContainer, "CENTER", xOff, 0)
 
         if i == currentStep then
-            dot:SetColorTexture(C.accent.r, C.accent.g, C.accent.b, 1)
+            local ac = GetThemeColor()
+            dot:SetColorTexture(ac.r, ac.g, ac.b, 1)
         else
             dot:SetColorTexture(C.border.r, C.border.g, C.border.b, 1)
         end
@@ -1744,6 +1716,13 @@ end
 local function ConfigureForWizard(config)
     local f = CreatePopupFrame()
 
+    -- Re-tint the top accent stripe to the live theme (party purple / raid
+    -- orange) on each open; the frame itself is only built once.
+    if f.AccentStripe then
+        local ac = GetThemeColor()
+        f.AccentStripe:SetColorTexture(ac.r, ac.g, ac.b, 1)
+    end
+
     -- Reset state
     CancelAutoAdvance()
     DF:ClearSettingHighlights()
@@ -1797,6 +1776,13 @@ end
 
 local function ConfigureForAlert(config)
     local f = CreatePopupFrame()
+
+    -- Re-tint the top accent stripe to the live theme (party purple / raid
+    -- orange) on each open; the frame itself is only built once.
+    if f.AccentStripe then
+        local ac = GetThemeColor()
+        f.AccentStripe:SetColorTexture(ac.r, ac.g, ac.b, 1)
+    end
 
     -- Reset state
     CancelAutoAdvance()

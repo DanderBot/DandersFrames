@@ -7,6 +7,12 @@ local CC = DF.ClickCast
 -- CONSTANTS
 -- ============================================================
 
+-- The Click-Casting UI uses a fixed GREEN accent — intentionally distinct from
+-- the party (purple) / raid (orange) theme — to signal it's neither party nor
+-- raid mode. Single source for that green; pass it to GUI:StyleCheckButton (and
+-- other styling) as `accent` so the whole Binds UI stays consistent.
+CC.ACCENT = { r = 0.2, g = 0.8, b = 0.4 }
+
 -- Mouse buttons we support (WoW supports up to Button31 for gaming mice)
 CC.MOUSE_BUTTONS = {
     "LeftButton",
@@ -345,6 +351,9 @@ CC.IsDefaultProfile = IsDefaultProfile
 
 -- Default profile template (what goes inside each profile)
 local PROFILE_TEMPLATE = {
+    -- Born in the new higher-wins priority scale, so the lazy priority migration
+    -- (CC:MigratePrioritiesLazy) never flips a freshly-created / copied profile.
+    _priorityHigherWinsV1 = true,
     bindings = {},
     customMacros = {},
     consumables = {},  -- Saved consumable item IDs

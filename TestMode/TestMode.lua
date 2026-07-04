@@ -1223,12 +1223,15 @@ function DF:UpdateTestIcons(frame, testData)
     -- Role Icon
     if frame.roleIcon then
         local role = testData.role
-        local shouldShow = true
-        
+        -- Only TANK/HEALER/DAMAGER have a role icon; a nil/"NONE" role shows none
+        -- (matches live StatusIcons and avoids GetRoleIconTexture indexing a nil
+        -- coord table for a roleless test unit).
+        local shouldShow = (role == "TANK" or role == "HEALER" or role == "DAMAGER")
+
         -- In test mode (out of combat), if "Only Apply Settings in Combat" is checked, show all icons
         local applySettings = not db.roleIconOnlyInCombat
-        
-        if applySettings then
+
+        if shouldShow and applySettings then
             if role == "TANK" then
                 shouldShow = db.roleIconShowTank ~= false
             elseif role == "HEALER" then
@@ -2453,6 +2456,7 @@ function DF:UpdateTestAbsorb(frame, testData)
             if db.frameShowBorder ~= false then
                 inset = frame.dfReducedMaxHealthClipping and 0 or (db.frameBorderSize or 1)  -- 0 when clipped: the clip edge is internal, no frame border there
             end
+            if db.pixelPerfect and DF.PixelPerfect then inset = DF:PixelPerfect(inset) end
             
             local barWidth = frame.healthBar:GetWidth() - (inset * 2)
             local barHeight = frame.healthBar:GetHeight() - (inset * 2)
@@ -2506,27 +2510,28 @@ function DF:UpdateTestAbsorb(frame, testData)
                 local texEnd = healthPercent + clampedAbsorbPercent
                 
                 if healthFillTexture then
+                    local edgeInset = DF:GetAbsorbEdgeInset(frame, db)
                     if healthOrient == "HORIZONTAL" then
-                        attachedTex:SetPoint("TOPLEFT", healthFillTexture, "TOPRIGHT", 0, 0)
-                        attachedTex:SetPoint("BOTTOMLEFT", healthFillTexture, "BOTTOMRIGHT", 0, 0)
+                        attachedTex:SetPoint("TOPLEFT", healthFillTexture, "TOPRIGHT", 0, -edgeInset)
+                        attachedTex:SetPoint("BOTTOMLEFT", healthFillTexture, "BOTTOMRIGHT", 0, edgeInset)
                         attachedTex:SetWidth(absorbWidth)
                         -- TexCoord: left, right, top, bottom
                         attachedTex:SetTexCoord(texStart, texEnd, 0, 1)
                     elseif healthOrient == "HORIZONTAL_INV" then
-                        attachedTex:SetPoint("TOPRIGHT", healthFillTexture, "TOPLEFT", 0, 0)
-                        attachedTex:SetPoint("BOTTOMRIGHT", healthFillTexture, "BOTTOMLEFT", 0, 0)
+                        attachedTex:SetPoint("TOPRIGHT", healthFillTexture, "TOPLEFT", 0, -edgeInset)
+                        attachedTex:SetPoint("BOTTOMRIGHT", healthFillTexture, "BOTTOMLEFT", 0, edgeInset)
                         attachedTex:SetWidth(absorbWidth)
                         -- For reversed, flip the texture coords
                         attachedTex:SetTexCoord(1 - texStart, 1 - texEnd, 0, 1)
                     elseif healthOrient == "VERTICAL" then
-                        attachedTex:SetPoint("BOTTOMLEFT", healthFillTexture, "TOPLEFT", 0, 0)
-                        attachedTex:SetPoint("BOTTOMRIGHT", healthFillTexture, "TOPRIGHT", 0, 0)
+                        attachedTex:SetPoint("BOTTOMLEFT", healthFillTexture, "TOPLEFT", edgeInset, 0)
+                        attachedTex:SetPoint("BOTTOMRIGHT", healthFillTexture, "TOPRIGHT", -edgeInset, 0)
                         attachedTex:SetHeight(absorbHeight)
                         -- Vertical: adjust top/bottom coords
                         attachedTex:SetTexCoord(0, 1, 1 - texEnd, 1 - texStart)
                     elseif healthOrient == "VERTICAL_INV" then
-                        attachedTex:SetPoint("TOPLEFT", healthFillTexture, "BOTTOMLEFT", 0, 0)
-                        attachedTex:SetPoint("TOPRIGHT", healthFillTexture, "BOTTOMRIGHT", 0, 0)
+                        attachedTex:SetPoint("TOPLEFT", healthFillTexture, "BOTTOMLEFT", edgeInset, 0)
+                        attachedTex:SetPoint("TOPRIGHT", healthFillTexture, "BOTTOMRIGHT", -edgeInset, 0)
                         attachedTex:SetHeight(absorbHeight)
                         attachedTex:SetTexCoord(0, 1, texStart, texEnd)
                     end
@@ -2636,6 +2641,7 @@ function DF:UpdateTestAbsorb(frame, testData)
             if db.frameShowBorder ~= false then
                 inset = frame.dfReducedMaxHealthClipping and 0 or (db.frameBorderSize or 1)  -- 0 when clipped: the clip edge is internal, no frame border there
             end
+            if db.pixelPerfect and DF.PixelPerfect then inset = DF:PixelPerfect(inset) end
             
             local barWidth = frame.healthBar:GetWidth() - (inset * 2)
             local barHeight = frame.healthBar:GetHeight() - (inset * 2)
@@ -2690,9 +2696,10 @@ function DF:UpdateTestAbsorb(frame, testData)
                     overflowTex:SetVertTile(false)
                 end
                 
-                -- Position like OVERLAY mode
-                overflowBar:SetPoint("TOPLEFT", frame.healthBar, "TOPLEFT", inset, -inset)
-                overflowBar:SetPoint("BOTTOMRIGHT", frame.healthBar, "BOTTOMRIGHT", -inset, inset)
+                -- Position like OVERLAY mode — flush when opaque/off, inset when translucent
+                local overflowInset = DF:GetAbsorbEdgeInset(frame, db)
+                overflowBar:SetPoint("TOPLEFT", frame.healthBar, "TOPLEFT", overflowInset, -overflowInset)
+                overflowBar:SetPoint("BOTTOMRIGHT", frame.healthBar, "BOTTOMRIGHT", -overflowInset, overflowInset)
                 
                 local maxHealth = testData.maxHealth or 100000
                 overflowBar:SetMinMaxValues(0, maxHealth)
@@ -2745,24 +2752,25 @@ function DF:UpdateTestAbsorb(frame, testData)
                     local texEnd = healthPercent + clampedAbsorbPercent
                     
                     if healthFillTexture then
+                        local edgeInset = DF:GetAbsorbEdgeInset(frame, db)
                         if healthOrient == "HORIZONTAL" then
-                            attachedTex:SetPoint("TOPLEFT", healthFillTexture, "TOPRIGHT", 0, 0)
-                            attachedTex:SetPoint("BOTTOMLEFT", healthFillTexture, "BOTTOMRIGHT", 0, 0)
+                            attachedTex:SetPoint("TOPLEFT", healthFillTexture, "TOPRIGHT", 0, -edgeInset)
+                            attachedTex:SetPoint("BOTTOMLEFT", healthFillTexture, "BOTTOMRIGHT", 0, edgeInset)
                             attachedTex:SetWidth(absorbWidth)
                             attachedTex:SetTexCoord(texStart, texEnd, 0, 1)
                         elseif healthOrient == "HORIZONTAL_INV" then
-                            attachedTex:SetPoint("TOPRIGHT", healthFillTexture, "TOPLEFT", 0, 0)
-                            attachedTex:SetPoint("BOTTOMRIGHT", healthFillTexture, "BOTTOMLEFT", 0, 0)
+                            attachedTex:SetPoint("TOPRIGHT", healthFillTexture, "TOPLEFT", 0, -edgeInset)
+                            attachedTex:SetPoint("BOTTOMRIGHT", healthFillTexture, "BOTTOMLEFT", 0, edgeInset)
                             attachedTex:SetWidth(absorbWidth)
                             attachedTex:SetTexCoord(1 - texStart, 1 - texEnd, 0, 1)
                         elseif healthOrient == "VERTICAL" then
-                            attachedTex:SetPoint("BOTTOMLEFT", healthFillTexture, "TOPLEFT", 0, 0)
-                            attachedTex:SetPoint("BOTTOMRIGHT", healthFillTexture, "TOPRIGHT", 0, 0)
+                            attachedTex:SetPoint("BOTTOMLEFT", healthFillTexture, "TOPLEFT", edgeInset, 0)
+                            attachedTex:SetPoint("BOTTOMRIGHT", healthFillTexture, "TOPRIGHT", -edgeInset, 0)
                             attachedTex:SetHeight(absorbHeight)
                             attachedTex:SetTexCoord(0, 1, 1 - texEnd, 1 - texStart)
                         elseif healthOrient == "VERTICAL_INV" then
-                            attachedTex:SetPoint("TOPLEFT", healthFillTexture, "BOTTOMLEFT", 0, 0)
-                            attachedTex:SetPoint("TOPRIGHT", healthFillTexture, "BOTTOMRIGHT", 0, 0)
+                            attachedTex:SetPoint("TOPLEFT", healthFillTexture, "BOTTOMLEFT", edgeInset, 0)
+                            attachedTex:SetPoint("TOPRIGHT", healthFillTexture, "BOTTOMRIGHT", -edgeInset, 0)
                             attachedTex:SetHeight(absorbHeight)
                             attachedTex:SetTexCoord(0, 1, texStart, texEnd)
                         end
@@ -2818,13 +2826,10 @@ function DF:UpdateTestAbsorb(frame, testData)
             local healthLevel = frame.healthBar:GetFrameLevel()
             customBar:SetFrameLevel(healthLevel + 2)
             
-            -- Inset by border size if frame border is enabled to avoid overlap
-            local inset = 0
-            if db.frameShowBorder ~= false then
-                inset = frame.dfReducedMaxHealthClipping and 0 or (db.frameBorderSize or 1)  -- 0 when clipped: the clip edge is internal, no frame border there
-            end
-            customBar:SetPoint("TOPLEFT", frame.healthBar, "TOPLEFT", inset, -inset)
-            customBar:SetPoint("BOTTOMRIGHT", frame.healthBar, "BOTTOMRIGHT", -inset, inset)
+            -- Cover the health fill: flush when opaque/off, inset when translucent.
+            local overlayInset = DF:GetAbsorbEdgeInset(frame, db)
+            customBar:SetPoint("TOPLEFT", frame.healthBar, "TOPLEFT", overlayInset, -overlayInset)
+            customBar:SetPoint("BOTTOMRIGHT", frame.healthBar, "BOTTOMRIGHT", -overlayInset, overlayInset)
             if customBar.bg then customBar.bg:Hide() end
             
             local healthOrient = db.healthOrientation or "HORIZONTAL"
@@ -2993,6 +2998,7 @@ function DF:UpdateTestHealAbsorb(frame, testData)
             if db.frameShowBorder ~= false then
                 inset = frame.dfReducedMaxHealthClipping and 0 or (db.frameBorderSize or 1)  -- 0 when clipped: the clip edge is internal, no frame border there
             end
+            if db.pixelPerfect and DF.PixelPerfect then inset = DF:PixelPerfect(inset) end
             
             local barWidth = frame.healthBar:GetWidth() - (inset * 2)
             local barHeight = frame.healthBar:GetHeight() - (inset * 2)
@@ -3041,28 +3047,29 @@ function DF:UpdateTestHealAbsorb(frame, testData)
                 local texEnd = healthPercent
                 
                 if healthFillTexture then
+                    local edgeInset = DF:GetAbsorbEdgeInset(frame, db)
                     if healthOrient == "HORIZONTAL" then
                         -- Heal absorb at right edge of health fill, extending left
-                        attachedTex:SetPoint("TOPRIGHT", healthFillTexture, "TOPRIGHT", 0, 0)
-                        attachedTex:SetPoint("BOTTOMRIGHT", healthFillTexture, "BOTTOMRIGHT", 0, 0)
+                        attachedTex:SetPoint("TOPRIGHT", healthFillTexture, "TOPRIGHT", 0, -edgeInset)
+                        attachedTex:SetPoint("BOTTOMRIGHT", healthFillTexture, "BOTTOMRIGHT", 0, edgeInset)
                         attachedTex:SetWidth(healAbsorbWidth)
                         attachedTex:SetTexCoord(texStart, texEnd, 0, 1)
                     elseif healthOrient == "HORIZONTAL_INV" then
                         -- Heal absorb at left edge of health fill, extending right
-                        attachedTex:SetPoint("TOPLEFT", healthFillTexture, "TOPLEFT", 0, 0)
-                        attachedTex:SetPoint("BOTTOMLEFT", healthFillTexture, "BOTTOMLEFT", 0, 0)
+                        attachedTex:SetPoint("TOPLEFT", healthFillTexture, "TOPLEFT", 0, -edgeInset)
+                        attachedTex:SetPoint("BOTTOMLEFT", healthFillTexture, "BOTTOMLEFT", 0, edgeInset)
                         attachedTex:SetWidth(healAbsorbWidth)
                         attachedTex:SetTexCoord(1 - texEnd, 1 - texStart, 0, 1)
                     elseif healthOrient == "VERTICAL" then
                         -- Heal absorb at top edge of health fill, extending down
-                        attachedTex:SetPoint("TOPLEFT", healthFillTexture, "TOPLEFT", 0, 0)
-                        attachedTex:SetPoint("TOPRIGHT", healthFillTexture, "TOPRIGHT", 0, 0)
+                        attachedTex:SetPoint("TOPLEFT", healthFillTexture, "TOPLEFT", edgeInset, 0)
+                        attachedTex:SetPoint("TOPRIGHT", healthFillTexture, "TOPRIGHT", -edgeInset, 0)
                         attachedTex:SetHeight(healAbsorbHeight)
                         attachedTex:SetTexCoord(0, 1, 1 - texEnd, 1 - texStart)
                     elseif healthOrient == "VERTICAL_INV" then
                         -- Heal absorb at bottom edge of health fill, extending up
-                        attachedTex:SetPoint("BOTTOMLEFT", healthFillTexture, "BOTTOMLEFT", 0, 0)
-                        attachedTex:SetPoint("BOTTOMRIGHT", healthFillTexture, "BOTTOMRIGHT", 0, 0)
+                        attachedTex:SetPoint("BOTTOMLEFT", healthFillTexture, "BOTTOMLEFT", edgeInset, 0)
+                        attachedTex:SetPoint("BOTTOMRIGHT", healthFillTexture, "BOTTOMRIGHT", -edgeInset, 0)
                         attachedTex:SetHeight(healAbsorbHeight)
                         attachedTex:SetTexCoord(0, 1, texStart, texEnd)
                     end
@@ -3114,13 +3121,10 @@ function DF:UpdateTestHealAbsorb(frame, testData)
             local healthLevel = frame.healthBar:GetFrameLevel()
             customBar:SetFrameLevel(healthLevel + 2)
             
-            -- Inset by border size if frame border is enabled to avoid overlap
-            local inset = 0
-            if db.frameShowBorder ~= false then
-                inset = frame.dfReducedMaxHealthClipping and 0 or (db.frameBorderSize or 1)  -- 0 when clipped: the clip edge is internal, no frame border there
-            end
-            customBar:SetPoint("TOPLEFT", frame.healthBar, "TOPLEFT", inset, -inset)
-            customBar:SetPoint("BOTTOMRIGHT", frame.healthBar, "BOTTOMRIGHT", -inset, inset)
+            -- Cover the health fill: flush when opaque/off, inset when translucent.
+            local overlayInset = DF:GetAbsorbEdgeInset(frame, db)
+            customBar:SetPoint("TOPLEFT", frame.healthBar, "TOPLEFT", overlayInset, -overlayInset)
+            customBar:SetPoint("BOTTOMRIGHT", frame.healthBar, "BOTTOMRIGHT", -overlayInset, overlayInset)
             if customBar.bg then customBar.bg:Hide() end
             
             -- Match real code logic exactly - heal absorbs fill from low HP side
@@ -3279,6 +3283,7 @@ function DF:UpdateTestHealPrediction(frame, testData)
             if db.frameShowBorder ~= false then
                 inset = frame.dfReducedMaxHealthClipping and 0 or (db.frameBorderSize or 1)  -- 0 when clipped: the clip edge is internal, no frame border there
             end
+            if db.pixelPerfect and DF.PixelPerfect then inset = DF:PixelPerfect(inset) end
             
             local barWidth = frame.healthBar:GetWidth() - (inset * 2)
             local barHeight = frame.healthBar:GetHeight() - (inset * 2)
@@ -5799,15 +5804,19 @@ function DF:CreateTestPanel()
     -- ============================================================
     -- COLOUR CONSTANTS
     -- ============================================================
-    local C_PARTY    = {r = 0.45, g = 0.45, b = 0.95, a = 1}
-    local C_RAID     = {r = 1.0,  g = 0.5,  b = 0.2,  a = 1}
-    local C_BG       = {r = 0.08, g = 0.08, b = 0.08, a = 0.95}
-    local C_PANEL    = {r = 0.12, g = 0.12, b = 0.12, a = 1}
-    local C_ELEMENT  = {r = 0.18, g = 0.18, b = 0.18, a = 1}
-    local C_BORDER   = {r = 0.25, g = 0.25, b = 0.25, a = 1}
-    local C_HOVER    = {r = 0.22, g = 0.22, b = 0.22, a = 1}
-    local C_TEXT     = {r = 0.9,  g = 0.9,  b = 0.9,  a = 1}
-    local C_TEXT_DIM = {r = 0.6,  g = 0.6,  b = 0.6,  a = 1}
+    -- Neutral tones reuse the shared GUI palette (same numeric values, zero
+    -- visual change) so they track any future palette change in lockstep. The
+    -- mode accent stays driven by GetThemeColor() below (party/raid aware).
+    local GUIColors  = DF.GUI.Colors
+    local C_PARTY    = GUIColors.accent
+    local C_RAID     = GUIColors.raid
+    local C_BG       = GUIColors.background
+    local C_PANEL    = GUIColors.panel
+    local C_ELEMENT  = GUIColors.element
+    local C_BORDER   = GUIColors.border
+    local C_HOVER    = GUIColors.hover
+    local C_TEXT     = GUIColors.text
+    local C_TEXT_DIM = GUIColors.textDim
 
     local PANEL_WIDTH   = 320
     local CONTENT_WIDTH = PANEL_WIDTH - 24  -- 12px padding each side
@@ -5836,13 +5845,7 @@ function DF:CreateTestPanel()
     panel:RegisterForDrag("LeftButton")
     panel:SetScript("OnDragStart", panel.StartMoving)
     panel:SetScript("OnDragStop", panel.StopMovingOrSizing)
-    panel:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    panel:SetBackdropColor(C_BG.r, C_BG.g, C_BG.b, C_BG.a)
-    panel:SetBackdropBorderColor(0, 0, 0, 1)
+    DF.GUI:CreatePanelBackdrop(panel, { bgAlpha = C_BG.a, borderColor = { r = 0, g = 0, b = 0, a = 1 } })
     panel:Hide()
 
     local function ApplyScale(self)
@@ -5872,7 +5875,7 @@ function DF:CreateTestPanel()
     -- Title
     local title = panel:CreateFontString(nil, "OVERLAY", "DFFontNormal")
     title:SetPoint("TOPLEFT", 12, -10)
-    title:SetText("Test Mode")
+    title:SetText(L["Test Mode"])
     panel.title = title
 
     -- Mode badge
@@ -5886,33 +5889,15 @@ function DF:CreateTestPanel()
     })
     badge.text = badge:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     badge.text:SetPoint("CENTER", 0, 0)
-    badge.text:SetText("Party")
+    badge.text:SetText(L["Party"])
     panel.badge = badge
 
     -- Close button
-    local closeBtn = CreateFrame("Button", nil, panel, "BackdropTemplate")
-    closeBtn:SetSize(22, 22)
-    closeBtn:SetPoint("TOPRIGHT", -8, -6)
-    closeBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    local closeBtn = DF.GUI:CreateCloseButton(panel, {
+        size = 22,
+        onClick = function() panel:Hide() end,
     })
-    closeBtn:SetBackdropColor(1, 1, 1, 0.04)
-    closeBtn:SetBackdropBorderColor(0, 0, 0, 0)
-    closeBtn.Text = closeBtn:CreateFontString(nil, "OVERLAY", "DFFontNormalLarge")
-    closeBtn.Text:SetPoint("CENTER", 0, 0)
-    closeBtn.Text:SetText("×")
-    closeBtn.Text:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    closeBtn:SetScript("OnClick", function() panel:Hide() end)
-    closeBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(0.85, 0.24, 0.24, 0.25)
-        self.Text:SetTextColor(0.9, 0.33, 0.33)
-    end)
-    closeBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(1, 1, 1, 0.04)
-        self.Text:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    end)
+    closeBtn:SetPoint("TOPRIGHT", -8, -6)
 
     -- Separator below header
     local headerSep = panel:CreateTexture(nil, "ARTWORK")
@@ -5926,15 +5911,15 @@ function DF:CreateTestPanel()
     -- ============================================================
     local toggleBtn = CreateFrame("Button", nil, panel, "BackdropTemplate")
     toggleBtn:SetPoint("TOPLEFT", 12, -38)
-    toggleBtn:SetSize(CONTENT_WIDTH, 30)
-    toggleBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    -- Full-width toggle. The active/inactive look (accent fill + "Disable Test
+    -- Mode" label when on) is driven by SetActive(testActive) in
+    -- UpdateStateInternal; here we just set the resting (inactive) label.
+    DF.GUI:StyleButton(toggleBtn, {
+        width = CONTENT_WIDTH,
+        height = 30,
+        font = "DFFontHighlight",
+        text = L["Enable Test Mode"],
     })
-    toggleBtn.Text = toggleBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlight")
-    toggleBtn.Text:SetPoint("CENTER")
-    toggleBtn.Text:SetText("Enable Test Mode")
     toggleBtn:SetScript("OnClick", function()
         DF:ToggleTestMode()
         panel:UpdateState()
@@ -5948,7 +5933,7 @@ function DF:CreateTestPanel()
     desc:SetJustifyH("LEFT")
     desc:SetSpacing(2)
     desc:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.8)
-    desc:SetText("Expand sections to toggle features. Click label text to jump to its settings page.")
+    desc:SetText(L["Expand sections to toggle features. Click label text to jump to its settings page."])
 
     -- ============================================================
     -- THEMED CHECKBOX HELPER
@@ -5957,25 +5942,12 @@ function DF:CreateTestPanel()
         local container = CreateFrame("Frame", nil, parent)
         container:SetSize(CONTENT_WIDTH / 2 - 4, 22)
 
-        -- Checkbox square
+        -- Checkbox square + check — uniform look via the shared styler, same as
+        -- every other checkbox (default 18/10 size; check square shows/hides).
         local box = CreateFrame("Button", nil, container, "BackdropTemplate")
-        box:SetSize(16, 16)
         box:SetPoint("LEFT", 0, 0)
-        box:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
-        })
-        box:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-        box:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.7)
+        local mark = DF.GUI:StyleCheckButton(box, { manualCheck = true })
         container.box = box
-
-        -- Checkmark texture (solid square, same pattern as GUI:CreateCheckbox)
-        local mark = box:CreateTexture(nil, "OVERLAY")
-        mark:SetTexture("Interface\\Buttons\\WHITE8x8")
-        mark:SetPoint("CENTER")
-        mark:SetSize(10, 10)
-        mark:Hide()
         container.mark = mark
 
         -- State
@@ -5984,21 +5956,34 @@ function DF:CreateTestPanel()
 
         container.SetChecked = function(self, val)
             self.checked = val and true or false
-            if self.checked then
-                local c = GetThemeColor()
-                self.mark:SetVertexColor(c.r, c.g, c.b)
-                self.mark:Show()
-                self.box:SetBackdropBorderColor(c.r, c.g, c.b, 0.5)
-                self.box:SetBackdropColor(c.r * 0.15, c.g * 0.15, c.b * 0.15, 1)
-            else
-                self.mark:Hide()
-                self.box:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.7)
-                self.box:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-            end
+            -- Recolour the check to the current (raid/party-aware) theme each time
+            -- the panel refreshes, same as every other themed widget here.
+            local c = GetThemeColor()
+            if self.box.ApplyThemeColor then self.box.ApplyThemeColor(c) end
+            self.mark:SetShown(self.checked)
         end
 
         container.GetChecked = function(self)
             return self.checked
+        end
+
+        -- Grey-out-in-place support for sub-toggles whose parent boolean is off.
+        -- Disabled: visible but non-interactive (label dimmed, box + container
+        -- mouse blocked). Re-applied on every panel refresh and on the parent
+        -- toggle. dfDisabled gates the box OnClick so a stray click can't slip
+        -- through while greyed.
+        container.dfDisabled = false
+        container.SetEnabled = function(self, enabled)
+            self.dfDisabled = not enabled
+            self.box:EnableMouse(enabled)
+            self:EnableMouse(enabled)
+            if self.labelText then
+                if enabled then
+                    self.labelText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+                else
+                    self.labelText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+                end
+            end
         end
 
         -- Label
@@ -6018,14 +6003,12 @@ function DF:CreateTestPanel()
             labelBtn:SetScript("OnEnter", function(self)
                 labelText:SetTextColor(1, 0.82, 0)
                 arrow:SetTextColor(1, 0.82, 0)
-                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:SetText("Click to open settings", 1, 1, 1)
-                GameTooltip:Show()
+                DF.GUI:ShowTooltip(self, { title = L["Click to open settings"] })
             end)
             labelBtn:SetScript("OnLeave", function(self)
                 labelText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
                 arrow:SetTextColor(0.4, 0.4, 0.4, 0.6)
-                GameTooltip:Hide()
+                DF.GUI:HideTooltip()
             end)
             labelBtn:SetScript("OnClick", function()
                 if DF.GUI and DF.GUI.SelectTab then
@@ -6044,6 +6027,7 @@ function DF:CreateTestPanel()
 
         -- Click the box to toggle
         box:SetScript("OnClick", function()
+            if container.dfDisabled then return end
             container:SetChecked(not container.checked)
             local isRaidMode = DF.GUI and DF.GUI.SelectedMode == "raid"
             local db = isRaidMode and DF:GetRaidDB() or DF:GetDB()
@@ -6066,17 +6050,10 @@ function DF:CreateTestPanel()
         container:SetScript("OnMouseDown", function()
             box:GetScript("OnClick")(box)
         end)
-        container:SetScript("OnEnter", function()
-            box:SetBackdropBorderColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.8)
-        end)
-        container:SetScript("OnLeave", function()
-            if container.checked then
-                local c = GetThemeColor()
-                box:SetBackdropBorderColor(c.r, c.g, c.b, 0.5)
-            else
-                box:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.7)
-            end
-        end)
+        -- No row-level border hover: the box's own highlight wash (from the shared
+        -- styler) is the sole hover effect, matching every other checkbox. A row-
+        -- level border hover here would flash on/off as the cursor crossed from the
+        -- label onto the box (container OnLeave fires when entering the child box).
 
         return container
     end
@@ -6141,10 +6118,25 @@ function DF:CreateTestPanel()
         container.thumb = thumb
         container.UpdateFill = UpdateFill
 
+        container.dfDisabled = false
         container.UpdateTheme = function()
+            -- While greyed, keep the muted look rather than repainting to accent.
+            if container.dfDisabled then
+                thumb:SetColorTexture(0.4, 0.4, 0.4, 1)
+                fill:SetColorTexture(0.4, 0.4, 0.4, 0.5)
+                return
+            end
             local nc = GetThemeColor()
             thumb:SetColorTexture(nc.r, nc.g, nc.b, 1)
             fill:SetColorTexture(nc.r, nc.g, nc.b, 0.8)
+        end
+
+        -- Grey-out-in-place: disable the slider + mute the fill/thumb when the
+        -- parent boolean enable is off. Visible but non-interactive.
+        container.SetEnabled = function(self, enabled)
+            self.dfDisabled = not enabled
+            slider:EnableMouse(enabled)
+            self.UpdateTheme()
         end
 
         -- Forward slider API to container for convenience
@@ -6330,9 +6322,9 @@ function DF:CreateTestPanel()
     -- ============================================================
 
     -- --- GENERAL ---
-    local secGeneral = CreateSection(panel, "General", "general")
+    local secGeneral = CreateSection(panel, L["General"], "general")
 
-    panel.showPetsCheck = secGeneral:AddCheckbox("Show Pets", "testShowPets", function(enabled, isRaidMode)
+    panel.showPetsCheck = secGeneral:AddCheckbox(L["Show Pets"], "testShowPets", function(enabled, isRaidMode)
         if isRaidMode then
             if DF.raidTestMode then
                 if enabled then
@@ -6354,7 +6346,7 @@ function DF:CreateTestPanel()
         end
     end, "display_pets")
 
-    panel.animHealthCheck = secGeneral:AddCheckbox("Animate Health", "testAnimateHealth", function(enabled, isRaidMode)
+    panel.animHealthCheck = secGeneral:AddCheckbox(L["Animate Health"], "testAnimateHealth", function(enabled, isRaidMode)
         if isRaidMode then
             if DF.raidTestMode then
                 if enabled then DF:StartTestAnimation()
@@ -6379,7 +6371,7 @@ function DF:CreateTestPanel()
     fcRow:SetHeight(28)
     local fcLabel = fcRow:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     fcLabel:SetPoint("LEFT", 0, 0)
-    fcLabel:SetText("Frame Count")
+    fcLabel:SetText(L["Frame Count"])
     fcLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
     local fcValue = fcRow:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     fcValue:SetPoint("LEFT", fcLabel, "RIGHT", 6, 0)
@@ -6425,18 +6417,18 @@ function DF:CreateTestPanel()
     secGeneral:AddWidget(fcRow, 28)
 
     -- --- BARS & OVERLAYS ---
-    local secBars = CreateSection(panel, "Bars & Overlays", "bars")
-    panel.showAbsorbsCheck = secBars:AddCheckbox("Absorbs", "testShowAbsorbs", nil, "bars_absorb")
-    panel.showHealPredictCheck = secBars:AddCheckbox("Heal Prediction", "testShowHealPrediction", nil, "bars_healpred")
-    panel.showClassPowerCheck = secBars:AddCheckbox("Class Power", "testShowClassPower", function(enabled)
+    local secBars = CreateSection(panel, L["Bars & Overlays"], "bars")
+    panel.showAbsorbsCheck = secBars:AddCheckbox(L["Absorbs"], "testShowAbsorbs", nil, "bars_absorb")
+    panel.showHealPredictCheck = secBars:AddCheckbox(L["Heal Prediction"], "testShowHealPrediction", nil, "bars_healpred")
+    panel.showClassPowerCheck = secBars:AddCheckbox(L["Class Power"], "testShowClassPower", function(enabled)
         if enabled then
             if DF.UpdateAllTestClassPower then DF:UpdateAllTestClassPower() end
         else
             if DF.CleanupTestClassPower then DF:CleanupTestClassPower() end
         end
     end, "bars_classpower")
-    panel.showOutOfRangeCheck = secBars:AddCheckbox("Out of Range", "testShowOutOfRange", nil, "display_fading")
-    panel.showReducedMaxCheck = secBars:AddCheckbox("Reduced Max Health", "testShowReducedMaxHealth", nil, "bars_health")
+    panel.showOutOfRangeCheck = secBars:AddCheckbox(L["Out of Range"], "testShowOutOfRange", nil, "display_fading")
+    panel.showReducedMaxCheck = secBars:AddCheckbox(L["Reduced Max Health"], "testShowReducedMaxHealth", nil, "bars_health")
     -- Text Designer is alpha-gated; only offer the toggle when the module loaded.
     if DF.UpdateTextDesigner then
         -- Default ON: seed any profile that predates the Config default so the
@@ -6444,7 +6436,7 @@ function DF:CreateTestPanel()
         local pdb, rdb = DF:GetDB(), DF:GetRaidDB()
         if pdb and pdb.testShowTextDesigner == nil then pdb.testShowTextDesigner = true end
         if rdb and rdb.testShowTextDesigner == nil then rdb.testShowTextDesigner = true end
-        panel.showTextDesignerCheck = secBars:AddCheckbox("Text Designer", "testShowTextDesigner", function()
+        panel.showTextDesignerCheck = secBars:AddCheckbox(L["Text Designer"], "testShowTextDesigner", function()
             if DF.UpdateTextDesigner then
                 for i = 0, 4 do
                     local f = DF.testPartyFrames and DF.testPartyFrames[i]
@@ -6459,11 +6451,14 @@ function DF:CreateTestPanel()
     end
 
     -- --- AURAS ---
-    local secAuras = CreateSection(panel, "Auras", "auras")
-    panel.showAurasCheck = secAuras:AddCheckbox("Show Auras", "testShowAuras", function(enabled, isRaidMode)
+    local secAuras = CreateSection(panel, L["Auras"], "auras")
+    panel.showAurasCheck = secAuras:AddCheckbox(L["Show Auras"], "testShowAuras", function(enabled, isRaidMode)
         if enabled and not isRaidMode and DF.testMode then DF:RefreshTestFramesWithLayout() end
+        -- Buff/Debuff count sliders only matter while auras are shown; grey them
+        -- in place when Show Auras is off.
+        if panel.RefreshDependentEnabled then panel.RefreshDependentEnabled() end
     end, "auras_buffs")
-    panel.showBossDebuffsCheck = secAuras:AddCheckbox("Boss Debuffs", "testShowBossDebuffs", function(enabled, isRaidMode)
+    panel.showBossDebuffsCheck = secAuras:AddCheckbox(L["Boss Debuffs"], "testShowBossDebuffs", function(enabled, isRaidMode)
         if isRaidMode then
             if DF.raidTestMode then
                 for i = 1, 40 do
@@ -6486,13 +6481,13 @@ function DF:CreateTestPanel()
             end
         end
     end, "auras_bossdebuffs")
-    panel.showDispelGlowCheck = secAuras:AddCheckbox("Dispel Overlay", "testShowDispelGlow", function()
+    panel.showDispelGlowCheck = secAuras:AddCheckbox(L["Dispel Overlay"], "testShowDispelGlow", function()
         if DF.testMode or DF.raidTestMode then DF:UpdateAllTestDispelGlow() end
     end, "auras_dispel")
-    panel.showMissingBuffCheck = secAuras:AddCheckbox("Missing Buff", "testShowMissingBuff", function()
+    panel.showMissingBuffCheck = secAuras:AddCheckbox(L["Missing Buff"], "testShowMissingBuff", function()
         if DF.testMode or DF.raidTestMode then DF:UpdateAllTestMissingBuff() end
     end, "auras_missingbuffs")
-    panel.showADCheck = secAuras:AddCheckbox("Aura Designer", "testShowAuraDesigner", function(enabled)
+    panel.showADCheck = secAuras:AddCheckbox(L["Aura Designer"], "testShowAuraDesigner", function(enabled)
         if DF.testMode or DF.raidTestMode then DF:UpdateAllTestAuraDesigner() end
     end, "auras_auradesigner")
 
@@ -6502,7 +6497,7 @@ function DF:CreateTestPanel()
 
     local buffLabel = auraSliderRow:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     buffLabel:SetPoint("LEFT", 0, 0)
-    buffLabel:SetText("Buffs:")
+    buffLabel:SetText(L["Buffs:"])
     buffLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
 
     local buffSlider = CreateThemedSlider(auraSliderRow, 55, 0, 5, 1)
@@ -6514,7 +6509,7 @@ function DF:CreateTestPanel()
 
     local debuffLabel = auraSliderRow:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     debuffLabel:SetPoint("LEFT", buffValue, "RIGHT", 12, 0)
-    debuffLabel:SetText("Debuffs:")
+    debuffLabel:SetText(L["Debuffs:"])
     debuffLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
 
     local debuffSlider = CreateThemedSlider(auraSliderRow, 55, 0, 5, 1)
@@ -6573,44 +6568,70 @@ function DF:CreateTestPanel()
         elseif DF.testMode then DF:ThrottledUpdateAll() end
     end)
     panel.debuffSlider = debuffSlider
+    -- Stash the slider labels so RefreshDependentEnabled can dim them in step
+    -- with the sliders when Show Auras is off.
+    panel.buffSliderLabel = buffLabel
+    panel.debuffSliderLabel = debuffLabel
+
+    -- Grey the Buff/Debuff count sliders in place when "Show Auras" is off (their
+    -- only consumer). Disabled-in-place per the boolean-enable grey rule: visible
+    -- but non-interactive, with labels + value texts dimmed. Reads testShowAuras
+    -- from the currently active (raid/party) db so mode switches honour it.
+    panel.RefreshDependentEnabled = function()
+        local isRaidMode = DF.GUI and DF.GUI.SelectedMode == "raid"
+        local adb = isRaidMode and DF:GetRaidDB() or DF:GetDB()
+        local aurasOn = adb and adb.testShowAuras and true or false
+        if panel.buffSlider and panel.buffSlider.SetEnabled then
+            panel.buffSlider:SetEnabled(aurasOn)
+        end
+        if panel.debuffSlider and panel.debuffSlider.SetEnabled then
+            panel.debuffSlider:SetEnabled(aurasOn)
+        end
+        local lr, lg, lb = C_TEXT.r, C_TEXT.g, C_TEXT.b
+        if not aurasOn then lr, lg, lb = C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b end
+        if panel.buffSliderLabel then panel.buffSliderLabel:SetTextColor(lr, lg, lb) end
+        if panel.debuffSliderLabel then panel.debuffSliderLabel:SetTextColor(lr, lg, lb) end
+        if panel.buffValueText then panel.buffValueText:SetTextColor(lr, lg, lb) end
+        if panel.debuffValueText then panel.debuffValueText:SetTextColor(lr, lg, lb) end
+    end
 
     secAuras:AddWidget(auraSliderRow, 22)
 
     -- --- INDICATORS & ICONS ---
-    local secIndicators = CreateSection(panel, "Indicators & Icons", "indicators")
-    panel.showExternalDefCheck = secIndicators:AddCheckbox("Defensive Icon", "testShowExternalDef", function()
+    local secIndicators = CreateSection(panel, L["Indicators & Icons"], "indicators")
+    panel.showExternalDefCheck = secIndicators:AddCheckbox(L["Defensive Icon"], "testShowExternalDef", function()
         if DF.testMode or DF.raidTestMode then DF:UpdateAllTestDefensiveBar() end
     end, "auras_defensiveicon")
     -- "Targeted Spell" was the old group-frame icon display that
     -- Blizzard's 2026-04-07 hotfix killed. The checkbox slot is now
     -- repurposed for the Targeted List (alpha/beta-only feature).
-    panel.showTargetedListCheck = secIndicators:AddCheckbox("Targeted List", "testShowTargetedList", function()
+    panel.showTargetedListCheck = secIndicators:AddCheckbox(L["Targeted List"], "testShowTargetedList", function()
         if DF.testMode or DF.raidTestMode then DF:UpdateAllTestTargetedList() end
     end, "indicators_targetedlist")
-    panel.animTargetedListCheck = secIndicators:AddCheckbox("Animate Targeted List", "testAnimateTargetedList", function()
+    panel.animTargetedListCheck = secIndicators:AddCheckbox(L["Animate Targeted List"], "testAnimateTargetedList", function()
         if DF.testMode or DF.raidTestMode then DF:UpdateAllTestTargetedList() end
     end)
     -- The (new fingerprint) Targeted Spells icons + the Personal Targeted display.
     -- UpdateAllTestTargetedSpell drives BOTH previews, so both share it.
-    panel.showTargetedSpellCheck = secIndicators:AddCheckbox("Targeted Spells", "testShowTargetedSpell", function()
+    panel.showTargetedSpellCheck = secIndicators:AddCheckbox(L["Targeted Spells"], "testShowTargetedSpell", function()
         if DF.testMode or DF.raidTestMode then DF:UpdateAllTestTargetedSpell() end
-    end)
-    panel.showPersonalTargetedCheck = secIndicators:AddCheckbox("Personal Targeted", "testShowPersonalTargeted", function()
+    end, "indicators_targetedspells")
+    panel.showPersonalTargetedCheck = secIndicators:AddCheckbox(L["Personal Targeted"], "testShowPersonalTargeted", function()
         if DF.testMode or DF.raidTestMode then DF:UpdateAllTestTargetedSpell() end
-    end)
+    end, "indicators_personal_targeted")
     -- One unified "Icons" toggle for the whole status/role/leader icon set in test
     -- mode (was split into "Status / Ready" + "Role / Leader"). Keyed on
     -- testShowStatusIcons; the role/leader render gate reads the same key.
-    panel.showStatusIconsCheck = secIndicators:AddCheckbox("Icons", "testShowStatusIcons", function()
+    panel.showStatusIconsCheck = secIndicators:AddCheckbox(L["Icons"], "testShowStatusIcons", function()
         if DF.testMode or DF.raidTestMode then DF:RefreshTestFrames() end
     end, "indicators_icons")
 
     -- --- HIGHLIGHTS ---
-    local secHighlights = CreateSection(panel, "Highlights", "highlights")
-    panel.showSelectionCheck = secHighlights:AddCheckbox("Selection", "testShowSelection", function()
+    local secHighlights = CreateSection(panel, L["Highlights"], "highlights")
+    panel.showSelectionCheck = secHighlights:AddCheckbox(L["Selection"], "testShowSelection", function()
         if DF.UpdateAllTestHighlights then DF:UpdateAllTestHighlights() end
     end, "indicators_highlights")
-    panel.showAggroCheck = secHighlights:AddCheckbox("Aggro", "testShowAggro", function()
+    panel.showAggroCheck = secHighlights:AddCheckbox(L["Aggro"], "testShowAggro", function()
         if DF.UpdateAllTestHighlights then DF:UpdateAllTestHighlights() end
     end, "indicators_highlights")
 
@@ -6630,12 +6651,12 @@ function DF:CreateTestPanel()
 
     local presetLabel = presetsFooter:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     presetLabel:SetPoint("TOPLEFT", 12, -8)
-    presetLabel:SetText("QUICK PRESETS")
+    presetLabel:SetText(L["QUICK PRESETS"])
     presetLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.7)
     panel.presetLabel = presetLabel
 
     local presets = {"STATIC", "COMBAT", "HEALER", "FULL"}
-    local presetNames = {STATIC = "Static", COMBAT = "Combat", HEALER = "Healer", FULL = "Full"}
+    local presetNames = {STATIC = L["Static"], COMBAT = L["Combat"], HEALER = L["Healer"], FULL = L["Full"]}
     local btnSpacing = 4
     local btnCount = #presets
     local btnWidth = math.floor((CONTENT_WIDTH - (btnSpacing * (btnCount - 1))) / btnCount)
@@ -6643,36 +6664,15 @@ function DF:CreateTestPanel()
 
     for i, preset in ipairs(presets) do
         local btn = CreateFrame("Button", nil, presetsFooter, "BackdropTemplate")
-        btn:SetSize(btnWidth, 24)
         btn:SetPoint("TOPLEFT", 12 + (i - 1) * (btnWidth + btnSpacing), -26)
-        btn:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
-        })
-        btn:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-        btn:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-        btn.Text = btn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-        btn.Text:SetPoint("CENTER")
-        btn.Text:SetText(presetNames[preset])
+        -- Segmented quick-preset cell: one active at a time, driven by SetActive
+        -- in UpdateStateInternal (mirrors db.testPreset). OnClick applies the
+        -- preset and refreshes.
+        DF.GUI:StyleButton(btn, { width = btnWidth, height = 24, text = presetNames[preset] })
         btn.preset = preset
         btn:SetScript("OnClick", function(self)
             DF:ApplyTestPreset(self.preset)
             panel:UpdateState()
-        end)
-        btn:SetScript("OnEnter", function(self)
-            local themeColor = GetThemeColor()
-            self:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 0.7)
-        end)
-        btn:SetScript("OnLeave", function(self)
-            local isRaidMode = DF.GUI and DF.GUI.SelectedMode == "raid"
-            local db = isRaidMode and DF:GetRaidDB() or DF:GetDB()
-            local themeColor = GetThemeColor()
-            if self.preset == db.testPreset then
-                self:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
-            else
-                self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-            end
         end)
         panel.presetBtns[i] = btn
     end
@@ -6704,27 +6704,25 @@ function DF:CreateTestPanel()
         local testActive = IsTestActive()
 
         -- Title
-        self.title:SetText("Test Mode")
+        self.title:SetText(L["Test Mode"])
         self.title:SetTextColor(themeColor.r, themeColor.g, themeColor.b)
 
         -- Badge
-        local badgeLabel = isRaidMode and "Raid" or "Party"
+        local badgeLabel = isRaidMode and L["Raid"] or L["Party"]
         self.badge.text:SetText(badgeLabel)
         self.badge:SetSize(self.badge.text:GetStringWidth() + 14, 18)
         self.badge:SetBackdropColor(themeColor.r * 0.15, themeColor.g * 0.15, themeColor.b * 0.15, 1)
         self.badge:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 0.3)
         self.badge.text:SetTextColor(themeColor.r, themeColor.g, themeColor.b)
 
-        -- Toggle button
+        -- Toggle button: SetActive drives the accent fill/border when test is on;
+        -- we set the label + (active) accent text colour to match.
+        self.toggleBtn:SetActive(testActive)
         if testActive then
-            self.toggleBtn:SetBackdropColor(themeColor.r * 0.3, themeColor.g * 0.3, themeColor.b * 0.3, 1)
-            self.toggleBtn:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
-            self.toggleBtn.Text:SetText("Disable Test Mode")
+            self.toggleBtn.Text:SetText(L["Disable Test Mode"])
             self.toggleBtn.Text:SetTextColor(themeColor.r, themeColor.g, themeColor.b)
         else
-            self.toggleBtn:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-            self.toggleBtn:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-            self.toggleBtn.Text:SetText("Enable Test Mode")
+            self.toggleBtn.Text:SetText(L["Enable Test Mode"])
             self.toggleBtn.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
         end
 
@@ -6773,6 +6771,11 @@ function DF:CreateTestPanel()
         self.debuffValueText:SetText(debuffCount)
         if self.debuffSlider.UpdateTheme then self.debuffSlider:UpdateTheme() end
 
+        -- Grey the Buff/Debuff sliders when Show Auras is off (boolean-enable grey
+        -- rule). Runs AFTER the value/UpdateTheme set above so the disabled muted
+        -- look wins; re-applied here so mode switches + panel opens honour it.
+        if self.RefreshDependentEnabled then self.RefreshDependentEnabled() end
+
         -- Restore section collapsed states from DB and update badges
         local savedSections = DF.db and DF.db.testPanelSections
         for _, sec in ipairs(allSections) do
@@ -6782,15 +6785,14 @@ function DF:CreateTestPanel()
             sec:UpdateBadge()
         end
 
-        -- Preset buttons
+        -- Preset buttons: SetActive on the one matching db.testPreset (accent
+        -- fill + border via the shared toggle look); accent the active label.
         for _, btn in ipairs(self.presetBtns) do
-            if btn.preset == db.testPreset then
-                btn:SetBackdropColor(themeColor.r * 0.3, themeColor.g * 0.3, themeColor.b * 0.3, 1)
-                btn:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
+            local isActive = btn.preset == db.testPreset
+            btn:SetActive(isActive)
+            if isActive then
                 btn.Text:SetTextColor(themeColor.r, themeColor.g, themeColor.b)
             else
-                btn:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-                btn:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
                 btn.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
             end
         end

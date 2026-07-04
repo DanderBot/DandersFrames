@@ -16,6 +16,28 @@ DF.VERSION = GetAddOnMetadata(addonName, "Version") or "Unknown"
 DF.L = LibStub("AceLocale-3.0"):GetLocale("DandersFrames")
 local L = DF.L
 
+-- ============================================================
+-- LOCALE REFRESH REGISTRY
+-- Some modules build label/option tables at file scope, which reads
+-- L["..."] before the languageOverride overlay is applied at
+-- ADDON_LOADED (see the overlay in the ADDON_LOADED handler below).
+-- Those file-scope reads would otherwise freeze on the enUS baseline.
+-- A module registers a rebuild fn here; Core re-runs them all once,
+-- right after the overlay, so the tables pick up the active locale.
+-- ============================================================
+DF._localeRefreshers = DF._localeRefreshers or {}
+function DF:RegisterLocaleRefresh(fn)
+    DF._localeRefreshers[#DF._localeRefreshers + 1] = fn
+end
+function DF:RunLocaleRefreshers()
+    for i = 1, #DF._localeRefreshers do
+        local ok, err = pcall(DF._localeRefreshers[i])
+        if not ok and DF.DebugError then
+            DF:DebugError("LocaleRefresh failed: " .. tostring(err))
+        end
+    end
+end
+
 -- Locale warnings: silent by default (see Locales/enUS.lua for rationale).
 -- Call DF:SetLocaleWarnings(true) — or use /df localewarn — to enable
 -- error-handler warnings on missing L["..."] keys for the current session.
@@ -1537,7 +1559,19 @@ function DF:LightweightUpdateFrameLevel(elementType)
     local mode = DF.GUI and DF.GUI.SelectedMode or "party"
     local db = DF.db[mode]
     if not db then return end
-    
+
+    -- Status icons whose full-render frame level (ApplyIconSettings) is
+    -- (parent-of-parent level + value); mirror that here so the Frame Level
+    -- slider previews live, matching Scale/Alpha. Keyed elementType -> frame field.
+    local SIMPLE_LEVEL_ICONS = {
+        resurrection = "resurrectionIcon",
+        phased       = "phasedIcon",
+        afk          = "afkIcon",
+        vehicle      = "vehicleIcon",
+        raidRole     = "raidRoleIcon",
+        summon       = "summonIcon",
+    }
+
     local function UpdateLevel(frame)
         if not frame then return end
         
@@ -1599,6 +1633,16 @@ function DF:LightweightUpdateFrameLevel(elementType)
                 frame.centerStatusIcon:SetFrameLevel(frameBaseLevel + level)
             else
                 frame.centerStatusIcon:SetFrameLevel(baseLevel + 5)
+            end
+        else
+            -- resurrection / phased / afk / vehicle / raidRole / summon icons
+            local field = SIMPLE_LEVEL_ICONS[elementType]
+            local icon = field and frame[field]
+            if icon then
+                local level = db[field .. "FrameLevel"] or 0
+                if level > 0 then
+                    icon:SetFrameLevel(icon:GetParent():GetParent():GetFrameLevel() + level)
+                end
             end
         end
     end
@@ -1833,6 +1877,12 @@ function DF:MigratePinnedMatchMode()
                         -- a value still at the old hard default (1.0) is treated as
                         -- "inherit" (cleared); a changed value is kept as override.
                         if set.scale == 1.0 then set.scale = nil end
+                        -- Spacing inherits the Based-on mode's frameSpacing unless
+                        -- overridden: the old hard default was 2, so a value still
+                        -- at 2 is treated as "inherit" (cleared); a non-2 value is
+                        -- kept as a deliberate override.
+                        if set.horizontalSpacing == 2 then set.horizontalSpacing = nil end
+                        if set.verticalSpacing == 2 then set.verticalSpacing = nil end
                         -- growDirection is a plain pinned-only setting; an earlier
                         -- build briefly cleared its HORIZONTAL default to nil, so
                         -- restore a concrete value for the dropdown.
@@ -3502,6 +3552,63 @@ function DF:MigrateBorderInsetFold()
     end
 end
 
+-- One-time cleanup: the legacy raidGroupOrder ("NORMAL"/"REVERSE") toggle is
+-- deprecated -- group order now comes solely from the Group Display Order /
+-- My Group First feature (raidGroupDisplayOrder), which every positioner honours.
+-- The live header path never applied raidGroupOrder, but the test/legacy Lua
+-- positioner did, so a stale "REVERSE" made test/legacy disagree with live. The
+-- reverse code is gone; NORMAL-ize any lingering value so it can't mislead
+-- exports/debug. Per-profile guarded; idempotent. (Re-reverse via Group Display Order.)
+function DF:MigrateDeprecateRaidGroupOrder()
+    if not DandersFramesDB_v2 or not DandersFramesDB_v2.profiles then return end
+    for _, profile in pairs(DandersFramesDB_v2.profiles) do
+        if type(profile) == "table" and not profile._raidGroupOrderRetiredV1 then
+            if type(profile.party) == "table" and profile.party.raidGroupOrder == "REVERSE" then
+                profile.party.raidGroupOrder = "NORMAL"
+            end
+            if type(profile.raid) == "table" and profile.raid.raidGroupOrder == "REVERSE" then
+                profile.raid.raidGroupOrder = "NORMAL"
+            end
+            profile._raidGroupOrderRetiredV1 = true
+        end
+    end
+end
+
+-- Transition shim (unreleased-only): an earlier iteration of the priority flip
+-- converted values to the new higher-wins scale and then stamped a COARSE flag —
+-- profile-level for Aura Designer, store-level for Click Casting. The replacement
+-- lazy migrations (DF.MigrateAuraDesignerPrioritiesLazy / CC:MigratePrioritiesLazy)
+-- key off a FINER flag (per resolved adDB table / per CC profile). Forward the
+-- coarse flags to the fine ones WITHOUT touching any value, so data already
+-- converted by the old pass is never double-flipped. Purely additive + idempotent
+-- (only sets flags); a no-op for anyone who never ran the old pass. Auto-layout
+-- overlays are intentionally left unstamped — the old pass never converted them,
+-- so the lazy migration must still flip those on first resolve.
+function DF:ForwardPriorityMigrationFlags()
+    local function stamp(adDB) if type(adDB) == "table" then adDB._priorityHigherWinsV1 = true end end
+    if DandersFramesDB_v2 and DandersFramesDB_v2.profiles then
+        for _, profile in pairs(DandersFramesDB_v2.profiles) do
+            if type(profile) == "table" and profile._priorityHigherWinsV1 then
+                if type(profile.party) == "table" then stamp(profile.party.auraDesigner) end
+                if type(profile.raid) == "table" then stamp(profile.raid.auraDesigner) end
+                if type(profile.auraDesignerPresets) == "table" then
+                    for _, presetCfg in pairs(profile.auraDesignerPresets) do stamp(presetCfg) end
+                end
+            end
+        end
+    end
+    local ccdb = DandersFramesClickCastingDB
+    if ccdb and ccdb._priorityHigherWinsV1 and type(ccdb.classes) == "table" then
+        for _, classData in pairs(ccdb.classes) do
+            if type(classData) == "table" and type(classData.profiles) == "table" then
+                for _, profile in pairs(classData.profiles) do
+                    if type(profile) == "table" then profile._priorityHigherWinsV1 = true end
+                end
+            end
+        end
+    end
+end
+
 -- One-time: carry the old bespoke important-spell highlight settings
 -- (targetedSpellHighlightStyle/Color/Size/Inset) into the new Important Spell
 -- Border key set (targetedSpellImportantBorder*), which is a second DF.Border
@@ -3675,6 +3782,10 @@ DF._MainEventDispatcher = function(self, event, arg1)
             DF_AllLocales = nil
         end
 
+        -- Rebuild any file-scope label tables now that the locale
+        -- overlay has been applied (see DF:RegisterLocaleRefresh above).
+        DF:RunLocaleRefreshers()
+
         -- Seed per-character profile from account-wide on first login for this character
         if not DandersFramesCharDB.currentProfile then
             DandersFramesCharDB.currentProfile = DandersFramesDB_v2.currentProfile
@@ -3710,7 +3821,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 partyEnabled = true,
                 raidEnabled = true,
                 settingsFont = "Friz Quadrata TT",
-                settingsFontOutline = "",
+                settingsFontOutline = "NONE",
             }
         end
         
@@ -3799,7 +3910,9 @@ DF._MainEventDispatcher = function(self, event, arg1)
 
         -- Ensure settings-panel font defaults exist
         if DF.db.settingsFont        == nil then DF.db.settingsFont        = "Friz Quadrata TT" end
-        if DF.db.settingsFontOutline == nil then DF.db.settingsFontOutline = "" end
+        -- Outline "None" is stored canonically as "NONE" everywhere; normalise the
+        -- legacy empty-string the old hand-rolled settings dropdown wrote.
+        if DF.db.settingsFontOutline == nil or DF.db.settingsFontOutline == "" then DF.db.settingsFontOutline = "NONE" end
 
         -- Ensure top-level font preferences exist (SDF rendering toggle from PR #115)
         if DF.db.fontSlug == nil then DF.db.fontSlug = false end
@@ -3856,7 +3969,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
 
                 -- Ensure settings-panel font defaults exist on every profile
                 if profile.settingsFont        == nil then profile.settingsFont        = "Friz Quadrata TT" end
-                if profile.settingsFontOutline == nil then profile.settingsFontOutline = "" end
+                if profile.settingsFontOutline == nil or profile.settingsFontOutline == "" then profile.settingsFontOutline = "NONE" end
 
                 -- Backfill missing auraDesigner.defaults keys.
                 -- The top-level migration (pairs(PartyDefaults) above) skips auraDesigner
@@ -4319,12 +4432,21 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- AuraDesigner/Options.lua; load order guarantees that file
         -- has registered DF.MigrateAuraDesignerIconBorderKeys by here.
         if DF.MigrateAuraDesignerIconBorderKeys then
-            DF:MigrateAuraDesignerIconBorderKeys(DF.db.party)
-            DF:MigrateAuraDesignerIconBorderKeys(DF.db.raid)
+            DF.MigrateAuraDesignerIconBorderKeys(DF.db.party)
+            DF.MigrateAuraDesignerIconBorderKeys(DF.db.raid)
+            -- Designer Presets relocated AD configs onto the profile root; walk
+            -- those too (the mode-DB calls above miss preset-nested border blocks,
+            -- which left imported legacy borders rendering via the old `style` path).
+            if DF.MigrateAuraDesignerPresetBorderKeys then
+                DF.MigrateAuraDesignerPresetBorderKeys(DF.db)
+            end
             if DandersFramesDB_v2 and DandersFramesDB_v2.profiles then
                 for _, profile in pairs(DandersFramesDB_v2.profiles) do
-                    DF:MigrateAuraDesignerIconBorderKeys(profile.party)
-                    DF:MigrateAuraDesignerIconBorderKeys(profile.raid)
+                    DF.MigrateAuraDesignerIconBorderKeys(profile.party)
+                    DF.MigrateAuraDesignerIconBorderKeys(profile.raid)
+                    if DF.MigrateAuraDesignerPresetBorderKeys then
+                        DF.MigrateAuraDesignerPresetBorderKeys(profile)
+                    end
                 end
             end
         end
@@ -4693,7 +4815,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
             DF.DebugConsole:Init()
         end
 
-        print("|cff00ff00DandersFrames|r " .. format(L["v%s loaded. Type %s/df%s for settings, %s/df resetgui%s if window is offscreen."], DF.VERSION, "|cffeda55f", "|r", "|cffeda55f", "|r"))
+        print("|cff00ff00DandersFrames|r " .. format(L["v%s loaded. Type %s/df%s for settings, %s/df resetgui%s if window is offscreen."], (DF.VERSION:gsub("^[vV]", "")), "|cffeda55f", "|r", "|cffeda55f", "|r"))
 
         -- ============================================================
         -- CRITICAL: Initialize frames HERE at ADDON_LOADED
@@ -4762,42 +4884,17 @@ DF._MainEventDispatcher = function(self, event, arg1)
             -- Theme color for popup
             local themeColor = { r = 0.2, g = 0.8, b = 0.2 }
             
-            -- Helper function to create styled buttons
+            -- Helper function to create styled buttons (routed through GUI:StyleButton)
             local function CreatePopupButton(parent, text, yOffset, isPrimary)
                 local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
-                btn:SetSize(220, 32)
-                btn:SetPoint("TOP", parent.warning, "BOTTOM", 0, yOffset)
-                btn:SetBackdrop({
-                    bgFile = "Interface\\Buttons\\WHITE8x8",
-                    edgeFile = "Interface\\Buttons\\WHITE8x8",
-                    edgeSize = 1,
-                })
-                
                 if isPrimary then
-                    btn:SetBackdropColor(themeColor.r * 0.3, themeColor.g * 0.3, themeColor.b * 0.3, 1)
-                    btn:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
+                    DF.GUI:StyleButton(btn, { width = 220, height = 32, text = text, primary = true })
                 else
-                    btn:SetBackdropColor(0.15, 0.15, 0.15, 1)
-                    btn:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
+                    DF.GUI:StyleButton(btn, { width = 220, height = 32, text = text })
                 end
-                
-                local btnText = btn:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-                btnText:SetPoint("CENTER")
-                btnText:SetText(text)
-                btnText:SetTextColor(1, 1, 1)
-                btn.label = btnText
-                
-                btn:SetScript("OnEnter", function(self)
-                    self:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
-                end)
-                btn:SetScript("OnLeave", function(self)
-                    if isPrimary then
-                        self:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
-                    else
-                        self:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
-                    end
-                end)
-                
+                btn:SetPoint("TOP", parent.warning, "BOTTOM", 0, yOffset)
+                btn.label = btn.Text
+
                 return btn
             end
             
@@ -4936,7 +5033,15 @@ DF._MainEventDispatcher = function(self, event, arg1)
             elseif msg == "lock" then
                 if DF.LockFrames then DF:LockFrames() end
             elseif msg == "raidunlock" or msg == "unlockraid" then
-                if DF.UnlockRaidFrames then DF:UnlockRaidFrames() end
+                -- While an auto layout is active, base-position unlock is blocked
+                -- (matches the disabled toolbar button) — point users to the active
+                -- layout's own Unlock button so they don't move the base by accident.
+                if DF.AutoProfilesUI and DF.AutoProfilesUI.IsLayoutActive and DF.AutoProfilesUI:IsLayoutActive() then
+                    local name = DF.AutoProfilesUI.GetActiveLayoutName and DF.AutoProfilesUI:GetActiveLayoutName()
+                    print("|cffff9900DandersFrames:|r " .. string.format(L["Auto layout \"%s\" is active. Unlock it from the Auto Layouts page to move its frames."], name or "?"))
+                elseif DF.UnlockRaidFrames then
+                    DF:UnlockRaidFrames()
+                end
             elseif msg == "raidlock" or msg == "lockraid" then
                 if DF.LockRaidFrames then DF:LockRaidFrames() end
             elseif msg == "reset" then
@@ -5313,6 +5418,11 @@ DF._MainEventDispatcher = function(self, event, arg1)
             if DF.MigrateTextDesignerFromLegacy then
                 DF:MigrateTextDesignerFromLegacy()
             end
+            -- One-time cleanup of stray health text the pre-fix migration injected
+            -- onto profiles that had health text off (idempotent, self-guarded).
+            if DF.CorrectStrayMigratedHealthText then
+                DF:CorrectStrayMigratedHealthText()
+            end
 
             -- Strip orphaned legacy text overrides from raid auto-layouts now that
             -- TD owns the built-in text (gated on migratedFromLegacy inside).
@@ -5332,6 +5442,21 @@ DF._MainEventDispatcher = function(self, event, arg1)
             -- (Text Designer now renders all text). Per-profile guarded.
             if DF.MigrateOORTextAlpha then
                 DF:MigrateOORTextAlpha()
+            end
+
+            -- Retire the deprecated raidGroupOrder reverse toggle (NORMAL-ize any
+            -- stale "REVERSE"); group order now comes from Group Display Order.
+            if DF.MigrateDeprecateRaidGroupOrder then
+                DF:MigrateDeprecateRaidGroupOrder()
+            end
+
+            -- Priority higher-wins flip is now lazy/at-point-of-use — see
+            -- DF.MigrateAuraDesignerPrioritiesLazy and CC:MigratePrioritiesLazy.
+            -- Only forward the old coarse migration flags to the new fine-grained
+            -- ones here (never flips a value), so data an earlier pass already
+            -- converted is not double-flipped.
+            if DF.ForwardPriorityMigrationFlags then
+                DF:ForwardPriorityMigrationFlags()
             end
 
             -- CRITICAL: Update power bars now that unit data is available

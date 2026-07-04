@@ -1493,9 +1493,15 @@ function Border:Apply(border, spec)
         for _, e in ipairs(edges) do if e then e:Hide() end end
         if not border.bd then
             border.bd = CreateFrame("Frame", nil, border, "BackdropTemplate")
-            border.bd:SetAllPoints(border)
         end
         local bd = border.bd
+        -- Re-anchor with the inset offsets on every Apply so texture borders honour
+        -- BorderInset and update live, matching the solid/gradient edges above.
+        -- (Previously SetAllPoints(border) once at creation: inset was ignored and
+        -- never updated.) inset == 0 reproduces the old flush layout exactly.
+        bd:ClearAllPoints()
+        bd:SetPoint("TOPLEFT", border, "TOPLEFT", inset, -inset)
+        bd:SetPoint("BOTTOMRIGHT", border, "BOTTOMRIGHT", -inset, inset)
         -- Thickness 0 = no border: hide the backdrop instead of clamping the
         -- edge to 1px (parity with the solid/gradient path above). The
         -- animation overlay is a separate frame and keeps running.

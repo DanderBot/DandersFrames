@@ -78,9 +78,9 @@ end
 -- ============================================================
 -- Uses the new 12.0.5 StatusBar:SetValue interpolation when smoothBars is enabled
 
-local function SetBarValue(bar, value, frame)
+local function SetBarValue(bar, value, frame, smoothOverride)
     if not bar or not bar.SetValue then return end
-    
+
     -- Get the appropriate db for this frame
     local db
     if frame and frame.isRaidFrame then
@@ -88,7 +88,14 @@ local function SetBarValue(bar, value, frame)
     else
         db = DF.GetDB and DF:GetDB()
     end
-    local smoothEnabled = db and db.smoothBars
+    -- smoothOverride lets a specific bar gate on its own key (e.g. resourceBarSmooth)
+    -- instead of the global health-bar smoothBars toggle.
+    local smoothEnabled
+    if smoothOverride ~= nil then
+        smoothEnabled = smoothOverride
+    else
+        smoothEnabled = db and db.smoothBars
+    end
     
     if smoothEnabled and Enum and Enum.StatusBarInterpolation and Enum.StatusBarInterpolation.ExponentialEaseOut then
         bar:SetValue(value, Enum.StatusBarInterpolation.ExponentialEaseOut)

@@ -8,6 +8,8 @@
 local Search = {}
 DF.Search = Search
 
+local L = DF.L
+
 -- ============================================================
 -- UI CONSTANTS (match GUI styling)
 -- ============================================================
@@ -19,6 +21,11 @@ local C_RAID       = {r = 1.0, g = 0.4, b = 0.2, a = 1}
 local C_HOVER      = {r = 0.25, g = 0.25, b = 0.25, a = 1}
 
 local function GetThemeColor()
+    -- Follow the active mode theme (party purple / raid orange) so the search box
+    -- focus highlight + results header match the rest of the GUI. Search's blue
+    -- C_ACCENT stays only on the deliberate blue-identity controls (slider thumbs,
+    -- dropdowns, breadcrumb) that pass it directly.
+    if DF.GUI and DF.GUI.GetThemeColor then return DF.GUI.GetThemeColor() end
     if DF.GUI and DF.GUI.SelectedMode == "raid" then return C_RAID else return C_ACCENT end
 end
 
@@ -532,7 +539,7 @@ function Search:CreateInlineCheckbox(parent, entry)
         
         local note = container:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
         note:SetPoint("LEFT", text, "RIGHT", 10, 0)
-        note:SetText("|cff888888(click header to edit)|r")
+        note:SetText("|cff888888" .. L["(click header to edit)"] .. "|r")
         
         return container
     end
@@ -540,19 +547,9 @@ function Search:CreateInlineCheckbox(parent, entry)
     local db = DF.db[DF.GUI.SelectedMode]
     local dbKey = entry.dbKey
     
-    local cb = CreateFrame("CheckButton", nil, container)
-    cb:SetSize(20, 20)
+    local cb = CreateFrame("CheckButton", nil, container, "BackdropTemplate")
     cb:SetPoint("LEFT", 0, 0)
-    CreateBackdrop(cb)
-    cb:SetBackdropColor(0, 0, 0, 0.5)
-    
-    cb.Check = cb:CreateTexture(nil, "OVERLAY")
-    cb.Check:SetTexture("Interface\\Buttons\\WHITE8x8")
-    local c = GetThemeColor()
-    cb.Check:SetVertexColor(c.r, c.g, c.b)
-    cb.Check:SetPoint("CENTER")
-    cb.Check:SetSize(12, 12)
-    cb:SetCheckedTexture(cb.Check)
+    DF.GUI:StyleCheckButton(cb, { size = 20, checkSize = 12, themeRoot = container })
     
     local text = container:CreateFontString(nil, "OVERLAY", "DFFontHighlight")
     text:SetPoint("LEFT", cb, "RIGHT", 8, 0)
@@ -570,105 +567,20 @@ function Search:CreateInlineCheckbox(parent, entry)
 end
 
 function Search:CreateInlineSlider(parent, entry)
+    -- Delegate to the shared slider builder so the inline search editor stays in
+    -- sync with the canonical slider (drag/throttle/profile-override behaviour).
+    -- db[dbKey] maps directly onto CreateSlider's dbTable/dbKey get/set, and
+    -- entry.callback onto its callback. C_ACCENT pins the intentional blue thumb/
+    -- fill so this drifted Search surface does NOT track the mode theme.
     local db = DF.db[DF.GUI.SelectedMode]
-    local dbKey = entry.dbKey
     local minVal = entry.minVal or 0
     local maxVal = entry.maxVal or 100
     local step = entry.step or 1
-    
-    local container = CreateFrame("Frame", nil, parent)
-    container:SetSize(340, 50)
-    
-    local lbl = container:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    lbl:SetPoint("TOPLEFT", 0, 0)
-    lbl:SetText(entry.label)
-    
-    local slider = CreateFrame("Slider", nil, container, "BackdropTemplate")
-    slider:SetPoint("TOPLEFT", 0, -18)
-    slider:SetSize(250, 6)
-    CreateBackdrop(slider)
-    slider:SetBackdropColor(0, 0, 0, 0.8)
-    slider:SetOrientation("HORIZONTAL")
-    slider:SetMinMaxValues(minVal, maxVal)
-    slider:SetValueStep(step)
-    slider:SetObeyStepOnDrag(true)
-    
-    local thumb = slider:CreateTexture(nil, "ARTWORK")
-    thumb:SetSize(8, 14)
-    local c = GetThemeColor()
-    thumb:SetColorTexture(c.r, c.g, c.b, 1)
-    slider:SetThumbTexture(thumb)
-    
-    local input = CreateFrame("EditBox", nil, container)
-    input:SetPoint("LEFT", slider, "RIGHT", 10, 0)
-    input:SetSize(45, 20)
-    CreateBackdrop(input)
-    input:SetBackdropColor(0, 0, 0, 0.5)
-    input:SetFontObject(DFFontHighlightSmall)
-    input:SetJustifyH("CENTER")
-    input:SetAutoFocus(false)
-    input:SetTextInsets(2, 2, 0, 0)
-    
-    local currentVal = db[dbKey] or minVal
-    slider:SetValue(currentVal)
-    if step < 1 then
-        input:SetText(string.format("%.2f", currentVal))
-    else
-        input:SetText(string.format("%d", currentVal))
-    end
-    
-    local suppressCallback = false
-    
-    -- Track drag state - no lightweight function for search sliders
-    local isDragging = false
-    slider:SetScript("OnMouseDown", function(self, button)
-        if button == "LeftButton" then
-            isDragging = true
-            DF:OnSliderDragStart(nil)
-        end
-    end)
-    slider:SetScript("OnMouseUp", function(self, button)
-        if button == "LeftButton" and isDragging then
-            isDragging = false
-            DF:OnSliderDragStop()
-        end
-    end)
-    
-    slider:SetScript("OnValueChanged", function(self, value)
-        if suppressCallback then return end
-        if step >= 1 then value = math.floor(value + 0.5) end
-        db[dbKey] = value
-        if not input:HasFocus() then
-            if step < 1 then
-                input:SetText(string.format("%.2f", value))
-            else
-                input:SetText(string.format("%d", value))
-            end
-        end
-        if entry.callback then entry.callback() end
-        DF:ThrottledUpdateAll()
-    end)
 
-    input:SetScript("OnEnterPressed", function(self)
-        local val = tonumber(self:GetText())
-        if val then
-            if val < minVal then val = minVal end
-            if val > maxVal then val = maxVal end
-            db[dbKey] = val
-            suppressCallback = true
-            slider:SetValue(val)
-            suppressCallback = false
-        end
-        self:ClearFocus()
-        if entry.callback then entry.callback() end
-        DF:UpdateAll()
-    end)
-    
-    input:SetScript("OnEscapePressed", function(self)
-        self:ClearFocus()
-    end)
-    
-    return container
+    -- Returns CreateSlider's container Frame (exposes .slider). The caller only
+    -- repositions it via :SetPoint, so the Frame return shape is preserved.
+    return DF.GUI:CreateSlider(parent, entry.label, minVal, maxVal, step,
+        db, entry.dbKey, entry.callback, nil, nil, nil, nil, C_ACCENT)
 end
 
 function Search:CreateInlineColorPicker(parent, entry)
@@ -754,103 +666,26 @@ function Search:CreateInlineColorPicker(parent, entry)
 end
 
 function Search:CreateInlineDropdown(parent, entry)
+    -- Delegate to the shared dropdown builder so the inline search editor stays in
+    -- sync with the canonical dropdown (menu/option-order/profile-override
+    -- behaviour). db[dbKey] maps directly onto CreateDropdown's dbTable/dbKey
+    -- get/set, and entry.callback onto its callback. entry.values is the same
+    -- keyed value->display table (with optional _order) that was registered, so
+    -- it passes straight through as the builder's options arg. opts.inline gives
+    -- the compact label-less opener; opts.accent pins the intentional blue so this
+    -- drifted Search surface does NOT track the mode theme.
     local db = DF.db[DF.GUI.SelectedMode]
-    local dbKey = entry.dbKey
     local values = entry.values or {}
-    
-    local container = CreateFrame("Frame", nil, parent)
-    container:SetSize(340, 55)
-    
-    local lbl = container:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    lbl:SetPoint("TOPLEFT", 0, 0)
-    lbl:SetText(entry.label)
-    
-    local btn = CreateFrame("Button", nil, container)
-    btn:SetPoint("TOPLEFT", 0, -15)
-    btn:SetSize(200, 24)
-    CreateBackdrop(btn)
-    btn:SetBackdropColor(0.1, 0.1, 0.1, 1)
-    
-    local btnText = btn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    btnText:SetPoint("LEFT", 8, 0)
-    btnText:SetText(values[db[dbKey]] or "Select...")
-    
-    local arrow = btn:CreateTexture(nil, "OVERLAY")
-    arrow:SetPoint("RIGHT", -8, 0)
-    arrow:SetSize(12, 12)
-    arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
-    arrow:SetVertexColor(0.7, 0.7, 0.7)
-    
-    local list = CreateFrame("Frame", nil, btn)
-    list:SetPoint("TOPLEFT", btn, "BOTTOMLEFT", 0, -2)
-    list:SetWidth(200)
-    CreateBackdrop(list)
-    list:SetBackdropColor(0.1, 0.1, 0.1, 1)
-    list:Hide()
-    list:SetFrameStrata("TOOLTIP")
-    
-    local function Select(key, display)
-        db[dbKey] = key
-        btnText:SetText(display)
-        list:Hide()
-        if entry.callback then entry.callback() end
-        DF:UpdateAll()
-    end
-    
-    local keys = {}
-    for k, v in pairs(values) do
-        -- Skip _order key and any non-string values (like tables)
-        if k ~= "_order" and type(v) == "string" then
-            table.insert(keys, k)
-        end
-    end
-    table.sort(keys, function(a, b)
-        return (values[a] or "") < (values[b] or "")
-    end)
-    
-    local yOff, count = -4, 0
-    for _, k in ipairs(keys) do
-        local v = values[k]
-        local opt = CreateFrame("Button", nil, list)
-        opt:SetHeight(20)
-        opt:SetPoint("TOPLEFT", 4, yOff)
-        opt:SetPoint("TOPRIGHT", -4, yOff)
-        
-        local t = opt:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-        t:SetPoint("LEFT", 4, 0)
-        t:SetText(v)
-        
-        opt:SetScript("OnEnter", function()
-            t:SetTextColor(GetThemeColor().r, GetThemeColor().g, GetThemeColor().b)
-        end)
-        opt:SetScript("OnLeave", function()
-            t:SetTextColor(1, 1, 1)
-        end)
-        opt:SetScript("OnClick", function()
-            Select(k, v)
-        end)
-        
-        yOff = yOff - 20
-        count = count + 1
-    end
-    list:SetHeight((count * 20) + 8)
-    
-    btn:SetScript("OnClick", function()
-        if list:IsShown() then
-            list:Hide()
-        else
-            list:Show()
-        end
-    end)
-    
-    btn:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
-    end)
-    btn:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(0.1, 0.1, 0.1, 1)
-    end)
-    
-    return container
+
+    -- Returns CreateDropdown's container Frame (exposes :UpdateText / :SetEnabled /
+    -- :RebuildOptions). The caller only repositions it via :SetPoint, so the Frame
+    -- return shape is preserved.
+    -- NOT inline: inline mode hides the dropdown's own label, but this is a
+    -- labeled setting in the search results, so keep the label (matches the
+    -- slider/checkbox search widgets). Keep the blue Search accent.
+    return DF.GUI:CreateDropdown(parent, entry.label, values,
+        db, entry.dbKey, entry.callback, nil, nil,
+        { accent = C_ACCENT })
 end
 
 -- ============================================================
@@ -868,45 +703,32 @@ function Search:CreateResultWidget(parent, entry, index)
     local tabDisplay = entry.tabLabel or entry.tab or "Unknown"
     local sectionDisplay = entry.section or ""
     
-    -- Create breadcrumb as a styled clickable button
-    local breadcrumb = CreateFrame("Button", nil, widget)
+    -- Create breadcrumb as a styled clickable button (shared GUI chrome, Search blue accent)
+    local breadcrumb = CreateFrame("Button", nil, widget, "BackdropTemplate")
     breadcrumb:SetPoint("TOPLEFT", 8, -5)
-    breadcrumb:SetHeight(18)
-    
-    -- Add button background
-    CreateBackdrop(breadcrumb)
-    breadcrumb:SetBackdropColor(0.2, 0.2, 0.2, 0.8)
-    breadcrumb:SetBackdropBorderColor(0.35, 0.35, 0.35, 1)
-    
-    local breadcrumbText = breadcrumb:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    breadcrumbText:SetPoint("LEFT", 8, 0)
-    
+
     local fullPath = tabDisplay .. (sectionDisplay ~= "" and ("  >  " .. sectionDisplay) or "")
-    breadcrumbText:SetText(fullPath)
-    breadcrumbText:SetTextColor(0.7, 0.7, 0.7)
-    
+    DF.GUI:StyleButton(breadcrumb, {
+        height = 18,
+        text = fullPath,
+        accent = C_ACCENT,
+        align = "left",
+        leftPad = 8,
+    })
+    local breadcrumbText = breadcrumb.Text
+
     -- Size the button to fit the text with padding
     local textWidth = breadcrumbText:GetStringWidth()
     breadcrumb:SetWidth(textWidth + 24)
-    
-    -- Hover effect - highlight the whole button
-    breadcrumb:SetScript("OnEnter", function(self)
-        local c = GetThemeColor()
-        self:SetBackdropColor(c.r * 0.4, c.g * 0.4, c.b * 0.4, 0.9)
-        self:SetBackdropBorderColor(c.r, c.g, c.b, 1)
-        breadcrumbText:SetTextColor(1, 1, 1)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText("Go to " .. tabDisplay, 1, 1, 1)
-        GameTooltip:Show()
+
+    -- Tooltip on hover (the accent wash/border hover is handled by StyleButton)
+    breadcrumb:HookScript("OnEnter", function(self)
+        DF.GUI:ShowTooltip(self, { title = string.format(L["Go to %s"], tabDisplay) })
     end)
-    
-    breadcrumb:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(0.2, 0.2, 0.2, 0.8)
-        self:SetBackdropBorderColor(0.35, 0.35, 0.35, 1)
-        breadcrumbText:SetTextColor(0.7, 0.7, 0.7)
-        GameTooltip:Hide()
+    breadcrumb:HookScript("OnLeave", function()
+        DF.GUI:HideTooltip()
     end)
-    
+
     -- Click to navigate
     breadcrumb:SetScript("OnClick", function()
         Search:NavigateToTab(entry.tab, entry.section)
@@ -1008,12 +830,12 @@ function Search:CreateSearchBar(parent)
     
     local icon = frame:CreateTexture(nil, "OVERLAY")
     icon:SetPoint("LEFT", 6, 0)
-    icon:SetSize(12, 12)
+    icon:SetSize(15, 15)
     icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\search")
-    icon:SetVertexColor(0.6, 0.6, 0.6)
-    
+    icon:SetVertexColor(0.72, 0.72, 0.72)
+
     local editbox = CreateFrame("EditBox", nil, frame)
-    editbox:SetPoint("LEFT", 22, 0)
+    editbox:SetPoint("LEFT", 26, 0)
     editbox:SetPoint("RIGHT", -24, 0)
     editbox:SetHeight(20)
     editbox:SetFontObject(DFFontHighlightSmall)
@@ -1021,8 +843,8 @@ function Search:CreateSearchBar(parent)
     editbox:SetTextInsets(2, 2, 0, 0)
     
     local placeholder = frame:CreateFontString(nil, "OVERLAY", "DFFontDisableSmall")
-    placeholder:SetPoint("LEFT", 24, 0)
-    placeholder:SetText("Search...")
+    placeholder:SetPoint("LEFT", 26, 0)
+    placeholder:SetText(L["Search..."])
     placeholder:SetTextColor(0.5, 0.5, 0.5)
     
     local clearBtn = CreateFrame("Button", nil, frame)
@@ -1109,7 +931,7 @@ function Search:CreateResultsPanel(parent)
     
     local header = panel:CreateFontString(nil, "OVERLAY", "DFFontNormalLarge")
     header:SetPoint("TOPLEFT", 15, -15)
-    header:SetText("Search Results")
+    header:SetText(L["Search Results"])
     local c = GetThemeColor()
     header:SetTextColor(c.r, c.g, c.b)
     panel.header = header
@@ -1121,7 +943,7 @@ function Search:CreateResultsPanel(parent)
     
     local noResults = panel:CreateFontString(nil, "OVERLAY", "DFFontHighlight")
     noResults:SetPoint("CENTER", panel, "CENTER", 0, 0)
-    noResults:SetText("No settings found.\nTry different keywords.")
+    noResults:SetText(L["No settings found.\nTry different keywords."])
     noResults:SetTextColor(0.5, 0.5, 0.5)
     noResults:Hide()
     panel.noResults = noResults
@@ -1168,7 +990,7 @@ function Search:ShowResults(query)
         panel.scroll:Hide()
     else
         panel.noResults:Hide()
-        panel.countText:SetText("(" .. #results .. " found)")
+        panel.countText:SetText(string.format(L["(%d found)"], #results))
         panel.scroll:Show()
         
         local yOffset = 0
@@ -1197,7 +1019,7 @@ function Search:HideResults()
         self.ResultsPanel:Hide()
         -- Reset the no results text in case it was changed to combat message
         if self.ResultsPanel.noResults then
-            self.ResultsPanel.noResults:SetText("No results found")
+            self.ResultsPanel.noResults:SetText(L["No results found"])
         end
     end
     
@@ -1222,7 +1044,7 @@ function Search:ShowCombatMessage()
     panel.resultWidgets = {}
     
     -- Show combat message instead of "No results"
-    panel.noResults:SetText("Search unavailable during combat")
+    panel.noResults:SetText(L["Search unavailable during combat"])
     panel.noResults:Show()
     panel.countText:SetText("")
     panel.scroll:Hide()
@@ -1239,7 +1061,7 @@ end
 
 function Search:ResetNoResultsText()
     if self.ResultsPanel and self.ResultsPanel.noResults then
-        self.ResultsPanel.noResults:SetText("No results found")
+        self.ResultsPanel.noResults:SetText(L["No results found"])
     end
 end
 

@@ -1221,7 +1221,11 @@ function CC:GetBindingKeyText(binding, includeCombatState)
     
     -- Add combat state indicator if requested
     if includeCombatState then
-        local combatSetting = binding.combat or "always"
+        -- Fall back to legacy loadCombat for freshly-added bindings (pre profile-load migration)
+        local combatSetting = binding.combat
+            or (binding.loadCombat == "combat" and "incombat")
+            or (binding.loadCombat == "nocombat" and "outofcombat")
+            or "always"
         if combatSetting == "incombat" then
             result = result .. " [C]"
         elseif combatSetting == "outofcombat" then
@@ -2258,7 +2262,7 @@ function CC:BuildCombinedMacroForBindings(bindings, forGlobalBinding)
     
     -- Sort each category by priority
     local function sortByPriority(a, b)
-        return (a.priority or 5) < (b.priority or 5)
+        return (a.priority or 5) > (b.priority or 5)  -- higher number = higher priority
     end
     table.sort(friendly, sortByPriority)
     table.sort(hostile, sortByPriority)
@@ -3059,7 +3063,7 @@ end
 function CC:FindBestKnownSpellBinding(bindings)
     -- Sort by priority first
     table.sort(bindings, function(a, b)
-        return (a.binding.priority or 5) < (b.binding.priority or 5)
+        return (a.binding.priority or 5) > (b.binding.priority or 5)  -- higher number = higher priority
     end)
     
     for _, item in ipairs(bindings) do

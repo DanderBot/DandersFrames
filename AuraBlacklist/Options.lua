@@ -32,11 +32,6 @@ function DF.BuildAuraBlacklistPage(guiRef, pageRef, dbRef)
     local page = pageRef
     local parent = page.child
 
-    -- ========== THEME ==========
-    local function GetThemeColor()
-        return GUI.GetThemeColor and GUI.GetThemeColor() or {r = 0.90, g = 0.55, b = 0.15}
-    end
-
     -- ========== STATE ==========
     local selectedClass = "AUTO"
 
@@ -88,26 +83,8 @@ function DF.BuildAuraBlacklistPage(guiRef, pageRef, dbRef)
 
     -- ========== MINI CHECKBOX HELPER ==========
     local function CreateMiniCheckbox(parentFrame, label, checked, onChange)
-        local tc = GetThemeColor()
-        local cb = CreateFrame("Button", nil, parentFrame)
-        cb:SetSize(12, 12)
-
-        -- Dark inset background
-        local bg = cb:CreateTexture(nil, "BACKGROUND")
-        bg:SetAllPoints()
-        bg:SetColorTexture(0.06, 0.06, 0.06, 1)
-
-        -- Subtle border
-        local border = cb:CreateTexture(nil, "BORDER")
-        border:SetPoint("TOPLEFT", -1, 1)
-        border:SetPoint("BOTTOMRIGHT", 1, -1)
-        border:SetColorTexture(0.30, 0.30, 0.30, 1)
-
-        -- Theme-colored fill when checked
-        local fill = cb:CreateTexture(nil, "ARTWORK")
-        fill:SetPoint("TOPLEFT", 2, -2)
-        fill:SetPoint("BOTTOMRIGHT", -2, 2)
-        fill:SetColorTexture(tc.r, tc.g, tc.b, 0.9)
+        local cb = CreateFrame("Button", nil, parentFrame, "BackdropTemplate")
+        local fill = GUI:StyleCheckButton(cb, { size = 12, checkSize = 8, manualCheck = true, themeRoot = parentFrame })
         fill:SetShown(checked)
 
         -- Label text (optional — column headers carry the meaning when omitted)
@@ -126,11 +103,9 @@ function DF.BuildAuraBlacklistPage(guiRef, pageRef, dbRef)
             onChange(newState)
         end)
         cb:SetScript("OnEnter", function()
-            border:SetColorTexture(tc.r * 0.6, tc.g * 0.6, tc.b * 0.6, 1)
             if text then text:SetTextColor(0.80, 0.80, 0.80) end
         end)
         cb:SetScript("OnLeave", function()
-            border:SetColorTexture(0.30, 0.30, 0.30, 1)
             if text then text:SetTextColor(0.55, 0.55, 0.55) end
         end)
 
@@ -140,7 +115,7 @@ function DF.BuildAuraBlacklistPage(guiRef, pageRef, dbRef)
 
     -- ========== SPELL ROW (unified list item) ==========
     local function CreateSpellRow(scrollContent, spell, index, rowHeight, blacklistKey, refreshFn)
-        local tc = GetThemeColor()
+        local tc = GUI.GetThemeColor()
         local bl = GetBlacklist()
         local entry = bl[blacklistKey] and bl[blacklistKey][spell.spellId]
         local isBlacklisted = entry ~= nil
@@ -197,13 +172,16 @@ function DF.BuildAuraBlacklistPage(guiRef, pageRef, dbRef)
             warnTex:SetAllPoints()
             warnTex:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\warning")
             warnIcon:SetScript("OnEnter", function(self)
-                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:SetText(L["Symbiotic Relationship"], 1, 0.82, 0)
-                GameTooltip:AddLine(L["Only the aura on the caster can be blacklisted. The aura on the target cannot be blacklisted due to Blizzard limitations."], 1, 1, 1, true)
-                GameTooltip:Show()
+                GUI:ShowTooltip(self, {
+                    title = L["Symbiotic Relationship"],
+                    tone = "warning",
+                    lines = {
+                        { text = L["Only the aura on the caster can be blacklisted. The aura on the target cannot be blacklisted due to Blizzard limitations."], color = { r = 1, g = 1, b = 1 } },
+                    },
+                })
             end)
             warnIcon:SetScript("OnLeave", function()
-                GameTooltip:Hide()
+                GUI:HideTooltip()
             end)
         end
 
@@ -282,7 +260,7 @@ function DF.BuildAuraBlacklistPage(guiRef, pageRef, dbRef)
             else
                 self:SetBackdropColor(0.08, 0.08, 0.08, 0.6)
             end
-            GameTooltip:Hide()
+            GUI:HideTooltip()
         end)
 
         return row
@@ -298,12 +276,20 @@ function DF.BuildAuraBlacklistPage(guiRef, pageRef, dbRef)
         container:SetSize(LIST_WIDTH, LIST_HEIGHT + 30)
         container:SetPoint("TOPLEFT", yAnchorFrame, "BOTTOMLEFT", 0, yOffset)
 
-        -- Header
-        local tc = GetThemeColor()
+        -- Header. Matches GUI:CreateHeader's theme behavior: color via the
+        -- theme color and register an UpdateTheme listener so it recolors when
+        -- the party/raid theme changes.
+        local tc = GUI.GetThemeColor()
         local header = container:CreateFontString(nil, "OVERLAY", "DFFontNormal")
         header:SetPoint("TOPLEFT", 0, 0)
         header:SetText(headerText)
         header:SetTextColor(tc.r, tc.g, tc.b)
+        header.UpdateTheme = function()
+            local nc = GUI.GetThemeColor()
+            header:SetTextColor(nc.r, nc.g, nc.b)
+        end
+        if not parent.ThemeListeners then parent.ThemeListeners = {} end
+        table.insert(parent.ThemeListeners, header)
 
         -- Blacklisted count (right-aligned next to header)
         local countText = container:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
@@ -328,13 +314,7 @@ function DF.BuildAuraBlacklistPage(guiRef, pageRef, dbRef)
         local listBg = CreateFrame("Frame", nil, container, "BackdropTemplate")
         listBg:SetPoint("TOPLEFT", 0, -18)
         listBg:SetSize(LIST_WIDTH, LIST_HEIGHT)
-        listBg:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
-        })
-        listBg:SetBackdropColor(0.06, 0.06, 0.06, 0.95)
-        listBg:SetBackdropBorderColor(0.20, 0.20, 0.20, 1)
+        GUI:CreatePanelBackdrop(listBg, {borderColor = {r = 0.20, g = 0.20, b = 0.20, a = 1}})
 
         -- Scroll frame
         local scrollFrame = CreateFrame("ScrollFrame", nil, listBg, "ScrollFrameTemplate")
@@ -407,7 +387,7 @@ function DF.BuildAuraBlacklistPage(guiRef, pageRef, dbRef)
 
     -- ========== CURATED LIST NOTICE ==========
     local noticeBanner = GUI:CreateInfoBanner(parent, {
-        tone = "warning",
+        tone = "info",
         text = L["This is a curated list selected by Blizzard. Additional spells cannot be added as these are the only spells Blizzard has allowed. If more are permitted in the future, they will be added to this list."],
     })
     noticeBanner:SetPoint("TOPLEFT", 10, -10)
@@ -424,137 +404,55 @@ function DF.BuildAuraBlacklistPage(guiRef, pageRef, dbRef)
     -- ========== CLASS DROPDOWN ==========
     -- Anchored to desc's BOTTOMLEFT (which itself trails noticeBanner) so this
     -- block shifts down when the banner wraps to multiple lines.
-    local dropdownContainer = CreateFrame("Frame", nil, parent)
+    --
+    -- The AUTO entry's display text reflects the player's detected class, so the
+    -- options table is rebuilt fresh each time the menu opens (opts.optionsFunc)
+    -- and whenever the page refreshes (page._updateDropdownText), keeping the
+    -- "Auto (CLASS)" label current. selectedClass is read/written via
+    -- customGet/customSet so the same upvalue + buff-widget refresh is preserved.
+    local function BuildClassOptions()
+        local opts = {
+            ["AUTO"] = { text = nil },  -- text filled below (dynamic)
+            _order = { "AUTO" },
+        }
+        local playerClass = GetPlayerClass()
+        local playerClassName = DF.AuraBlacklist and DF.AuraBlacklist.ClassNames
+            and DF.AuraBlacklist.ClassNames[playerClass] or playerClass
+        opts["AUTO"].text = format(L["Auto (%s)"], playerClassName or L["Unknown"])
+
+        if DF.AuraBlacklist and DF.AuraBlacklist.ClassOrder then
+            for _, classToken in ipairs(DF.AuraBlacklist.ClassOrder) do
+                local className = DF.AuraBlacklist.ClassNames
+                    and DF.AuraBlacklist.ClassNames[classToken] or classToken
+                opts[classToken] = { text = className }
+                tinsert(opts._order, classToken)
+            end
+        end
+        return opts
+    end
+
+    local dropdownContainer = GUI:CreateDropdown(
+        parent,
+        L["Class"],
+        BuildClassOptions(),
+        nil, nil,
+        nil,  -- callback (handled in customSet)
+        function() return selectedClass end,
+        function(value)
+            selectedClass = value
+            if page._buffWidget then page._buffWidget:Refresh() end
+        end,
+        { optionsFunc = BuildClassOptions }
+    )
     dropdownContainer:SetSize(280, 55)
     dropdownContainer:SetPoint("TOPLEFT", desc, "BOTTOMLEFT", 0, -10)
 
-    local classLabel = dropdownContainer:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    classLabel:SetPoint("TOPLEFT", 0, 0)
-    classLabel:SetText(L["Class"])
-    classLabel:SetTextColor(0.7, 0.7, 0.7)
-
-    -- Build dropdown items
-    local classOptions = {}
-    tinsert(classOptions, { value = "AUTO", text = L["Auto (detect class)"] })
-    if DF.AuraBlacklist and DF.AuraBlacklist.ClassOrder then
-        for _, classToken in ipairs(DF.AuraBlacklist.ClassOrder) do
-            local className = DF.AuraBlacklist.ClassNames and DF.AuraBlacklist.ClassNames[classToken] or classToken
-            tinsert(classOptions, { value = classToken, text = className })
-        end
+    -- External refresh hook: rebuild options (so AUTO shows the current class)
+    -- and resync the opener text. Matches the old _updateDropdownText contract.
+    page._updateDropdownText = function()
+        dropdownContainer:RebuildOptions(BuildClassOptions())
     end
-
-    local dropdownBtn = CreateFrame("Button", nil, dropdownContainer, "BackdropTemplate")
-    dropdownBtn:SetSize(200, 24)
-    dropdownBtn:SetPoint("TOPLEFT", 0, -16)
-    dropdownBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    dropdownBtn:SetBackdropColor(0.12, 0.12, 0.12, 0.95)
-    dropdownBtn:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
-
-    local dropdownText = dropdownBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    dropdownText:SetPoint("LEFT", 8, 0)
-    dropdownText:SetPoint("RIGHT", -20, 0)
-    dropdownText:SetJustifyH("LEFT")
-
-    -- Use the same chevron as every other DF dropdown (was a one-off yellow
-    -- sort arrow that looked out of place).
-    local dropdownArrow = dropdownBtn:CreateTexture(nil, "OVERLAY")
-    dropdownArrow:SetSize(12, 12)
-    dropdownArrow:SetPoint("RIGHT", -8, 0)
-    dropdownArrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
-    dropdownArrow:SetVertexColor(0.6, 0.6, 0.6)
-
-    -- Update dropdown display text
-    local function UpdateDropdownText()
-        for _, opt in ipairs(classOptions) do
-            if opt.value == selectedClass then
-                local displayText = opt.text
-                if selectedClass == "AUTO" then
-                    local playerClass = GetPlayerClass()
-                    local playerClassName = DF.AuraBlacklist and DF.AuraBlacklist.ClassNames and DF.AuraBlacklist.ClassNames[playerClass] or playerClass
-                    displayText = format(L["Auto (%s)"], playerClassName or L["Unknown"])
-                end
-                dropdownText:SetText(displayText)
-                return
-            end
-        end
-        dropdownText:SetText(L["Select Class"])
-    end
-
-    -- Dropdown menu (parented to UIParent so it renders above everything)
-    local dropdownMenu = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
-    dropdownMenu:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    dropdownMenu:SetBackdropColor(0.1, 0.1, 0.1, 0.98)
-    dropdownMenu:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
-    dropdownMenu:SetFrameStrata("FULLSCREEN_DIALOG")
-    dropdownMenu:SetPoint("TOPLEFT", dropdownBtn, "BOTTOMLEFT", 0, -2)
-    dropdownMenu:SetSize(200, #classOptions * 22 + 4)
-    dropdownMenu:Hide()
-
-    -- Click-outside overlay to close dropdown (#441)
-    local dropdownOverlay = CreateFrame("Button", nil, UIParent)
-    dropdownOverlay:SetAllPoints(UIParent)
-    dropdownOverlay:SetFrameStrata("FULLSCREEN")
-    dropdownOverlay:Hide()
-    dropdownOverlay:SetScript("OnClick", function()
-        dropdownMenu:Hide()
-        dropdownOverlay:Hide()
-    end)
-
-    for i, opt in ipairs(classOptions) do
-        local optBtn = CreateFrame("Button", nil, dropdownMenu)
-        optBtn:SetSize(196, 20)
-        optBtn:SetPoint("TOPLEFT", 2, -2 - (i - 1) * 22)
-
-        local optBg = optBtn:CreateTexture(nil, "BACKGROUND")
-        optBg:SetAllPoints()
-        optBg:SetColorTexture(0, 0, 0, 0)
-        optBtn._bg = optBg
-
-        local optText = optBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-        optText:SetPoint("LEFT", 8, 0)
-        optText:SetText(opt.text)
-
-        optBtn:SetScript("OnEnter", function()
-            optBg:SetColorTexture(0.2, 0.2, 0.2, 0.8)
-        end)
-        optBtn:SetScript("OnLeave", function()
-            optBg:SetColorTexture(0, 0, 0, 0)
-        end)
-        optBtn:SetScript("OnClick", function()
-            selectedClass = opt.value
-            UpdateDropdownText()
-            dropdownMenu:Hide()
-            dropdownOverlay:Hide()
-            if page._buffWidget then page._buffWidget:Refresh() end
-        end)
-    end
-
-    dropdownBtn:SetScript("OnClick", function()
-        if dropdownMenu:IsShown() then
-            dropdownMenu:Hide()
-            dropdownOverlay:Hide()
-        else
-            dropdownMenu:Show()
-            dropdownOverlay:Show()
-        end
-    end)
-    dropdownBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropBorderColor(0.5, 0.5, 0.5, 1)
-    end)
-    dropdownBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
-    end)
-
-    UpdateDropdownText()
-    page._updateDropdownText = UpdateDropdownText
+    page._updateDropdownText()
 
     -- ========== BUFF BLACKLIST WIDGET ==========
     local buffWidget = CreateSpellListWidget(

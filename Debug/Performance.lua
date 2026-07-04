@@ -174,7 +174,7 @@ function DF:StartPerformanceTracking(interval)
         Perf.cpuEnabled = false
         Perf.useNewAPI = false
         print("|cff00ff00DandersFrames:|r Performance tracking started (Memory only)")
-        print("|cffff9900Note:|r CPU profiling requires WoW 10.0+ or /console scriptProfile 1")
+        print("|cFFFF4444Note:|r CPU profiling requires WoW 10.0+ or /console scriptProfile 1")
     end
     
     -- Initial sample

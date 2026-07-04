@@ -301,6 +301,11 @@ local function ApplyHighlightStyle(ch, mode, thickness, inset, r, g, b, alpha, d
     local px = thickness * scale              -- desired thickness in pixels
     px = math.max(1, math.ceil(px - 0.01))    -- round up (with tiny epsilon for exact integers)
     thickness = px / scale
+    -- Snap the inset to whole screen pixels too, so the border edges land on the
+    -- physical grid (a fractional inset makes a 1px edge straddle two rows).
+    if inset and inset ~= 0 then
+        inset = math.floor(inset * scale + 0.5) / scale
+    end
     
     if mode == "NONE" then
         ch:Hide()
@@ -671,6 +676,14 @@ function DF:UpdateHighlights(frame, forceSelection, forceAggro)
             isAggro = status and status == 3
         else
             isAggro = status and status > 0
+        end
+        -- "Hide on Tanks": a tank holding aggro is expected, so the highlight is just
+        -- noise — suppress it for TANK-role units so healers only see when a DPS or
+        -- healer pulls aggro. Role-based, so it applies in role-assigned content
+        -- (dungeons/M+/raids) and no-ops where roles aren't set (UnitGroupRolesAssigned
+        -- returns "NONE").
+        if isAggro and db.aggroHideOnTanks and unit and UnitGroupRolesAssigned(unit) == "TANK" then
+            isAggro = false
         end
     end
 

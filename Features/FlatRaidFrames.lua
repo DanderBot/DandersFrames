@@ -1174,6 +1174,19 @@ function FlatRaidFrames:SetEnabled(enabled)
             end
         end
 
+        -- Group labels belong to grouped mode only. The same auto-layout grouped→flat
+        -- switch that can leave separated headers visible can also leave a stale group
+        -- label floating over the flat grid, so hide them here too.
+        if DF.raidGroupLabels then
+            for i = 1, 8 do
+                local label = DF.raidGroupLabels[i]
+                if label then
+                    label:Hide()
+                    if label.shadow then label.shadow:Hide() end
+                end
+            end
+        end
+
         -- When already visible, only refresh child sizes and isRaidFrame flag
         -- (skip the heavy Hide/Show + UpdateNameList cycle to avoid double-work
         -- since ApplyRaidFlatSorting will follow from ProcessRosterUpdate).

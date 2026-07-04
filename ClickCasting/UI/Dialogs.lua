@@ -21,16 +21,22 @@ local ImportPopupFrame = nil
 local pendingImportData = nil
 local pendingImportCallback = nil
 
--- Theme colors matching GUI/GUI.lua
+-- Theme colors matching GUI/GUI.lua. Neutrals that match GUI.Colors exactly are
+-- shared (same table references) so a palette change there flows through here too;
+-- accent points at the ClickCasting green (CC.ACCENT) rather than the party purple.
+-- The non-shared entries are intentionally distinct:
+--   * background uses a = 0.97 (popups sit slightly more opaque than the panels)
+--   * green/orange/red are popup-only status colours with no GUI.Colors equivalent.
+local GUIColors = DF.GUI.Colors
 local POPUP_COLORS = {
     background = {r = 0.08, g = 0.08, b = 0.08, a = 0.97},
-    panel = {r = 0.12, g = 0.12, b = 0.12, a = 1},
-    element = {r = 0.18, g = 0.18, b = 0.18, a = 1},
-    border = {r = 0.25, g = 0.25, b = 0.25, a = 1},
-    accent = {r = 0.45, g = 0.45, b = 0.95, a = 1},
-    hover = {r = 0.22, g = 0.22, b = 0.22, a = 1},
-    text = {r = 0.9, g = 0.9, b = 0.9, a = 1},
-    textDim = {r = 0.6, g = 0.6, b = 0.6, a = 1},
+    panel = GUIColors.panel,
+    element = GUIColors.element,
+    border = GUIColors.border,
+    accent = CC.ACCENT,
+    hover = GUIColors.hover,
+    text = GUIColors.text,
+    textDim = GUIColors.textDim,
     green = {r = 0.2, g = 0.9, b = 0.2},
     orange = {r = 1.0, g = 0.6, b = 0.1},
     red = {r = 0.9, g = 0.25, b = 0.25},
@@ -38,33 +44,15 @@ local POPUP_COLORS = {
 
 local function CreateStyledButton(parent, text, width, height)
     local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
-    btn:SetSize(width or 120, height or 28)
-    
-    if not btn.SetBackdrop then Mixin(btn, BackdropTemplateMixin) end
-    btn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    btn:SetBackdropColor(POPUP_COLORS.element.r, POPUP_COLORS.element.g, POPUP_COLORS.element.b, 1)
-    btn:SetBackdropBorderColor(POPUP_COLORS.border.r, POPUP_COLORS.border.g, POPUP_COLORS.border.b, 1)
-    
-    local label = btn:CreateFontString(nil, "OVERLAY", "DFFontNormal")
+    -- Shared button look; ClickCasting green accent on hover (matches its checkboxes).
+    DF.GUI:StyleButton(btn, { width = width or 120, height = height or 28, accent = CC.ACCENT })
+
+    local label = btn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     label:SetPoint("CENTER")
     label:SetText(text)
     label:SetTextColor(POPUP_COLORS.text.r, POPUP_COLORS.text.g, POPUP_COLORS.text.b)
     btn.label = label
-    
-    btn:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(POPUP_COLORS.hover.r, POPUP_COLORS.hover.g, POPUP_COLORS.hover.b, 1)
-        self:SetBackdropBorderColor(POPUP_COLORS.accent.r, POPUP_COLORS.accent.g, POPUP_COLORS.accent.b, 1)
-    end)
-    
-    btn:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(POPUP_COLORS.element.r, POPUP_COLORS.element.g, POPUP_COLORS.element.b, 1)
-        self:SetBackdropBorderColor(POPUP_COLORS.border.r, POPUP_COLORS.border.g, POPUP_COLORS.border.b, 1)
-    end)
-    
+
     return btn
 end
 
@@ -82,14 +70,10 @@ local function CreateImportPopup()
     frame:SetScript("OnDragStart", frame.StartMoving)
     frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
     
-    if not frame.SetBackdrop then Mixin(frame, BackdropTemplateMixin) end
-    frame:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 2,
-    })
+    -- Shared dialog-root chrome; restore the darker 0.08 background fill the
+    -- popups use (CreatePanelBackdrop's default is the lighter 0.12 panel).
+    DF.GUI:CreatePanelBackdrop(frame, { bgAlpha = POPUP_COLORS.background.a, borderColor = POPUP_COLORS.border })
     frame:SetBackdropColor(POPUP_COLORS.background.r, POPUP_COLORS.background.g, POPUP_COLORS.background.b, POPUP_COLORS.background.a)
-    frame:SetBackdropBorderColor(POPUP_COLORS.border.r, POPUP_COLORS.border.g, POPUP_COLORS.border.b, 1)
     frame:Hide()
     
     -- Title bar
@@ -110,58 +94,22 @@ local function CreateImportPopup()
     frame.title = title
     
     -- Close button
-    local closeBtn = CreateFrame("Button", nil, titleBar)
-    closeBtn:SetSize(20, 20)
-    closeBtn:SetPoint("RIGHT", -6, 0)
-    closeBtn:SetNormalFontObject("DFFontNormal")
-    
-    local closeTex = closeBtn:CreateTexture(nil, "ARTWORK")
-    closeTex:SetAllPoints()
-    closeTex:SetColorTexture(0.8, 0.2, 0.2, 0.8)
-    closeBtn.tex = closeTex
-    
-    local closeIcon = closeBtn:CreateTexture(nil, "OVERLAY")
-    closeIcon:SetPoint("CENTER", 0, 0)
-    closeIcon:SetSize(12, 12)
-    closeIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close")
-    closeIcon:SetVertexColor(1, 1, 1)
-    
-    closeBtn:SetScript("OnEnter", function(self) self.tex:SetColorTexture(1, 0.3, 0.3, 1) end)
-    closeBtn:SetScript("OnLeave", function(self) self.tex:SetColorTexture(0.8, 0.2, 0.2, 0.8) end)
-    closeBtn:SetScript("OnClick", function()
+    local closeBtn = DF.GUI:CreateCloseButton(titleBar, { onClick = function()
         if pendingImportCallback then
             pendingImportCallback("cancel")
         end
         frame:Hide()
-    end)
-    
-    -- Warning text panel
-    local warningPanel = CreateFrame("Frame", nil, frame, "BackdropTemplate")
+    end })
+    closeBtn:SetPoint("RIGHT", -6, 0)
+
+    -- Warning text panel (shared caution/warning banner; auto-resizes to its text).
+    -- frame.warning keeps a SetText interface (the banner exposes :SetText), so the
+    -- later PopulateImportPopup calls work unchanged.
+    local warningPanel = DF.GUI:CreateInfoBanner(frame, { tone = "caution" })
     warningPanel:SetPoint("TOPLEFT", titleBar, "BOTTOMLEFT", 10, -10)
     warningPanel:SetPoint("TOPRIGHT", titleBar, "BOTTOMRIGHT", -10, -10)
-    warningPanel:SetHeight(45)
-    if not warningPanel.SetBackdrop then Mixin(warningPanel, BackdropTemplateMixin) end
-    warningPanel:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    warningPanel:SetBackdropColor(0.3, 0.2, 0.1, 0.5)
-    warningPanel:SetBackdropBorderColor(0.6, 0.4, 0.1, 0.8)
-    
-    local warningIcon = warningPanel:CreateTexture(nil, "OVERLAY")
-    warningIcon:SetPoint("LEFT", 12, 0)
-    warningIcon:SetSize(20, 20)
-    warningIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\warning")
-    warningIcon:SetVertexColor(1, 0.8, 0.3)
-    
-    local warning = warningPanel:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    warning:SetPoint("LEFT", warningIcon, "RIGHT", 8, 0)
-    warning:SetPoint("RIGHT", -12, 0)
-    warning:SetJustifyH("LEFT")
-    warning:SetTextColor(1, 0.8, 0.3)
-    frame.warning = warning
-    
+    frame.warning = warningPanel
+
     -- Content area
     local contentArea = CreateFrame("Frame", nil, frame)
     contentArea:SetPoint("TOPLEFT", warningPanel, "BOTTOMLEFT", 0, -10)
@@ -172,14 +120,10 @@ local function CreateImportPopup()
     local validPanel = CreateFrame("Frame", nil, contentArea, "BackdropTemplate")
     validPanel:SetPoint("TOPLEFT", 0, 0)
     validPanel:SetSize(240, 200)
-    if not validPanel.SetBackdrop then Mixin(validPanel, BackdropTemplateMixin) end
-    validPanel:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(validPanel, {
+        bgColor = POPUP_COLORS.panel,
+        borderColor = {POPUP_COLORS.green.r * 0.5, POPUP_COLORS.green.g * 0.5, POPUP_COLORS.green.b * 0.5, 1},
     })
-    validPanel:SetBackdropColor(POPUP_COLORS.panel.r, POPUP_COLORS.panel.g, POPUP_COLORS.panel.b, 1)
-    validPanel:SetBackdropBorderColor(POPUP_COLORS.green.r * 0.5, POPUP_COLORS.green.g * 0.5, POPUP_COLORS.green.b * 0.5, 1)
     
     local validIcon = validPanel:CreateTexture(nil, "OVERLAY")
     validIcon:SetPoint("TOPLEFT", 10, -8)
@@ -207,14 +151,10 @@ local function CreateImportPopup()
     local invalidPanel = CreateFrame("Frame", nil, contentArea, "BackdropTemplate")
     invalidPanel:SetPoint("TOPRIGHT", 0, 0)
     invalidPanel:SetSize(240, 200)
-    if not invalidPanel.SetBackdrop then Mixin(invalidPanel, BackdropTemplateMixin) end
-    invalidPanel:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(invalidPanel, {
+        bgColor = POPUP_COLORS.panel,
+        borderColor = {POPUP_COLORS.red.r * 0.5, POPUP_COLORS.red.g * 0.5, POPUP_COLORS.red.b * 0.5, 1},
     })
-    invalidPanel:SetBackdropColor(POPUP_COLORS.panel.r, POPUP_COLORS.panel.g, POPUP_COLORS.panel.b, 1)
-    invalidPanel:SetBackdropBorderColor(POPUP_COLORS.red.r * 0.5, POPUP_COLORS.red.g * 0.5, POPUP_COLORS.red.b * 0.5, 1)
     
     local invalidIcon = invalidPanel:CreateTexture(nil, "OVERLAY")
     invalidIcon:SetPoint("TOPLEFT", 10, -8)
@@ -251,14 +191,9 @@ local function CreateImportPopup()
     summaryPanel:SetPoint("TOPLEFT", legend, "BOTTOMLEFT", 0, -8)
     summaryPanel:SetPoint("TOPRIGHT", contentArea, "BOTTOMRIGHT", 0, -8)
     summaryPanel:SetHeight(50)
-    if not summaryPanel.SetBackdrop then Mixin(summaryPanel, BackdropTemplateMixin) end
-    summaryPanel:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(summaryPanel, {
+        bgColor = {POPUP_COLORS.element.r, POPUP_COLORS.element.g, POPUP_COLORS.element.b, 0.5},
     })
-    summaryPanel:SetBackdropColor(POPUP_COLORS.element.r, POPUP_COLORS.element.g, POPUP_COLORS.element.b, 0.5)
-    summaryPanel:SetBackdropBorderColor(POPUP_COLORS.border.r, POPUP_COLORS.border.g, POPUP_COLORS.border.b, 1)
     
     local summary = summaryPanel:CreateFontString(nil, "OVERLAY", "DFFontNormal")
     summary:SetPoint("CENTER")
@@ -313,20 +248,20 @@ end
 local function GetBindingDisplayText(binding)
     -- Display names for mouse buttons
     local MOUSE_BUTTON_NAMES = {
-        LeftButton = "Left Click",
-        RightButton = "Right Click",
-        MiddleButton = "Middle Click",
-        Button4 = "Mouse 4",
-        Button5 = "Mouse 5",
-        Button6 = "Mouse 6",
-        Button7 = "Mouse 7",
-        Button8 = "Mouse 8",
+        LeftButton = L["Left Click"],
+        RightButton = L["Right Click"],
+        MiddleButton = L["Middle Click"],
+        Button4 = L["Mouse 4"],
+        Button5 = L["Mouse 5"],
+        Button6 = L["Mouse 6"],
+        Button7 = L["Mouse 7"],
+        Button8 = L["Mouse 8"],
     }
-    
+
     -- Display names for scroll
     local SCROLL_NAMES = {
-        SCROLLUP = "Scroll Up",
-        SCROLLDOWN = "Scroll Down",
+        SCROLLUP = L["Scroll Up"],
+        SCROLLDOWN = L["Scroll Down"],
     }
     
     -- Determine the key/button display text based on binding type
@@ -370,21 +305,21 @@ local function GetBindingDisplayText(binding)
     
     local actionText = ""
     if binding.actionType == "spell" then
-        actionText = binding.spellName or "Unknown Spell"
+        actionText = binding.spellName or L["Unknown Spell"]
     elseif binding.actionType == "macro" then
-        actionText = "Macro: " .. (binding.macroName or "Custom")
+        actionText = L["Macro: "] .. (binding.macroName or L["Custom"])
     elseif binding.actionType == "target" then
-        actionText = "Target"
+        actionText = L["Target"]
     elseif binding.actionType == "focus" then
-        actionText = "Focus"
+        actionText = L["Focus"]
     elseif binding.actionType == "follow" then
-        actionText = "Follow"
+        actionText = L["Follow"]
     elseif binding.actionType == "assist" then
-        actionText = "Assist"
+        actionText = L["Assist"]
     elseif binding.actionType == "menu" then
-        actionText = "Menu"
+        actionText = L["Menu"]
     else
-        actionText = binding.actionType or "Unknown"
+        actionText = binding.actionType or L["Unknown"]
     end
     
     return keyCombo .. " = " .. actionText
@@ -506,7 +441,7 @@ end
 -- Import profile from string
 function CC:ImportProfile(importString, newProfileName)
     if not importString or importString == "" then
-        return false, "Empty import string"
+        return false, L["Empty import string"]
     end
     
     local data
@@ -520,16 +455,16 @@ function CC:ImportProfile(importString, newProfileName)
         local payload = string.sub(importString, 6)
         data = self:DeserializeStringLegacy(payload)
     else
-        return false, "Invalid format (expected !DFC1! or DF01: header)"
+        return false, L["Invalid format (expected !DFC1! or DF01: header)"]
     end
     
     if not data then
-        return false, "Failed to decode import data"
+        return false, L["Failed to decode import data"]
     end
     
     -- Validate
     if not data.profile then
-        return false, "Invalid profile data"
+        return false, L["Invalid profile data"]
     end
     
     -- Analyze bindings for compatibility
@@ -576,7 +511,7 @@ function CC:ImportProfile(importString, newProfileName)
         -- Set callback
         pendingImportCallback = function(choice)
             if choice == "cancel" then
-                print("|cffff9900DandersFrames:|r Import cancelled")
+                print("|cffff9900DandersFrames:|r " .. L["Import cancelled"])
                 pendingImportData = nil
                 return
             end
@@ -654,9 +589,9 @@ function CC:DoImportProfile(data, bindings, newProfileName, importedInvalid)
     
     -- Print result
     local bindingCount = #bindings
-    print("|cff33cc33DandersFrames:|r Imported profile: " .. profileName .. " (" .. bindingCount .. " bindings)")
+    print("|cff33cc33DandersFrames:|r " .. format(L["Imported profile: %s"], profileName) .. " (" .. bindingCount .. " bindings)")
     if importedInvalid then
-        print("|cffff9900DandersFrames:|r Note: Some imported spells may not work with your current class/spec")
+        print("|cffff9900DandersFrames:|r " .. L["Note: Some imported spells may not work with your current class/spec"])
     end
     
     -- Refresh the UI to show the new profile
@@ -701,13 +636,9 @@ function CC:ShowClickCastConflictPopup(conflicts, enableCheckbox)
     local popup = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
     popup:SetSize(400, 280)  -- Taller to fit all buttons
     popup:SetPoint("CENTER")
-    popup:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 2,
-    })
+    -- Shared dialog-root chrome with the CC theme-coloured border + 0.1 fill.
+    DF.GUI:CreatePanelBackdrop(popup, { bgAlpha = 0.98, borderColor = themeColor })
     popup:SetBackdropColor(0.1, 0.1, 0.1, 0.98)
-    popup:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
     popup:SetFrameStrata("FULLSCREEN_DIALOG")
     popup:SetFrameLevel(200)
     popup:EnableMouse(true)
@@ -747,39 +678,13 @@ function CC:ShowClickCastConflictPopup(conflicts, enableCheckbox)
     -- Helper function to create buttons
     local function CreateChoiceButton(parent, text, yOffset, isPrimary)
         local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
-        btn:SetSize(180, 30)
         btn:SetPoint("TOP", warning, "BOTTOM", 0, yOffset)
-        btn:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
-        })
-        
         if isPrimary then
-            btn:SetBackdropColor(themeColor.r * 0.3, themeColor.g * 0.3, themeColor.b * 0.3, 1)
-            btn:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
+            DF.GUI:StyleButton(btn, { width = 180, height = 30, text = text, primary = true, accent = CC.ACCENT })
         else
-            btn:SetBackdropColor(0.15, 0.15, 0.15, 1)
-            btn:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
+            DF.GUI:StyleButton(btn, { width = 180, height = 30, text = text, accent = CC.ACCENT })
         end
-        
-        local btnText = btn:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-        btnText:SetPoint("CENTER")
-        btnText:SetText(text)
-        btnText:SetTextColor(1, 1, 1)
-        btn.label = btnText
-        
-        btn:SetScript("OnEnter", function(self)
-            self:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
-        end)
-        btn:SetScript("OnLeave", function(self)
-            if isPrimary then
-                self:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
-            else
-                self:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
-            end
-        end)
-        
+        btn.label = btn.Text  -- keep legacy .label accessor (callers SetText on it)
         return btn
     end
     
@@ -841,11 +746,25 @@ function CC:ShowClickCastConflictPopup(conflicts, enableCheckbox)
     end)
     popup.cancelBtn = cancelBtn
     
-    -- Ignore button (next to Cancel) - both centered as a group
-    local ignoreBtn = CreateChoiceButton(popup, L["Ignore"], -90, false)
+    -- Ignore button (next to Cancel) - both centered as a group.
+    -- NOT a StyleButton: this is a non-theme orange/red WARNING button whose
+    -- resting colour toggles orange->red in the confirmation state, so it keeps
+    -- its own backdrop + hover handlers (the accent fill would fight that).
+    local ignoreBtn = CreateFrame("Button", nil, popup, "BackdropTemplate")
     ignoreBtn:SetSize(100, 26)
+    ignoreBtn:SetPoint("TOP", warning, "BOTTOM", 0, -90)
+    ignoreBtn:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = 1,
+    })
     ignoreBtn:SetBackdropColor(0.3, 0.2, 0.1, 1)
     ignoreBtn:SetBackdropBorderColor(0.6, 0.4, 0.1, 1)
+    local ignoreText = ignoreBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    ignoreText:SetPoint("CENTER")
+    ignoreText:SetText(L["Ignore"])
+    ignoreText:SetTextColor(1, 1, 1)
+    ignoreBtn.label = ignoreText
     
     -- Center both buttons as a group (100 + 10 + 100 = 210 total width)
     cancelBtn:ClearAllPoints()
@@ -882,8 +801,8 @@ function CC:ShowClickCastConflictPopup(conflicts, enableCheckbox)
         else
             -- Confirmed - save setting and proceed to enable
             CC.db.ignoreConflictWarning = true
-            print("|cff33cc33DandersFrames:|r Conflict warning disabled. Both addons will remain enabled.")
-            print("|cffff9900DandersFrames:|r You can re-enable this warning by typing: /df resetconflict")
+            print("|cff33cc33DandersFrames:|r " .. L["Conflict warning disabled. Both addons will remain enabled."])
+            print("|cffff9900DandersFrames:|r " .. L["You can re-enable this warning by typing: /df resetconflict"])
             popup:Hide()
             -- Proceed to Blizzard warning / enable
             CC:ShowBlizzardClickCastWarning(enableCheckbox, function()
@@ -924,23 +843,14 @@ function CC:ShowClickCastConflictPopup(conflicts, enableCheckbox)
     popup.ignoreBtn = ignoreBtn
     
     -- Close button
-    local closeBtn = CreateFrame("Button", nil, popup)
-    closeBtn:SetSize(20, 20)
-    closeBtn:SetPoint("TOPRIGHT", -5, -5)
-    local closeIcon = closeBtn:CreateTexture(nil, "OVERLAY")
-    closeIcon:SetPoint("CENTER")
-    closeIcon:SetSize(12, 12)
-    closeIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close")
-    closeIcon:SetVertexColor(0.7, 0.7, 0.7)
-    closeBtn:SetScript("OnEnter", function() closeIcon:SetVertexColor(1, 0.3, 0.3) end)
-    closeBtn:SetScript("OnLeave", function() closeIcon:SetVertexColor(0.7, 0.7, 0.7) end)
-    closeBtn:SetScript("OnClick", function()
+    local closeBtn = DF.GUI:CreateCloseButton(popup, { onClick = function()
         if enableCheckbox then
             enableCheckbox:SetChecked(false)
         end
         popup:Hide()
-    end)
-    
+    end })
+    closeBtn:SetPoint("TOPRIGHT", -5, -5)
+
     popup:Show()
 end
 
@@ -969,13 +879,9 @@ function CC:ShowBlizzardClickCastWarning(enableCheckbox, onConfirm)
     local popup = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
     popup:SetSize(420, 200)
     popup:SetPoint("CENTER")
-    popup:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 2,
-    })
+    -- Shared dialog-root chrome with the CC theme-coloured border + 0.1 fill.
+    DF.GUI:CreatePanelBackdrop(popup, { bgAlpha = 0.98, borderColor = themeColor })
     popup:SetBackdropColor(0.1, 0.1, 0.1, 0.98)
-    popup:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
     popup:SetFrameStrata("FULLSCREEN_DIALOG")
     popup:SetFrameLevel(200)
     popup:EnableMouse(true)
@@ -1003,38 +909,12 @@ function CC:ShowBlizzardClickCastWarning(enableCheckbox, onConfirm)
     -- Helper function to create buttons
     local function CreateButton(parent, text, isPrimary)
         local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
-        btn:SetSize(160, 30)
-        btn:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
-        })
-        
         if isPrimary then
-            btn:SetBackdropColor(themeColor.r * 0.3, themeColor.g * 0.3, themeColor.b * 0.3, 1)
-            btn:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
+            DF.GUI:StyleButton(btn, { width = 160, height = 30, text = text, primary = true, accent = CC.ACCENT })
         else
-            btn:SetBackdropColor(0.15, 0.15, 0.15, 1)
-            btn:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
+            DF.GUI:StyleButton(btn, { width = 160, height = 30, text = text, accent = CC.ACCENT })
         end
-        
-        local btnText = btn:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-        btnText:SetPoint("CENTER")
-        btnText:SetText(text)
-        btnText:SetTextColor(1, 1, 1)
-        btn.label = btnText
-        
-        btn:SetScript("OnEnter", function(self)
-            self:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
-        end)
-        btn:SetScript("OnLeave", function(self)
-            if isPrimary then
-                self:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
-            else
-                self:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
-            end
-        end)
-        
+        btn.label = btn.Text  -- keep legacy .label accessor
         return btn
     end
     
@@ -1045,7 +925,7 @@ function CC:ShowBlizzardClickCastWarning(enableCheckbox, onConfirm)
         -- Reset Blizzard's click-casting profile to default (removes all custom bindings)
         if C_ClickBindings and C_ClickBindings.ResetCurrentProfile then
             C_ClickBindings.ResetCurrentProfile()
-            print("|cff33cc33DandersFrames:|r Blizzard click-casting profile reset to default.")
+            print("|cff33cc33DandersFrames:|r " .. L["Blizzard click-casting profile reset to default."])
         end
         
         -- Remember to clear on future enables
@@ -1072,23 +952,8 @@ function CC:ShowBlizzardClickCastWarning(enableCheckbox, onConfirm)
     
     -- "Don't show again" checkbox (small, bottom center)
     local dontShowCb = CreateFrame("CheckButton", nil, popup, "BackdropTemplate")
-    dontShowCb:SetSize(14, 14)
     dontShowCb:SetPoint("BOTTOM", 0, 55)
-    dontShowCb:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    dontShowCb:SetBackdropColor(0.1, 0.1, 0.1, 0.9)
-    dontShowCb:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
-    
-    local check = dontShowCb:CreateTexture(nil, "OVERLAY")
-    check:SetSize(16, 16)
-    check:SetPoint("CENTER", 0, 0)
-    check:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
-    check:SetVertexColor(themeColor.r, themeColor.g, themeColor.b, 1)
-    check:Hide()
-    dontShowCb.check = check
+    dontShowCb.check = DF.GUI:StyleCheckButton(dontShowCb, { accent = CC.ACCENT, manualCheck = true })
     
     dontShowCb:SetScript("OnClick", function(self)
         if self.check:IsShown() then
@@ -1106,24 +971,15 @@ function CC:ShowBlizzardClickCastWarning(enableCheckbox, onConfirm)
     dontShowLabel:SetTextColor(0.6, 0.6, 0.6)
     
     -- Close button
-    local closeBtn = CreateFrame("Button", nil, popup)
-    closeBtn:SetSize(20, 20)
-    closeBtn:SetPoint("TOPRIGHT", -5, -5)
-    local closeIcon = closeBtn:CreateTexture(nil, "OVERLAY")
-    closeIcon:SetPoint("CENTER")
-    closeIcon:SetSize(12, 12)
-    closeIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close")
-    closeIcon:SetVertexColor(0.7, 0.7, 0.7)
-    closeBtn:SetScript("OnEnter", function() closeIcon:SetVertexColor(1, 0.3, 0.3) end)
-    closeBtn:SetScript("OnLeave", function() closeIcon:SetVertexColor(0.7, 0.7, 0.7) end)
-    closeBtn:SetScript("OnClick", function()
+    local closeBtn = DF.GUI:CreateCloseButton(popup, { onClick = function()
         -- Revert checkbox state
         if enableCheckbox then
             enableCheckbox:SetChecked(false)
         end
         popup:Hide()
-    end)
-    
+    end })
+    closeBtn:SetPoint("TOPRIGHT", -5, -5)
+
     popup:Show()
 end
 
@@ -1139,13 +995,13 @@ function CC:ShowMacroEditorDialog(existingMacro)
     self:CloseAllMacroDialogs()
     
     local themeColor = DF.GUI and DF.GUI.GetThemeColor and DF.GUI.GetThemeColor() or {r = 0.2, g = 0.8, b = 0.4}
-    local C_BACKGROUND = {r = 0.08, g = 0.08, b = 0.08}
-    local C_PANEL = {r = 0.12, g = 0.12, b = 0.12}
-    local C_ELEMENT = {r = 0.18, g = 0.18, b = 0.18}
-    local C_BORDER = {r = 0.25, g = 0.25, b = 0.25}
-    local C_TEXT = {r = 0.9, g = 0.9, b = 0.9}
-    local C_TEXT_DIM = {r = 0.6, g = 0.6, b = 0.6}
-    
+    -- Shared neutral palette (same table refs as GUI.Colors); alpha is passed
+    -- explicitly at each call site, so the r/g/b-only references are sufficient.
+    local C_BACKGROUND = GUIColors.background
+    local C_BORDER = GUIColors.border
+    local C_TEXT = GUIColors.text
+    local C_TEXT_DIM = GUIColors.textDim
+
     local isEditing = existingMacro ~= nil
     local isImported = existingMacro and (existingMacro.source == "global_import" or existingMacro.source == "char_import")
     
@@ -1156,13 +1012,9 @@ function CC:ShowMacroEditorDialog(existingMacro)
     macroEditorDialog:SetPoint("CENTER", 0, 50)
     macroEditorDialog:SetFrameStrata("FULLSCREEN_DIALOG")
     macroEditorDialog:SetFrameLevel(100)
-    macroEditorDialog:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
+    -- Shared dialog-root chrome with the popups' darker 0.08 fill + black border.
+    DF.GUI:CreatePanelBackdrop(macroEditorDialog, { bgAlpha = 0.98, borderColor = { 0, 0, 0, 1 } })
     macroEditorDialog:SetBackdropColor(C_BACKGROUND.r, C_BACKGROUND.g, C_BACKGROUND.b, 0.98)
-    macroEditorDialog:SetBackdropBorderColor(0, 0, 0, 1)
     macroEditorDialog:EnableMouse(true)
     macroEditorDialog:SetMovable(true)
     macroEditorDialog:RegisterForDrag("LeftButton")
@@ -1184,25 +1036,9 @@ function CC:ShowMacroEditorDialog(existingMacro)
     title:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
     
     -- Close button
-    local closeBtn = CreateFrame("Button", nil, macroEditorDialog, "BackdropTemplate")
+    local closeBtn = DF.GUI:CreateCloseButton(macroEditorDialog, { onClick = function() thisDialog:Hide() end })
     closeBtn:SetPoint("TOPRIGHT", -6, -6)
-    closeBtn:SetSize(20, 20)
-    closeBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    closeBtn:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    closeBtn:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-    local closeIcon = closeBtn:CreateTexture(nil, "OVERLAY")
-    closeIcon:SetPoint("CENTER", 0, 0)
-    closeIcon:SetSize(12, 12)
-    closeIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close")
-    closeIcon:SetVertexColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    closeBtn:SetScript("OnClick", function() thisDialog:Hide() end)
-    closeBtn:SetScript("OnEnter", function(self) self:SetBackdropColor(0.8, 0.2, 0.2, 1) end)
-    closeBtn:SetScript("OnLeave", function(self) self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1) end)
-    
+
     -- Icon button
     local selectedIcon = existingMacro and existingMacro.icon or "Interface\\Icons\\INV_Misc_QuestionMark"
     local userSelectedIcon = existingMacro and existingMacro.icon and true or false -- Track if user manually picked
@@ -1265,13 +1101,7 @@ function CC:ShowMacroEditorDialog(existingMacro)
     local nameInput = CreateFrame("EditBox", nil, macroEditorDialog, "BackdropTemplate")
     nameInput:SetSize(310, 24)
     nameInput:SetPoint("TOPLEFT", nameLabel, "BOTTOMLEFT", 0, -4)
-    nameInput:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    nameInput:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    nameInput:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
+    DF.GUI:StyleEditBox(nameInput)
     DF.GUI:SetSettingsFont(nameInput, 11, "")
     nameInput:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
     nameInput:SetTextInsets(6, 6, 0, 0)
@@ -1279,7 +1109,7 @@ function CC:ShowMacroEditorDialog(existingMacro)
     nameInput:SetText(existingMacro and existingMacro.name or "")
     nameInput:SetEnabled(not isImported)
     if isImported then
-        nameInput:SetBackdropColor(C_ELEMENT.r - 0.05, C_ELEMENT.g - 0.05, C_ELEMENT.b - 0.05, 1)
+        nameInput:SetBackdropColor(0, 0, 0, 0.7)
     end
     
     -- Body label
@@ -1306,8 +1136,8 @@ function CC:ShowMacroEditorDialog(existingMacro)
         edgeFile = "Interface\\Buttons\\WHITE8x8",
         edgeSize = 1,
     })
-    bodyBg:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    bodyBg:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
+    bodyBg:SetBackdropColor(0, 0, 0, 0.5)
+    bodyBg:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
     bodyBg:SetFrameLevel(bodyScroll:GetFrameLevel() - 1)
     
     -- Body edit box
@@ -1341,39 +1171,15 @@ function CC:ShowMacroEditorDialog(existingMacro)
     
     -- Cancel button
     local cancelBtn = CreateFrame("Button", nil, macroEditorDialog, "BackdropTemplate")
-    cancelBtn:SetSize(80, 28)
     cancelBtn:SetPoint("BOTTOMLEFT", 12, 12)
-    cancelBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    cancelBtn:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    cancelBtn:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
-    local cancelText = cancelBtn:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    cancelText:SetPoint("CENTER")
-    cancelText:SetText(L["Cancel"])
-    cancelText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+    DF.GUI:StyleButton(cancelBtn, { width = 80, height = 28, text = L["Cancel"], accent = CC.ACCENT })
     cancelBtn:SetScript("OnClick", function() thisDialog:Hide() end)
-    cancelBtn:SetScript("OnEnter", function(self) self:SetBackdropColor(C_ELEMENT.r + 0.1, C_ELEMENT.g + 0.1, C_ELEMENT.b + 0.1, 1) end)
-    cancelBtn:SetScript("OnLeave", function(self) self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1) end)
     
     -- Delete button (for editing)
     if isEditing and not isImported then
         local deleteBtn = CreateFrame("Button", nil, macroEditorDialog, "BackdropTemplate")
-        deleteBtn:SetSize(80, 28)
         deleteBtn:SetPoint("LEFT", cancelBtn, "RIGHT", 8, 0)
-        deleteBtn:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
-        })
-        deleteBtn:SetBackdropColor(0.4, 0.1, 0.1, 1)
-        deleteBtn:SetBackdropBorderColor(0.6, 0.2, 0.2, 1)
-        local deleteText = deleteBtn:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-        deleteText:SetPoint("CENTER")
-        deleteText:SetText(L["Delete"])
-        deleteText:SetTextColor(1, 0.5, 0.5)
+        DF.GUI:StyleButton(deleteBtn, { width = 80, height = 28, text = L["Delete"], tone = "danger" })
         deleteBtn:SetScript("OnClick", function()
             StaticPopupDialogs["DF_CONFIRM_DELETE_MACRO"] = {
                 text = format(L["Delete macro '%s'?\nAny bindings using this macro will be removed."], existingMacro.name),
@@ -1391,27 +1197,14 @@ function CC:ShowMacroEditorDialog(existingMacro)
             }
             ShowPopupOnTop("DF_CONFIRM_DELETE_MACRO")
         end)
-        deleteBtn:SetScript("OnEnter", function(self) self:SetBackdropColor(0.6, 0.15, 0.15, 1) end)
-        deleteBtn:SetScript("OnLeave", function(self) self:SetBackdropColor(0.4, 0.1, 0.1, 1) end)
     end
     
     -- Import-specific buttons
     if isImported then
         -- Delete button for imported macros (positioned next to cancel)
         local deleteBtn = CreateFrame("Button", nil, macroEditorDialog, "BackdropTemplate")
-        deleteBtn:SetSize(80, 28)
         deleteBtn:SetPoint("LEFT", cancelBtn, "RIGHT", 8, 0)
-        deleteBtn:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
-        })
-        deleteBtn:SetBackdropColor(0.4, 0.1, 0.1, 1)
-        deleteBtn:SetBackdropBorderColor(0.6, 0.2, 0.2, 1)
-        local deleteText = deleteBtn:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-        deleteText:SetPoint("CENTER")
-        deleteText:SetText(L["Delete"])
-        deleteText:SetTextColor(1, 0.5, 0.5)
+        DF.GUI:StyleButton(deleteBtn, { width = 80, height = 28, text = L["Delete"], tone = "danger" })
         deleteBtn:SetScript("OnClick", function()
             StaticPopupDialogs["DF_CONFIRM_DELETE_IMPORTED_MACRO"] = {
                 text = format(L["Delete imported macro '%s'?\nAny bindings using this macro will be removed.\n\n(The original WoW macro will not be affected)"], existingMacro.name),
@@ -1429,24 +1222,11 @@ function CC:ShowMacroEditorDialog(existingMacro)
             }
             ShowPopupOnTop("DF_CONFIRM_DELETE_IMPORTED_MACRO")
         end)
-        deleteBtn:SetScript("OnEnter", function(self) self:SetBackdropColor(0.6, 0.15, 0.15, 1) end)
-        deleteBtn:SetScript("OnLeave", function(self) self:SetBackdropColor(0.4, 0.1, 0.1, 1) end)
-        
+
         -- Sync button
         local syncBtn = CreateFrame("Button", nil, macroEditorDialog, "BackdropTemplate")
-        syncBtn:SetSize(100, 28)
         syncBtn:SetPoint("BOTTOMRIGHT", -100, 12)
-        syncBtn:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
-        })
-        syncBtn:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-        syncBtn:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
-        local syncText = syncBtn:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-        syncText:SetPoint("CENTER")
-        syncText:SetText(L["Sync from WoW"])
-        syncText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+        DF.GUI:StyleButton(syncBtn, { width = 100, height = 28, text = L["Sync from WoW"], accent = CC.ACCENT })
         syncBtn:SetScript("OnClick", function()
             local success, msg = CC:SyncImportedMacro(existingMacro.id)
             if success then
@@ -1458,21 +1238,10 @@ function CC:ShowMacroEditorDialog(existingMacro)
             end
         end)
         
-        -- Convert to Custom button
+        -- Convert to Custom button (primary CTA)
         local convertBtn = CreateFrame("Button", nil, macroEditorDialog, "BackdropTemplate")
-        convertBtn:SetSize(80, 28)
         convertBtn:SetPoint("BOTTOMRIGHT", -12, 12)
-        convertBtn:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
-        })
-        convertBtn:SetBackdropColor(themeColor.r * 0.3, themeColor.g * 0.3, themeColor.b * 0.3, 1)
-        convertBtn:SetBackdropBorderColor(themeColor.r * 0.6, themeColor.g * 0.6, themeColor.b * 0.6, 1)
-        local convertText = convertBtn:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-        convertText:SetPoint("CENTER")
-        convertText:SetText(L["Edit Copy"])
-        convertText:SetTextColor(1, 1, 1)
+        DF.GUI:StyleButton(convertBtn, { width = 80, height = 28, text = L["Edit Copy"], primary = true, accent = CC.ACCENT })
         convertBtn:SetScript("OnClick", function()
             CC:ConvertToCustomMacro(existingMacro.id)
             -- Converted
@@ -1481,35 +1250,24 @@ function CC:ShowMacroEditorDialog(existingMacro)
             CC:RefreshSpellGrid()
         end)
     else
-        -- Save button
+        -- Save button (primary CTA)
         local saveBtn = CreateFrame("Button", nil, macroEditorDialog, "BackdropTemplate")
-        saveBtn:SetSize(80, 28)
         saveBtn:SetPoint("BOTTOMRIGHT", -12, 12)
-        saveBtn:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
-        })
-        saveBtn:SetBackdropColor(themeColor.r * 0.3, themeColor.g * 0.3, themeColor.b * 0.3, 1)
-        saveBtn:SetBackdropBorderColor(themeColor.r * 0.6, themeColor.g * 0.6, themeColor.b * 0.6, 1)
-        local saveText = saveBtn:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-        saveText:SetPoint("CENTER")
-        saveText:SetText(L["Save"])
-        saveText:SetTextColor(1, 1, 1)
+        DF.GUI:StyleButton(saveBtn, { width = 80, height = 28, text = L["Save"], primary = true, accent = CC.ACCENT })
         saveBtn:SetScript("OnClick", function()
             local name = nameInput:GetText():trim()
             local body = bodyInput:GetText()
             
             if name == "" then
-                print("|cffff4444DandersFrames:|r Please enter a macro name")
+                print("|cffff4444DandersFrames:|r " .. L["Please enter a macro name"])
                 return
             end
             if body == "" then
-                print("|cffff4444DandersFrames:|r Please enter macro text")
+                print("|cffff4444DandersFrames:|r " .. L["Please enter macro text"])
                 return
             end
             if #body > 255 then
-                print("|cffff4444DandersFrames:|r Macro text exceeds 255 characters")
+                print("|cffff4444DandersFrames:|r " .. L["Macro text exceeds 255 characters"])
                 return
             end
             
@@ -1527,8 +1285,6 @@ function CC:ShowMacroEditorDialog(existingMacro)
             thisDialog:Hide()
             -- Macro saved
         end)
-        saveBtn:SetScript("OnEnter", function(self) self:SetBackdropColor(themeColor.r * 0.5, themeColor.g * 0.5, themeColor.b * 0.5, 1) end)
-        saveBtn:SetScript("OnLeave", function(self) self:SetBackdropColor(themeColor.r * 0.3, themeColor.g * 0.3, themeColor.b * 0.3, 1) end)
     end
     
     macroEditorDialog:Show()
@@ -1547,24 +1303,20 @@ function CC:ShowIconPickerDialog(onSelect)
     end
     
     local themeColor = DF.GUI and DF.GUI.GetThemeColor and DF.GUI.GetThemeColor() or {r = 0.2, g = 0.8, b = 0.4}
-    local C_BACKGROUND = {r = 0.08, g = 0.08, b = 0.08}
-    local C_ELEMENT = {r = 0.18, g = 0.18, b = 0.18}
-    local C_BORDER = {r = 0.25, g = 0.25, b = 0.25}
-    local C_TEXT = {r = 0.9, g = 0.9, b = 0.9}
-    local C_TEXT_DIM = {r = 0.6, g = 0.6, b = 0.6}
-    
+    -- Shared neutral palette (same table refs as GUI.Colors); alpha passed per call.
+    local C_BACKGROUND = GUIColors.background
+    local C_BORDER = GUIColors.border
+    local C_TEXT = GUIColors.text
+    local C_TEXT_DIM = GUIColors.textDim
+
     iconPickerDialog = CreateFrame("Frame", "DFIconPickerDialog", UIParent, "BackdropTemplate")
     iconPickerDialog:SetSize(320, 280)
     iconPickerDialog:SetPoint("CENTER", 0, 50)
     iconPickerDialog:SetFrameStrata("FULLSCREEN_DIALOG")
     iconPickerDialog:SetFrameLevel(110)
-    iconPickerDialog:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
+    -- Shared dialog-root chrome with the popups' darker 0.08 fill + black border.
+    DF.GUI:CreatePanelBackdrop(iconPickerDialog, { bgAlpha = 0.98, borderColor = { 0, 0, 0, 1 } })
     iconPickerDialog:SetBackdropColor(C_BACKGROUND.r, C_BACKGROUND.g, C_BACKGROUND.b, 0.98)
-    iconPickerDialog:SetBackdropBorderColor(0, 0, 0, 1)
     iconPickerDialog:EnableMouse(true)
     iconPickerDialog:SetMovable(true)
     iconPickerDialog:RegisterForDrag("LeftButton")
@@ -1578,25 +1330,9 @@ function CC:ShowIconPickerDialog(onSelect)
     title:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
     
     -- Close button
-    local closeBtn = CreateFrame("Button", nil, iconPickerDialog, "BackdropTemplate")
+    local closeBtn = DF.GUI:CreateCloseButton(iconPickerDialog, { onClick = function() iconPickerDialog:Hide() end })
     closeBtn:SetPoint("TOPRIGHT", -6, -6)
-    closeBtn:SetSize(20, 20)
-    closeBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    closeBtn:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    closeBtn:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-    local closeIcon = closeBtn:CreateTexture(nil, "OVERLAY")
-    closeIcon:SetPoint("CENTER", 0, 0)
-    closeIcon:SetSize(12, 12)
-    closeIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close")
-    closeIcon:SetVertexColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    closeBtn:SetScript("OnClick", function() iconPickerDialog:Hide() end)
-    closeBtn:SetScript("OnEnter", function(self) self:SetBackdropColor(0.8, 0.2, 0.2, 1) end)
-    closeBtn:SetScript("OnLeave", function(self) self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1) end)
-    
+
     -- Icon grid
     local iconSize = 32
     local padding = 4
@@ -1645,13 +1381,7 @@ function CC:ShowIconPickerDialog(onSelect)
     local idInput = CreateFrame("EditBox", nil, iconPickerDialog, "BackdropTemplate")
     idInput:SetSize(100, 24)
     idInput:SetPoint("LEFT", idLabel, "RIGHT", 8, 0)
-    idInput:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    idInput:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    idInput:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
+    DF.GUI:StyleEditBox(idInput)
     DF.GUI:SetSettingsFont(idInput, 11, "")
     idInput:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
     idInput:SetTextInsets(6, 6, 0, 0)
@@ -1659,19 +1389,8 @@ function CC:ShowIconPickerDialog(onSelect)
     idInput:SetNumeric(true)
     
     local useIdBtn = CreateFrame("Button", nil, iconPickerDialog, "BackdropTemplate")
-    useIdBtn:SetSize(50, 24)
     useIdBtn:SetPoint("LEFT", idInput, "RIGHT", 4, 0)
-    useIdBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    useIdBtn:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    useIdBtn:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
-    local useIdText = useIdBtn:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
-    useIdText:SetPoint("CENTER")
-    useIdText:SetText(L["Use"])
-    useIdText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+    DF.GUI:StyleButton(useIdBtn, { width = 50, height = 24, text = L["Use"], accent = CC.ACCENT })
     useIdBtn:SetScript("OnClick", function()
         local id = tonumber(idInput:GetText())
         if id then
@@ -1682,19 +1401,8 @@ function CC:ShowIconPickerDialog(onSelect)
     
     -- Cancel button
     local cancelBtn = CreateFrame("Button", nil, iconPickerDialog, "BackdropTemplate")
-    cancelBtn:SetSize(80, 28)
     cancelBtn:SetPoint("BOTTOMRIGHT", -12, 12)
-    cancelBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    cancelBtn:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    cancelBtn:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
-    local cancelText = cancelBtn:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    cancelText:SetPoint("CENTER")
-    cancelText:SetText(L["Cancel"])
-    cancelText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+    DF.GUI:StyleButton(cancelBtn, { width = 80, height = 28, text = L["Cancel"], accent = CC.ACCENT })
     cancelBtn:SetScript("OnClick", function() iconPickerDialog:Hide() end)
     
     iconPickerDialog:Show()
@@ -1712,25 +1420,22 @@ function CC:ShowImportMacroDialog()
     self:CloseAllMacroDialogs()
     
     local themeColor = DF.GUI and DF.GUI.GetThemeColor and DF.GUI.GetThemeColor() or {r = 0.2, g = 0.8, b = 0.4}
-    local C_BACKGROUND = {r = 0.08, g = 0.08, b = 0.08}
-    local C_ELEMENT = {r = 0.18, g = 0.18, b = 0.18}
-    local C_BORDER = {r = 0.25, g = 0.25, b = 0.25}
-    local C_TEXT = {r = 0.9, g = 0.9, b = 0.9}
-    local C_TEXT_DIM = {r = 0.6, g = 0.6, b = 0.6}
-    
+    -- Shared neutral palette (same table refs as GUI.Colors); alpha passed per call.
+    local C_BACKGROUND = GUIColors.background
+    local C_ELEMENT = GUIColors.element
+    local C_BORDER = GUIColors.border
+    local C_TEXT = GUIColors.text
+    local C_TEXT_DIM = GUIColors.textDim
+
     importMacroDialog = CreateFrame("Frame", "DFImportMacroDialog", UIParent, "BackdropTemplate")
     local thisDialog = importMacroDialog  -- Local capture for closures
     importMacroDialog:SetSize(400, 400)
     importMacroDialog:SetPoint("CENTER", 0, 50)
     importMacroDialog:SetFrameStrata("FULLSCREEN_DIALOG")
     importMacroDialog:SetFrameLevel(100)
-    importMacroDialog:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
+    -- Shared dialog-root chrome with the popups' darker 0.08 fill + black border.
+    DF.GUI:CreatePanelBackdrop(importMacroDialog, { bgAlpha = 0.98, borderColor = { 0, 0, 0, 1 } })
     importMacroDialog:SetBackdropColor(C_BACKGROUND.r, C_BACKGROUND.g, C_BACKGROUND.b, 0.98)
-    importMacroDialog:SetBackdropBorderColor(0, 0, 0, 1)
     importMacroDialog:EnableMouse(true)
     importMacroDialog:SetMovable(true)
     importMacroDialog:RegisterForDrag("LeftButton")
@@ -1744,25 +1449,9 @@ function CC:ShowImportMacroDialog()
     title:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
     
     -- Close button
-    local closeBtn = CreateFrame("Button", nil, importMacroDialog, "BackdropTemplate")
+    local closeBtn = DF.GUI:CreateCloseButton(importMacroDialog, { onClick = function() thisDialog:Hide() end })
     closeBtn:SetPoint("TOPRIGHT", -6, -6)
-    closeBtn:SetSize(20, 20)
-    closeBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    closeBtn:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    closeBtn:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-    local closeIcon = closeBtn:CreateTexture(nil, "OVERLAY")
-    closeIcon:SetPoint("CENTER", 0, 0)
-    closeIcon:SetSize(12, 12)
-    closeIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close")
-    closeIcon:SetVertexColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    closeBtn:SetScript("OnClick", function() thisDialog:Hide() end)
-    closeBtn:SetScript("OnEnter", function(self) self:SetBackdropColor(0.8, 0.2, 0.2, 1) end)
-    closeBtn:SetScript("OnLeave", function(self) self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1) end)
-    
+
     -- Tab buttons
     local selectedTab = "general"
     local selectedMacros = {}
@@ -1776,45 +1465,25 @@ function CC:ShowImportMacroDialog()
         else
             btn:SetPoint("TOPLEFT", 12, -35)
         end
-        btn:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
-        })
-        btn:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-        btn:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
-        local btnText = btn:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
-        btnText:SetPoint("CENTER")
-        btnText:SetText(text)
-        btnText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+        -- Shared underline-tab style (CC green accent); StyleButton provides :SetActive.
+        DF.GUI:StyleButton(btn, { tab = true, text = text, width = 80, height = 24, accent = CC.ACCENT, font = "DFFontHighlight" })
         
-        function btn:SetActive(active)
-            if active then
-                self:SetBackdropColor(themeColor.r * 0.3, themeColor.g * 0.3, themeColor.b * 0.3, 1)
-                self:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 0.8)
-            else
-                self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-                self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
-            end
-        end
+        -- (active state handled by StyleButton tab mode)
         
         return btn
     end
     
-    local globalTab = CreateImportTab("General", "general")
-    local charTab = CreateImportTab("Character", "character", nil, globalTab)
+    local globalTab = CreateImportTab(L["General"], "general")
+    local charTab = CreateImportTab(L["Character"], "character", nil, globalTab)
     
     -- Scroll frame for macro list
     local scrollContainer = CreateFrame("Frame", nil, importMacroDialog, "BackdropTemplate")
     scrollContainer:SetPoint("TOPLEFT", 12, -65)
     scrollContainer:SetPoint("BOTTOMRIGHT", -12, 50)
-    scrollContainer:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(scrollContainer, {
+        bgColor = {C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 0.5},
+        borderColor = {C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5},
     })
-    scrollContainer:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 0.5)
-    scrollContainer:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
     
     local scrollFrame = CreateFrame("ScrollFrame", nil, scrollContainer, "ScrollFrameTemplate")
     scrollFrame:SetPoint("TOPLEFT", 4, -4)
@@ -1864,9 +1533,9 @@ function CC:ShowImportMacroDialog()
             row:SetBackdropColor(0, 0, 0, 0)
             
             -- Checkbox
-            local cb = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
-            cb:SetSize(20, 20)
+            local cb = CreateFrame("CheckButton", nil, row, "BackdropTemplate")
             cb:SetPoint("LEFT", 2, 0)
+            DF.GUI:StyleCheckButton(cb, { accent = CC.ACCENT })
             cb:SetScript("OnClick", function(self)
                 if self:GetChecked() then
                     selectedMacros[macro.wowIndex] = macro
@@ -1938,42 +1607,14 @@ function CC:ShowImportMacroDialog()
     
     -- Cancel button
     local cancelBtn = CreateFrame("Button", nil, importMacroDialog, "BackdropTemplate")
-    cancelBtn:SetSize(80, 28)
     cancelBtn:SetPoint("BOTTOMLEFT", 12, 12)
-    cancelBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    cancelBtn:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    cancelBtn:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
-    local cancelText = cancelBtn:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    cancelText:SetPoint("CENTER")
-    cancelText:SetText(L["Cancel"])
-    cancelText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+    DF.GUI:StyleButton(cancelBtn, { width = 80, height = 28, text = L["Cancel"], accent = CC.ACCENT })
     cancelBtn:SetScript("OnClick", function() thisDialog:Hide() end)
-    
+
     -- Import All button
     local importAllBtn = CreateFrame("Button", nil, importMacroDialog, "BackdropTemplate")
-    importAllBtn:SetSize(80, 28)
     importAllBtn:SetPoint("LEFT", cancelBtn, "RIGHT", 6, 0)
-    importAllBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    importAllBtn:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    importAllBtn:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
-    local importAllText = importAllBtn:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    importAllText:SetPoint("CENTER")
-    importAllText:SetText(L["Import All"])
-    importAllText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    importAllBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
-    end)
-    importAllBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
-    end)
+    DF.GUI:StyleButton(importAllBtn, { width = 80, height = 28, text = L["Import All"], accent = CC.ACCENT })
     importAllBtn:SetScript("OnClick", function()
         -- Import all macros from both general and character
         local globalMacros = CC:GetWoWGlobalMacros()
@@ -2000,33 +1641,22 @@ function CC:ShowImportMacroDialog()
         end
         
         local msg = ""
-        if imported > 0 then msg = msg .. "Imported " .. imported .. " macro(s). " end
-        if updated > 0 then msg = msg .. "Updated " .. updated .. " macro(s)." end
+        if imported > 0 then msg = msg .. format(L["Imported %d macro(s). "], imported) end
+        if updated > 0 then msg = msg .. format(L["Updated %d macro(s)."], updated) end
         if msg ~= "" then
             print("|cff00ff00DandersFrames:|r " .. msg)
         else
-            print("|cff00ff00DandersFrames:|r All macros already imported.")
+            print("|cff00ff00DandersFrames:|r " .. L["All macros already imported."])
         end
         
         thisDialog:Hide()
         CC:RefreshSpellGrid()
     end)
     
-    -- Import button
+    -- Import button (primary CTA)
     local importBtn = CreateFrame("Button", nil, importMacroDialog, "BackdropTemplate")
-    importBtn:SetSize(80, 28)
     importBtn:SetPoint("BOTTOMRIGHT", -12, 12)
-    importBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    importBtn:SetBackdropColor(themeColor.r * 0.3, themeColor.g * 0.3, themeColor.b * 0.3, 1)
-    importBtn:SetBackdropBorderColor(themeColor.r * 0.6, themeColor.g * 0.6, themeColor.b * 0.6, 1)
-    local importText = importBtn:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    importText:SetPoint("CENTER")
-    importText:SetText(L["Import"])
-    importText:SetTextColor(1, 1, 1)
+    DF.GUI:StyleButton(importBtn, { width = 80, height = 28, text = L["Import"], primary = true, accent = CC.ACCENT })
     importBtn:SetScript("OnClick", function()
         local imported = 0
         local updated = 0
@@ -2040,8 +1670,8 @@ function CC:ShowImportMacroDialog()
         end
         
         local msg = ""
-        if imported > 0 then msg = msg .. "Imported " .. imported .. " macro(s). " end
-        if updated > 0 then msg = msg .. "Updated " .. updated .. " macro(s)." end
+        if imported > 0 then msg = msg .. format(L["Imported %d macro(s). "], imported) end
+        if updated > 0 then msg = msg .. format(L["Updated %d macro(s)."], updated) end
         if msg ~= "" then
             print("|cff00ff00DandersFrames:|r " .. msg)
         end
@@ -2069,25 +1699,20 @@ function CC:ShowQuickMacroDialog()
     self:CloseAllMacroDialogs()
     
     local themeColor = DF.GUI and DF.GUI.GetThemeColor and DF.GUI.GetThemeColor() or {r = 0.2, g = 0.8, b = 0.4}
-    local C_BACKGROUND = {r = 0.08, g = 0.08, b = 0.08}
-    local C_ELEMENT = {r = 0.18, g = 0.18, b = 0.18}
-    local C_BORDER = {r = 0.25, g = 0.25, b = 0.25}
-    local C_TEXT = {r = 0.9, g = 0.9, b = 0.9}
-    local C_TEXT_DIM = {r = 0.6, g = 0.6, b = 0.6}
-    
+    -- Shared neutral palette (same table refs as GUI.Colors); alpha passed per call.
+    local C_BACKGROUND = GUIColors.background
+    local C_TEXT = GUIColors.text
+    local C_TEXT_DIM = GUIColors.textDim
+
     quickMacroDialog = CreateFrame("Frame", "DFQuickMacroDialog", UIParent, "BackdropTemplate")
     local thisDialog = quickMacroDialog  -- Local capture for closures
     quickMacroDialog:SetSize(420, 400)
     quickMacroDialog:SetPoint("CENTER", 0, 50)
     quickMacroDialog:SetFrameStrata("FULLSCREEN_DIALOG")
     quickMacroDialog:SetFrameLevel(100)
-    quickMacroDialog:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
+    -- Shared dialog-root chrome with the popups' darker 0.08 fill + black border.
+    DF.GUI:CreatePanelBackdrop(quickMacroDialog, { bgAlpha = 0.98, borderColor = { 0, 0, 0, 1 } })
     quickMacroDialog:SetBackdropColor(C_BACKGROUND.r, C_BACKGROUND.g, C_BACKGROUND.b, 0.98)
-    quickMacroDialog:SetBackdropBorderColor(0, 0, 0, 1)
     quickMacroDialog:EnableMouse(true)
     quickMacroDialog:SetMovable(true)
     quickMacroDialog:RegisterForDrag("LeftButton")
@@ -2101,25 +1726,9 @@ function CC:ShowQuickMacroDialog()
     title:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
     
     -- Close button
-    local closeBtn = CreateFrame("Button", nil, quickMacroDialog, "BackdropTemplate")
+    local closeBtn = DF.GUI:CreateCloseButton(quickMacroDialog, { onClick = function() thisDialog:Hide() end })
     closeBtn:SetPoint("TOPRIGHT", -6, -6)
-    closeBtn:SetSize(20, 20)
-    closeBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    closeBtn:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    closeBtn:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-    local closeIcon = closeBtn:CreateTexture(nil, "OVERLAY")
-    closeIcon:SetPoint("CENTER", 0, 0)
-    closeIcon:SetSize(12, 12)
-    closeIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close")
-    closeIcon:SetVertexColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    closeBtn:SetScript("OnClick", function() thisDialog:Hide() end)
-    closeBtn:SetScript("OnEnter", function(self) self:SetBackdropColor(0.8, 0.2, 0.2, 1) end)
-    closeBtn:SetScript("OnLeave", function(self) self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1) end)
-    
+
     -- State
     local selectedSpell = nil
     local selectedPattern = "mouseover_target_self"
@@ -2135,13 +1744,7 @@ function CC:ShowQuickMacroDialog()
     local spellInput = CreateFrame("EditBox", nil, quickMacroDialog, "BackdropTemplate")
     spellInput:SetSize(300, 24)
     spellInput:SetPoint("TOPLEFT", spellLabel, "BOTTOMLEFT", 0, -4)
-    spellInput:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    spellInput:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    spellInput:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
+    DF.GUI:StyleEditBox(spellInput)
     DF.GUI:SetSettingsFont(spellInput, 11, "")
     spellInput:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
     spellInput:SetTextInsets(6, 6, 0, 0)
@@ -2161,11 +1764,11 @@ function CC:ShowQuickMacroDialog()
     patternLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     
     local patterns = {
-        {key = "mouseover_target_self", label = "Mouseover → Target → Self (Helpful)"},
-        {key = "mouseover_target", label = "Mouseover → Target (Helpful)"},
-        {key = "mouseover_only", label = "Mouseover Only (Helpful)"},
-        {key = "harm_mouseover_target", label = "Mouseover → Target (Harmful)"},
-        {key = "focus_mouseover_target", label = "Focus → Mouseover → Target"},
+        {key = "mouseover_target_self", label = L["Mouseover → Target → Self (Helpful)"]},
+        {key = "mouseover_target", label = L["Mouseover → Target (Helpful)"]},
+        {key = "mouseover_only", label = L["Mouseover Only (Helpful)"]},
+        {key = "harm_mouseover_target", label = L["Mouseover → Target (Harmful)"]},
+        {key = "focus_mouseover_target", label = L["Focus → Mouseover → Target"]},
     }
     
     local patternButtons = {}
@@ -2191,24 +1794,20 @@ function CC:ShowQuickMacroDialog()
         })
         btn:SetBackdropColor(0, 0, 0, 0)
         
-        local radio = btn:CreateTexture(nil, "ARTWORK")
-        radio:SetSize(14, 14)
+        local radio = CreateFrame("Button", nil, btn, "BackdropTemplate")
         radio:SetPoint("LEFT", 4, 0)
-        radio:SetTexture("Interface\\Buttons\\UI-RadioButton")
-        radio:SetTexCoord(0, 0.25, 0, 1)
+        radio:EnableMouse(false)  -- the whole row handles the click
+        btn.radioFill = DF.GUI:StyleCheckButton(radio, { size = 14, checkSize = 8, accent = CC.ACCENT, manualCheck = true })
+        btn.radioFill:SetShown(false)
         btn.radio = radio
-        
-        local label = btn:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
+
+        local label = btn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
         label:SetPoint("LEFT", radio, "RIGHT", 6, 0)
         label:SetText(pattern.label)
         label:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-        
+
         function btn:SetSelected(selected)
-            if selected then
-                self.radio:SetTexCoord(0.25, 0.5, 0, 1)
-            else
-                self.radio:SetTexCoord(0, 0.25, 0, 1)
-            end
+            self.radioFill:SetShown(selected)
         end
         
         btn:SetScript("OnClick", function()
@@ -2238,9 +1837,9 @@ function CC:ShowQuickMacroDialog()
     -- Options
     yOffset = yOffset - 10
     
-    local tooltipCb = CreateFrame("CheckButton", nil, quickMacroDialog, "UICheckButtonTemplate")
-    tooltipCb:SetSize(20, 20)
+    local tooltipCb = CreateFrame("CheckButton", nil, quickMacroDialog, "BackdropTemplate")
     tooltipCb:SetPoint("TOPLEFT", 12, yOffset)
+    DF.GUI:StyleCheckButton(tooltipCb, { accent = CC.ACCENT })
     tooltipCb:SetChecked(true)
     tooltipCb:SetScript("OnClick", function(self)
         showTooltip = self:GetChecked()
@@ -2251,9 +1850,9 @@ function CC:ShowQuickMacroDialog()
     tooltipLabel:SetText(L["Add #showtooltip"])
     tooltipLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
     
-    local stopCb = CreateFrame("CheckButton", nil, quickMacroDialog, "UICheckButtonTemplate")
-    stopCb:SetSize(20, 20)
+    local stopCb = CreateFrame("CheckButton", nil, quickMacroDialog, "BackdropTemplate")
     stopCb:SetPoint("LEFT", tooltipLabel, "RIGHT", 20, 0)
+    DF.GUI:StyleCheckButton(stopCb, { accent = CC.ACCENT })
     stopCb:SetChecked(false)
     stopCb:SetScript("OnClick", function(self)
         stopCasting = self:GetChecked()
@@ -2274,13 +1873,7 @@ function CC:ShowQuickMacroDialog()
     local previewBg = CreateFrame("Frame", nil, quickMacroDialog, "BackdropTemplate")
     previewBg:SetSize(390, 60)
     previewBg:SetPoint("TOPLEFT", previewLabel, "BOTTOMLEFT", 0, -4)
-    previewBg:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    previewBg:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    previewBg:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
+    DF.GUI:CreateElementBackdrop(previewBg)
     
     local previewText = previewBg:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
     previewText:SetPoint("TOPLEFT", 8, -8)
@@ -2316,39 +1909,17 @@ function CC:ShowQuickMacroDialog()
     
     -- Cancel button
     local cancelBtn = CreateFrame("Button", nil, quickMacroDialog, "BackdropTemplate")
-    cancelBtn:SetSize(80, 28)
     cancelBtn:SetPoint("BOTTOMLEFT", 12, 12)
-    cancelBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    cancelBtn:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    cancelBtn:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
-    local cancelText = cancelBtn:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    cancelText:SetPoint("CENTER")
-    cancelText:SetText(L["Cancel"])
-    cancelText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+    DF.GUI:StyleButton(cancelBtn, { width = 80, height = 28, text = L["Cancel"], accent = CC.ACCENT })
     cancelBtn:SetScript("OnClick", function() thisDialog:Hide() end)
     
-    -- Create Macro button
+    -- Create Macro button (primary CTA)
     local createBtn = CreateFrame("Button", nil, quickMacroDialog, "BackdropTemplate")
-    createBtn:SetSize(100, 28)
     createBtn:SetPoint("BOTTOMRIGHT", -12, 12)
-    createBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    createBtn:SetBackdropColor(themeColor.r * 0.3, themeColor.g * 0.3, themeColor.b * 0.3, 1)
-    createBtn:SetBackdropBorderColor(themeColor.r * 0.6, themeColor.g * 0.6, themeColor.b * 0.6, 1)
-    local createText = createBtn:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    createText:SetPoint("CENTER")
-    createText:SetText(L["Create Macro"])
-    createText:SetTextColor(1, 1, 1)
+    DF.GUI:StyleButton(createBtn, { width = 100, height = 28, text = L["Create Macro"], primary = true, accent = CC.ACCENT })
     createBtn:SetScript("OnClick", function()
         if not selectedSpell then
-            print("|cffff4444DandersFrames:|r Please enter a spell name")
+            print("|cffff4444DandersFrames:|r " .. L["Please enter a spell name"])
             return
         end
         
@@ -2376,9 +1947,7 @@ function CC:ShowQuickMacroDialog()
         thisDialog:Hide()
         -- Macro created
     end)
-    createBtn:SetScript("OnEnter", function(self) self:SetBackdropColor(themeColor.r * 0.5, themeColor.g * 0.5, themeColor.b * 0.5, 1) end)
-    createBtn:SetScript("OnLeave", function(self) self:SetBackdropColor(themeColor.r * 0.3, themeColor.g * 0.3, themeColor.b * 0.3, 1) end)
-    
+
     quickMacroDialog:Show()
 end
 

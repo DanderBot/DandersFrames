@@ -303,6 +303,23 @@ function DF:UpdateRaidGroupedLayout()
         return
     end
     
+    -- DOOR-SHUT (live frames are never Lua-driven): in header mode the live unit
+    -- frames are children of the secure group headers and are positioned ONLY by
+    -- the secure header path. DF.raidFrames is a PROXY that resolves to those live
+    -- children (Frames/Core.lua), so the legacy Lua per-frame fallback below would
+    -- SetPoint them onto the container and fight the secure layout -- that is how
+    -- entering test mode or a GUI change could shove the LIVE frames around (e.g.
+    -- the group-order inversion). Route header mode to the secure path here; the Lua
+    -- fallback now only runs for genuinely headerless legacy frames (none in current
+    -- builds). TEST frames are positioned separately in TestMode.lua
+    -- (DF.testRaidFrames / DF.testRaidContainer) and never reach this live path.
+    if hasHeaders then
+        DF:UpdateRaidHeaderVisibility()
+        DF:PositionRaidHeaders()
+        DF:UpdateRaidGroupLabels()
+        return
+    end
+
     -- Sorting disabled OR test mode - use Lua-based positioning logic
     -- (Test mode has no real raid roster, so secure code can't query group membership)
     -- Update group layout params from current settings
@@ -1071,7 +1088,19 @@ function DF:LockRaidFrames()
     if not IsInRaid() then
         DF.raidContainer:Hide()
     end
-    
+
+    -- If this lock ends a layout-edit unlock session (started from a layout's own
+    -- Unlock button), exit editing so the dragged position is captured into that
+    -- layout (ExitEditing's diff-scan + the live SetProfileSetting on drag) and the
+    -- layout re-applies. Fires for ANY lock path (the layout's button, the position
+    -- panel's Lock, right-click, /df raidlock).
+    if DF.raidLayoutEditUnlock then
+        DF.raidLayoutEditUnlock = nil
+        if DF.AutoProfilesUI and DF.AutoProfilesUI.IsEditing and DF.AutoProfilesUI:IsEditing() then
+            DF.AutoProfilesUI:ExitEditing()
+        end
+    end
+
     -- Update button text if it exists
     if DF.raidLockButton and DF.raidLockButton.Text then
         DF.raidLockButton.Text:SetText("Unlock Raid Frames")

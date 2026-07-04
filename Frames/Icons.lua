@@ -212,8 +212,10 @@ local function GetOrCreateDefensiveBarIcon(frame, index)
         GameTooltip:Hide()
     end)
 
-    -- Mouse setup: enable hover for tooltips, propagate clicks to parent for bindings
-    -- Same approach as buff/debuff icons — guarded for combat lockdown
+    -- Mouse setup: enable hover for tooltips, propagate clicks to parent for bindings.
+    -- SetPropagateMouseMotion/Clicks ARE protected in combat (ADDON_ACTION_BLOCKED), so
+    -- this must stay combat-guarded; mid-combat creations defer to PLAYER_REGEN_ENABLED.
+    -- (Real fix for bug 961 is pre-creating these icons out of combat — see UpdateDefensiveBar.)
     if not InCombatLockdown() then
         icon:EnableMouse(true)
         if icon.SetPropagateMouseMotion then
@@ -1031,6 +1033,15 @@ function DF:UpdateDefensiveBar(frame)
     local cache = DF.BlizzardAuraCache and DF.BlizzardAuraCache[unit]
     do
         local maxDefs = db.defensiveBarMax or 4
+        -- Bug 961: the click-passthrough setup in GetOrCreateDefensiveBarIcon
+        -- (SetPropagateMouseMotion/Clicks) is combat-protected, so an extra defensive
+        -- icon first created mid-combat can't be made click-through until combat ends.
+        -- This function runs on every aura update, so pre-create the whole extra-icon
+        -- pool here while out of combat — the icons are created hidden and stay
+        -- click-through, so they're ready (and pass clicks) the moment combat starts.
+        if not InCombatLockdown() then
+            for i = 2, maxDefs do GetOrCreateDefensiveBarIcon(frame, i) end
+        end
         local iconSize = db.defensiveIconSize or 24
         local borderSize = db.defensiveIconBorderSize or 2
         local borderColor = db.defensiveIconBorderColor or DEFAULT_DEFENSIVE_BORDER_COLOR
@@ -1328,7 +1339,16 @@ function DF:UpdateAuraClickThrough()
     -- Use SetMouseClickEnabled(false) to allow tooltips while passing clicks through
     -- This is Cell's approach for click-casting compatibility with tooltips
     -- If DisableMouse is enabled, use EnableMouse(false) for complete click-through (no tooltips)
-    
+
+    -- The SetPropagateMouse* / EnableMouse setters below are protected in combat
+    -- (ADDON_ACTION_BLOCKED). If this runs mid-combat — e.g. the user toggles the
+    -- click-through option — defer it: flag for the PLAYER_REGEN_ENABLED handler, which
+    -- re-runs this out of combat.
+    if InCombatLockdown() then
+        DF.auraIconsNeedMouseFix = true
+        return
+    end
+
     local function updateFrameClickThrough(frame)
         if not frame then return end
         local db = DF:GetFrameDB(frame)

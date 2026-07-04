@@ -678,8 +678,15 @@ end
 function DF:SafeSetFont(fontString, fontNameOrPath, fontSize, outline)
     if not fontString then return false end
 
-    fontSize = fontSize or 10
-    outline = outline or ""
+    -- Harden against wrong-typed profile values: raw db values reach here from
+    -- every caller, and a corrupted import can store a boolean/number/table in
+    -- a font key. Coerce instead of crashing (a bad outline once broke frame
+    -- layout addon-wide on login): bad font name -> fallback font, bad size ->
+    -- default, bad outline -> no flags.
+    if type(fontNameOrPath) ~= "string" then fontNameOrPath = nil end
+    fontSize = tonumber(fontSize) or 10
+    if fontSize <= 0 then fontSize = 10 end
+    if type(outline) ~= "string" then outline = "" end
 
     -- The stored outline value may carry a "SHADOW;" prefix (Grid2-style: a drop
     -- shadow combined with any flag, e.g. "SHADOW;MONOCHROME, OUTLINE"). The legacy
@@ -921,6 +928,7 @@ DF.PartyDefaults = {
     aggroHighlightMode = "GLOW",
     aggroHighlightThickness = 1,
     aggroOnlyTanking = false,
+    aggroHideOnTanks = false,
     aggroUseCustomColors = false,
 
     -- Anchor/Position
@@ -1399,7 +1407,6 @@ DF.PartyDefaults = {
     dispelShowMagic = true,
     dispelShowPoison = true,
     dispelNameText = false,
-    dispellableHighlight = true,
 
     -- Dispel overlay source selector (Phase 1 UI uses bridge to old toggles)
     -- Values: "off" | "dandersframes" | "blizzard" | "both"
@@ -1823,8 +1830,12 @@ DF.PartyDefaults = {
     petNameY = 0,
     petOffsetX = 0,
     petOffsetY = -1,
+    petPowerBarHeight = 4,
+    petPowerColor = {r = 0.2, g = 0.4, b = 0.9},
+    petPowerColorMode = "POWER",
     petShowBorder = false,
     petShowHealthText = true,
+    petShowPowerBar = false,
     petTexture = "Interface\\TargetingFrame\\UI-StatusBar",
 
     -- Phased Icon
@@ -2169,7 +2180,6 @@ DF.PartyDefaults = {
     targetedSpellImportantBorderTexture = "SOLID",
     targetedSpellDisableMouse = false,
     targetedSpellDurationColor = {r = 1, g = 1, b = 1},
-    targetedSpellDurationColorByTime = false,
     targetedSpellDurationFont = "DF Roboto SemiBold",
     targetedSpellDurationOutline = "SHADOW",
     targetedSpellDurationScale = 1,
@@ -2598,6 +2608,7 @@ DF.RaidDefaults = {
     aggroHighlightMode = "GLOW",
     aggroHighlightThickness = 1,
     aggroOnlyTanking = false,
+    aggroHideOnTanks = false,
     aggroUseCustomColors = false,
 
     -- Anchor/Position
@@ -3076,7 +3087,6 @@ DF.RaidDefaults = {
     dispelShowMagic = true,
     dispelShowPoison = true,
     dispelNameText = false,
-    dispellableHighlight = true,
 
     -- Dispel overlay source selector (Phase 1 UI uses bridge to old toggles)
     -- Values: "off" | "dandersframes" | "blizzard" | "both"
@@ -3500,8 +3510,12 @@ DF.RaidDefaults = {
     petNameY = 0,
     petOffsetX = 0,
     petOffsetY = -1,
+    petPowerBarHeight = 4,
+    petPowerColor = {r = 0.2, g = 0.4, b = 0.9},
+    petPowerColorMode = "POWER",
     petShowBorder = false,
     petShowHealthText = true,
+    petShowPowerBar = false,
     petTexture = "Interface\\TargetingFrame\\UI-StatusBar",
 
     -- Phased Icon
@@ -3846,7 +3860,6 @@ DF.RaidDefaults = {
     targetedSpellImportantBorderTexture = "SOLID",
     targetedSpellDisableMouse = false,
     targetedSpellDurationColor = {r = 1, g = 1, b = 1},
-    targetedSpellDurationColorByTime = false,
     targetedSpellDurationFont = "DF Roboto SemiBold",
     targetedSpellDurationOutline = "SHADOW",
     targetedSpellDurationScale = 1,

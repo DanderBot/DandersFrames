@@ -1157,21 +1157,14 @@ function DF:UpdateAuraDesignerAppearance(frame)
 
     local inRange = GetInRange(frame)
 
-    -- Keep the AD tint/replace overlay inset off the frame border. This is also
-    -- done in ApplyHealthBar, but that only runs on an aura (re)apply — a range
-    -- transition doesn't re-run it, so without re-anchoring here the overlay kept
-    -- its full-frame extent and showed over the border until the next aura tick.
-    -- This pass runs on the range change, so the inset lands immediately.
+    -- Keep the AD tint overlay full-size (matching ApplyHealthBar). The opaque frame
+    -- border (frame level +10) sits above the overlay and covers its outer ring, so a
+    -- full-size overlay fills the whole visible bar with no missing edge pixels. (This
+    -- pass re-anchors on range changes because ApplyHealthBar only runs on aura apply.)
     local _ov = frame.dfAD and frame.dfAD.tintOverlay
     if _ov and frame.healthBar then
-        local _bi = (frame.border and frame.border:IsShown() and db.frameBorderSize) or 0
         _ov:ClearAllPoints()
-        if _bi > 0 then
-            _ov:SetPoint("TOPLEFT", frame.healthBar, "TOPLEFT", _bi, -_bi)
-            _ov:SetPoint("BOTTOMRIGHT", frame.healthBar, "BOTTOMRIGHT", -_bi, _bi)
-        else
-            _ov:SetAllPoints(frame.healthBar)
-        end
+        _ov:SetAllPoints(frame.healthBar)
     end
 
     if db.oorEnabled then

@@ -11,6 +11,11 @@ local addonName, DF = ...
 --   delete (x)  -> NK:RemoveAt
 --   warning     -> NK:AnalyzeConflicts (shadowed / overlapping rules)
 -- Called from Options/Options.lua via DF.BuildNicknamesPage().
+--
+-- Layout: this page uses the shared page masonry (Add/AddSpace) like every
+-- other page. Top-level blocks are Add()'d in a single full-width ("both")
+-- column; horizontal control rows are wrapped in composed containers whose
+-- children keep their relative SetPoints.
 -- ============================================================
 
 local ipairs = ipairs
@@ -22,11 +27,6 @@ local mmax = math.max
 
 local L = DF.L
 local ICON = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
-
-local function themeColor()
-    if DF.GUI and DF.GUI.GetThemeColor then return DF.GUI.GetThemeColor() end
-    return { r = 0.90, g = 0.55, b = 0.15 }
-end
 
 -- Human-readable text for an entry's "character / pattern" column. This is
 -- also exactly what the user would type to recreate it, so edit mode reuses it.
@@ -54,17 +54,15 @@ local function indexList(t)
     return tconcat(parts, ", ")
 end
 
-function DF.BuildNicknamesPage(guiRef, pageRef, dbRef)
+function DF.BuildNicknamesPage(guiRef, pageRef, dbRef, Add, AddSpace)
     local GUI = guiRef
     local parent = pageRef.child
 
-    -- Build frames once; later openings of the tab just refresh the list.
-    if pageRef._nicknamesBuilt then
-        if pageRef._nkRefresh then pageRef._nkRefresh() end
-        return
-    end
-    pageRef._nicknamesBuilt = true
-
+    -- Rebuilt on every page entry / mode switch. The page now lays out via the
+    -- shared Add() masonry, and DoBuild retires + re-adds children each build — so
+    -- (unlike the old hand-positioned version) this MUST re-create its widgets each
+    -- time, like every other page. Nicknames data is account-wide, so a party/raid
+    -- switch simply re-renders the same content.
     local NK = DF.Nicknames
 
     -- Forward declarations so handlers can reference each other.
@@ -73,7 +71,18 @@ function DF.BuildNicknamesPage(guiRef, pageRef, dbRef)
     local matchType = "exact"  -- transient: how the add/edit text is interpreted
     local draggingRow, dragOffsetY = nil, 0  -- drag-to-reorder state
 
-    -- ===== Enable checkbox (account-wide flag) — at the very top =====
+    -- ===== Account-wide banner (mirrors the Settings page's global banner) =====
+    Add(GUI:CreateInfoBanner(parent, {
+        tone = "info",
+        text = L["Nicknames are account-wide — shared across every character and profile, on both Party and Raid."],
+    }), 44, "both")
+
+    -- ===== Intro group (header + enable + description) — matches the other feature
+    -- pages (e.g. Pet Frames) so the toggle isn't floating loose under the banner. =====
+    AddSpace(12)
+    local introGroup = GUI:CreateSettingsGroup(parent, 560)
+    introGroup:AddWidget(GUI:CreateHeader(parent, L["Nickname Settings"]), 40)
+
     local enable = GUI:CreateCheckbox(parent, L["Enable Nicknames"], nil, nil, nil,
         function()
             local d = NK:GetDB()
@@ -83,50 +92,30 @@ function DF.BuildNicknamesPage(guiRef, pageRef, dbRef)
             local d = NK:GetDB()
             if d then d.enabled = val and true or false end
             NK:RefreshAllFrames()
+            -- Reveal/hide the rest of the page (sections + spacers) immediately.
+            if pageRef.RefreshStates then pageRef:RefreshStates() end
         end)
-    enable:SetPoint("TOPLEFT", 10, -10)
+    introGroup:AddWidget(enable, 30)
 
-    -- ===== Mark nicknames (optional decoration) =====
-    local markEnable = GUI:CreateCheckbox(parent, L["Mark nicknames"], nil, nil, nil,
-        function() local d = NK:GetDB(); return d and d.markEnabled end,
-        function(val) local d = NK:GetDB(); if d then d.markEnabled = val and true or false end; NK:RefreshAllFrames() end)
-    markEnable:SetPoint("TOPLEFT", enable, "BOTTOMLEFT", 0, -10)
+    introGroup:AddWidget(GUI:CreateLabel(parent, L["Replace character names with custom nicknames on party and raid frames."], 520), 30)
+    Add(introGroup, nil, "both")
 
-    local markScopeOpts = {
-        all = L["All nicknames"], mine = L["My added"], received = L["Received only"],
-        _order = { "all", "mine", "received" },
-    }
-    local markScopeDD = GUI:CreateDropdown(parent, L["Apply to"], markScopeOpts, nil, nil, nil,
-        function() local d = NK:GetDB(); return d and d.markScope or "all" end,
-        function(v) local d = NK:GetDB(); if d then d.markScope = v end; NK:RefreshAllFrames() end)
-    markScopeDD:SetSize(150, 50)
-    markScopeDD:SetPoint("TOPLEFT", markEnable, "BOTTOMLEFT", 0, -8)
+    -- Everything below the intro group is hidden when Nicknames is disabled (gated at
+    -- the end of this function), so a disabled page shows only the banner + the intro
+    -- group (header + Enable + description).
+    local gateStart = #pageRef.children + 1
+    AddSpace(12)  -- gap before the first group box
 
-    local markStyleOpts = {
-        brackets = L["Brackets  [name]"],
-        parens   = L["Parentheses  (name)"],
-        angle    = L["Angle  <name>"],
-        asterisk = L["Asterisk  name*"],
-        _order   = { "brackets", "parens", "angle", "asterisk" },
-    }
-    local markStyleDD = GUI:CreateDropdown(parent, L["Marker style"], markStyleOpts, nil, nil, nil,
-        function() local d = NK:GetDB(); return d and d.markStyle or "brackets" end,
-        function(v) local d = NK:GetDB(); if d then d.markStyle = v end; NK:RefreshAllFrames() end)
-    markStyleDD:SetSize(190, 50)
-    markStyleDD:SetPoint("TOPLEFT", markScopeDD, "TOPRIGHT", 10, 0)
+    -- ===== "Add a nickname" group box =====
+    -- Bordered settings group (header inside) holding the add/edit row, the match
+    -- hint, and the "Add from:" source buttons — all one unit.
+    local addGroup = GUI:CreateSettingsGroup(parent, 560)
+    addGroup:AddWidget(GUI:CreateHeader(parent, L["Add Nickname"]), 40)
 
-    -- ===== "Add a nickname" group box (subtle bordered container) =====
-    local addHeader = parent:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    addHeader:SetPoint("TOPLEFT", markScopeDD, "BOTTOMLEFT", 0, -12)
-    addHeader:SetText(L["Add a nickname"])
-    do local ahc = themeColor(); addHeader:SetTextColor(ahc.r, ahc.g, ahc.b) end
-
-    local addBox = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    addBox:SetPoint("TOPLEFT", addHeader, "BOTTOMLEFT", 0, -6)
-    addBox:SetSize(502, 122)  -- 502 = the saved-list width (kept in sync below)
-    addBox:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
-    addBox:SetBackdropColor(0, 0, 0, 0)               -- transparent fill: border-only group box (keeps text contrast)
-    addBox:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
+    -- The match/character/nickname row + Add/Cancel live inside this container.
+    -- Plain frame (no backdrop) — the surrounding group already supplies the border.
+    local addBox = CreateFrame("Frame", nil, parent)
+    addBox:SetSize(502, 64)
 
     -- ===== Add / edit row (inside the box) =====
     -- Match-type dropdown makes intent explicit (no hidden '*' parsing). Inline
@@ -138,22 +127,22 @@ function DF.BuildNicknamesPage(guiRef, pageRef, dbRef)
         contains = L["Contains"],
         _order   = { "exact", "prefix", "suffix", "contains" },
     }
-    local matchDropdown = GUI:CreateDropdown(parent, L["Match"], matchOptions, nil, nil, nil,
+    local matchDropdown = GUI:CreateDropdown(addBox, L["Match"], matchOptions, nil, nil, nil,
         function() return matchType end,
         function(v) matchType = v or "exact"; if updateModeHint then updateModeHint() end end)
     matchDropdown:SetSize(100, 50)
-    matchDropdown:SetPoint("TOPLEFT", addBox, "TOPLEFT", 12, -10)
+    matchDropdown:SetPoint("TOPLEFT", addBox, "TOPLEFT", 0, -10)  -- flush with the group's left edge
 
-    local charInput = GUI:CreateInput(parent, L["Character / text"], 130)
+    local charInput = GUI:CreateInput(addBox, L["Character / text"], 130)
     charInput:SetPoint("TOPLEFT", matchDropdown, "TOPRIGHT", 10, 0)
 
-    local nickInput = GUI:CreateInput(parent, L["Nickname"], 95)
+    local nickInput = GUI:CreateInput(addBox, L["Nickname"], 95)
     nickInput:SetPoint("TOPLEFT", charInput, "TOPRIGHT", 10, 0)
 
-    local addBtn = GUI:CreateButton(parent, L["Add"], 65, 24, nil)
+    local addBtn = GUI:CreateButton(addBox, L["Add"], 65, 24, nil)
     addBtn:SetPoint("LEFT", nickInput.EditBox, "RIGHT", 10, 0)
 
-    local cancelBtn = GUI:CreateButton(parent, L["Cancel"], 56, 24, nil)
+    local cancelBtn = GUI:CreateButton(addBox, L["Cancel"], 56, 24, nil)
     cancelBtn:SetPoint("LEFT", addBtn, "RIGHT", 6, 0)
     cancelBtn:Hide()
 
@@ -246,9 +235,24 @@ function DF.BuildNicknamesPage(guiRef, pageRef, dbRef)
     charInput.EditBox:SetScript("OnEnterPressed", function(self) self:ClearFocus(); commit() end)
     nickInput.EditBox:SetScript("OnEnterPressed", function(self) self:ClearFocus(); commit() end)
 
+    -- Grey-when-disabled: addBox is a plain composed frame, so the group's
+    -- disableChildrenOn can't reach its inner controls automatically. Forward a
+    -- SetEnabled that dims the box and disables each interactive control. (Skipped
+    -- when nothing is enabled to avoid stomping edit-mode B.net disables — the
+    -- gate only ever passes false here while editing is reset on each build.)
+    addBox.SetEnabled = function(self, enabled)
+        self:SetAlpha(enabled and 1.0 or 0.5)
+        if enabled then charInput.EditBox:Enable() else charInput.EditBox:Disable() end
+        if enabled then nickInput.EditBox:Enable() else nickInput.EditBox:Disable() end
+        if matchDropdown.SetEnabled then matchDropdown:SetEnabled(enabled) end
+        if addBtn.SetEnabled then addBtn:SetEnabled(enabled) end
+        if cancelBtn.SetEnabled then cancelBtn:SetEnabled(enabled) end
+    end
+
+    addGroup:AddWidget(addBox, 64)
+
     -- ===== Match hint (updates with the selected match type) =====
     local hint = parent:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    hint:SetPoint("TOPLEFT", matchDropdown, "BOTTOMLEFT", 0, -6)  -- left margin (title + list follow hint)
     hint:SetWidth(460)
     hint:SetJustifyH("LEFT")
     hint:SetTextColor(0.6, 0.6, 0.6, 1)  -- C_TEXT_DIM: addon-standard dim help text
@@ -264,15 +268,20 @@ function DF.BuildNicknamesPage(guiRef, pageRef, dbRef)
         end
     end
     updateModeHint()
+    addGroup:AddWidget(hint, 24)
 
     -- ===== "Add from <source>" buttons (Phase 2 source pickers) =====
-    local addFromLabel = parent:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    addFromLabel:SetPoint("TOPLEFT", hint, "BOTTOMLEFT", 0, -12)
+    -- Lives inside the Add-a-nickname group, beneath the hint.
+    local sourceBox = CreateFrame("Frame", nil, parent)
+    sourceBox:SetSize(560, 26)
+
+    local addFromLabel = sourceBox:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    addFromLabel:SetPoint("LEFT", sourceBox, "LEFT", 0, 0)
     addFromLabel:SetText(L["Add from:"])
     addFromLabel:SetTextColor(0.6, 0.6, 0.6, 1)  -- C_TEXT_DIM
 
     local function srcButton(text, key, anchorTo)
-        local b = GUI:CreateButton(parent, text, 78, 22, function()
+        local b = GUI:CreateButton(sourceBox, text, 78, 22, function()
             if DF.OpenNicknamePicker then DF.OpenNicknamePicker(key) end
         end)
         if anchorTo then
@@ -285,26 +294,25 @@ function DF.BuildNicknamesPage(guiRef, pageRef, dbRef)
     local bGroup = srcButton(L["Group"], "group", nil)
     local bGuild = srcButton(L["Guild"], "guild", bGroup)
     local bFriends = srcButton(L["Friends"], "friends", bGuild)
-    srcButton(L["B.net"], "bnet", bFriends)
-
-    -- ===== Priority info banner (explains the list's core model) =====
-    local priorityBanner = GUI:CreateInfoBanner(parent, {
-        tone = "info",
-        text = L["Rules are checked top to bottom — the first one that matches a name wins. Drag a row by its grip to change priority."],
-    })
-    priorityBanner:SetPoint("TOPLEFT", addBox, "BOTTOMLEFT", 0, -14)
-    priorityBanner:SetPoint("RIGHT", addBox, "RIGHT", 0, 0)
+    local bBnet = srcButton(L["B.net"], "bnet", bFriends)
+    -- Grey-when-disabled: dim the box + disable each source button (group gate via
+    -- disableChildrenOn reaches this child through its SetEnabled).
+    sourceBox.SetEnabled = function(self, enabled)
+        self:SetAlpha(enabled and 1.0 or 0.5)
+        for _, b in ipairs({ bGroup, bGuild, bFriends, bBnet }) do
+            if b and b.SetEnabled then b:SetEnabled(enabled) end
+        end
+    end
+    addGroup:AddWidget(sourceBox, 30)
+    Add(addGroup, nil, "both")
 
     -- ===== List title + count =====
-    local title = parent:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    title:SetPoint("TOPLEFT", priorityBanner, "BOTTOMLEFT", 0, -12)
-    title:SetText(L["Saved nicknames"])
-    local tc = themeColor()
-    title:SetTextColor(tc.r, tc.g, tc.b)
-
-    local countText = parent:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
-    countText:SetPoint("LEFT", title, "RIGHT", 10, 0)
+    AddSpace(8)
+    local title = GUI:CreateHeader(parent, L["Saved Nicknames"])
+    local countText = title:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
+    countText:SetPoint("LEFT", title.text, "RIGHT", 10, 0)
     countText:SetTextColor(0.5, 0.5, 0.5)
+    Add(title, 30, "both")
 
     -- ===== List background + scroll =====
     local ROW_HEIGHT = 26
@@ -312,15 +320,8 @@ function DF.BuildNicknamesPage(guiRef, pageRef, dbRef)
     local LIST_HEIGHT = 230
 
     local listBg = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    listBg:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -20)
     listBg:SetSize(LIST_WIDTH, LIST_HEIGHT)
-    listBg:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    listBg:SetBackdropColor(0.06, 0.06, 0.06, 0.95)
-    listBg:SetBackdropBorderColor(0.20, 0.20, 0.20, 1)
+    GUI:CreateElementBackdrop(listBg, { bgColor = { 0.06, 0.06, 0.06, 0.95 }, borderColor = { 0.20, 0.20, 0.20, 1 } })
 
     -- Column headers (just above the list border)
     local function colHeader(text, x)
@@ -343,11 +344,38 @@ function DF.BuildNicknamesPage(guiRef, pageRef, dbRef)
     scrollContent:SetSize(LIST_WIDTH - 28, 1)
     scrollFrame:SetScrollChild(scrollContent)
 
+    -- Grey-when-disabled support: when Nicknames is off the list dims to 0.5 and
+    -- stops taking mouse input (drag/edit/delete), but stays VISIBLE in place. The
+    -- page's RefreshStates calls this via listBg.disableOn (set in the gate loop).
+    -- A parent's EnableMouse(false) does NOT block child frames, so we must also
+    -- disable interaction on every pooled row (drag + edit/delete buttons).
+    -- Forward-declared here; assigned after rowPool exists (runs at gate time).
+    local applyRowsEnabled
+    listBg.SetEnabled = function(self, enabled)
+        local alpha = enabled and 1.0 or 0.5
+        self:SetAlpha(alpha)
+        self:EnableMouse(enabled)
+        scrollContent:EnableMouse(enabled)
+        scrollFrame:EnableMouse(enabled)
+        if applyRowsEnabled then applyRowsEnabled(enabled) end
+    end
+
     local emptyText = listBg:CreateFontString(nil, "OVERLAY", "DFFontDisableSmall")
     emptyText:SetPoint("CENTER", 0, 0)
     emptyText:SetText(L["No nickname rules yet. Add one above."])
 
     local rowPool = {}
+
+    -- Block/restore interaction on every pooled row when the list is disabled.
+    -- (listBg's own EnableMouse can't reach these children.) Rows are re-pooled by
+    -- Refresh, which re-applies this so freshly-shown rows inherit the gate state.
+    applyRowsEnabled = function(enabled)
+        for _, row in ipairs(rowPool) do
+            row:EnableMouse(enabled)
+            if row.del then row.del:SetEnabled(enabled) end
+            if row.edit then row.edit:SetEnabled(enabled) end
+        end
+    end
 
     -- Map a screen Y position to a 1-based drop index in the list.
     local function indexFromY(cursorY)
@@ -446,12 +474,12 @@ function DF.BuildNicknamesPage(guiRef, pageRef, dbRef)
         row.flag.tex:SetTexture(ICON .. "warning")
         row.flag:SetScript("OnEnter", function(self)
             if not self.tipTitle then return end
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText(self.tipTitle)
-            if self.tipBody then GameTooltip:AddLine(self.tipBody, 1, 1, 1, true) end
-            GameTooltip:Show()
+            GUI:ShowTooltip(self, {
+                title = self.tipTitle,
+                lines = self.tipBody and { self.tipBody } or nil,
+            })
         end)
-        row.flag:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        row.flag:SetScript("OnLeave", function() GUI:HideTooltip() end)
 
         -- nickname
         row.nickFS = row:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
@@ -465,19 +493,25 @@ function DF.BuildNicknamesPage(guiRef, pageRef, dbRef)
         row.srcFS:SetWidth(56)
         row.srcFS:SetJustifyH("LEFT")
 
-        -- delete (red-tinted) on the far right
-        row.del = GUI:CreateIconButton(row, "delete", "", 26, 22, function()
+        -- delete: danger tone gives a red icon at rest AND a red hover wash/border
+        -- (plain CreateIconButton hovered to the blue accent), matching every other
+        -- delete in the GUI.
+        row.del = CreateFrame("Button", nil, row, "BackdropTemplate")
+        GUI:StyleButton(row.del, {
+            width = 26, height = 22, tone = "danger",
+            icon = { texture = ICON .. "delete", size = 12 },
+        })
+        row.del.Icon:ClearAllPoints()
+        row.del.Icon:SetPoint("CENTER")
+        row.del:SetPoint("RIGHT", -2, 0)
+        row.del:SetScript("OnClick", function()
             local i = row.entryIndex
             if not i then return end
             if editingIndex then clearInputs(); setEditMode(false) end
             NK:RemoveAt(i)
             if Refresh then Refresh() end
-        end, 12)
-        row.del:SetPoint("RIGHT", -2, 0)
-        row.del.Icon:ClearAllPoints()
-        row.del.Icon:SetPoint("CENTER")
-        row.del.Icon:SetVertexColor(1, 0.5, 0.5)
-        row.del:SetBackdropBorderColor(0.8, 0.2, 0.2, 0.5)
+            PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+        end)
 
         -- edit (neutral) to the left of delete
         row.edit = GUI:CreateIconButton(row, "edit", "", 26, 22, function()
@@ -597,19 +631,106 @@ function DF.BuildNicknamesPage(guiRef, pageRef, dbRef)
         end
 
         scrollContent:SetHeight(mmax(1, n * ROW_HEIGHT))
+        -- Re-apply the disabled gate so freshly-pooled rows inherit it (Refresh
+        -- rebuilds rows, which would otherwise come back fully interactive).
+        applyRowsEnabled((data and data.enabled) and true or false)
         if refreshReceived then refreshReceived() end
     end
 
     pageRef._nkRefresh = Refresh
 
-    -- ===== Sharing & Sync =====
-    local shareHeader = parent:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    shareHeader:SetPoint("TOPLEFT", listBg, "BOTTOMLEFT", 0, -16)
-    shareHeader:SetText(L["Sharing & Sync"])
-    do local shc = themeColor(); shareHeader:SetTextColor(shc.r, shc.g, shc.b) end
+    -- The column headers sit just above listBg's TOP border — reserve a row for
+    -- them in the flow so they clear the title above instead of colliding with it.
+    AddSpace(18)
+    Add(listBg, LIST_HEIGHT, "both")
 
-    local selfInput = GUI:CreateInput(parent, L["Your nickname (broadcast)"], 160)
-    selfInput:SetPoint("TOPLEFT", shareHeader, "BOTTOMLEFT", 0, -8)
+    -- ===== Priority note (light) — sits UNDER the list, mirroring the "Exact: …"
+    -- hint that sits under the "Add a nickname" box. =====
+    local priorityNote = parent:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    priorityNote:SetJustifyH("LEFT")
+    priorityNote:SetTextColor(0.6, 0.6, 0.6, 1)  -- C_TEXT_DIM, matches the page's other hints
+    priorityNote:SetText(L["Rules are checked top to bottom — the first one that matches a name wins. Drag a row by its grip to change priority."])
+    Add(priorityNote, 24, "both")
+    AddSpace(12)  -- gap before the Marker box
+
+    -- ===== Marker (decoration sub-feature) — placed after the list since adding/
+    -- viewing nicknames is the primary task; the marker is secondary decoration. =====
+    -- "Mark nicknames" is the parent toggle; the two dropdowns are its sub-options,
+    -- indented beneath it and greyed out when marking is off so it reads as a unit.
+    local markGroup = GUI:CreateSettingsGroup(parent, 560)
+    markGroup:AddWidget(GUI:CreateHeader(parent, L["Marker"]), 40)
+
+    -- Forward-declared so the toggle's callback can enable/disable them.
+    local markScopeDD, markStyleDD
+    local function updateMarkControls()
+        local d = NK:GetDB()
+        local on = (d and d.markEnabled) and true or false
+        if markScopeDD and markScopeDD.SetEnabled then markScopeDD:SetEnabled(on) end
+        if markStyleDD and markStyleDD.SetEnabled then markStyleDD:SetEnabled(on) end
+    end
+
+    local markEnable = GUI:CreateCheckbox(parent, L["Mark nicknames"], nil, nil, nil,
+        function() local d = NK:GetDB(); return d and d.markEnabled end,
+        function(val)
+            local d = NK:GetDB(); if d then d.markEnabled = val and true or false end
+            updateMarkControls()
+            NK:RefreshAllFrames()
+        end)
+    markGroup:AddWidget(markEnable, 30)
+
+    -- The two dropdowns sit side-by-side in a composed container the group
+    -- stacks as a single row (flush-left, like the rest of the box).
+    local markDDRow = CreateFrame("Frame", nil, parent)
+    markDDRow:SetSize(560, 56)
+
+    local markScopeOpts = {
+        all = L["All nicknames"], mine = L["My added"], received = L["Received only"],
+        _order = { "all", "mine", "received" },
+    }
+    markScopeDD = GUI:CreateDropdown(markDDRow, L["Apply to"], markScopeOpts, nil, nil, nil,
+        function() local d = NK:GetDB(); return d and d.markScope or "all" end,
+        function(v) local d = NK:GetDB(); if d then d.markScope = v end; NK:RefreshAllFrames() end)
+    markScopeDD:SetSize(150, 50)
+    markScopeDD:SetPoint("TOPLEFT", markDDRow, "TOPLEFT", 0, 0)   -- flush left; grey-when-off conveys the dependency
+
+    local markStyleOpts = {
+        brackets = L["Brackets  [name]"],
+        parens   = L["Parentheses  (name)"],
+        angle    = L["Angle  <name>"],
+        asterisk = L["Asterisk  name*"],
+        _order   = { "brackets", "parens", "angle", "asterisk" },
+    }
+    markStyleDD = GUI:CreateDropdown(markDDRow, L["Marker style"], markStyleOpts, nil, nil, nil,
+        function() local d = NK:GetDB(); return d and d.markStyle or "brackets" end,
+        function(v) local d = NK:GetDB(); if d then d.markStyle = v end; NK:RefreshAllFrames() end)
+    markStyleDD:SetSize(190, 50)
+    markStyleDD:SetPoint("TOPLEFT", markScopeDD, "TOPRIGHT", 10, 0)
+    updateMarkControls()   -- set initial enabled/greyed state from saved value
+    -- Grey-when-disabled: the group gate (disableChildrenOn) reaches the composed
+    -- dropdown row through this SetEnabled. When re-enabling, defer to the marker's
+    -- own toggle state (markEnabled) so we don't un-grey sub-options the user left off.
+    markDDRow.SetEnabled = function(self, enabled)
+        self:SetAlpha(enabled and 1.0 or 0.5)
+        if enabled then
+            updateMarkControls()
+        else
+            if markScopeDD and markScopeDD.SetEnabled then markScopeDD:SetEnabled(false) end
+            if markStyleDD and markStyleDD.SetEnabled then markStyleDD:SetEnabled(false) end
+        end
+    end
+    markGroup:AddWidget(markDDRow, 60)
+    Add(markGroup, nil, "both")
+    AddSpace(12)  -- gap before the Sharing & Sync box
+
+    -- ===== Sharing & Sync =====
+    local shareGroup = GUI:CreateSettingsGroup(parent, 560)
+    shareGroup:AddWidget(GUI:CreateHeader(parent, L["Sharing & Sync"]), 40)
+
+    local shareBox = CreateFrame("Frame", nil, parent)
+    shareBox:SetSize(560, 80)
+
+    local selfInput = GUI:CreateInput(shareBox, L["Your nickname (broadcast)"], 160)
+    selfInput:SetPoint("TOPLEFT", shareBox, "TOPLEFT", 0, 0)
     do local d = NK:GetDB(); selfInput.EditBox:SetText((d and d.selfNick) or "") end
     local function saveSelfNick()
         local d = NK:GetDB(); if not d then return end
@@ -624,50 +745,56 @@ function DF.BuildNicknamesPage(guiRef, pageRef, dbRef)
         off = L["Off"], raid = L["Raid/Party"], guild = L["Guild"], both = L["Both"],
         _order = { "off", "raid", "guild", "both" },
     }
-    local shareViaDD = GUI:CreateDropdown(parent, L["Share via"], shareChannelOpts, nil, nil, nil,
+    local shareViaDD = GUI:CreateDropdown(shareBox, L["Share via"], shareChannelOpts, nil, nil, nil,
         function() local d = NK:GetDB(); return d and d.shareVia or "off" end,
         function(v) local d = NK:GetDB(); if d then d.shareVia = v end
             if DF.NicknamesComm then DF.NicknamesComm:BroadcastSelfNick() end end)
     shareViaDD:SetSize(120, 50)
     shareViaDD:SetPoint("TOPLEFT", selfInput, "TOPRIGHT", 12, 0)
 
-    local acceptDD = GUI:CreateDropdown(parent, L["Accept from"], shareChannelOpts, nil, nil, nil,
+    local acceptDD = GUI:CreateDropdown(shareBox, L["Accept from"], shareChannelOpts, nil, nil, nil,
         function() local d = NK:GetDB(); return d and d.acceptFrom or "off" end,
         function(v) local d = NK:GetDB(); if d then d.acceptFrom = v end end)
     acceptDD:SetSize(120, 50)
     acceptDD:SetPoint("TOPLEFT", shareViaDD, "TOPRIGHT", 12, 0)
 
-    local autoCB = GUI:CreateCheckbox(parent, L["Auto-share on group join"], nil, nil, nil,
+    local autoCB = GUI:CreateCheckbox(shareBox, L["Auto-share on group join"], nil, nil, nil,
         function() local d = NK:GetDB(); return d and d.autoSync end,
         function(val) local d = NK:GetDB(); if d then d.autoSync = val and true or false end end)
     autoCB:SetPoint("TOPLEFT", selfInput, "BOTTOMLEFT", 0, -10)
 
-    local shareNowBtn = GUI:CreateButton(parent, L["Share now"], 90, 22, function()
+    local shareNowBtn = GUI:CreateButton(shareBox, L["Share now"], 90, 22, function()
         if DF.NicknamesComm then DF.NicknamesComm:BroadcastSelfNick() end
     end)
     shareNowBtn:SetPoint("LEFT", autoCB, "RIGHT", 20, 0)
 
-    local requestBtn = GUI:CreateButton(parent, L["Request"], 90, 22, function()
+    local requestBtn = GUI:CreateButton(shareBox, L["Request"], 90, 22, function()
         if DF.NicknamesComm then DF.NicknamesComm:RequestFromGroup() end
     end)
     requestBtn:SetPoint("LEFT", shareNowBtn, "RIGHT", 8, 0)
+    -- Grey-when-disabled: dim the box + disable each control so the group gate
+    -- (disableChildrenOn) greys the whole Sharing & Sync row in place.
+    shareBox.SetEnabled = function(self, enabled)
+        self:SetAlpha(enabled and 1.0 or 0.5)
+        if enabled then selfInput.EditBox:Enable() else selfInput.EditBox:Disable() end
+        for _, c in ipairs({ shareViaDD, acceptDD, autoCB, shareNowBtn, requestBtn }) do
+            if c and c.SetEnabled then c:SetEnabled(enabled) end
+        end
+    end
+    shareGroup:AddWidget(shareBox, 80)
+    Add(shareGroup, nil, "both")
 
     -- ===== Received nicknames (shared by others; separate from your list) =====
-    local recvTitle = parent:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    recvTitle:SetPoint("TOPLEFT", autoCB, "BOTTOMLEFT", 0, -16)
-    recvTitle:SetText(L["Received nicknames"])
-    do local rtc = themeColor(); recvTitle:SetTextColor(rtc.r, rtc.g, rtc.b) end
-
-    local recvCount = parent:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
-    recvCount:SetPoint("LEFT", recvTitle, "RIGHT", 10, 0)
+    AddSpace(12)
+    local recvTitle = GUI:CreateHeader(parent, L["Received Nicknames"])
+    local recvCount = recvTitle:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
+    recvCount:SetPoint("LEFT", recvTitle.text, "RIGHT", 10, 0)
     recvCount:SetTextColor(0.5, 0.5, 0.5)
+    Add(recvTitle, 30, "both")
 
     local recvBg = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    recvBg:SetPoint("TOPLEFT", recvTitle, "BOTTOMLEFT", 0, -8)
     recvBg:SetSize(LIST_WIDTH, 120)
-    recvBg:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
-    recvBg:SetBackdropColor(0.06, 0.06, 0.06, 0.95)
-    recvBg:SetBackdropBorderColor(0.20, 0.20, 0.20, 1)
+    GUI:CreateElementBackdrop(recvBg, { bgColor = { 0.06, 0.06, 0.06, 0.95 }, borderColor = { 0.20, 0.20, 0.20, 1 } })
 
     local recvScroll = CreateFrame("ScrollFrame", nil, recvBg, "ScrollFrameTemplate")
     recvScroll:SetPoint("TOPLEFT", 4, -4)
@@ -678,11 +805,40 @@ function DF.BuildNicknamesPage(guiRef, pageRef, dbRef)
     recvContent:SetSize(LIST_WIDTH - 28, 1)
     recvScroll:SetScrollChild(recvContent)
 
+    -- Grey-when-disabled support (mirrors listBg): dim to 0.5 + drop mouse input
+    -- when Nicknames is off, but stay visible. Driven by recvBg.disableOn below.
+    -- As with the saved list, a parent's EnableMouse(false) doesn't reach child
+    -- frames, so we must disable each received row's interactive controls too.
+    -- Forward-declared; assigned after recvRows exists (runs at gate time).
+    local applyRecvRowsEnabled
+    recvBg.SetEnabled = function(self, enabled)
+        local alpha = enabled and 1.0 or 0.5
+        self:SetAlpha(alpha)
+        self:EnableMouse(enabled)
+        recvContent:EnableMouse(enabled)
+        recvScroll:EnableMouse(enabled)
+        if applyRecvRowsEnabled then applyRecvRowsEnabled(enabled) end
+    end
+
     local recvEmpty = recvBg:CreateFontString(nil, "OVERLAY", "DFFontDisableSmall")
     recvEmpty:SetPoint("CENTER", 0, 0)
     recvEmpty:SetText(L["No nicknames received yet."])
 
     local recvRows = {}
+
+    -- Block/restore interaction on every received row when the list is disabled.
+    -- (recvBg's own EnableMouse can't reach these children.) Re-applied by
+    -- refreshReceived so freshly-pooled rows inherit the gate state.
+    local function applyRecvRowsEnabledImpl(enabled)
+        for _, r in ipairs(recvRows) do
+            r:EnableMouse(enabled)
+            if r.del then r.del:SetEnabled(enabled) end
+            if r.block then r.block:SetEnabled(enabled) end
+            if r.status then r.status:EnableMouse(enabled) end
+        end
+    end
+    applyRecvRowsEnabled = applyRecvRowsEnabledImpl
+
     local function getRecvRow(i)
         local r = recvRows[i]
         if r then return r end
@@ -699,11 +855,9 @@ function DF.BuildNicknamesPage(guiRef, pageRef, dbRef)
         r.status.tex:SetVertexColor(1, 0.35, 0.35)
         r.status:SetScript("OnEnter", function(self)
             if not self.tip then return end
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText(self.tip, 1, 1, 1, true)
-            GameTooltip:Show()
+            GUI:ShowTooltip(self, { title = self.tip })
         end)
-        r.status:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        r.status:SetScript("OnLeave", function() GUI:HideTooltip() end)
 
         r.who = r:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
         r.who:SetPoint("LEFT", r.status, "RIGHT", 4, 0); r.who:SetWidth(170); r.who:SetJustifyH("LEFT")
@@ -775,20 +929,27 @@ function DF.BuildNicknamesPage(guiRef, pageRef, dbRef)
             r:Show()
         end
         recvContent:SetHeight(mmax(1, n * ROW_HEIGHT))
+        -- Re-apply the disabled gate so freshly-pooled rows inherit it.
+        local d = NK:GetDB()
+        applyRecvRowsEnabled((d and d.enabled) and true or false)
     end
+
+    Add(recvBg, 120, "both")
 
     -- ===== Name precedence (only shown when NSRT can also manage our names) =====
     -- Northern Sky Raid Tools can also be set to put nicknames on DandersFrames
     -- frames; when both are active they fight. This mirrors the one-time conflict
     -- popup (Features/Nicknames.lua) so the choice can be changed here later.
     if C_AddOns and C_AddOns.IsAddOnLoaded and C_AddOns.IsAddOnLoaded("NorthernSkyRaidTools") then
-        local precHeader = parent:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-        precHeader:SetPoint("TOPLEFT", recvBg, "BOTTOMLEFT", 0, -18)
-        precHeader:SetText(L["Name precedence"])
-        do local pc = themeColor(); precHeader:SetTextColor(pc.r, pc.g, pc.b) end
+        AddSpace(12)  -- gap so the Received list box doesn't merge into this one
+        local precGroup = GUI:CreateSettingsGroup(parent, 560)
+        precGroup:AddWidget(GUI:CreateHeader(parent, L["Name Precedence"]), 40)
 
-        local precDesc = parent:CreateFontString(nil, "OVERLAY", "DFFontDisableSmall")
-        precDesc:SetPoint("TOPLEFT", precHeader, "BOTTOMLEFT", 0, -6)
+        local precBox = CreateFrame("Frame", nil, parent)
+        precBox:SetSize(560, 80)
+
+        local precDesc = precBox:CreateFontString(nil, "OVERLAY", "DFFontDisableSmall")
+        precDesc:SetPoint("TOPLEFT", precBox, "TOPLEFT", 0, 0)
         precDesc:SetWidth(LIST_WIDTH)
         precDesc:SetJustifyH("LEFT")
         precDesc:SetText(L["Northern Sky Raid Tools can also show nicknames on DandersFrames frames. Choose which one decides the names shown here."])
@@ -797,14 +958,48 @@ function DF.BuildNicknamesPage(guiRef, pageRef, dbRef)
             self = "DandersFrames", nsrt = "Northern Sky Raid Tools",
             _order = { "self", "nsrt" },
         }
-        local precDD = GUI:CreateDropdown(parent, L["Names on frames decided by"], precOpts, nil, nil, nil,
+        local precDD = GUI:CreateDropdown(precBox, L["Names on frames decided by"], precOpts, nil, nil, nil,
             function() local d = NK:GetDB(); return (d and d.framePrecedence == "nsrt") and "nsrt" or "self" end,
             function(v)
                 local d = NK:GetDB(); if d then d.framePrecedence = v end
                 NK:RefreshAllFrames()
             end)
         precDD:SetSize(220, 50)
-        precDD:SetPoint("TOPLEFT", precDesc, "BOTTOMLEFT", -4, -8)
+        precDD:SetPoint("TOPLEFT", precDesc, "BOTTOMLEFT", 0, -8)  -- flush left, like every other box
+        -- Grey-when-disabled: dim the box + disable the dropdown (group gate reaches
+        -- this composed child through SetEnabled).
+        precBox.SetEnabled = function(self, enabled)
+            self:SetAlpha(enabled and 1.0 or 0.5)
+            if precDD.SetEnabled then precDD:SetEnabled(enabled) end
+        end
+        precGroup:AddWidget(precBox, 80)
+        Add(precGroup, nil, "both")
+    end
+
+    -- When Nicknames is disabled, GREY (don't hide) everything below the intro group
+    -- so the whole page stays visible but reads as inert: the banner + intro group
+    -- (header + Enable + description) stay fully interactive. Everything Add()'d after
+    -- the intro group (captured by gateStart) is greyed in place:
+    --   * settings groups   -> disableChildrenOn (greys every child but the header)
+    --   * SetEnabled widgets -> disableOn (the control greys itself)
+    --   * the list frames    -> disableOn drives the SetEnabled added above (alpha 0.5
+    --                           + mouse off); headers/labels/spacers stay full-colour.
+    -- Composes with any existing disableChildrenOn/disableOn. RefreshStates (run on
+    -- build + on the Enable toggle) applies it.
+    local function NicknamesDisabled()
+        local d = NK:GetDB()
+        return not (d and d.enabled)
+    end
+    for i = gateStart, #pageRef.children do
+        local w = pageRef.children[i]
+        if w.isSettingsGroup then
+            local prev = w.disableChildrenOn
+            w.disableChildrenOn = function(db) return NicknamesDisabled() or (prev and prev(db)) end
+        elseif w.SetEnabled then
+            local prev = w.disableOn
+            w.disableOn = function(db) return NicknamesDisabled() or (prev and prev(db)) end
+        end
+        -- else: labels/spacers (no SetEnabled) stay visible at full colour.
     end
 
     -- Keep this panel in sync with changes made anywhere (e.g. incoming shares).

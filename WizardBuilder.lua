@@ -272,6 +272,8 @@ local function CreateBuilderEditBox(parent, width, height, multiLine)
     local container = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     container:SetSize(width, height)
     ApplyBuilderBackdrop(container, BC.element, BC.border, 1)
+    container:SetBackdropColor(0, 0, 0, 0.5)
+    container:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
 
     local edit = CreateFrame("EditBox", nil, container)
     edit:SetPoint("TOPLEFT", 8, -4)
@@ -302,20 +304,8 @@ end
 -- Create a themed button
 local function CreateBuilderButton(parent, text, width, height, onClick)
     local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
-    btn:SetSize(width, height)
-    ApplyBuilderBackdrop(btn, BC.element, BC.border, 1)
+    DF.GUI:StyleButton(btn, { width = width, height = height, text = text })
 
-    btn.Text = btn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    btn.Text:SetPoint("CENTER")
-    btn.Text:SetText(text)
-    btn.Text:SetTextColor(BC.text.r, BC.text.g, BC.text.b)
-
-    btn:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(BC.hover.r, BC.hover.g, BC.hover.b, 1)
-    end)
-    btn:SetScript("OnLeave", function(self)
-        ApplyBuilderBackdrop(self, BC.element, BC.border, 1)
-    end)
     btn:SetScript("OnClick", function(self)
         PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
         if onClick then onClick() end
@@ -412,6 +402,7 @@ local function CreateBuilderFrame()
     accent:SetPoint("TOPRIGHT", 0, 0)
     accent:SetHeight(2)
     accent:SetColorTexture(BC.accent.r, BC.accent.g, BC.accent.b, 1)
+    f.AccentStripe = accent
 
     -- Title text
     f.TitleText = titleBar:CreateFontString(nil, "OVERLAY", "DFFontNormalLarge")
@@ -611,7 +602,7 @@ local function CreateOptionRowFrame(parent, optIndex, step, onUpdate)
         row.LabelEdit:SetAutoFocus(false)
         row.LabelEdit:SetFontObject(DFFontHighlightSmall)
         row.LabelEdit:SetTextInsets(6, 6, 0, 0)
-        ApplyBuilderBackdrop(row.LabelEdit, BC.element, BC.border, 1)
+        DF.GUI:StyleEditBox(row.LabelEdit, { skipFont = true })
         row.LabelEdit:SetTextColor(BC.text.r, BC.text.g, BC.text.b)
         row.LabelEdit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
 
@@ -1174,6 +1165,15 @@ function WB:ShowBuilder(wizardName, onSave)
     builderOnSave = onSave
 
     local f = CreateBuilderFrame()
+    -- Theme the accent to the current mode (party purple / raid orange) on each
+    -- open. The frame is cached, so this must run here rather than at build time.
+    -- RenderBuilderStep (below) reads BC.accent for the progress dots, so update
+    -- it before rendering; the stripe is a build-once texture so recolour it too.
+    local tc = DF.GUI and DF.GUI.GetThemeColor and DF.GUI.GetThemeColor()
+    if tc then
+        BC.accent.r, BC.accent.g, BC.accent.b = tc.r, tc.g, tc.b
+        if f.AccentStripe then f.AccentStripe:SetColorTexture(tc.r, tc.g, tc.b, 1) end
+    end
     f.TitleText:SetText(L["Building: "] .. (config.title or wizardName))
     f:Show()
     RenderBuilderStep()
@@ -1295,7 +1295,7 @@ function WB:BuildListPage(GUI, page, db, Add, AddSpace, AddSyncPoint)
         nameEdit:SetTextInsets(6, 6, 0, 0)
         if not nameEdit.SetBackdrop then Mixin(nameEdit, BackdropTemplateMixin) end
         nameEdit:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
-        nameEdit:SetBackdropColor(0.18, 0.18, 0.18, 1)
+        nameEdit:SetBackdropColor(0, 0, 0, 0.5)
         nameEdit:SetBackdropBorderColor(0.25, 0.25, 0.25, 0.5)
         nameEdit:SetText(config.name or "")
         nameEdit:SetScript("OnEnterPressed", function(self)
@@ -1330,7 +1330,7 @@ function WB:BuildListPage(GUI, page, db, Add, AddSpace, AddSyncPoint)
         descEdit:SetTextInsets(6, 6, 0, 0)
         if not descEdit.SetBackdrop then Mixin(descEdit, BackdropTemplateMixin) end
         descEdit:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
-        descEdit:SetBackdropColor(0.18, 0.18, 0.18, 1)
+        descEdit:SetBackdropColor(0, 0, 0, 0.5)
         descEdit:SetBackdropBorderColor(0.25, 0.25, 0.25, 0.5)
         descEdit:SetText(config.description or "")
         descEdit:SetScript("OnEnterPressed", function(self)
@@ -1591,7 +1591,7 @@ function WB:BuildEditorPage(GUI, page, db, Add, AddSpace, AddSyncPoint)
     idEdit:SetTextInsets(6, 6, 0, 0)
     if not idEdit.SetBackdrop then Mixin(idEdit, BackdropTemplateMixin) end
     idEdit:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
-    idEdit:SetBackdropColor(0.18, 0.18, 0.18, 1)
+    idEdit:SetBackdropColor(0, 0, 0, 0.5)
     idEdit:SetBackdropBorderColor(0.25, 0.25, 0.25, 0.5)
     idEdit:SetText(step.id or "")
     idEdit:SetScript("OnEnterPressed", function(self)
@@ -1634,7 +1634,7 @@ function WB:BuildEditorPage(GUI, page, db, Add, AddSpace, AddSyncPoint)
         qEdit:SetTextInsets(6, 6, 0, 0)
         if not qEdit.SetBackdrop then Mixin(qEdit, BackdropTemplateMixin) end
         qEdit:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
-        qEdit:SetBackdropColor(0.18, 0.18, 0.18, 1)
+        qEdit:SetBackdropColor(0, 0, 0, 0.5)
         qEdit:SetBackdropBorderColor(0.25, 0.25, 0.25, 0.5)
         qEdit:SetText(step.question or "")
         qEdit:SetScript("OnEnterPressed", function(self)
@@ -1661,7 +1661,7 @@ function WB:BuildEditorPage(GUI, page, db, Add, AddSpace, AddSyncPoint)
         dEdit:SetTextInsets(6, 6, 0, 0)
         if not dEdit.SetBackdrop then Mixin(dEdit, BackdropTemplateMixin) end
         dEdit:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
-        dEdit:SetBackdropColor(0.18, 0.18, 0.18, 1)
+        dEdit:SetBackdropColor(0, 0, 0, 0.5)
         dEdit:SetBackdropBorderColor(0.25, 0.25, 0.25, 0.5)
         dEdit:SetText(step.description or "")
         dEdit:SetScript("OnEnterPressed", function(self)
@@ -1679,70 +1679,20 @@ function WB:BuildEditorPage(GUI, page, db, Add, AddSpace, AddSyncPoint)
         single = L["Single Select"],
         multi = L["Multi Select"],
         summary = L["Summary"],
+        _order = { "single", "multi", "summary" },
     }
-    local typeOrder = { "single", "multi", "summary" }
-
-    local typeFrame = CreateFrame("Frame", nil, propsGroup)
-    typeFrame:SetSize(320, 50)
-    local typeLabel = typeFrame:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    typeLabel:SetPoint("TOPLEFT", 0, 0)
-    typeLabel:SetText(L["Type"])
-    typeLabel:SetTextColor(0.6, 0.6, 0.6)
-
-    local typeBtn = CreateFrame("Button", nil, typeFrame, "BackdropTemplate")
-    typeBtn:SetSize(200, 24)
-    typeBtn:SetPoint("TOPLEFT", 0, -16)
-    if not typeBtn.SetBackdrop then Mixin(typeBtn, BackdropTemplateMixin) end
-    typeBtn:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
-    typeBtn:SetBackdropColor(0.18, 0.18, 0.18, 1)
-    typeBtn:SetBackdropBorderColor(0.25, 0.25, 0.25, 0.5)
-    typeBtn.Text = typeBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    typeBtn.Text:SetPoint("LEFT", 6, 0)
-    typeBtn.Text:SetText(typeOptions[step.type] or step.type or "single")
-
-    local typeMenu = CreateFrame("Frame", nil, typeBtn, "BackdropTemplate")
-    typeMenu:SetFrameStrata("FULLSCREEN_DIALOG")
-    typeMenu:SetFrameLevel(300)
-    typeMenu:SetWidth(200)
-    if not typeMenu.SetBackdrop then Mixin(typeMenu, BackdropTemplateMixin) end
-    typeMenu:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
-    typeMenu:SetBackdropColor(0.12, 0.12, 0.12, 1)
-    typeMenu:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
-    typeMenu:SetPoint("TOP", typeBtn, "BOTTOM", 0, -1)
-    typeMenu:Hide()
-    typeMenu:EnableMouse(true)
-
-    local y = 0
-    for _, key in ipairs(typeOrder) do
-        local optBtn = CreateFrame("Button", nil, typeMenu, "BackdropTemplate")
-        optBtn:SetHeight(22)
-        optBtn:SetPoint("TOPLEFT", 2, -y)
-        optBtn:SetPoint("TOPRIGHT", -2, -y)
-        optBtn:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
-        optBtn:SetBackdropColor(0, 0, 0, 0)
-        local optLabel = optBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-        optLabel:SetPoint("LEFT", 6, 0)
-        optLabel:SetText(typeOptions[key])
-        optBtn:SetScript("OnEnter", function(self) self:SetBackdropColor(0.22, 0.22, 0.22, 1) end)
-        optBtn:SetScript("OnLeave", function(self) self:SetBackdropColor(0, 0, 0, 0) end)
-        optBtn:SetScript("OnClick", function()
+    local typeDD = DF.GUI:CreateDropdown(propsGroup, L["Type"], typeOptions, nil, nil,
+        nil,
+        function() return step.type or "single" end,
+        function(key)
             step.type = key
             config.modified = time()
             SaveWizardConfig(editingWizardName, config)
-            typeMenu:Hide()
             page:Refresh()
-        end)
-        y = y + 22
-    end
-    typeMenu:SetHeight(y + 4)
+        end,
+        {})
 
-    typeBtn:SetScript("OnClick", function()
-        if typeMenu:IsShown() then typeMenu:Hide() else typeMenu:Show() end
-    end)
-    typeBtn:SetScript("OnEnter", function(self) self:SetBackdropColor(0.22, 0.22, 0.22, 1) end)
-    typeBtn:SetScript("OnLeave", function(self) self:SetBackdropColor(0.18, 0.18, 0.18, 1) end)
-
-    propsGroup:AddWidget(typeFrame, 50)
+    propsGroup:AddWidget(typeDD, 50)
     Add(propsGroup, nil, 2)
     AddSpace(8, 2)
 
@@ -1760,65 +1710,23 @@ function WB:BuildEditorPage(GUI, page, db, Add, AddSpace, AddSyncPoint)
         intGroup:AddWidget(intHeaderFrame, 18)
 
         -- Test Mode dropdown
-        local testModeOpts = { [""] = L["Off"], party = L["Party"], raid = L["Raid"] }
-        local testModeFrame = CreateFrame("Frame", nil, intGroup)
-        testModeFrame:SetSize(320, 50)
-        local tmLabel = testModeFrame:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-        tmLabel:SetPoint("TOPLEFT", 0, 0)
-        tmLabel:SetText(L["Test Mode"])
-        tmLabel:SetTextColor(0.6, 0.6, 0.6)
-
-        local tmBtn = CreateFrame("Button", nil, testModeFrame, "BackdropTemplate")
-        tmBtn:SetSize(150, 24)
-        tmBtn:SetPoint("TOPLEFT", 0, -16)
-        if not tmBtn.SetBackdrop then Mixin(tmBtn, BackdropTemplateMixin) end
-        tmBtn:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
-        tmBtn:SetBackdropColor(0.18, 0.18, 0.18, 1)
-        tmBtn:SetBackdropBorderColor(0.25, 0.25, 0.25, 0.5)
-        tmBtn.Text = tmBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-        tmBtn.Text:SetPoint("LEFT", 6, 0)
-        tmBtn.Text:SetText(testModeOpts[step.testMode or ""] or L["Off"])
-
-        local tmMenu = CreateFrame("Frame", nil, tmBtn, "BackdropTemplate")
-        tmMenu:SetFrameStrata("FULLSCREEN_DIALOG")
-        tmMenu:SetFrameLevel(300)
-        tmMenu:SetWidth(150)
-        if not tmMenu.SetBackdrop then Mixin(tmMenu, BackdropTemplateMixin) end
-        tmMenu:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
-        tmMenu:SetBackdropColor(0.12, 0.12, 0.12, 1)
-        tmMenu:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
-        tmMenu:SetPoint("TOP", tmBtn, "BOTTOM", 0, -1)
-        tmMenu:Hide()
-        tmMenu:EnableMouse(true)
-
-        local tmY = 0
-        for _, pair in ipairs({ {"", L["Off"]}, {"party", L["Party"]}, {"raid", L["Raid"]} }) do
-            local tmOptBtn = CreateFrame("Button", nil, tmMenu, "BackdropTemplate")
-            tmOptBtn:SetHeight(22)
-            tmOptBtn:SetPoint("TOPLEFT", 2, -tmY)
-            tmOptBtn:SetPoint("TOPRIGHT", -2, -tmY)
-            tmOptBtn:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
-            tmOptBtn:SetBackdropColor(0, 0, 0, 0)
-            local tmOptLabel = tmOptBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-            tmOptLabel:SetPoint("LEFT", 6, 0)
-            tmOptLabel:SetText(pair[2])
-            tmOptBtn:SetScript("OnEnter", function(self) self:SetBackdropColor(0.22, 0.22, 0.22, 1) end)
-            tmOptBtn:SetScript("OnLeave", function(self) self:SetBackdropColor(0, 0, 0, 0) end)
-            tmOptBtn:SetScript("OnClick", function()
-                step.testMode = pair[1] ~= "" and pair[1] or nil
+        local testModeOpts = {
+            [""] = L["Off"],
+            party = L["Party"],
+            raid = L["Raid"],
+            _order = { "", "party", "raid" },
+        }
+        local tmDD = DF.GUI:CreateDropdown(intGroup, L["Test Mode"], testModeOpts, nil, nil,
+            nil,
+            function() return step.testMode or "" end,
+            function(key)
+                step.testMode = key ~= "" and key or nil
                 config.modified = time()
                 SaveWizardConfig(editingWizardName, config)
-                tmMenu:Hide()
-                tmBtn.Text:SetText(pair[2])
-            end)
-            tmY = tmY + 22
-        end
-        tmMenu:SetHeight(tmY + 4)
-        tmBtn:SetScript("OnClick", function() if tmMenu:IsShown() then tmMenu:Hide() else tmMenu:Show() end end)
-        tmBtn:SetScript("OnEnter", function(self) self:SetBackdropColor(0.22, 0.22, 0.22, 1) end)
-        tmBtn:SetScript("OnLeave", function(self) self:SetBackdropColor(0.18, 0.18, 0.18, 1) end)
+            end,
+            {})
 
-        intGroup:AddWidget(testModeFrame, 50)
+        intGroup:AddWidget(tmDD, 50)
 
         -- Open Tab
         local openTabFrame = CreateFrame("Frame", nil, intGroup)
@@ -1835,7 +1743,7 @@ function WB:BuildEditorPage(GUI, page, db, Add, AddSpace, AddSyncPoint)
         otEdit:SetTextInsets(6, 6, 0, 0)
         if not otEdit.SetBackdrop then Mixin(otEdit, BackdropTemplateMixin) end
         otEdit:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
-        otEdit:SetBackdropColor(0.18, 0.18, 0.18, 1)
+        otEdit:SetBackdropColor(0, 0, 0, 0.5)
         otEdit:SetBackdropBorderColor(0.25, 0.25, 0.25, 0.5)
         otEdit:SetText(step.openTab or "")
         otEdit:SetScript("OnEnterPressed", function(self)
@@ -1863,7 +1771,7 @@ function WB:BuildEditorPage(GUI, page, db, Add, AddSpace, AddSyncPoint)
         hsEdit:SetTextInsets(6, 6, 0, 0)
         if not hsEdit.SetBackdrop then Mixin(hsEdit, BackdropTemplateMixin) end
         hsEdit:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
-        hsEdit:SetBackdropColor(0.18, 0.18, 0.18, 1)
+        hsEdit:SetBackdropColor(0, 0, 0, 0.5)
         hsEdit:SetBackdropBorderColor(0.25, 0.25, 0.25, 0.5)
 
         -- Convert table to comma string for editing
@@ -1927,7 +1835,7 @@ function WB:BuildEditorPage(GUI, page, db, Add, AddSpace, AddSyncPoint)
             olEdit:SetTextInsets(4, 4, 0, 0)
             if not olEdit.SetBackdrop then Mixin(olEdit, BackdropTemplateMixin) end
             olEdit:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
-            olEdit:SetBackdropColor(0.18, 0.18, 0.18, 1)
+            olEdit:SetBackdropColor(0, 0, 0, 0.5)
             olEdit:SetBackdropBorderColor(0.25, 0.25, 0.25, 0.5)
             olEdit:SetText(opt.label or "")
             olEdit:SetScript("OnEnterPressed", function(self)
@@ -1951,7 +1859,7 @@ function WB:BuildEditorPage(GUI, page, db, Add, AddSpace, AddSyncPoint)
             ovEdit:SetTextInsets(4, 4, 0, 0)
             if not ovEdit.SetBackdrop then Mixin(ovEdit, BackdropTemplateMixin) end
             ovEdit:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
-            ovEdit:SetBackdropColor(0.18, 0.18, 0.18, 1)
+            ovEdit:SetBackdropColor(0, 0, 0, 0.5)
             ovEdit:SetBackdropBorderColor(0.25, 0.25, 0.25, 0.5)
             ovEdit:SetText(opt.value or "")
             ovEdit:SetScript("OnEnterPressed", function(self)
@@ -2074,6 +1982,18 @@ end
 function WB:GetBuiltinWizards()
     return builtinWizards
 end
+
+-- Built-in wizard `description` fields read L["..."] when the entry is
+-- registered at file scope — before the languageOverride overlay runs at
+-- ADDON_LOADED — so they freeze on the enUS baseline. Re-resolve them after
+-- the overlay. (Extend this match list if more built-in wizards are added.)
+DF:RegisterLocaleRefresh(function()
+    for _, w in ipairs(builtinWizards) do
+        if w.name == "Aura Filter Setup" then
+            w.description = L["Guided setup for configuring which buffs and debuffs appear on your frames."]
+        end
+    end
+end)
 
 -- ============================================================
 -- BUILT-IN WIZARD: Aura Filter Setup
