@@ -1,5 +1,8 @@
--- DandersFrames Custom Color Picker Test
--- /dfcolortest to open
+-- DandersFrames Custom Color Picker (LIVE code, not a test file)
+-- Replaces the Blizzard colour picker addon-wide: hooks
+-- ColorPickerFrame.SetupColorPickerAndShow / OpenColorPicker at
+-- PLAYER_ENTERING_WORLD and exposes GUI:OpenColorPicker as the public API.
+-- Dev harness: /dfcolorhook (hook status/install/uninstall; dev builds only).
 
 local addonName, DF = ...
 local GUI = DF.GUI
@@ -158,7 +161,7 @@ end
 -- Color Picker Frame
 -- ============================================================
 
-local function CreateColorPickerTest(hasAlpha)
+local function CreateColorPickerFrame(hasAlpha)
     if testFrame then
         testFrame.hasAlpha = hasAlpha
         testFrame:UpdateAlphaVisibility()
@@ -1589,12 +1592,6 @@ local function CreateColorPickerTest(hasAlpha)
         UpdateAllColors()
     end
     
-    -- Get current color as RGBA (0-1 range)
-    function testFrame:GetColor()
-        local r, g, b = HSVtoRGB(currentHue, currentSat, currentVal)
-        return r, g, b, currentAlpha
-    end
-    
     -- Set callbacks
     function testFrame:SetCallbacks(onAccept, onCancel, onChange)
         self.onAcceptCallback = onAccept
@@ -1669,7 +1666,7 @@ end
 -- @param onCancel: function() - called on cancel
 function GUI:OpenColorPicker(initialColor, hasAlpha, onAccept, onCancel, onChange, defaultColor)
     -- Ensure the picker is created
-    CreateColorPickerTest(hasAlpha)
+    CreateColorPickerFrame(hasAlpha)
 
     -- If picker is already visible, hide it first without triggering cancel callback
     -- This prevents state leakage when quickly switching between color pickers
@@ -2222,19 +2219,8 @@ hookInitFrame:SetScript("OnEvent", function(self, event)
     self:UnregisterEvent("PLAYER_ENTERING_WORLD")
 end)
 
--- Slash commands
-SLASH_DFCOLORTEST1 = "/dfcolortest"
-SlashCmdList["DFCOLORTEST"] = function()
-    CreateColorPickerTest(true)  -- With alpha
-end
-
-SLASH_DFCOLORTESTNOALPHA1 = "/dfcolortestna"
-SlashCmdList["DFCOLORTESTNOALPHA"] = function()
-    CreateColorPickerTest(false)  -- Without alpha
-end
-
 -- Debug command to check hook status
-SLASH_DFCOLORHOOK1 = "/dfcolorhook"
+DF:RegisterDebugSlash("DFCOLORHOOK", "Color picker hook status / toggle", true, "/dfcolorhook")
 SlashCmdList["DFCOLORHOOK"] = function(arg)
     if arg == "on" then
         local success = GUI:InstallColorPickerHook()

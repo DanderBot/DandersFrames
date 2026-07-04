@@ -7548,18 +7548,26 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local roleSection = Add(GUI:CreateCollapsibleSection(self.child, L["Role Icon"], false, 270), 28, 1)
 
         -- Header preview: the Tank/Healer/DPS icons in the currently selected
-        -- style. Rebuilt live whenever the style or an external path changes.
+        -- style. Rebuilt live whenever the style, an external path, or a
+        -- per-role Show toggle changes. Each role's icon desaturates when its
+        -- Show toggle is off (matching the other icon sections' previews);
+        -- the whole preview dims only when all three roles are off.
+        local roleShowKeys = { TANK = "roleIconShowTank", HEALER = "roleIconShowHealer", DAMAGER = "roleIconShowDPS" }
         local function UpdateRolePreview()
             if not roleSection.SetPreviewIcons then return end
             local icons = {}
+            local anyShown = false
             for _, role in ipairs({ "TANK", "HEALER", "DAMAGER" }) do
                 -- tex may be an atlas name (no coords) or a texture path (+coords).
                 local tex, l, r, t, b = DF:GetRoleIconTexture(db, role)
                 if tex then
-                    icons[#icons + 1] = { texture = tex, coords = l and { l, r, t, b } or nil }
+                    local shown = db[roleShowKeys[role]] ~= false
+                    anyShown = anyShown or shown
+                    icons[#icons + 1] = { texture = tex, coords = l and { l, r, t, b } or nil, desaturate = not shown }
                 end
             end
             roleSection:SetPreviewIcons(icons)
+            if roleSection.SetPreviewDimmed then roleSection:SetPreviewDimmed(not anyShown) end
         end
 
         -- Small gap between the section header and the first box.
@@ -7580,9 +7588,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         roleExtNote.hideOn = function(d) return d.roleIconStyle ~= "EXTERNAL" end
         -- Per-role filters: which roles ever show an icon (global — apply in and
         -- out of combat). The Hide In Combat toggle (Appearance) is an independent gate.
-        roleSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show Tank"], db, "roleIconShowTank", function() DF:UpdateAllRoleIcons() end), 30)
-        roleSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show Healer"], db, "roleIconShowHealer", function() DF:UpdateAllRoleIcons() end), 30)
-        roleSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show DPS"], db, "roleIconShowDPS", function() DF:UpdateAllRoleIcons() end), 30)
+        roleSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show Tank"], db, "roleIconShowTank", function() DF:UpdateAllRoleIcons(); UpdateRolePreview() end), 30)
+        roleSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show Healer"], db, "roleIconShowHealer", function() DF:UpdateAllRoleIcons(); UpdateRolePreview() end), 30)
+        roleSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show DPS"], db, "roleIconShowDPS", function() DF:UpdateAllRoleIcons(); UpdateRolePreview() end), 30)
         Add(roleSettings, nil, 1)
         roleSection:RegisterChild(roleSettings)
 

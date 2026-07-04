@@ -1102,7 +1102,7 @@ end
 -- SLASH COMMANDS
 -- ============================================================
 
-SLASH_DFRANGE1 = "/dfrange"
+DF:RegisterDebugSlash("DFRANGE", "Range fading diagnostics", false, "/dfrange")
 SlashCmdList["DFRANGE"] = function(msg)
     local cmd = msg:lower():trim()
     
@@ -1186,9 +1186,4 @@ function DF:ClearRangeCacheForUnit(unit)
         rangeCache["pet_" .. unit] = nil  -- Also clear pet cache for this unit
         wasOORCache[unit] = nil
     end
-end
-
-function DF:GetRangeCheckerInfo()
-    local info = DF:GetCurrentRangeSpellInfo()
-    return "IsSpellInRange", info.spellID, info.spellName
 end

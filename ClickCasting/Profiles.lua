@@ -489,15 +489,6 @@ function CC:GetProfileForLoadout(specIndex, loadoutConfigID, noFallback)
     return nil, false
 end
 
--- Check if a loadout has a specific (non-fallback) profile assignment
-function CC:HasSpecificLoadoutAssignment(specIndex, loadoutConfigID)
-    local classData = self:GetClassData()
-    if classData.loadoutAssignments[specIndex] then
-        return classData.loadoutAssignments[specIndex][loadoutConfigID] ~= nil
-    end
-    return false
-end
-
 -- Check and auto-switch profile based on current loadout
 function CC:CheckLoadoutProfileSwitch()
     if InCombatLockdown() then

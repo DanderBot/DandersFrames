@@ -1371,24 +1371,6 @@ function DF:InitializePetFrames()
     end
 end
 
-function DF:InitializeRaidPetFrames()
-    local db = DF:GetRaidDB()
-    
-    -- Don't create if pets are disabled for raid
-    if not db.petEnabled then return end
-    
-    -- Create raid pet frames via iterator
-    local frameIdx = 0
-    if DF.IterateRaidFrames then
-        DF:IterateRaidFrames(function(frame)
-            frameIdx = frameIdx + 1
-            if not DF.raidPetFrames[frameIdx] and frame then
-                DF.raidPetFrames[frameIdx] = DF:CreatePetFrame("raidpet" .. frameIdx, frame, true)
-            end
-        end)
-    end
-end
-
 -- ============================================================
 -- UPDATE ALL PET FRAMES
 -- ============================================================

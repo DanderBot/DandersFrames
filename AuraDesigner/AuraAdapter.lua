@@ -413,15 +413,6 @@ end
 -- DF.AuraDesigner tables in Config.lua.
 -- ============================================================
 
--- Returns a list of supported spec keys
-function AuraAdapter:GetSupportedSpecs()
-    local specs = {}
-    for spec in pairs(DF.AuraDesigner.SpecInfo) do
-        specs[#specs + 1] = spec
-    end
-    return specs
-end
-
 -- Returns the display name for a spec key
 function AuraAdapter:GetSpecDisplayName(specKey)
     local info = DF.AuraDesigner.SpecInfo[specKey]

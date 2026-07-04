@@ -98,8 +98,3 @@ function Preview:RefreshThrottled()
     lastThrottledLive = now
     self:RefreshLiveFrames()
 end
-
--- Returns the currently bound mock frame.
-function Preview:GetFrame()
-    return activeMockFrame
-end

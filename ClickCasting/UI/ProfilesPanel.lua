@@ -993,11 +993,6 @@ function CC:ResetBindingsToDefaults()
     print("|cff33cc33DandersFrames:|r Reset bindings to defaults (Target + Menu). " .. count .. " custom binding(s) removed.")
 end
 
--- Legacy function for compatibility
-function CC:ClearAllBindings()
-    self:ResetBindingsToDefaults()
-end
-
 function CC:ShowExportDialog()
     local exportString = self:ExportProfile()
     

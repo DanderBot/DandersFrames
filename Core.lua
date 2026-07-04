@@ -92,6 +92,35 @@ function DF:PromptReloadIfEnableFlagsChanged()
     })
 end
 
+-- ============================================================
+-- DEBUG SLASH COMMAND REGISTRY
+-- ============================================================
+-- Every debug slash command declares itself here instead of setting its
+-- SLASH_* global directly. The registry is what `/df debug` prints, so the
+-- listing can never drift from reality, and dev-only commands are simply not
+-- registered on release builds (the SlashCmdList handler still exists but no
+-- slash alias maps to it). RELEASE_CHANNEL is stamped by CI in Changelog.lua,
+-- which loads before this file.
+DF.DebugCommands = {}
+
+function DF:IsDevBuild()
+    return DF.RELEASE_CHANNEL ~= "release"
+end
+
+-- key = the SlashCmdList key; desc = one-liner for /df debug; devOnly = only
+-- register on alpha/beta builds; ... = the slash alias(es) ("/dfauras", ...).
+-- The handler stays a plain `SlashCmdList[key] = function` at the call site.
+function DF:RegisterDebugSlash(key, desc, devOnly, ...)
+    local entry = { key = key, desc = desc, dev = devOnly, cmds = { ... } }
+    entry.active = not devOnly or DF:IsDevBuild()
+    table.insert(DF.DebugCommands, entry)
+    if entry.active then
+        for i = 1, select("#", ...) do
+            _G["SLASH_" .. key .. i] = (select(i, ...))
+        end
+    end
+end
+
 -- Aura layout version: incremented when any layout-affecting setting changes.
 -- Frames track the version they were last laid out with to avoid redundant work.
 DF.auraLayoutVersion = 1
@@ -399,61 +428,6 @@ function DF:LightweightUpdateFrameScale()
     DF:UpdatePermanentMoverAnchor("raid")
 end
 
--- Update only frame alpha/opacity
-function DF:LightweightUpdateAlpha()
-    local mode = DF.GUI and DF.GUI.SelectedMode or "party"
-    local db = DF.db[mode]
-    if not db then return end
-    
-    local alpha = db.frameAlpha or 1
-    local bgAlpha = db.backgroundAlpha or 0.8
-    local bgTexture = db.backgroundTexture or "Solid"
-    local isTexturedBg = bgTexture ~= "Solid" and bgTexture ~= ""
-    
-    local function UpdateFrameAlpha(frame)
-        if not frame then return end
-        frame:SetAlpha(alpha)
-        if frame.background then
-            local c = db.backgroundColor or {r = 0, g = 0, b = 0}
-            if isTexturedBg then
-                -- For textured backgrounds, ensure SetAlpha is 1.0 and control via vertex color only
-                frame.background:SetAlpha(1.0)
-                frame.background:SetVertexColor(c.r, c.g, c.b, bgAlpha)
-            else
-                frame.background:SetColorTexture(c.r, c.g, c.b, bgAlpha)
-            end
-        end
-    end
-    
-    IterateFramesInMode(mode, UpdateFrameAlpha)
-end
-
--- Update only background alpha
-function DF:LightweightUpdateBackgroundAlpha()
-    local mode = DF.GUI and DF.GUI.SelectedMode or "party"
-    local db = DF.db[mode]
-    if not db then return end
-    
-    local bgAlpha = db.backgroundAlpha or 0.8
-    local c = db.backgroundColor or {r = 0, g = 0, b = 0}
-    local bgTexture = db.backgroundTexture or "Solid"
-    local isTexturedBg = bgTexture ~= "Solid" and bgTexture ~= ""
-    
-    local function UpdateBG(frame)
-        if frame and frame.background then
-            if isTexturedBg then
-                -- For textured backgrounds, ensure SetAlpha is 1.0 and control via vertex color only
-                frame.background:SetAlpha(1.0)
-                frame.background:SetVertexColor(c.r, c.g, c.b, bgAlpha)
-            else
-                frame.background:SetColorTexture(c.r, c.g, c.b, bgAlpha)
-            end
-        end
-    end
-    
-    IterateFramesInMode(mode, UpdateBG)
-end
-
 -- ============================================================
 -- SAFE TEXTURE SETTERS — graceful missing-texture fallback
 -- A configured texture can be missing when a profile imported from another user
@@ -521,23 +495,6 @@ function DF:SafeSetTexture(region, path, stock)
     return true
 end
 
--- Update only health bar texture
-function DF:LightweightUpdateHealthTexture()
-    local mode = DF.GUI and DF.GUI.SelectedMode or "party"
-    local db = DF.db[mode]
-    if not db then return end
-    
-    local tex = db.healthTexture or "Interface\\TargetingFrame\\UI-StatusBar"
-    
-    local function UpdateTex(frame)
-        if frame and frame.healthBar then
-            DF:SafeSetStatusBarTexture(frame.healthBar, tex)
-        end
-    end
-    
-    IterateFramesInMode(mode, UpdateTex)
-end
-
 -- Update only font shadows on all text elements
 function DF:LightweightUpdateFontShadows()
     -- 12.0.7: fontstring-level SetShadowOffset/SetShadowColor no longer render —
@@ -555,34 +512,6 @@ function DF:LightweightUpdateFontShadows()
     if DF.TextDesigner and DF.TextDesigner.Preview and DF.TextDesigner.Preview.RefreshLiveFrames then
         DF.TextDesigner.Preview:RefreshLiveFrames()
     end
-end
-
--- Update only aura icon sizes
-function DF:LightweightUpdateAuraSize(auraType)
-    local mode = DF.GUI and DF.GUI.SelectedMode or "party"
-    local db = DF.db[mode]
-    if not db then return end
-    
-    local size
-    local iconsKey
-    if auraType == "buff" then
-        size = db.buffSize or 20
-        iconsKey = "buffIcons"
-    else
-        size = db.debuffSize or 20
-        iconsKey = "debuffIcons"
-    end
-    
-    local function UpdateIcons(frame)
-        if not frame or not frame[iconsKey] then return end
-        for _, icon in ipairs(frame[iconsKey]) do
-            if icon then
-                icon:SetSize(size, size)
-            end
-        end
-    end
-    
-    IterateFramesInMode(mode, UpdateIcons)
 end
 
 -- Update only power/resource bar height
@@ -1456,15 +1385,10 @@ function DF:LightweightUpdateAuraDurationText(auraType)
                 icon.durationX = x
                 icon.durationY = y
                 
-                -- Find nativeCooldownText if not already found
+                -- Find nativeCooldownText if not already found (canonical helper —
+                -- also creates the hide-above-threshold wrapper this path used to skip)
                 if not icon.nativeCooldownText and icon.cooldown then
-                    local regions = {icon.cooldown:GetRegions()}
-                    for _, region in ipairs(regions) do
-                        if region and region.GetObjectType and region:GetObjectType() == "FontString" then
-                            icon.nativeCooldownText = region
-                            break
-                        end
-                    end
+                    DF:EnsureAuraDurationText(icon, db, auraType)
                 end
                 
                 -- Update native cooldown text if it exists
@@ -2050,30 +1974,6 @@ function DF:ClearTestModeStateDrivers()
     DF.testModeStateDriversActive = false
 end
 
--- Update class color alpha on health bars
-function DF:LightweightUpdateClassColorAlpha()
-    local mode = DF.GUI and DF.GUI.SelectedMode or "party"
-    local db = DF.db[mode]
-    if not db then return end
-    
-    -- This just stores the setting; actual application happens during frame updates
-    -- But we can trigger a refresh of existing frames
-    if DF.RefreshTestFrames then
-        DF:RefreshTestFrames()
-    end
-end
-
--- Update background class color alpha
-function DF:LightweightUpdateBackgroundClassAlpha()
-    local mode = DF.GUI and DF.GUI.SelectedMode or "party"
-    local db = DF.db[mode]
-    if not db then return end
-    
-    if DF.RefreshTestFrames then
-        DF:RefreshTestFrames()
-    end
-end
-
 -- Lightweight color updates for various frame elements
 function DF:LightweightUpdateHealthColor()
     local mode = DF.GUI and DF.GUI.SelectedMode or "party"
@@ -2226,8 +2126,8 @@ function DF:LightweightUpdateBorderColor()
         -- Route through SetBorderColor so it recolours whichever mode (solid
         -- edges or texture backdrop) is currently active. Resolved per-frame
         -- via GetFrameBorderColor so class / role colours pick up each
-        -- unit's resolved colour, and the dedicated frameBorderAlpha slider
-        -- is honoured on every drag tick.
+        -- unit's resolved colour. Border alpha rides frameBorderColor.a
+        -- (there is no separate alpha key) and is honoured on every drag tick.
         if frame.border.SetBorderColor then
             frame.border:SetBorderColor(DF:GetFrameBorderColor(frame, db))
         end
@@ -2306,29 +2206,6 @@ function DF:LightweightUpdateTextColor(textType)
     end
     
     IterateFramesInMode(mode, function(frame) UpdateFrame(frame, 0) end)
-end
-
-function DF:LightweightUpdatePowerBarColor()
-    local mode = DF.GUI and DF.GUI.SelectedMode or "party"
-    local db = DF.db[mode]
-    if not db then return end
-    
-    local function UpdateFrame(frame)
-        if not frame or not frame.powerBar then return end
-        if db.powerBarColor then
-            local c = db.powerBarColor
-            frame.powerBar:SetStatusBarColor(c.r, c.g, c.b, c.a or 1)
-        end
-    end
-    
-    IterateFramesInMode(mode, UpdateFrame)
-end
-
-function DF:LightweightUpdateGradientPreview()
-    -- Just update the gradient bar preview in options, not all frames
-    if DF.GUI and DF.GUI.currentGradientBar and DF.GUI.currentGradientBar.UpdatePreview then
-        DF.GUI.currentGradientBar.UpdatePreview()
-    end
 end
 
 function DF:LightweightUpdateAbsorbBarColor()
@@ -2813,22 +2690,6 @@ end
 -- SECRET VALUE HANDLING (Midnight 12.0)
 -- ============================================================
 
--- Check if a value can be accessed (not a secret value)
--- Secret values will throw errors when compared or used as table indices
-function DF:CanAccessValue(value)
-    if value == nil then return true end
-    
-    -- Try to compare the value - this will fail for secret values
-    local success = pcall(function()
-        local _ = (value == value)
-    end)
-    return success
-end
-
-function DF:IsSecretValue(value)
-    return not DF:CanAccessValue(value)
-end
-
 -- ============================================================
 -- AURA DEBUG
 -- ============================================================
@@ -3077,20 +2938,12 @@ function DF:IsInBattleground()
     return contentType == "battleground"
 end
 
--- Check if current content should use party frames (arena uses party-style but raid units)
-function DF:ShouldUsePartyFrames()
-    local contentType = DF:GetContentType()
-    -- Arena uses arena header (party-style but raid units)
-    -- All other raid content uses raid frames
-    return contentType ~= "arena" and not IsInRaid()
-end
-
 -- ============================================================
 -- DEBUG: Force Arena Mode
 -- Usage: /dfarena - Toggle arena mode for testing
 -- Requires being in a raid group to see frames
 -- ============================================================
-SLASH_DFARENA1 = "/dfarena"
+DF:RegisterDebugSlash("DFARENA", "Toggle arena test mode (raid group)", false, "/dfarena")
 SlashCmdList["DFARENA"] = function(msg)
     if InCombatLockdown() then
         print("|cffff8033DandersFrames:|r " .. L["Cannot toggle arena mode during combat"])
@@ -3130,15 +2983,6 @@ SlashCmdList["DFARENA"] = function(msg)
             DF:RefreshLiveFrames()
         end)
     end
-end
-
-function DF:GetSetting(key, mode)
-    local db = self:GetDB(mode)
-    local defaults = mode == "raid" and DF.RaidDefaults or DF.PartyDefaults
-    if db and db[key] ~= nil then
-        return db[key]
-    end
-    return defaults[key]
 end
 
 -- Get current mode based on group size
@@ -5075,19 +4919,61 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 else
                     print("|cff00ff00DandersFrames:|r Auto profiles module not loaded.")
                 end
+            elseif msg == "help" then
+                print("|cff7373f2DandersFrames|r " .. L["commands"] .. ":")
+                print("  |cff00ff00/df|r - " .. L["open settings"])
+                print("  |cff00ff00/df lock|r / |cff00ff00unlock|r - " .. L["lock/unlock party frames"])
+                print("  |cff00ff00/df raidlock|r / |cff00ff00raidunlock|r - " .. L["lock/unlock raid frames"])
+                print("  |cff00ff00/df test|r - " .. L["toggle the test mode panel"])
+                print("  |cff00ff00/df hide|r - " .. L["hide test frames"])
+                print("  |cff00ff00/df users|r - " .. L["show DandersFrames users in your group"])
+                print("  |cff00ff00/df clearoverride <key|all>|r - " .. L["clear stuck auto-layout overrides"])
+                print("  |cff00ff00/df resetgui|r - " .. L["reset settings window size/position"])
+                print("  |cff00ff00/df reset|r - |cffff6060" .. L["reset party + raid profiles to defaults"] .. "|r")
+                print("  |cff00ff00/df console|r - " .. L["open the debug console page"])
+                print("  |cff00ff00/df debug|r - " .. L["list debug commands (on/off toggles debug logging)"])
             elseif msg == "test" then
                 if DF.ToggleTestPanel then DF:ToggleTestPanel() end
             elseif msg == "hide" then
                 if DF.HideTestFrames then DF:HideTestFrames() end
             elseif msg == "debug" then
-                if DF.DebugConsole then
-                    local newState = not DF.DebugConsole:IsEnabled()
-                    DF.DebugConsole:SetEnabled(newState)
-                    print("|cff00ff00DandersFrames:|r " .. format(L["Debug logging %s"], newState and L["enabled"] or L["disabled"]))
-                else
-                    DF.debugEnabled = not DF.debugEnabled
-                    print("|cff00ff00DandersFrames:|r " .. format(L["Debug mode %s"], DF.debugEnabled and L["enabled"] or L["disabled"]))
+                -- Bare "/df debug" lists every available debug command; the
+                -- /dfXXX section is the DF:RegisterDebugSlash registry itself,
+                -- so that part can't drift from what's actually registered.
+                local dev = DF:IsDevBuild()
+                print("|cff7373f2DandersFrames|r " .. L["debug commands"] .. (dev and " |cffff8800(" .. L["dev build"] .. ")|r" or "") .. ":")
+                print("  " .. L["Debug logging"] .. ": |cff00ff00/df debug on|r / |cff00ff00/df debug off|r  ·  " .. L["console page"] .. ": |cff00ff00/df console|r")
+                print("  |cffffcc00" .. L["Support / diagnostics"] .. ":|r")
+                for _, e in ipairs(DF.DebugCommands) do
+                    if not e.dev then
+                        print(string.format("    |cff00ff00%s|r - %s", table.concat(e.cmds, " "), L[e.desc]))
+                    end
                 end
+                if dev then
+                    print("  |cffffcc00" .. L["Dev tools (alpha/beta builds only)"] .. ":|r")
+                    for _, e in ipairs(DF.DebugCommands) do
+                        if e.dev then
+                            print(string.format("    |cff00ff00%s|r - %s", table.concat(e.cmds, " "), L[e.desc]))
+                        end
+                    end
+                end
+                -- /df subcommand diagnostics (hand-listed — keep in sync with this handler)
+                print("  |cffffcc00" .. L["/df diagnostics"] .. ":|r")
+                print("    |cff00ff00/df exportaudit|r - " .. L["export category drift check"])
+                print("    |cff00ff00/df overrides|r - " .. L["active auto-layout overrides"])
+                print("    |cff00ff00/df attached|r - " .. L["foreign frames anchored to ours"])
+                print("    |cff00ff00/df headers|r / |cff00ff00auras|r / |cff00ff00dispel|r - " .. L["subsystem state dumps"])
+                print("    |cff00ff00/df auratimer|r - " .. L["aura timer stats (add 'reset' to clear)"])
+                print("    |cff00ff00/df profiler|r / |cff00ff00/df profile <sec>|r - " .. L["performance profiling"])
+                print("    |cff00ff00/df debugrole|r / |cff00ff00debugslider|r / |cff00ff00debugfonts|r ... - " .. L["verbose logging toggles"])
+            elseif msg == "debug on" or msg == "debug off" then
+                local newState = msg == "debug on"
+                if DF.DebugConsole then
+                    DF.DebugConsole:SetEnabled(newState)
+                else
+                    DF.debugEnabled = newState
+                end
+                print("|cff00ff00DandersFrames:|r " .. format(L["Debug logging %s"], newState and L["enabled"] or L["disabled"]))
             elseif msg == "users" then
                 if DF.VersionCheck then DF.VersionCheck:PrintUsers() end
             elseif msg == "console" then

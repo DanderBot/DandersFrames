@@ -161,24 +161,6 @@ function DF:UpdateReducedMaxHealth(frame)
     end
 end
 
-function DF:UpdateAllReducedMaxHealth()
-    local function updateFrame(frame)
-        if frame and frame:IsShown() then
-            DF:UpdateReducedMaxHealth(frame)
-        end
-    end
-
-    if DF.IteratePartyFrames then
-        DF:IteratePartyFrames(updateFrame)
-    end
-    if DF.IterateRaidFrames then
-        DF:IterateRaidFrames(updateFrame)
-    end
-    if DF.IterateAllFrames and not (DF.IteratePartyFrames or DF.IterateRaidFrames) then
-        DF:IterateAllFrames(updateFrame)
-    end
-end
-
 function DF:UpdateAllVisibleReducedMaxHealth(unit)
     local function updateFrame(frame)
         if frame and frame:IsShown() and (not unit or frame.unit == unit) then

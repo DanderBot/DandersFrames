@@ -677,11 +677,6 @@ function NK:FavoriteKey(c, isBnet)
     return data.favorites.chars, NK:Normalize(full)
 end
 
-function NK:IsFavorite(c, isBnet)
-    local bucket, key = NK:FavoriteKey(c, isBnet)
-    return (bucket and key and bucket[key]) and true or false
-end
-
 -- Toggle a candidate's favourite state. Returns true if it changed.
 function NK:ToggleFavorite(c, isBnet)
     local bucket, key = NK:FavoriteKey(c, isBnet)
@@ -997,11 +992,6 @@ function NK:UnblockSender(sender)
             e.reason = nil
         end
     end
-    NK:RefreshAllFrames()
-end
-
-function NK:ClearReceived()
-    NK.received = {}
     NK:RefreshAllFrames()
 end
 

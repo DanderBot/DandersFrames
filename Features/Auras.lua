@@ -190,21 +190,9 @@ auraTimerGroup:SetScript("OnLoop", function()
                     do
                         -- Find native cooldown text if needed (safety net — rendering function usually discovers first)
                         if not icon.nativeCooldownText and icon.cooldown then
-                            local regions = {icon.cooldown:GetRegions()}
-                            for _, region in pairs(regions) do
-                                if region and region.GetObjectType and region:GetObjectType() == "FontString" then
-                                    icon.nativeCooldownText = region
-                                    -- Create wrapper for hide-above-threshold alpha control
-                                    if not icon.durationHideWrapper then
-                                        icon.durationHideWrapper = CreateFrame("Frame", nil, icon.cooldown)
-                                        icon.durationHideWrapper:SetAllPoints(icon)
-                                        icon.durationHideWrapper:SetFrameLevel(icon.cooldown:GetFrameLevel() + 2)
-                                        icon.durationHideWrapper:EnableMouse(false)
-                                        region:SetParent(icon.durationHideWrapper)
-                                    end
-                                    break
-                                end
-                            end
+                            local fdb = icon.unitFrame and DF.GetFrameDB and DF:GetFrameDB(icon.unitFrame)
+                            local fprefix = icon.auraType == "BUFF" and "buff" or "debuff"
+                            DF:EnsureAuraDurationText(icon, fdb, fprefix)
                         end
 
                         -- Native text visibility is controlled by the cooldown frame's own Show/Hide
@@ -418,13 +406,6 @@ function DF:RegisterIconForAuraTimer(icon)
     end
 end
 
--- Unregister icon
-function DF:UnregisterIconFromAuraTimer(icon)
-    if icon then
-        trackedIcons[icon] = nil
-    end
-end
-
 -- Per-unit aura cache, the single source of truth for aura data across
 -- all DF consumers (Direct mode aura pipeline, Aura Designer, defensive
 -- icon, dispel overlay, sound engine, missing-buff detection, etc.).
@@ -495,7 +476,6 @@ local function EnsureAuraCacheEntry(unit)
 end
 
 -- Track if we've successfully hooked Blizzard's frames
-DF.BlizzardHookActive = false
 
 -- ============================================================
 -- SCAN BLIZZARD FRAMES FOR APPROVED AURAS
@@ -2685,6 +2665,83 @@ end
 -- Old cost:     O(total_unit_auras) ≈ 30+ API calls per aura type
 -- ============================================================
 
+-- Canonical discovery/setup for an aura icon's native cooldown countdown text.
+-- Finds the FontString inside the Blizzard cooldown, creates durationHideWrapper
+-- (the parent frame whose alpha implements "hide duration above threshold") and
+-- parents the text into it, and applies the current duration font/anchor on
+-- first discovery so the large default font never flashes. Every path that
+-- needs the native text (live render, shared timer safety net, slider
+-- lightweight update, test mode) MUST come through here: the hand-rolled
+-- copies this replaces disagreed about parenting — test mode moved the text to
+-- textOverlay and the slider path never created the wrapper, either of which
+-- left hide-above-threshold driving an empty wrapper until /reload.
+function DF:EnsureAuraDurationText(icon, db, prefix)
+    if not icon or not icon.cooldown then return icon and icon.nativeCooldownText end
+
+    if not icon.nativeCooldownText then
+        local regions = {icon.cooldown:GetRegions()}
+        for _, region in ipairs(regions) do
+            if region and region.GetObjectType and region:GetObjectType() == "FontString" then
+                icon.nativeCooldownText = region
+
+                if db and prefix and DF.SafeSetFont then
+                    local durationScale = db[prefix .. "DurationScale"] or 1.0
+                    local durationFont = db[prefix .. "DurationFont"] or "Fonts\\FRIZQT__.TTF"
+                    local durationOutline = db[prefix .. "DurationOutline"] or "OUTLINE"
+                    if durationOutline == "NONE" then durationOutline = "" end
+                    DF:SafeSetFont(region, durationFont, 10 * durationScale, durationOutline)
+
+                    local durationAnchor = db[prefix .. "DurationAnchor"] or "CENTER"
+                    region:ClearAllPoints()
+                    region:SetPoint(durationAnchor, icon, durationAnchor,
+                        db[prefix .. "DurationX"] or 0, db[prefix .. "DurationY"] or 0)
+                end
+
+                -- Sync Blizzard's own countdown-number visibility to the user setting
+                -- (icon.showDuration is stamped by ApplyAuraLayout, which runs before
+                -- any icon displays in both live and test paths; if it hasn't been
+                -- stamped yet, leave visibility to the caller rather than force-hiding).
+                if icon.showDuration ~= nil and icon.cooldown.SetHideCountdownNumbers then
+                    icon.cooldown:SetHideCountdownNumbers(not icon.showDuration)
+                end
+                break
+            end
+        end
+    end
+
+    local text = icon.nativeCooldownText
+    if text then
+        if not icon.durationHideWrapper then
+            icon.durationHideWrapper = CreateFrame("Frame", nil, icon.cooldown)
+            icon.durationHideWrapper:SetAllPoints(icon)
+            icon.durationHideWrapper:SetFrameLevel(icon.cooldown:GetFrameLevel() + 2)
+            icon.durationHideWrapper:EnableMouse(false)
+        end
+        if text:GetParent() ~= icon.durationHideWrapper then
+            text:SetParent(icon.durationHideWrapper)
+        end
+    end
+    return text
+end
+
+-- Dispel-type name → configured debuff border colour (with the shared default
+-- palette). Single source for the live colour-curve construction and test
+-- mode's mock recolour so the defaults can't drift apart.
+function DF:GetDebuffTypeColor(db, dispelName)
+    if dispelName == "Magic" then
+        return db.debuffBorderColorMagic or {r = 0.2, g = 0.6, b = 1.0}
+    elseif dispelName == "Curse" then
+        return db.debuffBorderColorCurse or {r = 0.6, g = 0.0, b = 1.0}
+    elseif dispelName == "Disease" then
+        return db.debuffBorderColorDisease or {r = 0.6, g = 0.4, b = 0.0}
+    elseif dispelName == "Poison" then
+        return db.debuffBorderColorPoison or {r = 0.0, g = 0.6, b = 0.0}
+    elseif dispelName == "Bleed" or dispelName == "Enrage" then
+        return db.debuffBorderColorBleed or {r = 1.0, g = 0.0, b = 0.0}
+    end
+    return db.debuffBorderColorNone or {r = 0.8, g = 0.0, b = 0.0}
+end
+
 function DF:UpdateAuraIconsDirect(frame, icons, auraType, maxAuras)
     local unit = frame.unit
     local db = DF:GetFrameDB(frame)
@@ -2771,16 +2828,7 @@ function DF:UpdateAuraIconsDirect(frame, icons, auraType, maxAuras)
     -- Pre-fetch: dead/offline state (once per call, not per icon)
     local unitDeadOrOffline = UnitIsDeadOrGhost(unit) or not UnitIsConnected(unit)
 
-    -- Pre-fetch: duration font settings for nativeCooldownText first-time setup
     local prefix = auraType == "BUFF" and "buff" or "debuff"
-    local durationScale = db[prefix .. "DurationScale"] or 1.0
-    local durationFont = db[prefix .. "DurationFont"] or "Fonts\\FRIZQT__.TTF"
-    local durationOutline = db[prefix .. "DurationOutline"] or "OUTLINE"
-    if durationOutline == "NONE" then durationOutline = "" end
-    local durationSize = 10 * durationScale
-    local durationX = db[prefix .. "DurationX"] or 0
-    local durationY = db[prefix .. "DurationY"] or 0
-    local durationAnchor = db[prefix .. "DurationAnchor"] or "CENTER"
     
     -- Iterate aura data in display order
     -- Direct mode: uses pre-fetched full AuraData (no fallbacks — API returns nothing, we show nothing)
@@ -2955,12 +3003,12 @@ function DF:UpdateAuraIconsDirect(frame, icons, auraType, maxAuras)
                                 local curve = C_CurveUtil.CreateColorCurve()
                                 curve:SetType(Enum.LuaCurveType.Step)
 
-                                local noneColor = db.debuffBorderColorNone or {r = 0.8, g = 0.0, b = 0.0}
-                                local magicColor = db.debuffBorderColorMagic or {r = 0.2, g = 0.6, b = 1.0}
-                                local curseColor = db.debuffBorderColorCurse or {r = 0.6, g = 0.0, b = 1.0}
-                                local diseaseColor = db.debuffBorderColorDisease or {r = 0.6, g = 0.4, b = 0.0}
-                                local poisonColor = db.debuffBorderColorPoison or {r = 0.0, g = 0.6, b = 0.0}
-                                local bleedColor = db.debuffBorderColorBleed or {r = 1.0, g = 0.0, b = 0.0}
+                                local noneColor = DF:GetDebuffTypeColor(db, nil)
+                                local magicColor = DF:GetDebuffTypeColor(db, "Magic")
+                                local curseColor = DF:GetDebuffTypeColor(db, "Curse")
+                                local diseaseColor = DF:GetDebuffTypeColor(db, "Disease")
+                                local poisonColor = DF:GetDebuffTypeColor(db, "Poison")
+                                local bleedColor = DF:GetDebuffTypeColor(db, "Bleed")
 
                                 curve:AddPoint(0, CreateColor(noneColor.r, noneColor.g, noneColor.b, 1.0))
                                 curve:AddPoint(1, CreateColor(magicColor.r, magicColor.g, magicColor.b, 1.0))
@@ -2983,7 +3031,7 @@ function DF:UpdateAuraIconsDirect(frame, icons, auraType, maxAuras)
                                 end
                                 icon.border:SetColor(r, g, b, 1.0)
                             else
-                                local c = db.debuffBorderColorNone or {r = 0.8, g = 0, b = 0}
+                                local c = DF:GetDebuffTypeColor(db, nil)
                                 icon.border:SetColor(c.r, c.g, c.b, 1.0)
                             end
                             icon.border:SetAlpha(0.8)
@@ -2993,38 +3041,9 @@ function DF:UpdateAuraIconsDirect(frame, icons, auraType, maxAuras)
                         icon.border:Hide()
                     end
 
-                    -- Find native cooldown text (first time only, cached on icon)
-                    if not icon.nativeCooldownText and icon.cooldown then
-                        local regions = {icon.cooldown:GetRegions()}
-                        for _, region in ipairs(regions) do
-                            if region and region.GetObjectType and region:GetObjectType() == "FontString" then
-                                icon.nativeCooldownText = region
-
-                                -- Immediately apply font settings to prevent large default font flash
-                                if DF.SafeSetFont then
-                                    DF:SafeSetFont(region, durationFont, durationSize, durationOutline)
-                                end
-
-                                -- Create wrapper frame for parent-level alpha control (hide duration above threshold)
-                                if not icon.durationHideWrapper then
-                                    icon.durationHideWrapper = CreateFrame("Frame", nil, icon.cooldown)
-                                    icon.durationHideWrapper:SetAllPoints(icon)
-                                    icon.durationHideWrapper:SetFrameLevel(icon.cooldown:GetFrameLevel() + 2)
-                                    icon.durationHideWrapper:EnableMouse(false)
-                                end
-                                region:SetParent(icon.durationHideWrapper)
-
-                                region:ClearAllPoints()
-                                region:SetPoint(durationAnchor, icon, durationAnchor, durationX, durationY)
-
-                                -- Tell Blizzard's cooldown to show/hide countdown numbers based on user setting
-                                if icon.cooldown.SetHideCountdownNumbers then
-                                    icon.cooldown:SetHideCountdownNumbers(not icon.showDuration)
-                                end
-
-                                break
-                            end
-                        end
+                    -- Find + set up native cooldown text (canonical helper, first time only)
+                    if not icon.nativeCooldownText then
+                        DF:EnsureAuraDurationText(icon, db, prefix)
                     end
 
                     icon:Show()
@@ -3353,7 +3372,6 @@ function DF:DebugAuraFiltering()
     print("|cff00ccffDandersFrames Aura Filter Debug:|r")
     print("")
     print("|cffffcc00Hook Status:|r")
-    print("  Blizzard Hook Active:", DF.BlizzardHookActive and "Yes" or "No")
     print("  CompactUnitFrame_UpdateAuras exists:", CompactUnitFrame_UpdateAuras and "Yes" or "No")
     print("")
     
@@ -3887,7 +3905,7 @@ if CompactUnitFrame_UpdateSelectionHighlight then
 end
 
 -- Slash command
-SLASH_DFAURAS1 = "/dfauras"
+DF:RegisterDebugSlash("DFAURAS", "Aura filtering / pipeline state dump", false, "/dfauras")
 SlashCmdList["DFAURAS"] = function(msg)
     if msg == "scan" then
         DF:ForceScanBlizzardFrames()
@@ -4200,7 +4218,7 @@ local function InstallDebugHook()
 end
 
 -- Slash command handler for debug
-SLASH_DFAURASDEBUG1 = "/dfaurasdebug"
+DF:RegisterDebugSlash("DFAURASDEBUG", "Aura debug logging toggle", false, "/dfaurasdebug")
 SlashCmdList["DFAURASDEBUG"] = function(msg)
     msg = msg:lower():trim()
     
@@ -4227,7 +4245,7 @@ end
 -- Usage: /dfdefdup
 -- ============================================================
 
-SLASH_DFDEFDUP1 = "/dfdefdup"
+DF:RegisterDebugSlash("DFDEFDUP", "Defensive bar dedup state dump", false, "/dfdefdup")
 SlashCmdList["DFDEFDUP"] = function()
     local issecret = issecretvalue or function() return false end
     local header = "|cff00ff00DandersFrames|r |cff00ccff[Defensive/Buff Dedup Debug]|r"
@@ -4352,7 +4370,7 @@ end
 --   e.g. /dfscan party1
 -- ============================================================
 
-SLASH_DFSCAN1 = "/dfscan"
+DF:RegisterDebugSlash("DFSCAN", "Direct aura scan state / rescan", false, "/dfscan")
 SlashCmdList["DFSCAN"] = function(msg)
     msg = msg and msg:match("^%s*(.-)%s*$") or ""
 

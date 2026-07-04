@@ -381,13 +381,6 @@ local function CacheAbsorbLayoutState(frame, db)
     s.overshieldR, s.overshieldG, s.overshieldB = osc.r, osc.g, osc.b
 end
 
--- Invalidate the absorb layout cache for a frame. Call this from any
--- code path that changes state the cache can't detect (e.g., the frame
--- itself being replaced or recreated).
-function DF:InvalidateAbsorbLayout(frame)
-    if frame then frame.dfAbsorbState = nil end
-end
-
 -- Edge inset for absorb / heal-absorb overlays. Returns 0 (flush to the health
 -- bar) when the frame border is off or fully OPAQUE. This works by Z-ORDER, not
 -- geometry: the border frame draws at parent frame level +10 while the absorb
@@ -425,21 +418,28 @@ function DF:UpdateAbsorb(frame, testIndex)
 
     -- Get values - either from test data or real unit
     local maxHealth, absorbs
+    local isTestRender, testHealthPercent = false, nil
 
     if DF.testMode and testIndex ~= nil then
-        local testData = DF:GetTestUnitData(testIndex)
+        -- testIndex may be a numeric index or a ready testData TABLE (the
+        -- TestMode render/animation loop passes its per-tick data directly)
+        local testData = type(testIndex) == "table" and testIndex or DF:GetTestUnitData(testIndex)
         if testData then
             maxHealth = testData.maxHealth
             absorbs = testData.absorbPercent * maxHealth
+            isTestRender = true
+            testHealthPercent = testData.healthPercent or 1
         else
             maxHealth = 100000
             absorbs = 0
         end
     elseif DF.raidTestMode and testIndex ~= nil then
-        local testData = DF:GetTestUnitData(testIndex, true)  -- true = raid
+        local testData = type(testIndex) == "table" and testIndex or DF:GetTestUnitData(testIndex, true)  -- true = raid
         if testData then
             maxHealth = testData.maxHealth
             absorbs = testData.absorbPercent * maxHealth
+            isTestRender = true
+            testHealthPercent = testData.healthPercent or 1
         else
             maxHealth = 100000
             absorbs = 0
@@ -473,7 +473,15 @@ function DF:UpdateAbsorb(frame, testIndex)
             -- The calculator object itself is already cached on the frame.
             local attachedAbsorbs = absorbs
             local isClamped = false
-            if frame.absorbCalculator and unit and CreateUnitHealPredictionCalculator then
+            if isTestRender then
+                -- Test data: the calculator can only query the REAL unit (0 solo),
+                -- so derive the clamped value from the mock percentages instead.
+                local curHealth = testHealthPercent * maxHealth
+                if curHealth + absorbs > maxHealth then
+                    attachedAbsorbs = maxHealth - curHealth
+                    isClamped = true
+                end
+            elseif frame.absorbCalculator and unit and CreateUnitHealPredictionCalculator then
                 UnitGetDetailedHealPrediction(unit, nil, frame.absorbCalculator)
                 if frame.absorbCalculator.GetDamageAbsorbs then
                     local r1, r2 = frame.absorbCalculator:GetDamageAbsorbs()
@@ -750,8 +758,15 @@ function DF:UpdateAbsorb(frame, testIndex)
         local attachedAbsorbs = absorbs
         local isClamped = false
         
-        -- Create/reuse the calculator
-        if CreateUnitHealPredictionCalculator and unit then
+        -- Create/reuse the calculator (test data: derive from mock percentages
+        -- instead — the calculator can only query the REAL unit, 0 when solo)
+        if isTestRender then
+            local curHealth = testHealthPercent * maxHealth
+            if curHealth + absorbs > maxHealth then
+                attachedAbsorbs = maxHealth - curHealth
+                isClamped = true
+            end
+        elseif CreateUnitHealPredictionCalculator and unit then
             if not frame.absorbCalculator then
                 frame.absorbCalculator = CreateUnitHealPredictionCalculator()
             end
@@ -990,8 +1005,15 @@ function DF:UpdateAbsorb(frame, testIndex)
         local attachedAbsorbs = absorbs
         local isClamped = false
         
-        -- Create/reuse the calculator
-        if CreateUnitHealPredictionCalculator and unit then
+        -- Create/reuse the calculator (test data: derive from mock percentages
+        -- instead — the calculator can only query the REAL unit, 0 when solo)
+        if isTestRender then
+            local curHealth = testHealthPercent * maxHealth
+            if curHealth + absorbs > maxHealth then
+                attachedAbsorbs = maxHealth - curHealth
+                isClamped = true
+            end
+        elseif CreateUnitHealPredictionCalculator and unit then
             if not frame.absorbCalculator then
                 frame.absorbCalculator = CreateUnitHealPredictionCalculator()
             end
@@ -1316,7 +1338,9 @@ function DF:UpdateHealAbsorb(frame, testIndex)
     local maxHealth, healAbsorb
     
     if DF.testMode and testIndex ~= nil then
-        local testData = DF:GetTestUnitData(testIndex)
+        -- testIndex may be a numeric index or a ready testData TABLE (the
+        -- TestMode render/animation loop passes its per-tick data directly)
+        local testData = type(testIndex) == "table" and testIndex or DF:GetTestUnitData(testIndex)
         if testData then
             maxHealth = testData.maxHealth
             healAbsorb = testData.healAbsorbPercent * maxHealth
@@ -1325,7 +1349,7 @@ function DF:UpdateHealAbsorb(frame, testIndex)
             healAbsorb = 0
         end
     elseif DF.raidTestMode and testIndex ~= nil then
-        local testData = DF:GetTestUnitData(testIndex, true)  -- true = raid
+        local testData = type(testIndex) == "table" and testIndex or DF:GetTestUnitData(testIndex, true)  -- true = raid
         if testData then
             maxHealth = testData.maxHealth
             healAbsorb = testData.healAbsorbPercent * maxHealth
@@ -1715,7 +1739,9 @@ function DF:UpdateHealPrediction(frame, testIndex)
     
     if DF.testMode and testIndex ~= nil then
         isTestMode = true
-        local testData = DF:GetTestUnitData(testIndex)
+        -- testIndex may be a numeric index or a ready testData TABLE (the
+        -- TestMode render/animation loop passes its per-tick data directly)
+        local testData = type(testIndex) == "table" and testIndex or DF:GetTestUnitData(testIndex)
         if testData then
             maxHealth = testData.maxHealth
             testHealthPercent = testData.healthPercent
@@ -1729,7 +1755,7 @@ function DF:UpdateHealPrediction(frame, testIndex)
         end
     elseif DF.raidTestMode and testIndex ~= nil then
         isTestMode = true
-        local testData = DF:GetTestUnitData(testIndex, true)
+        local testData = type(testIndex) == "table" and testIndex or DF:GetTestUnitData(testIndex, true)
         if testData then
             maxHealth = testData.maxHealth
             testHealthPercent = testData.healthPercent
@@ -2644,22 +2670,6 @@ DF.ClassToRaidBuff = {
     ["SHAMAN"] = "missingBuffCheckSkyfury",
     ["EVOKER"] = "missingBuffCheckBronze",
 }
-
--- Get the list of raid buff spell IDs (for filtering from display)
-function DF:GetRaidBuffSpellIDs()
-    local spellIDs = {}
-    for _, buffInfo in ipairs(DF.RaidBuffs) do
-        local spellIDOrTable = buffInfo[1]
-        if type(spellIDOrTable) == "table" then
-            for _, spellID in ipairs(spellIDOrTable) do
-                spellIDs[spellID] = true
-            end
-        else
-            spellIDs[spellIDOrTable] = true
-        end
-    end
-    return spellIDs
-end
 
 -- Non-secret raid buff spell IDs (Blizzard-whitelisted, remain readable in combat)
 -- Source: Ellesmere whitelist, cross-referenced with our RaidBuffs
