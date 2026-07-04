@@ -34,6 +34,7 @@ A top-to-bottom rework of the configuration UI so every panel shares one consist
 
 ### Bug Fixes
 
+* (Fonts) **A corrupted font setting can no longer break the addon on login** — font name, size and outline values are validated before use, so a bad value in an imported or hand-edited profile now degrades to default text styling instead of erroring out the entire frame layout (which showed up as missing debuffs, broken test mode and blank settings values). (by Krathe)
 * (Pinned Frames / Test Mode) Fixed a Lua error that spammed and froze the UI (forcing a reload) when previewing pinned frames containing NPC/boss units — role icons no longer error on units without a role. (by Krathe)
 * (Sorting) Fixed the combat-status banner on the Sorting page sometimes appearing as a blank white box instead of its coloured status. (by Krathe)
 * (Raid) Test mode and settings changes can no longer disturb your **live** raid frames — group order and positions are always driven by the secure layout, fixing the grouped-raid inversion that previously needed a `/reload`. (by Krathe)
