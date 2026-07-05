@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Bug Fixes
+
+* (Text Designer) **Restored health text lost when upgrading to 4.6.0** — the legacy-to-Text-Designer conversion keyed "did this profile use health text?" off an internal flag that never actually controlled the old display, so upgrading dropped the health text element for most converting profiles (and its cleanup pass could remove a working health element from profiles converted by earlier versions). The conversion now keys off the real setting — the health text Format, where only NONE means off — and profiles that already lost their health text get it rebuilt from their legacy settings on login. If you had deliberately deleted the auto-created health element, it may reappear once — delete it again and it will stay gone. The stray "%" cleanup now targets only profiles that genuinely had health text disabled. (by Krathe)
+
 ## [4.6.0]
 
 ### Interface Overhaul
