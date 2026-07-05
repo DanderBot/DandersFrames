@@ -5396,29 +5396,6 @@ function SecureSort:RegisterPartyFrames()
     return count
 end
 
--- Verify party frames are accessible in secure environment
--- Returns: true if all frames accessible, false otherwise
-function SecureSort:VerifyPartyFrames()
-    if not self.initialized then
-        return false
-    end
-    
-    -- Run the test snippet
-    self:RunSnippet("test_count_party")
-    
-    -- Check results (need small delay for secure code to complete)
-    local status = self:GetStatus()
-    local expectedCount = 5
-    
-    if status.testPartyCount == expectedCount then
-        DebugPrint("Party frames verified: " .. status.testPartyCount .. "/" .. expectedCount)
-        return true
-    else
-        DebugPrint("Party frame verification FAILED: " .. tostring(status.testPartyCount) .. "/" .. expectedCount)
-        return false
-    end
-end
-
 -- Register raid frames (raid1-40) with secure handler
 -- Returns: number of frames registered, or nil on error
 function SecureSort:RegisterRaidFrames()
@@ -5511,29 +5488,6 @@ function SecureSort:RegisterRaidFrames()
     return count
 end
 
--- Verify raid frames are accessible in secure environment
--- Returns: true if all frames accessible, false otherwise
-function SecureSort:VerifyRaidFrames()
-    if not self.initialized then
-        return false
-    end
-    
-    -- Run the test snippet
-    self:RunSnippet("test_count_raid")
-    
-    -- Check results
-    local status = self:GetStatus()
-    local expectedCount = 40
-    
-    if status.testRaidCount == expectedCount then
-        DebugPrint("Raid frames verified: " .. status.testRaidCount .. "/" .. expectedCount)
-        return true
-    else
-        DebugPrint("Raid frame verification FAILED: " .. tostring(status.testRaidCount) .. "/" .. expectedCount)
-        return false
-    end
-end
-
 -- Register ALL frames (party + raid) - convenience function
 -- Returns: table with partyCount, raidCount
 function SecureSort:RegisterAllFrames()
@@ -5548,7 +5502,7 @@ end
 -- SLASH COMMANDS
 -- ============================================================
 
-SLASH_DFSECURE1 = "/dfsecure"
+DF:RegisterDebugSlash("DFSECURE", "Secure sort diagnostics", false, "/dfsecure")
 SlashCmdList["DFSECURE"] = function(msg)
     local cmd, arg = msg:match("^(%S*)%s*(.-)$")
     cmd = cmd:lower()

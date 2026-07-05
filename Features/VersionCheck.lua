@@ -82,37 +82,6 @@ function VC:CompareVersions(a, b)
     return 0
 end
 
--- Developer-only: run the expected comparator test matrix. Returns pass/fail counts.
-function VC:RunComparatorTests()
-    local cases = {
-        -- { a, b, expected }
-        { "v4.3.2", "v4.3.3", -1 },
-        { "v4.3.3", "v4.3.2",  1 },
-        { "v4.3.2", "v4.3.2",  0 },
-        { "4.3.2",  "v4.3.2",  0 },
-        { "v4.3.2-alpha.3", "v4.3.2",       -1 },  -- pre < stable (same base)
-        { "v4.3.2",         "v4.3.2-alpha.3", 1 },
-        { "v4.3.2-alpha.3", "v4.3.3",       -1 },  -- lower base beats suffix
-        { "v4.3.3-alpha.1", "v4.3.2",        1 },  -- pre of higher base > stable of lower
-        { "v4.3.2-alpha.1", "v4.3.2-alpha.2",-1 },
-        { "v4.3.2-alpha.5", "v4.3.2-beta.1",-1 },
-        { "v4.3.2-beta.1",  "v4.3.2-alpha.9", 1 },
-    }
-    local pass, fail = 0, 0
-    for _, c in ipairs(cases) do
-        local got = self:CompareVersions(c[1], c[2])
-        if got == c[3] then
-            pass = pass + 1
-        else
-            fail = fail + 1
-            print(format("|cffff4040FAIL|r cmp(%s, %s) = %s, expected %s",
-                c[1], c[2], tostring(got), tostring(c[3])))
-        end
-    end
-    print(format("|cffeda55fDandersFrames:|r comparator tests: %d pass, %d fail", pass, fail))
-    return pass, fail
-end
-
 -- ============================================================
 -- ADDON COMM DISPATCH
 -- ============================================================
@@ -314,12 +283,6 @@ VC.handlers["V"] = function(self, sender, payload, channel)
     if self:ShouldNag(payload) then
         self:ShowNag(payload)
     end
-end
-
--- Developer-only: simulate receiving a V from a fake sender.
-function VC:TestNag(version)
-    self.hasNagged = false  -- allow re-test in same session
-    VC.handlers["V"](self, "TestDummy-TestRealm", version or "999.0.0", "PARTY")
 end
 
 -- ============================================================

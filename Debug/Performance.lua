@@ -193,15 +193,6 @@ function DF:StopPerformanceTracking()
     print("|cff00ff00DandersFrames:|r Performance tracking stopped")
 end
 
--- Toggle tracking
-function DF:TogglePerformanceTracking()
-    if Perf.enabled then
-        DF:StopPerformanceTracking()
-    else
-        DF:StartPerformanceTracking()
-    end
-end
-
 -- Get current stats
 function DF:GetPerformanceStats()
     UpdateMemory()

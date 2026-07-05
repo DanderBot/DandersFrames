@@ -220,7 +220,7 @@ local function CreateIconPreview()
 end
 
 -- Slash command
-SLASH_DFICONS1 = "/dficons"
+DF:RegisterDebugSlash("DFICONS", "Icon library browser", true, "/dficons")
 SlashCmdList["DFICONS"] = function()
     CreateIconPreview()
 end

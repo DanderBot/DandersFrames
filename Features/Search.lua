@@ -146,16 +146,6 @@ function Search:Register(entry)
     return entry
 end
 
-function Search:ClearRegistry()
-    self.Registry = {}
-    registrationId = 0
-    self.RegistryBuilt = false
-end
-
-function Search:MarkRegistryBuilt()
-    self.RegistryBuilt = true
-end
-
 function Search:InvalidateRegistry()
     self.RegistryBuilt = false
 end
@@ -1057,12 +1047,6 @@ function Search:ShowCombatMessage()
         end
     end
     panel:Show()
-end
-
-function Search:ResetNoResultsText()
-    if self.ResultsPanel and self.ResultsPanel.noResults then
-        self.ResultsPanel.noResults:SetText(L["No results found"])
-    end
 end
 
 -- ============================================================

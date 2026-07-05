@@ -75,7 +75,7 @@ Debug\AttachmentScan.lua
 GUI\IconLib.lua
 GUI\GUI.lua
 GUI\DFFonts.lua
-GUI\ColorPickerTest.lua
+GUI\ColorPicker.lua
 Features\Search.lua
 Options\Options.lua
 Options\AutoProfiles.lua
