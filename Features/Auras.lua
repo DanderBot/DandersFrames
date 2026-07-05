@@ -3204,10 +3204,133 @@ end
 
 -- Is the factory buff path active for this frame right now?
 function DF:UseFactoryForBuffs(frame, db)
-    return DF.db and DF.db.buffUseFactory
+    -- ON by default on this experimental build; flip OFF only via an explicit false
+    -- (ToggleBuffFactory). Still hard-gated to 12.1 + DIRECT source + not test mode.
+    return DF.db and DF.db.buffUseFactory ~= false
         and DF.AuraContainer and DF.AuraContainer.IsSupported()
         and db.auraSourceMode == "DIRECT"
         and not (DF.testMode or DF.raidTestMode)
+end
+
+-- GUI-facing predicate: does the factory own the buff row for this mode's db? Unlike
+-- UseFactoryForBuffs (the render gate, which also excludes test mode), this must NOT flip in
+-- test mode — else "blocked" overlays would wrongly lift while previewing. Used by GUI when().
+function DF:FactoryOwnsBuffRow(db)
+    return DF.db and DF.db.buffUseFactory ~= false
+        and DF.AuraContainer and DF.AuraContainer.IsSupported()
+        and db and db.auraSourceMode == "DIRECT" or false
+end
+
+-- Duration-text formatters for the factory row, by format key:
+--   NUMBER -> bare seconds (45), then "2m"/"1h"   (NumericRuleFormatter)
+--   SHORT  -> "45s" / "2m" / "1h"                 (SecondsFormatter, OneLetter)
+--   FULL   -> "45 Seconds" / "2 Minutes"          (SecondsFormatter, None = full word)
+-- Blizzard's own default is SHORT-like; DF's legacy rows showed NUMBER. Built once per
+-- format and cached (Blizzard securecopies the options table, so one object per format is fine).
+local function BuildDurationFormatter(format, hideAboveT)
+    format = format or "NUMBER"
+    -- Hide-above-threshold: show seconds up to the threshold, blank above it. Forces a numeric
+    -- formatter (SecondsFormatter has no empty band). The slider caps at 60s, so no minute/hour
+    -- bands are needed below the threshold.
+    if hideAboveT then
+        if not (C_StringUtil and C_StringUtil.CreateNumericRuleFormatter and Enum and Enum.NumericRuleFormatRounding) then return nil end
+        local secFmt = (format == "SHORT" and "%.0fs") or (format == "FULL" and "%.0f Seconds") or "%.0f"
+        local ok, f = pcall(function()
+            local down = Enum.NumericRuleFormatRounding.Down
+            local fmt = C_StringUtil.CreateNumericRuleFormatter()
+            fmt:AddBreakpoint({ threshold = 0,          step = 1, rounding = down, min = 1, format = secFmt })
+            fmt:AddBreakpoint({ threshold = hideAboveT, step = 1, rounding = down, format = "" })
+            return fmt
+        end)
+        return ok and f or nil
+    end
+    if format == "NUMBER" then
+        if not (C_StringUtil and C_StringUtil.CreateNumericRuleFormatter and Enum and Enum.NumericRuleFormatRounding) then return nil end
+        local ok, f = pcall(function()
+            local down = Enum.NumericRuleFormatRounding.Down
+            local fmt = C_StringUtil.CreateNumericRuleFormatter()
+            fmt:AddBreakpoint({ threshold = 0,    step = 1, rounding = down, min = 1, format = "%.0f" })
+            fmt:AddBreakpoint({ threshold = 60,   step = 1, rounding = down, min = 1, format = "%.0fm",
+                                components = { { div = 60,   step = 1, rounding = down } } })
+            fmt:AddBreakpoint({ threshold = 3600, step = 1, rounding = down, min = 1, format = "%.0fh",
+                                components = { { div = 3600, step = 1, rounding = down } } })
+            return fmt
+        end)
+        return ok and f or nil
+    end
+    -- SHORT / FULL: Blizzard's SecondsFormatter, differing only in the abbreviation.
+    if not (C_StringUtil and C_StringUtil.CreateSecondsFormatter and C_CurveUtil and Enum) then return nil end
+    local abbrev = (format == "FULL") and Enum.SecondsFormatterAbbreviation.None
+                    or Enum.SecondsFormatterAbbreviation.OneLetter
+    local ok, f = pcall(function()
+        local fmt = C_StringUtil.CreateSecondsFormatter()
+        local mult = 1.5
+        local curve = C_CurveUtil.CreateCurve()
+        curve:AddPoint(1 + mult * SECONDS_PER_MIN,  Enum.SecondsFormatterInterval.Minutes)
+        curve:AddPoint(1 + mult * SECONDS_PER_HOUR, Enum.SecondsFormatterInterval.Hours)
+        curve:AddPoint(1 + mult * SECONDS_PER_DAY,  Enum.SecondsFormatterInterval.Days)
+        fmt:SetDefaultAbbreviation(abbrev)
+        fmt:SetMinInterval(Enum.SecondsFormatterInterval.Seconds)
+        fmt:SetMaxIntervalCurve(curve)
+        fmt:SetDesiredUnitCount(1)
+        return fmt
+    end)
+    return ok and f or nil
+end
+
+local durationFormatterCache = {}
+local function GetDurationFormatter(format, hideAboveT)
+    format = format or "NUMBER"
+    local key = format .. "|" .. tostring(hideAboveT or "")
+    if durationFormatterCache[key] == nil then
+        durationFormatterCache[key] = BuildDurationFormatter(format, hideAboveT) or false
+    end
+    return durationFormatterCache[key] or nil
+end
+
+-- Stacks-count formatter: blank below `minStacks`, show the number at/above it. (Native default
+-- shows counts > 1 = minStacks 2; a formatter makes any minimum work.)
+local stacksFormatterCache = {}
+local function GetStacksFormatter(minStacks)
+    minStacks = tonumber(minStacks) or 2
+    if stacksFormatterCache[minStacks] == nil then
+        stacksFormatterCache[minStacks] = false
+        if C_StringUtil and C_StringUtil.CreateNumericRuleFormatter and Enum and Enum.NumericRuleFormatRounding then
+            local ok, f = pcall(function()
+                local down = Enum.NumericRuleFormatRounding.Down
+                local fmt = C_StringUtil.CreateNumericRuleFormatter()
+                fmt:AddBreakpoint({ threshold = 0,         step = 1, rounding = down, format = "" })
+                fmt:AddBreakpoint({ threshold = minStacks, step = 1, rounding = down, format = "%.0f" })
+                return fmt
+            end)
+            if ok then stacksFormatterCache[minStacks] = f end
+        end
+    end
+    return stacksFormatterCache[minStacks] or nil
+end
+
+-- The legacy duration colour gradient (red expiring -> green full) as a C_CurveUtil colour
+-- curve keyed on RemainingPercent. Built once; applied directly on the button's
+-- DurationTextBinding (bypassing Blizzard's bugged SetDurationText wrapper). Percent-based,
+-- matching legacy exactly.
+local durationColorCurve
+local function GetDurationColorCurve()
+    if durationColorCurve == nil then
+        durationColorCurve = false
+        if C_CurveUtil and C_CurveUtil.CreateColorCurve and CreateColor and Enum and Enum.LuaCurveType then
+            local ok, c = pcall(function()
+                local curve = C_CurveUtil.CreateColorCurve()
+                curve:SetType(Enum.LuaCurveType.Linear)
+                curve:AddPoint(0,   CreateColor(1, 0,   0, 1))   -- expiring: red
+                curve:AddPoint(0.3, CreateColor(1, 0.5, 0, 1))   -- orange
+                curve:AddPoint(0.5, CreateColor(1, 1,   0, 1))   -- yellow
+                curve:AddPoint(1,   CreateColor(0, 1,   0, 1))   -- full: green
+                return curve
+            end)
+            if ok then durationColorCurve = c end
+        end
+    end
+    return durationColorCurve or nil
 end
 
 -- Map a prefixed aura-row setting block (buff*/debuff*) -> DF.AuraContainer config.
@@ -3224,6 +3347,9 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
 
     local dur
     if g("ShowDuration") ~= false then
+        local durFormat = g("DurationFormat") or "NUMBER"
+        local colorByTime = g("DurationColorByTime") and true or false
+        local hideAboveT = (g("DurationHideAboveEnabled") and g("DurationHideAboveThreshold")) or nil
         dur = {
             show    = true,
             anchor  = g("DurationAnchor") or "CENTER",
@@ -3232,8 +3358,9 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
             font    = g("DurationFont"),
             size    = 10 * (g("DurationScale") or 1),
             outline = g("DurationOutline"),
-            -- (no static duration-colour key exists in the db; text renders white. Time-based
-            --  colouring is v2 via Krathe's numeric-rule formatter.)
+            formatter  = GetDurationFormatter(durFormat, hideAboveT),
+            colorCurve = colorByTime and GetDurationColorCurve() or nil,  -- percent gradient (applied on the binding)
+            formatKey  = durFormat .. (colorByTime and ":C" or "") .. (hideAboveT and (":H" .. tostring(hideAboveT)) or ""),
         }
     end
 
@@ -3268,6 +3395,8 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
                 font    = g("StackFont"),
                 size    = 10 * (g("StackScale") or 1),
                 outline = g("StackOutline"),
+                formatter = GetStacksFormatter(g("StackMinimum") or 2),
+                formatKey = tostring(g("StackMinimum") or 2),
             },
         },
     }
@@ -3283,8 +3412,9 @@ local function buffFactorySig(cfg)
     local s = cfg.style
     return table.concat({
         tostring(cfg.max), tostring(f), tostring(cfg.tooltips),
-        tostring(s.duration ~= nil), tostring(s.border ~= nil),
-        tostring(s.cooldown and s.cooldown.show ~= false),
+        tostring(s.duration ~= nil), tostring(s.duration and s.duration.formatKey),
+        tostring(s.stacks and s.stacks.formatKey),
+        tostring(s.border ~= nil), tostring(s.cooldown and s.cooldown.show ~= false),
     }, "|")
 end
 
@@ -3347,7 +3477,8 @@ end
 -- Dev toggle for the experimental factory buff path. /reload to apply cleanly.
 function DF:ToggleBuffFactory()
     if not DF.db then return end
-    DF.db.buffUseFactory = not DF.db.buffUseFactory
+    local currentlyOn = DF.db.buffUseFactory ~= false   -- nil (default) counts as ON
+    DF.db.buffUseFactory = not currentlyOn
     local on = DF.db.buffUseFactory
     print("|cffeda55fDandersFrames|r buff factory: " .. (on and "|cff00ff00ON|r" or "|cffff0000OFF|r") .. " — /reload to apply")
     return on

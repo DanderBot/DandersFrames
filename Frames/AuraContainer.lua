@@ -463,27 +463,31 @@ local function bindNative(slot, config)
 
     if slot.dfDur and slot.SetDurationText and not slot._boundDur then
         slot._boundDur = true
-        -- SetDurationText's textColorCurve is bugged on this build — try WITH it
-        -- (self-heals if Blizzard fixes it), fall back WITHOUT it so text still renders.
         local durSpec = style.duration or {}
         local opts = {}
-        if durSpec.colorCurve then opts.textColorCurve = durSpec.colorCurve end
+        if durSpec.formatter then opts.formatter = durSpec.formatter end
         if durSpec.expiredText and durSpec.expiredText ~= "" then opts.expiredText = durSpec.expiredText end
         if durSpec.zeroText and durSpec.zeroText ~= "" then opts.zeroDurationText = durSpec.zeroText end
         local ok, err = pcall(function() slot:SetDurationText(slot.dfDur, opts) end)
-        if not ok then
-            opts.textColorCurve = nil
-            pcall(function() slot:SetDurationText(slot.dfDur, opts) end)
-            if not warnedCurve then
-                warnedCurve = true
-                DF:DebugWarn(DBG, "SetDurationText textColorCurve bugged (Blizzard, missing property) — text falls back to static colour: %s", tostring(err))
-            end
+        if not ok and not warnedCurve then
+            warnedCurve = true
+            DF:DebugWarn(DBG, "SetDurationText failed: %s", tostring(err))
+        end
+        -- Colour-by-time: call SetTextColorCurve DIRECTLY on the binding with the REQUIRED
+        -- `property` arg. Blizzard's SetDurationText wrapper omits it (bugged -> text vanishes),
+        -- so we bypass it — the binding is a plain field on our addon-created button. This is the
+        -- legacy percent gradient. Guarded; C-side render is unverified (Krathe checks in-game).
+        if ok and durSpec.colorCurve and slot.DurationTextBinding then
+            pcall(function()
+                slot.DurationTextBinding:SetTextColorCurve(durSpec.colorCurve, Enum.DurationTextBindingProperty.RemainingPercent)
+            end)
         end
     end
 
     if slot.dfStack and slot.SetApplicationCount and not slot._boundStack then
         slot._boundStack = true
-        slot:SetApplicationCount(slot.dfStack, {})
+        local stackSpec = style.stacks or {}
+        slot:SetApplicationCount(slot.dfStack, stackSpec.formatter and { formatter = stackSpec.formatter } or {})
     end
 
     if slot.dfBar and slot.SetDurationBar and not slot._boundBar then

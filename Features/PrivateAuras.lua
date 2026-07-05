@@ -276,7 +276,7 @@ function DF:SetupPrivateAuraAnchors(frame)
             unitToken = unit,
             auraIndex = i,
             parent    = iconFrame,
-            showCountdownFrame   = showCountdown,
+            showCooldownFrame   = showCountdown,
             showCountdownNumbers = showNumbers,
             iconInfo = BuildIconInfo(iconSize, borderScale, textScale, iconFrame),
             isContainer = false,
@@ -381,7 +381,7 @@ SetupContainerOverlay = function(frame, unit, db)
         parent = wrapper,
         isContainer = true,
         auraIndex = 1,
-        showCountdownFrame = false,
+        showCooldownFrame = false,
         showCountdownNumbers = false,
     })
 
@@ -640,7 +640,7 @@ function DF:ReanchorPrivateAuras(frame)
                 unitToken = newUnit,
                 auraIndex = i,
                 parent    = iconFrame,
-                showCountdownFrame   = showCountdown,
+                showCooldownFrame   = showCountdown,
                 showCountdownNumbers = showNumbers,
                 iconInfo = BuildIconInfo(iconSize, borderScale, textScale, iconFrame),
                 isContainer = false,
@@ -672,7 +672,7 @@ function DF:ReanchorPrivateAuras(frame)
             parent = wrapper,
             isContainer = true,
             auraIndex = 1,
-            showCountdownFrame = false,
+            showCooldownFrame = false,
             showCountdownNumbers = false,
         })
         if cAnchorID then
