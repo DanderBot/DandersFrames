@@ -177,8 +177,3 @@ end
 -- ============================================================
 -- HELPER: Check if a frame is currently health-faded
 -- ============================================================
-
-function DF:IsHealthFaded(frame)
-    if not frame then return false end
-    return frame.dfHealthFadeActive == true
-end

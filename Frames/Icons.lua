@@ -516,24 +516,6 @@ function DF:GetRaidBuffIcons()
     return icons
 end
 
--- Get raid buff names for filtering (when both spellId and icon are secret)
-function DF:GetRaidBuffNames()
-    if DF.RaidBuffNameCache then
-        return DF.RaidBuffNameCache
-    end
-    
-    local names = {}
-    for _, buffInfo in ipairs(DF.RaidBuffs) do
-        local name = buffInfo[3]  -- Name is index 3 in our table
-        if name then
-            names[name] = true
-        end
-    end
-    
-    DF.RaidBuffNameCache = names
-    return names
-end
-
 -- ============================================================
 -- PRE-COMBAT AURA SNAPSHOT
 -- Captures raid buff state on entering combat for fallback
@@ -986,6 +968,128 @@ end
 
 -- Update defensive icon for a single frame
 -- Uses Blizzard's CenterDefensiveBuff cache - they decide which defensive to show
+-- ============================================================
+-- SHARED DEFENSIVE BAR LAYOUT (live + test mode)
+-- ============================================================
+-- Pure layout math from db alone — no unit reads — so test mode positions
+-- through the exact code live uses. Single source: before this, test mode
+-- kept its own copy that skipped the pixel-perfect scale fold and the
+-- pixel-grid snap (the drift class that caused bug 951).
+--
+-- The returned table is a REUSED module scratch table: UpdateDefensiveBar
+-- runs on every aura update (~184 calls/sec in a 25-player raid) and this
+-- path is kept allocation-free. Every field is written on every call, and
+-- the layout is consumed within the same update — never retain it.
+local defensiveBarLayoutScratch = {}
+
+function DF:GetDefensiveBarLayout(db)
+    local iconSize = db.defensiveIconSize or 24
+    local borderSize = db.defensiveIconBorderSize or 2
+    local scale = db.defensiveIconScale or 1.0
+    local spacing = db.defensiveBarSpacing or 2
+    local growth = db.defensiveBarGrowth or "RIGHT_DOWN"
+
+    local userScale = scale  -- pre-pixel-perfect scale; drives the LAYOUT space
+    if db.pixelPerfect then
+        iconSize, scale, borderSize = DF:PixelPerfectSizeAndScaleForBorder(iconSize, scale, borderSize)
+    end
+
+    -- Pixel-perfect folds the user's scale INTO the icon size and resets scale to
+    -- 1.0 (so the border lands on whole pixels). That changes the coordinate space
+    -- SetPoint offsets live in: the anchor offset + inter-icon spacing would then be
+    -- applied UNSCALED instead of at the user's scale, shifting the whole block.
+    -- Re-scale the layout coords by the original user scale so the block lands
+    -- identically with or without pixel-perfect. (bug 951)
+    local layoutScale = (db.pixelPerfect and userScale) or 1.0
+    local layoutSpacing = spacing * layoutScale
+
+    local primary, secondary = strsplit("_", growth)
+    primary = primary or "RIGHT"
+    secondary = secondary or "DOWN"
+
+    local primaryX, primaryY = GetDefensiveGrowthOffset(primary, iconSize, layoutSpacing)
+    local secondaryX, secondaryY = GetDefensiveGrowthOffset(secondary, iconSize, layoutSpacing)
+
+    local out = defensiveBarLayoutScratch
+    out.iconSize = iconSize; out.scale = scale; out.borderSize = borderSize
+    out.anchor = db.defensiveIconAnchor or "CENTER"
+    out.baseX = (db.defensiveIconX or 0) * layoutScale
+    out.baseY = (db.defensiveIconY or 0) * layoutScale
+    out.spacing = layoutSpacing
+    out.wrap = db.defensiveBarWrap or 5
+    out.maxDefs = db.defensiveBarMax or 4
+    out.primary = primary; out.secondary = secondary
+    out.primaryX = primaryX; out.primaryY = primaryY
+    out.secondaryX = secondaryX; out.secondaryY = secondaryY
+    out.pixelPerfect = db.pixelPerfect
+    return out
+end
+
+-- Position one bar icon on the wrap grid (1-based slot index) + scale/level.
+function DF:PositionDefensiveBarIcon(frame, db, L, icon, i)
+    local idx = i - 1
+    local row = floor(idx / L.wrap)
+    local col = idx % L.wrap
+
+    local offsetX = (col * L.primaryX) + (row * L.secondaryX)
+    local offsetY = (col * L.primaryY) + (row * L.secondaryY)
+
+    icon:SetScale(L.scale)
+    icon:ClearAllPoints()
+    icon:SetPoint(L.anchor, frame, L.anchor, L.baseX + offsetX, L.baseY + offsetY)
+    DF:SnapPointToPixelGrid(icon, L.pixelPerfect)
+
+    local frameLevel = db.defensiveIconFrameLevel or 0
+    if frameLevel == 0 then
+        icon:SetFrameLevel(frame.contentOverlay:GetFrameLevel() + 26)
+    else
+        icon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
+    end
+end
+
+-- CENTER growth: second pass to center icons within each row/column.
+-- Mirrors DF:RepositionCenterGrowthIcons from Features/Auras.lua.
+function DF:ApplyDefensiveBarCenterGrowth(frame, L, count)
+    if L.primary ~= "CENTER" or count <= 0 then return end
+    local isHorizontalGrowth = (L.secondary == "LEFT" or L.secondary == "RIGHT")
+
+    if isHorizontalGrowth then
+        -- Vertical stacking (centered), horizontal column growth
+        for i = 1, count do
+            local icon = GetOrCreateDefensiveBarIcon(frame, i)
+            if icon then
+                local idx = i - 1
+                local col = floor(idx / L.wrap)
+                local row = idx % L.wrap
+                local iconsInCol = math.min(L.wrap, count - (col * L.wrap))
+                local centerOffset = (iconsInCol - 1) * (L.iconSize + L.spacing) / 2
+                local x = L.baseX + (col * L.secondaryX)
+                local y = L.baseY - (row * (L.iconSize + L.spacing)) + centerOffset
+                icon:ClearAllPoints()
+                icon:SetPoint(L.anchor, frame, L.anchor, x, y)
+                DF:SnapPointToPixelGrid(icon, L.pixelPerfect)
+            end
+        end
+    else
+        -- Horizontal stacking (centered), vertical row growth
+        for i = 1, count do
+            local icon = GetOrCreateDefensiveBarIcon(frame, i)
+            if icon then
+                local idx = i - 1
+                local row = floor(idx / L.wrap)
+                local col = idx % L.wrap
+                local iconsInRow = math.min(L.wrap, count - (row * L.wrap))
+                local centerOffset = (iconsInRow - 1) * (L.iconSize + L.spacing) / 2
+                local x = L.baseX + (col * (L.iconSize + L.spacing)) - centerOffset
+                local y = L.baseY + (row * L.secondaryY)
+                icon:ClearAllPoints()
+                icon:SetPoint(L.anchor, frame, L.anchor, x, y)
+                DF:SnapPointToPixelGrid(icon, L.pixelPerfect)
+            end
+        end
+    end
+end
+
 function DF:UpdateDefensiveBar(frame)
     if not frame or not frame.unit or not frame.defensiveIcon then return end
     
@@ -1011,28 +1115,19 @@ function DF:UpdateDefensiveBar(frame)
         return
     end
 
-    -- Ensure cache.defensives is populated for this unit.
-    --
-    -- Direct mode (Fix A commit 3): PopulateDefensiveCache is a cheap
-    -- no-op — cache.defensives is maintained incrementally by
-    -- ScanUnitFull / ApplyAuraDelta via the ClassifyAura defensive
-    -- filter pass, and this early-returns when cache.hasFullScan is
-    -- true (the common case in steady-state combat).
-    --
-    -- Blizzard mode (will be removed by Blizzard in 12.0.5 next week):
-    -- PopulateDefensiveCache still runs the legacy GetUnitAuras scan
-    -- because CaptureAurasFromBlizzardFrame doesn't populate
-    -- cache.defensives itself. See the TODO in PopulateDefensiveCache
-    -- for the post-removal cleanup.
+    -- Ensure cache.defensives is populated for this unit. In steady state
+    -- this is a cheap no-op — cache.defensives is maintained incrementally by
+    -- ScanUnitFull / ApplyAuraDelta via the ClassifyAura defensive filter
+    -- pass, and PopulateDefensiveCache early-returns when cache.hasFullScan
+    -- is true. Before the first full scan it triggers one.
     if DF.PopulateDefensiveCache then
         DF:PopulateDefensiveCache(unit)
     end
-
-    -- Defensive icons always use the multi-defensive renderer regardless of
-    -- the user's aura source mode.
     local cache = DF.BlizzardAuraCache and DF.BlizzardAuraCache[unit]
     do
-        local maxDefs = db.defensiveBarMax or 4
+        -- Shared layout math (also used by test mode — see GetDefensiveBarLayout)
+        local L = DF:GetDefensiveBarLayout(db)
+        local maxDefs = L.maxDefs
         -- Bug 961: the click-passthrough setup in GetOrCreateDefensiveBarIcon
         -- (SetPropagateMouseMotion/Clicks) is combat-protected, so an extra defensive
         -- icon first created mid-combat can't be made click-through until combat ends.
@@ -1042,8 +1137,7 @@ function DF:UpdateDefensiveBar(frame)
         if not InCombatLockdown() then
             for i = 2, maxDefs do GetOrCreateDefensiveBarIcon(frame, i) end
         end
-        local iconSize = db.defensiveIconSize or 24
-        local borderSize = db.defensiveIconBorderSize or 2
+        local iconSize, borderSize = L.iconSize, L.borderSize
         local borderColor = db.defensiveIconBorderColor or DEFAULT_DEFENSIVE_BORDER_COLOR
         local showBorder = db.defensiveIconShowBorder ~= false
         local showDuration = db.defensiveIconShowDuration ~= false
@@ -1054,41 +1148,6 @@ function DF:UpdateDefensiveBar(frame)
         local durationX = db.defensiveIconDurationX or 0
         local durationY = db.defensiveIconDurationY or 0
         local durationColor = db.defensiveIconDurationColor or DEFAULT_DEFENSIVE_DURATION_COLOR
-        local anchor = db.defensiveIconAnchor or "CENTER"
-        local baseX = db.defensiveIconX or 0
-        local baseY = db.defensiveIconY or 0
-        local scale = db.defensiveIconScale or 1.0
-        local spacing = db.defensiveBarSpacing or 2
-        local growth = db.defensiveBarGrowth or "RIGHT_DOWN"
-        local wrap = db.defensiveBarWrap or 5
-
-        local userScale = scale  -- pre-pixel-perfect scale; drives the LAYOUT space
-        if db.pixelPerfect then
-            iconSize, scale, borderSize = DF:PixelPerfectSizeAndScaleForBorder(iconSize, scale, borderSize)
-        end
-
-        -- Pixel-perfect folds the user's scale INTO the icon size and resets scale to
-        -- 1.0 (so the border lands on whole pixels). That changes the coordinate space
-        -- SetPoint offsets live in: the anchor offset + inter-icon spacing would then be
-        -- applied UNSCALED instead of at the user's scale, shifting the whole block —
-        -- e.g. a scale-0.6 bar with Offset Y -28 dropped a row lower than test mode,
-        -- which keeps SetScale(userScale). Re-scale the layout coords by the original
-        -- user scale so the block lands identically with or without pixel-perfect, and
-        -- matches test mode. (bug 951)
-        local layoutScale = (db.pixelPerfect and userScale) or 1.0
-        local layoutBaseX = baseX * layoutScale
-        local layoutBaseY = baseY * layoutScale
-        local layoutSpacing = spacing * layoutScale
-
-        -- Parse compound growth direction (PRIMARY_SECONDARY)
-        local primary, secondary = strsplit("_", growth)
-        primary = primary or "RIGHT"
-        secondary = secondary or "DOWN"
-
-        -- Calculate growth offsets using scaled size (same pattern as buff/debuff icons)
-        local scaledSize = iconSize * scale
-        local primaryX, primaryY = GetDefensiveGrowthOffset(primary, iconSize, layoutSpacing)
-        local secondaryX, secondaryY = GetDefensiveGrowthOffset(secondary, iconSize, layoutSpacing)
 
         local count = 0
         local adIDs = frame.dfAD_activeInstanceIDs  -- Aura Designer dedup
@@ -1108,70 +1167,13 @@ function DF:UpdateDefensiveBar(frame)
                     count = count + 1
                     local icon = GetOrCreateDefensiveBarIcon(frame, count)
                     RenderDefensiveBarIcon(icon, unit, id, db, iconSize, borderSize, borderColor, showBorder, showDuration, durationScale, durationFont, durationOutline, durationX, durationY, durationColor)
-
-                    -- Position the icon using wrap grid layout (same as buff/debuff icons)
-                    local idx = count - 1  -- 0-based for offset calculation
-                    local row = floor(idx / wrap)
-                    local col = idx % wrap
-
-                    local offsetX = (col * primaryX) + (row * secondaryX)
-                    local offsetY = (col * primaryY) + (row * secondaryY)
-
-                    icon:SetScale(scale)
-                    icon:ClearAllPoints()
-                    icon:SetPoint(anchor, frame, anchor, layoutBaseX + offsetX, layoutBaseY + offsetY)
-                    DF:SnapPointToPixelGrid(icon, db.pixelPerfect)
-
-                    -- Frame level
-                    local frameLevel = db.defensiveIconFrameLevel or 0
-                    if frameLevel == 0 then
-                        icon:SetFrameLevel(frame.contentOverlay:GetFrameLevel() + 26)
-                    else
-                        icon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
-                    end
+                    DF:PositionDefensiveBarIcon(frame, db, L, icon, count)
                 end
             end
         end
 
         -- CENTER growth: second pass to center icons within each row/column
-        -- Mirrors DF:RepositionCenterGrowthIcons from Features/Auras.lua
-        if primary == "CENTER" and count > 0 then
-            local isHorizontalGrowth = (secondary == "LEFT" or secondary == "RIGHT")
-
-            if isHorizontalGrowth then
-                -- Vertical stacking (centered), horizontal column growth
-                local secX = secondaryX
-                for i = 1, count do
-                    local icon = GetOrCreateDefensiveBarIcon(frame, i)
-                    local idx = i - 1
-                    local col = floor(idx / wrap)
-                    local row = idx % wrap
-                    local iconsInCol = math.min(wrap, count - (col * wrap))
-                    local centerOffset = (iconsInCol - 1) * (iconSize + layoutSpacing) / 2
-                    local x = layoutBaseX + (col * secX)
-                    local y = layoutBaseY - (row * (iconSize + layoutSpacing)) + centerOffset
-                    icon:ClearAllPoints()
-                    icon:SetPoint(anchor, frame, anchor, x, y)
-                    DF:SnapPointToPixelGrid(icon, db.pixelPerfect)
-                end
-            else
-                -- Horizontal stacking (centered), vertical row growth
-                local secY = secondaryY
-                for i = 1, count do
-                    local icon = GetOrCreateDefensiveBarIcon(frame, i)
-                    local idx = i - 1
-                    local row = floor(idx / wrap)
-                    local col = idx % wrap
-                    local iconsInRow = math.min(wrap, count - (row * wrap))
-                    local centerOffset = (iconsInRow - 1) * (iconSize + layoutSpacing) / 2
-                    local x = layoutBaseX + (col * (iconSize + layoutSpacing)) - centerOffset
-                    local y = layoutBaseY + (row * secY)
-                    icon:ClearAllPoints()
-                    icon:SetPoint(anchor, frame, anchor, x, y)
-                    DF:SnapPointToPixelGrid(icon, db.pixelPerfect)
-                end
-            end
-        end
+        DF:ApplyDefensiveBarCenterGrowth(frame, L, count)
 
         -- Hide remaining icons
         for i = count + 1, maxDefs do
@@ -1224,31 +1226,6 @@ function DF:UpdateAllDefensiveBars()
     end
 end
 
--- Hide all defensive icons
-function DF:HideAllDefensiveBars()
-    local function hideFrame(frame)
-        if frame and frame.defensiveIcon then
-            frame.defensiveIcon:Hide()
-        end
-        -- Also hide multi-defensive bar icons
-        if frame and frame.defensiveBarIcons then
-            for _, icon in pairs(frame.defensiveBarIcons) do
-                icon:Hide()
-            end
-        end
-    end
-    
-    -- Party frames via iterator
-    if DF.IteratePartyFrames then
-        DF:IteratePartyFrames(hideFrame)
-    end
-    
-    -- Raid frames via iterator
-    if DF.IterateRaidFrames then
-        DF:IterateRaidFrames(hideFrame)
-    end
-end
-
 -- Legacy function for backwards compatibility
 function DF:UpdateExternalDefIcon(frame)
     -- Redirect to new defensive bar
@@ -1258,11 +1235,6 @@ end
 -- Legacy function for backwards compatibility
 function DF:UpdateAllExternalDefIcons()
     DF:UpdateAllDefensiveBars()
-end
-
--- Legacy function for backwards compatibility
-function DF:HideAllExternalDefIcons()
-    DF:HideAllDefensiveBars()
 end
 
 function DF:UpdateAuras(frame)

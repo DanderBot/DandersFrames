@@ -2717,7 +2717,6 @@ function SecureSort:PushRaidGroupLayoutConfig()
         raidGroupLayoutConfig.horizontal = %s
         raidGroupLayoutConfig.groupAnchor = "%s"
         raidGroupLayoutConfig.playerAnchor = "%s"
-        raidGroupLayoutConfig.reverseGroupOrder = %s
         raidUseGroups = %s
     ]],
         lp.frameWidth,
@@ -2729,7 +2728,6 @@ function SecureSort:PushRaidGroupLayoutConfig()
         tostring(lp.horizontal),
         lp.groupAnchor or "CENTER",
         lp.playerAnchor or "START",
-        tostring(lp.reverseGroupOrder or false),
         tostring(useGroups)
     )
     
@@ -3275,7 +3273,11 @@ function SecureSort:PositionFrameToSlot(frame, slotIndex, frameCount, layoutPara
     
     frame:ClearAllPoints()
     frame:SetPoint(anchor, container, relativeAnchor, x, y)
-    
+    -- Pixel-perfect: land the frame's edges on the physical grid. The CENTER growth
+    -- anchor computes offsets via /2, which can fall on a half-pixel and make a 1px
+    -- border straddle two physical rows; this nudges it back on-grid (bounded ≤0.5px).
+    DF:SnapPointToPixelGrid(frame, (DF:GetFrameDB(frame) or {}).pixelPerfect)
+
     DebugPrint("Positioned frame to slot " .. slotIndex .. " at (" .. x .. ", " .. y .. ")")
     return true
 end
@@ -3317,7 +3319,15 @@ function SecureSort:PositionRaidFrameToSlot(frame, slotIndex, frameCount, layout
     if not frame or not container then
         return false
     end
-    
+
+    -- DOOR-SHUT backstop (flat): mirror the grouped positioner. The live flat raid
+    -- frames are children of the FlatRaidFrames secure header; this Lua per-frame
+    -- positioner is for TEST frames (DF.testRaidContainer) only. Refuse any call
+    -- that targets the live container so test mode can never drive live frames.
+    if container == DF.raidContainer then
+        return false
+    end
+
     local x, y = self:CalculateRaidSlotPosition(slotIndex, frameCount, layoutParams)
     local anchor, relativeAnchor = self:GetRaidSlotAnchors(layoutParams)
     
@@ -3325,50 +3335,19 @@ function SecureSort:PositionRaidFrameToSlot(frame, slotIndex, frameCount, layout
     local currentAnchor, currentRelTo, currentRelAnchor, currentX, currentY = frame:GetPoint(1)
     if currentAnchor == anchor and currentRelAnchor == relativeAnchor 
        and currentX and currentY
-       and math.abs(currentX - x) < 0.5 and math.abs(currentY - y) < 0.5 then
+       and math.abs(currentX - x) <= 0.5 and math.abs(currentY - y) <= 0.5 then
         -- Frame is already in position, skip
         return false
     end
     
     frame:ClearAllPoints()
     frame:SetPoint(anchor, container, relativeAnchor, x, y)
-    
-    return true
-end
+    -- Pixel-perfect: land the frame's edges on the physical grid. The CENTER grid
+    -- anchor computes offsets via /2, which can fall on a half-pixel and make a 1px
+    -- border straddle two physical rows; this nudges it back on-grid (bounded ≤0.5px).
+    DF:SnapPointToPixelGrid(frame, (DF:GetFrameDB(frame) or {}).pixelPerfect)
 
--- Position all visible raid frames to grid slots (insecure - for test mode)
--- @param frameCount: number of visible frames to position
--- @param layoutParams: raid layout configuration
--- @param container: the container frame
--- @return number of frames actually moved
-function SecureSort:PositionAllRaidFramesToSlots(frameCount, layoutParams, container)
-    if not container then
-        DebugPrint("ERROR: PositionAllRaidFramesToSlots - container is nil")
-        return 0
-    end
-    
-    if not DF.IterateRaidFrames then
-        return 0
-    end
-    
-    local moved = 0
-    local frameIndex = 0
-    DF:IterateRaidFrames(function(frame, idx)
-        frameIndex = frameIndex + 1
-        if frameIndex > frameCount then return true end  -- Stop iteration
-        
-        if frame and frame:IsShown() then
-            local slotIndex = frameIndex - 1  -- Convert to 0-based
-            if self:PositionRaidFrameToSlot(frame, slotIndex, frameCount, layoutParams, container) then
-                moved = moved + 1
-            end
-        end
-    end)
-    
-    if moved > 0 then
-        DebugPrint("Positioned " .. moved .. "/" .. frameCount .. " raid frames")
-    end
-    return moved
+    return true
 end
 
 -- ============================================================
@@ -3565,7 +3544,6 @@ SecureSort.raidGroupLayoutParams = {
     horizontal = true,           -- Direction players fill within group (HORIZONTAL = left-to-right)
     groupAnchor = "CENTER",      -- How groups are anchored (START/CENTER/END)
     playerAnchor = "START",      -- How players are anchored within group slot (START/CENTER/END)
-    reverseGroupOrder = false,   -- Whether to reverse group order
 }
 
 -- Update raid GROUP layout parameters from DF settings
@@ -3602,7 +3580,6 @@ function SecureSort:UpdateRaidGroupLayoutParams()
         horizontal = db.growDirection == "HORIZONTAL",
         groupAnchor = db.raidGroupAnchor or "START",
         playerAnchor = db.raidPlayerAnchor or "START",
-        reverseGroupOrder = db.raidGroupOrder == "REVERSE",
         groupRowGrowth = db.raidGroupRowGrowth or "START",
     }
     
@@ -3642,8 +3619,7 @@ function SecureSort:CalculateRaidGroupPosition(groupNum, posInGroup, playersInGr
     local horizontal = lp.horizontal
     local groupAnchor = lp.groupAnchor
     local playerAnchor = lp.playerAnchor
-    local reverseGroupOrder = lp.reverseGroupOrder
-    
+
     -- ============================================================
     -- Mirror the LIVE grouped positioner exactly so test == live:
     --   * the secure snippet (Headers.lua position snippet) anchors each group
@@ -3708,15 +3684,13 @@ function SecureSort:CalculateRaidGroupPosition(groupNum, posInGroup, playersInGr
     end
     local gInRC = isPartialRow and popRem or groupsPerRowCol
 
-    -- Reverse group order within the row/column when raidGroupOrder == "REVERSE".
-    -- gInRC is the live snippet's groupsInThisRC (full row -> groupsPerRowCol,
-    -- partial last row -> popRem), so this mirrors the secure snippet's
-    -- `posInRC = groupsInThisRC - 1 - posInRC`. Applied unconditionally (NOT gated
-    -- on testMode): this function also drives the live sorting-disabled grouped
-    -- path (Frames/Init.lua), so both live and test must reverse identically.
-    if reverseGroupOrder then
-        posInRC = gInRC - 1 - posInRC
-    end
+    -- Group order is driven SOLELY by activeGroupList (Group Display Order /
+    -- My Group First, via DF:GetEffectiveRaidGroupOrder). The legacy
+    -- raidGroupOrder == "REVERSE" toggle is deprecated (no GUI; superseded by the
+    -- display-order feature) and is intentionally NOT applied here -- the live
+    -- header positioner (Headers.lua:UpdateRaidPositionAttributes) never honoured
+    -- it, so honouring it here made test/legacy disagree with live. gInRC is still
+    -- the row/column population used by the groupAnchor END/CENTER offsets below.
 
     local x, yDown
     if horizontal then
@@ -3861,7 +3835,17 @@ function SecureSort:PositionRaidFrameToGroupSlot(frame, groupNum, posInGroup, pl
     if not frame or not container then
         return false
     end
-    
+
+    -- DOOR-SHUT backstop: this legacy Lua per-frame positioner must NEVER drive
+    -- LIVE raid frames. In header mode the live frames are children of the secure
+    -- group headers (positioned by the secure header path); only TEST frames
+    -- (passed with DF.testRaidContainer) or genuinely headerless legacy frames may
+    -- use this. The live container + active headers => a live header frame slipped
+    -- through; refuse it so test mode can never corrupt live.
+    if container == DF.raidContainer and DF.raidSeparatedHeaders then
+        return false
+    end
+
     local x, y = self:CalculateRaidGroupPosition(groupNum, posInGroup, playersInGroup, activeGroupList, layoutParams)
 
     -- Anchor TOPLEFT, identical to the in-combat secure snippet. (An older
@@ -3872,12 +3856,16 @@ function SecureSort:PositionRaidFrameToGroupSlot(frame, groupNum, posInGroup, pl
     local currentAnchor, _, currentRelAnchor, currentX, currentY = frame:GetPoint(1)
     if currentAnchor == "TOPLEFT" and currentRelAnchor == "TOPLEFT"
        and currentX and currentY
-       and math.abs(currentX - x) < 0.5 and math.abs(currentY - y) < 0.5 then
+       and math.abs(currentX - x) <= 0.5 and math.abs(currentY - y) <= 0.5 then
         return false
     end
 
     frame:ClearAllPoints()
     frame:SetPoint("TOPLEFT", container, "TOPLEFT", x, y)
+    -- Pixel-perfect: land the frame's edges on the physical grid (no-op for the
+    -- TOPLEFT stride math, but keeps grouped test frames consistent with party/flat
+    -- and covers any CENTER growth-anchor offset that lands on a half-pixel).
+    DF:SnapPointToPixelGrid(frame, (DF:GetFrameDB(frame) or {}).pixelPerfect)
 
     return true
 end
@@ -4346,8 +4334,7 @@ function SecureSort:RegisterPhase25Snippets()
         local horizontal = lc.horizontal
         local groupAnchor = lc.groupAnchor or "CENTER"
         local playerAnchor = lc.playerAnchor or "START"
-        local reverseGroupOrder = lc.reverseGroupOrder
-        
+
         -- Get frame count
         local frameCount = self:GetAttribute("raidFrameCount") or 0
         self:CallMethod("DebugPrint", "RAID POS GROUPED: frameCount=" .. frameCount)
@@ -4473,12 +4460,12 @@ function SecureSort:RegisterPhase25Snippets()
                         local rcIndex = math.floor((groupIndex - 1) / groupsPerRowCol) + 1
                         local posInRC = (groupIndex - 1) % groupsPerRowCol
 
-                        -- Apply reverse group order if enabled
+                        -- Group order comes solely from activeGroupList (display
+                        -- order / my-group-first). Legacy raidGroupOrder=="REVERSE"
+                        -- is deprecated and not applied (the header positioner never
+                        -- honoured it). groupsInThisRC is still needed for rc sizing.
                         local groupsInThisRC = math.min(groupsPerRowCol, activeGroupCount - (rcIndex - 1) * groupsPerRowCol)
-                        if reverseGroupOrder then
-                            posInRC = groupsInThisRC - 1 - posInRC
-                        end
-                        
+
                         -- Calculate row/column container dimensions
                         local rcWidth, rcHeight
                         if horizontal then
@@ -5409,29 +5396,6 @@ function SecureSort:RegisterPartyFrames()
     return count
 end
 
--- Verify party frames are accessible in secure environment
--- Returns: true if all frames accessible, false otherwise
-function SecureSort:VerifyPartyFrames()
-    if not self.initialized then
-        return false
-    end
-    
-    -- Run the test snippet
-    self:RunSnippet("test_count_party")
-    
-    -- Check results (need small delay for secure code to complete)
-    local status = self:GetStatus()
-    local expectedCount = 5
-    
-    if status.testPartyCount == expectedCount then
-        DebugPrint("Party frames verified: " .. status.testPartyCount .. "/" .. expectedCount)
-        return true
-    else
-        DebugPrint("Party frame verification FAILED: " .. tostring(status.testPartyCount) .. "/" .. expectedCount)
-        return false
-    end
-end
-
 -- Register raid frames (raid1-40) with secure handler
 -- Returns: number of frames registered, or nil on error
 function SecureSort:RegisterRaidFrames()
@@ -5524,29 +5488,6 @@ function SecureSort:RegisterRaidFrames()
     return count
 end
 
--- Verify raid frames are accessible in secure environment
--- Returns: true if all frames accessible, false otherwise
-function SecureSort:VerifyRaidFrames()
-    if not self.initialized then
-        return false
-    end
-    
-    -- Run the test snippet
-    self:RunSnippet("test_count_raid")
-    
-    -- Check results
-    local status = self:GetStatus()
-    local expectedCount = 40
-    
-    if status.testRaidCount == expectedCount then
-        DebugPrint("Raid frames verified: " .. status.testRaidCount .. "/" .. expectedCount)
-        return true
-    else
-        DebugPrint("Raid frame verification FAILED: " .. tostring(status.testRaidCount) .. "/" .. expectedCount)
-        return false
-    end
-end
-
 -- Register ALL frames (party + raid) - convenience function
 -- Returns: table with partyCount, raidCount
 function SecureSort:RegisterAllFrames()
@@ -5561,7 +5502,7 @@ end
 -- SLASH COMMANDS
 -- ============================================================
 
-SLASH_DFSECURE1 = "/dfsecure"
+DF:RegisterDebugSlash("DFSECURE", "Secure sort diagnostics", false, "/dfsecure")
 SlashCmdList["DFSECURE"] = function(msg)
     local cmd, arg = msg:match("^(%S*)%s*(.-)$")
     cmd = cmd:lower()

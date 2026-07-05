@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+### Bug Fixes
+
+* (Profiles) **Selective export/import no longer silently drops settings** — the category lists had drifted behind the addon's settings, so a selective export was missing the entire Targeted List page, the buff/debuff border style and animation families, permanent movers, My Buff Indicators, out-of-range alpha values and several more (~180 settings). All now travel with their categories, and an internal audit keeps the lists complete going forward. Full-profile export was never affected. (by Krathe)
+* (Profiles) **Export categories now match the addon's features** — the old "Icons" checkbox silently bundled five whole features (Targeted Spells, Targeted List, Missing Buffs, Defensives and the status icons); Text hid the Text Designer; Auras hid Boss Debuffs. The export/import picker now offers each feature as its own category — Dispel, Boss Debuffs, Missing Buffs, Defensives, My Buff Indicators, Targeted Spells, Targeted List, Text Designer and Status Icons included — so you can share exactly one feature's setup (or exclude one) honestly. Existing export strings keep working unchanged. (by Krathe)
+* (Text Designer) **Imported profiles keep their Text Designer configuration** — importing any modern profile with the Text category selected silently wiped the imported Text Designer elements and rebuilt them from the legacy text settings (the legacy-import converter misidentified every modern export as a legacy one). Modern imports now leave the imported Text Designer intact; genuinely old exports still convert as before. (by Krathe)
+* (Profiles) **Party/raid section-sync links now export and import** — the per-page "sync party & raid" toggles were left behind by both full and selective export (and reset when importing into a new profile). They now travel with full exports and with the Other category on selective exports. (by Krathe)
+* (Debug) **Debug commands tidied and self-documenting** — new `/df help` lists the user commands, and `/df debug` now lists every available debug command with a one-line description (`/df debug on`/`off` controls debug logging explicitly). Support diagnostics (aura, click-casting, header, range and similar state dumps) remain available in all builds for troubleshooting; developer harnesses (performance suite, atlas browser, deep aura tooling and the like) now only register on alpha/beta builds; and nine obsolete one-off test commands from finished development work were removed entirely. (by Krathe)
+* (Status Icons) **Role and raid-target icons no longer apply their Scale setting twice** — two update paths each applied the scale, so the icons actually rendered at scale-squared. They now render at exactly the size the slider says; with default settings the raid target icon becomes ~10% smaller and the role icon is unchanged. (by Krathe)
+* (Auras) **"Hide Duration Above" no longer silently breaks after using Test Mode** — the aura duration text is now set up through one shared path. Previously, opening test mode (or dragging a duration slider before any timed aura had displayed) could disconnect the text from the visibility control that implements the threshold, so durations stayed visible above your cutoff until a reload. The buff/debuff border type colours also now come from one shared palette in test and live. (by Krathe)
+* (Interface) **Mode accent now updates on the toolbar and Test panel buttons** — the changelog button at the top of the settings window and the Test panel's Enable/Disable button kept the hover tint of whichever mode they were first shown in, so they could flash the party accent in raid (or vice-versa). They now follow the current party/raid accent like every other control. (by Krathe)
+* (Test Mode) **Absorb, heal-absorb and heal-prediction previews now render through the real bar code** — test mode used to hand-draw simplified copies of these bars, which could drift from what you actually see in dungeons (and did, before the recent pixel-perfect fixes). The previews are now pixel-identical to live by construction, including attached/overflow modes and the overshield glow. (by Krathe)
+* (Test Mode) **Defensive bar preview now positions through the real layout code** — the test icons previously used their own copy of the grid layout that skipped pixel-perfect scale folding and pixel-grid snapping, so the preview could sit slightly off from live placement. One shared layout path now serves both. (by Krathe)
+* (Internal) **Code cleanup, round one** — removed ~130 unused functions (including two entire superseded dialogs), 6 dead settings keys and ~140 orphaned locale strings identified by the 2026-07 code audit; raid defaults are now generated from party defaults (they were a 1,250-line hand-maintained copy that could silently drift); the live colour picker moved out of its misleadingly-named "Test" file; binding-row icons resolve through one shared helper. No behaviour change. (by Krathe)
+* (Auras) **Removed the obsolete Blizzard aura source** — WoW 12.0.5 removed the API it relied on, and every profile has been force-migrated to the Direct API source since v4.2.x. The Aura Filters page loses its dead "Source Mode" dropdown (whose choice was silently reverted every login), and the setup wizard now goes straight to filter configuration. Direct API is simply how auras work now. (by Krathe)
+
+## [4.6.0]
+
 ### Interface Overhaul
 
 A top-to-bottom rework of the configuration UI so every panel shares one consistent look and behaviour.
@@ -27,11 +44,22 @@ A top-to-bottom rework of the configuration UI so every panel shares one consist
 * (Auto Layouts) Moving raid frames while an auto layout is active now edits **that layout**, via its own Unlock button. (by Krathe)
 * (Pinned Frames) Each set's **Horizontal/Vertical Spacing** now inherits from the based-on mode, overridable per set. (by Krathe)
 * (Options / Click Casting) Inline "Note:" labels are now consistent and no longer show a stray "?". (by Krathe)
-* (Click Casting) The binding **Priority** slider now reads left-to-right as High → Low and shows the priority number directly. The stored priority is unchanged — only the slider's display orientation changed. (by Krathe)
+* (Interface) **Notes, tips and banners now share one colour system** — caveats, tips, recommendations and warnings across the settings UI are coloured from a single set of tones (info, caution, danger, success) instead of assorted one-off colours, so a note's importance reads the same everywhere. (by Krathe)
+* (Interface) Drag-to-reorder lists (role, class and group order) now use a clearer reorder-handle icon. (by Krathe)
+* (Pixel Perfect) The Display page now shows the **UI Scale** that gives exact 1:1 pixel rendering at your resolution (or confirms you're already there) — purely informational, it never changes your scale. (by Krathe)
+* (Click Casting / Aura Designer) The **Priority** sliders now read left-to-right as Low → High — **higher number wins**, matching every other slider (right = more). Your existing priorities are migrated automatically, so only the displayed number changes, not which binding or aura takes precedence. (by Krathe)
 
 ### Bug Fixes
 
+* (Fonts) **A corrupted font setting can no longer break the addon on login** — font name, size and outline values are validated before use, so a bad value in an imported or hand-edited profile now degrades to default text styling instead of erroring out the entire frame layout (which showed up as missing debuffs, broken test mode and blank settings values). (by Krathe)
+* (Pinned Frames / Test Mode) Fixed a Lua error that spammed and froze the UI (forcing a reload) when previewing pinned frames containing NPC/boss units — role icons no longer error on units without a role. (by Krathe)
+* (Sorting) Fixed the combat-status banner on the Sorting page sometimes appearing as a blank white box instead of its coloured status. (by Krathe)
+* (Raid) Test mode and settings changes can no longer disturb your **live** raid frames — group order and positions are always driven by the secure layout, fixing the grouped-raid inversion that previously needed a `/reload`. (by Krathe)
+* (Raid) Retired an obsolete internal reverse-group-order setting that could invert raid groups; group order is controlled entirely by **Group Display Order** / **My Group First**. (by Krathe)
+* (Pet Frames) Fixed a combat error (blocked action) when a pet appeared, died, or was dismissed during combat — pet frames now hide combat-safely. (by Krathe)
 * (Borders) **Border Inset** is now honoured by texture-style borders, and updates live. (by Krathe)
+* (Shields) Absorb and heal-absorb overlays now cover the health bar with **no gap** — flush to the edge when the frame border is opaque or off, keeping a small inset only when the border is translucent (so the shield doesn't show through it). (by Krathe)
+* (Pixel Perfect) **Center-aligned** frames now snap to the physical pixel grid, so borders stay crisp instead of doubling or dropping a side — party frames live, and raid frames in test mode (live raid keeps Blizzard's secure positioning). The overshield line indicator and the solid highlight border snap to whole pixels too. (by Krathe)
 * (Text) Fixed a stray health value (often a "%") appearing for users who never turned health text on. (by Krathe)
 * (Nicknames) Fixed an error matching nicknames against boss/NPC names on pinned frames in encounters.
 * (Localization) Test Mode, position, grid, Text/Aura Designer and auto-profile labels now translate properly.

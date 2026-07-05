@@ -262,14 +262,14 @@ function DF:HideAllTestPetFrames()
         if DF.testPetFrames[i] then DF.testPetFrames[i]:Hide() end
     end
     -- Also hide pet group container if it exists
-    if DF.petGroupContainer then DF.petGroupContainer:Hide() end
+    DF:HidePetGroupContainer(DF.petGroupContainer)
 end
 
 function DF:HideAllTestRaidPetFrames()
     for i = 1, 40 do
         if DF.testRaidPetFrames[i] then DF.testRaidPetFrames[i]:Hide() end
     end
-    if DF.raidPetGroupContainer then DF.raidPetGroupContainer:Hide() end
+    DF:HidePetGroupContainer(DF.raidPetGroupContainer)
 end
 
 -- ============================================================
@@ -329,6 +329,15 @@ end
 -- ============================================================
 -- PET FRAME UPDATES
 -- ============================================================
+
+-- Combat-safe hide for a pet GROUP CONTAINER. In GROUPED mode the secure pet
+-- buttons are re-parented onto the container, so a raw :Hide() on it can be a
+-- protected action mid-combat (blocked -> error). The child buttons already drop
+-- to alpha 0 via SetPetFrameVisible, so skipping the container :Hide() in combat
+-- leaves nothing visible; the real hide lands on the next out-of-combat update.
+function DF:HidePetGroupContainer(container)
+    if container and not InCombatLockdown() then container:Hide() end
+end
 
 -- Helper to set pet frame visibility (uses SetAlpha to work in combat)
 -- Note: When showing, we don't set alpha to 1 because range fading may need a different alpha
@@ -877,9 +886,7 @@ function DF:UpdatePetGroupLayout()
     -- Only use group layout if in GROUPED mode and pets are enabled/shown
     local petsEnabled = isTestMode and (db.petEnabled and db.testShowPets ~= false) or (not isTestMode and db.petEnabled)
     if db.petGroupMode ~= "GROUPED" or not petsEnabled then
-        if DF.petGroupContainer then
-            DF.petGroupContainer:Hide()
-        end
+        DF:HidePetGroupContainer(DF.petGroupContainer)
         return
     end
 
@@ -920,7 +927,7 @@ function DF:UpdatePetGroupLayout()
     end
 
     if #petFrames == 0 then
-        container:Hide()
+        DF:HidePetGroupContainer(container)
         return
     end
 
@@ -1126,9 +1133,7 @@ function DF:UpdateRaidPetGroupLayout()
     -- Only use group layout if in GROUPED mode and pets are enabled/shown
     local petsEnabled = isTestMode and (db.petEnabled and db.testShowPets ~= false) or (not isTestMode and db.petEnabled)
     if db.petGroupMode ~= "GROUPED" or not petsEnabled then
-        if DF.raidPetGroupContainer then
-            DF.raidPetGroupContainer:Hide()
-        end
+        DF:HidePetGroupContainer(DF.raidPetGroupContainer)
         return
     end
 
@@ -1164,7 +1169,7 @@ function DF:UpdateRaidPetGroupLayout()
     end
 
     if #petFrames == 0 then
-        container:Hide()
+        DF:HidePetGroupContainer(container)
         return
     end
 
@@ -1366,24 +1371,6 @@ function DF:InitializePetFrames()
     end
 end
 
-function DF:InitializeRaidPetFrames()
-    local db = DF:GetRaidDB()
-    
-    -- Don't create if pets are disabled for raid
-    if not db.petEnabled then return end
-    
-    -- Create raid pet frames via iterator
-    local frameIdx = 0
-    if DF.IterateRaidFrames then
-        DF:IterateRaidFrames(function(frame)
-            frameIdx = frameIdx + 1
-            if not DF.raidPetFrames[frameIdx] and frame then
-                DF.raidPetFrames[frameIdx] = DF:CreatePetFrame("raidpet" .. frameIdx, frame, true)
-            end
-        end)
-    end
-end
-
 -- ============================================================
 -- UPDATE ALL PET FRAMES
 -- ============================================================
@@ -1404,9 +1391,9 @@ function DF:UpdateAllPetFrames(force)
     -- Hide party pet group container if in raid test mode
     if DF.raidTestMode then
         DF:Debug("PET", "UpdateAllPetFrames: hiding party pets (raid test mode active)")
-        if DF.petFrames.player then DF.petFrames.player:Hide() end
+        if DF.petFrames.player then DF:SetPetFrameVisible(DF.petFrames.player, false) end
         for i = 1, 4 do
-            if DF.partyPetFrames[i] then DF.partyPetFrames[i]:Hide() end
+            if DF.partyPetFrames[i] then DF:SetPetFrameVisible(DF.partyPetFrames[i], false) end
         end
         DF:HideAllTestPetFrames()
         return
@@ -1418,11 +1405,11 @@ function DF:UpdateAllPetFrames(force)
     -- hidden once raid frames take over.
     if not DF.testMode and IsInRaid() then
         DF:Debug("PET", "UpdateAllPetFrames: hiding party pets (live raid active)")
-        if DF.petFrames.player then DF.petFrames.player:Hide() end
+        if DF.petFrames.player then DF:SetPetFrameVisible(DF.petFrames.player, false) end
         for i = 1, 4 do
-            if DF.partyPetFrames[i] then DF.partyPetFrames[i]:Hide() end
+            if DF.partyPetFrames[i] then DF:SetPetFrameVisible(DF.partyPetFrames[i], false) end
         end
-        if DF.petGroupContainer then DF.petGroupContainer:Hide() end
+        DF:HidePetGroupContainer(DF.petGroupContainer)
         return
     end
 
@@ -1441,11 +1428,11 @@ function DF:UpdateAllPetFrames(force)
         if DF.testMode then
             DF:HideAllTestPetFrames()
         else
-            if DF.petFrames.player then DF.petFrames.player:Hide() end
+            if DF.petFrames.player then DF:SetPetFrameVisible(DF.petFrames.player, false) end
             for i = 1, 4 do
-                if DF.partyPetFrames[i] then DF.partyPetFrames[i]:Hide() end
+                if DF.partyPetFrames[i] then DF:SetPetFrameVisible(DF.partyPetFrames[i], false) end
             end
-            if DF.petGroupContainer then DF.petGroupContainer:Hide() end
+            DF:HidePetGroupContainer(DF.petGroupContainer)
         end
         return
     end
@@ -1518,7 +1505,7 @@ function DF:UpdateAllRaidPetFrames(force)
     -- Hide raid pet frames if in party test mode (not raid test mode)
     if DF.testMode and not DF.raidTestMode then
         for i = 1, 40 do
-            if DF.raidPetFrames[i] then DF.raidPetFrames[i]:Hide() end
+            if DF.raidPetFrames[i] then DF:SetPetFrameVisible(DF.raidPetFrames[i], false) end
         end
         DF:HideAllTestRaidPetFrames()
         return
@@ -1537,9 +1524,9 @@ function DF:UpdateAllRaidPetFrames(force)
             DF:HideAllTestRaidPetFrames()
         else
             for i = 1, 40 do
-                if DF.raidPetFrames[i] then DF.raidPetFrames[i]:Hide() end
+                if DF.raidPetFrames[i] then DF:SetPetFrameVisible(DF.raidPetFrames[i], false) end
             end
-            if DF.raidPetGroupContainer then DF.raidPetGroupContainer:Hide() end
+            DF:HidePetGroupContainer(DF.raidPetGroupContainer)
         end
         return
     end
@@ -1684,10 +1671,12 @@ function DF:ApplyPetSettings()
         end
         DF:UpdateAllPetFrames(true)  -- force: explicit settings change
     else
-        -- Hide all party pet frames (both live and test)
-        if DF.petFrames.player then DF.petFrames.player:Hide() end
+        -- Hide all party pet frames (both live and test). Route through
+        -- SetPetFrameVisible so a disable toggled IN COMBAT falls back to alpha-0
+        -- — a direct :Hide() on the secure pet button is protected (taint/blocked).
+        if DF.petFrames.player then DF:SetPetFrameVisible(DF.petFrames.player, false) end
         for i = 1, 4 do
-            if DF.partyPetFrames[i] then DF.partyPetFrames[i]:Hide() end
+            if DF.partyPetFrames[i] then DF:SetPetFrameVisible(DF.partyPetFrames[i], false) end
         end
         DF:HideAllTestPetFrames()
     end
@@ -1701,7 +1690,7 @@ function DF:ApplyPetSettings()
         DF:UpdateAllRaidPetFrames(true)  -- force: explicit settings change
     else
         for i = 1, 40 do
-            if DF.raidPetFrames[i] then DF.raidPetFrames[i]:Hide() end
+            if DF.raidPetFrames[i] then DF:SetPetFrameVisible(DF.raidPetFrames[i], false) end
         end
         DF:HideAllTestRaidPetFrames()
     end

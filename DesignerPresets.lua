@@ -45,6 +45,9 @@ function DF:NewAuraDesignerConfig()
     cfg.auras = {}
     cfg.layoutGroups = {}
     cfg.nextLayoutGroupID = 1
+    -- Born in the new higher-wins priority scale, so the lazy priority migration
+    -- never flips a freshly-created config (see MigrateAuraDesignerPrioritiesLazy).
+    cfg._priorityHigherWinsV1 = true
     return cfg
 end
 
@@ -457,8 +460,10 @@ function DF:ImportDesignerPresets(importData, categories)
     end
     -- Pinned sets reference designer presets too, so a pinnedFrames-only import/
     -- export must carry the libraries or a set ends up pointing at a missing preset.
+    -- ("text" kept alongside "textDesigner" for pre-restructure export strings,
+    -- whose category list bundled the Text Designer under Text.)
     local importAura = (not wanted) or wanted.auraDesigner or wanted.autoLayout or wanted.pinnedFrames
-    local importText = (not wanted) or wanted.text or wanted.autoLayout or wanted.pinnedFrames
+    local importText = (not wanted) or wanted.textDesigner or wanted.text or wanted.autoLayout or wanted.pinnedFrames
 
     local function mergeLib(libKey, src)
         if type(src) ~= "table" then return end
@@ -685,11 +690,6 @@ function DF:SetModeDesignerPreset(kind, mode, name)
         local prof = DF._realProfile or DF.db
         if prof and prof[mode] then prof[mode][refKey] = name end
     end
-end
-
--- The reference key for a designer kind ("auraDesignerPreset" / "textDesignerPreset").
-function DF:GetDesignerRefKey(kind)
-    return DESIGNER_KINDS[kind] and DESIGNER_KINDS[kind].ref
 end
 
 -- While editing a raid auto-layout: is the layout currently INHERITING the

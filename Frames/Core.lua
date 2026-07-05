@@ -255,41 +255,6 @@ function DF:PixelPerfectThickness(value)
     return result
 end
 
--- Snap a value UP to the next pixel boundary (ceiling)
-function DF:PixelPerfectCeil(value)
-    local scale = self:GetPixelScale()
-    return math.ceil(value / scale) * scale
-end
-
--- Adjust a size to ensure borders fit evenly on all sides
--- Takes a desired size and border thickness, returns adjusted size
--- Ensures the inner content area (size - 2*border) is a whole pixel count
--- and the overall size accommodates the border cleanly
-function DF:PixelPerfectSizeForBorder(size, borderThickness)
-    local scale = self:GetPixelScale()
-    
-    -- Snap border to nearest pixel (minimum 1 pixel if > 0)
-    local borderPixels = math.floor(borderThickness / scale + 0.5)
-    if borderThickness > 0 and borderPixels < 1 then
-        borderPixels = 1
-    end
-    local ppBorder = borderPixels * scale
-    
-    -- Snap size to nearest pixel
-    local sizePixels = math.floor(size / scale + 0.5)
-    
-    -- Calculate content area (what's left after borders on both sides)
-    local contentPixels = sizePixels - (2 * borderPixels)
-    
-    -- If content would be less than 1 pixel, increase size
-    if contentPixels < 1 then
-        contentPixels = 1
-        sizePixels = contentPixels + (2 * borderPixels)
-    end
-    
-    return sizePixels * scale, ppBorder
-end
-
 -- Adjust size and scale together to ensure pixel-perfect rendering with borders
 -- The key insight: SetScale scales EVERYTHING including border thickness
 -- So a 1px border at scale 1.15 becomes 1.15px which won't render cleanly
@@ -364,36 +329,6 @@ function DF:SetPixelPerfectSize(frame, width, height, db)
         frame:SetSize(self:PixelPerfect(width), self:PixelPerfect(height))
     else
         frame:SetSize(width, height)
-    end
-end
-
--- Pixel-perfect SetWidth helper
--- Skips SetWidth for secure header children during combat
-function DF:SetPixelPerfectWidth(frame, width, db)
-    -- Skip for secure header children during combat (protected frame restriction)
-    if frame.dfIsHeaderChild and InCombatLockdown() then
-        return
-    end
-    
-    if db and db.pixelPerfect then
-        frame:SetWidth(self:PixelPerfect(width))
-    else
-        frame:SetWidth(width)
-    end
-end
-
--- Pixel-perfect SetHeight helper
--- Skips SetHeight for secure header children during combat
-function DF:SetPixelPerfectHeight(frame, height, db)
-    -- Skip for secure header children during combat (protected frame restriction)
-    if frame.dfIsHeaderChild and InCombatLockdown() then
-        return
-    end
-    
-    if db and db.pixelPerfect then
-        frame:SetHeight(self:PixelPerfect(height))
-    else
-        frame:SetHeight(height)
     end
 end
 
@@ -490,21 +425,6 @@ function DF:FormatNumber(num)
     return tostring(num)
 end
 
--- Abbreviate large numbers (for health text, etc.)
-function DF:AbbreviateNumber(num)
-    if not num then return "0" end
-    
-    if num >= 1000000000 then
-        return string.format("%.1fB", num / 1000000000)
-    elseif num >= 1000000 then
-        return string.format("%.1fM", num / 1000000)
-    elseif num >= 1000 then
-        return string.format("%.1fK", num / 1000)
-    else
-        return tostring(math.floor(num))
-    end
-end
-
 -- Get duration text color based on remaining percentage (for test mode)
 -- Returns r, g, b values matching the color curve used for live frames
 -- 0% = red, 30% = orange, 50% = yellow, 100% = green
@@ -527,11 +447,6 @@ function DF:GetDurationColorByPercent(percent)
         local t = (percent - 0.5) / 0.5
         return 1 - t, 1, 0
     end
-end
-
--- Check if frame is valid for updates
-function DF:IsValidFrame(frame)
-    return frame and frame.healthBar and true or false
 end
 
 -- ============================================================
@@ -748,6 +663,11 @@ function DF:GetRoleIconTexture(db, role)
             return atlas  -- atlas name, no texcoords
         end
         local c = BLIZZARD_ROLE_COORDS[role]
+        -- Unknown/missing role (e.g. "NONE" or nil for a roleless unit): no icon.
+        -- Callers pass the result to SetIconTextureOrAtlas, which no-ops on nil.
+        -- Guard prevents indexing a nil coord table (a roleless test/raid unit
+        -- otherwise crashed GetRoleIconTexture).
+        if not c then return nil end
         return "Interface\\LFGFrame\\UI-LFG-ICON-PORTRAITROLES", c[1], c[2], c[3], c[4]
     end
 end

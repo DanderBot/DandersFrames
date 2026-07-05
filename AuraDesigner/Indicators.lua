@@ -2027,7 +2027,7 @@ function Indicators:ConfigureIcon(frame, config, defaults, auraName, priority)
     -- Frame level: base from frame (not contentOverlay) + per-indicator level + small priority tiebreaker
     local level = config.frameLevel or (defaults and defaults.indicatorFrameLevel) or 2
     local baseLevel = frame:GetFrameLevel()
-    local priorityBoost = math.floor((20 - (priority or 5)) / 4)  -- 0-5 range for tiebreaking
+    local priorityBoost = math.floor((9 + (priority or 5)) / 4)  -- higher priority = higher frame level
     icon:SetFrameLevel(math.max(0, baseLevel + level + priorityBoost))
 
     -- Frame strata: per-indicator override, falls back to global default.
@@ -2894,7 +2894,7 @@ function Indicators:ConfigureSquare(frame, config, defaults, auraName, priority)
     -- Frame level: base from frame (not contentOverlay) + per-indicator level + small priority tiebreaker
     local level = config.frameLevel or (defaults and defaults.indicatorFrameLevel) or 2
     local baseLevel = frame:GetFrameLevel()
-    local priorityBoost = math.floor((20 - (priority or 5)) / 4)  -- 0-5 range for tiebreaking
+    local priorityBoost = math.floor((9 + (priority or 5)) / 4)  -- higher priority = higher frame level
     sq:SetFrameLevel(math.max(0, baseLevel + level + priorityBoost))
 
     -- Frame strata: per-indicator override, falls back to global default.
@@ -3972,7 +3972,7 @@ function Indicators:ConfigureBar(frame, config, defaults, auraName, priority)
     -- Frame level: base from frame (not contentOverlay) + per-indicator level + small priority tiebreaker
     local level = config.frameLevel or (defaults and defaults.indicatorFrameLevel) or 2
     local baseLevel = frame:GetFrameLevel()
-    local priorityBoost = math.floor((20 - (priority or 5)) / 4)  -- 0-5 range for tiebreaking
+    local priorityBoost = math.floor((9 + (priority or 5)) / 4)  -- higher priority = higher frame level
     bar:SetFrameLevel(math.max(0, baseLevel + level + priorityBoost))
 
     -- Frame strata: per-indicator override, falls back to global default.

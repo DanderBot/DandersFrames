@@ -156,12 +156,6 @@ local function CloseOpenDropdown()
     currentOpenDropdown = nil
 end
 
--- Set the currently open dropdown
-local function SetOpenDropdown(menuFrame)
-    CloseOpenDropdown()
-    currentOpenDropdown = menuFrame
-end
-
 -- Helper to get current theme color
 local function GetThemeColor()
     if GUI.SelectedMode == "raid" then return C_RAID else return C_ACCENT end
@@ -799,6 +793,32 @@ function GUI:CreateLabel(parent, text, width, color)
     return frame
 end
 
+-- CreateNote: a lightweight LEVELLED note (NO box — that is CreateInfoBanner's
+-- job) for an inline caveat/tip attached to a field or section. It is the middle
+-- tier between a plain CreateLabel and a full banner.
+--   opts.tone    info | caution | danger | success — tints the note from the
+--                SAME palette as the banners (via ToneHex), so notes and banners
+--                speak one colour language. Omit for a neutral dim note.
+--   opts.prefix  optional lead word ("Note", "Warning", "Recommendation") shown
+--                in the tone colour, followed by ": " and the body in dim text.
+--   opts.width   wrap width.
+-- Returns a CreateLabel frame, so it is a drop-in anywhere a label goes.
+function GUI:CreateNote(parent, text, opts)
+    opts = opts or {}
+    local str
+    if opts.tone and opts.prefix then
+        -- Route the prefix through L so "Note"/"Tip"/etc. are localizable (the
+        -- locale metatable returns the key unchanged when a locale lacks it).
+        local prefix = (L and L[opts.prefix]) or opts.prefix
+        str = "|c" .. self:ToneHex(opts.tone) .. prefix .. ":|r " .. text
+    elseif opts.tone then
+        str = "|c" .. self:ToneHex(opts.tone) .. text .. "|r"
+    else
+        str = text
+    end
+    return self:CreateLabel(parent, str, opts.width)
+end
+
 -- Segmented button group: a row of mutually-exclusive buttons, one selected at
 -- a time. Each option shows a primary label and an optional subtitle on a
 -- second line. Selected button gets a themed border + tinted fill; unselected
@@ -944,11 +964,13 @@ end
 -- CreateInfoBanner
 -- ------------------------------------------------------------
 -- A self-resizing banner with an icon, body text, and a "tone"
--- (info / warning / caution / danger / success) that controls
--- background, border, default text colour, and default icon.
+-- (info / caution / danger / success) that controls background,
+-- border, default text colour, and default icon. ("warning" is a
+-- legacy alias of "caution".) Do NOT pass fontTemplate — banners
+-- share one font on purpose; only the tone should vary.
 --
 -- Usage:
---   local banner = GUI:CreateInfoBanner(parent, { tone = "warning", text = "..." })
+--   local banner = GUI:CreateInfoBanner(parent, { tone = "caution", text = "..." })
 --   Add(banner, banner.layoutHeight, "both")
 --
 -- Methods on the returned frame:
@@ -964,38 +986,66 @@ end
 -- or shrinks the banner to fit. The host page is re-laid out so widgets
 -- below the banner reposition.
 -- ============================================================
+-- Each tone carries FOUR colour roles so all three consumers (banners,
+-- inline ToneHex text, and tooltips) stay in sync:
+--   bg / border / textColor / icon+iconColor  drive the BANNER box itself.
+--   accent                                     is the vivid emphasis colour
+--     used for INLINE text (ToneHex) and tooltip titles, read against the
+--     dark GUI background rather than the banner's own tinted bg. It is a
+--     SEPARATE role from iconColor: e.g. the danger icon is a light warm so
+--     the triangle pops on the orange banner, but inline "Warning" text must
+--     be a real red to out-rank a caution — deriving one from the other
+--     (the original bug) made inline danger paler than caution.
 local INFO_BANNER_TONES = {
     info = {
         bg = {0.15, 0.18, 0.28, 1},
         useThemeBorder = true, borderAlpha = 0.5,
         icon = "info",
         textColor = {0.85, 0.85, 0.85},
+        accent = {0.6, 0.8, 1},          -- light blue
     },
-    warning = {
-        bg = {0.25, 0.22, 0.10, 1},
-        border = {0.6, 0.55, 0.2, 0.6},
-        icon = "warning",
-        textColor = {1, 0.82, 0},
-    },
+    -- NOTE: "warning" was merged into "caution" (they were near-duplicate golds).
+    -- SetTone("warning") still resolves via the alias below for safety.
     caution = {
         bg = {0.5, 0.45, 0.1, 0.9},
         border = {0.7, 0.6, 0.1, 1},
         icon = "warning", iconColor = {1, 0.9, 0.3},
         textColor = {1, 0.95, 0.7},
+        accent = {1, 0.82, 0},           -- gold
     },
     danger = {
         bg = {0.6, 0.3, 0.1, 0.9},
         border = {0.8, 0.4, 0.1, 1},
-        icon = "warning", iconColor = {1, 0.6, 0.2},
+        -- icon kept a light warm (not the mid-orange bg hue) so the triangle pops
+        icon = "warning", iconColor = {1, 0.9, 0.72},
         textColor = {1, 0.85, 0.7},
+        accent = {1, 0.27, 0.27},        -- real red (destructive), NOT the pale icon warm
     },
     success = {
         bg = {0.1, 0.4, 0.2, 0.9},
         border = {0.2, 0.6, 0.3, 1},
         icon = "check", iconColor = {0.3, 1, 0.5},
         textColor = {0.7, 1, 0.8},
+        accent = {0.4, 0.85, 0.5},       -- green
     },
 }
+-- Legacy alias: "warning" was merged into "caution" (near-duplicate golds).
+INFO_BANNER_TONES.warning = INFO_BANNER_TONES.caution
+
+-- Hex accent ("ffRRGGBB", for inline |c...|r escapes) matching a banner tone, so
+-- inline caveat text (e.g. a warning word in a subtitle) reads as the SAME
+-- info/caution/danger/success language as the banners instead of an ad-hoc colour.
+-- Uses the tone's dedicated inline `accent` (NOT the banner iconColor, which is
+-- tuned to sit on the banner's own bg and would make danger paler than caution).
+function GUI:ToneHex(toneName)
+    local t = INFO_BANNER_TONES[toneName] or INFO_BANNER_TONES.caution
+    local c = t.accent or t.iconColor or t.textColor or {1, 1, 1}
+    return string.format("ff%02x%02x%02x",
+        math.floor((c[1] or 1) * 255 + 0.5),
+        math.floor((c[2] or 1) * 255 + 0.5),
+        math.floor((c[3] or 1) * 255 + 0.5))
+end
+
 local INFO_BANNER_ICON_PATH = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
 
 function GUI:CreateInfoBanner(parent, opts)
@@ -1495,10 +1545,12 @@ end
 function GUI:ShowTooltip(owner, opts)
     if not owner or not opts or not opts.title then return end
     GameTooltip:SetOwner(owner, opts.anchor or "ANCHOR_RIGHT")
-    if opts.tone == "warning" then
-        GameTooltip:SetText(opts.title, 1, 0.82, 0)      -- caution gold
-    elseif opts.tone == "danger" then
-        GameTooltip:SetText(opts.title, 1, 0.27, 0.27)   -- destructive red (FF4444)
+    -- Title colour is single-sourced from the tone's inline accent so a tooltip
+    -- title reads the same as inline ToneHex text of the same tone. Untoned = white.
+    local toneDef = opts.tone and INFO_BANNER_TONES[opts.tone]
+    local ac = toneDef and toneDef.accent
+    if ac then
+        GameTooltip:SetText(opts.title, ac[1], ac[2], ac[3])
     else
         GameTooltip:SetText(opts.title, 1, 1, 1)
     end
@@ -2402,7 +2454,7 @@ function GUI.RegisterOverrideWidget(widget)
 end
 
 -- Slash command to toggle debug mode
-SLASH_DFOVERRIDEDEBUG1 = "/dfoverridedebug"
+DF:RegisterDebugSlash("DFOVERRIDEDEBUG", "Auto layout override table dump", true, "/dfoverridedebug")
 SlashCmdList["DFOVERRIDEDEBUG"] = function()
     overrideDebugMode = not overrideDebugMode
     print("|cff00ff00DandersFrames:|r Override debug mode " .. (overrideDebugMode and "ENABLED" or "DISABLED"))
@@ -4533,7 +4585,7 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
     -- per active border, which adds up in 20-30 player raids.
     if showPerfBanner then
         local perfBanner = GUI:CreateInfoBanner(parent, {
-            tone = "warning",
+            tone = "caution",
             text = L["Animations run per-border and may impact FPS in larger raids. Use sparingly on high-priority alerts."],
             staticHeight = true,
             minHeight    = 56,
@@ -6426,18 +6478,14 @@ function GUI:CreateRoleOrderList(parent, dbTable, dbKey, callback, separateMelee
         local grip = CreateFrame("Frame", nil, parentFrame)
         grip:SetSize(12, 16)
         
-        for i = 1, 3 do
-            local line = grip:CreateTexture(nil, "ARTWORK")
-            line:SetSize(10, 2)
-            line:SetPoint("TOP", grip, "TOP", 0, -3 - (i - 1) * 5)
-            line:SetColorTexture(0.5, 0.5, 0.5, 1)
-            grip["line" .. i] = line
-        end
+        local icon = grip:CreateTexture(nil, "ARTWORK")
+        icon:SetAllPoints(grip)
+        icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\reorder")
+        icon:SetVertexColor(0.5, 0.5, 0.5, 1)
+        grip.icon = icon
         
         grip.SetGripColor = function(self, r, g, b)
-            for i = 1, 3 do
-                self["line" .. i]:SetColorTexture(r, g, b, 1)
-            end
+            self.icon:SetVertexColor(r, g, b, 1)
         end
         
         return grip
@@ -6751,18 +6799,14 @@ function GUI:CreateClassOrderList(parent, dbTable, dbKey, callback)
         local grip = CreateFrame("Frame", nil, parentFrame)
         grip:SetSize(10, 12)
         
-        for i = 1, 3 do
-            local line = grip:CreateTexture(nil, "ARTWORK")
-            line:SetSize(8, 1)
-            line:SetPoint("TOP", grip, "TOP", 0, -2 - (i - 1) * 4)
-            line:SetColorTexture(0.5, 0.5, 0.5, 1)
-            grip["line" .. i] = line
-        end
+        local icon = grip:CreateTexture(nil, "ARTWORK")
+        icon:SetAllPoints(grip)
+        icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\reorder")
+        icon:SetVertexColor(0.5, 0.5, 0.5, 1)
+        grip.icon = icon
         
         grip.SetGripColor = function(self, r, g, b)
-            for i = 1, 3 do
-                self["line" .. i]:SetColorTexture(r, g, b, 1)
-            end
+            self.icon:SetVertexColor(r, g, b, 1)
         end
         
         return grip
@@ -7057,18 +7101,14 @@ function GUI:CreateGroupOrderList(parent, dbTable, dbKey, callback, playerGroupF
         local grip = CreateFrame("Frame", nil, parentFrame)
         grip:SetSize(12, 14)
         
-        for i = 1, 3 do
-            local line = grip:CreateTexture(nil, "ARTWORK")
-            line:SetSize(10, 2)
-            line:SetPoint("TOP", grip, "TOP", 0, -2 - (i - 1) * 4)
-            line:SetColorTexture(0.5, 0.5, 0.5, 1)
-            grip["line" .. i] = line
-        end
+        local icon = grip:CreateTexture(nil, "ARTWORK")
+        icon:SetAllPoints(grip)
+        icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\reorder")
+        icon:SetVertexColor(0.5, 0.5, 0.5, 1)
+        grip.icon = icon
         
         grip.SetGripColor = function(self, r, g, b)
-            for i = 1, 3 do
-                self["line" .. i]:SetColorTexture(r, g, b, 1)
-            end
+            self.icon:SetVertexColor(r, g, b, 1)
         end
         
         return grip
@@ -7463,18 +7503,14 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
         local grip = CreateFrame("Frame", nil, parentFrame)
         grip:SetSize(12, 14)
         
-        for i = 1, 3 do
-            local line = grip:CreateTexture(nil, "ARTWORK")
-            line:SetSize(10, 2)
-            line:SetPoint("TOP", grip, "TOP", 0, -2 - (i - 1) * 4)
-            line:SetColorTexture(0.5, 0.5, 0.5, 1)
-            grip["line" .. i] = line
-        end
+        local icon = grip:CreateTexture(nil, "ARTWORK")
+        icon:SetAllPoints(grip)
+        icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\reorder")
+        icon:SetVertexColor(0.5, 0.5, 0.5, 1)
+        grip.icon = icon
         
         grip.SetGripColor = function(self, r, g, b)
-            for i = 1, 3 do
-                self["line" .. i]:SetColorTexture(r, g, b, 1)
-            end
+            self.icon:SetVertexColor(r, g, b, 1)
         end
         
         return grip
@@ -8092,405 +8128,11 @@ end
 -- selection bar. Used by the Wizard Builder for wizard/step lists.
 -- =========================================================================
 
-function GUI:CreateSelectableList(parent, width, height, onSelect)
-    local ROW_HEIGHT = 28
-    local MAX_VISIBLE = math.floor(height / ROW_HEIGHT)
-
-    local container = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    container:SetSize(width, height)
-    CreateElementBackdrop(container)
-
-    -- Scroll frame
-    local scroll = CreateFrame("ScrollFrame", nil, container, "ScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", 2, -2)
-    scroll:SetPoint("BOTTOMRIGHT", -20, 2)
-
-    local child = CreateFrame("Frame", nil, scroll)
-    child:SetWidth(width - 24)
-    scroll:SetScrollChild(child)
-
-    StyleScrollBar(scroll)
-
-    -- State
-    local items = {}
-    local selectedIndex = nil
-    local rowPool = {}
-
-    local function GetRow(index)
-        if rowPool[index] then return rowPool[index] end
-
-        local row = CreateFrame("Button", nil, child, "BackdropTemplate")
-        row:SetHeight(ROW_HEIGHT)
-        row:SetPoint("TOPLEFT", 0, -((index - 1) * ROW_HEIGHT))
-        row:SetPoint("TOPRIGHT", 0, -((index - 1) * ROW_HEIGHT))
-
-        row:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-        })
-        row:SetBackdropColor(0, 0, 0, 0)
-
-        -- Accent bar on left (hidden by default)
-        row.accent = row:CreateTexture(nil, "OVERLAY")
-        row.accent:SetPoint("TOPLEFT", 0, 0)
-        row.accent:SetPoint("BOTTOMLEFT", 0, 0)
-        row.accent:SetWidth(3)
-        row.accent:Hide()
-
-        row.label = row:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-        row.label:SetPoint("LEFT", 8, 0)
-        row.label:SetPoint("RIGHT", -4, 0)
-        row.label:SetJustifyH("LEFT")
-        row.label:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-
-        row:SetScript("OnEnter", function(self)
-            if selectedIndex ~= self.index then
-                self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
-            end
-        end)
-        row:SetScript("OnLeave", function(self)
-            if selectedIndex ~= self.index then
-                self:SetBackdropColor(0, 0, 0, 0)
-            end
-        end)
-        row:SetScript("OnClick", function(self)
-            container:SetSelected(self.index)
-            PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-        end)
-
-        rowPool[index] = row
-        return row
-    end
-
-    local function Refresh()
-        local themeColor = GetThemeColor()
-        child:SetHeight(math.max(1, #items * ROW_HEIGHT))
-
-        for i = 1, math.max(#items, #rowPool) do
-            local row = GetRow(i)
-            if i <= #items then
-                row.index = i
-                row.label:SetText(items[i].label or items[i].name or tostring(items[i]))
-                row:Show()
-
-                if i == selectedIndex then
-                    row:SetBackdropColor(C_ELEMENT.r + 0.05, C_ELEMENT.g + 0.05, C_ELEMENT.b + 0.05, 1)
-                    row.accent:SetColorTexture(themeColor.r, themeColor.g, themeColor.b, 1)
-                    row.accent:Show()
-                    row.label:SetTextColor(1, 1, 1)
-                else
-                    row:SetBackdropColor(0, 0, 0, 0)
-                    row.accent:Hide()
-                    row.label:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-                end
-            else
-                row:Hide()
-            end
-        end
-    end
-
-    function container:SetItems(newItems)
-        items = newItems or {}
-        if selectedIndex and selectedIndex > #items then
-            selectedIndex = #items > 0 and #items or nil
-        end
-        Refresh()
-    end
-
-    function container:GetItems()
-        return items
-    end
-
-    function container:SetSelected(index)
-        if index and (index < 1 or index > #items) then index = nil end
-        local oldIndex = selectedIndex
-        selectedIndex = index
-        Refresh()
-        if oldIndex ~= index and onSelect then
-            onSelect(index and items[index] or nil, index)
-        end
-    end
-
-    function container:GetSelected()
-        return selectedIndex
-    end
-
-    function container:GetSelectedItem()
-        return selectedIndex and items[selectedIndex] or nil
-    end
-
-    function container:RefreshDisplay()
-        Refresh()
-    end
-
-    return container
-end
-
 -- =========================================================================
 -- SEARCHABLE DROPDOWN WIDGET
 -- Dropdown with a search/filter box. Used for the DB key picker (800+ keys)
 -- and any large option set. Groups items by category headers.
 -- =========================================================================
-
-function GUI:CreateSearchableDropdown(parent, label, width, onSelect)
-    local MENU_WIDTH = width or 260
-    local ROW_HEIGHT = 22
-    local MAX_VISIBLE = 12
-    local SEARCH_HEIGHT = 26
-
-    local container = CreateFrame("Frame", nil, parent)
-    container:SetSize(MENU_WIDTH, 50)
-
-    -- Label
-    if label then
-        container.label = container:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-        container.label:SetPoint("TOPLEFT", 0, 0)
-        container.label:SetText(label)
-        container.label:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    end
-
-    -- Button
-    local btn = CreateFrame("Button", nil, container, "BackdropTemplate")
-    btn:SetSize(MENU_WIDTH, 24)
-    btn:SetPoint("TOPLEFT", 0, -20)
-    CreateElementBackdrop(btn)
-
-    btn.Text = btn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    btn.Text:SetPoint("LEFT", 6, 0)
-    btn.Text:SetPoint("RIGHT", -20, 0)
-    btn.Text:SetJustifyH("LEFT")
-    btn.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    btn.Text:SetText(L["Select..."])
-
-    btn.Arrow = btn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    btn.Arrow:SetPoint("RIGHT", -6, 0)
-    btn.Arrow:SetText("v")
-    btn.Arrow:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-
-    -- Menu frame
-    local menuFrame = CreateFrame("Frame", nil, btn, "BackdropTemplate")
-    menuFrame:SetFrameStrata("FULLSCREEN_DIALOG")
-    menuFrame:SetFrameLevel(300)
-    menuFrame:SetWidth(MENU_WIDTH)
-    menuFrame:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    menuFrame:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 1)
-    menuFrame:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
-    menuFrame:SetPoint("TOP", btn, "BOTTOM", 0, -2)
-    menuFrame:Hide()
-    menuFrame:EnableMouse(true)
-
-    -- Search box
-    local searchBox = CreateFrame("EditBox", nil, menuFrame, "BackdropTemplate")
-    searchBox:SetSize(MENU_WIDTH - 12, SEARCH_HEIGHT)
-    searchBox:SetPoint("TOP", 0, -6)
-    searchBox:SetAutoFocus(false)
-    searchBox:SetFontObject(DFFontHighlightSmall)
-    searchBox:SetTextInsets(6, 6, 0, 0)
-    CreateElementBackdrop(searchBox)
-
-    searchBox.placeholder = searchBox:CreateFontString(nil, "OVERLAY", "DFFontDisableSmall")
-    searchBox.placeholder:SetPoint("LEFT", 6, 0)
-    searchBox.placeholder:SetText(L["Search..."])
-    searchBox.placeholder:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.6)
-
-    -- Scroll frame for menu items
-    local menuScroll = CreateFrame("ScrollFrame", nil, menuFrame, "ScrollFrameTemplate")
-    menuScroll:SetPoint("TOPLEFT", 4, -(SEARCH_HEIGHT + 12))
-    menuScroll:SetPoint("BOTTOMRIGHT", -20, 4)
-
-    local menuChild = CreateFrame("Frame", nil, menuScroll)
-    menuChild:SetWidth(MENU_WIDTH - 28)
-    menuScroll:SetScrollChild(menuChild)
-
-    StyleScrollBar(menuScroll)
-
-    -- State
-    local allOptions = {}  -- { { value = "x", text = "X", category = "Cat" }, ... }
-    local menuButtons = {}
-    local selectedValue = nil
-
-    local function RebuildMenu(filterText)
-        filterText = filterText and filterText:lower() or ""
-
-        -- Filter options
-        local filtered = {}
-        for _, opt in ipairs(allOptions) do
-            if filterText == "" or (opt.text and opt.text:lower():find(filterText, 1, true)) or
-               (opt.value and tostring(opt.value):lower():find(filterText, 1, true)) then
-                tinsert(filtered, opt)
-            end
-        end
-
-        -- Group by category
-        local categories = {}
-        local catOrder = {}
-        for _, opt in ipairs(filtered) do
-            local cat = opt.category or ""
-            if not categories[cat] then
-                categories[cat] = {}
-                tinsert(catOrder, cat)
-            end
-            tinsert(categories[cat], opt)
-        end
-
-        -- Build rows
-        local yOffset = 0
-        local rowIndex = 0
-        local themeColor = GetThemeColor()
-
-        -- Hide existing
-        for _, b in ipairs(menuButtons) do b:Hide() end
-
-        for _, cat in ipairs(catOrder) do
-            -- Category header (if not empty string)
-            if cat ~= "" then
-                rowIndex = rowIndex + 1
-                local header = menuButtons[rowIndex]
-                if not header then
-                    header = CreateFrame("Frame", nil, menuChild)
-                    header:SetHeight(18)
-                    menuButtons[rowIndex] = header
-                    header.label = header:CreateFontString(nil, "OVERLAY", "DFFontDisableSmall")
-                    header.label:SetPoint("LEFT", 4, 0)
-                    header.label:SetJustifyH("LEFT")
-                    header.isHeader = true
-                end
-                header:SetPoint("TOPLEFT", 0, -yOffset)
-                header:SetPoint("TOPRIGHT", 0, -yOffset)
-                header.label:SetText(cat:upper())
-                header.label:SetTextColor(themeColor.r, themeColor.g, themeColor.b, 0.8)
-                header:Show()
-                yOffset = yOffset + 18
-            end
-
-            -- Options in this category
-            for _, opt in ipairs(categories[cat]) do
-                rowIndex = rowIndex + 1
-                local row = menuButtons[rowIndex]
-                if not row then
-                    row = CreateFrame("Button", nil, menuChild, "BackdropTemplate")
-                    row:SetHeight(ROW_HEIGHT)
-                    row:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
-                    row:SetBackdropColor(0, 0, 0, 0)
-                    menuButtons[rowIndex] = row
-                    row.label = row:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-                    row.label:SetPoint("LEFT", 8, 0)
-                    row.label:SetPoint("RIGHT", -4, 0)
-                    row.label:SetJustifyH("LEFT")
-
-                    row:SetScript("OnEnter", function(self)
-                        self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
-                    end)
-                    row:SetScript("OnLeave", function(self)
-                        if self.optValue == selectedValue then
-                            self:SetBackdropColor(themeColor.r, themeColor.g, themeColor.b, 0.15)
-                        else
-                            self:SetBackdropColor(0, 0, 0, 0)
-                        end
-                    end)
-                    row:SetScript("OnClick", function(self)
-                        selectedValue = self.optValue
-                        btn.Text:SetText(self.optText or tostring(self.optValue))
-                        menuFrame:Hide()
-                        CloseOpenDropdown()
-                        PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-                        if onSelect then onSelect(self.optValue, self.optText) end
-                    end)
-                end
-                row:SetPoint("TOPLEFT", 0, -yOffset)
-                row:SetPoint("TOPRIGHT", 0, -yOffset)
-                row.optValue = opt.value
-                row.optText = opt.text
-                row.label:SetText(opt.text or tostring(opt.value))
-
-                if opt.value == selectedValue then
-                    row:SetBackdropColor(themeColor.r, themeColor.g, themeColor.b, 0.15)
-                    row.label:SetTextColor(1, 1, 1)
-                else
-                    row:SetBackdropColor(0, 0, 0, 0)
-                    row.label:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-                end
-                row:Show()
-                yOffset = yOffset + ROW_HEIGHT
-            end
-        end
-
-        menuChild:SetHeight(math.max(1, yOffset))
-        local visibleHeight = math.min(yOffset, MAX_VISIBLE * ROW_HEIGHT)
-        menuFrame:SetHeight(visibleHeight + SEARCH_HEIGHT + 20)
-    end
-
-    -- Search box handlers
-    searchBox:SetScript("OnTextChanged", function(self)
-        local text = self:GetText()
-        searchBox.placeholder:SetShown(text == "")
-        RebuildMenu(text)
-    end)
-    searchBox:SetScript("OnEscapePressed", function(self)
-        self:ClearFocus()
-        menuFrame:Hide()
-        CloseOpenDropdown()
-    end)
-
-    -- Button toggle
-    btn:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
-    end)
-    btn:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    end)
-    btn:SetScript("OnClick", function()
-        if menuFrame:IsShown() then
-            menuFrame:Hide()
-            CloseOpenDropdown()
-        else
-            CloseOpenDropdown()
-            searchBox:SetText("")
-            RebuildMenu("")
-            menuFrame:Show()
-            SetOpenDropdown(menuFrame)
-            searchBox:SetFocus()
-        end
-        PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-    end)
-
-    -- Public API
-    function container:SetOptions(opts)
-        allOptions = opts or {}
-        RebuildMenu("")
-    end
-
-    function container:SetValue(value)
-        selectedValue = value
-        -- Find display text
-        for _, opt in ipairs(allOptions) do
-            if opt.value == value then
-                btn.Text:SetText(opt.text or tostring(value))
-                return
-            end
-        end
-        btn.Text:SetText(value and tostring(value) or L["Select..."])
-    end
-
-    function container:GetValue()
-        return selectedValue
-    end
-
-    function container:SetEnabled(enabled)
-        btn:SetEnabled(enabled)
-        if enabled then
-            btn:SetAlpha(1)
-        else
-            btn:SetAlpha(0.5)
-            menuFrame:Hide()
-        end
-    end
-
-    return container
-end
 
 -- =========================================================================
 -- KEY-VALUE EDITOR WIDGET
@@ -8498,440 +8140,12 @@ end
 -- Each row: [Searchable Key Dropdown] = [Value Input] [X Delete]
 -- =========================================================================
 
-function GUI:CreateKeyValueEditor(parent, width, keyOptionsFunc, onChanged)
-    local ROW_HEIGHT = 50
-    local KEY_WIDTH = math.floor(width * 0.55)
-    local VAL_WIDTH = math.floor(width * 0.30)
-    local DEL_WIDTH = 22
-
-    local container = CreateFrame("Frame", nil, parent)
-    container:SetWidth(width)
-
-    local rows = {}
-    local data = {}  -- { { key = "party.x", value = 123 }, ... }
-
-    local function NotifyChanged()
-        local result = {}
-        for _, entry in ipairs(data) do
-            if entry.key and entry.key ~= "" then
-                result[entry.key] = entry.value
-            end
-        end
-        if onChanged then onChanged(result) end
-    end
-
-    local function InferValueType(key)
-        -- Determine input type from defaults
-        if not key then return "string" end
-        local mode, dbKey = key:match("^(%w+)%.(.+)$")
-        if not mode or not dbKey then return "string" end
-        local defaults = (mode == "party") and DF.PartyDefaults or
-                         (mode == "raid") and DF.RaidDefaults or nil
-        if not defaults then return "string" end
-        local defaultVal = defaults[dbKey]
-        if defaultVal == nil then return "string" end
-        local t = type(defaultVal)
-        if t == "boolean" then return "boolean" end
-        if t == "number" then return "number" end
-        if t == "table" and defaultVal.r and defaultVal.g and defaultVal.b then return "color" end
-        return "string"
-    end
-
-    local function BuildRow(index)
-        local row = rows[index]
-        if not row then
-            row = CreateFrame("Frame", nil, container)
-            row:SetHeight(ROW_HEIGHT)
-            rows[index] = row
-
-            -- Key dropdown
-            row.keyDropdown = GUI:CreateSearchableDropdown(row, nil, KEY_WIDTH - 4, function(value, text)
-                data[index].key = value
-                -- Update value input type
-                local vtype = InferValueType(value)
-                row:UpdateValueInput(vtype, data[index].value)
-                NotifyChanged()
-            end)
-            row.keyDropdown:SetPoint("TOPLEFT", 0, 0)
-
-            -- Value input (edit box by default, swapped for checkbox if boolean)
-            row.valueFrame = CreateFrame("Frame", nil, row)
-            row.valueFrame:SetSize(VAL_WIDTH, 24)
-            row.valueFrame:SetPoint("TOPLEFT", KEY_WIDTH, -20)
-
-            row.valueEdit = CreateFrame("EditBox", nil, row.valueFrame, "BackdropTemplate")
-            row.valueEdit:SetSize(VAL_WIDTH, 24)
-            row.valueEdit:SetPoint("TOPLEFT")
-            row.valueEdit:SetAutoFocus(false)
-            row.valueEdit:SetFontObject(DFFontHighlightSmall)
-            row.valueEdit:SetTextInsets(6, 6, 0, 0)
-            CreateElementBackdrop(row.valueEdit)
-            row.valueEdit:SetScript("OnEnterPressed", function(self)
-                self:ClearFocus()
-                local vtype = InferValueType(data[index].key)
-                if vtype == "number" then
-                    data[index].value = tonumber(self:GetText()) or 0
-                else
-                    data[index].value = self:GetText()
-                end
-                NotifyChanged()
-            end)
-            row.valueEdit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-
-            row.valueCheck = CreateFrame("CheckButton", nil, row.valueFrame, "BackdropTemplate")
-            row.valueCheck:SetPoint("TOPLEFT", 2, -2)
-            GUI:StyleCheckButton(row.valueCheck, { size = 20 })
-            row.valueCheck:SetScript("OnClick", function(self)
-                data[index].value = self:GetChecked()
-                NotifyChanged()
-            end)
-            row.valueCheck:Hide()
-
-            row.valueBoolLabel = row.valueFrame:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-            row.valueBoolLabel:SetPoint("LEFT", row.valueCheck, "RIGHT", 4, 0)
-            row.valueBoolLabel:SetText(L["Enabled"])
-            row.valueBoolLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-            row.valueBoolLabel:Hide()
-
-            -- Delete button
-            row.deleteBtn = GUI:CreateButton(row, "X", DEL_WIDTH, 24, function()
-                tremove(data, index)
-                container:Refresh()
-                NotifyChanged()
-            end)
-            row.deleteBtn:SetPoint("TOPLEFT", KEY_WIDTH + VAL_WIDTH + 4, -20)
-
-            function row:UpdateValueInput(vtype, val)
-                if vtype == "boolean" then
-                    row.valueEdit:Hide()
-                    row.valueCheck:Show()
-                    row.valueBoolLabel:Show()
-                    row.valueCheck:SetChecked(val == true)
-                else
-                    row.valueCheck:Hide()
-                    row.valueBoolLabel:Hide()
-                    row.valueEdit:Show()
-                    row.valueEdit:SetText(val ~= nil and tostring(val) or "")
-                end
-            end
-        end
-        return row
-    end
-
-    -- Add button
-    local addBtn = GUI:CreateButton(container, L["Add Setting"], 120, 22, function()
-        tinsert(data, { key = "", value = "" })
-        container:Refresh()
-    end, "add")
-
-    function container:Refresh()
-        local keyOpts = keyOptionsFunc and keyOptionsFunc() or {}
-        local yOffset = 0
-
-        for i = 1, math.max(#data, #rows) do
-            if i <= #data then
-                local row = BuildRow(i)
-                row:ClearAllPoints()
-                row:SetPoint("TOPLEFT", 0, -yOffset)
-                row:SetPoint("TOPRIGHT", 0, -yOffset)
-                row.keyDropdown:SetOptions(keyOpts)
-                row.keyDropdown:SetValue(data[i].key)
-
-                local vtype = InferValueType(data[i].key)
-                row:UpdateValueInput(vtype, data[i].value)
-                row:Show()
-                yOffset = yOffset + ROW_HEIGHT + 4
-            elseif rows[i] then
-                rows[i]:Hide()
-            end
-        end
-
-        addBtn:ClearAllPoints()
-        addBtn:SetPoint("TOPLEFT", 0, -yOffset)
-        container:SetHeight(yOffset + 30)
-    end
-
-    function container:SetData(newData)
-        -- newData = { ["party.key"] = value, ... }
-        data = {}
-        if newData then
-            for k, v in pairs(newData) do
-                tinsert(data, { key = k, value = v })
-            end
-        end
-        container:Refresh()
-    end
-
-    function container:GetData()
-        local result = {}
-        for _, entry in ipairs(data) do
-            if entry.key and entry.key ~= "" then
-                result[entry.key] = entry.value
-            end
-        end
-        return result
-    end
-
-    container:Refresh()
-    return container
-end
-
 -- =========================================================================
 -- BRANCH EDITOR WIDGET
 -- Visual editor for conditional wizard branching rules.
 -- Each row: IF [step] [operator] [value] → [goto step] [X]
 -- Plus: ELSE → [fallback step]
 -- =========================================================================
-
-function GUI:CreateBranchEditor(parent, width, onChanged)
-    local ROW_HEIGHT = 30
-    local container = CreateFrame("Frame", nil, parent)
-    container:SetWidth(width)
-
-    local branches = {}  -- { { condition = { step = "", equals = "" }, goto = "" }, ... }
-    local fallbackNext = nil
-    local stepOptions = {}  -- populated externally
-    local rows = {}
-
-    local function NotifyChanged()
-        if onChanged then onChanged(branches, fallbackNext) end
-    end
-
-    local function MakeStepDropdown(parentFrame, w, onChange)
-        local dd = CreateFrame("Button", nil, parentFrame, "BackdropTemplate")
-        dd:SetSize(w, 22)
-        CreateElementBackdrop(dd)
-
-        dd.Text = dd:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-        dd.Text:SetPoint("LEFT", 4, 0)
-        dd.Text:SetPoint("RIGHT", -14, 0)
-        dd.Text:SetJustifyH("LEFT")
-        dd.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-        dd.Text:SetText(L["(none)"])
-
-        dd.Arrow = dd:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-        dd.Arrow:SetPoint("RIGHT", -4, 0)
-        dd.Arrow:SetText("v")
-        dd.Arrow:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-
-        dd.value = nil
-
-        -- Simple menu
-        local menu = CreateFrame("Frame", nil, dd, "BackdropTemplate")
-        menu:SetFrameStrata("FULLSCREEN_DIALOG")
-        menu:SetFrameLevel(310)
-        menu:SetWidth(w)
-        menu:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
-        })
-        menu:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 1)
-        menu:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
-        menu:SetPoint("TOP", dd, "BOTTOM", 0, -1)
-        menu:Hide()
-        menu:EnableMouse(true)
-
-        local menuBtns = {}
-
-        local function RebuildMenu()
-            for _, b in ipairs(menuBtns) do b:Hide() end
-            local y = 0
-            for i, opt in ipairs(stepOptions) do
-                local b = menuBtns[i]
-                if not b then
-                    b = CreateFrame("Button", nil, menu, "BackdropTemplate")
-                    b:SetHeight(22)
-                    b:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
-                    b:SetBackdropColor(0, 0, 0, 0)
-                    menuBtns[i] = b
-                    b.label = b:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-                    b.label:SetPoint("LEFT", 6, 0)
-                    b.label:SetJustifyH("LEFT")
-                    b:SetScript("OnEnter", function(self) self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1) end)
-                    b:SetScript("OnLeave", function(self) self:SetBackdropColor(0, 0, 0, 0) end)
-                    b:SetScript("OnClick", function(self)
-                        dd.value = self.optValue
-                        dd.Text:SetText(self.optValue or L["(none)"])
-                        menu:Hide()
-                        CloseOpenDropdown()
-                        PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-                        if onChange then onChange(self.optValue) end
-                    end)
-                end
-                b:SetPoint("TOPLEFT", 2, -y)
-                b:SetPoint("TOPRIGHT", -2, -y)
-                b.optValue = opt.value or opt
-                b.label:SetText(opt.text or opt.value or tostring(opt))
-                b.label:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-                b:Show()
-                y = y + 22
-            end
-            menu:SetHeight(math.max(22, y + 4))
-        end
-
-        dd:SetScript("OnClick", function()
-            if menu:IsShown() then
-                menu:Hide()
-                CloseOpenDropdown()
-            else
-                CloseOpenDropdown()
-                RebuildMenu()
-                menu:Show()
-                SetOpenDropdown(menu)
-            end
-        end)
-        dd:SetScript("OnEnter", function(self) self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1) end)
-        dd:SetScript("OnLeave", function(self) self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1) end)
-
-        function dd:SetValue(v)
-            dd.value = v
-            dd.Text:SetText(v or L["(none)"])
-        end
-
-        return dd
-    end
-
-    local function BuildRow(index)
-        local row = rows[index]
-        if not row then
-            row = CreateFrame("Frame", nil, container)
-            row:SetHeight(ROW_HEIGHT)
-            rows[index] = row
-
-            -- "IF" label
-            row.ifLabel = row:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-            row.ifLabel:SetPoint("LEFT", 0, 0)
-            row.ifLabel:SetText("IF")
-            row.ifLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-
-            -- Step dropdown (which step's answer to check)
-            row.stepDD = MakeStepDropdown(row, 90, function(val)
-                branches[index].condition.step = val
-                NotifyChanged()
-            end)
-            row.stepDD:SetPoint("LEFT", row.ifLabel, "RIGHT", 4, 0)
-
-            -- Operator label ("=")
-            row.opLabel = row:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-            row.opLabel:SetPoint("LEFT", row.stepDD, "RIGHT", 4, 0)
-            row.opLabel:SetText("=")
-            row.opLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-
-            -- Value edit
-            row.valueEdit = CreateFrame("EditBox", nil, row, "BackdropTemplate")
-            row.valueEdit:SetSize(70, 22)
-            row.valueEdit:SetPoint("LEFT", row.opLabel, "RIGHT", 4, 0)
-            row.valueEdit:SetAutoFocus(false)
-            row.valueEdit:SetFontObject(DFFontHighlightSmall)
-            row.valueEdit:SetTextInsets(4, 4, 0, 0)
-            CreateElementBackdrop(row.valueEdit)
-            row.valueEdit:SetScript("OnEnterPressed", function(self)
-                self:ClearFocus()
-                branches[index].condition.equals = self:GetText()
-                NotifyChanged()
-            end)
-            row.valueEdit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-
-            -- Arrow label
-            row.arrowLabel = row:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-            row.arrowLabel:SetPoint("LEFT", row.valueEdit, "RIGHT", 4, 0)
-            row.arrowLabel:SetText("->")
-            row.arrowLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-
-            -- Goto step dropdown
-            row.gotoDD = MakeStepDropdown(row, 80, function(val)
-                branches[index]["goto"] = val
-                NotifyChanged()
-            end)
-            row.gotoDD:SetPoint("LEFT", row.arrowLabel, "RIGHT", 4, 0)
-
-            -- Delete button
-            row.deleteBtn = GUI:CreateButton(row, "X", 22, 22, function()
-                tremove(branches, index)
-                container:Refresh()
-                NotifyChanged()
-            end)
-            row.deleteBtn:SetPoint("LEFT", row.gotoDD, "RIGHT", 4, 0)
-        end
-        return row
-    end
-
-    -- Fallback row
-    local fallbackRow = CreateFrame("Frame", nil, container)
-    fallbackRow:SetHeight(ROW_HEIGHT)
-
-    local elseLabel = fallbackRow:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    elseLabel:SetPoint("LEFT", 0, 0)
-    elseLabel:SetText("ELSE ->")
-    elseLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-
-    local fallbackDD = MakeStepDropdown(fallbackRow, 100, function(val)
-        fallbackNext = val
-        NotifyChanged()
-    end)
-    fallbackDD:SetPoint("LEFT", elseLabel, "RIGHT", 4, 0)
-
-    -- Add button
-    local addBtn = GUI:CreateButton(container, L["Add Rule"], 100, 22, function()
-        tinsert(branches, { condition = { step = "", equals = "" }, ["goto"] = "" })
-        container:Refresh()
-        NotifyChanged()
-    end, "add")
-
-    function container:SetStepOptions(opts)
-        stepOptions = opts or {}
-    end
-
-    function container:Refresh()
-        local yOffset = 0
-
-        for i = 1, math.max(#branches, #rows) do
-            if i <= #branches then
-                local row = BuildRow(i)
-                row:ClearAllPoints()
-                row:SetPoint("TOPLEFT", 0, -yOffset)
-                row:SetPoint("TOPRIGHT", 0, -yOffset)
-
-                local b = branches[i]
-                row.stepDD:SetValue(b.condition and b.condition.step or "")
-                row.valueEdit:SetText(b.condition and b.condition.equals or "")
-                row.gotoDD:SetValue(b["goto"] or "")
-                row:Show()
-                yOffset = yOffset + ROW_HEIGHT + 2
-            elseif rows[i] then
-                rows[i]:Hide()
-            end
-        end
-
-        -- Fallback row
-        fallbackRow:ClearAllPoints()
-        fallbackRow:SetPoint("TOPLEFT", 0, -yOffset)
-        fallbackRow:SetPoint("TOPRIGHT", 0, -yOffset)
-        fallbackDD:SetValue(fallbackNext)
-        yOffset = yOffset + ROW_HEIGHT + 4
-
-        -- Add button
-        addBtn:ClearAllPoints()
-        addBtn:SetPoint("TOPLEFT", 0, -yOffset)
-        yOffset = yOffset + 28
-
-        container:SetHeight(yOffset)
-    end
-
-    function container:SetData(branchesData, fallback)
-        branches = branchesData or {}
-        fallbackNext = fallback
-        container:Refresh()
-    end
-
-    function container:GetData()
-        return branches, fallbackNext
-    end
-
-    container:Refresh()
-    return container
-end
 
 -- =========================================================================
 -- MAIN GUI CREATION
@@ -9507,6 +8721,10 @@ function DF:CreateGUI()
         -- SetActive only fix the resting backdrop, not the HIGHLIGHT wash.)
         if btnTest.UpdateTheme then btnTest.UpdateTheme() end
         if btnLock.UpdateTheme then btnLock.UpdateTheme() end
+        -- infoBtn (changelog) also lives on the main frame, not a page child, so
+        -- the ThemeListeners loop below never reaches it either — refresh its hover
+        -- wash to the current mode accent here alongside Test/Lock.
+        if infoBtn and infoBtn.UpdateTheme then infoBtn.UpdateTheme() end
         
         -- Show/hide Test and Lock buttons based on mode
         if GUI.SelectedMode == "clicks" then
@@ -10361,7 +9579,7 @@ function DF:CreateGUI()
             -- of rendering any controls. Whitelisted pages (General, Profiles,
             -- Debug, Targeted List, Personal Targeted) always render normally.
             if GUI:IsTabDisabledForCurrentMode(self.tabName) then
-                local banner = GUI:CreateInfoBanner(parent, { tone = "warning" })
+                local banner = GUI:CreateInfoBanner(parent, { tone = "info" })
                 banner:SetText(GUI.SelectedMode == "raid"
                     and (L["Raid frames are currently disabled. Changes here will apply after re-enabling Raid in the General tab and reloading."])
                     or  (L["Party frames are currently disabled. Changes here will apply after re-enabling Party in the General tab and reloading."]))

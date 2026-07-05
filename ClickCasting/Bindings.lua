@@ -197,6 +197,58 @@ end
 -- Export to CC namespace for use in UI files
 CC.GetSpellDisplayInfo = GetSpellDisplayInfo
 
+-- Resolve the display icon (texture path or fileID) for a binding. Single
+-- source of truth for the action-type -> icon chain, shared by the full
+-- binding row (BindingEditor) and the collapsed row (Main). Always returns a
+-- texture; unknown/broken bindings get the question mark.
+function CC:GetBindingDisplayIcon(binding)
+    local QM = "Interface\\Icons\\INV_Misc_QuestionMark"
+    if binding.actionType == "target" then
+        return "Interface\\CURSOR\\Crosshairs"
+    elseif binding.actionType == "menu" then
+        return "Interface\\Buttons\\UI-GuildButton-OfficerNote-Up"
+    elseif binding.actionType == "focus" then
+        return "Interface\\Icons\\Ability_Hunter_MasterMarksman"
+    elseif binding.actionType == "assist" then
+        return "Interface\\Icons\\Ability_Hunter_SniperShot"
+    elseif binding.actionType == CC.ACTION_TYPES.ITEM then
+        if binding.itemType == "slot" and binding.itemSlot then
+            local itemInfo = CC:GetSlotItemInfo(binding.itemSlot)
+            if itemInfo and itemInfo.icon then
+                return itemInfo.icon
+            end
+            for _, slotData in ipairs(CC.EQUIPMENT_SLOTS) do
+                if slotData.slot == binding.itemSlot then
+                    return slotData.icon
+                end
+            end
+            return QM
+        elseif binding.itemId then
+            local itemInfo = CC:GetItemInfoById(binding.itemId)
+            return (itemInfo and itemInfo.icon) or QM
+        end
+        return QM
+    elseif binding.actionType == "macro" and binding.macroId then
+        local macro = CC:GetMacroById(binding.macroId)
+        if macro then
+            -- Try to auto-detect icon from macro body first
+            local autoIcon = CC:GetIconFromMacroBody(macro.body)
+            if autoIcon then
+                return autoIcon
+            elseif macro.icon and type(macro.icon) == "number" and macro.icon > 0 then
+                return macro.icon
+            end
+        end
+        return QM
+    elseif binding.spellId or binding.spellName then
+        -- Current display icon (accounts for talent overrides like
+        -- Divine Toll -> Holy Armaments)
+        local _, displayIcon = GetSpellDisplayInfo(binding.spellId, binding.spellName)
+        return displayIcon or QM
+    end
+    return QM
+end
+
 -- BINDING MIGRATION
 -- ============================================================
 -- Migrate bindings to use root spell IDs instead of override spell IDs
@@ -1075,64 +1127,6 @@ function CC:FindKeyConflicts(newBinding, excludeIndex)
     return conflicts
 end
 
-function CC:AddBinding(bindingData)
-    local binding = CopyTable(DEFAULT_BINDING)
-    
-    -- Copy provided data
-    if bindingData then
-        for k, v in pairs(bindingData) do
-            binding[k] = v
-        end
-    end
-    
-    -- Check for duplicates
-    local duplicateIndex = self:FindDuplicateBinding(binding)
-    if duplicateIndex then
-        print("|cffff9900DandersFrames:|r That binding already exists.")
-        return nil
-    end
-    
-    table.insert(self.db.bindings, binding)
-    self:ApplyBindings()
-    
-    return #self.db.bindings
-end
-
--- Update a binding
-function CC:UpdateBinding(index, bindingData)
-    if not index or not self.db.bindings[index] then return false end
-    
-    -- Create a merged binding to check for duplicates
-    local mergedBinding = CopyTable(self.db.bindings[index])
-    for k, v in pairs(bindingData) do
-        mergedBinding[k] = v
-    end
-    
-    -- Check for duplicates (exclude the binding being updated)
-    local duplicateIndex = self:FindDuplicateBinding(mergedBinding, index)
-    if duplicateIndex then
-        print("|cffff9900DandersFrames:|r That binding already exists.")
-        return false
-    end
-    
-    for k, v in pairs(bindingData) do
-        self.db.bindings[index][k] = v
-    end
-    
-    self:ApplyBindings()
-    return true
-end
-
--- Get all bindings
-function CC:GetBindings()
-    return self.db.bindings
-end
-
--- Get a single binding
-function CC:GetBinding(index)
-    return self.db.bindings[index]
-end
-
 -- Enable/disable click-casting
 -- Static popup for reload confirmation after toggling click-casting
 StaticPopupDialogs["DANDERSFRAMES_CLICKCAST_RELOAD"] = {
@@ -1392,119 +1386,6 @@ function CC:CloseAllMacroDialogs()
     if _G["DFImportMacroDialog"] then _G["DFImportMacroDialog"]:Hide() end
     if _G["DFQuickMacroDialog"] then _G["DFQuickMacroDialog"]:Hide() end
     if _G["DFIconPickerDialog"] then _G["DFIconPickerDialog"]:Hide() end
-end
-
--- Search player's spellbook for spells
-function CC:SearchSpellbook(searchText)
-    local results = {}
-    searchText = searchText and searchText:lower() or ""
-    
-    -- Track spells by displaySpellId, preferring "root" spells over override spells
-    -- Root spells are those where baseSpellId != displaySpellId (they're being overridden)
-    -- These are preferred because they always exist regardless of talents
-    local spellsByDisplayId = {}  -- displaySpellId -> {spell data, isRoot}
-    
-    -- Get book type
-    local bookType = Enum.SpellBookSpellBank.Player
-    
-    -- Get number of skill lines (tabs)
-    local numTabs = C_SpellBook.GetNumSpellBookSkillLines()
-    
-    for tabIndex = 1, numTabs do
-        local skillLineInfo = C_SpellBook.GetSpellBookSkillLineInfo(tabIndex)
-        
-        if skillLineInfo and not skillLineInfo.shouldHide then
-            local offset = skillLineInfo.itemIndexOffset
-            local numSlots = skillLineInfo.numSpellBookItems
-            
-            -- Iterate through spells in this tab
-            for i = 1, numSlots do
-                local slotIndex = offset + i
-                
-                local spellBookItemInfo = C_SpellBook.GetSpellBookItemInfo(slotIndex, bookType)
-                
-                -- Only include regular spells (not FutureSpell, Flyout, PetAction)
-                if spellBookItemInfo and spellBookItemInfo.itemType == Enum.SpellBookItemType.Spell then
-                    local isPassive = C_SpellBook.IsSpellBookItemPassive(slotIndex, bookType)
-                    local baseSpellId = spellBookItemInfo.spellID
-                    
-                    -- Use IsSpellInSpellBook with includeOverrides=true to properly detect
-                    -- both regular known spells AND override spells (like Chrono Flames)
-                    local isKnown = baseSpellId and C_SpellBook.IsSpellInSpellBook and 
-                        C_SpellBook.IsSpellInSpellBook(baseSpellId, bookType, true)
-                    
-                    if baseSpellId and not isPassive and isKnown then
-                        -- Get display info which handles override spells (e.g., Living Flame -> Chrono Flames)
-                        local displayName, displayIcon, displaySpellId = GetSpellDisplayInfo(baseSpellId, nil)
-                        
-                        if displayName then
-                            -- Find the TRUE root spell using GetBaseSpell
-                            -- This handles cases where the spellbook entry itself is an override
-                            -- e.g., Chrono Flames (431443) -> Living Flame (361469)
-                            local trueRootId = baseSpellId
-                            if C_Spell.GetBaseSpell then
-                                local baseId = C_Spell.GetBaseSpell(baseSpellId)
-                                if baseId and baseId ~= baseSpellId then
-                                    trueRootId = baseId
-                                end
-                            end
-                            
-                            -- Get spell name for binding (use true root spell)
-                            local rootInfo = C_Spell.GetSpellInfo(trueRootId)
-                            local baseName = rootInfo and rootInfo.name or displayName
-                            
-                            -- Check if matches search - search against BOTH base name and override name
-                            local matchesSearch = searchText == "" or 
-                                displayName:lower():find(searchText, 1, true) or
-                                baseName:lower():find(searchText, 1, true)
-                            
-                            if matchesSearch then
-                                -- Determine if this is a "root" spell
-                                -- Either the spellbook entry itself is being overridden (baseSpellId != displaySpellId)
-                                -- OR the spellbook entry has a deeper root (trueRootId != baseSpellId)
-                                local isRoot = (baseSpellId ~= displaySpellId) or (trueRootId ~= baseSpellId)
-                                
-                                local existing = spellsByDisplayId[displaySpellId]
-                                
-                                -- Add if we haven't seen this displaySpellId, OR if this is a root spell
-                                -- and the existing one isn't (prefer root spells)
-                                if not existing or (isRoot and not existing.isRoot) then
-                                    spellsByDisplayId[displaySpellId] = {
-                                        spell = {
-                                            name = baseName,           -- Root spell name for binding
-                                            displayName = displayName, -- Override name for display
-                                            icon = displayIcon,
-                                            spellId = trueRootId,      -- Use true root spell ID
-                                        },
-                                        isRoot = isRoot,
-                                    }
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end
-    
-    -- Convert to results array
-    for displaySpellId, data in pairs(spellsByDisplayId) do
-        table.insert(results, data.spell)
-    end
-    
-    -- Sort by name
-    table.sort(results, function(a, b) return a.name < b.name end)
-    
-    -- Limit results to avoid overwhelming the UI
-    if #results > 50 then
-        local limited = {}
-        for i = 1, 50 do
-            limited[i] = results[i]
-        end
-        results = limited
-    end
-    
-    return results
 end
 
 -- Get all player spells (for the spell grid)
@@ -1852,7 +1733,7 @@ end
 
 -- Debug command to test resurrection spell detection
 -- Note: If this doesn't work, use /dfrestest instead (defined in Core.lua)
-SLASH_DFCCRES1 = "/dfccres"
+DF:RegisterDebugSlash("DFCCRES", "Resurrection spell detection test", true, "/dfccres")
 SlashCmdList["DFCCRES"] = function(msg)
     -- Safety check
     if not CC or not CC.RESURRECTION_SPELL_NAMES then
@@ -2262,7 +2143,7 @@ function CC:BuildCombinedMacroForBindings(bindings, forGlobalBinding)
     
     -- Sort each category by priority
     local function sortByPriority(a, b)
-        return (a.priority or 5) < (b.priority or 5)
+        return (a.priority or 5) > (b.priority or 5)  -- higher number = higher priority
     end
     table.sort(friendly, sortByPriority)
     table.sort(hostile, sortByPriority)
@@ -2891,201 +2772,6 @@ end
 -- AUTO-GENERATED MACROS FOR HELP/HARM SPLITS
 -- ============================================================
 
--- Check if two combat conditions can overlap (both could be active at same time)
-function CC:CombatConditionsOverlap(combat1, combat2)
-    -- nil or "always" means active in all states
-    local c1 = combat1 or "always"
-    local c2 = combat2 or "always"
-    
-    -- If either is "always", they overlap
-    if c1 == "always" or c2 == "always" then
-        return true
-    end
-    
-    -- "combat" and "nocombat" never overlap
-    if (c1 == "combat" and c2 == "nocombat") or (c1 == "nocombat" and c2 == "combat") then
-        return false
-    end
-    
-    -- Same condition = overlap
-    return true
-end
-
--- Build macro body for a help/harm split
--- Now accepts full binding objects to access fallback settings
-function CC:BuildHelpHarmMacroBody(friendlyBinding, hostileBinding, anyBinding)
-    local parts = {}
-    
-    -- Friendly spell with [help] condition
-    if friendlyBinding and friendlyBinding.spellName then
-        local spellName = GetLocalizedSpellName(friendlyBinding.spellId) or friendlyBinding.spellName
-        local fallback = friendlyBinding.fallback or {}
-        local combatCond = GetCombatCondition(friendlyBinding)
-
-        -- Check if this is a resurrection spell
-        local isResSpell = self:IsResurrectionSpell(spellName, friendlyBinding.spellId)
-        local lifeCondition = isResSpell and ",dead" or ",nodead"
-        
-        -- Build combat condition string for reuse
-        local combatStr = ""
-        if combatCond == "combat" then
-            combatStr = ",combat"
-        elseif combatCond == "nocombat" then
-            combatStr = ",nocombat"
-        end
-        
-        -- Mouseover help (primary)
-        table.insert(parts, "[@mouseover,help" .. lifeCondition .. combatStr .. "] " .. spellName)
-        
-        -- Target help fallback (if enabled)
-        if fallback.target then
-            table.insert(parts, "[@target,help" .. lifeCondition .. combatStr .. "] " .. spellName)
-        end
-    end
-    
-    -- Hostile spell with [harm] condition
-    if hostileBinding and hostileBinding.spellName then
-        local spellName = GetLocalizedSpellName(hostileBinding.spellId) or hostileBinding.spellName
-        local fallback = hostileBinding.fallback or {}
-        local combatCond = GetCombatCondition(hostileBinding)
-
-        -- Check if this is a resurrection spell
-        local isResSpell = self:IsResurrectionSpell(spellName, hostileBinding.spellId)
-        local lifeCondition = isResSpell and ",dead" or ",nodead"
-        
-        -- Build combat condition string for reuse
-        local combatStr = ""
-        if combatCond == "combat" then
-            combatStr = ",combat"
-        elseif combatCond == "nocombat" then
-            combatStr = ",nocombat"
-        end
-        
-        -- Mouseover harm (primary)
-        table.insert(parts, "[@mouseover,harm" .. lifeCondition .. combatStr .. "] " .. spellName)
-        
-        -- Target harm fallback (if enabled OR by default for hostile spells)
-        if fallback.target ~= false then  -- Default true for hostile
-            table.insert(parts, "[@target,harm" .. lifeCondition .. combatStr .. "] " .. spellName)
-        end
-    end
-    
-    -- Any target fallback
-    if anyBinding and anyBinding.spellName then
-        local anySpell = GetLocalizedSpellName(anyBinding.spellId) or anyBinding.spellName
-        table.insert(parts, "[] " .. anySpell)
-    end
-
-    -- Self-cast fallback for friendly spell (at the very end)
-    if friendlyBinding and friendlyBinding.spellName then
-        local fallback = friendlyBinding.fallback or {}
-        if fallback.selfCast then
-            local friendlySpell = GetLocalizedSpellName(friendlyBinding.spellId) or friendlyBinding.spellName
-            local combatCond = GetCombatCondition(friendlyBinding)
-            local combatStr = ""
-            if combatCond == "combat" then
-                combatStr = ",combat"
-            elseif combatCond == "nocombat" then
-                combatStr = ",nocombat"
-            end
-            table.insert(parts, "[@player" .. combatStr .. "] " .. friendlySpell)
-        end
-    end
-
-    -- Check if any contributing binding has stopSpellTarget enabled
-    local useStopSpellTarget = false
-    for _, b in ipairs({friendlyBinding, hostileBinding, anyBinding}) do
-        if b and b.fallback and b.fallback.stopSpellTarget then
-            useStopSpellTarget = true
-            break
-        end
-    end
-
-    local macroText = "/cast " .. table.concat(parts, "; ")
-    if useStopSpellTarget then
-        macroText = macroText .. "\n/stopspelltarget"
-    end
-    return macroText
-end
-
--- Get or create an auto-generated macro for a specific key combination
-function CC:GetOrCreateAutoMacro(keyIdentifier, macroBody)
-    if not self.db.customMacros then self.db.customMacros = {} end
-    
-    local autoMacroName = "_auto_" .. keyIdentifier:gsub("[^%w]", "_")
-    
-    -- Look for existing auto-macro with this name
-    for i, macro in ipairs(self.db.customMacros) do
-        if macro.autoGenerated and macro.name == autoMacroName then
-            -- Update body if changed
-            if macro.body ~= macroBody then
-                macro.body = macroBody
-            end
-            return macro
-        end
-    end
-    
-    -- Create new auto-macro
-    local newMacro = {
-        id = self:GenerateMacroId(),
-        name = autoMacroName,
-        body = macroBody,
-        icon = nil,
-        autoGenerated = true,
-        keyIdentifier = keyIdentifier,
-    }
-    table.insert(self.db.customMacros, newMacro)
-    
-    if self.db.options and self.db.options.debugBindings then
-        print("|cff00ff00DF Auto-Macro:|r Created '" .. autoMacroName .. "'")
-        print("|cff888888Body:|r " .. macroBody)
-    end
-    
-    return newMacro
-end
-
--- Cleanup orphaned auto-macros that are no longer needed
-function CC:CleanupOrphanedAutoMacros(neededAutoMacroIds)
-    if not self.db.customMacros then return end
-    
-    for i = #self.db.customMacros, 1, -1 do
-        local macro = self.db.customMacros[i]
-        if macro.autoGenerated and not neededAutoMacroIds[macro.id] then
-            if self.db.options and self.db.options.debugBindings then
-                print("|cff00ff00DF Auto-Macro:|r Removed orphaned '" .. macro.name .. "'")
-            end
-            table.remove(self.db.customMacros, i)
-        end
-    end
-end
-
--- Helper to find best known spell binding from a list
-function CC:FindBestKnownSpellBinding(bindings)
-    -- Sort by priority first
-    table.sort(bindings, function(a, b)
-        return (a.binding.priority or 5) < (b.binding.priority or 5)
-    end)
-    
-    for _, item in ipairs(bindings) do
-        local b = item.binding
-        if b.actionType == self.ACTION_TYPES.SPELL and b.spellName then
-            if IsSpellKnownByName(b.spellName, b.spellId) then
-                return b
-            end
-        end
-    end
-    
-    -- Fallback to first spell even if not known
-    for _, item in ipairs(bindings) do
-        local b = item.binding
-        if b.actionType == self.ACTION_TYPES.SPELL and b.spellName then
-            return b
-        end
-    end
-    
-    return nil
-end
-
 
 -- Get WoW global macros
 function CC:GetWoWGlobalMacros()
@@ -3296,7 +2982,7 @@ CC.COMMON_MACRO_ICONS = {
 -- DEBUG SLASH COMMAND
 -- ============================================================
 
-SLASH_DFSPELLDUMP1 = "/dfspelldump"
+DF:RegisterDebugSlash("DFSPELLDUMP", "Raw spell dump", true, "/dfspelldump")
 SlashCmdList["DFSPELLDUMP"] = function(msg)
     local searchTerm = msg and msg:lower() or ""
     print("|cff33cc66=== DF Spellbook Dump ===|r")
@@ -3382,7 +3068,7 @@ end
 -- ============================================================
 
 -- Debug: Toggle debug mode
-SLASH_DFCCDEBUG1 = "/dfccdebug"
+DF:RegisterDebugSlash("DFCCDEBUG", "Click-casting debug toggle", false, "/dfccdebug")
 SlashCmdList["DFCCDEBUG"] = function()
     CC.debugMode = not CC.debugMode
     if CC.debugMode then
@@ -3394,7 +3080,7 @@ SlashCmdList["DFCCDEBUG"] = function()
 end
 
 -- Debug: Show current mouseover state
-SLASH_DFCCMOUSEOVER1 = "/dfccmouseover"
+DF:RegisterDebugSlash("DFCCMOUSEOVER", "Mouseover resolution debug", true, "/dfccmouseover")
 SlashCmdList["DFCCMOUSEOVER"] = function()
     print("|cff33cc66=== DF Click Cast Mouseover Debug ===|r")
     
@@ -3541,7 +3227,7 @@ SlashCmdList["DFCCMOUSEOVER"] = function()
 end
 
 -- Debug: Show current override bindings
-SLASH_DFCCKEYBINDS1 = "/dfcckeybinds"
+DF:RegisterDebugSlash("DFCCKEYBINDS", "Keyboard binding state dump", true, "/dfcckeybinds")
 SlashCmdList["DFCCKEYBINDS"] = function()
     print("|cff33cc66=== DF Override Binding Check ===|r")
     
@@ -3575,7 +3261,7 @@ end
 -- Debug: Enable live click debugging
 CC.debugClicksEnabled = false
 
-SLASH_DFCCDEBUGCLICKS1 = "/dfccdebugclicks"
+DF:RegisterDebugSlash("DFCCDEBUGCLICKS", "Click registration dump", true, "/dfccdebugclicks")
 SlashCmdList["DFCCDEBUGCLICKS"] = function()
     CC.debugClicksEnabled = not CC.debugClicksEnabled
     if CC.debugClicksEnabled then
@@ -3618,7 +3304,7 @@ SlashCmdList["DFCCDEBUGCLICKS"] = function()
 end
 
 -- Debug: Show all bindings and their macro text
-SLASH_DFCCBINDINGS1 = "/dfccbindings"
+DF:RegisterDebugSlash("DFCCBINDINGS", "Click-casting bindings dump", false, "/dfccbindings")
 SlashCmdList["DFCCBINDINGS"] = function()
     print("|cff33cc66=== DF Click Cast Bindings ===|r")
     
@@ -3652,39 +3338,8 @@ SlashCmdList["DFCCBINDINGS"] = function()
     end
 end
 
--- Debug: Test if macro conditional would pass right now
-SLASH_DFCCTESTMACRO1 = "/dfcctestmacro"
-SlashCmdList["DFCCTESTMACRO"] = function(msg)
-    print("|cff33cc66=== DF Macro Conditional Test ===|r")
-    
-    -- Show current state
-    local moExists = UnitExists("mouseover")
-    local moName = moExists and UnitName("mouseover") or "none"
-    local moHelp = moExists and UnitIsFriend("player", "mouseover")
-    local moHarm = moExists and UnitCanAttack("player", "mouseover")
-    local moDead = moExists and UnitIsDeadOrGhost("mouseover")
-    
-    print("mouseover exists: " .. tostring(moExists))
-    print("mouseover name: " .. moName)
-    print("mouseover help: " .. tostring(moHelp))
-    print("mouseover harm: " .. tostring(moHarm))
-    print("mouseover dead: " .. tostring(moDead))
-    
-    local tgtExists = UnitExists("target")
-    local tgtName = tgtExists and UnitName("target") or "none"
-    print("target exists: " .. tostring(tgtExists))
-    print("target name: " .. tgtName)
-    
-    -- Simulate macro conditionals
-    print("--- Conditional Results ---")
-    print("[@mouseover,exists] = " .. tostring(moExists))
-    print("[@mouseover,help,exists] = " .. tostring(moExists and moHelp))
-    print("[@mouseover,help,exists,nodead] = " .. tostring(moExists and moHelp and not moDead))
-    print("[@mouseover,harm,exists,nodead] = " .. tostring(moExists and moHarm and not moDead))
-end
-
 -- Debug command: Check actual override bindings for common keys
-SLASH_DFCCBINDCHECK1 = "/dfccbindcheck"
+DF:RegisterDebugSlash("DFCCBINDCHECK", "Override key binding check", true, "/dfccbindcheck")
 SlashCmdList["DFCCBINDCHECK"] = function()
     print("|cff00ff00[DF CC]|r Checking override bindings for keys 1-9:")
     
@@ -3705,7 +3360,7 @@ SlashCmdList["DFCCBINDCHECK"] = function()
 end
 
 -- Debug command: Show binding attributes on hovered frame
-SLASH_DFCCFRAMEATTRS1 = "/dfccframeattrs"
+DF:RegisterDebugSlash("DFCCFRAMEATTRS", "Secure frame attribute dump", true, "/dfccframeattrs")
 SlashCmdList["DFCCFRAMEATTRS"] = function()
     local frame = CC.currentHoveredFrame
     if not frame then
@@ -3761,7 +3416,7 @@ SlashCmdList["DFCCFRAMEATTRS"] = function()
 end
 
 -- Debug loadout profile switching
-SLASH_DFCCLOADOUT1 = "/dfccloadout"
+DF:RegisterDebugSlash("DFCCLOADOUT", "Click-casting loadout internals", true, "/dfccloadout")
 SlashCmdList["DFCCLOADOUT"] = function()
     print("|cff00ffffDandersFrames Click-Casting Loadout Debug:|r")
     
@@ -3797,7 +3452,7 @@ SlashCmdList["DFCCLOADOUT"] = function()
 end
 
 -- Debug: Toggle click debugging on hovercast button
-SLASH_DFCCCLICKDEBUG1 = "/dfccclickdebug"
+DF:RegisterDebugSlash("DFCCCLICKDEBUG", "Click event debug toggle", true, "/dfccclickdebug")
 SlashCmdList["DFCCCLICKDEBUG"] = function()
     CC.debugClicksEnabled = not CC.debugClicksEnabled
     if CC.debugClicksEnabled then
@@ -3810,7 +3465,7 @@ SlashCmdList["DFCCCLICKDEBUG"] = function()
 end
 
 -- Debug: Comprehensive keyboard fallback diagnosis
-SLASH_DFCCKBFALLBACK1 = "/dfcckbfallback"
+DF:RegisterDebugSlash("DFCCKBFALLBACK", "Keyboard fallback debug", true, "/dfcckbfallback")
 SlashCmdList["DFCCKBFALLBACK"] = function()
     print("|cff33cc66=== DF Keyboard Fallback Debug ===|r")
     

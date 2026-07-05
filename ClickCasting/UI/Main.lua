@@ -1220,58 +1220,8 @@ function CC:CreateCollapsedBindingRow(parent, binding, index)
     icon:SetSize(36, 36)
     icon:SetPoint("TOP", 0, -3)
     
-    -- Set icon based on action type (same logic as full row)
-    if binding.actionType == "target" then
-        icon:SetTexture("Interface\\CURSOR\\Crosshairs")
-    elseif binding.actionType == "menu" then
-        icon:SetTexture("Interface\\Buttons\\UI-GuildButton-OfficerNote-Up")
-    elseif binding.actionType == "focus" then
-        icon:SetTexture("Interface\\Icons\\Ability_Hunter_MasterMarksman")
-    elseif binding.actionType == "assist" then
-        icon:SetTexture("Interface\\Icons\\Ability_Hunter_SniperShot")
-    elseif binding.actionType == CC.ACTION_TYPES.ITEM then
-        if binding.itemType == "slot" and binding.itemSlot then
-            local itemInfo = CC:GetSlotItemInfo(binding.itemSlot)
-            if itemInfo and itemInfo.icon then
-                icon:SetTexture(itemInfo.icon)
-            else
-                for _, slotData in ipairs(CC.EQUIPMENT_SLOTS) do
-                    if slotData.slot == binding.itemSlot then
-                        icon:SetTexture(slotData.icon)
-                        break
-                    end
-                end
-            end
-        elseif binding.itemId then
-            local itemInfo = CC:GetItemInfoById(binding.itemId)
-            if itemInfo and itemInfo.icon then
-                icon:SetTexture(itemInfo.icon)
-            else
-                icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
-            end
-        else
-            icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
-        end
-    elseif binding.actionType == "macro" and binding.macroId then
-        local macro = CC:GetMacroById(binding.macroId)
-        if macro then
-            local autoIcon = CC:GetIconFromMacroBody(macro.body)
-            if autoIcon then
-                icon:SetTexture(autoIcon)
-            elseif macro.icon and type(macro.icon) == "number" and macro.icon > 0 then
-                icon:SetTexture(macro.icon)
-            else
-                icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
-            end
-        else
-            icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
-        end
-    elseif binding.spellId or binding.spellName then
-        local _, displayIcon = GetSpellDisplayInfo(binding.spellId, binding.spellName)
-        icon:SetTexture(displayIcon or "Interface\\Icons\\INV_Misc_QuestionMark")
-    else
-        icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
-    end
+    -- Icon for the binding's action (shared resolver in Bindings.lua)
+    icon:SetTexture(CC:GetBindingDisplayIcon(binding))
     icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
     
     -- Keybind text (below icon, centered)
@@ -1479,7 +1429,7 @@ function CC:CreateKeybindPopup()
     local isMac = IsMacClient and IsMacClient()
     local macWarning = popup:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     macWarning:SetPoint("TOP", instructions, "BOTTOM", 0, -4)
-    macWarning:SetText("|cFFFF4444Note:|r " .. L["Cmd + Left Click unavailable on Mac"])
+    macWarning:SetText("|c" .. DF.GUI:ToneHex("caution") .. L["Note"] .. ":|r " .. L["Cmd + Left Click unavailable on Mac"])
     macWarning:SetTextColor(0.6, 0.6, 0.6)
     if isMac then
         macWarning:Show()

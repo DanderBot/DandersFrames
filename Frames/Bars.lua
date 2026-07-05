@@ -294,9 +294,12 @@ local function AbsorbLayoutStateChanged(frame, db)
     local col = db.absorbBarColor or DEFAULT_ABSORB_COLOR
     if s.colR ~= col.r or s.colG ~= col.g or s.colB ~= col.b or s.colA ~= (col.a or 0.7) then return true end
 
-    -- Border settings (affect inset calculations for attached/overlay modes)
+    -- Border settings (affect inset calculations for attached/overlay modes).
+    -- Alpha matters too: GetAbsorbEdgeInset flips flush(0) <-> inset at the
+    -- opaque<->translucent threshold, so a Border Alpha change must invalidate.
     if s.frameShowBorder ~= (db.frameShowBorder ~= false)                 then return true end
     if s.frameBorderSize ~= (db.frameBorderSize or 1)                     then return true end
+    if s.frameBorderAlpha ~= ((db.frameBorderColor and (db.frameBorderColor.a or db.frameBorderColor[4])) or 1) then return true end
 
     -- Floating-mode specific
     if s.orientation     ~= (db.absorbBarOrientation or "HORIZONTAL")     then return true end
@@ -352,6 +355,7 @@ local function CacheAbsorbLayoutState(frame, db)
     s.colR, s.colG, s.colB, s.colA = col.r, col.g, col.b, col.a or 0.7
     s.frameShowBorder = db.frameShowBorder ~= false
     s.frameBorderSize = db.frameBorderSize or 1
+    s.frameBorderAlpha = (db.frameBorderColor and (db.frameBorderColor.a or db.frameBorderColor[4])) or 1
     s.orientation     = db.absorbBarOrientation or "HORIZONTAL"
     s.width           = db.absorbBarWidth or 50
     s.height          = db.absorbBarHeight or 6
@@ -377,11 +381,22 @@ local function CacheAbsorbLayoutState(frame, db)
     s.overshieldR, s.overshieldG, s.overshieldB = osc.r, osc.g, osc.b
 end
 
--- Invalidate the absorb layout cache for a frame. Call this from any
--- code path that changes state the cache can't detect (e.g., the frame
--- itself being replaced or recreated).
-function DF:InvalidateAbsorbLayout(frame)
-    if frame then frame.dfAbsorbState = nil end
+-- Edge inset for absorb / heal-absorb overlays. Returns 0 (flush to the health
+-- bar) when the frame border is off or fully OPAQUE. This works by Z-ORDER, not
+-- geometry: the border frame draws at parent frame level +10 while the absorb
+-- overlay is only +2/+3, so an opaque border paints OVER a flush overlay and the
+-- shield covers the health fill exactly with nothing showing through — no inset
+-- needed. Returns the pixel-snapped border size only when the border is
+-- TRANSLUCENT, so the shield doesn't bleed through the border's edge band.
+-- dfReducedMaxHealthClipping => 0 (the clip edge is internal, no border there).
+function DF:GetAbsorbEdgeInset(frame, db)
+    if not db or db.frameShowBorder == false then return 0 end
+    local bc = db.frameBorderColor
+    local alpha = (bc and (bc.a or bc[4])) or 1
+    if alpha >= 1 then return 0 end
+    local inset = (frame and frame.dfReducedMaxHealthClipping) and 0 or (db.frameBorderSize or 1)
+    if db.pixelPerfect and DF.PixelPerfect then inset = DF:PixelPerfect(inset) end
+    return inset
 end
 
 function DF:UpdateAbsorb(frame, testIndex)
@@ -403,21 +418,28 @@ function DF:UpdateAbsorb(frame, testIndex)
 
     -- Get values - either from test data or real unit
     local maxHealth, absorbs
+    local isTestRender, testHealthPercent = false, nil
 
     if DF.testMode and testIndex ~= nil then
-        local testData = DF:GetTestUnitData(testIndex)
+        -- testIndex may be a numeric index or a ready testData TABLE (the
+        -- TestMode render/animation loop passes its per-tick data directly)
+        local testData = type(testIndex) == "table" and testIndex or DF:GetTestUnitData(testIndex)
         if testData then
             maxHealth = testData.maxHealth
             absorbs = testData.absorbPercent * maxHealth
+            isTestRender = true
+            testHealthPercent = testData.healthPercent or 1
         else
             maxHealth = 100000
             absorbs = 0
         end
     elseif DF.raidTestMode and testIndex ~= nil then
-        local testData = DF:GetTestUnitData(testIndex, true)  -- true = raid
+        local testData = type(testIndex) == "table" and testIndex or DF:GetTestUnitData(testIndex, true)  -- true = raid
         if testData then
             maxHealth = testData.maxHealth
             absorbs = testData.absorbPercent * maxHealth
+            isTestRender = true
+            testHealthPercent = testData.healthPercent or 1
         else
             maxHealth = 100000
             absorbs = 0
@@ -451,7 +473,15 @@ function DF:UpdateAbsorb(frame, testIndex)
             -- The calculator object itself is already cached on the frame.
             local attachedAbsorbs = absorbs
             local isClamped = false
-            if frame.absorbCalculator and unit and CreateUnitHealPredictionCalculator then
+            if isTestRender then
+                -- Test data: the calculator can only query the REAL unit (0 solo),
+                -- so derive the clamped value from the mock percentages instead.
+                local curHealth = testHealthPercent * maxHealth
+                if curHealth + absorbs > maxHealth then
+                    attachedAbsorbs = maxHealth - curHealth
+                    isClamped = true
+                end
+            elseif frame.absorbCalculator and unit and CreateUnitHealPredictionCalculator then
                 UnitGetDetailedHealPrediction(unit, nil, frame.absorbCalculator)
                 if frame.absorbCalculator.GetDamageAbsorbs then
                     local r1, r2 = frame.absorbCalculator:GetDamageAbsorbs()
@@ -728,8 +758,15 @@ function DF:UpdateAbsorb(frame, testIndex)
         local attachedAbsorbs = absorbs
         local isClamped = false
         
-        -- Create/reuse the calculator
-        if CreateUnitHealPredictionCalculator and unit then
+        -- Create/reuse the calculator (test data: derive from mock percentages
+        -- instead — the calculator can only query the REAL unit, 0 when solo)
+        if isTestRender then
+            local curHealth = testHealthPercent * maxHealth
+            if curHealth + absorbs > maxHealth then
+                attachedAbsorbs = maxHealth - curHealth
+                isClamped = true
+            end
+        elseif CreateUnitHealPredictionCalculator and unit then
             if not frame.absorbCalculator then
                 frame.absorbCalculator = CreateUnitHealPredictionCalculator()
             end
@@ -790,7 +827,7 @@ function DF:UpdateAbsorb(frame, testIndex)
                         glow:SetPoint("TOPLEFT", frame.healthBar, "TOPLEFT", 0, 0)
                         glow:SetPoint("BOTTOMLEFT", frame.healthBar, "BOTTOMLEFT", 0, 0)
                     end
-                    glow:SetWidth(2)
+                    glow:SetWidth(db.pixelPerfect and DF:PixelPerfect(2) or 2)
                 else
                     if atEnd then
                         glow:SetPoint("TOPLEFT", frame.healthBar, "TOPLEFT", 0, 0)
@@ -799,7 +836,7 @@ function DF:UpdateAbsorb(frame, testIndex)
                         glow:SetPoint("BOTTOMLEFT", frame.healthBar, "BOTTOMLEFT", 0, 0)
                         glow:SetPoint("BOTTOMRIGHT", frame.healthBar, "BOTTOMRIGHT", 0, 0)
                     end
-                    glow:SetHeight(2)
+                    glow:SetHeight(db.pixelPerfect and DF:PixelPerfect(2) or 2)
                 end
                 
             elseif glowStyle == "GRADIENT" then
@@ -892,36 +929,41 @@ function DF:UpdateAbsorb(frame, testIndex)
         if db.frameShowBorder ~= false then
             inset = frame.dfReducedMaxHealthClipping and 0 or (db.frameBorderSize or 1)  -- 0 when clipped: the clip edge is internal, no frame border there
         end
+        if db.pixelPerfect and DF.PixelPerfect then inset = DF:PixelPerfect(inset) end
         
         local barWidth = frame.healthBar:GetWidth() - (inset * 2)
         local barHeight = frame.healthBar:GetHeight() - (inset * 2)
         
-        -- Use StatusBar API to handle proportional fill - no manual division needed
-        -- Set bar to full size and let SetMinMaxValues/SetValue calculate the fill
+        -- Use StatusBar API to handle proportional fill - no manual division needed.
+        -- Pixel-perfect: pin the CROSS axis to the health fill's two edges so the
+        -- shield matches the fill with no sliver/gap. edgeInset insets that axis ONLY
+        -- when the frame border is translucent (so the shield doesn't show through it);
+        -- it is 0 for an opaque/absent border. The PRIMARY axis keeps its sized extent.
+        local edgeInset = DF:GetAbsorbEdgeInset(frame, db)
         if healthOrient == "HORIZONTAL" then
             customBar:SetOrientation("HORIZONTAL")
             customBar:SetReverseFill(false)
-            customBar:SetHeight(barHeight)
             customBar:SetWidth(barWidth)
-            customBar:SetPoint("LEFT", healthFillTexture, "RIGHT", 0, 0)
+            customBar:SetPoint("TOPLEFT", healthFillTexture, "TOPRIGHT", 0, -edgeInset)
+            customBar:SetPoint("BOTTOMLEFT", healthFillTexture, "BOTTOMRIGHT", 0, edgeInset)
         elseif healthOrient == "HORIZONTAL_INV" then
             customBar:SetOrientation("HORIZONTAL")
             customBar:SetReverseFill(true)
-            customBar:SetHeight(barHeight)
             customBar:SetWidth(barWidth)
-            customBar:SetPoint("RIGHT", healthFillTexture, "LEFT", 0, 0)
+            customBar:SetPoint("TOPRIGHT", healthFillTexture, "TOPLEFT", 0, -edgeInset)
+            customBar:SetPoint("BOTTOMRIGHT", healthFillTexture, "BOTTOMLEFT", 0, edgeInset)
         elseif healthOrient == "VERTICAL" then
             customBar:SetOrientation("VERTICAL")
             customBar:SetReverseFill(false)
-            customBar:SetWidth(barWidth)
             customBar:SetHeight(barHeight)
-            customBar:SetPoint("BOTTOM", healthFillTexture, "TOP", 0, 0)
+            customBar:SetPoint("BOTTOMLEFT", healthFillTexture, "TOPLEFT", edgeInset, 0)
+            customBar:SetPoint("BOTTOMRIGHT", healthFillTexture, "TOPRIGHT", -edgeInset, 0)
         elseif healthOrient == "VERTICAL_INV" then
             customBar:SetOrientation("VERTICAL")
             customBar:SetReverseFill(true)
-            customBar:SetWidth(barWidth)
             customBar:SetHeight(barHeight)
-            customBar:SetPoint("TOP", healthFillTexture, "BOTTOM", 0, 0)
+            customBar:SetPoint("TOPLEFT", healthFillTexture, "BOTTOMLEFT", edgeInset, 0)
+            customBar:SetPoint("TOPRIGHT", healthFillTexture, "BOTTOMRIGHT", -edgeInset, 0)
         end
         
         -- Let WoW's StatusBar handle the percentage calculation internally
@@ -963,8 +1005,15 @@ function DF:UpdateAbsorb(frame, testIndex)
         local attachedAbsorbs = absorbs
         local isClamped = false
         
-        -- Create/reuse the calculator
-        if CreateUnitHealPredictionCalculator and unit then
+        -- Create/reuse the calculator (test data: derive from mock percentages
+        -- instead — the calculator can only query the REAL unit, 0 when solo)
+        if isTestRender then
+            local curHealth = testHealthPercent * maxHealth
+            if curHealth + absorbs > maxHealth then
+                attachedAbsorbs = maxHealth - curHealth
+                isClamped = true
+            end
+        elseif CreateUnitHealPredictionCalculator and unit then
             if not frame.absorbCalculator then
                 frame.absorbCalculator = CreateUnitHealPredictionCalculator()
             end
@@ -992,35 +1041,40 @@ function DF:UpdateAbsorb(frame, testIndex)
         if db.frameShowBorder ~= false then
             inset = frame.dfReducedMaxHealthClipping and 0 or (db.frameBorderSize or 1)  -- 0 when clipped: the clip edge is internal, no frame border there
         end
+        if db.pixelPerfect and DF.PixelPerfect then inset = DF:PixelPerfect(inset) end
         
         local barWidth = frame.healthBar:GetWidth() - (inset * 2)
         local barHeight = frame.healthBar:GetHeight() - (inset * 2)
         
-        -- Use StatusBar API to handle proportional fill - no manual division needed
+        -- Use StatusBar API to handle proportional fill - no manual division needed.
+        -- Pixel-perfect: pin the CROSS axis to the health fill's two edges so the
+        -- shield matches the fill with no sliver/gap. edgeInset insets that axis ONLY
+        -- when the frame border is translucent (so the shield doesn't show through it).
+        local edgeInset = DF:GetAbsorbEdgeInset(frame, db)
         if healthOrient == "HORIZONTAL" then
             customBar:SetOrientation("HORIZONTAL")
             customBar:SetReverseFill(false)
-            customBar:SetHeight(barHeight)
             customBar:SetWidth(barWidth)
-            customBar:SetPoint("LEFT", healthFillTexture, "RIGHT", 0, 0)
+            customBar:SetPoint("TOPLEFT", healthFillTexture, "TOPRIGHT", 0, -edgeInset)
+            customBar:SetPoint("BOTTOMLEFT", healthFillTexture, "BOTTOMRIGHT", 0, edgeInset)
         elseif healthOrient == "HORIZONTAL_INV" then
             customBar:SetOrientation("HORIZONTAL")
             customBar:SetReverseFill(true)
-            customBar:SetHeight(barHeight)
             customBar:SetWidth(barWidth)
-            customBar:SetPoint("RIGHT", healthFillTexture, "LEFT", 0, 0)
+            customBar:SetPoint("TOPRIGHT", healthFillTexture, "TOPLEFT", 0, -edgeInset)
+            customBar:SetPoint("BOTTOMRIGHT", healthFillTexture, "BOTTOMLEFT", 0, edgeInset)
         elseif healthOrient == "VERTICAL" then
             customBar:SetOrientation("VERTICAL")
             customBar:SetReverseFill(false)
-            customBar:SetWidth(barWidth)
             customBar:SetHeight(barHeight)
-            customBar:SetPoint("BOTTOM", healthFillTexture, "TOP", 0, 0)
+            customBar:SetPoint("BOTTOMLEFT", healthFillTexture, "TOPLEFT", edgeInset, 0)
+            customBar:SetPoint("BOTTOMRIGHT", healthFillTexture, "TOPRIGHT", -edgeInset, 0)
         elseif healthOrient == "VERTICAL_INV" then
             customBar:SetOrientation("VERTICAL")
             customBar:SetReverseFill(true)
-            customBar:SetWidth(barWidth)
             customBar:SetHeight(barHeight)
-            customBar:SetPoint("TOP", healthFillTexture, "BOTTOM", 0, 0)
+            customBar:SetPoint("TOPLEFT", healthFillTexture, "BOTTOMLEFT", edgeInset, 0)
+            customBar:SetPoint("TOPRIGHT", healthFillTexture, "BOTTOMRIGHT", -edgeInset, 0)
         end
         
         -- Let WoW's StatusBar handle the percentage calculation internally
@@ -1077,9 +1131,10 @@ function DF:UpdateAbsorb(frame, testIndex)
             overflowTex:SetVertTile(false)
         end
         
-        -- Position like OVERLAY mode
-        overflowBar:SetPoint("TOPLEFT", frame.healthBar, "TOPLEFT", inset, -inset)
-        overflowBar:SetPoint("BOTTOMRIGHT", frame.healthBar, "BOTTOMRIGHT", -inset, inset)
+        -- Position like OVERLAY mode — flush when opaque/off, inset when translucent
+        local overflowInset = DF:GetAbsorbEdgeInset(frame, db)
+        overflowBar:SetPoint("TOPLEFT", frame.healthBar, "TOPLEFT", overflowInset, -overflowInset)
+        overflowBar:SetPoint("BOTTOMRIGHT", frame.healthBar, "BOTTOMRIGHT", -overflowInset, overflowInset)
         overflowBar:SetMinMaxValues(0, maxHealth)
         
         -- Match health bar orientation for overlay
@@ -1142,14 +1197,12 @@ function DF:UpdateAbsorb(frame, testIndex)
         
         if customBar.bg then customBar.bg:Hide() end
         
-        -- Use explicit points instead of SetAllPoints to ensure proper clipping
-        -- Inset by border size if frame border is enabled to avoid overlap
-        local inset = 0
-        if db.frameShowBorder ~= false then
-            inset = frame.dfReducedMaxHealthClipping and 0 or (db.frameBorderSize or 1)  -- 0 when clipped: the clip edge is internal, no frame border there
-        end
-        customBar:SetPoint("TOPLEFT", frame.healthBar, "TOPLEFT", inset, -inset)
-        customBar:SetPoint("BOTTOMRIGHT", frame.healthBar, "BOTTOMRIGHT", -inset, inset)
+        -- Cover the health fill: flush when the border is opaque/off, inset by the
+        -- (snapped) border size when the border is translucent so the shield doesn't
+        -- bleed through the border's edge band.
+        local overlayInset = DF:GetAbsorbEdgeInset(frame, db)
+        customBar:SetPoint("TOPLEFT", frame.healthBar, "TOPLEFT", overlayInset, -overlayInset)
+        customBar:SetPoint("BOTTOMRIGHT", frame.healthBar, "BOTTOMRIGHT", -overlayInset, overlayInset)
         customBar:SetMinMaxValues(0, maxHealth)
         
         -- Match health bar orientation
@@ -1285,7 +1338,9 @@ function DF:UpdateHealAbsorb(frame, testIndex)
     local maxHealth, healAbsorb
     
     if DF.testMode and testIndex ~= nil then
-        local testData = DF:GetTestUnitData(testIndex)
+        -- testIndex may be a numeric index or a ready testData TABLE (the
+        -- TestMode render/animation loop passes its per-tick data directly)
+        local testData = type(testIndex) == "table" and testIndex or DF:GetTestUnitData(testIndex)
         if testData then
             maxHealth = testData.maxHealth
             healAbsorb = testData.healAbsorbPercent * maxHealth
@@ -1294,7 +1349,7 @@ function DF:UpdateHealAbsorb(frame, testIndex)
             healAbsorb = 0
         end
     elseif DF.raidTestMode and testIndex ~= nil then
-        local testData = DF:GetTestUnitData(testIndex, true)  -- true = raid
+        local testData = type(testIndex) == "table" and testIndex or DF:GetTestUnitData(testIndex, true)  -- true = raid
         if testData then
             maxHealth = testData.maxHealth
             healAbsorb = testData.healAbsorbPercent * maxHealth
@@ -1483,36 +1538,41 @@ function DF:UpdateHealAbsorb(frame, testIndex)
         if db.frameShowBorder ~= false then
             inset = frame.dfReducedMaxHealthClipping and 0 or (db.frameBorderSize or 1)  -- 0 when clipped: the clip edge is internal, no frame border there
         end
+        if db.pixelPerfect and DF.PixelPerfect then inset = DF:PixelPerfect(inset) end
         
         local barWidth = frame.healthBar:GetWidth() - (inset * 2)
         local barHeight = frame.healthBar:GetHeight() - (inset * 2)
         
-        -- Use StatusBar API to handle proportional fill - no manual division needed
-        -- Position: anchor to health fill edge, extend INWARD toward 0 health
+        -- Use StatusBar API to handle proportional fill - no manual division needed.
+        -- Position: anchor to health fill edge, extend INWARD toward 0 health.
+        -- Pixel-perfect: pin the CROSS axis to the health fill's two edges so it
+        -- matches the fill with no sliver/gap. edgeInset insets that axis ONLY when
+        -- the frame border is translucent (so the shield doesn't show through it).
+        local edgeInset = DF:GetAbsorbEdgeInset(frame, db)
         if healthOrient == "HORIZONTAL" then
             bar:SetOrientation("HORIZONTAL")
             bar:SetReverseFill(true)  -- Fill toward 0 (left)
-            bar:SetHeight(barHeight)
             bar:SetWidth(barWidth)
-            bar:SetPoint("RIGHT", healthFillTexture, "RIGHT", 0, 0)
+            bar:SetPoint("TOPRIGHT", healthFillTexture, "TOPRIGHT", 0, -edgeInset)
+            bar:SetPoint("BOTTOMRIGHT", healthFillTexture, "BOTTOMRIGHT", 0, edgeInset)
         elseif healthOrient == "HORIZONTAL_INV" then
             bar:SetOrientation("HORIZONTAL")
             bar:SetReverseFill(false)  -- Fill toward 0 (right)
-            bar:SetHeight(barHeight)
             bar:SetWidth(barWidth)
-            bar:SetPoint("LEFT", healthFillTexture, "LEFT", 0, 0)
+            bar:SetPoint("TOPLEFT", healthFillTexture, "TOPLEFT", 0, -edgeInset)
+            bar:SetPoint("BOTTOMLEFT", healthFillTexture, "BOTTOMLEFT", 0, edgeInset)
         elseif healthOrient == "VERTICAL" then
             bar:SetOrientation("VERTICAL")
             bar:SetReverseFill(true)  -- Fill toward 0 (down)
-            bar:SetWidth(barWidth)
             bar:SetHeight(barHeight)
-            bar:SetPoint("TOP", healthFillTexture, "TOP", 0, 0)
+            bar:SetPoint("TOPLEFT", healthFillTexture, "TOPLEFT", edgeInset, 0)
+            bar:SetPoint("TOPRIGHT", healthFillTexture, "TOPRIGHT", -edgeInset, 0)
         elseif healthOrient == "VERTICAL_INV" then
             bar:SetOrientation("VERTICAL")
             bar:SetReverseFill(false)  -- Fill toward 0 (up)
-            bar:SetWidth(barWidth)
             bar:SetHeight(barHeight)
-            bar:SetPoint("BOTTOM", healthFillTexture, "BOTTOM", 0, 0)
+            bar:SetPoint("BOTTOMLEFT", healthFillTexture, "BOTTOMLEFT", edgeInset, 0)
+            bar:SetPoint("BOTTOMRIGHT", healthFillTexture, "BOTTOMRIGHT", -edgeInset, 0)
         end
         
         -- Let WoW's StatusBar handle the percentage calculation internally
@@ -1534,15 +1594,12 @@ function DF:UpdateHealAbsorb(frame, testIndex)
         
         if bar.bg then bar.bg:Hide() end
         
-        -- Use explicit points instead of SetAllPoints to ensure proper clipping
-        -- Inset by border size if frame border is enabled to avoid overlap
-        local inset = 0
-        if db.frameShowBorder ~= false then
-            inset = frame.dfReducedMaxHealthClipping and 0 or (db.frameBorderSize or 1)  -- 0 when clipped: the clip edge is internal, no frame border there
-        end
+        -- Cover the health fill: flush when the border is opaque/off, inset when the
+        -- border is translucent so the shield doesn't bleed through the border edge.
+        local overlayInset = DF:GetAbsorbEdgeInset(frame, db)
         bar:ClearAllPoints()
-        bar:SetPoint("TOPLEFT", frame.healthBar, "TOPLEFT", inset, -inset)
-        bar:SetPoint("BOTTOMRIGHT", frame.healthBar, "BOTTOMRIGHT", -inset, inset)
+        bar:SetPoint("TOPLEFT", frame.healthBar, "TOPLEFT", overlayInset, -overlayInset)
+        bar:SetPoint("BOTTOMRIGHT", frame.healthBar, "BOTTOMRIGHT", -overlayInset, overlayInset)
         
         -- Match health bar orientation
         -- Heal absorbs fill from low HP side (opposite of regular absorbs)
@@ -1682,7 +1739,9 @@ function DF:UpdateHealPrediction(frame, testIndex)
     
     if DF.testMode and testIndex ~= nil then
         isTestMode = true
-        local testData = DF:GetTestUnitData(testIndex)
+        -- testIndex may be a numeric index or a ready testData TABLE (the
+        -- TestMode render/animation loop passes its per-tick data directly)
+        local testData = type(testIndex) == "table" and testIndex or DF:GetTestUnitData(testIndex)
         if testData then
             maxHealth = testData.maxHealth
             testHealthPercent = testData.healthPercent
@@ -1696,7 +1755,7 @@ function DF:UpdateHealPrediction(frame, testIndex)
         end
     elseif DF.raidTestMode and testIndex ~= nil then
         isTestMode = true
-        local testData = DF:GetTestUnitData(testIndex, true)
+        local testData = type(testIndex) == "table" and testIndex or DF:GetTestUnitData(testIndex, true)
         if testData then
             maxHealth = testData.maxHealth
             testHealthPercent = testData.healthPercent
@@ -1969,6 +2028,7 @@ function DF:UpdateHealPrediction(frame, testIndex)
         if db.frameShowBorder ~= false then
             inset = frame.dfReducedMaxHealthClipping and 0 or (db.frameBorderSize or 1)  -- 0 when clipped: the clip edge is internal, no frame border there
         end
+        if db.pixelPerfect and DF.PixelPerfect then inset = DF:PixelPerfect(inset) end
         
         -- For test mode, we can use calculated positions
         -- For live mode, we anchor to the health fill texture
@@ -2610,22 +2670,6 @@ DF.ClassToRaidBuff = {
     ["SHAMAN"] = "missingBuffCheckSkyfury",
     ["EVOKER"] = "missingBuffCheckBronze",
 }
-
--- Get the list of raid buff spell IDs (for filtering from display)
-function DF:GetRaidBuffSpellIDs()
-    local spellIDs = {}
-    for _, buffInfo in ipairs(DF.RaidBuffs) do
-        local spellIDOrTable = buffInfo[1]
-        if type(spellIDOrTable) == "table" then
-            for _, spellID in ipairs(spellIDOrTable) do
-                spellIDs[spellID] = true
-            end
-        else
-            spellIDs[spellIDOrTable] = true
-        end
-    end
-    return spellIDs
-end
 
 -- Non-secret raid buff spell IDs (Blizzard-whitelisted, remain readable in combat)
 -- Source: Ellesmere whitelist, cross-referenced with our RaidBuffs

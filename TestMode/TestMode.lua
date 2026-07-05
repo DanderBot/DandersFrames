@@ -533,13 +533,13 @@ function DF:UpdateTestFrameHealthOnly(frame, index)
     
     -- Update absorb bars if enabled
     if db.testShowAbsorbs then
-        DF:UpdateTestAbsorb(frame, animatedTestData)
-        DF:UpdateTestHealAbsorb(frame, animatedTestData)
+        DF:UpdateAbsorb(frame, animatedTestData)
+        DF:UpdateHealAbsorb(frame, animatedTestData)
     end
     
     -- Update heal prediction if enabled
     if db.testShowHealPrediction ~= false then
-        DF:UpdateTestHealPrediction(frame, animatedTestData)
+        DF:UpdateHealPrediction(frame, animatedTestData)
     end
     
     -- Update dispel gradient if it's tracking health
@@ -1024,12 +1024,13 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     
     -- Update absorb bars
     if db.testShowAbsorbs then
-        DF:UpdateTestAbsorb(frame, testData)
-        DF:UpdateTestHealAbsorb(frame, testData)
+        DF:UpdateAbsorb(frame, testData)
+        DF:UpdateHealAbsorb(frame, testData)
     else
         if frame.dfAbsorbBar then frame.dfAbsorbBar:Hide() end
         if frame.dfHealAbsorbBar then frame.dfHealAbsorbBar:Hide() end
         if frame.absorbOvershieldGlow then frame.absorbOvershieldGlow:Hide() end
+        if frame.absorbOverflowBar then frame.absorbOverflowBar:Hide() end
         if frame.healAbsorbOvershieldGlow then frame.healAbsorbOvershieldGlow:Hide() end
         -- Hide attached textures used for ATTACHED mode test display
         if frame.absorbAttachedTexture then frame.absorbAttachedTexture:Hide() end
@@ -1040,7 +1041,7 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     
     -- Update heal prediction (check test mode setting)
     if db.testShowHealPrediction ~= false then
-        DF:UpdateTestHealPrediction(frame, testData)
+        DF:UpdateHealPrediction(frame, testData)
     else
         if frame.dfHealPredictionBar then frame.dfHealPredictionBar:Hide() end
     end
@@ -1223,12 +1224,15 @@ function DF:UpdateTestIcons(frame, testData)
     -- Role Icon
     if frame.roleIcon then
         local role = testData.role
-        local shouldShow = true
-        
+        -- Only TANK/HEALER/DAMAGER have a role icon; a nil/"NONE" role shows none
+        -- (matches live StatusIcons and avoids GetRoleIconTexture indexing a nil
+        -- coord table for a roleless test unit).
+        local shouldShow = (role == "TANK" or role == "HEALER" or role == "DAMAGER")
+
         -- In test mode (out of combat), if "Only Apply Settings in Combat" is checked, show all icons
         local applySettings = not db.roleIconOnlyInCombat
-        
-        if applySettings then
+
+        if shouldShow and applySettings then
             if role == "TANK" then
                 shouldShow = db.roleIconShowTank ~= false
             elseif role == "HEALER" then
@@ -1977,17 +1981,12 @@ function DF:UpdateTestAurasContent(frame)
                     -- Apply duration visibility from settings
                     local showDuration = db.buffShowDuration ~= false
                     icon.cooldown:SetHideCountdownNumbers(not showDuration)
-                    
-                    -- Discover native cooldown text if not already cached
+
+                    -- Discover + set up native cooldown text (canonical helper — keeps
+                    -- the text parented to durationHideWrapper, same as live; test used
+                    -- to steal it into textOverlay, breaking hide-above-threshold)
                     if not icon.nativeCooldownText then
-                        local regions = {icon.cooldown:GetRegions()}
-                        for _, region in ipairs(regions) do
-                            if region and region.GetObjectType and region:GetObjectType() == "FontString" then
-                                icon.nativeCooldownText = region
-                                icon.nativeTextReparented = false
-                                break
-                            end
-                        end
+                        DF:EnsureAuraDurationText(icon, db, "buff")
                     end
                     
                     -- Apply duration text styling from settings
@@ -2010,13 +2009,7 @@ function DF:UpdateTestAurasContent(frame)
                             DF:SafeSetFont(icon.nativeCooldownText, durationFont, durationSize, durationOutline)
                             icon.nativeCooldownText:ClearAllPoints()
                             icon.nativeCooldownText:SetPoint(durationAnchor, icon, durationAnchor, durationX, durationY)
-                            
-                            -- Reparent to textOverlay if needed (above swipe)
-                            if icon.textOverlay and not icon.nativeTextReparented then
-                                icon.nativeCooldownText:SetParent(icon.textOverlay)
-                                icon.nativeTextReparented = true
-                            end
-                            
+
                             -- Apply color - either fixed or by time remaining
                             if db.buffDurationColorByTime then
                                 -- Calculate remaining percentage for color (30% elapsed = 70% remaining)
@@ -2113,21 +2106,9 @@ function DF:UpdateTestAurasContent(frame)
                         -- Only colour-by-type recolours per-update; static debuff
                         -- borders carry colour/style from ConfigureAuraIconBorder.
                         if db.debuffBorderColorByType ~= false then
-                            local dispelName = debuffData.debuffType
-                            local color
-                            if dispelName == "Magic" then
-                                color = db.debuffBorderColorMagic or {r = 0.2, g = 0.6, b = 1.0}
-                            elseif dispelName == "Curse" then
-                                color = db.debuffBorderColorCurse or {r = 0.6, g = 0.0, b = 1.0}
-                            elseif dispelName == "Disease" then
-                                color = db.debuffBorderColorDisease or {r = 0.6, g = 0.4, b = 0.0}
-                            elseif dispelName == "Poison" then
-                                color = db.debuffBorderColorPoison or {r = 0.0, g = 0.6, b = 0.0}
-                            elseif dispelName == "Bleed" or dispelName == "Enrage" then
-                                color = db.debuffBorderColorBleed or {r = 1.0, g = 0.0, b = 0.0}
-                            else
-                                color = db.debuffBorderColorNone or {r = 0.8, g = 0.0, b = 0.0}
-                            end
+                            -- Shared dispel-type palette (same helper the live colour
+                            -- curve is built from, so defaults can't drift).
+                            local color = DF:GetDebuffTypeColor(db, debuffData.debuffType)
                             icon.border:SetColor(color.r, color.g, color.b, 0.8)
                         end
                         icon.border:Show()
@@ -2148,17 +2129,11 @@ function DF:UpdateTestAurasContent(frame)
                     -- Apply duration visibility from settings
                     local showDuration = db.debuffShowDuration ~= false
                     icon.cooldown:SetHideCountdownNumbers(not showDuration)
-                    
-                    -- Discover native cooldown text if not already cached
+
+                    -- Discover + set up native cooldown text (canonical helper — keeps
+                    -- the text parented to durationHideWrapper, same as live)
                     if not icon.nativeCooldownText then
-                        local regions = {icon.cooldown:GetRegions()}
-                        for _, region in ipairs(regions) do
-                            if region and region.GetObjectType and region:GetObjectType() == "FontString" then
-                                icon.nativeCooldownText = region
-                                icon.nativeTextReparented = false
-                                break
-                            end
-                        end
+                        DF:EnsureAuraDurationText(icon, db, "debuff")
                     end
                     
                     -- Apply duration text styling from settings
@@ -2181,13 +2156,7 @@ function DF:UpdateTestAurasContent(frame)
                             DF:SafeSetFont(icon.nativeCooldownText, durationFont, durationSize, durationOutline)
                             icon.nativeCooldownText:ClearAllPoints()
                             icon.nativeCooldownText:SetPoint(durationAnchor, icon, durationAnchor, durationX, durationY)
-                            
-                            -- Reparent to textOverlay if needed (above swipe)
-                            if icon.textOverlay and not icon.nativeTextReparented then
-                                icon.nativeCooldownText:SetParent(icon.textOverlay)
-                                icon.nativeTextReparented = true
-                            end
-                            
+
                             -- Apply color - either fixed or by time remaining
                             if db.debuffDurationColorByTime then
                                 -- Calculate remaining percentage for color (50% elapsed = 50% remaining)
@@ -2386,1025 +2355,6 @@ function DF:UpdateAllTestBossDebuffs()
                 end
             end
         end
-    end
-end
-
--- Update test absorb bar (unified for party and raid)
-function DF:UpdateTestAbsorb(frame, testData)
-    if not frame or not frame.healthBar then return end
-    
-    local db = DF:GetFrameDB(frame)
-    local absorbPercent = testData.absorbPercent or 0
-    local healthPercent = testData.healthPercent or 0.75
-    
-    -- Create bar if needed
-    if not frame.dfAbsorbBar then
-        frame.dfAbsorbBar = CreateFrame("StatusBar", nil, frame)
-        frame.dfAbsorbBar:SetMinMaxValues(0, 1)
-        frame.dfAbsorbBar:EnableMouse(false)
-        local bg = frame.dfAbsorbBar:CreateTexture(nil, "BACKGROUND")
-        bg:SetAllPoints(true)
-        bg:SetColorTexture(0, 0, 0, 0.5)
-        frame.dfAbsorbBar.bg = bg
-    end
-    
-    local customBar = frame.dfAbsorbBar
-    local absorbMode = db.absorbBarMode or "OVERLAY"
-    local absorbColor = db.absorbBarColor or {r = 0, g = 0.835, b = 1, a = 0.7}
-    
-    -- Set texture exactly like live code (only when texture changes)
-    local tex = db.absorbBarTexture or "Interface\\Buttons\\WHITE8x8"
-    if customBar.currentTexture ~= tex then
-        customBar.currentTexture = tex
-        if tex == "Interface\\RaidFrame\\Shield-Overlay" then
-            customBar:SetStatusBarTexture(tex)
-            local barTex = customBar:GetStatusBarTexture()
-            if barTex then
-                barTex:SetHorizTile(true)
-                barTex:SetVertTile(true)
-                barTex:SetTexCoord(0, 2, 0, 1)
-                barTex:SetDesaturated(true)
-            end
-        else
-            customBar:SetStatusBarTexture(tex)
-            local barTex = customBar:GetStatusBarTexture()
-            if barTex then
-                barTex:SetHorizTile(false)
-                barTex:SetVertTile(false)
-                barTex:SetTexCoord(0, 1, 0, 1)
-                barTex:SetDesaturated(false)
-            end
-        end
-    end
-    
-    if absorbPercent > 0 then
-        customBar:SetStatusBarColor(absorbColor.r, absorbColor.g, absorbColor.b, absorbColor.a or 0.7)
-        customBar:SetAlpha(1)  -- Reset frame alpha (may have been set to 0 by ATTACHED_OVERFLOW mode)
-        
-        if absorbMode == "ATTACHED" then
-            -- ATTACHED mode: Use a plain texture with proper TexCoords for texture alignment
-            -- This ensures the absorb bar texture continues seamlessly from the health bar
-            
-            -- Hide the StatusBar immediately - we use a plain texture for ATTACHED mode
-            customBar:Hide()
-            if customBar.bg then customBar.bg:Hide() end
-            
-            local inset = 0
-            if db.frameShowBorder ~= false then
-                inset = frame.dfReducedMaxHealthClipping and 0 or (db.frameBorderSize or 1)  -- 0 when clipped: the clip edge is internal, no frame border there
-            end
-            
-            local barWidth = frame.healthBar:GetWidth() - (inset * 2)
-            local barHeight = frame.healthBar:GetHeight() - (inset * 2)
-            local healthOrient = db.healthOrientation or "HORIZONTAL"
-            
-            -- Calculate how much space is available (missing health)
-            local missingPercent = 1 - healthPercent
-            -- Clamp absorb to not exceed max health
-            local clampedAbsorbPercent = math.min(absorbPercent, missingPercent)
-            local isClamped = absorbPercent > missingPercent
-            
-            -- Get the health fill texture to anchor to
-            local healthFillTexture = frame.healthBar:GetStatusBarTexture()
-            
-            -- Calculate absorb bar size - only scale in the direction of the bar
-            -- For horizontal bars: scale width, use full height
-            -- For vertical bars: use full width, scale height
-            local isHorizontal = (healthOrient == "HORIZONTAL" or healthOrient == "HORIZONTAL_INV")
-            local absorbWidth = isHorizontal and (barWidth * clampedAbsorbPercent) or barWidth
-            local absorbHeight = isHorizontal and barHeight or (barHeight * clampedAbsorbPercent)
-            
-            -- Create or reuse attached texture for proper alignment
-            if not frame.absorbAttachedTexture then
-                frame.absorbAttachedTexture = frame.healthBar:CreateTexture(nil, "ARTWORK", nil, 2)
-            end
-            local attachedTex = frame.absorbAttachedTexture
-            
-            -- Only hide when health is truly full (no space for absorbs) or bar would be too small to render
-            -- Check the relevant dimension based on orientation
-            local relevantSize = isHorizontal and absorbWidth or absorbHeight
-            if missingPercent < 0.001 or relevantSize < 1 then
-                attachedTex:Hide()
-            else
-                -- Use the same texture as the absorb bar
-                local absorbTexture = db.absorbBarTexture or "Interface\\TargetingFrame\\UI-StatusBar"
-                if type(absorbTexture) == "table" then
-                    absorbTexture = absorbTexture.path or "Interface\\TargetingFrame\\UI-StatusBar"
-                end
-                attachedTex:SetTexture(absorbTexture)
-                attachedTex:SetVertexColor(absorbColor.r, absorbColor.g, absorbColor.b, absorbColor.a or 0.7)
-                
-                -- Apply blend mode
-                local blendMode = db.absorbBarBlendMode or "BLEND"
-                attachedTex:SetBlendMode(blendMode)
-                
-                attachedTex:ClearAllPoints()
-                
-                -- Calculate proper texture coordinates to continue from health bar
-                -- healthPercent = where health ends, clampedAbsorbPercent = how much absorb to show
-                local texStart = healthPercent
-                local texEnd = healthPercent + clampedAbsorbPercent
-                
-                if healthFillTexture then
-                    if healthOrient == "HORIZONTAL" then
-                        attachedTex:SetPoint("TOPLEFT", healthFillTexture, "TOPRIGHT", 0, 0)
-                        attachedTex:SetPoint("BOTTOMLEFT", healthFillTexture, "BOTTOMRIGHT", 0, 0)
-                        attachedTex:SetWidth(absorbWidth)
-                        -- TexCoord: left, right, top, bottom
-                        attachedTex:SetTexCoord(texStart, texEnd, 0, 1)
-                    elseif healthOrient == "HORIZONTAL_INV" then
-                        attachedTex:SetPoint("TOPRIGHT", healthFillTexture, "TOPLEFT", 0, 0)
-                        attachedTex:SetPoint("BOTTOMRIGHT", healthFillTexture, "BOTTOMLEFT", 0, 0)
-                        attachedTex:SetWidth(absorbWidth)
-                        -- For reversed, flip the texture coords
-                        attachedTex:SetTexCoord(1 - texStart, 1 - texEnd, 0, 1)
-                    elseif healthOrient == "VERTICAL" then
-                        attachedTex:SetPoint("BOTTOMLEFT", healthFillTexture, "TOPLEFT", 0, 0)
-                        attachedTex:SetPoint("BOTTOMRIGHT", healthFillTexture, "TOPRIGHT", 0, 0)
-                        attachedTex:SetHeight(absorbHeight)
-                        -- Vertical: adjust top/bottom coords
-                        attachedTex:SetTexCoord(0, 1, 1 - texEnd, 1 - texStart)
-                    elseif healthOrient == "VERTICAL_INV" then
-                        attachedTex:SetPoint("TOPLEFT", healthFillTexture, "BOTTOMLEFT", 0, 0)
-                        attachedTex:SetPoint("TOPRIGHT", healthFillTexture, "BOTTOMRIGHT", 0, 0)
-                        attachedTex:SetHeight(absorbHeight)
-                        attachedTex:SetTexCoord(0, 1, texStart, texEnd)
-                    end
-                else
-                    -- Fallback: position manually
-                    local healthWidth = barWidth * healthPercent
-                    local healthHeight = barHeight * healthPercent
-                    
-                    if healthOrient == "HORIZONTAL" then
-                        attachedTex:SetPoint("TOPLEFT", frame.healthBar, "TOPLEFT", inset + healthWidth, -inset)
-                        attachedTex:SetPoint("BOTTOMLEFT", frame.healthBar, "BOTTOMLEFT", inset + healthWidth, inset)
-                        attachedTex:SetWidth(absorbWidth)
-                        attachedTex:SetTexCoord(texStart, texEnd, 0, 1)
-                    elseif healthOrient == "HORIZONTAL_INV" then
-                        attachedTex:SetPoint("TOPRIGHT", frame.healthBar, "TOPRIGHT", -inset - healthWidth, -inset)
-                        attachedTex:SetPoint("BOTTOMRIGHT", frame.healthBar, "BOTTOMRIGHT", -inset - healthWidth, inset)
-                        attachedTex:SetWidth(absorbWidth)
-                        attachedTex:SetTexCoord(1 - texStart, 1 - texEnd, 0, 1)
-                    elseif healthOrient == "VERTICAL" then
-                        attachedTex:SetPoint("BOTTOMLEFT", frame.healthBar, "BOTTOMLEFT", inset, inset + healthHeight)
-                        attachedTex:SetPoint("BOTTOMRIGHT", frame.healthBar, "BOTTOMRIGHT", -inset, inset + healthHeight)
-                        attachedTex:SetHeight(absorbHeight)
-                        attachedTex:SetTexCoord(0, 1, 1 - texEnd, 1 - texStart)
-                    elseif healthOrient == "VERTICAL_INV" then
-                        attachedTex:SetPoint("TOPLEFT", frame.healthBar, "TOPLEFT", inset, -inset - healthHeight)
-                        attachedTex:SetPoint("TOPRIGHT", frame.healthBar, "TOPRIGHT", -inset, -inset - healthHeight)
-                        attachedTex:SetHeight(absorbHeight)
-                        attachedTex:SetTexCoord(0, 1, texStart, texEnd)
-                    end
-                end
-                
-                attachedTex:Show()
-            end
-            
-            -- Handle overshield glow in test mode - show when clamped
-            if db.absorbBarShowOvershield then
-                if not frame.absorbOvershieldGlow then
-                    frame.absorbOvershieldGlow = frame.healthBar:CreateTexture(nil, "OVERLAY", nil, 7)
-                end
-                
-                local glow = frame.absorbOvershieldGlow
-                local glowStyle = db.absorbBarOvershieldStyle or "SPARK"
-                local glowColor = db.absorbBarOvershieldColor or absorbColor
-                local glowAlpha = db.absorbBarOvershieldAlpha or 0.8
-                local reversePos = db.absorbBarOvershieldReverse or false
-                
-                local isHorizontal = (healthOrient == "HORIZONTAL" or healthOrient == "HORIZONTAL_INV")
-                local isReversed = (healthOrient == "HORIZONTAL_INV" or healthOrient == "VERTICAL_INV")
-                local atMaxHP = not reversePos
-                local atEnd = (atMaxHP ~= isReversed)
-                
-                glow:ClearAllPoints()
-                glow:SetRotation(0)
-                glow:SetTexCoord(0, 1, 0, 1)
-                glow:SetBlendMode("ADD")
-                
-                local glowWidth = glowStyle == "LINE" and 2 or (glowStyle == "SPARK" and 5 or (glowStyle == "GLOW" and 10 or 20))
-                
-                if isHorizontal then
-                    glow:SetTexture(glowStyle == "LINE" and "Interface\\Buttons\\WHITE8x8" or ("Interface\\AddOns\\DandersFrames\\Media\\" .. (atEnd and "DF_Gradient_H_Rev" or "DF_Gradient_H")))
-                    if atEnd then
-                        glow:SetPoint("TOPRIGHT", frame.healthBar, "TOPRIGHT", 0, 0)
-                        glow:SetPoint("BOTTOMRIGHT", frame.healthBar, "BOTTOMRIGHT", 0, 0)
-                    else
-                        glow:SetPoint("TOPLEFT", frame.healthBar, "TOPLEFT", 0, 0)
-                        glow:SetPoint("BOTTOMLEFT", frame.healthBar, "BOTTOMLEFT", 0, 0)
-                    end
-                    glow:SetWidth(glowWidth)
-                else
-                    glow:SetTexture(glowStyle == "LINE" and "Interface\\Buttons\\WHITE8x8" or ("Interface\\AddOns\\DandersFrames\\Media\\" .. (atEnd and "DF_Gradient_V_Rev" or "DF_Gradient_V")))
-                    if atEnd then
-                        glow:SetPoint("TOPLEFT", frame.healthBar, "TOPLEFT", 0, 0)
-                        glow:SetPoint("TOPRIGHT", frame.healthBar, "TOPRIGHT", 0, 0)
-                    else
-                        glow:SetPoint("BOTTOMLEFT", frame.healthBar, "BOTTOMLEFT", 0, 0)
-                        glow:SetPoint("BOTTOMRIGHT", frame.healthBar, "BOTTOMRIGHT", 0, 0)
-                    end
-                    glow:SetHeight(glowWidth)
-                end
-                
-                glow:SetVertexColor(glowColor.r, glowColor.g, glowColor.b, 1)
-                -- Show glow only when absorb is clamped (would exceed max health)
-                if isClamped then
-                    glow:SetAlpha(glowAlpha)
-                    glow:Show()
-                else
-                    glow:Hide()
-                end
-            elseif frame.absorbOvershieldGlow then
-                frame.absorbOvershieldGlow:Hide()
-            end
-            
-            -- Hide overflow bar for regular ATTACHED mode
-            if frame.absorbOverflowBar then frame.absorbOverflowBar:Hide() end
-            
-        elseif absorbMode == "ATTACHED_OVERFLOW" then
-            -- ATTACHED_OVERFLOW mode: Shows attached texture when not clamped, overlay when clamped
-            
-            -- Hide the StatusBar - we use plain texture for attached display
-            customBar:Hide()
-            if customBar.bg then customBar.bg:Hide() end
-            
-            -- Hide glow (we use overflow overlay instead)
-            if frame.absorbOvershieldGlow then frame.absorbOvershieldGlow:Hide() end
-            
-            local inset = 0
-            if db.frameShowBorder ~= false then
-                inset = frame.dfReducedMaxHealthClipping and 0 or (db.frameBorderSize or 1)  -- 0 when clipped: the clip edge is internal, no frame border there
-            end
-            
-            local barWidth = frame.healthBar:GetWidth() - (inset * 2)
-            local barHeight = frame.healthBar:GetHeight() - (inset * 2)
-            local healthOrient = db.healthOrientation or "HORIZONTAL"
-            
-            -- Calculate clamped values
-            local missingPercent = 1 - healthPercent
-            local clampedAbsorbPercent = math.min(absorbPercent, missingPercent)
-            local isClamped = absorbPercent > missingPercent
-            
-            local healthFillTexture = frame.healthBar:GetStatusBarTexture()
-            
-            -- Calculate absorb bar size - only scale in the direction of the bar
-            local isHorizontal = (healthOrient == "HORIZONTAL" or healthOrient == "HORIZONTAL_INV")
-            local absorbWidth = isHorizontal and (barWidth * clampedAbsorbPercent) or barWidth
-            local absorbHeight = isHorizontal and barHeight or (barHeight * clampedAbsorbPercent)
-            
-            -- Create or reuse attached texture for proper alignment (same as ATTACHED mode)
-            if not frame.absorbAttachedTexture then
-                frame.absorbAttachedTexture = frame.healthBar:CreateTexture(nil, "ARTWORK", nil, 2)
-            end
-            local attachedTex = frame.absorbAttachedTexture
-            
-            -- Handle overflow bar (shown when clamped)
-            if not frame.absorbOverflowBar then
-                frame.absorbOverflowBar = CreateFrame("StatusBar", nil, frame.healthBar)
-                frame.absorbOverflowBar:SetMinMaxValues(0, 1)
-                frame.absorbOverflowBar:EnableMouse(false)
-            end
-            local overflowBar = frame.absorbOverflowBar
-            
-            if isClamped then
-                -- Hide attached texture, show overflow bar
-                attachedTex:Hide()
-                
-                local healthLevel = frame.healthBar:GetFrameLevel()
-                overflowBar:ClearAllPoints()
-                -- Keep overflow bar below dispel overlay (+6) and highlights (+9)
-                overflowBar:SetFrameLevel(healthLevel + 3)
-                
-                -- Apply same texture/color as main absorb bar
-                local texture = db.absorbBarTexture or "Interface\\TargetingFrame\\UI-StatusBar"
-                if type(texture) == "table" then
-                    texture = texture.path or "Interface\\TargetingFrame\\UI-StatusBar"
-                end
-                overflowBar:SetStatusBarTexture(texture)
-                overflowBar:SetStatusBarColor(absorbColor.r, absorbColor.g, absorbColor.b, absorbColor.a or 0.7)
-                
-                local overflowTex = overflowBar:GetStatusBarTexture()
-                if overflowTex then
-                    overflowTex:SetHorizTile(false)
-                    overflowTex:SetVertTile(false)
-                end
-                
-                -- Position like OVERLAY mode
-                overflowBar:SetPoint("TOPLEFT", frame.healthBar, "TOPLEFT", inset, -inset)
-                overflowBar:SetPoint("BOTTOMRIGHT", frame.healthBar, "BOTTOMRIGHT", -inset, inset)
-                
-                local maxHealth = testData.maxHealth or 100000
-                overflowBar:SetMinMaxValues(0, maxHealth)
-                
-                local overlayReverse = db.absorbBarOverlayReverse or false
-                
-                if healthOrient == "HORIZONTAL" then
-                    overflowBar:SetOrientation("HORIZONTAL")
-                    overflowBar:SetReverseFill(not overlayReverse)
-                elseif healthOrient == "HORIZONTAL_INV" then
-                    overflowBar:SetOrientation("HORIZONTAL")
-                    overflowBar:SetReverseFill(overlayReverse)
-                elseif healthOrient == "VERTICAL" then
-                    overflowBar:SetOrientation("VERTICAL")
-                    overflowBar:SetReverseFill(not overlayReverse)
-                elseif healthOrient == "VERTICAL_INV" then
-                    overflowBar:SetOrientation("VERTICAL")
-                    overflowBar:SetReverseFill(overlayReverse)
-                end
-                
-                overflowBar:SetAlpha(1)
-                overflowBar:SetValue(absorbPercent * maxHealth)
-                overflowBar:Show()
-            else
-                -- Show attached texture, hide overflow bar
-                overflowBar:SetAlpha(0)
-                overflowBar:Hide()
-                
-                -- Only hide when health is truly full or bar would be too small to render
-                local relevantSize = isHorizontal and absorbWidth or absorbHeight
-                if missingPercent < 0.001 or relevantSize < 1 then
-                    attachedTex:Hide()
-                else
-                    -- Use the same texture as the absorb bar
-                    local absorbTexture = db.absorbBarTexture or "Interface\\TargetingFrame\\UI-StatusBar"
-                    if type(absorbTexture) == "table" then
-                        absorbTexture = absorbTexture.path or "Interface\\TargetingFrame\\UI-StatusBar"
-                    end
-                    attachedTex:SetTexture(absorbTexture)
-                    attachedTex:SetVertexColor(absorbColor.r, absorbColor.g, absorbColor.b, absorbColor.a or 0.7)
-                    
-                    -- Apply blend mode
-                    local blendMode = db.absorbBarBlendMode or "BLEND"
-                    attachedTex:SetBlendMode(blendMode)
-                    
-                    attachedTex:ClearAllPoints()
-                    
-                    -- Calculate proper texture coordinates to continue from health bar
-                    local texStart = healthPercent
-                    local texEnd = healthPercent + clampedAbsorbPercent
-                    
-                    if healthFillTexture then
-                        if healthOrient == "HORIZONTAL" then
-                            attachedTex:SetPoint("TOPLEFT", healthFillTexture, "TOPRIGHT", 0, 0)
-                            attachedTex:SetPoint("BOTTOMLEFT", healthFillTexture, "BOTTOMRIGHT", 0, 0)
-                            attachedTex:SetWidth(absorbWidth)
-                            attachedTex:SetTexCoord(texStart, texEnd, 0, 1)
-                        elseif healthOrient == "HORIZONTAL_INV" then
-                            attachedTex:SetPoint("TOPRIGHT", healthFillTexture, "TOPLEFT", 0, 0)
-                            attachedTex:SetPoint("BOTTOMRIGHT", healthFillTexture, "BOTTOMLEFT", 0, 0)
-                            attachedTex:SetWidth(absorbWidth)
-                            attachedTex:SetTexCoord(1 - texStart, 1 - texEnd, 0, 1)
-                        elseif healthOrient == "VERTICAL" then
-                            attachedTex:SetPoint("BOTTOMLEFT", healthFillTexture, "TOPLEFT", 0, 0)
-                            attachedTex:SetPoint("BOTTOMRIGHT", healthFillTexture, "TOPRIGHT", 0, 0)
-                            attachedTex:SetHeight(absorbHeight)
-                            attachedTex:SetTexCoord(0, 1, 1 - texEnd, 1 - texStart)
-                        elseif healthOrient == "VERTICAL_INV" then
-                            attachedTex:SetPoint("TOPLEFT", healthFillTexture, "BOTTOMLEFT", 0, 0)
-                            attachedTex:SetPoint("TOPRIGHT", healthFillTexture, "BOTTOMRIGHT", 0, 0)
-                            attachedTex:SetHeight(absorbHeight)
-                            attachedTex:SetTexCoord(0, 1, texStart, texEnd)
-                        end
-                    else
-                        -- Fallback: position manually
-                        local healthWidth = barWidth * healthPercent
-                        local healthHeight = barHeight * healthPercent
-                        
-                        if healthOrient == "HORIZONTAL" then
-                            attachedTex:SetPoint("TOPLEFT", frame.healthBar, "TOPLEFT", inset + healthWidth, -inset)
-                            attachedTex:SetPoint("BOTTOMLEFT", frame.healthBar, "BOTTOMLEFT", inset + healthWidth, inset)
-                            attachedTex:SetWidth(absorbWidth)
-                            attachedTex:SetTexCoord(texStart, texEnd, 0, 1)
-                        elseif healthOrient == "HORIZONTAL_INV" then
-                            attachedTex:SetPoint("TOPRIGHT", frame.healthBar, "TOPRIGHT", -inset - healthWidth, -inset)
-                            attachedTex:SetPoint("BOTTOMRIGHT", frame.healthBar, "BOTTOMRIGHT", -inset - healthWidth, inset)
-                            attachedTex:SetWidth(absorbWidth)
-                            attachedTex:SetTexCoord(1 - texStart, 1 - texEnd, 0, 1)
-                        elseif healthOrient == "VERTICAL" then
-                            attachedTex:SetPoint("BOTTOMLEFT", frame.healthBar, "BOTTOMLEFT", inset, inset + healthHeight)
-                            attachedTex:SetPoint("BOTTOMRIGHT", frame.healthBar, "BOTTOMRIGHT", -inset, inset + healthHeight)
-                            attachedTex:SetHeight(absorbHeight)
-                            attachedTex:SetTexCoord(0, 1, 1 - texEnd, 1 - texStart)
-                        elseif healthOrient == "VERTICAL_INV" then
-                            attachedTex:SetPoint("TOPLEFT", frame.healthBar, "TOPLEFT", inset, -inset - healthHeight)
-                            attachedTex:SetPoint("TOPRIGHT", frame.healthBar, "TOPRIGHT", -inset, -inset - healthHeight)
-                            attachedTex:SetHeight(absorbHeight)
-                            attachedTex:SetTexCoord(0, 1, texStart, texEnd)
-                        end
-                    end
-                    
-                    attachedTex:Show()
-                end
-            end
-            
-        elseif absorbMode == "OVERLAY" then
-            -- Hide overshield glow for non-ATTACHED modes
-            if frame.absorbOvershieldGlow then frame.absorbOvershieldGlow:Hide() end
-            -- Hide overflow bar for OVERLAY mode
-            if frame.absorbOverflowBar then frame.absorbOverflowBar:Hide() end
-            -- Hide the attached texture (used for ATTACHED mode test display)
-            if frame.absorbAttachedTexture then frame.absorbAttachedTexture:Hide() end
-            
-            -- Overlay mode: fills from right edge toward left (reverse fill)
-            -- Clear any existing anchors first
-            customBar:ClearAllPoints()
-            
-            -- Set parent to health bar for overlay mode
-            customBar:SetParent(frame.healthBar)
-            customBar:SetFrameStrata(frame:GetFrameStrata())
-            
-            -- Set frame level above health bar but below dispel overlay (+6) and highlights (+9)
-            local healthLevel = frame.healthBar:GetFrameLevel()
-            customBar:SetFrameLevel(healthLevel + 2)
-            
-            -- Inset by border size if frame border is enabled to avoid overlap
-            local inset = 0
-            if db.frameShowBorder ~= false then
-                inset = frame.dfReducedMaxHealthClipping and 0 or (db.frameBorderSize or 1)  -- 0 when clipped: the clip edge is internal, no frame border there
-            end
-            customBar:SetPoint("TOPLEFT", frame.healthBar, "TOPLEFT", inset, -inset)
-            customBar:SetPoint("BOTTOMRIGHT", frame.healthBar, "BOTTOMRIGHT", -inset, inset)
-            if customBar.bg then customBar.bg:Hide() end
-            
-            local healthOrient = db.healthOrientation or "HORIZONTAL"
-            local overlayReverse = db.absorbBarOverlayReverse or false
-            
-            -- Match real code logic exactly
-            if healthOrient == "HORIZONTAL" then
-                customBar:SetOrientation("HORIZONTAL")
-                customBar:SetReverseFill(not overlayReverse)
-            elseif healthOrient == "HORIZONTAL_INV" then
-                customBar:SetOrientation("HORIZONTAL")
-                customBar:SetReverseFill(overlayReverse)
-            elseif healthOrient == "VERTICAL" then
-                customBar:SetOrientation("VERTICAL")
-                customBar:SetReverseFill(not overlayReverse)
-            elseif healthOrient == "VERTICAL_INV" then
-                customBar:SetOrientation("VERTICAL")
-                customBar:SetReverseFill(overlayReverse)
-            end
-            
-            local maxHealth = testData.maxHealth or 100000
-            customBar:SetMinMaxValues(0, maxHealth)
-            customBar:SetValue(absorbPercent * maxHealth)
-            customBar:Show()
-        else
-            -- Hide overshield glow for non-ATTACHED modes
-            if frame.absorbOvershieldGlow then frame.absorbOvershieldGlow:Hide() end
-            -- Hide overflow bar for FLOATING mode
-            if frame.absorbOverflowBar then frame.absorbOverflowBar:Hide() end
-            -- Hide the attached texture (used for ATTACHED mode test display)
-            if frame.absorbAttachedTexture then frame.absorbAttachedTexture:Hide() end
-            
-            -- Floating mode
-            -- Clear any existing anchors first
-            customBar:ClearAllPoints()
-            customBar:SetParent(frame)
-            
-            -- Hide briefly to force strata change to take effect
-            local wasShown = customBar:IsShown()
-            if wasShown then customBar:Hide() end
-            
-            -- Apply strata setting
-            local strata = db.absorbBarStrata or "MEDIUM"
-            if strata ~= "SANDWICH" and strata ~= "SANDWICH_LOW" then
-                customBar:SetFrameStrata(strata)
-            else
-                customBar:SetFrameStrata(frame:GetFrameStrata())
-            end
-            
-            -- Apply frame level setting
-            local floatingLevel = db.absorbBarFrameLevel or 10
-            customBar:SetFrameLevel(floatingLevel)
-            
-            if wasShown then customBar:Show() end
-            
-            -- Dimensions & Orientation
-            local orientation = db.absorbBarOrientation or "HORIZONTAL"
-            customBar:SetOrientation(orientation)
-            customBar:SetReverseFill(db.absorbBarReverse or false)
-            
-            local w = db.absorbBarWidth or 50
-            local h = db.absorbBarHeight or 6
-            
-            if orientation == "VERTICAL" then
-                customBar:SetWidth(h)
-                customBar:SetHeight(w)
-            else
-                customBar:SetWidth(w)
-                customBar:SetHeight(h)
-            end
-            
-            local anchor = db.absorbBarAnchor or "CENTER"
-            local x = db.absorbBarX or 0
-            local y = db.absorbBarY or 0
-            customBar:SetPoint(anchor, frame, anchor, x, y)
-            
-            customBar:SetMinMaxValues(0, 1)
-            customBar:SetValue(absorbPercent)
-            
-            if customBar.bg then 
-                customBar.bg:Show()
-                local bgC = db.absorbBarBackgroundColor or {r = 0, g = 0, b = 0, a = 0.5}
-                customBar.bg:SetColorTexture(bgC.r, bgC.g, bgC.b, bgC.a)
-            end
-            customBar:Show()
-        end
-        
-        -- Hide attached texture when not in ATTACHED or ATTACHED_OVERFLOW mode
-        if frame.absorbAttachedTexture and absorbMode ~= "ATTACHED" and absorbMode ~= "ATTACHED_OVERFLOW" then
-            frame.absorbAttachedTexture:Hide()
-        end
-    else
-        customBar:Hide()
-        -- Also hide the attached texture used for ATTACHED mode
-        if frame.absorbAttachedTexture then
-            frame.absorbAttachedTexture:Hide()
-        end
-    end
-end
-
--- Update test heal absorb bar (unified for party and raid)
-function DF:UpdateTestHealAbsorb(frame, testData)
-    if not frame or not frame.healthBar then return end
-    
-    local db = DF:GetFrameDB(frame)
-    local healAbsorbPercent = testData.healAbsorbPercent or 0
-    local healthPercent = testData.healthPercent or 0.75
-    
-    -- Create bar if needed
-    if not frame.dfHealAbsorbBar then
-        frame.dfHealAbsorbBar = CreateFrame("StatusBar", nil, frame)
-        frame.dfHealAbsorbBar:SetMinMaxValues(0, 1)
-        frame.dfHealAbsorbBar:EnableMouse(false)
-        local bg = frame.dfHealAbsorbBar:CreateTexture(nil, "BACKGROUND")
-        bg:SetAllPoints(true)
-        bg:SetColorTexture(0, 0, 0, 0.5)
-        frame.dfHealAbsorbBar.bg = bg
-    end
-    
-    local customBar = frame.dfHealAbsorbBar
-    local healAbsorbMode = db.healAbsorbBarMode or "OVERLAY"
-    local healAbsorbColor = db.healAbsorbBarColor or {r = 0.4, g = 0.1, b = 0.1, a = 0.7}
-    
-    -- Set texture exactly like live code (only when texture changes)
-    local tex = db.healAbsorbBarTexture or "Interface\\Buttons\\WHITE8x8"
-    if customBar.currentTexture ~= tex then
-        customBar.currentTexture = tex
-        if tex == "Interface\\RaidFrame\\Shield-Overlay" then
-            customBar:SetStatusBarTexture(tex)
-            local barTex = customBar:GetStatusBarTexture()
-            if barTex then
-                barTex:SetHorizTile(true)
-                barTex:SetVertTile(true)
-                barTex:SetTexCoord(0, 2, 0, 1)
-                barTex:SetDesaturated(true)
-            end
-        else
-            customBar:SetStatusBarTexture(tex)
-            local barTex = customBar:GetStatusBarTexture()
-            if barTex then
-                barTex:SetHorizTile(false)
-                barTex:SetVertTile(false)
-                barTex:SetTexCoord(0, 1, 0, 1)
-                barTex:SetDesaturated(false)
-            end
-        end
-    end
-    
-    if healAbsorbPercent > 0 then
-        customBar:SetStatusBarColor(healAbsorbColor.r, healAbsorbColor.g, healAbsorbColor.b, healAbsorbColor.a or 0.7)
-        
-        if healAbsorbMode == "ATTACHED" then
-            -- ATTACHED mode: Use a plain texture with proper TexCoords for texture alignment
-            -- This ensures the heal absorb bar texture continues seamlessly from the health bar
-            
-            -- Hide the StatusBar immediately - we use a plain texture for ATTACHED mode
-            customBar:Hide()
-            if customBar.bg then customBar.bg:Hide() end
-            
-            -- Hide any existing overshield glow (not used for heal absorbs)
-            if frame.healAbsorbOvershieldGlow then
-                frame.healAbsorbOvershieldGlow:Hide()
-            end
-            
-            local inset = 0
-            if db.frameShowBorder ~= false then
-                inset = frame.dfReducedMaxHealthClipping and 0 or (db.frameBorderSize or 1)  -- 0 when clipped: the clip edge is internal, no frame border there
-            end
-            
-            local barWidth = frame.healthBar:GetWidth() - (inset * 2)
-            local barHeight = frame.healthBar:GetHeight() - (inset * 2)
-            local healthOrient = db.healthOrientation or "HORIZONTAL"
-            
-            -- Clamp heal absorb at current health (can't go past 0)
-            local clampedHealAbsorbPercent = math.min(healAbsorbPercent, healthPercent)
-            
-            -- Get the health fill texture to anchor to
-            local healthFillTexture = frame.healthBar:GetStatusBarTexture()
-            
-            -- Calculate heal absorb bar size - only scale in the direction of the bar
-            local isHorizontal = (healthOrient == "HORIZONTAL" or healthOrient == "HORIZONTAL_INV")
-            local healAbsorbWidth = isHorizontal and (barWidth * clampedHealAbsorbPercent) or barWidth
-            local healAbsorbHeight = isHorizontal and barHeight or (barHeight * clampedHealAbsorbPercent)
-            
-            -- Create or reuse attached texture for proper alignment
-            if not frame.healAbsorbAttachedTexture then
-                frame.healAbsorbAttachedTexture = frame.healthBar:CreateTexture(nil, "ARTWORK", nil, 3)
-            end
-            local attachedTex = frame.healAbsorbAttachedTexture
-            
-            -- Only hide when health is essentially 0 (no bar to anchor to) or bar would be too small to render
-            local relevantSize = isHorizontal and healAbsorbWidth or healAbsorbHeight
-            if healthPercent < 0.001 or relevantSize < 1 then
-                attachedTex:Hide()
-            else
-                -- Use the same texture as the heal absorb bar
-                local healAbsorbTexture = db.healAbsorbBarTexture or "Interface\\TargetingFrame\\UI-StatusBar"
-                if type(healAbsorbTexture) == "table" then
-                    healAbsorbTexture = healAbsorbTexture.path or "Interface\\TargetingFrame\\UI-StatusBar"
-                end
-                attachedTex:SetTexture(healAbsorbTexture)
-                attachedTex:SetVertexColor(healAbsorbColor.r, healAbsorbColor.g, healAbsorbColor.b, healAbsorbColor.a or 0.7)
-                
-                -- Apply blend mode
-                local blendMode = db.healAbsorbBarBlendMode or "BLEND"
-                attachedTex:SetBlendMode(blendMode)
-                
-                attachedTex:ClearAllPoints()
-                
-                -- Calculate proper texture coordinates
-                -- Heal absorb extends INWARD from health fill edge toward 0
-                -- texStart = where heal absorb starts (at health edge), texEnd = where it ends (toward 0)
-                local texStart = healthPercent - clampedHealAbsorbPercent
-                local texEnd = healthPercent
-                
-                if healthFillTexture then
-                    if healthOrient == "HORIZONTAL" then
-                        -- Heal absorb at right edge of health fill, extending left
-                        attachedTex:SetPoint("TOPRIGHT", healthFillTexture, "TOPRIGHT", 0, 0)
-                        attachedTex:SetPoint("BOTTOMRIGHT", healthFillTexture, "BOTTOMRIGHT", 0, 0)
-                        attachedTex:SetWidth(healAbsorbWidth)
-                        attachedTex:SetTexCoord(texStart, texEnd, 0, 1)
-                    elseif healthOrient == "HORIZONTAL_INV" then
-                        -- Heal absorb at left edge of health fill, extending right
-                        attachedTex:SetPoint("TOPLEFT", healthFillTexture, "TOPLEFT", 0, 0)
-                        attachedTex:SetPoint("BOTTOMLEFT", healthFillTexture, "BOTTOMLEFT", 0, 0)
-                        attachedTex:SetWidth(healAbsorbWidth)
-                        attachedTex:SetTexCoord(1 - texEnd, 1 - texStart, 0, 1)
-                    elseif healthOrient == "VERTICAL" then
-                        -- Heal absorb at top edge of health fill, extending down
-                        attachedTex:SetPoint("TOPLEFT", healthFillTexture, "TOPLEFT", 0, 0)
-                        attachedTex:SetPoint("TOPRIGHT", healthFillTexture, "TOPRIGHT", 0, 0)
-                        attachedTex:SetHeight(healAbsorbHeight)
-                        attachedTex:SetTexCoord(0, 1, 1 - texEnd, 1 - texStart)
-                    elseif healthOrient == "VERTICAL_INV" then
-                        -- Heal absorb at bottom edge of health fill, extending up
-                        attachedTex:SetPoint("BOTTOMLEFT", healthFillTexture, "BOTTOMLEFT", 0, 0)
-                        attachedTex:SetPoint("BOTTOMRIGHT", healthFillTexture, "BOTTOMRIGHT", 0, 0)
-                        attachedTex:SetHeight(healAbsorbHeight)
-                        attachedTex:SetTexCoord(0, 1, texStart, texEnd)
-                    end
-                else
-                    -- Fallback: position manually
-                    local healthWidth = barWidth * healthPercent
-                    local healthHeight = barHeight * healthPercent
-                    
-                    if healthOrient == "HORIZONTAL" then
-                        attachedTex:SetPoint("TOPRIGHT", frame.healthBar, "TOPLEFT", inset + healthWidth, -inset)
-                        attachedTex:SetPoint("BOTTOMRIGHT", frame.healthBar, "BOTTOMLEFT", inset + healthWidth, inset)
-                        attachedTex:SetWidth(healAbsorbWidth)
-                        attachedTex:SetTexCoord(texStart, texEnd, 0, 1)
-                    elseif healthOrient == "HORIZONTAL_INV" then
-                        attachedTex:SetPoint("TOPLEFT", frame.healthBar, "TOPRIGHT", -inset - healthWidth, -inset)
-                        attachedTex:SetPoint("BOTTOMLEFT", frame.healthBar, "BOTTOMRIGHT", -inset - healthWidth, inset)
-                        attachedTex:SetWidth(healAbsorbWidth)
-                        attachedTex:SetTexCoord(1 - texEnd, 1 - texStart, 0, 1)
-                    elseif healthOrient == "VERTICAL" then
-                        attachedTex:SetPoint("TOPLEFT", frame.healthBar, "BOTTOMLEFT", inset, inset + healthHeight)
-                        attachedTex:SetPoint("TOPRIGHT", frame.healthBar, "BOTTOMRIGHT", -inset, inset + healthHeight)
-                        attachedTex:SetHeight(healAbsorbHeight)
-                        attachedTex:SetTexCoord(0, 1, 1 - texEnd, 1 - texStart)
-                    elseif healthOrient == "VERTICAL_INV" then
-                        attachedTex:SetPoint("BOTTOMLEFT", frame.healthBar, "TOPLEFT", inset, -inset - healthHeight)
-                        attachedTex:SetPoint("BOTTOMRIGHT", frame.healthBar, "TOPRIGHT", -inset, -inset - healthHeight)
-                        attachedTex:SetHeight(healAbsorbHeight)
-                        attachedTex:SetTexCoord(0, 1, texStart, texEnd)
-                    end
-                end
-                
-                attachedTex:Show()
-            end
-            
-        elseif healAbsorbMode == "OVERLAY" then
-            -- Hide overshield glow for non-ATTACHED modes
-            if frame.healAbsorbOvershieldGlow then frame.healAbsorbOvershieldGlow:Hide() end
-            -- Hide attached texture for non-ATTACHED modes
-            if frame.healAbsorbAttachedTexture then frame.healAbsorbAttachedTexture:Hide() end
-            
-            -- Clear any existing anchors first
-            customBar:ClearAllPoints()
-            
-            -- Set parent to health bar for overlay mode
-            customBar:SetParent(frame.healthBar)
-            customBar:SetFrameStrata(frame:GetFrameStrata())
-            
-            -- Set frame level above health bar
-            local healthLevel = frame.healthBar:GetFrameLevel()
-            customBar:SetFrameLevel(healthLevel + 2)
-            
-            -- Inset by border size if frame border is enabled to avoid overlap
-            local inset = 0
-            if db.frameShowBorder ~= false then
-                inset = frame.dfReducedMaxHealthClipping and 0 or (db.frameBorderSize or 1)  -- 0 when clipped: the clip edge is internal, no frame border there
-            end
-            customBar:SetPoint("TOPLEFT", frame.healthBar, "TOPLEFT", inset, -inset)
-            customBar:SetPoint("BOTTOMRIGHT", frame.healthBar, "BOTTOMRIGHT", -inset, inset)
-            if customBar.bg then customBar.bg:Hide() end
-            
-            -- Match real code logic exactly - heal absorbs fill from low HP side
-            local healthOrient = db.healthOrientation or "HORIZONTAL"
-            local overlayReverse = db.healAbsorbBarOverlayReverse or false
-            
-            if healthOrient == "HORIZONTAL" then
-                customBar:SetOrientation("HORIZONTAL")
-                customBar:SetReverseFill(overlayReverse)
-            elseif healthOrient == "HORIZONTAL_INV" then
-                customBar:SetOrientation("HORIZONTAL")
-                customBar:SetReverseFill(not overlayReverse)
-            elseif healthOrient == "VERTICAL" then
-                customBar:SetOrientation("VERTICAL")
-                customBar:SetReverseFill(overlayReverse)
-            elseif healthOrient == "VERTICAL_INV" then
-                customBar:SetOrientation("VERTICAL")
-                customBar:SetReverseFill(not overlayReverse)
-            end
-            
-            local maxHealth = testData.maxHealth or 100000
-            customBar:SetMinMaxValues(0, maxHealth)
-            customBar:SetValue(healAbsorbPercent * maxHealth)
-            customBar:Show()
-        else
-            -- Hide overshield glow for non-ATTACHED modes
-            if frame.healAbsorbOvershieldGlow then frame.healAbsorbOvershieldGlow:Hide() end
-            -- Hide attached texture for non-ATTACHED modes
-            if frame.healAbsorbAttachedTexture then frame.healAbsorbAttachedTexture:Hide() end
-            
-            -- FLOATING mode
-            customBar:ClearAllPoints()
-            customBar:SetParent(frame)
-            customBar:SetFrameStrata(frame:GetFrameStrata())
-            
-            local floatingLevel = db.healAbsorbBarFrameLevel or 10
-            customBar:SetFrameLevel(floatingLevel)
-            
-            local orientation = db.healAbsorbBarOrientation or "HORIZONTAL"
-            customBar:SetOrientation(orientation)
-            customBar:SetReverseFill(db.healAbsorbBarReverse or false)
-            
-            local w = db.healAbsorbBarWidth or 50
-            local h = db.healAbsorbBarHeight or 6
-            
-            if orientation == "VERTICAL" then
-                customBar:SetWidth(h)
-                customBar:SetHeight(w)
-            else
-                customBar:SetWidth(w)
-                customBar:SetHeight(h)
-            end
-            
-            local anchor = db.healAbsorbBarAnchor or "CENTER"
-            local x = db.healAbsorbBarX or 0
-            local y = db.healAbsorbBarY or 0
-            customBar:SetPoint(anchor, frame, anchor, x, y)
-            
-            customBar:SetMinMaxValues(0, 1)
-            customBar:SetValue(healAbsorbPercent)
-            if customBar.bg then customBar.bg:Show() end
-            customBar:Show()
-        end
-    else
-        customBar:Hide()
-        -- Also hide the attached texture used for ATTACHED mode
-        if frame.healAbsorbAttachedTexture then
-            frame.healAbsorbAttachedTexture:Hide()
-        end
-    end
-end
-
--- Update test heal prediction bar (unified for party and raid)
-function DF:UpdateTestHealPrediction(frame, testData)
-    if not frame or not frame.healthBar then return end
-    
-    local db = DF:GetFrameDB(frame)
-    
-    -- Check if heal prediction is enabled
-    if not db.healPredictionEnabled then
-        if frame.dfHealPredictionBar then
-            frame.dfHealPredictionBar:Hide()
-        end
-        return
-    end
-    
-    local healPredictionPercent = testData.healPredictionPercent or 0
-    local healthPercent = testData.healthPercent or 0.75
-    
-    -- Create bar if needed
-    if not frame.dfHealPredictionBar then
-        frame.dfHealPredictionBar = CreateFrame("StatusBar", nil, frame)
-        frame.dfHealPredictionBar:SetMinMaxValues(0, 1)
-        frame.dfHealPredictionBar:EnableMouse(false)
-        local bg = frame.dfHealPredictionBar:CreateTexture(nil, "BACKGROUND")
-        bg:SetAllPoints(true)
-        bg:SetColorTexture(0, 0, 0, 0.5)
-        frame.dfHealPredictionBar.bg = bg
-    end
-    
-    local customBar = frame.dfHealPredictionBar
-    local mode = db.healPredictionMode or "OVERLAY"
-    local showMode = db.healPredictionShowMode or "ALL"
-    
-    -- Get color based on show mode
-    local color
-    if showMode == "MINE" then
-        color = db.healPredictionMyColor or {r = 0.0, g = 0.8, b = 0.2, a = 0.7}
-    elseif showMode == "OTHERS" then
-        color = db.healPredictionOthersColor or {r = 0.0, g = 0.5, b = 0.8, a = 0.7}
-    else
-        color = db.healPredictionAllColor or {r = 0.0, g = 0.7, b = 0.4, a = 0.7}
-    end
-    
-    -- Show heal prediction if there's incoming heals AND either:
-    -- 1. Health is not full, OR
-    -- 2. Show overheal is enabled
-    local showOverheal = db.healPredictionShowOverheal
-    if healPredictionPercent > 0 and (healthPercent < 1 or showOverheal) then
-        -- Set texture exactly like live code (only when texture changes)
-        local tex = db.healPredictionTexture or "Interface\\Buttons\\WHITE8x8"
-        if customBar.currentTexture ~= tex then
-            customBar.currentTexture = tex
-            customBar:SetStatusBarTexture(tex)
-            local barTex = customBar:GetStatusBarTexture()
-            if barTex then
-                barTex:SetHorizTile(false)
-                barTex:SetVertTile(false)
-                barTex:SetTexCoord(0, 1, 0, 1)
-            end
-        end
-        customBar:SetStatusBarColor(color.r, color.g, color.b, color.a or 0.7)
-        
-        if mode == "OVERLAY" then
-            -- OVERLAY mode: Anchor to health fill texture like absorbs do in ATTACHED
-            customBar:ClearAllPoints()
-            
-            -- Parent to frame (not healthBar) to avoid clipping when showing overheal
-            customBar:SetParent(frame)
-            customBar:SetFrameStrata(frame:GetFrameStrata())
-            
-            -- For OVERLAY mode, disable tiling in narrow bars (like ATTACHED absorbs)
-            local overlayBarTex = customBar:GetStatusBarTexture()
-            if overlayBarTex then
-                overlayBarTex:SetHorizTile(false)
-                overlayBarTex:SetVertTile(false)
-                overlayBarTex:SetTexCoord(0, 1, 0, 1)
-            end
-            
-            -- Set frame level above health bar but below resource bar (which is at +2)
-            local healthLevel = frame.healthBar:GetFrameLevel()
-            customBar:SetFrameLevel(healthLevel + 1)
-            
-            -- Inset by border size if frame border is enabled to avoid overlap
-            local inset = 0
-            if db.frameShowBorder ~= false then
-                inset = frame.dfReducedMaxHealthClipping and 0 or (db.frameBorderSize or 1)  -- 0 when clipped: the clip edge is internal, no frame border there
-            end
-            
-            local barWidth = frame.healthBar:GetWidth() - (inset * 2)
-            local barHeight = frame.healthBar:GetHeight() - (inset * 2)
-            
-            local healthOrient = db.healthOrientation or "HORIZONTAL"
-            
-            -- Calculate the missing health and clamp heal to not exceed it (unless showOverheal is enabled)
-            local missingPercent = 1 - healthPercent
-            local clampedHealPercent
-            if showOverheal then
-                clampedHealPercent = healPredictionPercent  -- Show full overheal
-            else
-                clampedHealPercent = math.min(healPredictionPercent, missingPercent)
-            end
-            
-            -- Get the health fill texture to anchor to
-            local healthFillTexture = frame.healthBar:GetStatusBarTexture()
-            
-            -- Calculate heal prediction bar size
-            local healWidth = barWidth * clampedHealPercent
-            local healHeight = barHeight * clampedHealPercent
-            
-            if healthFillTexture then
-                -- Anchor to health fill texture edge using two-point anchoring for exact height match
-                if healthOrient == "HORIZONTAL" then
-                    customBar:SetOrientation("HORIZONTAL")
-                    customBar:SetReverseFill(false)
-                    customBar:SetWidth(healWidth)
-                    customBar:SetPoint("TOPLEFT", healthFillTexture, "TOPRIGHT", 0, 0)
-                    customBar:SetPoint("BOTTOMLEFT", healthFillTexture, "BOTTOMRIGHT", 0, 0)
-                elseif healthOrient == "HORIZONTAL_INV" then
-                    customBar:SetOrientation("HORIZONTAL")
-                    customBar:SetReverseFill(true)
-                    customBar:SetWidth(healWidth)
-                    customBar:SetPoint("TOPRIGHT", healthFillTexture, "TOPLEFT", 0, 0)
-                    customBar:SetPoint("BOTTOMRIGHT", healthFillTexture, "BOTTOMLEFT", 0, 0)
-                elseif healthOrient == "VERTICAL" then
-                    customBar:SetOrientation("VERTICAL")
-                    customBar:SetReverseFill(false)
-                    customBar:SetHeight(healHeight)
-                    customBar:SetPoint("BOTTOMLEFT", healthFillTexture, "TOPLEFT", 0, 0)
-                    customBar:SetPoint("BOTTOMRIGHT", healthFillTexture, "TOPRIGHT", 0, 0)
-                elseif healthOrient == "VERTICAL_INV" then
-                    customBar:SetOrientation("VERTICAL")
-                    customBar:SetReverseFill(true)
-                    customBar:SetHeight(healHeight)
-                    customBar:SetPoint("TOPLEFT", healthFillTexture, "BOTTOMLEFT", 0, 0)
-                    customBar:SetPoint("TOPRIGHT", healthFillTexture, "BOTTOMRIGHT", 0, 0)
-                end
-            else
-                -- Fallback: calculate position manually with two-point anchoring
-                local healthWidth = barWidth * healthPercent
-                local healthHeight = barHeight * healthPercent
-                
-                if healthOrient == "HORIZONTAL" then
-                    customBar:SetOrientation("HORIZONTAL")
-                    customBar:SetReverseFill(false)
-                    customBar:SetWidth(healWidth)
-                    customBar:SetPoint("TOPLEFT", frame.healthBar, "TOPLEFT", inset + healthWidth, -inset)
-                    customBar:SetPoint("BOTTOMLEFT", frame.healthBar, "BOTTOMLEFT", inset + healthWidth, inset)
-                elseif healthOrient == "HORIZONTAL_INV" then
-                    customBar:SetOrientation("HORIZONTAL")
-                    customBar:SetReverseFill(true)
-                    customBar:SetWidth(healWidth)
-                    customBar:SetPoint("TOPRIGHT", frame.healthBar, "TOPRIGHT", -inset - healthWidth, -inset)
-                    customBar:SetPoint("BOTTOMRIGHT", frame.healthBar, "BOTTOMRIGHT", -inset - healthWidth, inset)
-                elseif healthOrient == "VERTICAL" then
-                    customBar:SetOrientation("VERTICAL")
-                    customBar:SetReverseFill(false)
-                    customBar:SetHeight(healHeight)
-                    customBar:SetPoint("BOTTOMLEFT", frame.healthBar, "BOTTOMLEFT", inset, inset + healthHeight)
-                    customBar:SetPoint("BOTTOMRIGHT", frame.healthBar, "BOTTOMRIGHT", -inset, inset + healthHeight)
-                elseif healthOrient == "VERTICAL_INV" then
-                    customBar:SetOrientation("VERTICAL")
-                    customBar:SetReverseFill(true)
-                    customBar:SetHeight(healHeight)
-                    customBar:SetPoint("TOPLEFT", frame.healthBar, "TOPLEFT", inset, -inset - healthHeight)
-                    customBar:SetPoint("TOPRIGHT", frame.healthBar, "TOPRIGHT", -inset, -inset - healthHeight)
-                end
-            end
-            
-            customBar:SetMinMaxValues(0, 1)
-            customBar:SetValue(1)
-            if customBar.bg then customBar.bg:Hide() end
-        else
-            -- Floating mode - need to set position and size
-            customBar:ClearAllPoints()
-            customBar:SetParent(frame)
-            customBar:SetFrameStrata(frame:GetFrameStrata())
-            
-            local healthLevel = frame.healthBar:GetFrameLevel()
-            local floatingLevel = db.healPredictionFrameLevel or 12
-            customBar:SetFrameLevel(floatingLevel)
-            
-            local orientation = db.healPredictionOrientation or "HORIZONTAL"
-            customBar:SetOrientation(orientation)
-            customBar:SetReverseFill(db.healPredictionReverse or false)
-            
-            local w = db.healPredictionWidth or 50
-            local h = db.healPredictionHeight or 6
-            
-            if orientation == "VERTICAL" then
-                customBar:SetWidth(h)
-                customBar:SetHeight(w)
-            else
-                customBar:SetWidth(w)
-                customBar:SetHeight(h)
-            end
-            
-            local anchor = db.healPredictionAnchor or "CENTER"
-            local x = db.healPredictionX or 0
-            local y = db.healPredictionY or 0
-            customBar:SetPoint(anchor, frame, anchor, x, y)
-            
-            customBar:SetMinMaxValues(0, 1)
-            customBar:SetValue(healPredictionPercent)
-            
-            if customBar.bg then 
-                customBar.bg:Show() 
-                local bgC = db.healPredictionBackgroundColor or {r = 0, g = 0, b = 0, a = 0.5}
-                customBar.bg:SetColorTexture(bgC.r, bgC.g, bgC.b, bgC.a)
-            end
-        end
-        customBar:Show()
-    else
-        customBar:Hide()
     end
 end
 
@@ -3797,17 +2747,6 @@ end
 
 -- Throttled layout refresh for slider changes (avoids flickering)
 DF.lastLayoutRefresh = 0
-function DF:RefreshTestFramesWithLayoutThrottled()
-    local now = GetTime()
-    -- Only apply layout once every 0.3 seconds to prevent flickering during slider drags
-    if now - DF.lastLayoutRefresh < 0.3 then
-        -- Just do a regular refresh without layout
-        DF:RefreshTestFrames()
-        return
-    end
-    DF.lastLayoutRefresh = now
-    DF:RefreshTestFramesWithLayout()
-end
 
 function DF:HideTestFrames(silent)
     DF.testMode = false
@@ -4802,37 +3741,6 @@ end
 -- TEST MODE HELPER FUNCTIONS
 -- ============================================================
 
--- Test dispel glow - uses the real dispel overlay system
-function DF:UpdateTestDispelGlow(frame, dispelType)
-    -- The real dispel overlay system already handles test mode
-    -- Just call it directly
-    if DF.UpdateDispelOverlay then
-        DF:UpdateDispelOverlay(frame)
-    end
-end
-
-function DF:ClearTestDispelGlow(frame)
-    -- Hide the real dispel overlay
-    if frame and frame.dfDispelOverlay then
-        local overlay = frame.dfDispelOverlay
-        if overlay.borderTop then overlay.borderTop:Hide() end
-        if overlay.borderBottom then overlay.borderBottom:Hide() end
-        if overlay.borderLeft then overlay.borderLeft:Hide() end
-        if overlay.borderRight then overlay.borderRight:Hide() end
-        if overlay.gradient then overlay.gradient:Hide() end
-        -- Hide edge gradients (EDGE style)
-        if overlay.gradientTop then overlay.gradientTop:Hide() end
-        if overlay.gradientBottom then overlay.gradientBottom:Hide() end
-        if overlay.gradientLeft then overlay.gradientLeft:Hide() end
-        if overlay.gradientRight then overlay.gradientRight:Hide() end
-        if overlay.icons then
-            for _, icon in pairs(overlay.icons) do
-                icon:Hide()
-            end
-        end
-    end
-end
-
 function DF:UpdateAllTestDispelGlow()
     -- Safety check - Dispel module may not be loaded yet
     if not DF.UpdateDispelOverlay then return end
@@ -5110,21 +4018,9 @@ local function RenderTestDefensiveIcon(icon, db, textureID, iconSize, borderSize
     icon:Show()
 end
 
--- Growth direction helper for test defensive bar positioning
-local function GetTestDefGrowthOffset(direction, iconSize, pad)
-    if direction == "LEFT" then
-        return -(iconSize + pad), 0
-    elseif direction == "RIGHT" then
-        return iconSize + pad, 0
-    elseif direction == "UP" then
-        return 0, iconSize + pad
-    elseif direction == "DOWN" then
-        return 0, -(iconSize + pad)
-    end
-    return 0, 0
-end
-
 -- Test defensive icon — supports multiple icons with growth/wrap layout
+-- (positioning goes through the shared DF:GetDefensiveBarLayout /
+-- PositionDefensiveBarIcon / ApplyDefensiveBarCenterGrowth in Frames/Icons.lua)
 function DF:UpdateTestDefensiveBar(frame, testData)
     if not frame or not frame.defensiveIcon then return end
 
@@ -5134,21 +4030,14 @@ function DF:UpdateTestDefensiveBar(frame, testData)
     local showIcon = testData and (testData.role == "TANK" or testData.role == "HEALER")
 
     if db.defensiveIconEnabled and showIcon then
-        local iconSize = db.defensiveIconSize or 24
-        local borderSize = db.defensiveIconBorderSize or 2
+        -- Shared layout math — the exact code live uses (pixel-perfect scale
+        -- fold + pixel-grid snap included, which the old test copy skipped).
+        local L = DF:GetDefensiveBarLayout(db)
+        local iconSize, borderSize = L.iconSize, L.borderSize
+        local maxDefs = L.maxDefs
         local borderColor = db.defensiveIconBorderColor or {r = 0, g = 0.8, b = 0, a = 1}
-        local anchor = db.defensiveIconAnchor or "CENTER"
-        local baseX = db.defensiveIconX or 0
-        local baseY = db.defensiveIconY or 0
-        local scale = db.defensiveIconScale or 1.0
         local showDuration = db.defensiveIconShowDuration ~= false
         local showBorder = db.defensiveIconShowBorder ~= false
-
-        -- Apply pixel perfect to border size
-        if db.pixelPerfect then
-            borderSize = DF:PixelPerfect(borderSize)
-            iconSize = DF:PixelPerfect(iconSize)
-        end
 
         -- Duration text settings
         local durationScale = db.defensiveIconDurationScale or 1.0
@@ -5159,12 +4048,6 @@ function DF:UpdateTestDefensiveBar(frame, testData)
         local durationY = db.defensiveIconDurationY or 0
         local durationColor = db.defensiveIconDurationColor or {r = 1, g = 1, b = 1}
 
-        -- Layout settings for multi-icon
-        local maxDefs = db.defensiveBarMax or 4
-        local spacing = db.defensiveBarSpacing or 2
-        local growth = db.defensiveBarGrowth or "RIGHT_DOWN"
-        local wrap = db.defensiveBarWrap or 5
-
         -- Determine how many defensives to show based on role
         -- Tanks show more defensives, healers show fewer
         local numDefs
@@ -5173,15 +4056,6 @@ function DF:UpdateTestDefensiveBar(frame, testData)
         else
             numDefs = math.min(1, maxDefs)
         end
-
-        -- Parse compound growth direction
-        local primary, secondary = strsplit("_", growth)
-        primary = primary or "RIGHT"
-        secondary = secondary or "DOWN"
-
-        local scaledSize = iconSize * scale
-        local primaryX, primaryY = GetTestDefGrowthOffset(primary, iconSize, spacing)
-        local secondaryX, secondaryY = GetTestDefGrowthOffset(secondary, iconSize, spacing)
 
         -- Render each test defensive icon
         for i = 1, numDefs do
@@ -5193,73 +4067,12 @@ function DF:UpdateTestDefensiveBar(frame, testData)
                 local elapsed = GetTime() % duration
 
                 RenderTestDefensiveIcon(icon, db, TEST_DEFENSIVE_SPELLS[spellIndex], iconSize, borderSize, borderColor, showBorder, showDuration, durationScale, durationFont, durationOutline, durationX, durationY, durationColor, elapsed, duration)
-
-                -- Position the icon using wrap grid layout
-                local idx = i - 1  -- 0-based
-                local row = math.floor(idx / wrap)
-                local col = idx % wrap
-
-                local offsetX = (col * primaryX) + (row * secondaryX)
-                local offsetY = (col * primaryY) + (row * secondaryY)
-
-                icon:SetScale(scale)
-                icon:ClearAllPoints()
-                icon:SetPoint(anchor, frame, anchor, baseX + offsetX, baseY + offsetY)
-
-                -- Frame level
-                local frameLevel = db.defensiveIconFrameLevel or 0
-                if frameLevel == 0 then
-                    -- +26: above the buff/debuff auras (frame+40) and their
-                    -- borders, so the defensive alert sits on top.  Mirrors the
-                    -- live UpdateDefensiveBar + Core.lua auto re-level.
-                    icon:SetFrameLevel(frame.contentOverlay:GetFrameLevel() + 26)
-                else
-                    icon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
-                end
+                DF:PositionDefensiveBarIcon(frame, db, L, icon, i)
             end
         end
 
         -- CENTER growth: second pass to center icons within each row/column
-        -- Mirrors DF:RepositionCenterGrowthIcons from Features/Auras.lua
-        if primary == "CENTER" and numDefs > 0 then
-            local isHorizontalGrowth = (secondary == "LEFT" or secondary == "RIGHT")
-
-            if isHorizontalGrowth then
-                -- Vertical stacking (centered), horizontal column growth
-                local secX = secondaryX
-                for i = 1, numDefs do
-                    local icon = DF:GetOrCreateDefensiveBarIcon(frame, i)
-                    if icon then
-                        local idx = i - 1
-                        local col = math.floor(idx / wrap)
-                        local row = idx % wrap
-                        local iconsInCol = math.min(wrap, numDefs - (col * wrap))
-                        local centerOffset = (iconsInCol - 1) * (iconSize + spacing) / 2
-                        local x = baseX + (col * secX)
-                        local y = baseY - (row * (iconSize + spacing)) + centerOffset
-                        icon:ClearAllPoints()
-                        icon:SetPoint(anchor, frame, anchor, x, y)
-                    end
-                end
-            else
-                -- Horizontal stacking (centered), vertical row growth
-                local secY = secondaryY
-                for i = 1, numDefs do
-                    local icon = DF:GetOrCreateDefensiveBarIcon(frame, i)
-                    if icon then
-                        local idx = i - 1
-                        local row = math.floor(idx / wrap)
-                        local col = idx % wrap
-                        local iconsInRow = math.min(wrap, numDefs - (row * wrap))
-                        local centerOffset = (iconsInRow - 1) * (iconSize + spacing) / 2
-                        local x = baseX + (col * (iconSize + spacing)) - centerOffset
-                        local y = baseY + (row * secY)
-                        icon:ClearAllPoints()
-                        icon:SetPoint(anchor, frame, anchor, x, y)
-                    end
-                end
-            end
-        end
+        DF:ApplyDefensiveBarCenterGrowth(frame, L, numDefs)
 
         -- Hide remaining icons beyond what we're showing
         for i = numDefs + 1, maxDefs do
@@ -5278,11 +4091,6 @@ function DF:UpdateTestDefensiveBar(frame, testData)
             end
         end
     end
-end
-
--- Legacy wrapper for backwards compatibility
-function DF:UpdateTestExternalDef(frame, testData)
-    DF:UpdateTestDefensiveBar(frame, testData)
 end
 
 function DF:UpdateAllTestDefensiveBar()
@@ -5333,11 +4141,6 @@ function DF:UpdateAllTestDefensiveBar()
             end
         end
     end
-end
-
--- Legacy wrapper for backwards compatibility
-function DF:UpdateAllTestExternalDef()
-    DF:UpdateAllTestDefensiveBar()
 end
 
 
@@ -6711,7 +5514,12 @@ function DF:CreateTestPanel()
         self.badge.text:SetTextColor(themeColor.r, themeColor.g, themeColor.b)
 
         -- Toggle button: SetActive drives the accent fill/border when test is on;
-        -- we set the label + (active) accent text colour to match.
+        -- we set the label + (active) accent text colour to match. SetActive repaints
+        -- the resting fill, but the hover wash (the HIGHLIGHT texture) is only re-tinted
+        -- by ApplyThemeColor — the toggle's UpdateTheme listener lives on the test panel,
+        -- which nothing walks on a mode switch, so refresh it here or the wash stays
+        -- frozen at the mode the panel was first opened in.
+        if self.toggleBtn.ApplyThemeColor then self.toggleBtn.ApplyThemeColor(themeColor) end
         self.toggleBtn:SetActive(testActive)
         if testActive then
             self.toggleBtn.Text:SetText(L["Disable Test Mode"])

@@ -82,7 +82,6 @@ local mockSourceInstance  -- singleton — mock data is shared
 local MockSource = {}
 MockSource.__index = MockSource
 
-function MockSource:_isMock() return true end
 -- Marks the single preview mock unit (NOT the per-frame test source). The
 -- status_text resolver uses this to show a sample status in the preview even
 -- though the mock unit is "alive", so the element is visible/stylable. Test
@@ -104,10 +103,8 @@ function MockSource:GetHPDeficit() return MOCK_DATA.hpDeficit end
 function MockSource:GetHPMaxReductionPct() return MOCK_DATA.hpMaxReductionPct end
 
 function MockSource:GetPowerCurrent() return MOCK_DATA.powerCurrent end
-function MockSource:GetPowerMax() return MOCK_DATA.powerMax end
 function MockSource:GetPowerPercent() return MOCK_DATA.powerPercent end
 function MockSource:GetPowerDeficit() return MOCK_DATA.powerDeficit end
-function MockSource:GetPowerTypeToken() return MOCK_DATA.powerTypeToken end
 function MockSource:GetPowerTypeString() return MOCK_DATA.powerTypeString end
 
 function MockSource:GetAbsorbAmount() return MOCK_DATA.absorbAmount end
@@ -142,8 +139,6 @@ DataSource.MOCK_DATA = MOCK_DATA  -- expose so Preview can read it for chrome re
 
 local LiveSource = {}
 LiveSource.__index = LiveSource
-
-function LiveSource:_isMock() return false end
 
 function LiveSource:GetName()
     if DF.GetFrameName then return DF:GetFrameName(self.unit) end
@@ -221,10 +216,6 @@ function LiveSource:GetPowerCurrent()
     return UnitPower(self.unit)
 end
 
-function LiveSource:GetPowerMax()
-    return UnitPowerMax(self.unit)
-end
-
 function LiveSource:GetPowerPercent()
     if _G.UnitPowerPercent then
         return UnitPowerPercent(self.unit, nil, false, getMS().ScaleTo100)
@@ -237,11 +228,6 @@ function LiveSource:GetPowerDeficit()
         return UnitPowerMissing(self.unit)
     end
     return nil
-end
-
-function LiveSource:GetPowerTypeToken()
-    local _, token = UnitPowerType(self.unit)
-    return token or "MANA"
 end
 
 -- "RUNIC_POWER" -> "Runic Power", "FOCUS" -> "Focus". Used as a guaranteed
@@ -361,8 +347,6 @@ end
 local TestSource = {}
 TestSource.__index = TestSource
 
-function TestSource:_isMock() return true end  -- non-secret synthetic data
-
 local function tdata(self) return self.data or {} end
 
 -- Health as 0-1. While the "Animate Health" test demo is running, the bar
@@ -404,14 +388,12 @@ function TestSource:GetPowerCurrent()
     local d = tdata(self)
     return math.floor((d.powerPercent or 0) * (d.maxHealth or 100000))
 end
-function TestSource:GetPowerMax() return tdata(self).maxHealth or 100000 end
 function TestSource:GetPowerPercent() return (tdata(self).powerPercent or 0) * 100 end
 function TestSource:GetPowerDeficit()
     local d = tdata(self)
     local maxP = d.maxHealth or 100000
     return maxP - math.floor((d.powerPercent or 0) * maxP)
 end
-function TestSource:GetPowerTypeToken() return "MANA" end
 function TestSource:GetPowerTypeString() return _G["POWER_TYPE_MANA"] or "Mana" end
 
 function TestSource:GetAbsorbAmount()

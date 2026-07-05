@@ -900,7 +900,7 @@ end)
 -- SLASH COMMAND
 -- ============================================================
 
-SLASH_DFDA1 = "/dfda"
+DF:RegisterDebugSlash("DFDA", "Deep aura debug tooling", true, "/dfda")
 SlashCmdList["DFDA"] = function(msg)
     DA:ToggleOptions()
 end

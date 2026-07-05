@@ -893,20 +893,6 @@ function DF:RefreshRemainingPrivateAuraAnchors()
     end
 end
 
-function DF:RefreshAllPrivateAuraAnchorsDebounced()
-    if refreshTimer then
-        refreshTimer:Cancel()
-    end
-    refreshTimer = C_Timer.NewTimer(0.3, function()
-        refreshTimer = nil
-        if InCombatLockdown() then
-            needsPostCombatSetup = true
-            return
-        end
-        DF:RefreshAllPrivateAuraAnchors()
-    end)
-end
-
 function DF:RefreshAllPrivateAuraAnchors()
     QueueOrExecute("refresh", function()
         if DF.IteratePartyFrames then
@@ -1034,7 +1020,7 @@ end)
 -- DEBUG COMMANDS
 -- ============================================================
 
-SLASH_DFBOSSDEBUFFS1 = "/dfboss"
+DF:RegisterDebugSlash("DFBOSSDEBUFFS", "Boss debuff / private aura state", false, "/dfboss")
 SlashCmdList["DFBOSSDEBUFFS"] = function(msg)
     msg = msg:lower():trim()
 

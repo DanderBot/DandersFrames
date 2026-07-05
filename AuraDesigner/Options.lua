@@ -475,6 +475,46 @@ local function MigrateInstancesLazy(adDB)
 end
 DF.MigrateAuraDesignerInstancesLazy = MigrateInstancesLazy
 
+-- Lazy, flag-gated Priority-scale flip (old lower-wins → new higher-wins). Same
+-- resolve-time, once-per-table pattern as the border-key fold above: it runs on
+-- the EXACT adDB about to be rendered/edited, so auto-layout overlays, presets,
+-- and the legacy inline config are all covered AT POINT OF USE, gated by
+-- `_priorityHigherWinsV1`. Fresh configs are born flagged (NewAuraDesignerConfig)
+-- and exports/imports carry the flag on the copied table, so only genuine pre-4.6
+-- data is ever flipped — and exactly once. Replaces the old one-shot ADDON_LOADED
+-- walker, which misclassified flat auras with no indicators and double-flipped
+-- newly-created / imported profiles into corruption.
+local function FlipAuraPriority(auraCfg)
+    if type(auraCfg) == "table" and type(auraCfg.priority) == "number" then
+        local p = math.floor(auraCfg.priority + 0.5)
+        if p < 1 then p = 1 elseif p > 10 then p = 10 end
+        auraCfg.priority = 11 - p
+    end
+end
+local function MigratePrioritiesLazy(adDB)
+    if type(adDB) ~= "table" or adDB._priorityHigherWinsV1 then return end
+    local auras = adDB.auras
+    if type(auras) == "table" then
+        -- Shape detection off the first entry only, matching MigrateBorderKeysOnAurasTable.
+        for _, val in pairs(auras) do
+            if type(val) == "table" then
+                if val.priority ~= nil or val.indicators ~= nil or val.icon ~= nil then
+                    for _, auraCfg in pairs(auras) do FlipAuraPriority(auraCfg) end            -- flat: auras[name]
+                else
+                    for _, specAuras in pairs(auras) do                                         -- spec: auras[spec][name]
+                        if type(specAuras) == "table" then
+                            for _, auraCfg in pairs(specAuras) do FlipAuraPriority(auraCfg) end
+                        end
+                    end
+                end
+            end
+            break
+        end
+    end
+    adDB._priorityHigherWinsV1 = true
+end
+DF.MigrateAuraDesignerPrioritiesLazy = MigratePrioritiesLazy
+
 local function GetAuraDesignerDB()
     -- The editor is mode-tabbed: it edits the preset the active mode uses
     -- (party → its assigned preset, etc.). Because edited == used, live
@@ -493,6 +533,7 @@ local function GetAuraDesignerDB()
     end
     MigrateInstancesLazy(adDB)
     MigrateBorderKeysLazy(adDB)
+    MigratePrioritiesLazy(adDB)
     return adDB
 end
 
@@ -2568,10 +2609,10 @@ local function RefreshPreviewEffects()
     -- Frame-level effects all draw onto the SAME single preview elements (one
     -- healthFill / healthBg / nameText / etc.), so when more than one aura
     -- configures the same type they conflict. The runtime resolves this by
-    -- priority (lower number wins; first claim per type — see prioritySort and
+    -- priority (higher number wins; first claim per type — see prioritySort and
     -- Indicators:Apply's `if state.X then return end`). Mirror that here so the
     -- preview is deterministic instead of pairs()-order-dependent: iterate auras
-    -- in ascending-priority order (tiebreak by name) and apply first-wins per type.
+    -- in descending-priority order (tiebreak by name) and apply first-wins per type.
     local sortedAuras = {}
     for auraName, auraCfg in pairs(GetSpecAuras()) do
         if type(auraCfg) == "table" then  -- skip corrupted entries
@@ -2579,7 +2620,7 @@ local function RefreshPreviewEffects()
         end
     end
     sort(sortedAuras, function(a, b)
-        if a.priority ~= b.priority then return a.priority < b.priority end
+        if a.priority ~= b.priority then return a.priority > b.priority end  -- higher number = higher priority
         return a.name < b.name
     end)
 
@@ -3828,7 +3869,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 g:AddWidget(topSpacer, 4)
 
                 local banner = GUI:CreateInfoBanner(parent, {
-                    tone = "warning",
+                    tone = "caution",
                     text = L["Sound alerts only work when you are in a group."],
                 })
                 banner:SetWidth(contentWidth - 10)
@@ -5708,10 +5749,16 @@ CreateEffectCard = function(parent, yPos, effect)
             local priSlider = GUI:CreateSlider(body, L["Priority"], 1, 10, 1, auraProxy, "priority")
             -- Extra gap above (was +4) so the slider isn't squished against the
             -- triggers / Add Trigger row, plus a little breathing room below before
-            -- the effect's Appearance group (increment 54 → 68).
-            priSlider:SetPoint("TOPLEFT", body, "TOPLEFT", 5, -(triggersH + 14))
-            priSlider:SetWidth(bodyWidth - 10)
-            triggersH = triggersH + 68
+            -- the effect's Appearance group (increment 54 → 68 → 84 with the note).
+            -- x=8 matches the "TRIGGERED BY" section above (Options.lua trigContainer)
+            -- so the Priority slider + note line up with the card's other elements.
+            priSlider:SetPoint("TOPLEFT", body, "TOPLEFT", 8, -(triggersH + 14))
+            priSlider:SetWidth(bodyWidth - 16)
+            -- Direction note in the standard GUI label style (dim, wrapped) so it
+            -- matches every other settings note: HIGHER number = higher priority.
+            local priNote = GUI:CreateLabel(body, L["Higher priority wins"], bodyWidth - 16)
+            priNote:SetPoint("TOPLEFT", priSlider, "BOTTOMLEFT", 0, -2)
+            triggersH = triggersH + 84
         end
 
         local _, bodyH = BuildTypeContent(body, effect.typeKey, effect.auraName, bodyWidth, proxy, triggersH, indicatorGroup, effect.indicatorID)

@@ -259,17 +259,41 @@ function CC:GetProfileList()
     return names
 end
 
+-- Lazy, flag-gated Priority-scale flip for a Click Casting profile (old
+-- lower-wins → new higher-wins, 11-p over 1..10). Mirrors the Aura Designer
+-- lazy migration: it runs on the EXACT profile table at point-of-use (when the
+-- profile is made active / read), gated by `profile._priorityHigherWinsV1`, so
+-- it flips each stored setup exactly once. New profiles are born flagged
+-- (PROFILE_TEMPLATE) and imports carry the flag on the copied table, so only
+-- genuine pre-4.6 bindings are ever flipped. Replaces the old one-shot
+-- ADDON_LOADED walk (whose store-level flag meant a later-imported old profile
+-- was never flipped, and new/imported profiles were double-flipped).
+function CC:MigratePrioritiesLazy(profile)
+    if type(profile) ~= "table" or profile._priorityHigherWinsV1 then return end
+    if type(profile.bindings) == "table" then
+        for _, binding in ipairs(profile.bindings) do
+            if type(binding) == "table" and type(binding.priority) == "number" then
+                local p = math.floor(binding.priority + 0.5)
+                if p < 1 then p = 1 elseif p > 10 then p = 10 end
+                binding.priority = 11 - p
+            end
+        end
+    end
+    profile._priorityHigherWinsV1 = true
+end
+
 -- Get the currently active profile data
 function CC:GetActiveProfile()
     local classData = self:GetClassData()
     local defaultName = GetDefaultProfileName()
     local profileName = classData.activeProfile or defaultName
-    
+
     -- Ensure the profile exists
     if not classData.profiles[profileName] then
         classData.profiles[profileName] = self:CreateEmptyProfile()
     end
-    
+
+    self:MigratePrioritiesLazy(classData.profiles[profileName])
     return classData.profiles[profileName], profileName
 end
 
@@ -298,9 +322,12 @@ function CC:SetActiveProfile(profileName)
     
     local oldProfile = classData.activeProfile
     classData.activeProfile = profileName
-    
+
     -- Update self.profile reference
     self.profile = classData.profiles[profileName]
+    -- Flip legacy (pre-4.6) priorities to higher-wins on first activation of this
+    -- profile, before its bindings feed the flipped comparators / macro build.
+    self:MigratePrioritiesLazy(self.profile)
     
     -- Also update legacy self.db references for compatibility
     self.db.bindings = self.profile.bindings
@@ -460,15 +487,6 @@ function CC:GetProfileForLoadout(specIndex, loadoutConfigID, noFallback)
     end
     
     return nil, false
-end
-
--- Check if a loadout has a specific (non-fallback) profile assignment
-function CC:HasSpecificLoadoutAssignment(specIndex, loadoutConfigID)
-    local classData = self:GetClassData()
-    if classData.loadoutAssignments[specIndex] then
-        return classData.loadoutAssignments[specIndex][loadoutConfigID] ~= nil
-    end
-    return false
 end
 
 -- Check and auto-switch profile based on current loadout

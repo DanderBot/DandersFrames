@@ -2034,26 +2034,9 @@ function DF:ShowSubWizard(config)
     ConfigureForWizard(config)
 end
 
--- Close the popup programmatically
-function DF:HidePopup()
-    CancelAutoAdvance()
-    DF:ClearSettingHighlights()
-    CleanupTestMode()
-    CleanupGUI()
-    wipe(wizardStack)
-    if PopupFrame then
-        PopupFrame:Hide()
-    end
-end
-
 -- Check if popup is currently showing
 function DF:IsPopupShown()
     return PopupFrame and PopupFrame:IsShown()
-end
-
--- Check if we're inside a sub-wizard
-function DF:IsSubWizardActive()
-    return #wizardStack > 0
 end
 
 -- ============================================================

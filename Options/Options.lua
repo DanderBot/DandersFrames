@@ -1313,6 +1313,35 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             makeBlizGet("pixelPerfect"), makeBlizSet("pixelPerfect"), "pixelPerfect"), 30)
         renderingGroup:AddWidget(GUI:CreateLabel(self.child,
             L["Snaps sizes and borders to exact pixels for crisp rendering."], 250), 30)
+        -- Pixel-perfect scale hint: at a UI Scale of 768/physicalHeight, one UI unit
+        -- equals one physical pixel, so snapping has nothing to round away and borders
+        -- are at their crispest. Tell the user that value (and whether they're already
+        -- there) — purely informational, we never change their scale for them.
+        do
+            local function computeScaleHint()
+                local _, physH = GetPhysicalScreenSize()
+                local recScale = (physH and physH > 0) and (768 / physH) or 1
+                local pp = (DF.GetPixelScale and DF:GetPixelScale()) or 1
+                if math.abs(pp - 1) < 0.01 then
+                    return L["Your UI Scale is already pixel-perfect for this resolution."]
+                end
+                return string.format(
+                    L["Tip: for the crispest result at this resolution, set your UI Scale to %.4f — type /console UIScale %.4f to apply it (it may be below the in-game slider's minimum)."],
+                    recScale, recScale)
+            end
+            local scaleHint = GUI:CreateLabel(self.child, computeScaleHint(), 250)
+            -- Recompute on page refresh so the hint isn't stale after a resolution or
+            -- UI-scale change (GetPixelScale is re-cached on those events). Idempotent
+            -- SetText — only writes when the text actually changed — so no relayout loop.
+            scaleHint.refreshContent = function()
+                local t = computeScaleHint()
+                if t ~= scaleHint._dfLastHint then
+                    scaleHint._dfLastHint = t
+                    scaleHint:SetText(t)
+                end
+            end
+            renderingGroup:AddWidget(scaleHint, 45)
+        end
         Add(renderingGroup, nil, 1)
 
         -- ===== SETTINGS PANEL APPEARANCE GROUP (Column 2, Top) =====
@@ -1974,7 +2003,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local infoGroup = GUI:CreateSettingsGroup(self.child, 280)
         infoGroup:AddWidget(GUI:CreateHeader(self.child, L["Affected Elements"]), 40)
         infoGroup:AddWidget(GUI:CreateLabel(self.child, L["• Text Designer (Name, Health, Status & custom text)\n• Buff Stack & Duration\n• Debuff Stack & Duration\n• Pet Frame Text\n• Targeted Spell Duration\n• Defensive Icon Duration\n• All Icon Text (Res, Summon, etc.)\n• Group Labels (Raid)\n• Targeted List\n• Personal Targeted Spell\n• Aura Designer Indicators\n• Pinned Frames"], 250), 235)
-        infoGroup:AddWidget(GUI:CreateLabel(self.child, "|cFFFF4444Note:|r " .. L["Font sizes are not changed. Adjust sizes in each element's page."], 250), 40)
+        infoGroup:AddWidget(GUI:CreateNote(self.child, L["Font sizes are not changed. Adjust sizes in each element's page."], {tone = "caution", prefix = "Note", width = 250}), 40)
         Add(infoGroup, nil, 2)
     end)
     
@@ -2058,7 +2087,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         partyMsg.hideOn = function() return GUI.SelectedMode == "raid" end
         
         -- Flat mode message
-        local flatMsg = Add(GUI:CreateLabel(self.child, L["Group labels are not available in Flat Grid layout.\n\nEnable 'Use Group-Based Layout' in Frame settings\nto use group labels."], 400), 80, "both")
+        local flatMsg = Add(GUI:CreateNote(self.child, L["Group labels are not available in Flat Grid layout.\n\nEnable 'Use Group-Based Layout' in Frame settings\nto use group labels."], {tone = "caution", width = 400}), 80, "both")
         flatMsg.hideOn = function() return GUI.SelectedMode ~= "raid" or db.raidUseGroups end
     end)
     
@@ -3851,8 +3880,15 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end
         end
 
-        combatBanner.hideOn = HideSortOptions
-        combatBanner.UpdateBanner = UpdateCombatBanner
+        -- Hide when an external FrameSort addon owns sorting OR our sorting is off
+        -- (the combat banner is only meaningful while our sorting is enabled).
+        -- Without the sortEnabled check, the page's RefreshStates re-showed the
+        -- banner after UpdateCombatBanner had hidden it -- a white, tone-less box.
+        combatBanner.hideOn = function(d) return HideSortOptions(d) or not d.sortEnabled end
+        -- Reapply tone + text on every page refresh. RefreshStates calls
+        -- refreshContent (not the old custom UpdateBanner method), so the banner
+        -- never shows without a tone (the backdrop defaults to white until toned).
+        combatBanner.refreshContent = UpdateCombatBanner
         Add(combatBanner, combatBanner.layoutHeight, "both")
 
         -- Initial update
@@ -3906,7 +3942,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         if FrameSortApi then
             local frameSortGroup = GUI:CreateSettingsGroup(self.child, 280)
             frameSortGroup:AddWidget(GUI:CreateHeader(self.child, L["FrameSort Integration"]), 40)
-            frameSortGroup:AddWidget(GUI:CreateLabel(self.child, format(L["FrameSort addon detected. Enable to let FrameSort control frame ordering.\n\n%sExperimental:%s This feature is new and may not work perfectly in all scenarios. Please report any issues."], "|cFFFF8800", "|r"), 250), 70)
+            frameSortGroup:AddWidget(GUI:CreateLabel(self.child, format(L["FrameSort addon detected. Enable to let FrameSort control frame ordering.\n\n%sExperimental:%s This feature is new and may not work perfectly in all scenarios. Please report any issues."], "|c" .. GUI:ToneHex("caution"), "|r"), 250), 70)
             frameSortGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Use FrameSort Addon"], db, "useFrameSort", function()
                 -- Set both modes simultaneously
                 local partyDB = DF:GetDB("party")
@@ -4068,7 +4104,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end), 30)
         tsDisableMouse.disableOn = function(d) return not d.targetedSpellEnabled end
         
-        clickThroughGroup:AddWidget(GUI:CreateLabel(self.child, "|cFFFF4444Note:|r " .. L["Click-through icons will not show tooltips."], 250), 25)
+        clickThroughGroup:AddWidget(GUI:CreateNote(self.child, L["Click-through icons will not show tooltips."], {tone = "caution", prefix = "Note", width = 250}), 25)
         
         Add(clickThroughGroup, nil, 1)
         
@@ -5267,10 +5303,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     -- Auras > Aura Filters (master switch for Blizzard vs Direct API mode)
     local pageAuraFilters = CreateSubTab("auras", "auras_filters", L["Aura Filters"])
     BuildPage(pageAuraFilters, function(self, db, Add, AddSpace, AddSyncPoint)
-        -- Setup wizard banner (hidden when Blizzard's aura pipeline is gone
-        -- on 12.0.5+: the wizard walks users through choosing between Blizzard
-        -- and Direct sources, which is meaningless when only Direct exists).
-        if not DF.BlizzardAuraSourceUnavailable then
+        -- Setup wizard banner: guided walkthrough of the aura filters.
+        do
             local banner = GUI:CreateInfoBanner(self.child, { tone = "info" })
             banner:SetText(L["Having trouble with buffs or debuffs? Run the setup wizard for guided help."])
             -- Reserve room on the right for the action button (the banner body
@@ -5296,7 +5330,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end
 
         -- Copy button at top
-        Add(CreateCopyButton(self.child, {"auraSourceMode", "directBuff", "directDebuff"}, L["Aura Filters"], "auras_filters"), 25, 2)
+        Add(CreateCopyButton(self.child, {"directBuff", "directDebuff"}, L["Aura Filters"], "auras_filters"), 25, 2)
 
         -- ===== INFO BANNER =====
         -- Explains that Aura Filters only affect buff/debuff bars, with inline
@@ -5336,11 +5370,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             AddSpace(4, "both")
         end
 
-        -- hideOn helper: only show Direct mode options when Direct is selected
-        local function HideDirectOptions(d)
-            return d.auraSourceMode ~= "DIRECT"
-        end
-
         -- Callback that rebuilds filter strings and rescans
         local function DirectFilterChanged()
             if DF.RebuildDirectFilterStrings then
@@ -5351,56 +5380,24 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end
         end
 
-        -- ===== MODE SELECTION (Column 1) =====
-        local modeGroup = GUI:CreateSettingsGroup(self.child, 280)
-        modeGroup:AddWidget(GUI:CreateHeader(self.child, L["Aura Data Source"]), 40)
-
-        local modeOptions = {
-            BLIZZARD = L["Blizzard (Default)"],
-            DIRECT = L["Direct API"],
-        }
-        local modeDropdown = modeGroup:AddWidget(GUI:CreateDropdown(self.child, L["Source Mode"], modeOptions, db, "auraSourceMode", function()
-            if DF.SetAuraSourceMode then
-                DF:SetAuraSourceMode(db.auraSourceMode)
-            end
-            self:RefreshStates()
-        end), 55)
-        -- Disable the dropdown when Blizzard's aura pipeline has been removed
-        -- (12.0.5+). The forced-DIRECT migration in Features/Auras.lua ensures
-        -- the value is correct; this just prevents the user from trying to
-        -- switch back to a source that no longer exists.
-        modeDropdown.disableOn = function() return DF.BlizzardAuraSourceUnavailable end
-
-        -- Warning note shown when the Blizzard source has been force-disabled.
-        -- Uses hideOn (not disableOn) since it's informational text.
-        local apiBlockedNote = modeGroup:AddWidget(GUI:CreateLabel(self.child,
-            "|cffffcc00" .. L["WoW 12.0.5 removed addon access to Blizzard's party-frame aura data. The Blizzard source is no longer available; DandersFrames has switched to Direct API automatically."] .. "|r", 250), 60)
-        apiBlockedNote.hideOn = function() return not DF.BlizzardAuraSourceUnavailable end
-
-        Add(modeGroup, nil, 1)
-
         -- ===== BUFF FILTERS (Column 2, Direct mode only) =====
         local function HideBuffSubFilters(d)
-            return d.auraSourceMode ~= "DIRECT" or d.directBuffShowAll
+            return d.directBuffShowAll
         end
 
         local buffGroup = GUI:CreateSettingsGroup(self.child, 280)
-        buffGroup.hideOn = HideDirectOptions
         local buffHeader = buffGroup:AddWidget(GUI:CreateHeader(self.child, L["Buff Filters"]), 40)
-        buffHeader.hideOn = HideDirectOptions
 
         local bfAll = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["All Buffs"], db, "directBuffShowAll", function()
             DirectFilterChanged()
             self:RefreshStates()
         end), 30)
-        bfAll.hideOn = HideDirectOptions
         bfAll.tooltip = L["Show every buff with no filtering."]
 
         local bfOnlyMine = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Only My Buffs"], db, "directBuffOnlyMine", function()
             DirectFilterChanged()
             self:RefreshStates()
         end), 30)
-        bfOnlyMine.hideOn = HideDirectOptions
         bfOnlyMine.tooltip = L["Only show buffs that you cast. Applies to all buff filters."]
 
         local buffSubInfo = buffGroup:AddWidget(GUI:CreateLabel(self.child, "|cff888888" .. L["Enabled filters are combined \226\128\148 buffs matching any selected filter will be shown."] .. "|r", 250), 35)
@@ -5436,34 +5433,29 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             NAME = L["Alphabetical"],
         }
         local bfSort = buffGroup:AddWidget(GUI:CreateDropdown(self.child, L["Sort Order"], buffSortOptions, db, "directBuffSortOrder", DirectFilterChanged), 55)
-        bfSort.hideOn = HideDirectOptions
         Add(buffGroup, nil, 2)
 
         -- ===== DEBUFF FILTERS (Column 1, Direct mode only) =====
         local function HideDebuffSubFilters(d)
-            return d.auraSourceMode ~= "DIRECT" or d.directDebuffShowAll
+            return d.directDebuffShowAll
         end
 
         local debuffGroup = GUI:CreateSettingsGroup(self.child, 280)
-        debuffGroup.hideOn = HideDirectOptions
         local debuffHeader = debuffGroup:AddWidget(GUI:CreateHeader(self.child, L["Debuff Filters"]), 40)
-        debuffHeader.hideOn = HideDirectOptions
 
         local dfAll = debuffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["All Debuffs"], db, "directDebuffShowAll", function()
             DirectFilterChanged()
             self:RefreshStates()
         end), 30)
-        dfAll.hideOn = HideDirectOptions
         dfAll.tooltip = L["Show every debuff with no filtering."]
 
         -- ===== WARNING BANNER: All Debuffs disabled =====
         local debuffWarningBanner = GUI:CreateInfoBanner(self.child, {
-            tone = "caution",
-            fontTemplate = "DFFontNormal",
+            tone = "info",
             text = L["Recommended: enable 'All Debuffs' to see all relevant debuffs, especially for healers."],
         })
         debuffWarningBanner.hideOn = function(d)
-            return d.auraSourceMode ~= "DIRECT" or d.directDebuffShowAll
+            return d.directDebuffShowAll
         end
         debuffGroup:AddWidget(debuffWarningBanner, debuffWarningBanner.layoutHeight)
 
@@ -5492,7 +5484,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             NAME = L["Alphabetical"],
         }
         local dfSort = debuffGroup:AddWidget(GUI:CreateDropdown(self.child, L["Sort Order"], debuffSortOptions, db, "directDebuffSortOrder", DirectFilterChanged), 55)
-        dfSort.hideOn = HideDirectOptions
         Add(debuffGroup, nil, 1)
 
         -- ===== AURA BLACKLIST (Column 2, under Buff Filters) =====
@@ -5682,7 +5673,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Border Group (col1)
         local borderGroup = GUI:CreateSettingsGroup(self.child, 260)
         borderGroup:AddWidget(GUI:CreateHeader(self.child, L["Border"]), 40)
-        local buffMasqueNote = borderGroup:AddWidget(GUI:CreateLabel(self.child, "|cffff9900" .. L["Borders controlled by Masque."] .. "|r " .. L["See Integrations."], 230), 30)
+        local buffMasqueNote = borderGroup:AddWidget(GUI:CreateNote(self.child, L["Borders controlled by Masque."] .. " " .. L["See Integrations."], {tone = "caution", width = 230}), 30)
         buffMasqueNote.hideOn = function(d) return not MasqueControlsBorders(d) end
         -- Full border toolkit via the unified helper (Stage 5.5 Phase 2).  No
         -- class/role colour (aura indicators aren't unit-class).  Hidden when
@@ -5902,7 +5893,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Border Group (col1)
         local borderGroup = GUI:CreateSettingsGroup(self.child, 260)
         borderGroup:AddWidget(GUI:CreateHeader(self.child, L["Border"]), 40)
-        local debuffMasqueNote = borderGroup:AddWidget(GUI:CreateLabel(self.child, "|cffff9900" .. L["Borders controlled by Masque."] .. "|r " .. L["See Integrations."], 230), 30)
+        local debuffMasqueNote = borderGroup:AddWidget(GUI:CreateNote(self.child, L["Borders controlled by Masque."] .. " " .. L["See Integrations."], {tone = "caution", width = 230}), 30)
         debuffMasqueNote.hideOn = function(d) return not MasqueControlsBorders(d) end
         -- Full border toolkit via the unified helper (Stage 5.5 Phase 2).  When
         -- "Color by Dispel Type" (below) is ON, the border is forced SOLID and
@@ -6119,7 +6110,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         stackNoteLabel:SetPoint("TOPLEFT", stackNoteContainer, "TOPLEFT", 0, 0)
         stackNoteLabel:SetWidth(250)
         stackNoteLabel:SetJustifyH("LEFT")
-        stackNoteLabel:SetText("|cFFFF4444Note:|r " .. L["Icons smaller than 30 may hide stack text behind duration text. At small sizes, consider disabling duration numbers."])
+        stackNoteLabel:SetText(("|c" .. GUI:ToneHex("caution") .. L["Note"] .. ":|r ") .. L["Icons smaller than 30 may hide stack text behind duration text. At small sizes, consider disabling duration numbers."])
+        -- Match the note look: gold "Note:" prefix + dim body (this font defaults to
+        -- gold, which made the whole body gold instead of the CreateNote dim body).
+        stackNoteLabel:SetTextColor(GUI.Colors.textDim.r, GUI.Colors.textDim.g, GUI.Colors.textDim.b)
         local showMeBtn = CreateFrame("Button", nil, stackNoteContainer, "BackdropTemplate")
         showMeBtn:SetPoint("TOPLEFT", stackNoteLabel, "BOTTOMLEFT", 0, -4)
         GUI:StyleButton(showMeBtn, { width = 55, height = 18, text = "|cFFFFFF00" .. L["Show me"] .. "|r" })
@@ -6134,7 +6128,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             if DF.PreviewPrivateAuraAnchors then DF:PreviewPrivateAuraAnchors() end
             if DF.UpdateAllTestBossDebuffs then DF:UpdateAllTestBossDebuffs() end
         end, true), 40)
-        sizeGroup:AddWidget(GUI:CreateLabel(self.child, "|cFFFFD100Tip:|r " .. L["Set border scale to a negative value to hide the border entirely."], 250), 50)
+        sizeGroup:AddWidget(GUI:CreateNote(self.child, L["Set border scale to a negative value to hide the border entirely."], {tone = "success", prefix = "Tip", width = 250}), 50)
         sizeGroup:AddWidget(GUI:CreateSlider(self.child, L["Spacing"], 0, 20, 1, db, "bossDebuffsSpacing", nil, function()
             if DF.UpdateAllPrivateAuraPositions then DF:UpdateAllPrivateAuraPositions() end
             if DF.UpdateAllTestBossDebuffs then DF:UpdateAllTestBossDebuffs() end
@@ -6540,7 +6534,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         
         local function HideTargetedSpellOptions(d) return not d.targetedSpellEnabled end
         local function HideTargetedDurationOptions(d) return not d.targetedSpellEnabled or not d.targetedSpellShowDuration end
-        local function HideBorderOptions(d) return not d.targetedSpellEnabled or not d.targetedSpellShowBorder end
         
         local function TargetedSpellLightweightUpdate()
             if (DF.testMode or DF.raidTestMode) and DF.UpdateAllTestTargetedSpell then DF:UpdateAllTestTargetedSpell() end
@@ -6553,7 +6546,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- ===== DISCLAIMER BANNER (full width) =====
         local tsDisclaimerBanner = GUI:CreateInfoBanner(self.child, {
-            tone = "info",
+            tone = "caution",
             text = L["Targeted Spells guesses who an enemy is targeting from their class, role, race, and sex. Members who share all four can't be told apart and won't show an icon."],
         })
         Add(tsDisclaimerBanner, tsDisclaimerBanner.layoutHeight, "both")
@@ -6907,7 +6900,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
             local function HideTLOptions(d) return not d.targetedListEnabled end
             local function HideIconOptions(d) return not d.targetedListEnabled or not d.targetedListShowIcon end
-            local function HideBorderOptions(d) return not d.targetedListEnabled or not d.targetedListShowBorder end
             local function HideTargetNameOptions(d) return not d.targetedListEnabled or not d.targetedListShowTargetName end
 
             local function TargetedListUpdate()
@@ -7228,7 +7220,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         
         local function HidePersonalOptions(d) return not d.personalTargetedSpellEnabled end
         local function HidePersonalDurationOptions(d) return not d.personalTargetedSpellEnabled or not d.personalTargetedSpellShowDuration end
-        local function HideBorderOptions(d) return not d.personalTargetedSpellEnabled or not d.personalTargetedSpellShowBorder end
         
         local function PersonalTargetedUpdate()
             if DF.UpdatePersonalTargetedSpellsPosition then DF:UpdatePersonalTargetedSpellsPosition() end
@@ -7513,18 +7504,26 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local roleSection = Add(GUI:CreateCollapsibleSection(self.child, L["Role Icon"], false, 270), 28, 1)
 
         -- Header preview: the Tank/Healer/DPS icons in the currently selected
-        -- style. Rebuilt live whenever the style or an external path changes.
+        -- style. Rebuilt live whenever the style, an external path, or a
+        -- per-role Show toggle changes. Each role's icon desaturates when its
+        -- Show toggle is off (matching the other icon sections' previews);
+        -- the whole preview dims only when all three roles are off.
+        local roleShowKeys = { TANK = "roleIconShowTank", HEALER = "roleIconShowHealer", DAMAGER = "roleIconShowDPS" }
         local function UpdateRolePreview()
             if not roleSection.SetPreviewIcons then return end
             local icons = {}
+            local anyShown = false
             for _, role in ipairs({ "TANK", "HEALER", "DAMAGER" }) do
                 -- tex may be an atlas name (no coords) or a texture path (+coords).
                 local tex, l, r, t, b = DF:GetRoleIconTexture(db, role)
                 if tex then
-                    icons[#icons + 1] = { texture = tex, coords = l and { l, r, t, b } or nil }
+                    local shown = db[roleShowKeys[role]] ~= false
+                    anyShown = anyShown or shown
+                    icons[#icons + 1] = { texture = tex, coords = l and { l, r, t, b } or nil, desaturate = not shown }
                 end
             end
             roleSection:SetPreviewIcons(icons)
+            if roleSection.SetPreviewDimmed then roleSection:SetPreviewDimmed(not anyShown) end
         end
 
         -- Small gap between the section header and the first box.
@@ -7545,9 +7544,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         roleExtNote.hideOn = function(d) return d.roleIconStyle ~= "EXTERNAL" end
         -- Per-role filters: which roles ever show an icon (global — apply in and
         -- out of combat). The Hide In Combat toggle (Appearance) is an independent gate.
-        roleSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show Tank"], db, "roleIconShowTank", function() DF:UpdateAllRoleIcons() end), 30)
-        roleSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show Healer"], db, "roleIconShowHealer", function() DF:UpdateAllRoleIcons() end), 30)
-        roleSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show DPS"], db, "roleIconShowDPS", function() DF:UpdateAllRoleIcons() end), 30)
+        roleSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show Tank"], db, "roleIconShowTank", function() DF:UpdateAllRoleIcons(); UpdateRolePreview() end), 30)
+        roleSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show Healer"], db, "roleIconShowHealer", function() DF:UpdateAllRoleIcons(); UpdateRolePreview() end), 30)
+        roleSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show DPS"], db, "roleIconShowDPS", function() DF:UpdateAllRoleIcons(); UpdateRolePreview() end), 30)
         Add(roleSettings, nil, 1)
         roleSection:RegisterChild(roleSettings)
 
@@ -8588,7 +8587,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         Add(blizSection, 36, "both")
 
         local blizGroup = GUI:CreateSettingsGroup(self.child, 280)
-        blizGroup:AddWidget(GUI:CreateLabel(self.child, "|cFFFF4444Note:|r " .. L["This overlay is rendered by Blizzard and has limited customisation. It is separate from the DandersFrames overlay above."], 260), 60)
+        blizGroup:AddWidget(GUI:CreateNote(self.child, L["This overlay is rendered by Blizzard and has limited customisation. It is separate from the DandersFrames overlay above."], {tone = "caution", prefix = "Note", width = 260}), 60)
 
         local gradientDirOptions = {
             [0] = L["Top Edge"],
@@ -9001,8 +9000,23 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         self.exportFrameTypes = {party = true, raid = true}
         self.importFrameTypes = {party = true, raid = true}
         
-        local categoryOrder = {"position", "layout", "bars", "auras", "text", "icons", "other", "pinnedFrames", "auraDesigner", "autoLayout"}
-        
+        -- Derived from the category registry (single source of truth) so this list
+        -- can never drift from DF.ExportCategories when categories change.
+        local categoryOrder = {}
+        for cat in pairs(DF.ExportCategoryInfo) do table.insert(categoryOrder, cat) end
+        table.sort(categoryOrder, function(a, b)
+            return (DF.ExportCategoryInfo[a].order or 99) < (DF.ExportCategoryInfo[b].order or 99)
+        end)
+
+        -- Page-scope note: unlike the rest of the settings window, this page is
+        -- NOT scoped by the party/raid tab -- exports and imports operate on the
+        -- whole profile, gated only by the Export for / Import for rows.
+        local scopeBanner = GUI:CreateInfoBanner(self.child, {
+            tone = "info",
+            text = L["Profiles include both Party and Raid settings. Exporting and importing always works on the profile as a whole, no matter which mode tab is selected above. Use the 'Export for' and 'Import for' checkboxes in each column to choose which mode's settings are included."],
+        })
+        Add(scopeBanner, scopeBanner.layoutHeight or 44, "both")
+
         -- Helper to add to section
         local function AddToSection(widget, col, colNum)
             widget.layoutCol = colNum or col
@@ -9062,11 +9076,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local presetRow = CreateFrame("Frame", nil, self.child)
         presetRow:SetSize(240, 24)
         
+        -- frameTypes: true = All checks Party+Raid, false = None clears them,
+        -- nil = Look/Layout leave the frame-type row alone.
         local presets = {
-            {name = "All", x = 0, cats = {"position", "layout", "bars", "auras", "text", "icons", "other", "pinnedFrames", "auraDesigner", "autoLayout"}},
-            {name = "Look", x = 60, cats = {"bars", "auras", "text", "icons", "other"}},
+            {name = "All", x = 0, frameTypes = true, cats = categoryOrder},
+            {name = "Look", x = 60, cats = {"bars", "auras", "dispel", "bossDebuffs", "missingBuffs", "defensives", "myBuffs", "targetedSpells", "targetedList", "text", "textDesigner", "icons", "other"}},
             {name = "Layout", x = 120, cats = {"position", "layout"}},
-            {name = "None", x = 180, cats = {}},
+            {name = "None", x = 180, frameTypes = false, cats = {}},
         }
         
         for _, p in ipairs(presets) do
@@ -9076,35 +9092,63 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 local sel = {}
                 for _, c in ipairs(p.cats) do sel[c] = true end
                 for cat, cb in pairs(self.exportCheckboxes) do cb:SetChecked(sel[cat] or false) end
+                -- All/None also drive the Party/Raid row -- keep the STATE table in
+                -- sync (SetChecked does not fire the checkbox OnClick handlers).
+                if p.frameTypes ~= nil and self.exportFrameTypeBoxes then
+                    for ft, box in pairs(self.exportFrameTypeBoxes) do
+                        box:SetChecked(p.frameTypes)
+                        self.exportFrameTypes[ft] = p.frameTypes
+                    end
+                    if self.UpdateExportCategoryState then self.UpdateExportCategoryState() end
+                end
             end)
         end
         exportSettingsGroup:AddWidget(presetRow, 28)
         
-        -- Frame types row
+        -- Frame types row ("Export for" -- the modes whose settings ship; the
+        -- category list below picks WHICH settings, this row picks WHOSE)
+        exportSettingsGroup:AddWidget(GUI:CreateLabel(self.child, L["Export for"], 240), 22)
         local ftRow = CreateFrame("Frame", nil, self.child)
         ftRow:SetSize(240, 20)
         
         local partyExp = CreateSmallCheckbox(ftRow, L["Party"], true)
         partyExp:SetPoint("LEFT", 0, 0)
-        partyExp.checkbox:SetScript("OnClick", function(s) self.exportFrameTypes.party = s:GetChecked() end)
+        partyExp.checkbox:SetScript("OnClick", function(s)
+            self.exportFrameTypes.party = s:GetChecked()
+            if self.UpdateExportCategoryState then self.UpdateExportCategoryState() end
+        end)
         
         local raidExp = CreateSmallCheckbox(ftRow, L["Raid"], true)
         raidExp:SetPoint("LEFT", 80, 0)
-        raidExp.checkbox:SetScript("OnClick", function(s) self.exportFrameTypes.raid = s:GetChecked() end)
+        raidExp.checkbox:SetScript("OnClick", function(s)
+            self.exportFrameTypes.raid = s:GetChecked()
+            if self.UpdateExportCategoryState then self.UpdateExportCategoryState() end
+        end)
+        self.exportFrameTypeBoxes = {party = partyExp, raid = raidExp}
         exportSettingsGroup:AddWidget(ftRow, 24)
         
-        -- Categories
+        -- Categories ("Settings to include" -- sub-settings of the modes above)
+        exportSettingsGroup:AddWidget(GUI:CreateLabel(self.child, L["Settings to include"], 240), 22)
         for _, cat in ipairs(categoryOrder) do
             local info = DF.ExportCategoryInfo[cat]
             local catRow = CreateFrame("Frame", nil, self.child)
             catRow:SetSize(240, 18)
             
-            local cb = CreateSmallCheckbox(catRow, info.name, true)
+            local cb = CreateSmallCheckbox(catRow, L[info.name], true)
             cb:SetPoint("LEFT", 0, 0)
             self.exportCheckboxes[cat] = cb
             exportSettingsGroup:AddWidget(catRow, 20)
         end
         
+        -- Grey the category list while no mode is selected (nothing would
+        -- export) -- the addon-wide disabled-means-dimmed convention.
+        self.UpdateExportCategoryState = function()
+            local enabled = self.exportFrameTypes.party or self.exportFrameTypes.raid
+            for _, cb in pairs(self.exportCheckboxes) do
+                if enabled then cb:Enable() else cb:Disable() end
+            end
+        end
+
         AddToSection(exportSettingsGroup, nil, 1)
         
         -- Export Actions Group
@@ -9306,7 +9350,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         self.createNewProfileCheck = createNewCheck
         importSettingsGroup:AddWidget(createNewRow, 24)
         
-        -- Frame types row
+        -- Frame types row ("Import for" -- which mode receives the settings)
+        importSettingsGroup:AddWidget(GUI:CreateLabel(self.child, L["Import for"], 240), 22)
         local ftRowImp = CreateFrame("Frame", nil, self.child)
         ftRowImp:SetSize(240, 20)
         
@@ -9323,13 +9368,14 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         self.importRaidCheck = raidImp
         importSettingsGroup:AddWidget(ftRowImp, 24)
         
-        -- Categories
+        -- Categories ("Settings to include")
+        importSettingsGroup:AddWidget(GUI:CreateLabel(self.child, L["Settings to include"], 240), 22)
         for _, cat in ipairs(categoryOrder) do
             local info = DF.ExportCategoryInfo[cat]
             local catRow = CreateFrame("Frame", nil, self.child)
             catRow:SetSize(240, 18)
             
-            local cb = CreateSmallCheckbox(catRow, info.name, false)
+            local cb = CreateSmallCheckbox(catRow, L[info.name], false)
             cb:SetPoint("LEFT", 0, 0)
             cb:Disable()
             self.importCheckboxes[cat] = cb
@@ -9380,7 +9426,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 confirmText = L["Create new profile '"] .. (profileName or L["Imported Profile"]) .. L["'?\n\nThis will copy your current settings, then apply the selected import categories on top."]
             else
                 local currentProfile = DF:GetCurrentProfile() or "Default"
-                confirmText = L["Import settings into current profile?\n\n"] .. "|cffff4444" .. L["WARNING: This will permanently overwrite settings in your '"] .. currentProfile .. L["' profile."] .. "|r\n\n" .. L["Tip: Check 'Create New Profile' to import without affecting your current settings."]
+                confirmText = L["Import settings into current profile?\n\n"] .. "|c" .. GUI:ToneHex("danger") .. L["WARNING: This will permanently overwrite settings in your '"] .. currentProfile .. L["' profile."] .. "|r\n\n" .. L["Tip: Check 'Create New Profile' to import without affecting your current settings."]
             end
             
             StaticPopupDialogs["DANDERSFRAMES_IMPORT_CONFIRM"] = {

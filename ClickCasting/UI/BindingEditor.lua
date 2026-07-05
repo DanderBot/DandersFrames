@@ -43,428 +43,6 @@ local function ShowPopupOnTop(name) return CC.ShowPopupOnTop and CC.ShowPopupOnT
 
 local addBindingDialog = nil
 
-function CC:ShowAddBindingDialog(onComplete, existingBinding, existingIndex)
-    if addBindingDialog then
-        addBindingDialog:Hide()
-    end
-    
-    -- Theme colors (matching GUI/GUI.lua)
-    local themeColor = DF.GUI and DF.GUI.GetThemeColor and DF.GUI.GetThemeColor() or {r = 0.45, g = 0.45, b = 0.95}
-    -- Shared palette (same r/g/b as the GUI.lua locals; alpha is supplied per call site).
-    local C_BACKGROUND = DF.GUI.Colors.background
-    local C_ELEMENT = DF.GUI.Colors.element
-    local C_BORDER = DF.GUI.Colors.border
-    local C_TEXT = DF.GUI.Colors.text
-    local C_TEXT_DIM = DF.GUI.Colors.textDim
-    
-    -- Create dialog
-    addBindingDialog = CreateFrame("Frame", "DFClickCastAddDialog", UIParent, "BackdropTemplate")
-    addBindingDialog:SetSize(420, 430)  -- Start at collapsed height
-    addBindingDialog:SetPoint("CENTER", 0, 50)
-    addBindingDialog:SetFrameStrata("FULLSCREEN_DIALOG")
-    addBindingDialog:SetFrameLevel(100)
-    DF.GUI:CreatePanelBackdrop(addBindingDialog, { bgAlpha = 0.98, borderColor = {0, 0, 0, 1} })
-    addBindingDialog:EnableMouse(true)
-    addBindingDialog:SetMovable(true)
-    addBindingDialog:RegisterForDrag("LeftButton")
-    addBindingDialog:SetScript("OnDragStart", addBindingDialog.StartMoving)
-    addBindingDialog:SetScript("OnDragStop", addBindingDialog.StopMovingOrSizing)
-    
-    -- Title
-    local title = addBindingDialog:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    title:SetPoint("TOPLEFT", 12, -12)
-    title:SetText(existingBinding and L["Edit Binding"] or L["Add New Binding"])
-    title:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    
-    -- Close button
-    local closeBtn = DF.GUI:CreateCloseButton(addBindingDialog, {
-        size = 20,
-        onClick = function() addBindingDialog:Hide() end,
-    })
-    closeBtn:SetPoint("TOPRIGHT", -6, -6)
-
-    -- Working binding data
-    local bindingData = existingBinding and CopyTable(existingBinding) or {
-        enabled = true,
-        button = "LeftButton",
-        modifiers = "",
-        actionType = "spell",
-        spellId = nil,
-        spellName = nil,
-        macroText = nil,
-        loadSpec = nil,
-        loadCombat = nil,
-        priority = 5,  -- Default priority (1=highest, 10=lowest)
-    }
-    
-    local yOffset = -45
-    
-    -- STEP 1: Key Combination
-    local step1Label = addBindingDialog:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    step1Label:SetPoint("TOPLEFT", 15, yOffset)
-    step1Label:SetText(L["Step 1: Click here with desired key combo"])
-    step1Label:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    yOffset = yOffset - 20
-    
-    local keyCaptureBtn = CreateFrame("Button", nil, addBindingDialog, "BackdropTemplate")
-    keyCaptureBtn:SetPoint("TOPLEFT", 15, yOffset)
-    DF.GUI:StyleButton(keyCaptureBtn, { width = 390, height = 32, accent = CC.ACCENT })
-    keyCaptureBtn:RegisterForClicks("AnyDown", "AnyUp")
-    
-    local keyText = keyCaptureBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    keyText:SetPoint("CENTER")
-    
-    local function UpdateKeyText()
-        keyText:SetText(CC:GetBindingDisplayString(bindingData))
-        keyText:SetTextColor(themeColor.r, themeColor.g, themeColor.b)
-    end
-    UpdateKeyText()
-    
-    keyCaptureBtn:SetScript("OnClick", function(self, button)
-        local mods = ""
-        if IsShiftKeyDown() then mods = mods .. "shift-" end
-        if IsControlKeyDown() then mods = mods .. "ctrl-" end
-        if IsAltKeyDown() then mods = mods .. "alt-" end
-        if IsMetaKeyDown() then mods = mods .. "meta-" end
-        
-        bindingData.button = button
-        bindingData.modifiers = mods
-        UpdateKeyText()
-        
-        -- Warn Mac users about Command+Left Click limitation (right click works fine)
-        if mods:find("meta") and button == "LeftButton" then
-            CC:ShowMacMetaClickWarning()
-        end
-    end)
-    
-    -- Mac warning label (only shown on Mac)
-    if IsMacClient and IsMacClient() then
-        local macWarning = addBindingDialog:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-        macWarning:SetPoint("TOPLEFT", keyCaptureBtn, "BOTTOMLEFT", 0, -2)
-        macWarning:SetWidth(390)
-        macWarning:SetJustifyH("LEFT")
-        macWarning:SetText("|cFFFF4444Note:|r " .. L["Cmd + Left Click unavailable on Mac"])
-        macWarning:SetTextColor(0.6, 0.6, 0.6)
-        yOffset = yOffset - 12  -- Extra space for the warning
-    end
-    
-    yOffset = yOffset - 45
-    
-    -- STEP 2: Action Selection (spell list with Target/Menu at top)
-    local step2Label = addBindingDialog:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    step2Label:SetPoint("TOPLEFT", 15, yOffset)
-    step2Label:SetText(L["Step 2: Select Action"])
-    step2Label:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    yOffset = yOffset - 20
-    
-    -- Search box for filtering spells
-    local spellBox = CreateFrame("EditBox", nil, addBindingDialog, "BackdropTemplate")
-    spellBox:SetPoint("TOPLEFT", 15, yOffset)
-    spellBox:SetSize(390, 26)
-    DF.GUI:StyleEditBox(spellBox, { skipFont = true })
-    DF.GUI:SetSettingsFont(spellBox, 11, "")
-    spellBox:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    spellBox:SetTextInsets(24, 8, 0, 0)
-    spellBox:SetAutoFocus(false)
-    spellBox:SetText("")
-    
-    -- Search icon
-    local spellSearchIcon = spellBox:CreateTexture(nil, "OVERLAY")
-    spellSearchIcon:SetPoint("LEFT", 6, 0)
-    spellSearchIcon:SetSize(12, 12)
-    spellSearchIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\search")
-    spellSearchIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    
-    -- Placeholder text
-    local placeholder = spellBox:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    placeholder:SetPoint("LEFT", 24, 0)
-    placeholder:SetText(L["Search spells..."])
-    placeholder:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    
-    spellBox:SetScript("OnEditFocusGained", function() placeholder:Hide() end)
-    spellBox:SetScript("OnEditFocusLost", function() 
-        if spellBox:GetText() == "" then placeholder:Show() end 
-    end)
-    
-    yOffset = yOffset - 32
-    
-    -- Selection display
-    local selectionFrame = CreateFrame("Frame", nil, addBindingDialog, "BackdropTemplate")
-    selectionFrame:SetPoint("TOPLEFT", 15, yOffset)
-    selectionFrame:SetSize(390, 28)
-    DF.GUI:CreateElementBackdrop(selectionFrame, {
-        bgColor = DF.GUI.Colors.panel,
-        borderColor = {C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5},
-    })
-    
-    local selectionIcon = selectionFrame:CreateTexture(nil, "ARTWORK")
-    selectionIcon:SetPoint("LEFT", 6, 0)
-    selectionIcon:SetSize(20, 20)
-    selectionIcon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark") -- Default question mark
-    selectionIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-    
-    local selectionText = selectionFrame:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    selectionText:SetPoint("LEFT", selectionIcon, "RIGHT", 8, 0)
-    selectionText:SetText(L["No action selected"])
-    selectionText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    
-    -- Track if valid selection was made
-    local validSelection = false
-    
-    local function UpdateSelection(actionType, spellName, icon)
-        bindingData.actionType = actionType
-        bindingData.spellName = spellName
-        validSelection = true
-        
-        if actionType == "target" then
-            selectionIcon:SetTexture(132212) -- Target icon
-            selectionText:SetText(L["Target Unit"])
-        elseif actionType == "menu" then
-            selectionIcon:SetTexture(134331) -- Menu icon
-            selectionText:SetText(L["Open Unit Menu"])
-        else
-            selectionIcon:SetTexture(icon or "Interface\\Icons\\INV_Misc_QuestionMark")
-            selectionText:SetText(spellName or L["Unknown Spell"])
-        end
-        selectionText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-        selectionFrame:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
-    end
-    
-    -- Pre-populate if editing existing binding
-    if existingBinding then
-        if existingBinding.actionType == "target" then
-            UpdateSelection("target", nil, nil)
-        elseif existingBinding.actionType == "menu" then
-            UpdateSelection("menu", nil, nil)
-        elseif existingBinding.spellName then
-            local icon = CC:GetSpellIcon(existingBinding.spellName)
-            UpdateSelection("spell", existingBinding.spellName, icon)
-        end
-    end
-    
-    yOffset = yOffset - 35
-    
-    -- Action list (Target/Menu + Spells)
-    local spellScrollFrame = CreateFrame("ScrollFrame", nil, addBindingDialog, "ScrollFrameTemplate")
-    spellScrollFrame:SetPoint("TOPLEFT", 15, yOffset)
-    spellScrollFrame:SetSize(375, 130)
-    DF.GUI.StyleScrollBar(spellScrollFrame)
-
-    local spellListContent = CreateFrame("Frame", nil, spellScrollFrame)
-    spellListContent:SetSize(360, 1)
-    spellScrollFrame:SetScrollChild(spellListContent)
-    
-    local spellButtons = {}
-    
-    local function CreateActionButton(parent, yPos, icon, text, onClick)
-        local btn = CreateFrame("Button", nil, parent)
-        btn:SetPoint("TOPLEFT", 0, -yPos)
-        btn:SetSize(360, 22)
-        
-        local iconTex = btn:CreateTexture(nil, "ARTWORK")
-        iconTex:SetPoint("LEFT", 4, 0)
-        iconTex:SetSize(18, 18)
-        iconTex:SetTexture(icon)
-        iconTex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-        
-        local nameText = btn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-        nameText:SetPoint("LEFT", iconTex, "RIGHT", 8, 0)
-        nameText:SetText(text)
-        
-        local highlight = btn:CreateTexture(nil, "HIGHLIGHT")
-        highlight:SetAllPoints()
-        highlight:SetColorTexture(themeColor.r, themeColor.g, themeColor.b, 0.3)
-        
-        btn:SetScript("OnClick", onClick)
-        
-        return btn
-    end
-    
-    local function PopulateSpellList(searchText)
-        for _, btn in ipairs(spellButtons) do
-            btn:Hide()
-            btn:SetParent(nil)
-        end
-        wipe(spellButtons)
-        
-        local yPos = 0
-        searchText = searchText or ""
-        local searchLower = searchText:lower()
-        
-        -- Add Target Unit at top (if matches search or no search)
-        if searchText == "" or ("target unit"):find(searchLower, 1, true) then
-            local btn = CreateActionButton(spellListContent, yPos, 132212, "|cff88ff88"..L["Target Unit"].."|r", function()
-                UpdateSelection("target", nil, nil)
-            end)
-            table.insert(spellButtons, btn)
-            yPos = yPos + 24
-        end
-        
-        -- Add Open Menu at top (if matches search or no search)
-        if searchText == "" or ("open menu"):find(searchLower, 1, true) or ("unit menu"):find(searchLower, 1, true) then
-            local btn = CreateActionButton(spellListContent, yPos, 134331, "|cff88ff88"..L["Open Unit Menu"].."|r", function()
-                UpdateSelection("menu", nil, nil)
-            end)
-            table.insert(spellButtons, btn)
-            yPos = yPos + 24
-        end
-        
-        -- Add separator if we have special items and spells
-        if yPos > 0 and searchText == "" then
-            local sep = spellListContent:CreateTexture(nil, "ARTWORK")
-            sep:SetPoint("TOPLEFT", 0, -yPos)
-            sep:SetSize(360, 1)
-            sep:SetColorTexture(0.3, 0.3, 0.3, 0.5)
-            yPos = yPos + 6
-        end
-        
-        -- Add spells from spellbook
-        local spells = CC:SearchSpellbook(searchText)
-        
-        for i, spell in ipairs(spells) do
-            if i > 30 then break end
-            
-            -- Use displayName from search results (already has override applied)
-            local displayName = spell.displayName or spell.name
-            local displayIcon = spell.icon
-            
-            -- Show override name/icon, but pass BASE spell name for binding
-            local btn = CreateActionButton(spellListContent, yPos, displayIcon, displayName, function()
-                UpdateSelection("spell", spell.name, displayIcon)  -- spell.name is the base name
-            end)
-            table.insert(spellButtons, btn)
-            yPos = yPos + 24
-        end
-        
-        spellListContent:SetHeight(math.max(1, yPos))
-    end
-    
-    spellBox:SetScript("OnTextChanged", function(self)
-        local text = self:GetText()
-        if text == "" then
-            placeholder:Show()
-        else
-            placeholder:Hide()
-        end
-        PopulateSpellList(text)
-    end)
-    
-    PopulateSpellList("")
-    
-    yOffset = yOffset - 145
-    
-    -- STEP 3: Combat Condition
-    local step3Label = addBindingDialog:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    step3Label:SetPoint("TOPLEFT", 15, yOffset)
-    step3Label:SetText(L["Step 3: Combat Condition (optional)"])
-    step3Label:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    yOffset = yOffset - 20
-    
-    local combatOptions = {
-        {value = nil, label = L["Always"]},
-        {value = "combat", label = L["In Combat Only"]},
-        {value = "nocombat", label = L["Out of Combat Only"]},
-    }
-    
-    local combatButtons = {}
-    xPos = 15
-    
-    local function UpdateCombatButtons()
-        for key, b in pairs(combatButtons) do
-            local isSelected = (key == "always" and not bindingData.loadCombat) or (key == bindingData.loadCombat)
-            b:SetActive(isSelected)
-            if isSelected then
-                b.label:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-            else
-                b.label:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-            end
-        end
-    end
-
-    for _, opt in ipairs(combatOptions) do
-        local btn = CreateFrame("Button", nil, addBindingDialog, "BackdropTemplate")
-        btn:SetPoint("TOPLEFT", xPos, yOffset)
-        DF.GUI:StyleButton(btn, { width = 125, height = 26, accent = CC.ACCENT })
-
-        local label = btn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-        label:SetPoint("CENTER")
-        label:SetText(opt.label)
-        btn.label = label
-        
-        combatButtons[opt.value or "always"] = btn
-        
-        btn:SetScript("OnClick", function()
-            bindingData.loadCombat = opt.value
-            UpdateCombatButtons()
-        end)
-        
-        xPos = xPos + 130
-    end
-    
-    UpdateCombatButtons()
-    yOffset = yOffset - 50
-    
-    -- SAVE / CANCEL BUTTONS
-    local saveBtn = CreateFrame("Button", nil, addBindingDialog, "BackdropTemplate")
-    saveBtn:SetPoint("BOTTOMRIGHT", -95, 12)
-    DF.GUI:StyleButton(saveBtn, {
-        width = 80, height = 26, tone = "success", accent = CC.ACCENT,
-        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\save", size = 18 },
-        text = L["Save"],
-    })
-
-    local function DoSave()
-        local success = true
-        if existingIndex then
-            success = CC:UpdateBinding(existingIndex, bindingData)
-        else
-            success = CC:AddBinding(bindingData) ~= nil
-        end
-        
-        if not success then
-            -- Duplicate found, don't close dialog
-            return
-        end
-        
-        addBindingDialog:Hide()
-        
-        if onComplete then
-            onComplete()
-        end
-    end
-    
-    saveBtn:SetScript("OnClick", function()
-        -- Validate that an action was selected
-        if not validSelection then
-            -- Flash the selection frame red
-            selectionFrame:SetBackdropBorderColor(1, 0.3, 0.3, 1)
-            selectionText:SetText(L["Please select an action!"])
-            selectionText:SetTextColor(1, 0.4, 0.4)
-            C_Timer.After(2, function()
-                if not validSelection then
-                    selectionFrame:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-                    selectionText:SetText(L["No action selected"])
-                    selectionText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-                end
-            end)
-            return
-        end
-        
-        -- Save the binding (multiple bindings on same key allowed for fallback functionality)
-        DoSave()
-    end)
-    
-    local cancelBtn = CreateFrame("Button", nil, addBindingDialog, "BackdropTemplate")
-    cancelBtn:SetPoint("BOTTOMRIGHT", -10, 12)
-    DF.GUI:StyleButton(cancelBtn, { width = 80, height = 26, text = L["Cancel"], accent = CC.ACCENT })
-
-    cancelBtn:SetScript("OnClick", function()
-        addBindingDialog:Hide()
-    end)
-    
-    addBindingDialog:Show()
-end
-
 -- ============================================================
 
 -- ACTIVE BINDINGS ROW CREATION
@@ -488,62 +66,8 @@ function CC:CreateBindingRow(parent, binding, index)
     icon:SetSize(32, 32)
     icon:SetPoint("LEFT", 4, 0)
     
-    -- Set icon based on action type
-    if binding.actionType == "target" then
-        icon:SetTexture("Interface\\CURSOR\\Crosshairs")
-    elseif binding.actionType == "menu" then
-        icon:SetTexture("Interface\\Buttons\\UI-GuildButton-OfficerNote-Up")
-    elseif binding.actionType == "focus" then
-        icon:SetTexture("Interface\\Icons\\Ability_Hunter_MasterMarksman")
-    elseif binding.actionType == "assist" then
-        icon:SetTexture("Interface\\Icons\\Ability_Hunter_SniperShot")
-    elseif binding.actionType == CC.ACTION_TYPES.ITEM then
-        -- Item binding
-        if binding.itemType == "slot" and binding.itemSlot then
-            local itemInfo = CC:GetSlotItemInfo(binding.itemSlot)
-            if itemInfo and itemInfo.icon then
-                icon:SetTexture(itemInfo.icon)
-            else
-                -- Use slot default icon
-                for _, slotData in ipairs(CC.EQUIPMENT_SLOTS) do
-                    if slotData.slot == binding.itemSlot then
-                        icon:SetTexture(slotData.icon)
-                        break
-                    end
-                end
-            end
-        elseif binding.itemId then
-            local itemInfo = CC:GetItemInfoById(binding.itemId)
-            if itemInfo and itemInfo.icon then
-                icon:SetTexture(itemInfo.icon)
-            else
-                icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
-            end
-        else
-            icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
-        end
-    elseif binding.actionType == "macro" and binding.macroId then
-        local macro = CC:GetMacroById(binding.macroId)
-        if macro then
-            -- Try to auto-detect icon from macro body first
-            local autoIcon = CC:GetIconFromMacroBody(macro.body)
-            if autoIcon then
-                icon:SetTexture(autoIcon)
-            elseif macro.icon and type(macro.icon) == "number" and macro.icon > 0 then
-                icon:SetTexture(macro.icon)
-            else
-                icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
-            end
-        else
-            icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
-        end
-    elseif binding.spellId or binding.spellName then
-        -- Get current display icon (accounts for talent overrides like Divine Toll -> Holy Armaments)
-        local _, displayIcon = GetSpellDisplayInfo(binding.spellId, binding.spellName)
-        icon:SetTexture(displayIcon or "Interface\\Icons\\INV_Misc_QuestionMark")
-    else
-        icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
-    end
+    -- Icon for the binding's action (shared resolver in Bindings.lua)
+    icon:SetTexture(CC:GetBindingDisplayIcon(binding))
     icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
     row.icon = icon
     
@@ -928,7 +452,7 @@ function CC:CreateEditBindingPanel()
     macWarning:SetPoint("RIGHT", clearBindBtn, "RIGHT", 0, 0)
     macWarning:SetJustifyH("LEFT")
     macWarning:SetWordWrap(false)
-    macWarning:SetText("|cFFFF4444Note:|r " .. L["Cmd + Left Click unavailable on Mac"])
+    macWarning:SetText(("|c" .. DF.GUI:ToneHex("caution") .. L["Note"] .. ":|r ") .. L["Cmd + Left Click unavailable on Mac"])
     macWarning:SetTextColor(0.6, 0.6, 0.6)
     if IsMacClient and IsMacClient() then
         macWarning:Show()
@@ -1182,7 +706,7 @@ function CC:CreateEditBindingPanel()
     fallbackSubtitle:SetWidth(280)
     fallbackSubtitle:SetJustifyH("LEFT")
     fallbackSubtitle:SetWordWrap(true)
-    fallbackSubtitle:SetText(format(L["For nameplates & world units. %sDoes not work with action bar binds.%s"], "|cffff3333", "|r"))
+    fallbackSubtitle:SetText(format(L["For nameplates & world units. %sDoes not work with action bar binds.%s"], "|c" .. DF.GUI:ToneHex("caution"), "|r"))
     fallbackSubtitle:SetTextColor(0.5, 0.5, 0.5)
     panel.fallbackSubtitle = fallbackSubtitle
     
@@ -1244,13 +768,13 @@ function CC:CreateEditBindingPanel()
     priorityLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     panel.priorityLabel = priorityLabel
 
-    -- Shared slider builder. The stored field (panel.pendingBinding.priority,
-    -- 1 = High .. 10 = Low) is written 1:1 via customGet/customSet, so the saved
-    -- value is identical to the old hand-rolled slider (which also stored the raw
-    -- priority; its 11-value was only a display-geometry inversion). The slider's
-    -- internal value now equals the priority directly, so the builder's input box
-    -- shows the actual priority number. Thumb runs left = 1 (High) .. right = 10
-    -- (Low); the hint labels below are oriented to match.
+    -- Shared slider builder. The stored field (panel.pendingBinding.priority) is
+    -- written 1:1 via customGet/customSet and shown directly in the input box.
+    -- Direction: HIGHER number = higher priority (10 wins over 1), matching every
+    -- other slider (right = more). Thumb runs left = 1 (Low) .. right = 10 (High).
+    -- A lazy per-profile migration (CC:MigratePrioritiesLazy) remaps older saved
+    -- values on first access, and the resolution comparators were flipped, so
+    -- existing bindings resolve the same.
     local prioritySlider = DF.GUI:CreateSlider(
         advancedContent,            -- parent
         "",                         -- label (priorityLabel handles the caption)
@@ -1274,16 +798,14 @@ function CC:CreateEditBindingPanel()
     )
     prioritySlider:SetPoint("TOPLEFT", 68, -155)
 
-    -- Priority hint labels (1 = High on left, 10 = Low on right)
-    local highLabel = advancedContent:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
-    highLabel:SetPoint("TOPLEFT", prioritySlider, "BOTTOMLEFT", 0, -2)
-    highLabel:SetText(L["1 = High"])
-    highLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-
-    local lowLabel = advancedContent:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
-    lowLabel:SetPoint("TOPRIGHT", prioritySlider, "BOTTOMRIGHT", 0, -2)
-    lowLabel:SetText(L["10 = Low"])
-    lowLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    -- Direction note (standard GUI label style). The slider's container is 50px
+    -- tall (its bottom sits near the Delete/Cancel/Save row), so the note is placed
+    -- in the gap BELOW the visible bar — anchored ~28px down from the slider top and
+    -- shifted left to x=0 to sit under the "Priority:" caption. Anchored to the
+    -- slider so it tracks the macro/spell repositioning; the CreateLabel frame has
+    -- no background, so its lower extent over the button row is invisible.
+    local priNote = DF.GUI:CreateLabel(advancedContent, L["Higher priority wins"], 248)
+    priNote:SetPoint("TOPLEFT", prioritySlider, "TOPLEFT", -68, -28)
 
     panel.prioritySlider = prioritySlider
     
@@ -1498,11 +1020,11 @@ end
 -- Show warning about Mac Command+Left Click not working
 function CC:ShowMacMetaClickWarning()
     StaticPopupDialogs["DF_MAC_META_CLICK_WARNING"] = {
-        text = "|cffff9900" .. L["Mac Limitation"] .. "|r\n\n" ..
+        text = "|c" .. DF.GUI:ToneHex("caution") .. L["Mac Limitation"] .. "|r\n\n" ..
                L["Command + Left Click bindings do not work on macOS. "] ..
                L["This is a World of Warcraft client limitation, not an addon bug."] .. "\n\n" ..
                L["The binding will be saved, but it will not trigger in-game."] .. "\n\n" ..
-               "|cff88ff88" .. L["Recommendation:"] .. "|r " .. L["Use "] .. "|cffffffff" .. L["Option (Alt)"] .. "|r " .. L["or "] .. "|cffffffff" .. L["Control"] .. "|r " .. L["instead of Command for left click modifiers."],
+               "|c" .. DF.GUI:ToneHex("success") .. L["Recommendation:"] .. "|r " .. L["Use "] .. "|cffffffff" .. L["Option (Alt)"] .. "|r " .. L["or "] .. "|cffffffff" .. L["Control"] .. "|r " .. L["instead of Command for left click modifiers."],
         button1 = L["OK"],
         timeout = 0,
         whileDead = true,
@@ -1558,7 +1080,7 @@ function CC:ShowEditBindingPanel(spellData, existingBinding, existingIndex)
             actionType = spellData.actionType or self.ACTION_TYPES.SPELL,
             spellId = spellData.spellId,
             spellName = spellData.spellName or spellData.name,
-            priority = 5,  -- Default priority (1=highest, 10=lowest)
+            priority = 5,  -- Default priority (10=highest, 1=lowest)
         }
         
         if spellData.isMacro then
@@ -1860,8 +1382,8 @@ function CC:ShowEditBindingPanel(spellData, existingBinding, existingIndex)
     end
     
     -- Update priority slider. The slider's internal value equals the stored
-    -- priority directly (1 = High .. 10 = Low); the builder's input box and fill
-    -- update off this value.
+    -- priority directly (1 = Low .. 10 = High; higher wins); the builder's input
+    -- box and fill update off this value.
     panel.prioritySlider.slider:SetValue(currentPriority)
     
     -- Update fallback checkboxes (only if not a macro)
@@ -1973,7 +1495,7 @@ function CC:FinalizeSaveBinding()
         
         -- Show warning popup
         StaticPopupDialogs["DF_KEY_CONFLICT_WARNING"] = {
-            text = "|cffff4444" .. L["Warning:"] .. "|r " .. keyText .. " " .. L["is already bound to:"] .. "\n\n" .. conflictDesc .. "\n\n" .. L["Multiple bindings on the same key may not work as expected. Save anyway?"],
+            text = "|c" .. DF.GUI:ToneHex("danger") .. L["Warning:"] .. "|r " .. keyText .. " " .. L["is already bound to:"] .. "\n\n" .. conflictDesc .. "\n\n" .. L["Multiple bindings on the same key may not work as expected. Save anyway?"],
             button1 = L["Save Anyway"],
             button2 = L["Cancel"],
             OnAccept = function()
@@ -2065,7 +1587,7 @@ function CC:ProcessKeybind(bindType, key)
         modifiers = mods,
         scope = defaultScope,
         combat = defaultCombat,
-        priority = 5,  -- Default priority (1=highest, 10=lowest)
+        priority = 5,  -- Default priority (10=highest, 1=lowest)
         -- Default to all frames
         frames = {
             dandersFrames = true,
@@ -2151,7 +1673,7 @@ function CC:ProcessKeybind(bindType, key)
         
         -- Show warning popup
         StaticPopupDialogs["DF_QUICKBIND_CONFLICT_WARNING"] = {
-            text = "|cffff4444" .. L["Warning:"] .. "|r " .. keyText .. " " .. L["is already bound to:"] .. "\n\n" .. conflictDesc .. "\n\n" .. L["Multiple bindings on the same key may not work as expected. Save anyway?"],
+            text = "|c" .. DF.GUI:ToneHex("danger") .. L["Warning:"] .. "|r " .. keyText .. " " .. L["is already bound to:"] .. "\n\n" .. conflictDesc .. "\n\n" .. L["Multiple bindings on the same key may not work as expected. Save anyway?"],
             button1 = L["Save Anyway"],
             button2 = L["Cancel"],
             OnAccept = function()
@@ -2190,40 +1712,6 @@ function CC:CommitQuickBindingDirect(newBinding)
     self:UpdateBlizzardFrameRegistration()
     self:ApplyBindings()
     self:RefreshSpellGrid(true)  -- Skip scroll reset to maintain position
-end
-
-function CC:ClearBindingsForSpell(spellName)
-    if not spellName then return end
-    
-    local toRemove = {}
-    for i, binding in ipairs(self.db.bindings) do
-        if binding.spellName == spellName then
-            table.insert(toRemove, 1, i) -- Insert at beginning so we remove from end first
-        end
-    end
-    
-    for _, idx in ipairs(toRemove) do
-        table.remove(self.db.bindings, idx)
-    end
-    
-    self:ApplyBindings()
-end
-
-function CC:ClearBindingsForAction(actionType)
-    if not actionType then return end
-    
-    local toRemove = {}
-    for i, binding in ipairs(self.db.bindings) do
-        if binding.actionType == actionType and not binding.spellName then
-            table.insert(toRemove, 1, i)
-        end
-    end
-    
-    for _, idx in ipairs(toRemove) do
-        table.remove(self.db.bindings, idx)
-    end
-    
-    self:ApplyBindings()
 end
 
 function CC:GetBindingsForSpell(spellName, displaySpellId)
@@ -4328,7 +3816,7 @@ initFrame:SetScript("OnEvent", function(self, event, isInitialLogin, isReloading
 end)
 
 -- Debug slash command to list all detected spells
-SLASH_DFCCSPELLS1 = "/dfccspells"
+DF:RegisterDebugSlash("DFCCSPELLS", "Spellbook detection dump", true, "/dfccspells")
 SlashCmdList["DFCCSPELLS"] = function(msg)
     if msg == "raw" then
         -- Dump raw spellbook data with item types
@@ -4457,55 +3945,6 @@ SlashCmdList["DFCCSPELLS"] = function(msg)
         print("  |cff00ff00/dfccspells types|r - Show counts by spell type")
         print("  |cff00ff00/dfccspells raw|r - Dump all spellbook entries with types")
     end
-end
-
--- Test slash command for Mac warning popup
-SLASH_DFCCMACTEST1 = "/dfccmactest"
-SlashCmdList["DFCCMACTEST"] = function()
-    local isMac = IsMacClient and IsMacClient() or false
-    print("|cff33cc66[DF Click Casting]|r Mac warning test:")
-    print("  IsMacClient() = " .. tostring(isMac))
-    
-    -- Show the popup warning
-    CC:ShowMacMetaClickWarning()
-    
-    -- Open the click casting UI if needed
-    if not CC.clickCastUIFrame or not CC.clickCastUIFrame:IsShown() then
-        CC:ToggleClickCastUI()
-    end
-    
-    -- Open the edit binding panel with a dummy spell to see the warning
-    local dummySpell = {
-        spellName = "Test Spell",
-        name = "Test Spell",
-        icon = 136243,  -- Generic spell icon
-    }
-    CC:ShowEditBindingPanel(dummySpell, nil, nil)
-    
-    -- Force show the Mac warning in the edit panel
-    if CC.editBindingPanel and CC.editBindingPanel.macWarning then
-        CC.editBindingPanel.macWarning:Show()
-        print("  Showing warning in Edit Binding Panel")
-    end
-    
-    -- Also show quick bind popup to test that warning (just the visual, no capture)
-    C_Timer.After(0.5, function()
-        if CC.keybindPopup then
-            -- Show just the popup visually (not the capture frame)
-            CC.keybindPopup.title:SetText("Quick Bind Test")
-            CC.keybindPopup.spellName:SetText("Test Spell")
-            CC.keybindPopup:ClearAllPoints()
-            CC.keybindPopup:SetPoint("CENTER", UIParent, "CENTER", 250, 0)
-            CC.keybindPopup:Show()
-            
-            -- Force show the Mac warning
-            if CC.keybindPopup.macWarning then
-                CC.keybindPopup.macWarning:Show()
-                print("  Showing warning in Quick Bind Popup (positioned to the right)")
-                print("  Note: Quick bind popup is display-only for this test")
-            end
-        end
-    end)
 end
 
 -- ============================================================
