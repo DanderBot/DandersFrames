@@ -4932,6 +4932,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- /df subcommand diagnostics (hand-listed — keep in sync with this handler)
                 print("  |cffffcc00" .. L["/df diagnostics"] .. ":|r")
                 print("    |cff00ff00/df exportaudit|r - " .. L["export category drift check"])
+                print("    |cff00ff00/df blocked|r - " .. L["settings disabled by the 12.1 aura system"])
                 print("    |cff00ff00/df overrides|r - " .. L["active auto-layout overrides"])
                 print("    |cff00ff00/df attached|r - " .. L["foreign frames anchored to ours"])
                 print("    |cff00ff00/df headers|r / |cff00ff00auras|r / |cff00ff00dispel|r - " .. L["subsystem state dumps"])
@@ -5094,6 +5095,12 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- declared local-only (guards against export-list drift).
                 if DF.AuditExportCategories then
                     DF:AuditExportCategories()
+                end
+            elseif msg == "blocked" then
+                -- Dev: inventory of settings disabled by the 12.1 aura system
+                -- (the running "what we've lost / restored" audit).
+                if DF.PrintBlockedSettings then
+                    DF:PrintBlockedSettings()
                 end
             elseif msg == "auratimer" then
                 -- Show aura timer stats

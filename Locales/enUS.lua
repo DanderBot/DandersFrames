@@ -1137,6 +1137,16 @@ L["Not Available on Raid Frames"] = true
 L["Not Cancelable"] = true
 L["Not in a raid group"] = true
 L["Number"] = true
+L["settings disabled by the 12.1 aura system"] = true
+-- 12.1 blocked-overlay wording (GUI:BlockedWording) — shared across every dead-setting page
+L["Blizzard limitation"] = true
+L["Not available on 12.1"] = true
+L["Not available with the 12.1 aura system"] = true
+L["Not available yet with the 12.1 aura system"] = true
+L["These settings are being rebuilt on WoW's new 12.1 aura system and will return in a future update."] = true
+L["This is being rebuilt on WoW's new 12.1 aura system and will return in a future update."] = true
+L["WoW's new 12.1 aura system doesn't support these settings, so they can't be provided."] = true
+L["WoW's new 12.1 aura system doesn't support this setting."] = true
 L["Cmd + Left Click unavailable on Mac"] = true
 L["Font sizes are not changed. Adjust sizes in each element's page."] = true
 L["Note"] = true

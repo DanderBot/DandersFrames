@@ -418,23 +418,28 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local buffTooltipEnable = buffTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Buff Tooltips"], db, "tooltipBuffEnabled", nil), 30)
         buffTooltipEnable.keepEnabled = true
         buffTooltipGroup.disableChildrenOn = function(d) return not d.tooltipBuffEnabled end
-        buffTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Disable in Combat"], db, "tooltipBuffDisableInCombat", function() end), 30)
+        local buffTtCombat = buffTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Disable in Combat"], db, "tooltipBuffDisableInCombat", function() end), 30)
+        GUI:BlockControl12_1(buffTtCombat, "roadmap", { id = "tooltips:buffcombat", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsBuffRow(d) end })
         
         local buffAnchorValues = {
             DEFAULT = L["Game Default"],
             CURSOR = L["Cursor"],
             FRAME = L["Buff Icon"],
         }
-        buffTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor To"], buffAnchorValues, db, "tooltipBuffAnchor", function() GUI:RefreshCurrentPage() end), 55)
+        local buffTtAnchorTo = buffTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor To"], buffAnchorValues, db, "tooltipBuffAnchor", function() GUI:RefreshCurrentPage() end), 55)
+        GUI:BlockControl12_1(buffTtAnchorTo, "roadmap", { id = "tooltips:buffanchorto", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsBuffRow(d) end })
         
         local buffAnchorPos = buffTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorPositionValues, db, "tooltipBuffAnchorPos", function() end), 55)
         buffAnchorPos.disableOn = function(d) return d.tooltipBuffAnchor == "DEFAULT" end
+        GUI:BlockControl12_1(buffAnchorPos, "roadmap", { id = "tooltips:buffanchorpos", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsBuffRow(d) end })
         
         local buffOffsetX = buffTooltipGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -150, 150, 1, db, "tooltipBuffX", function() end), 55)
         buffOffsetX.disableOn = function(d) return d.tooltipBuffAnchor ~= "FRAME" end
+        GUI:BlockControl12_1(buffOffsetX, "roadmap", { id = "tooltips:buffoffsetx", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsBuffRow(d) end })
         
         local buffOffsetY = buffTooltipGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -150, 150, 1, db, "tooltipBuffY", function() end), 55)
         buffOffsetY.disableOn = function(d) return d.tooltipBuffAnchor ~= "FRAME" end
+        GUI:BlockControl12_1(buffOffsetY, "roadmap", { id = "tooltips:buffoffsety", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsBuffRow(d) end })
         
         Add(buffTooltipGroup, nil, 2)
         
@@ -468,6 +473,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         debuffOffsetY.disableOn = function(d) return d.tooltipDebuffAnchor ~= "FRAME" end
         
         Add(debuffTooltipGroup, nil, 1)
+        GUI:BlockControl12_1(debuffTooltipGroup, "roadmap", { id = "tooltips:debuffgroup", page = L["Tooltips"] })
         
         -- Defensive Icon Tooltips (Column 2)
         local defTooltipGroup = GUI:CreateSettingsGroup(self.child, 280)
@@ -494,6 +500,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         defOffsetY.disableOn = function(d) return d.tooltipDefensiveAnchor ~= "FRAME" end
         
         Add(defTooltipGroup, nil, 2)
+        GUI:BlockControl12_1(defTooltipGroup, "roadmap", { id = "tooltips:defensivegroup", page = L["Tooltips"] })
 
         -- Resurrection Icon Tooltips (Column 3)
         local resTooltipGroup = GUI:CreateSettingsGroup(self.child, 280)
@@ -4067,11 +4074,12 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         masqueGroup:AddWidget(GUI:CreateHeader(self.child, L["Masque Integration"]), 40)
         
         if DF.Masque then
-            masqueGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Let Masque Control Aura Borders"], db, "masqueBorderControl", function()
+            local masqueBorderChk = masqueGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Let Masque Control Aura Borders"], db, "masqueBorderControl", function()
                 if DF.ApplyLayout then DF:ApplyLayout() end
                 if DF.UpdateAllFrames then DF:UpdateAllFrames() end
                 print("|cff00ff00DandersFrames:|r Masque border control " .. (db.masqueBorderControl and L["enabled"] or L["disabled"]) .. ". A /reload may be needed.")
             end), 30)
+            GUI:BlockControl12_1(masqueBorderChk, "roadmap", { id = "integrations:masqueborder", page = L["Integrations"] })
             masqueGroup:AddWidget(GUI:CreateLabel(self.child, L["When enabled, Masque skins aura icons and borders. DF border settings will be disabled."], 250), 45)
         else
             masqueGroup:AddWidget(GUI:CreateLabel(self.child, L["Masque addon is not installed.\n\nMasque allows you to skin buff/debuff icons with custom textures. Install Masque from CurseForge to enable."], 250), 75)
@@ -4093,11 +4101,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             if DF.UpdateAuraClickThrough then DF:UpdateAuraClickThrough() end
         end), 30)
         debuffDisableMouse.disableOn = function(d) return not d.showDebuffs end
+        GUI:BlockControl12_1(debuffDisableMouse, "roadmap", { id = "integrations:debuffclickthrough", page = L["Integrations"] })
         
         local defensiveDisableMouse = clickThroughGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Defensive Icon Click-Through"], db, "defensiveIconDisableMouse", function()
             if DF.UpdateAuraClickThrough then DF:UpdateAuraClickThrough() end
         end), 30)
         defensiveDisableMouse.disableOn = function(d) return not d.defensiveIconEnabled end
+        GUI:BlockControl12_1(defensiveDisableMouse, "roadmap", { id = "integrations:defensiveclickthrough", page = L["Integrations"] })
         
         local tsDisableMouse = clickThroughGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Targeted Spell Click-Through"], db, "targetedSpellDisableMouse", function()
             if DF.UpdateAuraClickThrough then DF:UpdateAuraClickThrough() end
@@ -5433,6 +5443,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             NAME = L["Alphabetical"],
         }
         local bfSort = buffGroup:AddWidget(GUI:CreateDropdown(self.child, L["Sort Order"], buffSortOptions, db, "directBuffSortOrder", DirectFilterChanged), 55)
+        GUI:BlockControl12_1(bfSort, "roadmap", { id = "filters:buffsort", page = L["Aura Filters"], when = function(d) return DF:FactoryOwnsBuffRow(d) end })
         Add(buffGroup, nil, 2)
 
         -- ===== DEBUFF FILTERS (Column 1, Direct mode only) =====
@@ -5485,6 +5496,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         }
         local dfSort = debuffGroup:AddWidget(GUI:CreateDropdown(self.child, L["Sort Order"], debuffSortOptions, db, "directDebuffSortOrder", DirectFilterChanged), 55)
         Add(debuffGroup, nil, 1)
+        GUI:BlockControl12_1(debuffGroup, "roadmap", { id = "filters:debuffgroup", page = L["Aura Filters"] })
 
         -- ===== AURA BLACKLIST (Column 2, under Buff Filters) =====
         -- Pointer section directing users to the dedicated Aura Blacklist tab.
@@ -5517,6 +5529,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
     -- Auras > Aura Designer
     local pageAuraDesigner = CreateSubTab("auras", "auras_auradesigner", L["Aura Designer"])
+    -- 12.1: the Aura Designer engine reads secret aura data (spellId/expiration) the
+    -- new aura system no longer exposes. Whole page blocked until it's rebuilt.
+    GUI:BlockPage12_1(pageAuraDesigner, "roadmap")
     BuildPage(pageAuraDesigner, function(self, db, Add, AddSpace, AddSyncPoint)
         if DF.BuildAuraDesignerPage then
             DF.BuildAuraDesignerPage(GUI, self, db)
@@ -5525,6 +5540,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
     -- Auras > Aura Blacklist
     local pageAuraBlacklist = CreateSubTab("auras", "auras_blacklist", L["Aura Blacklist"])
+    -- 12.1: native aura filters are include-only, so an exclude-by-spellID blacklist
+    -- can't be expressed. Genuine Blizzard limitation, not a roadmap port.
+    GUI:BlockPage12_1(pageAuraBlacklist, "limitation")
     BuildPage(pageAuraBlacklist, function(self, db, Add, AddSpace, AddSyncPoint)
         if DF.BuildAuraBlacklistPage then
             DF.BuildAuraBlacklistPage(GUI, self, db)
@@ -5589,6 +5607,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             DF:UpdateAllAuras()
         end), 30)
         Add(dedupGroup, nil, 1)
+        GUI:BlockControl12_1(dedupGroup, "roadmap", { id = "buffs:dedup", page = L["Buffs"], when = function(d) return DF:FactoryOwnsBuffRow(d) end })
 
         AddSpace(10, "both")
 
@@ -5789,6 +5808,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             },
         })
         AddToSection(expiringGroup, nil, 1)
+        GUI:BlockControl12_1(expiringGroup, "roadmap", { id = "buffs:expiring", page = L["Buffs"], when = function(d) return DF:FactoryOwnsBuffRow(d) end })
 
         currentSection = nil
 
@@ -5807,6 +5827,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
     -- Auras > Debuffs (combined Layout + Appearance with collapsible sections)
     local pageDebuffs = CreateSubTab("auras", "auras_debuffs", L["Debuffs"])
+    -- 12.1: the debuff row is still on the legacy secret-reading render; the factory
+    -- serves only the buff row in v1. Blocked until the debuff row is ported.
+    GUI:BlockPage12_1(pageDebuffs, "roadmap")
     BuildPage(pageDebuffs, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top
         Add(CreateCopyButton(self.child, {"debuff", "showDebuffs"}, L["Debuffs"], "auras_debuffs"), 25, 2)
@@ -6169,6 +6192,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     
     -- Auras > Missing Buffs
     local pageMissingBuffs = CreateSubTab("auras", "auras_missingbuffs", L["Missing Buffs"])
+    -- 12.1: missing-buff detection reads secret aura presence per unit, which the new
+    -- aura system no longer exposes. Blocked until reworked on the Group-Buff source.
+    GUI:BlockPage12_1(pageMissingBuffs, "roadmap")
     BuildPage(pageMissingBuffs, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top
         Add(CreateCopyButton(self.child, {"missingBuff"}, L["Missing Buffs"], "auras_missingbuffs"), 25, 2)
@@ -6307,6 +6333,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     
     -- Auras > Defensive Icon
     local pageDefensiveIcon = CreateSubTab("auras", "auras_defensiveicon", L["Defensive Icon"])
+    -- 12.1: defensive icons are the FIRST factory port (pilot). The banner is
+    -- when-driven so it lifts itself automatically once the factory serves this row
+    -- (DF.AuraContainer.ServesDefensiveIcons) — no GUI surgery needed at that point.
+    GUI:BlockPage12_1(pageDefensiveIcon, "roadmap", function()
+        return GUI:IsAuraFactoryActive()
+            and not (DF.AuraContainer and DF.AuraContainer.ServesDefensiveIcons and DF.AuraContainer.ServesDefensiveIcons())
+    end)
     BuildPage(pageDefensiveIcon, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top
         Add(CreateCopyButton(self.child, {"defensiveIcon"}, L["Defensive Icon"], "auras_defensiveicon"), 25, 2)
@@ -8417,6 +8450,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         nameTextCheck.hideOn = HideDispelOptions
         displayGroup.hideOn = HideDispelOptions
         dfSection:RegisterChild(displayGroup)
+        GUI:BlockControl12_1(displayGroup, "roadmap", { id = "dispel:display", page = L["Dispel Overlay"] })
         Add(displayGroup, nil, 1)
 
         -- ===== ICON GROUP (Column 2) =====
@@ -8455,6 +8489,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         iconOffsetY.hideOn = HideIconOptions
         iconGroup.hideOn = HideDispelOptions
         dfSection:RegisterChild(iconGroup)
+        GUI:BlockControl12_1(iconGroup, "roadmap", { id = "dispel:icon", page = L["Dispel Overlay"] })
         Add(iconGroup, nil, 2)
 
         -- ===== BORDER GROUP (Column 1) =====
@@ -8474,6 +8509,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         borderAlpha.hideOn = HideDispelOptions
         borderGroup.hideOn = HideDispelOptions
         dfSection:RegisterChild(borderGroup)
+        GUI:BlockControl12_1(borderGroup, "roadmap", { id = "dispel:border", page = L["Dispel Overlay"] })
         Add(borderGroup, nil, 1)
 
         -- ===== COLORS GROUP (Column 2) =====
@@ -8501,6 +8537,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         resetColors.hideOn = HideDispelOptions
         colorsGroup.hideOn = HideDispelOptions
         dfSection:RegisterChild(colorsGroup)
+        GUI:BlockControl12_1(colorsGroup, "limitation", { id = "dispel:colors", page = L["Dispel Overlay"] })
         Add(colorsGroup, nil, 2)
 
         -- ===== GRADIENT GROUP (Column 1) =====
@@ -8538,6 +8575,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         blendDropdown.hideOn = HideDispelOptions
         gradientGroup.hideOn = HideDispelOptions
         dfSection:RegisterChild(gradientGroup)
+        GUI:BlockControl12_1(gradientGroup, "limitation", { id = "dispel:gradient", page = L["Dispel Overlay"] })
         Add(gradientGroup, nil, 1)
 
         -- ===== DARKEN GROUP (Column 2) =====
@@ -8557,6 +8595,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         darkenAlpha.disableOn = function(d) return not d.dispelGradientDarkenEnabled end
         darkenGroup.hideOn = HideDispelOptions
         dfSection:RegisterChild(darkenGroup)
+        GUI:BlockControl12_1(darkenGroup, "limitation", { id = "dispel:darken", page = L["Dispel Overlay"] })
         Add(darkenGroup, nil, 2)
 
         -- ===== BLIZZARD OVERLAY COLLAPSIBLE SECTION =====

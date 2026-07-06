@@ -35,6 +35,238 @@ GUI.Colors = {
 
 DF.SectionRegistry = DF.SectionRegistry or {}
 
+-- ============================================================
+-- BLOCKED / DISABLED-ON-12.1 OVERLAY SYSTEM
+-- Marks settings that no longer function under WoW 12.1's Blizzard-driven aura
+-- widgets. Two surfaces:
+--   GUI:SetPageBlocked(page, ...) — whole dead page: renders one banner instead
+--     of the controls (reuses DoBuild's disabled-mode branch via GUI.BlockedPages).
+--   GUI:SetBlocked(target, ...)   — a single control OR a whole settings-group:
+--     composes the block into the existing grey-out seam (widget.disableOn for
+--     controls, group.disableChildrenOn for groups) + a frosted overlay + tooltip.
+-- A metadata registry (DF.BlockedSettings) drives `/df blocked`, the running
+-- "what we've lost / what we've restored" audit.
+--
+-- EVERY marker gates on DF.AuraContainer.IsSupported() (via a `when` predicate) so
+-- NOTHING blocks on live 12.0.x, where the legacy render still works — the overlays
+-- only appear once the 12.1 aura system is active. Apply-side helpers below build
+-- the right `when` per target (whole-page vs buff-row-owned vs any-12.1).
+-- Wording: "not yet available…" for roadmap ports; "Blizzard limitation" for
+-- genuine permanent limits.
+-- ============================================================
+
+DF.BlockedSettings = DF.BlockedSettings or {}   -- [id] = { id, page, reason, tooltip, wording }
+GUI.BlockedPages   = GUI.BlockedPages   or {}   -- [tabName] = { reason, tooltip, tone, when }
+
+-- True once the 12.1 Blizzard aura widgets are live. The base gate for every
+-- blocked marker; on 12.0.x this is false so all overlays stay hidden and no
+-- control is greyed.
+function GUI:IsAuraFactoryActive()
+    return (DF.AuraContainer and DF.AuraContainer.IsSupported and DF.AuraContainer.IsSupported()) and true or false
+end
+
+-- Register/refresh a metadata entry, keyed by a stable id so page rebuilds
+-- overwrite rather than leak or double-count (widget-keyed registries stale on
+-- every mode switch). Pure data — never holds a widget reference.
+function GUI:RegisterBlockedMeta(id, info)
+    if not id then return end
+    DF.BlockedSettings[id] = {
+        id      = id,
+        page    = info.page,
+        reason  = info.reason,
+        tooltip = info.tooltip,
+        wording = info.wording,   -- "roadmap" | "limitation"
+    }
+end
+
+-- Toggle a frosted overlay's visibility from its owner's current block state.
+-- Called from BOTH standard refresh passes (page RefreshStates + group
+-- RefreshChildStates). No-op unless the frame carries an overlay.
+function GUI:RefreshBlockedOverlay(frame, db)
+    local ov = frame and frame.blockedOverlay
+    if not ov then return end
+    local blocked = (not ov.when) or (db and ov.when(db)) or false
+    ov:SetShown(blocked and true or false)
+end
+
+-- Internal: build the frosted veil + centred reason label + hover tooltip over a
+-- target frame. It's a CHILD of the target so it rides the target's frame level,
+-- hides/moves with it, and gets trashed on rebuild (no leak). frameLevel +10 (a
+-- mere +1 renders under nested interactive children). EnableMouse only — NEVER
+-- EnableMouseWheel, which would eat the page ScrollFrame's wheel when the cursor
+-- sits on a blocked row. SetIgnoreParentAlpha keeps the veil + label bright while
+-- the greyed control underneath dims to 0.4.
+local function BuildFrostOverlay(target, reason, tooltip, whenFn)
+    local ov = CreateFrame("Frame", nil, target)
+    ov:SetAllPoints(target)
+    ov:SetFrameLevel(target:GetFrameLevel() + 10)
+    ov:SetIgnoreParentAlpha(true)
+    ov:EnableMouse(true)
+
+    local bg = GUI.Colors.background
+    local veil = ov:CreateTexture(nil, "BACKGROUND")
+    veil:SetAllPoints()
+    veil:SetColorTexture(bg.r, bg.g, bg.b, 0.55)
+
+    local lbl = ov:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    lbl:SetPoint("LEFT", ov, "LEFT", 6, 0)
+    lbl:SetPoint("RIGHT", ov, "RIGHT", -6, 0)
+    lbl:SetJustifyH("CENTER")
+    lbl:SetWordWrap(true)
+    lbl:SetText("|c" .. GUI:ToneHex("caution") .. (reason or "") .. "|r")
+
+    ov.when    = whenFn
+    ov.reason  = reason
+    ov.tooltip = tooltip
+    ov:SetScript("OnEnter", function(self)
+        GUI:ShowTooltip(self, {
+            title = reason,
+            tone  = "caution",
+            lines = tooltip and { { text = tooltip } } or nil,
+        })
+    end)
+    ov:SetScript("OnLeave", function() GUI:HideTooltip() end)
+    ov:Hide()   -- RefreshBlockedOverlay shows it when the block is active
+    return ov
+end
+
+-- Mark a single widget OR a whole settings-group as blocked. Composes `when` into
+-- the existing grey seam (widget.disableOn / group.disableChildrenOn — a
+-- SettingsGroup has no SetEnabled, so disableOn on a group would frost but grey
+-- nothing), attaches a frosted overlay, and registers metadata.
+--   opts = { reason, tooltip, when, id, page, wording }
+--   when(db) -> true when blocked. Omit for always-blocked (still gate via `when`
+--   at the call site so 12.0.x stays clear).
+function GUI:SetBlocked(target, opts)
+    if not target then return end
+    opts = opts or {}
+    local whenFn = opts.when   -- nil => always blocked (caller is responsible for the 12.1 gate)
+
+    local id = opts.id or ((opts.page or "?") .. ":" .. (opts.reason or tostring(target)))
+    GUI:RegisterBlockedMeta(id, opts)
+
+    if target.isSettingsGroup then
+        local prev = target.disableChildrenOn
+        target.disableChildrenOn = function(d)
+            return (((not whenFn) or whenFn(d)) or (prev and prev(d))) and true or false
+        end
+    else
+        local prev = target.disableOn
+        target.disableOn = function(d)
+            return (((not whenFn) or whenFn(d)) or (prev and prev(d))) and true or false
+        end
+    end
+
+    target.blockedOverlay = BuildFrostOverlay(target, opts.reason, opts.tooltip, whenFn)
+    GUI:RefreshBlockedOverlay(target, DF.db and DF.db[GUI.SelectedMode])
+    return target
+end
+
+-- Mark a whole page dead: renders a single banner instead of the page's controls
+-- (via GUI.BlockedPages, consumed by DoBuild). `when(db)` lets a page un-block
+-- itself later — e.g. the Defensive Icon banner lifts automatically once the
+-- factory pilot serves that row, with no GUI surgery.
+--   opts = { reason, tooltip, tone, when, wording, page }
+function GUI:SetPageBlocked(page, opts)
+    if not page or not page.tabName then return end
+    opts = opts or {}
+    GUI.BlockedPages[page.tabName] = {
+        reason  = opts.reason,
+        tooltip = opts.tooltip,
+        tone    = opts.tone or "caution",
+        when    = opts.when,
+    }
+    GUI:RegisterBlockedMeta("page:" .. page.tabName, {
+        page    = opts.page or page.tabLabel or page.tabName,
+        reason  = opts.reason,
+        tooltip = opts.tooltip,
+        wording = opts.wording,
+    })
+    if page.Invalidate then page:Invalidate() end
+end
+
+-- Is this page currently blocked for the active mode's db? (Used by DoBuild /
+-- RefreshCached; the cache key tracks it so a `when` flip rebuilds the page.)
+function GUI:IsTabBlockedForCurrentMode(tabName, db)
+    local info = GUI.BlockedPages[tabName]
+    if not info then return false end
+    if info.when then return (info.when(db) and true) or false end
+    return true
+end
+
+-- Shared 12.1 blocked wording, resolved at call time (never at file scope — L
+-- freezes on enUS if baked into a file-scope table). scope = "page" | "group";
+-- wording = "roadmap" (returns/rebuilt later) | "limitation" (permanent).
+-- Returns reason (short headline / on-frost label), tooltip (detail).
+function GUI:BlockedWording(scope, wording)
+    local L = DF.L
+    if scope == "page" then
+        if wording == "limitation" then
+            return L["Not available with the 12.1 aura system"],
+                   L["WoW's new 12.1 aura system doesn't support these settings, so they can't be provided."]
+        end
+        return L["Not available yet with the 12.1 aura system"],
+               L["These settings are being rebuilt on WoW's new 12.1 aura system and will return in a future update."]
+    else
+        if wording == "limitation" then
+            return L["Blizzard limitation"],
+                   L["WoW's new 12.1 aura system doesn't support this setting."]
+        end
+        return L["Not available on 12.1"],
+               L["This is being rebuilt on WoW's new 12.1 aura system and will return in a future update."]
+    end
+end
+
+-- Convenience: block a whole page with the shared wording. `when` defaults to the
+-- base 12.1 gate (so nothing blocks on 12.0.x); pass a stricter predicate to let
+-- the page un-block once a port lands (e.g. the Defensive Icon pilot).
+function GUI:BlockPage12_1(page, wording, when)
+    if not page then return end
+    local r, t = GUI:BlockedWording("page", wording)
+    GUI:SetPageBlocked(page, {
+        reason  = r,
+        tooltip = t,
+        wording = wording or "roadmap",
+        page    = page.tabLabel or page.tabName,
+        when    = when or function() return GUI:IsAuraFactoryActive() end,
+    })
+end
+
+-- Convenience: block a single control OR a settings-group with the shared wording.
+--   opts = { id, page, when }  (when defaults to the base 12.1 gate)
+function GUI:BlockControl12_1(target, wording, opts)
+    if not target then return end
+    opts = opts or {}
+    local r, t = GUI:BlockedWording("group", wording)
+    GUI:SetBlocked(target, {
+        reason  = r,
+        tooltip = t,
+        wording = wording or "roadmap",
+        id      = opts.id,
+        page    = opts.page,
+        when    = opts.when or function() return GUI:IsAuraFactoryActive() end,
+    })
+end
+
+-- `/df blocked` — dump the metadata registry: the running inventory of settings
+-- disabled by the 12.1 aura system, tagged [port] (roadmap) vs [limit] (permanent).
+-- Dev diagnostic; output intentionally not localized.
+function DF:PrintBlockedSettings()
+    local list = {}
+    for _, e in pairs(DF.BlockedSettings) do list[#list + 1] = e end
+    table.sort(list, function(a, b)
+        return ((a.page or "") .. "\1" .. (a.id or "")) < ((b.page or "") .. "\1" .. (b.id or ""))
+    end)
+    local active = GUI:IsAuraFactoryActive()
+    print(string.format("|cffffcc00DandersFrames — settings blocked by the 12.1 aura system|r (%d entries, factory %s):",
+        #list, active and "|cff00ff00ACTIVE|r" or "|cff808080inactive (12.0.x)|r"))
+    for _, e in ipairs(list) do
+        local tag = (e.wording == "limitation") and "|cffff6666[limit]|r" or "|cffffcc00[port] |r"
+        print(string.format("  %s |cffffffff%s|r — %s", tag, tostring(e.page or e.id), tostring(e.reason or "")))
+    end
+    print("  |cff808080(group/widget entries register when their page is first opened this session)|r")
+end
+
 -- Track selected mode
 GUI.SelectedMode = "party"
 
@@ -749,19 +981,33 @@ function GUI:CreateSettingsGroup(parent, width, opts)
         local hasGroupGate = self.disableChildrenOn ~= nil
         local groupOff = hasGroupGate and self.disableChildrenOn(db) or false
 
+        -- When the whole group is blocked on 12.1, grey EVERYTHING — including the
+        -- header and the feature's own Enable toggle (keepEnabled) — since the
+        -- feature can't function at all under the new aura system.
+        local groupBlocked = false
+        if self.blockedOverlay then
+            groupBlocked = ((not self.blockedOverlay.when) or self.blockedOverlay.when(db)) and true or false
+        end
+
         for i, entry in ipairs(self.groupChildren) do
             local widget = entry.widget
             if widget.SetEnabled and (widget.disableOn or hasGroupGate) then
                 local shouldDisable = (widget.disableOn and widget.disableOn(db)) or false
-                if groupOff and i > 1 and not widget.keepEnabled then
+                if groupBlocked then
+                    shouldDisable = true
+                elseif groupOff and i > 1 and not widget.keepEnabled then
                     shouldDisable = true
                 end
                 widget:SetEnabled(not shouldDisable)
             end
+            if widget.blockedOverlay then GUI:RefreshBlockedOverlay(widget, db) end
             if widget.refreshContent and widget:IsShown() then
                 widget:refreshContent(db)
             end
         end
+
+        -- Toggle the group's own frost (whole-group blocked case).
+        GUI:RefreshBlockedOverlay(self, db)
     end
 
     return group
@@ -9587,6 +9833,30 @@ function DF:CreateGUI()
                 banner.layoutCol = "both"
                 self.builtForMode = GUI.SelectedMode
                 self.builtForDisabled = true
+                -- Track the REAL block state even while mode-disabled: RefreshCached
+                -- recomputes isBlocked independent of disabled state, so hardcoding false
+                -- here would miss the cache on every revisit of a page that is BOTH
+                -- disabled and blocked (all five aura sub-tabs on 12.1 with a mode off).
+                self.builtForBlocked = GUI:IsTabBlockedForCurrentMode(self.tabName, db)
+                self.cacheValid = true
+                self:RefreshStates()
+                return
+            end
+
+            -- Blocked-page handling: a page marked dead on 12.1 (GUI.BlockedPages)
+            -- renders one banner instead of its controls. `when(db)` lets it un-block
+            -- later (e.g. once a factory port lands); RefreshCached tracks
+            -- builtForBlocked so the flip forces a rebuild.
+            local blockInfo = GUI.BlockedPages[self.tabName]
+            if blockInfo and ((not blockInfo.when) or blockInfo.when(db)) then
+                local banner = GUI:CreateInfoBanner(parent, { tone = blockInfo.tone or "caution" })
+                banner:SetText((blockInfo.reason or "")
+                    .. (blockInfo.tooltip and ("\n\n" .. blockInfo.tooltip) or ""))
+                table.insert(self.children, banner)
+                banner.layoutCol = "both"
+                self.builtForMode = GUI.SelectedMode
+                self.builtForDisabled = false
+                self.builtForBlocked = true
                 self.cacheValid = true
                 self:RefreshStates()
                 return
@@ -9614,6 +9884,7 @@ function DF:CreateGUI()
             builderFunc(self, db, Add, AddSpace, AddSyncPoint)
             self.builtForMode = GUI.SelectedMode
             self.builtForDisabled = false
+            self.builtForBlocked = false
             self.cacheValid = true
             self:RefreshStates()
         end
@@ -9634,9 +9905,11 @@ function DF:CreateGUI()
             if not db then return end
 
             local isDisabled = GUI:IsTabDisabledForCurrentMode(self.tabName)
+            local isBlocked = GUI:IsTabBlockedForCurrentMode(self.tabName, db)
             if self.cacheValid
                and self.builtForMode == GUI.SelectedMode
-               and self.builtForDisabled == isDisabled then
+               and self.builtForDisabled == isDisabled
+               and self.builtForBlocked == isBlocked then
                 self:RefreshStates()
                 return
             end
@@ -9674,6 +9947,8 @@ function DF:CreateGUI()
             
             -- Second pass: handle regular widgets and group visibility
             for _, widget in ipairs(self.children) do
+                -- Keep any blocked-overlay (top-level widget or group) in sync.
+                if widget.blockedOverlay then GUI:RefreshBlockedOverlay(widget, db) end
                 -- Skip SettingsGroup children - they're handled by their parent group
                 if widget.settingsGroup then
                     -- Already handled by group's LayoutChildren
