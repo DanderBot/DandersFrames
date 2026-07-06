@@ -2573,6 +2573,140 @@ function DF:DriveBuffFactory(frame, db)
     end
 end
 
+-- ============================================================
+-- DEFENSIVE-ICON FACTORY BRIDGE (pilot — first non-buff consumer)
+-- Routes the defensive row through DF.AuraContainer on 12.1 using the native
+-- BIG_DEFENSIVE / EXTERNAL_DEFENSIVE filters. Reuses the buff bridge's config SHAPE
+-- + buffFactorySig (the element-agnostic row signature). Defensive settings have a
+-- different key layout (defensiveIcon* + defensiveBar*), so they get a dedicated
+-- mapper rather than the prefix builder. Gated on DF.db.defensiveUseFactory (default
+-- on) + IsSupported → no effect on live 12.0.x.
+-- Known v1 gaps (native filters can't exclude specific instances until PTR-4):
+-- no AD/buff dedup, no range fade, CENTER growth falls back to RIGHT.
+-- ============================================================
+
+-- Render gate (excludes test mode, which paints legacy icons directly).
+function DF:UseFactoryForDefensive(frame, db)
+    return DF.db and DF.db.defensiveUseFactory ~= false
+        and DF.AuraContainer and DF.AuraContainer.IsSupported()
+        and BuildDirectDefensiveFilters() ~= nil
+        and not (DF.testMode or DF.raidTestMode)
+end
+
+-- GUI-facing predicate (does NOT exclude test mode, so a "blocked" overlay doesn't
+-- flicker while previewing). Mirrors DF:FactoryOwnsBuffRow.
+function DF:FactoryOwnsDefensiveRow(db)
+    return (DF.db and DF.db.defensiveUseFactory ~= false
+        and DF.AuraContainer and DF.AuraContainer.IsSupported()
+        and BuildDirectDefensiveFilters() ~= nil) or false
+end
+
+-- Map the defensive settings -> the AuraContainer config SHAPE. Filter = the native
+-- defensive list the legacy classifier already uses; a row of up to defensiveBarMax
+-- icons. Stacks use the legacy min-2 display. buffFactorySig treats this cfg the same
+-- as a buff cfg (it reads derived fields, not db keys).
+function DF:BuildDefensiveRowConfig(db, unit)
+    local dur
+    if db.defensiveIconShowDuration ~= false then
+        local colorByTime = db.defensiveIconDurationColorByTime and true or false
+        dur = {
+            show    = true,
+            anchor  = "CENTER",
+            offsetX = db.defensiveIconDurationX or 0,
+            offsetY = db.defensiveIconDurationY or 0,
+            font    = db.defensiveIconDurationFont,
+            size    = 10 * (db.defensiveIconDurationScale or 1),
+            outline = db.defensiveIconDurationOutline,
+            color   = db.defensiveIconDurationColor,
+            formatter  = GetDurationFormatter("NUMBER", nil),
+            colorCurve = colorByTime and GetDurationColorCurve() or nil,
+            formatKey  = "NUMBER" .. (colorByTime and ":C" or ""),
+        }
+    end
+
+    return {
+        unit     = unit,
+        mode     = "row",
+        filter   = BuildDirectDefensiveFilters(),
+        max      = db.defensiveBarMax or 4,
+        enabled  = true,
+        tooltips = not db.defensiveIconDisableMouse,
+        layout = {
+            size     = db.defensiveIconSize or 24,
+            scale    = db.defensiveIconScale or 1,
+            spacingX = db.defensiveBarSpacing or 2,
+            spacingY = db.defensiveBarSpacing or 2,
+            anchor   = db.defensiveIconAnchor or "CENTER",
+            growth   = db.defensiveBarGrowth or "RIGHT_DOWN",
+            wrap     = db.defensiveBarWrap or 5,
+            offsetX  = db.defensiveIconX or 0,
+            offsetY  = db.defensiveIconY or 0,
+        },
+        style = {
+            icon   = { show = true, zoom = true, inset = 0 },
+            border = (db.defensiveIconShowBorder ~= false) and { db = db, prefix = "defensiveIcon" } or nil,
+            cooldown = { show = not db.defensiveIconHideSwipe, reverse = true, edge = false, numbers = false },
+            duration = dur,
+            stacks = {
+                show      = true,
+                anchor    = "BOTTOMRIGHT",
+                offsetX   = 2,
+                offsetY   = -1,
+                formatter = GetStacksFormatter(2),
+                formatKey = "2",
+            },
+        },
+    }
+end
+
+-- Drive the factory defensive row for one frame. Mirrors DriveBuffFactory: lazy create,
+-- hide the legacy defensive pool (no double render), keep on the frame's unit, re-apply
+-- on a layout-version bump. The container self-updates from UNIT_AURA (no per-tick render).
+function DF:DriveDefensiveFactory(frame, db)
+    local h = frame.defensiveFactory
+    if not h then
+        h = DF.AuraContainer:Create(frame, DF:BuildDefensiveRowConfig(db, frame.unit))
+        frame.defensiveFactory = h
+        frame.dfDefFactoryVersion = DF.auraLayoutVersion or 0
+        if h then frame.defensiveFactorySig = buffFactorySig(h.config) end
+    end
+
+    -- No double render: keep the legacy defensive icon pool hidden while the factory owns it.
+    if frame.defensiveIcon then frame.defensiveIcon:Hide() end
+    if frame.defensiveBarIcons then
+        for _, icon in pairs(frame.defensiveBarIcons) do
+            if icon and icon.Hide then icon:Hide() end
+        end
+    end
+    if not h then return end
+
+    -- Keep on the frame's unit; defer a wrong-unit show until regen in combat. Hide via the
+    -- plain anchor frame (GetFrame():SetShown), NOT h:SetShown -- the latter queues an enable
+    -- op that would upgrade a queued retarget into a full rebuild (frame leak).
+    if h:GetUnit() ~= frame.unit then
+        h:SetUnit(frame.unit)
+        frame.dfDefFactoryHidden = InCombatLockdown() or nil
+    elseif frame.dfDefFactoryHidden and not InCombatLockdown() then
+        frame.dfDefFactoryHidden = nil
+    end
+    h:GetFrame():SetShown(not frame.dfDefFactoryHidden)
+
+    -- Re-apply settings only on a layout-version bump (defensive option changes bump it
+    -- via UpdateAllDefensiveBars -> InvalidateAuraLayout).
+    local ver = DF.auraLayoutVersion or 0
+    if frame.dfDefFactoryVersion ~= ver then
+        frame.dfDefFactoryVersion = ver
+        local cfg = DF:BuildDefensiveRowConfig(db, frame.unit)
+        local sig = buffFactorySig(cfg)
+        if frame.defensiveFactorySig ~= sig then
+            frame.defensiveFactorySig = sig
+            h:Rebuild(cfg)                      -- structural (max/filter/tooltips)
+        else
+            h:ApplyStyle(cfg.style, cfg.layout) -- cosmetics — in place, no leak
+        end
+    end
+end
+
 -- Dev toggle for the experimental factory buff path. /reload to apply cleanly.
 function DF:ToggleBuffFactory()
     if not DF.db then return end

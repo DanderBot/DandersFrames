@@ -6333,13 +6333,12 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     
     -- Auras > Defensive Icon
     local pageDefensiveIcon = CreateSubTab("auras", "auras_defensiveicon", L["Defensive Icon"])
-    -- 12.1: defensive icons are the FIRST factory port (pilot). The banner is
-    -- when-driven so it lifts itself automatically once the factory serves this row
-    -- (DF.AuraContainer.ServesDefensiveIcons) — no GUI surgery needed at that point.
-    GUI:BlockPage12_1(pageDefensiveIcon, "roadmap", function()
-        return GUI:IsAuraFactoryActive()
-            and not (DF.AuraContainer and DF.AuraContainer.ServesDefensiveIcons and DF.AuraContainer.ServesDefensiveIcons())
-    end)
+    -- 12.1: defensive icons now render through DF.AuraContainer (native BIG_DEFENSIVE /
+    -- EXTERNAL_DEFENSIVE filters); the legacy path stays as a secret-hardened fallback, so
+    -- the page is usable — no whole-page banner. Only settings the factory can't honor are
+    -- blocked (frame level, below). Left as known gaps (not cleanly addressable): border
+    -- animation (inlined in the shared border helper) and CENTER growth (a dropdown option
+    -- that falls back to RIGHT under the factory).
     BuildPage(pageDefensiveIcon, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top
         Add(CreateCopyButton(self.child, {"defensiveIcon"}, L["Defensive Icon"], "auras_defensiveicon"), 25, 2)
@@ -6383,9 +6382,12 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
         end, function() DF:LightweightUpdateDefensiveIcons() end, true), 55)
 
-        appearanceGroup:AddWidget(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "defensiveIconFrameLevel", function()
+        local defFrameLevelSlider = appearanceGroup:AddWidget(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "defensiveIconFrameLevel", function()
             if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
         end, function() DF:LightweightUpdateFrameLevel("defensive") end, true), 55)
+        -- The factory manages the container's own frame level, so this can't apply while
+        -- the factory owns the defensive row (12.1).
+        GUI:BlockControl12_1(defFrameLevelSlider, "roadmap", { id = "defensive:framelevel", page = L["Defensive Icon"], when = function(d) return DF:FactoryOwnsDefensiveRow(d) end })
 
         appearanceGroup:AddWidget(GUI:CreateLabel(self.child, L["0=Auto, Higher=On top of more elements"], 230), 25)
         Add(appearanceGroup, nil, 2)

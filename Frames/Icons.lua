@@ -1105,14 +1105,28 @@ function DF:UpdateDefensiveBar(frame)
     
     -- Check if feature is enabled
     if not db.defensiveIconEnabled then
+        if frame.defensiveFactory then frame.defensiveFactory:GetFrame():Hide() end
         frame.defensiveIcon:Hide()
         return
     end
     
     -- Check if unit exists
     if not UnitExists(unit) then
+        if frame.defensiveFactory then frame.defensiveFactory:GetFrame():Hide() end
         frame.defensiveIcon:Hide()
         return
+    end
+
+    -- Factory defensive row (12.1): route through DF.AuraContainer when active. The
+    -- container self-updates from UNIT_AURA, so there's no per-tick render here.
+    if DF:UseFactoryForDefensive(frame, db) then
+        DF:DriveDefensiveFactory(frame, db)
+        return
+    end
+    -- A container was built but the factory path is now inactive (test mode / toggle off):
+    -- hide it so the legacy render below can't double up.
+    if frame.defensiveFactory then
+        frame.defensiveFactory:GetFrame():Hide()
     end
 
     -- Ensure cache.defensives is populated for this unit. In steady state
@@ -1201,6 +1215,9 @@ end
 
 -- Update defensive icons for all frames
 function DF:UpdateAllDefensiveBars()
+    -- Setting changes route through here; bump the shared layout version so the factory
+    -- defensive path re-applies on the next update (mirrors the buff callbacks).
+    if DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
     -- Check if in test mode - use test update functions instead
     if DF.testMode or DF.raidTestMode then
         if DF.UpdateAllTestDefensiveBar then
