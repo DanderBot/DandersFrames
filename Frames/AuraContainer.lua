@@ -578,9 +578,18 @@ local function layoutRow(handle)
 
     -- Step matches the legacy Direct-row math: the icon-size term is pre-scaled and each
     -- button is SetScale(scale)'d, so the icon, the step, and the button's children (fonts,
-    -- border, cooldown) all render at `scale` — pixel-matching DF's rows. scale=1 is a no-op.
-    local stepX = sx * scale + spX
-    local stepY = sy * scale + spY
+    -- border, cooldown) all render at `scale` — pixel-matching DF's buff rows. scale=1 is a no-op.
+    -- preScaledStep=false (defensive row) uses the legacy DEFENSIVE stride: the icon-size term
+    -- is UNSCALED, so — offsets living in the button's scaled space — the rendered stride is
+    -- (size+spacing)*scale and the gap is spacing*scale (no double-scale of the size term).
+    local stepX, stepY
+    if L.preScaledStep == false then
+        stepX = sx + spX
+        stepY = sy + spY
+    else
+        stepX = sx * scale + spX
+        stepY = sy * scale + spY
+    end
     for i, b in ipairs(handle.buttons) do
         local idx = i - 1
         local col = idx % wrap
@@ -1087,6 +1096,11 @@ function AuraContainer:Create(parent, config)
     -- Both modes: h.frame occupies the unit-frame rect (row layout anchors are relative
     -- to it; overlay covers it). To reposition: h:ClearAllPoints() then h:SetPoint(...).
     h.frame:SetAllPoints(parent)
+    -- Z-order: legacy renders host aura icons ABOVE contentOverlay (parent+25, name/health
+    -- text). Raising h.frame raises the whole subtree — the native container + AuraButtons +
+    -- their holders are all descendants with relative levels (Blizzard sets no fixed levels).
+    -- Default +40 = legacy buff-icon level; the defensive row passes +51 (= contentOverlay+26).
+    h.frame:SetFrameLevel(math.max(0, parent:GetFrameLevel() + (cfg.frameLevelOffset or 40)))
 
     if InCombatLockdown() then
         -- Can't safely stand up secure container state in combat; build on regen.

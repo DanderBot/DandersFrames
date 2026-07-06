@@ -2563,6 +2563,8 @@ function DF:DriveBuffFactory(frame, db)
             unit = frame.unit,
             filterList = BuildDirectBuffFilters(db),
         })
+        -- Re-apply the z-order level (buffs default to +40 = legacy parity). Not part of the sig.
+        h:GetFrame():SetFrameLevel(math.max(0, frame:GetFrameLevel() + (cfg.frameLevelOffset or 40)))
         local sig = buffFactorySig(cfg)
         if frame.buffFactorySig ~= sig then
             frame.buffFactorySig = sig
@@ -2631,6 +2633,11 @@ function DF:BuildDefensiveRowConfig(db, unit)
         max      = db.defensiveBarMax or 4,
         enabled  = true,
         tooltips = not db.defensiveIconDisableMouse,
+        -- Z-order: match the legacy defensive level — contentOverlay+26 = frame+51 when auto
+        -- (defensiveIconFrameLevel 0), else the user's own offset. Applied to the container's
+        -- anchor frame in AuraContainer:Create + on each layout-version re-apply.
+        frameLevelOffset = (db.defensiveIconFrameLevel and db.defensiveIconFrameLevel ~= 0)
+            and db.defensiveIconFrameLevel or 51,
         layout = {
             size     = db.defensiveIconSize or 24,
             scale    = db.defensiveIconScale or 1,
@@ -2641,6 +2648,7 @@ function DF:BuildDefensiveRowConfig(db, unit)
             wrap     = db.defensiveBarWrap or 5,
             offsetX  = db.defensiveIconX or 0,
             offsetY  = db.defensiveIconY or 0,
+            preScaledStep = false,   -- legacy defensive spacing (unscaled size term; no double-scale)
         },
         style = {
             icon   = { show = true, zoom = true, inset = 0 },
@@ -2697,6 +2705,9 @@ function DF:DriveDefensiveFactory(frame, db)
     if frame.dfDefFactoryVersion ~= ver then
         frame.dfDefFactoryVersion = ver
         local cfg = DF:BuildDefensiveRowConfig(db, frame.unit)
+        -- Re-apply the z-order level (honors runtime defensiveIconFrameLevel changes; survives
+        -- Rebuild since the new container inherits relative to h.frame). Not part of the sig.
+        h:GetFrame():SetFrameLevel(math.max(0, frame:GetFrameLevel() + (cfg.frameLevelOffset or 40)))
         local sig = buffFactorySig(cfg)
         if frame.defensiveFactorySig ~= sig then
             frame.defensiveFactorySig = sig
