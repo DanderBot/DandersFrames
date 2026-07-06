@@ -316,6 +316,30 @@ function Expiring:Unregister(element)
     end
 end
 
+-- Refresh a registered entry's aura-time fields without a full re-register.
+-- Change-detection callers (the AD border path) skip their rebuild — and with
+-- it the RegisterExpiring call — when nothing VISUAL changed. An aura REFRESH
+-- keeps the same auraInstanceID, so it takes that skip and the entry's cached
+-- duration/expirationTime go stale; the manual threshold fallback then
+-- computes remaining time from the stale expiration, which decays to zero and
+-- parks the entry permanently "expiring" (stuck pulse, stuck Show-When-Missing
+-- visibility). Callers pass the CURRENT aura data every apply cycle; this is a
+-- no-op when the element has no registered entry.
+--
+-- The new values are assigned unconditionally (no equality short-circuit:
+-- duration/expirationTime may be secret values, and comparing secrets taints)
+-- and the entry re-evaluates immediately, mirroring Register, so a refresh
+-- that climbs back above the threshold un-expires on this same update instead
+-- of a tick later.
+function Expiring:UpdateEntryTimes(element, duration, expirationTime, auraInstanceID)
+    local entry = element and expiringRegistry[element]
+    if not entry then return end
+    entry.duration = duration
+    entry.expirationTime = expirationTime
+    entry.auraInstanceID = auraInstanceID
+    EvaluateEntry(element, entry)
+end
+
 -- ~3 FPS shared ticker.  One OnUpdate for every registered element across the
 -- whole addon (AD indicators + buff expiring borders).
 local expiringFrame = CreateFrame("Frame")
