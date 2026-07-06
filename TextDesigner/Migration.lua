@@ -35,6 +35,94 @@ end
 -- PER-MODE BUILD
 -- ============================================================
 
+-- Build ONE health element from a mode's legacy settings, or nil when the
+-- user had health text off. The live legacy renderer is gated by
+-- healthTextFormat ALONE ("NONE" = off; anything else renders, Config
+-- default CURRENTMAX) — showHealthText was only ever read by test mode,
+-- has no GUI control, and defaults to false, so it must NOT gate this:
+-- keying on it (4.6.0) silently dropped the health element for every
+-- migrating profile. `nextID` is the caller's element-id allocator.
+local function buildHealthElement(db, nextID)
+    -- Default to the real Config default (CURRENTMAX), NOT "PERCENT" — a nil
+    -- format is the unset default, and falling back to PERCENT was what turned
+    -- it into a bare "%". Composite formats render as one group FontString that
+    -- owns the font/size/outline/color/anchor/offset.
+    local healthFormat = db.healthTextFormat or "CURRENTMAX"
+    if healthFormat == "NONE" then
+        -- The one legacy state that genuinely means "no health text".
+        return nil
+    end
+
+    -- Color is re-copied per element so a group + its siblings never share
+    -- the same color ref.
+    local healthCommon = {
+        anchor        = db.healthTextAnchor,
+        offsetX       = db.healthTextX,
+        offsetY       = db.healthTextY,
+        useClassColor = db.healthTextUseClassColor,
+        outline       = db.healthTextOutline,
+        font          = db.healthFont,
+        fontSize      = db.healthFontSize,
+    }
+    local function newHealthElem(extra)
+        local e = {
+            id            = nextID(),
+            enabled       = true,
+            label         = "",
+            anchor        = healthCommon.anchor,
+            offsetX       = healthCommon.offsetX,
+            offsetY       = healthCommon.offsetY,
+            color         = copyColor(db.healthTextColor),
+            useClassColor = healthCommon.useClassColor,
+            outline       = healthCommon.outline,
+            font          = healthCommon.font,
+            fontSize      = healthCommon.fontSize,
+            overrides     = appearanceOverrides(),
+        }
+        for k, v in pairs(extra) do e[k] = v end
+        return e
+    end
+
+    if healthFormat == "PERCENT" then
+        return newHealthElem({
+            contentType = "hp_percent",
+            decimals    = 0,
+            hidePercent = db.healthTextHidePercent,
+        })
+    elseif healthFormat == "CURRENT" then
+        return newHealthElem({
+            contentType  = "hp_current",
+            abbreviate   = db.healthTextAbbreviate,
+            hideWhenZero = true,
+        })
+    elseif healthFormat == "DEFICIT" then
+        return newHealthElem({
+            contentType  = "hp_deficit",
+            abbreviate   = db.healthTextAbbreviate,
+            hideWhenZero = true,
+        })
+    elseif healthFormat == "CURRENT_PERCENT" then
+        return newHealthElem({
+            contentType    = "group",
+            groupSeparator = " ",
+            groupItems     = {
+                { contentType = "hp_current", abbreviate = db.healthTextAbbreviate },
+                { contentType = "hp_percent", decimals = 0 },
+            },
+        })
+    else
+        -- CURRENTMAX / CURRENT_MAX / unknown → the Config default (current / max).
+        return newHealthElem({
+            contentType    = "group",
+            groupSeparator = " / ",
+            groupItems     = {
+                { contentType = "hp_current", abbreviate = db.healthTextAbbreviate, hideWhenZero = false },
+                { contentType = "hp_max",     abbreviate = db.healthTextAbbreviate },
+            },
+        })
+    end
+end
+
 -- Builds the elements array for one mode's legacy settings. `tdDB` is the
 -- mode's db.textDesigner; the nextElementID counter on it is used + bumped
 -- the same way the picker does so future manual adds keep unique ids.
@@ -68,85 +156,12 @@ local function buildElements(db, tdDB)
     }
 
     -- ── HEALTH ───────────────────────────────────────────────
-    -- Only migrate health text if the user actually had it ENABLED. showHealthText
-    -- defaults to false, so without this gate the migration injected a health
-    -- element onto frames for everyone who never turned health text on — showing a
-    -- stray "%" (PERCENT / nil format) or "x / y" on the health bar. Status text
-    -- is gated the same way (statusTextEnabled) below; health was the gap.
-    if db.showHealthText ~= false then
-        -- Default to the real Config default (CURRENTMAX), NOT "PERCENT" — a nil
-        -- format is the unset default, and falling back to PERCENT was what turned
-        -- it into a bare "%". Composite formats render as one group FontString that
-        -- owns the font/size/outline/color/anchor/offset.
-        local healthFormat = db.healthTextFormat or "CURRENTMAX"
-        -- Color is re-copied per element (in newHealthElem) so a group + its
-        -- siblings never share the same color ref.
-        local healthCommon = {
-            anchor        = db.healthTextAnchor,
-            offsetX       = db.healthTextX,
-            offsetY       = db.healthTextY,
-            useClassColor = db.healthTextUseClassColor,
-            outline       = db.healthTextOutline,
-            font          = db.healthFont,
-            fontSize      = db.healthFontSize,
-        }
-        local function newHealthElem(extra)
-            local e = {
-                id            = nextID(),
-                enabled       = true,
-                label         = "",
-                anchor        = healthCommon.anchor,
-                offsetX       = healthCommon.offsetX,
-                offsetY       = healthCommon.offsetY,
-                color         = copyColor(db.healthTextColor),
-                useClassColor = healthCommon.useClassColor,
-                outline       = healthCommon.outline,
-                font          = healthCommon.font,
-                fontSize      = healthCommon.fontSize,
-                overrides     = appearanceOverrides(),
-            }
-            for k, v in pairs(extra) do e[k] = v end
-            return e
-        end
-
-        if healthFormat == "PERCENT" then
-            elements[#elements + 1] = newHealthElem({
-                contentType = "hp_percent",
-                decimals    = 0,
-                hidePercent = db.healthTextHidePercent,
-            })
-        elseif healthFormat == "CURRENT" then
-            elements[#elements + 1] = newHealthElem({
-                contentType  = "hp_current",
-                abbreviate   = db.healthTextAbbreviate,
-                hideWhenZero = true,
-            })
-        elseif healthFormat == "DEFICIT" then
-            elements[#elements + 1] = newHealthElem({
-                contentType  = "hp_deficit",
-                abbreviate   = db.healthTextAbbreviate,
-                hideWhenZero = true,
-            })
-        elseif healthFormat == "CURRENT_PERCENT" then
-            elements[#elements + 1] = newHealthElem({
-                contentType    = "group",
-                groupSeparator = " ",
-                groupItems     = {
-                    { contentType = "hp_current", abbreviate = db.healthTextAbbreviate },
-                    { contentType = "hp_percent", decimals = 0 },
-                },
-            })
-        else
-            -- CURRENTMAX / CURRENT_MAX / unknown → the Config default (current / max).
-            elements[#elements + 1] = newHealthElem({
-                contentType    = "group",
-                groupSeparator = " / ",
-                groupItems     = {
-                    { contentType = "hp_current", abbreviate = db.healthTextAbbreviate, hideWhenZero = false },
-                    { contentType = "hp_max",     abbreviate = db.healthTextAbbreviate },
-                },
-            })
-        end
+    -- Gated inside buildHealthElement on healthTextFormat ~= "NONE" — the
+    -- only off-state the legacy live renderer ever honoured. Status text is
+    -- gated on statusTextEnabled below because the live path reads that key.
+    local healthElem = buildHealthElement(db, nextID)
+    if healthElem then
+        elements[#elements + 1] = healthElem
     end
 
     -- ── STATUS (Dead / Offline / Ghost) ──────────────────────
@@ -232,13 +247,17 @@ end
 -- ============================================================
 -- CORRECTIVE PASS — remove stray auto-migrated health text
 -- ============================================================
--- The pre-fix migration ignored showHealthText, so profiles that had health text
--- OFF still got an auto-built health element (a stray "%" / "x / y" on the bar).
--- The builder is fixed going forward, but already-migrated profiles keep the
--- artifact and the one-shot migratedFromLegacy guard stops a natural re-run. This
--- removes it, but ONLY when safe:
---   1. the profile was auto-migrated AND had health text OFF (showHealthText ==
---      false) — so nobody who actually wanted health text is touched; and
+-- The original (4.4-era) migration turned healthTextFormat == "NONE" — the only
+-- legacy state where the live path showed NO health text — into a percent
+-- element (its else-branch), so those users got a stray "%" / "x / y" on the
+-- bar. The builder is fixed going forward, but already-migrated profiles keep
+-- the artifact and the one-shot migratedFromLegacy guard stops a natural
+-- re-run. This removes it, but ONLY when safe:
+--   1. the profile was auto-migrated AND had health text off in the one way the
+--      live renderer honoured (healthTextFormat == "NONE") — so nobody who
+--      actually saw health text is touched. (4.6.0 keyed this on
+--      showHealthText == false, which is the DEFAULT — that wrongly deleted
+--      wanted health elements; RestoreMigratedHealthText below repairs it.)
 --   2. the health element is still byte-identical to what the (buggy) migration
 --      produced — so a moved / recoloured / reformatted element (user engaged with
 --      it) is left alone.
@@ -307,8 +326,9 @@ function DF:CorrectStrayMigratedHealthText()
         local tdDB = db and ((DF.GetModeTextDesigner and DF:GetModeTextDesigner(mode))
             or (DF.TextDesigner and DF.TextDesigner.EnsureDB and DF.TextDesigner:EnsureDB(db)))
         if db and tdDB and not tdDB.healthMigrationCorrected then
-            -- Eligible only when this profile was auto-migrated AND had health text off.
-            if tdDB.migratedFromLegacy == true and db.showHealthText == false
+            -- Eligible only when this profile was auto-migrated AND had health
+            -- text off in the way the live renderer honoured (format NONE).
+            if tdDB.migratedFromLegacy == true and db.healthTextFormat == "NONE"
                 and type(tdDB.elements) == "table" then
                 local expected = legacyMigratedHealthElement(db)
                 for i = #tdDB.elements, 1, -1 do
@@ -325,6 +345,81 @@ function DF:CorrectStrayMigratedHealthText()
     end
     if total > 0 then
         DF:Debug("TD", "CorrectStrayMigratedHealthText: removed %d stray health element(s)", total)
+        if DF.TextDesigner and DF.TextDesigner.Preview and DF.TextDesigner.Preview.RefreshAll then
+            DF.TextDesigner.Preview:RefreshAll()
+        end
+        if DF.UpdateAllFrames then DF:UpdateAllFrames() end
+    end
+
+    -- Chained here (rather than separately wired in Core/Profile) so it runs
+    -- at both existing call sites — login and profile switch — and always
+    -- AFTER the stray-element removal above.
+    DF:RestoreMigratedHealthText()
+end
+
+-- ============================================================
+-- CORRECTIVE PASS 2 — restore health text the 4.6.0 migration dropped
+-- ============================================================
+-- 4.6.0 gated the migrated health element on showHealthText — a key the live
+-- legacy renderer never read (test-mode only, no GUI control, defaults to
+-- false). Two damage classes shipped:
+--   * fresh 4.6.0 migrations skipped the health element entirely; and
+--   * the stray-"%" corrective pass above deleted 4.4/4.5-era migrated health
+--     elements from any profile whose (unrelated) showHealthText was false.
+-- For auto-migrated stores that ended up with NO health element even though
+-- the legacy format says health text was on, rebuild it from the mode's
+-- legacy settings. One-shot per store (healthRestoredV2). Known trade-off: a
+-- user who deliberately deleted their auto-migrated health element gets it
+-- back once (called out in the changelog); the flag stops any repeat.
+
+-- True if any element (or item of a composite group) renders a health value.
+local function isHealthContent(contentType)
+    return type(contentType) == "string" and contentType:sub(1, 3) == "hp_"
+end
+
+local function hasHealthElement(elements)
+    for _, e in ipairs(elements) do
+        if isHealthContent(e.contentType) then return true end
+        if e.contentType == "group" and type(e.groupItems) == "table" then
+            for _, item in ipairs(e.groupItems) do
+                if isHealthContent(item.contentType) then return true end
+            end
+        end
+    end
+    return false
+end
+
+function DF:RestoreMigratedHealthText()
+    if not DF.db then return end
+    local total = 0
+    for _, mode in ipairs({ "party", "raid" }) do
+        local db = DF:GetDB(mode)
+        local tdDB = db and ((DF.GetModeTextDesigner and DF:GetModeTextDesigner(mode))
+            or (DF.TextDesigner and DF.TextDesigner.EnsureDB and DF.TextDesigner:EnsureDB(db)))
+        if db and tdDB and not tdDB.healthRestoredV2 then
+            if tdDB.migratedFromLegacy == true
+                and type(tdDB.elements) == "table"
+                and (db.healthTextFormat or "CURRENTMAX") ~= "NONE"
+                and not hasHealthElement(tdDB.elements) then
+                tdDB.nextElementID = tdDB.nextElementID or 1
+                local function nextID()
+                    local id = tdDB.nextElementID
+                    tdDB.nextElementID = id + 1
+                    return id
+                end
+                local elem = buildHealthElement(db, nextID)
+                if elem then
+                    tdDB.elements[#tdDB.elements + 1] = elem
+                    total = total + 1
+                end
+            end
+            -- Mark every visited store — including ineligible ones — so the
+            -- scan never re-runs.
+            tdDB.healthRestoredV2 = true
+        end
+    end
+    if total > 0 then
+        DF:Debug("TD", "RestoreMigratedHealthText: rebuilt %d health element(s) from legacy settings", total)
         if DF.TextDesigner and DF.TextDesigner.Preview and DF.TextDesigner.Preview.RefreshAll then
             DF.TextDesigner.Preview:RefreshAll()
         end
