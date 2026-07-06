@@ -391,7 +391,7 @@ end
 DF.durationAPIMode = nil  -- Will be "old" or "new" once detected
 
 -- Register a simple slash command for debug (in case the main addon slash commands aren't loaded yet)
-SLASH_DFDURATIONDEBUG1 = "/dfduration"
+DF:RegisterDebugSlash("DFDURATIONDEBUG", "Aura duration debug toggle", true, "/dfduration")
 SlashCmdList["DFDURATIONDEBUG"] = function(msg)
     if msg == "on" then
         DF.debugDurationAPI = true
@@ -554,17 +554,6 @@ function DF:RegisterUnitEventsForFrame(frame, unit)
     end
     
     frame.dfRegisteredUnit = unit
-end
-
--- Unregister all unit events from a frame
-function DF:UnregisterUnitEventsForFrame(frame)
-    if not frame then return end
-    
-    for _, event in ipairs(UNIT_EVENTS_TO_FILTER) do
-        frame:UnregisterEvent(event)
-    end
-    
-    frame.dfRegisteredUnit = nil
 end
 
 -- ============================================================
@@ -1154,129 +1143,6 @@ function DF:CreateFrameElementsExtended(frame, db)
         frame.buffIcons[i] = DF:CreateAuraIcon(frame, i, "BUFF")
         frame.debuffIcons[i] = DF:CreateAuraIcon(frame, i, "DEBUFF")
     end
-end
-
--- ========================================
--- SETUP FRAME EVENTS
--- Sets up event registration and OnEvent handler for legacy frames
--- Header children do NOT call this - they use centralized event handling
--- ========================================
-function DF:SetupFrameEvents(frame, unit)
-    if not frame or not unit then return end
-    
-    -- Register unit-specific events using C++ level filtering
-    DF:RegisterUnitEventsForFrame(frame, unit)
-    
-    -- Global events (no unit parameter or we need to receive for all units)
-    -- NOTE: GROUP_ROSTER_UPDATE removed - handled centrally, OnAttributeChanged handles unit changes
-    frame:RegisterEvent("RAID_TARGET_UPDATE")
-    frame:RegisterEvent("READY_CHECK")
-    frame:RegisterEvent("READY_CHECK_CONFIRM")
-    frame:RegisterEvent("READY_CHECK_FINISHED")
-    frame:RegisterEvent("PARTY_LEADER_CHANGED")
-    frame:RegisterEvent("PLAYER_ROLES_ASSIGNED")
-    
-    -- Conditionally register power events based on setting
-    DF:UpdatePowerEventRegistration(frame)
-    
-    -- Event handler
-    frame:SetScript("OnEvent", function(self, event, eventUnit)
-        -- Wait until addon is fully initialized
-        if not DF.initialized then return end
-        
-        -- PERF TEST: Nuclear option - disable ALL event handling
-        if DF.PerfTest and not DF.PerfTest.enableAllEvents then return end
-        
-        -- Events that don't have a unit argument or need special handling
-        if event == "RAID_TARGET_UPDATE" then
-            if not DF.PerfTest or DF.PerfTest.enableStatusIcons then
-                DF:UpdateRaidTargetIcon(self)
-            end
-            return
-        elseif event == "READY_CHECK" then
-            if not DF.PerfTest or DF.PerfTest.enableStatusIcons then
-                DF:UpdateReadyCheckIcon(self)
-            end
-            return
-        elseif event == "READY_CHECK_FINISHED" then
-            if not DF.PerfTest or DF.PerfTest.enableStatusIcons then
-                DF:ScheduleReadyCheckHide(self)
-            end
-            return
-        elseif event == "PARTY_LEADER_CHANGED" then
-            if not DF.PerfTest or DF.PerfTest.enableRoleLeaderIcons then
-                DF:UpdateLeaderIcon(self)
-            end
-            return
-        elseif event == "PLAYER_ROLES_ASSIGNED" then
-            -- Role changes - update role icon only (unit hasn't changed)
-            if not DF.PerfTest or DF.PerfTest.enableRoleLeaderIcons then
-                DF:UpdateRoleIcon(self)
-            end
-            return
-        end
-        
-        -- Skip if unit doesn't match (should rarely trigger with RegisterUnitEvent)
-        if eventUnit and eventUnit ~= self.unit then return end
-        
-        -- Route events to appropriate update functions
-        if event == "UNIT_HEALTH" or event == "UNIT_MAXHEALTH" then
-            if not DF.PerfTest or DF.PerfTest.enableHealthUpdates then
-                if DF.UpdateHealthFast then
-                    DF:UpdateHealthFast(self)
-                else
-                    DF:UpdateUnitFrame(self, "legacy:UNIT_HEALTH")
-                end
-            end
-        elseif event == "UNIT_NAME_UPDATE" then
-            if not DF.PerfTest or DF.PerfTest.enableNameUpdates then
-                DF:UpdateName(self)
-            end
-        elseif event == "UNIT_AURA" then
-            -- UpdateAuras, UpdateMissingBuffIcon, and UpdateDispelOverlay driven by hooksecurefunc (Auras.lua), not here
-            if DF.UpdateExternalDefIcon then
-                DF:UpdateExternalDefIcon(self)
-            end
-        elseif event == "UNIT_POWER_UPDATE" or event == "UNIT_MAXPOWER" or event == "UNIT_DISPLAYPOWER" then
-            if not DF.PerfTest or DF.PerfTest.enablePowerBar then
-                if DF.UpdatePower then
-                    DF:UpdatePower(self)
-                else
-                    DF:UpdateUnitFrame(self, "legacy:UNIT_POWER")
-                end
-            end
-        elseif event == "UNIT_ABSORB_AMOUNT_CHANGED" then
-            if not DF.testMode and not DF.raidTestMode then
-                DF:UpdateAbsorb(self)
-            end
-        elseif event == "UNIT_HEAL_ABSORB_AMOUNT_CHANGED" then
-            if not DF.testMode and not DF.raidTestMode then
-                DF:UpdateHealAbsorb(self)
-            end
-        elseif event == "UNIT_HEAL_PREDICTION" then
-            if not DF.testMode and not DF.raidTestMode then
-                DF:UpdateHealPrediction(self)
-            end
-        elseif event == "UNIT_CONNECTION" then
-            if not DF.PerfTest or DF.PerfTest.enableConnectionStatus then
-                DF:UpdateUnitFrame(self, "legacy:UNIT_CONNECTION")
-            end
-        elseif event == "READY_CHECK_CONFIRM" then
-            if not DF.PerfTest or DF.PerfTest.enableStatusIcons then
-                DF:UpdateReadyCheckIcon(self)
-            end
-        elseif event == "INCOMING_SUMMON_CHANGED" then
-            if not DF.PerfTest or DF.PerfTest.enableStatusIcons then
-                DF:UpdateCenterStatusIcon(self)
-            end
-        elseif event == "INCOMING_RESURRECT_CHANGED" then
-            if not DF.PerfTest or DF.PerfTest.enableStatusIcons then
-                DF:UpdateCenterStatusIcon(self)
-            end
-        end
-    end)
-    
-    frame.dfEventsSetup = true
 end
 
 function DF:CreateUnitFrame(unit, index, isRaid)

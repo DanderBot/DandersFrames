@@ -3852,27 +3852,6 @@ function PinnedFrames:ExitTestMode()
     end)
 end
 
--- Apply fake test data to all currently-shown pinned test frames. Called
--- by the Test Mode animation ticker so health bars stay in sync with
--- DF.TestData.animationPhase when testAnimateHealth is on.
-function PinnedFrames:UpdateTestFrames()
-    if not self.testModeActive then return end
-
-    for setIndex = 1, PinnedFrames.MAX_SETS do
-        local pool = self.testFrames[setIndex]
-        if pool then
-            for i = 1, #pool do
-                local f = pool[i]
-                if f and f:IsShown() and f.dfTestIndex then
-                    if DF.UpdateTestFrame then
-                        DF:UpdateTestFrame(f, f.dfTestIndex)
-                    end
-                end
-            end
-        end
-    end
-end
-
 -- ============================================================
 -- TIMED BOSS SPAWN TEST
 -- Schedules show/hide of individual boss slots over time, for
@@ -4144,7 +4123,7 @@ function PinnedFrames:SetBossTestMode(visibleCount)
 end
 
 -- Slash command for debug
-SLASH_DFPINNED1 = "/dfpinned"
+DF:RegisterDebugSlash("DFPINNED", "Pinned frames diagnostics", false, "/dfpinned")
 SlashCmdList["DFPINNED"] = function(msg)
     if msg == "info" then
         PinnedFrames:DebugPrint()

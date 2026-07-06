@@ -289,14 +289,17 @@ function DF:ApplyFrameLayout(frame)
     -- ========================================
     -- ROLE ICON
     -- ========================================
+    -- Role/raid-target icons: layout owns the flat BASE size only (matching the
+    -- leader/ready-check pattern below); the user's scale is applied exactly once,
+    -- via SetScale in the Bars.lua updaters + the slider lightweight path. The old
+    -- code multiplied the scale into the size here too, so both icons rendered at
+    -- base × scale² whenever the scale wasn't 1.0.
     if frame.roleIcon then
-        local showRole = db.showRoleIcon ~= false
-        local roleScale = db.roleIconScale or 1.0
         local roleAnchor = db.roleIconAnchor or "TOPLEFT"
         local roleX = db.roleIconX or 2
         local roleY = db.roleIconY or -2
-        
-        local roleSize = 18 * roleScale
+
+        local roleSize = 18
         if db.pixelPerfect then
             roleSize = DF:PixelPerfect(roleSize)
         end
@@ -304,17 +307,16 @@ function DF:ApplyFrameLayout(frame)
         frame.roleIcon:ClearAllPoints()
         frame.roleIcon:SetPoint(roleAnchor, frame, roleAnchor, roleX, roleY)
     end
-    
+
     -- ========================================
     -- RAID TARGET ICON
     -- ========================================
     if frame.raidTargetIcon then
-        local raidTargetScale = db.raidTargetIconScale or 1.0
         local raidTargetAnchor = db.raidTargetIconAnchor or "TOP"
         local raidTargetX = db.raidTargetIconX or 0
         local raidTargetY = db.raidTargetIconY or 2
-        
-        local raidTargetSize = 16 * raidTargetScale
+
+        local raidTargetSize = 16
         if db.pixelPerfect then
             raidTargetSize = DF:PixelPerfect(raidTargetSize)
         end

@@ -136,16 +136,6 @@ function DF:CreateRaidFrame(unit, index)
     return frame
 end
 
--- Apply layout settings to a raid frame (DEPRECATED - use ApplyFrameLayout instead)
-function DF:ApplyRaidFrameLayout(frame)
-    DF:ApplyFrameLayout(frame)
-end
-
--- Update raid frame (DEPRECATED - use UpdateUnitFrame instead)
-function DF:UpdateRaidFrame(frame)
-    DF:UpdateUnitFrame(frame)
-end
-
 function DF:UpdateRaidLayout()
     local db = DF:GetRaidDB()
     
@@ -1437,56 +1427,6 @@ function DF:UpdateLiveRaidFrames()
     -- Update raid pet frames
     if DF.UpdateAllRaidPetFrames then
         DF:UpdateAllRaidPetFrames()
-    end
-end
-
--- ============================================================
--- HIDE LIVE RAID FRAMES (when leaving a raid)
--- ============================================================
-function DF:HideLiveRaidFrames()
-    if InCombatLockdown() then
-        DF.needsUpdate = true
-        return
-    end
-    
-    -- Hide raid container
-    if DF.raidContainer then
-        DF.raidContainer:Hide()
-    end
-    
-    -- Hide raid headers (header mode)
-    if DF.FlatRaidFrames and DF.FlatRaidFrames.header then
-        DF.FlatRaidFrames.header:Hide()
-    end
-    if DF.raidSeparatedHeaders then
-        for i = 1, 8 do
-            if DF.raidSeparatedHeaders[i] then
-                DF.raidSeparatedHeaders[i]:Hide()
-            end
-        end
-    end
-    
-    -- Unregister unit watches for legacy raid frames (if they exist)
-    if DF.raidFrames then
-        for i = 1, 40 do
-            local frame = DF.raidFrames[i]
-            if frame then
-                UnregisterUnitWatch(frame)
-                frame:Hide()
-            end
-        end
-    end
-    
-    -- Show party container (header mode uses partyContainer)
-    -- But not if test mode is active
-    if DF.testMode or DF.raidTestMode then
-        return
-    end
-    
-    if DF.headersCreated and DF.partyContainer then
-        DF.partyContainer:Show()
-    elseif DF.container then
-        DF.container:Show()
     end
 end
 

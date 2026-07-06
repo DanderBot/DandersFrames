@@ -1455,7 +1455,7 @@ end)
 -- DEBUG COMMANDS
 -- ============================================================
 
-SLASH_DFFLATRAID1 = "/dfflatraid"
+DF:RegisterDebugSlash("DFFLATRAID", "Flat raid debug / info / reinit", false, "/dfflatraid")
 SlashCmdList["DFFLATRAID"] = function(msg)
     if msg == "debug" then
         FlatRaidFrames.debug = not FlatRaidFrames.debug

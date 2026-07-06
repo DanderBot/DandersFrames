@@ -975,11 +975,6 @@ function DF:HideAllTargetedSpells(frame)
     end
 end
 
--- Legacy compatibility function
-function DF:HideTargetedSpell(frame)
-    DF:HideAllTargetedSpells(frame)
-end
-
 -- ============================================================
 -- LAYOUT UPDATE FUNCTIONS
 -- ============================================================
@@ -1008,11 +1003,6 @@ function DF:UpdateAllTargetedSpellLayouts()
             DF:UpdateTargetedSpellLayout(frame)
         end
     end)
-end
-
--- Legacy compatibility
-function DF:CreateTargetedSpellIndicator(frame)
-    EnsureIconPool(frame, 5)
 end
 
 -- ============================================================
@@ -1688,13 +1678,6 @@ function DF:SetNameplateOffscreen(enabled)
     end
 end
 
-function DF:GetNameplateOffscreen()
-    if C_CVar and C_CVar.GetCVar then
-        return C_CVar.GetCVar("nameplateShowOffscreen") == "1"
-    end
-    return false
-end
-
 -- ============================================================
 -- ENABLE/DISABLE
 -- ============================================================
@@ -1804,11 +1787,6 @@ end
 -- Export scan function for unified roster handler
 function DF:ScanAllEnemyCasts()
     ScanAllEnemyCasts()
-end
-
--- Export active casters clear for unified roster handler
-function DF:ClearActiveCasters()
-    wipe(activeCasters)
 end
 
 function DF:ToggleTargetedSpells(enabled)
@@ -2798,11 +2776,6 @@ end
 -- CAST HISTORY (TEST FEATURE)
 -- ============================================================
 
--- Get cast history table
-function DF:GetCastHistory()
-    return castHistory
-end
-
 -- Clear cast history
 function DF:ClearCastHistory()
     wipe(castHistory)
@@ -3401,15 +3374,6 @@ function DF:ShowCastHistoryUI()
                 DF:RefreshCastHistoryUI()
             end
         end)
-    end
-end
-
--- Toggle cast history UI
-function DF:ToggleCastHistoryUI()
-    if castHistoryFrame and castHistoryFrame:IsShown() then
-        castHistoryFrame:Hide()
-    else
-        DF:ShowCastHistoryUI()
     end
 end
 

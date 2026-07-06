@@ -408,20 +408,22 @@ local function TogglePerfTestFrame()
 end
 
 -- Slash command
-SLASH_DFPERFTEST1 = "/dfperftest"
-SLASH_DFPERFTEST2 = "/dfperf"
+DF:RegisterDebugSlash("DFPERFTEST", "Performance test suite", true, "/dfperftest", "/dfperf")
 SlashCmdList["DFPERFTEST"] = TogglePerfTestFrame
 
 -- Hook into /df command after a delay to ensure it's registered
-C_Timer.After(1, function()
-    local originalSlashHandler = SlashCmdList["DANDERSFRAMES"]
-    if originalSlashHandler then
-        SlashCmdList["DANDERSFRAMES"] = function(msg)
-            if msg == "perftest" or msg == "perf" then
-                TogglePerfTestFrame()
-            else
-                originalSlashHandler(msg)
+-- (dev builds only — matches the gated /dfperftest)
+if DF:IsDevBuild() then
+    C_Timer.After(1, function()
+        local originalSlashHandler = SlashCmdList["DANDERSFRAMES"]
+        if originalSlashHandler then
+            SlashCmdList["DANDERSFRAMES"] = function(msg)
+                if msg == "perftest" or msg == "perf" then
+                    TogglePerfTestFrame()
+                else
+                    originalSlashHandler(msg)
+                end
             end
         end
-    end
-end)
+    end)
+end

@@ -441,7 +441,7 @@ end
 -- SLASH COMMAND
 -- ============================================================
 
-SLASH_DFSORT1 = "/dfsort"
+DF:RegisterDebugSlash("DFSORT", "Frame sorting diagnostics", false, "/dfsort")
 SlashCmdList["DFSORT"] = function(msg)
     if msg == "refresh" or msg == "resort" then
         Sort:TriggerResort()

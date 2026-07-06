@@ -1,5 +1,7 @@
 -- Atlas Icon Browser for DandersFrames
--- Opens with /df atlas or /dfatlas
+-- Opens with /df atlas or /dfatlas (dev builds only)
+
+local addonName, DF = ...
 
 local atlasFrame = nil
 local ICONS_PER_ROW = 12
@@ -588,27 +590,27 @@ local function CreateAtlasBrowser()
 end
 
 -- Slash command
-SLASH_DFATLAS1 = "/dfatlas"
+DF:RegisterDebugSlash("DFATLAS", "Atlas texture browser", true, "/dfatlas")
 SlashCmdList["DFATLAS"] = function()
     CreateAtlasBrowser()
 end
 
--- Also hook into /df atlas
-local frame = CreateFrame("Frame")
-frame:RegisterEvent("PLAYER_LOGIN")
-frame:SetScript("OnEvent", function()
-    C_Timer.After(2, function()
-        local oldSlashHandler = SlashCmdList["DANDERSFRAMES"]
-        if oldSlashHandler then
-            SlashCmdList["DANDERSFRAMES"] = function(msg)
-                if msg and msg:lower() == "atlas" then
-                    CreateAtlasBrowser()
-                else
-                    oldSlashHandler(msg)
+-- Also hook into /df atlas (dev builds only — matches the gated /dfatlas)
+if DF:IsDevBuild() then
+    local frame = CreateFrame("Frame")
+    frame:RegisterEvent("PLAYER_LOGIN")
+    frame:SetScript("OnEvent", function()
+        C_Timer.After(2, function()
+            local oldSlashHandler = SlashCmdList["DANDERSFRAMES"]
+            if oldSlashHandler then
+                SlashCmdList["DANDERSFRAMES"] = function(msg)
+                    if msg and msg:lower() == "atlas" then
+                        CreateAtlasBrowser()
+                    else
+                        oldSlashHandler(msg)
+                    end
                 end
             end
-        end
+        end)
     end)
-end)
-
-print("|cff7373f2DandersFrames:|r Atlas Browser loaded. Use |cffffffff/dfatlas|r to open.")
+end

@@ -1953,7 +1953,7 @@ end
 
 
 -- Debug slash command for global bindings
-SLASH_DFCCGLOBAL1 = "/dfccglobal"
+DF:RegisterDebugSlash("DFCCGLOBAL", "Global bindings debug", true, "/dfccglobal")
 SlashCmdList["DFCCGLOBAL"] = function(msg)
     if msg == "debug" then
         CC.db.options.debugBindings = not CC.db.options.debugBindings

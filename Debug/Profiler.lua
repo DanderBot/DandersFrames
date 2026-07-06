@@ -274,7 +274,6 @@ local PROFILED_FUNCTIONS = {
     "UpdateAuras",                  -- Entry point (alias for Enhanced)
     "UpdateAuras_Enhanced",
     "UpdateAuraIcons",              -- Legacy path (kept for comparison)
-    "UpdateAuraIcons_Enhanced",
     "UpdateAuraIconsDirect",        -- Merged collect+display (Tier 3)
     "CollectBuffs",
     "CollectDebuffs",
@@ -316,17 +315,13 @@ local PROFILED_FUNCTIONS = {
     "UpdatePetHealthFade",
 
     -- ----------------------------------------------------------
-    -- Status icons (legacy + enhanced + per-unit)
+    -- Status icons (per-unit)
     -- ----------------------------------------------------------
     "UpdateRoleIcon",
     "UpdateLeaderIcon",
     "UpdateRaidTargetIcon",
     "UpdateReadyCheckIcon",
     "UpdateCenterStatusIcon",
-    "UpdateRoleIconEnhanced",
-    "UpdateLeaderIconEnhanced",
-    "UpdateRaidTargetIconEnhanced",
-    "UpdateReadyCheckIconEnhanced",
     "UpdateSummonIcon",
     "UpdateResurrectionIcon",
     "UpdatePhasedIcon",
@@ -357,7 +352,6 @@ local PROFILED_FUNCTIONS = {
     -- ----------------------------------------------------------
     -- Targeted Spells
     -- ----------------------------------------------------------
-    "UpdateTargetedSpellAnimatedBorder",
     "UpdateTargetedSpellLayout",
 
     -- ----------------------------------------------------------
@@ -420,7 +414,6 @@ local PROFILED_FUNCTIONS = {
     -- ----------------------------------------------------------
     -- Blizzard integration
     -- ----------------------------------------------------------
-    "CaptureAurasFromBlizzardFrame",
     "UpdateBlizzardFrameVisibility",
 }
 

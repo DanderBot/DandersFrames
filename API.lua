@@ -832,7 +832,7 @@ end
 -- DEBUG / TEST SLASH COMMANDS
 -- ============================================================
 
-SLASH_DFAPI1 = "/dfapi"
+DF:RegisterDebugSlash("DFAPI", "Public API test / event refire", false, "/dfapi")
 SlashCmdList["DFAPI"] = function(msg)
     msg = (msg or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
 

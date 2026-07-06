@@ -5303,10 +5303,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     -- Auras > Aura Filters (master switch for Blizzard vs Direct API mode)
     local pageAuraFilters = CreateSubTab("auras", "auras_filters", L["Aura Filters"])
     BuildPage(pageAuraFilters, function(self, db, Add, AddSpace, AddSyncPoint)
-        -- Setup wizard banner (hidden when Blizzard's aura pipeline is gone
-        -- on 12.0.5+: the wizard walks users through choosing between Blizzard
-        -- and Direct sources, which is meaningless when only Direct exists).
-        if not DF.BlizzardAuraSourceUnavailable then
+        -- Setup wizard banner: guided walkthrough of the aura filters.
+        do
             local banner = GUI:CreateInfoBanner(self.child, { tone = "info" })
             banner:SetText(L["Having trouble with buffs or debuffs? Run the setup wizard for guided help."])
             -- Reserve room on the right for the action button (the banner body
@@ -5332,7 +5330,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end
 
         -- Copy button at top
-        Add(CreateCopyButton(self.child, {"auraSourceMode", "directBuff", "directDebuff"}, L["Aura Filters"], "auras_filters"), 25, 2)
+        Add(CreateCopyButton(self.child, {"directBuff", "directDebuff"}, L["Aura Filters"], "auras_filters"), 25, 2)
 
         -- ===== INFO BANNER =====
         -- Explains that Aura Filters only affect buff/debuff bars, with inline
@@ -5372,11 +5370,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             AddSpace(4, "both")
         end
 
-        -- hideOn helper: only show Direct mode options when Direct is selected
-        local function HideDirectOptions(d)
-            return d.auraSourceMode ~= "DIRECT"
-        end
-
         -- Callback that rebuilds filter strings and rescans
         local function DirectFilterChanged()
             if DF.RebuildDirectFilterStrings then
@@ -5387,56 +5380,24 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end
         end
 
-        -- ===== MODE SELECTION (Column 1) =====
-        local modeGroup = GUI:CreateSettingsGroup(self.child, 280)
-        modeGroup:AddWidget(GUI:CreateHeader(self.child, L["Aura Data Source"]), 40)
-
-        local modeOptions = {
-            BLIZZARD = L["Blizzard (Default)"],
-            DIRECT = L["Direct API"],
-        }
-        local modeDropdown = modeGroup:AddWidget(GUI:CreateDropdown(self.child, L["Source Mode"], modeOptions, db, "auraSourceMode", function()
-            if DF.SetAuraSourceMode then
-                DF:SetAuraSourceMode(db.auraSourceMode)
-            end
-            self:RefreshStates()
-        end), 55)
-        -- Disable the dropdown when Blizzard's aura pipeline has been removed
-        -- (12.0.5+). The forced-DIRECT migration in Features/Auras.lua ensures
-        -- the value is correct; this just prevents the user from trying to
-        -- switch back to a source that no longer exists.
-        modeDropdown.disableOn = function() return DF.BlizzardAuraSourceUnavailable end
-
-        -- Warning note shown when the Blizzard source has been force-disabled.
-        -- Uses hideOn (not disableOn) since it's informational text.
-        local apiBlockedNote = modeGroup:AddWidget(GUI:CreateLabel(self.child,
-            "|cffffcc00" .. L["WoW 12.0.5 removed addon access to Blizzard's party-frame aura data. The Blizzard source is no longer available; DandersFrames has switched to Direct API automatically."] .. "|r", 250), 60)
-        apiBlockedNote.hideOn = function() return not DF.BlizzardAuraSourceUnavailable end
-
-        Add(modeGroup, nil, 1)
-
         -- ===== BUFF FILTERS (Column 2, Direct mode only) =====
         local function HideBuffSubFilters(d)
-            return d.auraSourceMode ~= "DIRECT" or d.directBuffShowAll
+            return d.directBuffShowAll
         end
 
         local buffGroup = GUI:CreateSettingsGroup(self.child, 280)
-        buffGroup.hideOn = HideDirectOptions
         local buffHeader = buffGroup:AddWidget(GUI:CreateHeader(self.child, L["Buff Filters"]), 40)
-        buffHeader.hideOn = HideDirectOptions
 
         local bfAll = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["All Buffs"], db, "directBuffShowAll", function()
             DirectFilterChanged()
             self:RefreshStates()
         end), 30)
-        bfAll.hideOn = HideDirectOptions
         bfAll.tooltip = L["Show every buff with no filtering."]
 
         local bfOnlyMine = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Only My Buffs"], db, "directBuffOnlyMine", function()
             DirectFilterChanged()
             self:RefreshStates()
         end), 30)
-        bfOnlyMine.hideOn = HideDirectOptions
         bfOnlyMine.tooltip = L["Only show buffs that you cast. Applies to all buff filters."]
 
         local buffSubInfo = buffGroup:AddWidget(GUI:CreateLabel(self.child, "|cff888888" .. L["Enabled filters are combined \226\128\148 buffs matching any selected filter will be shown."] .. "|r", 250), 35)
@@ -5472,24 +5433,20 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             NAME = L["Alphabetical"],
         }
         local bfSort = buffGroup:AddWidget(GUI:CreateDropdown(self.child, L["Sort Order"], buffSortOptions, db, "directBuffSortOrder", DirectFilterChanged), 55)
-        bfSort.hideOn = HideDirectOptions
         Add(buffGroup, nil, 2)
 
         -- ===== DEBUFF FILTERS (Column 1, Direct mode only) =====
         local function HideDebuffSubFilters(d)
-            return d.auraSourceMode ~= "DIRECT" or d.directDebuffShowAll
+            return d.directDebuffShowAll
         end
 
         local debuffGroup = GUI:CreateSettingsGroup(self.child, 280)
-        debuffGroup.hideOn = HideDirectOptions
         local debuffHeader = debuffGroup:AddWidget(GUI:CreateHeader(self.child, L["Debuff Filters"]), 40)
-        debuffHeader.hideOn = HideDirectOptions
 
         local dfAll = debuffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["All Debuffs"], db, "directDebuffShowAll", function()
             DirectFilterChanged()
             self:RefreshStates()
         end), 30)
-        dfAll.hideOn = HideDirectOptions
         dfAll.tooltip = L["Show every debuff with no filtering."]
 
         -- ===== WARNING BANNER: All Debuffs disabled =====
@@ -5498,7 +5455,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             text = L["Recommended: enable 'All Debuffs' to see all relevant debuffs, especially for healers."],
         })
         debuffWarningBanner.hideOn = function(d)
-            return d.auraSourceMode ~= "DIRECT" or d.directDebuffShowAll
+            return d.directDebuffShowAll
         end
         debuffGroup:AddWidget(debuffWarningBanner, debuffWarningBanner.layoutHeight)
 
@@ -5527,7 +5484,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             NAME = L["Alphabetical"],
         }
         local dfSort = debuffGroup:AddWidget(GUI:CreateDropdown(self.child, L["Sort Order"], debuffSortOptions, db, "directDebuffSortOrder", DirectFilterChanged), 55)
-        dfSort.hideOn = HideDirectOptions
         Add(debuffGroup, nil, 1)
 
         -- ===== AURA BLACKLIST (Column 2, under Buff Filters) =====
@@ -6575,7 +6531,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         
         local function HideTargetedSpellOptions(d) return not d.targetedSpellEnabled end
         local function HideTargetedDurationOptions(d) return not d.targetedSpellEnabled or not d.targetedSpellShowDuration end
-        local function HideBorderOptions(d) return not d.targetedSpellEnabled or not d.targetedSpellShowBorder end
         
         local function TargetedSpellLightweightUpdate()
             if (DF.testMode or DF.raidTestMode) and DF.UpdateAllTestTargetedSpell then DF:UpdateAllTestTargetedSpell() end
@@ -6942,7 +6897,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
             local function HideTLOptions(d) return not d.targetedListEnabled end
             local function HideIconOptions(d) return not d.targetedListEnabled or not d.targetedListShowIcon end
-            local function HideBorderOptions(d) return not d.targetedListEnabled or not d.targetedListShowBorder end
             local function HideTargetNameOptions(d) return not d.targetedListEnabled or not d.targetedListShowTargetName end
 
             local function TargetedListUpdate()
@@ -7263,7 +7217,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         
         local function HidePersonalOptions(d) return not d.personalTargetedSpellEnabled end
         local function HidePersonalDurationOptions(d) return not d.personalTargetedSpellEnabled or not d.personalTargetedSpellShowDuration end
-        local function HideBorderOptions(d) return not d.personalTargetedSpellEnabled or not d.personalTargetedSpellShowBorder end
         
         local function PersonalTargetedUpdate()
             if DF.UpdatePersonalTargetedSpellsPosition then DF:UpdatePersonalTargetedSpellsPosition() end
@@ -7548,18 +7501,26 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local roleSection = Add(GUI:CreateCollapsibleSection(self.child, L["Role Icon"], false, 270), 28, 1)
 
         -- Header preview: the Tank/Healer/DPS icons in the currently selected
-        -- style. Rebuilt live whenever the style or an external path changes.
+        -- style. Rebuilt live whenever the style, an external path, or a
+        -- per-role Show toggle changes. Each role's icon desaturates when its
+        -- Show toggle is off (matching the other icon sections' previews);
+        -- the whole preview dims only when all three roles are off.
+        local roleShowKeys = { TANK = "roleIconShowTank", HEALER = "roleIconShowHealer", DAMAGER = "roleIconShowDPS" }
         local function UpdateRolePreview()
             if not roleSection.SetPreviewIcons then return end
             local icons = {}
+            local anyShown = false
             for _, role in ipairs({ "TANK", "HEALER", "DAMAGER" }) do
                 -- tex may be an atlas name (no coords) or a texture path (+coords).
                 local tex, l, r, t, b = DF:GetRoleIconTexture(db, role)
                 if tex then
-                    icons[#icons + 1] = { texture = tex, coords = l and { l, r, t, b } or nil }
+                    local shown = db[roleShowKeys[role]] ~= false
+                    anyShown = anyShown or shown
+                    icons[#icons + 1] = { texture = tex, coords = l and { l, r, t, b } or nil, desaturate = not shown }
                 end
             end
             roleSection:SetPreviewIcons(icons)
+            if roleSection.SetPreviewDimmed then roleSection:SetPreviewDimmed(not anyShown) end
         end
 
         -- Small gap between the section header and the first box.
@@ -7580,9 +7541,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         roleExtNote.hideOn = function(d) return d.roleIconStyle ~= "EXTERNAL" end
         -- Per-role filters: which roles ever show an icon (global — apply in and
         -- out of combat). The Hide In Combat toggle (Appearance) is an independent gate.
-        roleSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show Tank"], db, "roleIconShowTank", function() DF:UpdateAllRoleIcons() end), 30)
-        roleSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show Healer"], db, "roleIconShowHealer", function() DF:UpdateAllRoleIcons() end), 30)
-        roleSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show DPS"], db, "roleIconShowDPS", function() DF:UpdateAllRoleIcons() end), 30)
+        roleSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show Tank"], db, "roleIconShowTank", function() DF:UpdateAllRoleIcons(); UpdateRolePreview() end), 30)
+        roleSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show Healer"], db, "roleIconShowHealer", function() DF:UpdateAllRoleIcons(); UpdateRolePreview() end), 30)
+        roleSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show DPS"], db, "roleIconShowDPS", function() DF:UpdateAllRoleIcons(); UpdateRolePreview() end), 30)
         Add(roleSettings, nil, 1)
         roleSection:RegisterChild(roleSettings)
 
@@ -9036,8 +8997,23 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         self.exportFrameTypes = {party = true, raid = true}
         self.importFrameTypes = {party = true, raid = true}
         
-        local categoryOrder = {"position", "layout", "bars", "auras", "text", "icons", "other", "pinnedFrames", "auraDesigner", "autoLayout"}
-        
+        -- Derived from the category registry (single source of truth) so this list
+        -- can never drift from DF.ExportCategories when categories change.
+        local categoryOrder = {}
+        for cat in pairs(DF.ExportCategoryInfo) do table.insert(categoryOrder, cat) end
+        table.sort(categoryOrder, function(a, b)
+            return (DF.ExportCategoryInfo[a].order or 99) < (DF.ExportCategoryInfo[b].order or 99)
+        end)
+
+        -- Page-scope note: unlike the rest of the settings window, this page is
+        -- NOT scoped by the party/raid tab -- exports and imports operate on the
+        -- whole profile, gated only by the Export for / Import for rows.
+        local scopeBanner = GUI:CreateInfoBanner(self.child, {
+            tone = "info",
+            text = L["Profiles include both Party and Raid settings. Exporting and importing always works on the profile as a whole, no matter which mode tab is selected above. Use the 'Export for' and 'Import for' checkboxes in each column to choose which mode's settings are included."],
+        })
+        Add(scopeBanner, scopeBanner.layoutHeight or 44, "both")
+
         -- Helper to add to section
         local function AddToSection(widget, col, colNum)
             widget.layoutCol = colNum or col
@@ -9097,11 +9073,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local presetRow = CreateFrame("Frame", nil, self.child)
         presetRow:SetSize(240, 24)
         
+        -- frameTypes: true = All checks Party+Raid, false = None clears them,
+        -- nil = Look/Layout leave the frame-type row alone.
         local presets = {
-            {name = "All", x = 0, cats = {"position", "layout", "bars", "auras", "text", "icons", "other", "pinnedFrames", "auraDesigner", "autoLayout"}},
-            {name = "Look", x = 60, cats = {"bars", "auras", "text", "icons", "other"}},
+            {name = "All", x = 0, frameTypes = true, cats = categoryOrder},
+            {name = "Look", x = 60, cats = {"bars", "auras", "dispel", "bossDebuffs", "missingBuffs", "defensives", "myBuffs", "targetedSpells", "targetedList", "text", "textDesigner", "icons", "other"}},
             {name = "Layout", x = 120, cats = {"position", "layout"}},
-            {name = "None", x = 180, cats = {}},
+            {name = "None", x = 180, frameTypes = false, cats = {}},
         }
         
         for _, p in ipairs(presets) do
@@ -9111,35 +9089,63 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 local sel = {}
                 for _, c in ipairs(p.cats) do sel[c] = true end
                 for cat, cb in pairs(self.exportCheckboxes) do cb:SetChecked(sel[cat] or false) end
+                -- All/None also drive the Party/Raid row -- keep the STATE table in
+                -- sync (SetChecked does not fire the checkbox OnClick handlers).
+                if p.frameTypes ~= nil and self.exportFrameTypeBoxes then
+                    for ft, box in pairs(self.exportFrameTypeBoxes) do
+                        box:SetChecked(p.frameTypes)
+                        self.exportFrameTypes[ft] = p.frameTypes
+                    end
+                    if self.UpdateExportCategoryState then self.UpdateExportCategoryState() end
+                end
             end)
         end
         exportSettingsGroup:AddWidget(presetRow, 28)
         
-        -- Frame types row
+        -- Frame types row ("Export for" -- the modes whose settings ship; the
+        -- category list below picks WHICH settings, this row picks WHOSE)
+        exportSettingsGroup:AddWidget(GUI:CreateLabel(self.child, L["Export for"], 240), 22)
         local ftRow = CreateFrame("Frame", nil, self.child)
         ftRow:SetSize(240, 20)
         
         local partyExp = CreateSmallCheckbox(ftRow, L["Party"], true)
         partyExp:SetPoint("LEFT", 0, 0)
-        partyExp.checkbox:SetScript("OnClick", function(s) self.exportFrameTypes.party = s:GetChecked() end)
+        partyExp.checkbox:SetScript("OnClick", function(s)
+            self.exportFrameTypes.party = s:GetChecked()
+            if self.UpdateExportCategoryState then self.UpdateExportCategoryState() end
+        end)
         
         local raidExp = CreateSmallCheckbox(ftRow, L["Raid"], true)
         raidExp:SetPoint("LEFT", 80, 0)
-        raidExp.checkbox:SetScript("OnClick", function(s) self.exportFrameTypes.raid = s:GetChecked() end)
+        raidExp.checkbox:SetScript("OnClick", function(s)
+            self.exportFrameTypes.raid = s:GetChecked()
+            if self.UpdateExportCategoryState then self.UpdateExportCategoryState() end
+        end)
+        self.exportFrameTypeBoxes = {party = partyExp, raid = raidExp}
         exportSettingsGroup:AddWidget(ftRow, 24)
         
-        -- Categories
+        -- Categories ("Settings to include" -- sub-settings of the modes above)
+        exportSettingsGroup:AddWidget(GUI:CreateLabel(self.child, L["Settings to include"], 240), 22)
         for _, cat in ipairs(categoryOrder) do
             local info = DF.ExportCategoryInfo[cat]
             local catRow = CreateFrame("Frame", nil, self.child)
             catRow:SetSize(240, 18)
             
-            local cb = CreateSmallCheckbox(catRow, info.name, true)
+            local cb = CreateSmallCheckbox(catRow, L[info.name], true)
             cb:SetPoint("LEFT", 0, 0)
             self.exportCheckboxes[cat] = cb
             exportSettingsGroup:AddWidget(catRow, 20)
         end
         
+        -- Grey the category list while no mode is selected (nothing would
+        -- export) -- the addon-wide disabled-means-dimmed convention.
+        self.UpdateExportCategoryState = function()
+            local enabled = self.exportFrameTypes.party or self.exportFrameTypes.raid
+            for _, cb in pairs(self.exportCheckboxes) do
+                if enabled then cb:Enable() else cb:Disable() end
+            end
+        end
+
         AddToSection(exportSettingsGroup, nil, 1)
         
         -- Export Actions Group
@@ -9341,7 +9347,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         self.createNewProfileCheck = createNewCheck
         importSettingsGroup:AddWidget(createNewRow, 24)
         
-        -- Frame types row
+        -- Frame types row ("Import for" -- which mode receives the settings)
+        importSettingsGroup:AddWidget(GUI:CreateLabel(self.child, L["Import for"], 240), 22)
         local ftRowImp = CreateFrame("Frame", nil, self.child)
         ftRowImp:SetSize(240, 20)
         
@@ -9358,13 +9365,14 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         self.importRaidCheck = raidImp
         importSettingsGroup:AddWidget(ftRowImp, 24)
         
-        -- Categories
+        -- Categories ("Settings to include")
+        importSettingsGroup:AddWidget(GUI:CreateLabel(self.child, L["Settings to include"], 240), 22)
         for _, cat in ipairs(categoryOrder) do
             local info = DF.ExportCategoryInfo[cat]
             local catRow = CreateFrame("Frame", nil, self.child)
             catRow:SetSize(240, 18)
             
-            local cb = CreateSmallCheckbox(catRow, info.name, false)
+            local cb = CreateSmallCheckbox(catRow, L[info.name], false)
             cb:SetPoint("LEFT", 0, 0)
             cb:Disable()
             self.importCheckboxes[cat] = cb

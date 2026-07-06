@@ -3177,31 +3177,6 @@ end
 -- OVERRIDE SYSTEM FUNCTIONS
 -- ============================================================
 
--- Get a raid setting value, checking profile overrides first
--- Returns: value, isOverridden
-function AutoProfilesUI:GetRaidSetting(key)
-    local globalValue = DF.db.raid[key]
-    
-    -- If editing a profile, check that profile's overrides
-    if self.editingProfile then
-        local overrides = self.editingProfile.overrides
-        if overrides and overrides[key] ~= nil then
-            return overrides[key], true  -- value, isOverridden
-        end
-        return globalValue, false
-    end
-    
-    -- If auto-profiles enabled and not editing, check active profile
-    if DF.db.raidAutoProfiles and DF.db.raidAutoProfiles.enabled then
-        local activeProfile = self:GetActiveProfile()
-        if activeProfile and activeProfile.overrides and activeProfile.overrides[key] ~= nil then
-            return activeProfile.overrides[key], true
-        end
-    end
-    
-    return globalValue, false
-end
-
 function AutoProfilesUI:SetProfileSetting(key, value)
     if not self.editingProfile then return false end
 
@@ -3994,7 +3969,7 @@ end
 -- Usage: /dfautotest - Print current detection results
 -- ============================================================
 
-SLASH_DFAUTOTEST1 = "/dfautotest"
+DF:RegisterDebugSlash("DFAUTOTEST", "Auto profiles test harness", true, "/dfautotest")
 SlashCmdList["DFAUTOTEST"] = function()
     local autoDb = DF.db and DF.db.raidAutoProfiles
     local enabled = autoDb and autoDb.enabled
