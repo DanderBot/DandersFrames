@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Bug Fixes
+
+* (Text Designer) **Element colour edits now apply while you pick** — changing an element's Color previously took effect only after closing the colour picker with OK; while the picker was open the text kept rendering the default colour (usually white) no matter what you chose, so the setting looked broken — the swatch showed your colour while the text refused to change. The per-element colour override now engages on the first change, so the preview and live frames follow the picker immediately. (by Krathe)
+
 ## [4.7.0]
 
 ### Bug Fixes
