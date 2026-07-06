@@ -1147,6 +1147,9 @@ L["These settings are being rebuilt on WoW's new 12.1 aura system and will retur
 L["This is being rebuilt on WoW's new 12.1 aura system and will return in a future update."] = true
 L["WoW's new 12.1 aura system doesn't support these settings, so they can't be provided."] = true
 L["WoW's new 12.1 aura system doesn't support this setting."] = true
+-- 12.1 unsupported-version guard popup (Core.lua)
+L["Unsupported Game Version"] = true
+L["DandersFrames doesn't support this version of the game.\n\nThis build is made for World of Warcraft 12.1. Please install the version that matches your client from CurseForge or Wago."] = true
 L["Cmd + Left Click unavailable on Mac"] = true
 L["Font sizes are not changed. Adjust sizes in each element's page."] = true
 L["Note"] = true

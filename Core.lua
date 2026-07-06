@@ -3105,6 +3105,37 @@ end
 -- INITIALIZATION
 -- ============================================================
 
+-- ------------------------------------------------------------
+-- Unsupported-version guard
+-- This build is 12.1-only (TOC Interface 120100). WoW hides it as out-of-date
+-- on older clients, but a user with "Load out of date AddOns" enabled would run
+-- it on the wrong version and hit bugs. Warn them to install the matching build.
+-- Uses its OWN frame so the popup fires even if the main init trips on the wrong
+-- client. Only fires for OLDER clients (< 12.1); newer clients are left alone.
+-- ------------------------------------------------------------
+do
+    local MIN_INTERFACE = 120100  -- 12.1.0
+    local clientToc = select(4, GetBuildInfo())
+    if type(clientToc) == "number" and clientToc < MIN_INTERFACE then
+        local guardFrame = CreateFrame("Frame")
+        guardFrame:RegisterEvent("PLAYER_LOGIN")
+        guardFrame:SetScript("OnEvent", function(self)
+            self:UnregisterAllEvents()
+            local L = DF.L
+            if DF.ShowPopupAlert then
+                DF:ShowPopupAlert({
+                    title = L["Unsupported Game Version"],
+                    message = L["DandersFrames doesn't support this version of the game.\n\nThis build is made for World of Warcraft 12.1. Please install the version that matches your client from CurseForge or Wago."],
+                    icon = "Interface\\Icons\\INV_Misc_QuestionMark",
+                    buttons = {
+                        { label = L["OK"], onClick = nil },
+                    },
+                })
+            end
+        end)
+    end
+end
+
 local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("PLAYER_LOGIN")
