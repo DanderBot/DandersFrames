@@ -4,7 +4,7 @@
 
 ### Bug Fixes
 
-* (Aura Designer) **Expiring state now clears when an aura is refreshed** — refreshing a tracked aura (re-casting a HoT in its pandemic window, for example) kept the border's cached expiry times from before the refresh, so once an indicator crossed its Expiring Threshold it stayed "expiring" forever: pulse animations never stopped and Show-When-Missing trackers stayed visible full-time. The expiring engine now refreshes its timing data on every aura update. Present since 4.4.0; borders using the Expiring Color Override were unaffected. (by Krathe)
+* (Aura Designer) Fixed expiring border animations staying stuck on after the tracked aura was refreshed (for example re-casting a HoT in its pandemic window). (by Krathe)
 
 ## [4.7.0]
 

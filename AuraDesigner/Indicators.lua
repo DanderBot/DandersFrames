@@ -1115,23 +1115,24 @@ local function ApplyBorderToOverlay(ch, frame, config, auraData)
     if expiringEnabled == nil then expiringEnabled = false end
     local ec = config.expiringColor
 
-    -- Keep the expiring entry's aura times fresh on EVERY cycle, rebuild or
-    -- not: an aura REFRESH keeps the same auraInstanceID, so it lands in the
-    -- signature skip below with the ticker entry still holding the pre-refresh
-    -- duration/expirationTime. The manual threshold math then decays to zero
-    -- remaining and parks the border permanently "expiring" — a stuck pulse,
-    -- or a stuck-visible Show-When-Missing tracker. (No-op when no expiring
-    -- entry is registered for this overlay.)
-    DF.Expiring:UpdateEntryTimes(ch, auraData and auraData.duration,
-        auraData and auraData.expirationTime, auraID)
-
     -- Change detection — ApplyBorder runs every Apply cycle (frame-level
     -- indicator), so skip the rebuild + expiring re-register when nothing the
     -- border cares about changed.  Comprehensive (covers every render-affecting
     -- spec field) so GUI edits reach live frames without /reload.  The expiring
     -- ticker recolours live via RecolorActive between rebuilds.
     local sig = BorderTypeSpecSig(spec, auraID, config)
-    if ch.dfAD_sig == sig then return end
+    if ch.dfAD_sig == sig then
+        -- Same visual spec — but an aura REFRESH keeps its auraInstanceID, so
+        -- it lands here with the expiring entry still holding the pre-refresh
+        -- duration/expirationTime. The manual threshold math then decays to
+        -- zero remaining and parks the border permanently "expiring" (stuck
+        -- pulse). Refresh the entry's times before skipping; the rebuild path
+        -- below re-registers with fresh times anyway. (No-op when no expiring
+        -- entry is registered for this overlay.)
+        DF.Expiring:UpdateEntryTimes(ch, auraData and auraData.duration,
+            auraData and auraData.expirationTime, auraID)
+        return
+    end
     ch.dfAD_sig = sig
 
     DF.Border:Apply(ch, spec)
