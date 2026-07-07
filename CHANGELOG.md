@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+## [5.0.0]
+
+### WoW 12.1 (Midnight) Rework
+
+* (Auras) Rebuilt to work with WoW 12.1's new protected aura system. This build runs on 12.1 only — 12.0.x stays on 4.7.
+* (Auras) Buff and defensive icon rows now render through the new 12.1 aura engine.
+* (Auras) New buff duration format option (Number / Short / Full).
+* (Interface) Settings that 12.1 no longer allows the addon to control are marked in the options panel.
+
+### Known Issues (12.1 alpha)
+
+* An aura matching more than one filter can show duplicate icons — a 12.1 limitation we're still working around.
+* Some buff/defensive tooltip and duration-colour settings don't yet apply to the new aura rows.
+* Dragging certain aura sliders can briefly stutter.
+
 ## [4.7.0]
 
 ### Bug Fixes
