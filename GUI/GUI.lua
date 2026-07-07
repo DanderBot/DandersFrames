@@ -4013,9 +4013,18 @@ function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback
         
         -- Store original values for cancel
         local originalColor = {r = c.r, g = c.g, b = c.b, a = c.a or 1}
+
+        -- Blizzard's SetupColorPickerAndShow fires swatchFunc once DURING
+        -- setup (its SetColorRGB triggers OnColorSelect — the source comments
+        -- it). That spurious fire re-writes the unchanged colour and runs the
+        -- change callbacks on mere open: it commits per-element override flags
+        -- (Text Designer) and triggers a pointless full refresh. Suppress
+        -- callbacks until setup has returned.
+        local settingUp = true
         
         local info = {
             swatchFunc = function()
+                if settingUp then return end
                 local r, g, b = ColorPickerFrame:GetColorRGB()
                 local a = 1
                 if hasAlpha and ColorPickerFrame.GetColorAlpha then
@@ -4042,6 +4051,7 @@ function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback
             end,
             hasOpacity = hasAlpha,
             opacityFunc = hasAlpha and function()
+                if settingUp then return end
                 if ColorPickerFrame.GetColorAlpha then
                     local a = ColorPickerFrame:GetColorAlpha()
                     if a then
@@ -4123,6 +4133,7 @@ function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback
         -- Mark this as a DandersFrames color picker call
         GUI:MarkColorPickerCall()
         ColorPickerFrame:SetupColorPickerAndShow(info)
+        settingUp = false
     end)
     
     container.SetEnabled = function(self, enabled)
