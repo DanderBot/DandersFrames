@@ -828,6 +828,16 @@ local function BuildAppearanceSection(GUI, parent, elem, card, yStart)
     end, function()
         -- Throttled refresh while dragging: preview every tick, live frames
         -- ~30/s — live but not laggy. Full RefreshAll runs once on close.
+        --
+        -- The override flag must be set HERE too, not only in the full
+        -- callback above: in lightweight mode the full callback only fires
+        -- when the picker closes via OK, but the value binding writes
+        -- elem.color on every change. Without the flag the renderer keeps
+        -- resolving globalDefaults (white) for the whole picker session —
+        -- the swatch shows the new colour while the text refuses to change,
+        -- which reads as "the color setting doesn't work". First touch of
+        -- the picker = the user wants a per-element colour; flag it then.
+        elem.overrides.color = true
         if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshThrottled() end
     end, true)
     colorPicker:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
