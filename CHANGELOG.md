@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [4.7.1]
+
 ### Bug Fixes
 
 * (Text Designer) Element colour changes now take effect immediately while the colour picker is open, instead of only after closing it with OK. (by Krathe)
