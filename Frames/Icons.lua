@@ -1105,14 +1105,20 @@ function DF:UpdateDefensiveBar(frame)
     
     -- Check if feature is enabled
     if not db.defensiveIconEnabled then
-        if frame.defensiveFactory then frame.defensiveFactory:GetFrame():Hide() end
+        if frame.defensiveFactory then
+            frame.defensiveFactory:GetFrame():Hide()
+            frame.dfDefFactoryShown = false   -- keep DriveDefensiveFactory's shown-cache coherent
+        end
         frame.defensiveIcon:Hide()
         return
     end
-    
+
     -- Check if unit exists
     if not UnitExists(unit) then
-        if frame.defensiveFactory then frame.defensiveFactory:GetFrame():Hide() end
+        if frame.defensiveFactory then
+            frame.defensiveFactory:GetFrame():Hide()
+            frame.dfDefFactoryShown = false
+        end
         frame.defensiveIcon:Hide()
         return
     end
@@ -1127,6 +1133,7 @@ function DF:UpdateDefensiveBar(frame)
     -- hide it so the legacy render below can't double up.
     if frame.defensiveFactory then
         frame.defensiveFactory:GetFrame():Hide()
+        frame.dfDefFactoryShown = false
     end
 
     -- Ensure cache.defensives is populated for this unit. In steady state

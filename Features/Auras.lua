@@ -2559,7 +2559,15 @@ function DF:DriveBuffFactory(frame, db)
     if not h then return end
 
     -- Row-level opacity (legacy per-icon buffAlpha; container-frame children multiply it).
-    h:GetFrame():SetAlpha(db.buffAlpha or 1)
+    -- BUILD-ONCE-LEAVE-IT: the standing container's frame tree is written ONLY on actual
+    -- change, never per-event — the combat-proven DF_AuraLab pattern builds once and lets
+    -- Blizzard drive; DriveBuffFactory runs per UNIT_AURA/range tick, so unconditional
+    -- writes here would re-touch the live tree many times a second in combat.
+    local rowAlpha = db.buffAlpha or 1
+    if frame.dfBuffFactoryAlpha ~= rowAlpha then
+        frame.dfBuffFactoryAlpha = rowAlpha
+        h:GetFrame():SetAlpha(rowAlpha)
+    end
 
     -- Keep the container on the frame's current unit. OOC retargets immediately; in combat
     -- the factory defers the retarget, so hide the row until regen rather than show the
@@ -2573,11 +2581,20 @@ function DF:DriveBuffFactory(frame, db)
     elseif frame.dfBuffFactoryHidden and not InCombatLockdown() then
         frame.dfBuffFactoryHidden = nil
     end
-    h:GetFrame():SetShown(not frame.dfBuffFactoryHidden)
+    -- Show/hide only on state change (no per-event SetShown churn on the live tree).
+    local rowShown = not frame.dfBuffFactoryHidden
+    if frame.dfBuffFactoryShown ~= rowShown then
+        frame.dfBuffFactoryShown = rowShown
+        h:GetFrame():SetShown(rowShown)
+    end
 
-    -- Apply setting changes only when the layout version actually bumped.
+    -- Apply setting changes only when the layout version actually bumped — and only OUT
+    -- of combat. In combat the standing container is left completely alone (the lab's
+    -- proven pattern: existing containers keep running in combat; every addon-side
+    -- re-touch — restyle, rebuild, SetFrameLevel, formatter churn — is a divergence).
+    -- The version stays stale so the first OOC drive catches up.
     local ver = DF.auraLayoutVersion or 0
-    if frame.dfBuffFactoryVersion ~= ver then
+    if frame.dfBuffFactoryVersion ~= ver and not InCombatLockdown() then
         frame.dfBuffFactoryVersion = ver
         local cfg = DF:BuildAuraRowConfig(db, "buff", {
             unit = frame.unit,
@@ -2717,12 +2734,20 @@ function DF:DriveDefensiveFactory(frame, db)
     elseif frame.dfDefFactoryHidden and not InCombatLockdown() then
         frame.dfDefFactoryHidden = nil
     end
-    h:GetFrame():SetShown(not frame.dfDefFactoryHidden)
+    -- Show/hide only on state change (no per-event SetShown churn on the live tree —
+    -- build-once-leave-it, mirrors DriveBuffFactory).
+    local rowShown = not frame.dfDefFactoryHidden
+    if frame.dfDefFactoryShown ~= rowShown then
+        frame.dfDefFactoryShown = rowShown
+        h:GetFrame():SetShown(rowShown)
+    end
 
     -- Re-apply settings only on a layout-version bump (defensive option changes bump it
-    -- via UpdateAllDefensiveBars -> InvalidateAuraLayout).
+    -- via UpdateAllDefensiveBars -> InvalidateAuraLayout) — and only OUT of combat: the
+    -- standing container is never re-touched in lockdown (lab parity); the stale version
+    -- catches up on the first OOC drive.
     local ver = DF.auraLayoutVersion or 0
-    if frame.dfDefFactoryVersion ~= ver then
+    if frame.dfDefFactoryVersion ~= ver and not InCombatLockdown() then
         frame.dfDefFactoryVersion = ver
         local cfg = DF:BuildDefensiveRowConfig(db, frame.unit)
         -- Re-apply the z-order level (honors runtime defensiveIconFrameLevel changes; survives
@@ -2764,6 +2789,7 @@ function DF:UpdateAuras_Enhanced(frame)
     local buffFactoryActive = db.showBuffs and DF:UseFactoryForBuffs(frame, db)
     if frame.buffFactory and not buffFactoryActive then
         frame.buffFactory:GetFrame():Hide()
+        frame.dfBuffFactoryShown = false   -- keep DriveBuffFactory's shown-cache coherent
     end
 
     -- Aura Designer runs when enabled; standard buffs can coexist if showBuffs is on.

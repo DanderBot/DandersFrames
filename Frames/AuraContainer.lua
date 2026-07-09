@@ -419,15 +419,15 @@ local function bindNative(slot, config)
             warnedCurve = true
             DF:DebugWarn(DBG, "SetDurationText failed: %s", tostring(err))
         end
-        -- Colour-by-time: call SetTextColorCurve DIRECTLY on the binding with the REQUIRED
-        -- `property` arg. Blizzard's SetDurationText wrapper omits it (bugged -> text vanishes),
-        -- so we bypass it — the binding is a plain field on our addon-created button. This is the
-        -- legacy percent gradient. Guarded; C-side render is unverified (Krathe checks in-game).
-        if ok and durSpec.colorCurve and slot.DurationTextBinding then
-            pcall(function()
-                slot.DurationTextBinding:SetTextColorCurve(durSpec.colorCurve, Enum.DurationTextBindingProperty.RemainingPercent)
-            end)
-        end
+        -- Colour-by-time: the smooth textColorCurve path is DEAD on 68569 (live-tested
+        -- 2026-07-09, port plan §2.8/§3): SetDurationText forwards SetTextColorCurve(curve)
+        -- WITHOUT the required `property` arg (no-op), and `button.DurationTextBinding` is a
+        -- PRIVATE field — NOT on the public object table initializeFrame receives — so the
+        -- old direct-binding poke here could never fire, and poking Blizzard-owned binding
+        -- state on a live button is exactly the class of touch the combat-proven DF_AuraLab
+        -- initFrame avoids. durSpec.colorCurve is accepted-but-inert; colour-by-time ships
+        -- via the discrete BUCKETS formatter (|cRRGGBB escapes in AddBreakpoint format
+        -- strings, the NSRT/EnhanceQoL-proven path) in P2.
     end
 
     if slot.dfStack and slot.SetApplicationCount and not slot._boundStack then
@@ -870,6 +870,17 @@ function Handle:ApplyStyle(style, layout)
     if type(layout) == "table" then
         self.config.layout = layout   -- optional geometry swap (size/scale/spacing/growth/offsets)
     end
+    -- BUILD-ONCE-LEAVE-IT (combat parity with the proven DF_AuraLab pattern): a live
+    -- native container's buttons are NEVER re-touched in combat. The lab builds once,
+    -- lets Blizzard drive, and only restyles on explicit OOC user action; restyling
+    -- live buttons mid-combat (SetSize/SetPoint/SetTexCoord/SafeSetFont on regions the
+    -- native driver owns) is a divergence from the combat-proven pattern. Config is
+    -- already captured above; the restyle replays at regen.
+    if InCombatLockdown() then
+        self._pendingRestyle = true
+        self:_registerRegen()
+        return
+    end
     -- Row-mode buttons are anchored by the CONTAINER's secure flow layout -- SetPoint-ing
     -- them here would fight it (and touches secretwrapped anchor points). Geometry changes
     -- go through SetAuraLayout* (P1); only the future "slots" mode hand-anchors. styleButton_regions
@@ -978,6 +989,7 @@ function Handle:Destroy()
         return
     end
     self._pendingOp = nil
+    self._pendingRestyle = nil
     self:_teardownContainer()
 end
 
@@ -1002,19 +1014,29 @@ function Handle:_registerRegen()
                 self._handles[h] = nil
                 local op = h._pendingOp
                 h._pendingOp = nil
+                local restyle = h._pendingRestyle
+                h._pendingRestyle = nil
                 -- pcall each handle's op so one failure can't strand the rest.
                 if op == "destroy" then
                     pcall(function() h:_teardownContainer() end)
-                elseif not h._destroyed and op then
-                    pcall(function()
-                        if op == "rebuild" then
-                            h:_rebuild()
-                        elseif op == "retarget" then
-                            if h.backend then h.backend:setUnit(h.config.unit) end
-                        elseif op == "enable" then
-                            if h.backend then h.backend:setEnabled(h.config.enabled ~= false) end
-                        end
-                    end)
+                elseif not h._destroyed then
+                    if op then
+                        pcall(function()
+                            if op == "rebuild" then
+                                h:_rebuild()
+                            elseif op == "retarget" then
+                                if h.backend then h.backend:setUnit(h.config.unit) end
+                            elseif op == "enable" then
+                                if h.backend then h.backend:setEnabled(h.config.enabled ~= false) end
+                            end
+                        end)
+                    end
+                    -- Combat-deferred cosmetic restyle (ApplyStyle hit in lockdown). A
+                    -- rebuild already styles fresh buttons from the updated config, so
+                    -- only non-rebuild paths need the explicit OOC re-apply.
+                    if restyle and op ~= "rebuild" then
+                        pcall(function() h:ApplyStyle() end)
+                    end
                 end
             end
         end)
