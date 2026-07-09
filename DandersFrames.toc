@@ -3,7 +3,7 @@
 ## Notes: Custom party/raid frames for WoW Midnight 12.0
 ## X-Credits: Some optimization patterns informed by studying Grid2 and other community addons. Secret aura tracking techniques from Harrek's Advanced Raid Frames (used with permission).
 ## Author: Danders
-## Version: v5.0.0-alpha.1
+## Version: v5.0.0-alpha.2
 ## X-Curse-Project-ID: 1389690
 ## X-Wago-ID: RNL9B46o
 ## IconTexture: Interface\AddOns\DandersFrames\Media\DF_Icon

@@ -13,8 +13,10 @@
 
 ### Known Issues (12.1 alpha)
 
+* The 12.1 aura rows are being rebuilt on Blizzard's new container system and are under active testing — please report any case where buff or defensive auras stop updating, **especially in combat**.
 * An aura matching more than one filter can show duplicate icons — a 12.1 limitation we're still working around.
 * Some buff/defensive tooltip and duration-colour settings don't yet apply to the new aura rows.
+* Debuffs, dispel overlay and other non-buff aura displays are not yet ported to the new system and may be blank on 12.1.
 * Dragging certain aura sliders can briefly stutter.
 
 ## [4.7.0]
