@@ -1248,15 +1248,6 @@ local directModeSubscriber = {}
 local directModeActive = false
 
 function directModeSubscriber:OnUnitAura(event, unit, updateInfo)
-    -- 12.1: the legacy scan reads the now-fully-secret UNIT_AURA payload (updateInfo fields +
-    -- aura data), which is BLOCKED and TAINTS DandersFrames — poisoning the secure aura
-    -- containers + header in combat (taint.log: boolean test on secret at Auras.lua:1300).
-    -- The factory (DF.AuraContainer) renders auras natively and does NOT use DF.AuraCache, so
-    -- the scan is dead on 12.1 — gate it off entirely. Legacy cache consumers (defensive bar /
-    -- dispel / AD) that haven't ported yet are already non-functional on secret 12.1 data.
-    if DF.AuraContainer and DF.AuraContainer.IsSupported and DF.AuraContainer.IsSupported() then
-        return
-    end
     if not unit then return end
     -- Only process units shown by DF frames (main frames or pinned frames).
     -- Main frames: O(1) check via unitFrameMap.
@@ -1303,27 +1294,35 @@ function directModeSubscriber:OnUnitAura(event, unit, updateInfo)
     -- Every other UNIT_AURA event flows through the cheap delta path.
     --
     -- See _Reference/fix-a-plan.md for the full architecture.
-    local cache = DF.AuraCache[unit]
-    local needsFull = not updateInfo
-                      or updateInfo.isFullUpdate
-                      or not cache
-                      or not cache.hasFullScan
+    -- 12.1: the legacy cache scan reads the now-fully-secret UNIT_AURA payload (updateInfo /
+    -- aura data), a boolean/compare on a secret that is BLOCKED and TAINTS DandersFrames —
+    -- poisoning the secure header + aura containers in combat (taint.log Auras.lua:1300). The
+    -- factory renders auras natively and never uses DF.AuraCache, so SKIP the scan on 12.1 —
+    -- but STILL trigger the frame render below so the factory gets driven. (Legacy cache
+    -- consumers not yet ported are already non-functional on secret 12.1 data.)
+    if not (DF.AuraContainer and DF.AuraContainer.IsSupported and DF.AuraContainer.IsSupported()) then
+        local cache = DF.AuraCache[unit]
+        local needsFull = not updateInfo
+                          or updateInfo.isFullUpdate
+                          or not cache
+                          or not cache.hasFullScan
 
-    if needsFull then
-        DF.AuraCacheStats.scanFull = DF.AuraCacheStats.scanFull + 1
-        ScanUnitFull(unit)
-    else
-        -- Try the incremental path. If it returns false (cache in
-        -- a state where delta isn't safe), fall back to full scan.
-        if ApplyAuraDelta(unit, updateInfo) then
-            DF.AuraCacheStats.deltaApplied = DF.AuraCacheStats.deltaApplied + 1
-        else
-            DF.AuraCacheStats.deltaFallback = DF.AuraCacheStats.deltaFallback + 1
+        if needsFull then
+            DF.AuraCacheStats.scanFull = DF.AuraCacheStats.scanFull + 1
             ScanUnitFull(unit)
+        else
+            -- Try the incremental path. If it returns false (cache in
+            -- a state where delta isn't safe), fall back to full scan.
+            if ApplyAuraDelta(unit, updateInfo) then
+                DF.AuraCacheStats.deltaApplied = DF.AuraCacheStats.deltaApplied + 1
+            else
+                DF.AuraCacheStats.deltaFallback = DF.AuraCacheStats.deltaFallback + 1
+                ScanUnitFull(unit)
+            end
         end
     end
 
-    TriggerAuraUpdateForUnit(unit)
+    TriggerAuraUpdateForUnit(unit)   -- drives the factory (and legacy render on 12.0)
 end
 
 function DF:EnableDirectAuraMode()
