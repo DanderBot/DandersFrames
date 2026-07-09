@@ -600,11 +600,13 @@ function NativeBackend:build()
         return
     end
     self.container = c
-    -- ⚠ TAINT: do NOT call base Frame methods (SetAllPoints/Show/SetEnabled) on the secure
-    -- container from here — those are un-delegated and taint it, which re-blocks its combat
-    -- button Show/Hide. The header creates it shown + enabled (KeyValue enabled=true) + parented
-    -- to the button; drive it ONLY through the laundered inbound API (SetUnit / AddAuraGroup /
-    -- candidateFilters / layout / sort). Positioning will move to the inbound SetAuraLayout* API.
+    -- Position the (secure) container over the unit button. The SecureGroupHeader creates it
+    -- with NO anchors and NO size, so without this its flow-laid buttons never resolve a rect
+    -- and never draw. taint.log CONFIRMED this base-Frame call does NOT taint the container —
+    -- the combat freeze was unrelated secret-value compares (Config.lua:773 / Auras.lua:1300),
+    -- now fixed. OOC only (build runs OOC / on regen). config.layout → inbound SetAuraLayout*
+    -- lands in P1, but anchoring the container to the button is DF's job regardless.
+    if not InCombatLockdown() then pcall(function() c:SetAllPoints(button); c:Show() end) end
     if type(config.unit) == "string" then pcall(function() c:SetUnit(config.unit) end) end
 
     -- Fresh generation: buttons are created in lazy batches (of 10) as needed, so a slot's

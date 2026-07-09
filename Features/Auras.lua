@@ -956,6 +956,14 @@ end
 
 -- Full scan — wipes and rebuilds the entire cache entry for a unit.
 local function ScanUnitFull(unit)
+    -- 12.1: the factory (DF.AuraContainer) renders auras natively; this legacy DF.AuraCache scan
+    -- reads the now-fully-secret aura data (dispelName/expirationTime/name compares) which TAINTS
+    -- DandersFrames and poisons secure frames in combat. Gate the scan PRIMITIVE off on 12.1 —
+    -- covers every caller at once (OnUnitAura, DirectScanAllUnits, PopulateDefensiveCache,
+    -- PinnedFrames, Range, AD adapter). Legacy cache consumers are already non-functional on
+    -- secret 12.1 data; they port to the factory in later phases. TriggerAuraUpdateForUnit still
+    -- fires (drives the factory); it just finds an empty cache, which the factory doesn't use.
+    if DF.AuraContainer and DF.AuraContainer.IsSupported and DF.AuraContainer.IsSupported() then return end
     if not unit or not UnitExists(unit) then return end
     if not IsRosterUnit(unit) then return end
     if not GetAuraSlots or not GetAuraDataBySlot then return end
