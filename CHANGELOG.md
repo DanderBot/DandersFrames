@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+* (Auras) Fix the in-combat aura freeze: the stack-count formatter cannot process the protected (secret) stack values 12.1 uses in combat, and the resulting error permanently stopped that frame's aura updates until reload. Stack counts now use the built-in display (shown at 2 or more); the "minimum stacks" setting no longer applies to the new aura rows.
+
 ## [5.0.0]
 
 ### WoW 12.1 (Midnight) Rework

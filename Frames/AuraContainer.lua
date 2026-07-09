@@ -40,8 +40,10 @@ local addonName, DF = ...
 --   3. container:UpdateAllAuras() is now an addon-callable dirty-mark (the real refresh).
 --   4. In initializeFrame: build FRESH regions as children of the button. NEVER SetParent
 --      an existing scripted widget onto a button (forbidden-aspect inheritance blocks it).
---   5. SetDurationText textColorCurve is FIXED on 68569 (dedicated DurationTextBinding:
---      SetTextColorCurve(curve)) -> smooth gradients return (bindNative wiring lands in P1).
+--   5. SetDurationText textColorCurve is NOT addon-reachable on 68569 (live-tested: Blizzard
+--      forwards the curve without the required `property`, and DurationTextBinding is private).
+--      Colour-by-time = discrete BUCKETS via the duration formatter (|c escapes) — P2.
+--      Stacks formatters are FORBIDDEN outright (secret trap — see bindNative).
 --   6. Animation on OUR child regions is fine (AnimationGroup:Play + OnUpdate run; the
 --      button's onUpdateMode=disabled doesn't propagate). Only expiry-TRIGGERED anim is dead.
 --   7. Cannot read IsShown / spellId / expirationTime / dispelName / presence — all secret.
@@ -432,8 +434,19 @@ local function bindNative(slot, config)
 
     if slot.dfStack and slot.SetApplicationCount and not slot._boundStack then
         slot._boundStack = true
-        local stackSpec = style.stacks or {}
-        slot:SetApplicationCount(slot.dfStack, stackSpec.formatter and { formatter = stackSpec.formatter } or {})
+        -- ⚠ NEVER pass a formatter here (style.stacks.formatter is deliberately ignored).
+        -- Blizzard's ApplyApplicationCount (Blizzard_CustomAuraButton.lua:260) calls
+        -- formatter:FormatNumber(applications) in LUA with the stack count, which is
+        -- SECRET in combat — and formatter userdata cannot hold secret values
+        -- ("Attempt to set secret values on an object that prevents secret values").
+        -- The throw lands INSIDE the container's ProcessDirtyFlags pass, tripping the
+        -- dirty-flag latch (OnDirtyChanged only re-arms on clean→dirty) and bricking
+        -- the container for the session — the alpha.2 in-combat freeze. Bind-time
+        -- validation can't catch it: AssertValidFormatter test-drives with a NON-secret
+        -- value. The no-formatter path renders secure-side via secretwrap (shows
+        -- counts > 1) and is the only secret-safe option. (Duration formatters are
+        -- DIFFERENT: they go to the C-side DurationTextBinding, which handles secrets.)
+        slot:SetApplicationCount(slot.dfStack, {})
     end
 
     if slot.dfBar and slot.SetDurationBar and not slot._boundBar then

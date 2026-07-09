@@ -2407,50 +2407,24 @@ local function GetDurationFormatter(format, hideAboveT)
     return durationFormatterCache[key] or nil
 end
 
--- Stacks-count formatter: blank below `minStacks`, show the number at/above it. (Native default
--- shows counts > 1 = minStacks 2; a formatter makes any minimum work.)
-local stacksFormatterCache = {}
-local function GetStacksFormatter(minStacks)
-    minStacks = tonumber(minStacks) or 2
-    if stacksFormatterCache[minStacks] == nil then
-        stacksFormatterCache[minStacks] = false
-        if C_StringUtil and C_StringUtil.CreateNumericRuleFormatter and Enum and Enum.NumericRuleFormatRounding then
-            local ok, f = pcall(function()
-                local down = Enum.NumericRuleFormatRounding.Down
-                local fmt = C_StringUtil.CreateNumericRuleFormatter()
-                fmt:AddBreakpoint({ threshold = 0,         step = 1, rounding = down, format = "" })
-                fmt:AddBreakpoint({ threshold = minStacks, step = 1, rounding = down, format = "%.0f" })
-                return fmt
-            end)
-            if ok then stacksFormatterCache[minStacks] = f end
-        end
-    end
-    return stacksFormatterCache[minStacks] or nil
-end
+-- ⚠ STACKS FORMATTERS ARE FORBIDDEN on container rows — do not re-add one.
+-- (Removed 2026-07-09; was the alpha.2 in-combat container freeze.) Blizzard's
+-- ApplyApplicationCount calls formatter:FormatNumber(applications) in LUA with the
+-- stack count, which is SECRET in combat; formatter userdata cannot hold secrets, so
+-- the call throws inside the container's dirty pass → the dirty-flag latch bricks the
+-- container for the session. Bind-time validation can't catch it (AssertValidFormatter
+-- test-drives with a non-secret value). The native no-formatter path (shows counts > 1,
+-- rendered secure-side via secretwrap) is the only secret-safe option — `stackMinimum`
+-- other than 2 is therefore not expressible on 12.1 container rows. Duration-text
+-- formatters are NOT affected (C-side DurationTextBinding handles secrets).
 
--- The legacy duration colour gradient (red expiring -> green full) as a C_CurveUtil colour
--- curve keyed on RemainingPercent. Built once; applied directly on the button's
--- DurationTextBinding (bypassing Blizzard's bugged SetDurationText wrapper). Percent-based,
--- matching legacy exactly.
-local durationColorCurve
-local function GetDurationColorCurve()
-    if durationColorCurve == nil then
-        durationColorCurve = false
-        if C_CurveUtil and C_CurveUtil.CreateColorCurve and CreateColor and Enum and Enum.LuaCurveType then
-            local ok, c = pcall(function()
-                local curve = C_CurveUtil.CreateColorCurve()
-                curve:SetType(Enum.LuaCurveType.Linear)
-                curve:AddPoint(0,   CreateColor(1, 0,   0, 1))   -- expiring: red
-                curve:AddPoint(0.3, CreateColor(1, 0.5, 0, 1))   -- orange
-                curve:AddPoint(0.5, CreateColor(1, 1,   0, 1))   -- yellow
-                curve:AddPoint(1,   CreateColor(0, 1,   0, 1))   -- full: green
-                return curve
-            end)
-            if ok then durationColorCurve = c end
-        end
-    end
-    return durationColorCurve or nil
-end
+-- (Removed 2026-07-09: GetDurationColorCurve. The smooth duration-text colour curve is
+-- NOT addon-reachable on 68569 — SetDurationText{textColorCurve} drops the required
+-- `property` arg, and the button's DurationTextBinding is PRIVATE, so "apply it on the
+-- binding" cannot work; poking Blizzard-owned binding state on a live button is also the
+-- exact touch class behind the combat dirty-latch freeze. durationColorByTime ships as
+-- discrete colour BUCKETS via the duration formatter (|cRRGGBB escapes in AddBreakpoint
+-- format strings — C-side, secret-safe, the NSRT-proven path) in P2.)
 
 -- Map a prefixed aura-row setting block (buff*/debuff*) -> DF.AuraContainer config.
 -- prefix = "buff" (debuff reuses this later). opts.filterList is the PRE-BUILT native
@@ -2478,7 +2452,9 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
             size    = 10 * (g("DurationScale") or 1),
             outline = g("DurationOutline"),
             formatter  = GetDurationFormatter(durFormat, hideAboveT),
-            colorCurve = colorByTime and GetDurationColorCurve() or nil,  -- percent gradient (applied on the binding)
+            -- colorByTime: colour BUCKETS via the formatter land in P2 (the smooth curve is
+            -- not addon-reachable — see the GetDurationColorCurve tombstone below). The
+            -- formatKey keeps the flag in the rebuild signature so the P2 wiring hot-applies.
             formatKey  = durFormat .. (colorByTime and ":C" or "") .. (hideAboveT and (":H" .. tostring(hideAboveT)) or ""),
         }
     end
@@ -2514,8 +2490,8 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
                 font    = g("StackFont"),
                 size    = 10 * (g("StackScale") or 1),
                 outline = g("StackOutline"),
-                formatter = GetStacksFormatter(g("StackMinimum") or 2),
-                formatKey = tostring(g("StackMinimum") or 2),
+                -- No formatter: forbidden on container rows (secret trap — see the
+                -- GetStacksFormatter tombstone above). Native default = counts > 1.
             },
         },
     }
@@ -2658,7 +2634,7 @@ function DF:BuildDefensiveRowConfig(db, unit)
             outline = db.defensiveIconDurationOutline,
             color   = db.defensiveIconDurationColor,
             formatter  = GetDurationFormatter("NUMBER", nil),
-            colorCurve = colorByTime and GetDurationColorCurve() or nil,
+            -- colorByTime: buckets via the formatter land in P2 (see the tombstone above).
             formatKey  = "NUMBER" .. (colorByTime and ":C" or ""),
         }
     end
@@ -2697,8 +2673,8 @@ function DF:BuildDefensiveRowConfig(db, unit)
                 anchor    = "BOTTOMRIGHT",
                 offsetX   = 2,
                 offsetY   = -1,
-                formatter = GetStacksFormatter(2),
-                formatKey = "2",
+                -- No formatter: forbidden on container rows (secret trap — see the
+                -- GetStacksFormatter tombstone above). Native default = counts > 1.
             },
         },
     }
