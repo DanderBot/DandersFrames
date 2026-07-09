@@ -68,6 +68,10 @@ local DBG = "AURACONTAINER"
 -- taint, native dispel reject) logs ONCE, not once per button.
 local warnedCurve, warnedBorder, warnedNativeDispel = false, false, false
 local warnedRestyle, warnedRefresh, warnedMouse = false, false, false
+local warnedNoContainer = false
+-- Per-handle key-namespace counter: multiple consumers (buff, defensive, ...) share the ONE
+-- secure AuraContainer that lives on each unit button, so their group/slot keys must be unique.
+local _handleSeq = 0
 
 -- ============================================================
 -- CAPABILITY DETECTION  (the version gate + PTR-4 feature gates)
@@ -580,10 +584,27 @@ function NativeBackend:isNativeSlots() return true end
 function NativeBackend:build()
     local handle = self.handle
     local config = handle.config
-    local c = CreateFrame("AuraContainer", nil, handle.frame, "CustomAuraContainerTemplate")
-    c:SetAllPoints(handle.frame)
+    -- ACQUIRE the SECURE container the SecureGroupHeader created on the unit button (via the
+    -- auraContainerTemplate attribute). An addon-created container is tainted → its aura
+    -- Show/Hide/create are BLOCKED in combat (renders OOC, freezes in combat). This one is
+    -- Blizzard-created → untainted → combat-safe. It's SHARED per button across consumers
+    -- (buff/defensive/...), so keys are namespaced and we never destroy it.
+    local button = handle.parentButton
+    local c = button and button.AuraContainer
+    if not c then
+        if not warnedNoContainer then
+            warnedNoContainer = true
+            DF:DebugWarn(DBG, "no secure AuraContainer on the unit button (auraContainerTemplate unset on the header, or a non-header frame) — unit=%s", tostring(config.unit))
+        end
+        self.container = nil
+        return
+    end
     self.container = c
-    if type(config.unit) == "string" then c:SetUnit(config.unit) end
+    if not InCombatLockdown() then
+        -- OOC positioning of the (secure) container is legal; leave it enabled+shown.
+        pcall(function() c:SetAllPoints(button); c:Show() end)
+    end
+    if type(config.unit) == "string" then pcall(function() c:SetUnit(config.unit) end) end
 
     -- Fresh generation: buttons are created in lazy batches (of 10) as needed, so a slot's
     -- initializeFrame can fire long after build (incl. mid-combat on pool exhaustion). The
@@ -592,6 +613,12 @@ function NativeBackend:build()
     handle._gen = (handle._gen or 0) + 1
     local initFn = handle:_makeInitializeFrame(handle._gen)
 
+    -- Park the previous generation's groups (topology is add-only — no RemoveAuraGroup), then
+    -- add this generation under per-handle + per-gen namespaced keys (no collision with other
+    -- consumers sharing this container, no collision with our own parked-but-not-removed keys).
+    self:_parkGroups()
+    self.groupKeys = {}
+    local keyPrefix = handle._keyBase .. "_g" .. handle._gen .. "_"
     local filters = normalizeFilters(config.filter)
     local maxCount = handle:_slotCount()
     local isOverlay = config.mode == "overlay"
@@ -599,21 +626,22 @@ function NativeBackend:build()
         if AuraUtil and AuraUtil.IsValidFilterString and not AuraUtil.IsValidFilterString(f) then
             DF:DebugWarn(DBG, "filter rejected by IsValidFilterString: %s (group skipped)", tostring(f))
         else
-            local key = "df" .. i
+            local key = keyPrefix .. i
             if isOverlay then
-                -- AddAuraSlot creates its single button synchronously + returns it (public,
-                -- addon-anchorable). Anchor it over the whole unit frame (presence box).
                 local ok, btn = pcall(function() return c:AddAuraSlot(key, f, { initializeFrame = initFn }) end)
-                if ok and btn then pcall(function() btn:SetAllPoints(handle.frame) end)
+                if ok and btn then self.groupKeys[key] = "slot"; pcall(function() btn:SetAllPoints(button) end)
                 elseif not ok then DF:DebugWarn(DBG, "AddAuraSlot failed: %s", tostring(btn)) end
             else
                 local ok, err = pcall(function() c:AddAuraGroup(key, f, { maxFrameCount = maxCount, initializeFrame = initFn }) end)
-                if not ok then DF:DebugWarn(DBG, "AddAuraGroup failed: %s", tostring(err)) end
+                if ok then self.groupKeys[key] = "group"
+                else DF:DebugWarn(DBG, "AddAuraGroup failed: %s", tostring(err)) end
             end
         end
     end
 
-    c:SetEnabled(config.enabled ~= false)   -- LAST -> gates UNIT_AURA registration
+    -- Enable/show only OOC (build runs OOC or on regen). Shared container: enabling is
+    -- idempotent across consumers; we never DISABLE it (that would kill the other row).
+    if not InCombatLockdown() then pcall(function() c:SetEnabled(config.enabled ~= false) end) end
 
     pcall(function()
         DF:Debug(DBG, "built (native) unit=%s mode=%s groups=%d",
@@ -621,12 +649,32 @@ function NativeBackend:build()
     end)
 end
 
+-- Park (don't remove — topology is add-only) this backend's groups by zeroing their frame
+-- count, so a rebuild/teardown releases their buttons without destroying the shared container.
+function NativeBackend:_parkGroups()
+    local c = self.container
+    if c and self.groupKeys then
+        for key, kind in pairs(self.groupKeys) do
+            pcall(function()
+                if kind == "group" and c.SetAuraGroupMaxFrameCount then
+                    c:SetAuraGroupMaxFrameCount(key, 0)
+                elseif kind == "slot" and c.SetAuraSlotFilterString then
+                    c:SetAuraSlotFilterString(key, "HELPFUL|!HELPFUL")   -- match-nothing: parks the slot
+                end
+            end)
+        end
+    end
+    self.groupKeys = nil
+end
+
 function NativeBackend:setUnit(unit)
-    if self.container and type(unit) == "string" then self.container:SetUnit(unit) end
+    if self.container and type(unit) == "string" then pcall(function() self.container:SetUnit(unit) end) end
 end
 
 function NativeBackend:setEnabled(on)
-    if self.container then self.container:SetEnabled(on) end
+    -- Only ever ENABLE the shared container; disabling would freeze the other consumer's row.
+    -- To hide OUR row we park our groups instead (handled by teardown / maxFrameCount 0).
+    if self.container and on then pcall(function() self.container:SetEnabled(true) end) end
 end
 
 -- 68569: UpdateAllAuras() is an addon-callable dirty-mark (processed next OnUpdate while
@@ -636,19 +684,15 @@ function NativeBackend:refresh()
     if not c then return end
     if type(c.UpdateAllAuras) == "function" then
         pcall(function() c:UpdateAllAuras() end)
-    else
-        c:Hide(); c:Show()
     end
+    -- (no Hide/Show fallback: the container is shared + button-owned — never bounce it)
 end
 
--- Full quiesce: SetEnabled(false) + Hide, then drop the ref (RemoveAllAuraFrames is gone;
--- the container's own button pools park with it — WoW never frees frames regardless).
+-- The container is OWNED BY THE UNIT BUTTON (secure header created it) and SHARED across
+-- consumers — never Hide/disable/destroy it. Just park OUR groups and drop our ref.
 function NativeBackend:teardown()
-    if self.container then
-        pcall(function() self.container:SetEnabled(false) end)
-        self.container:Hide()
-        self.container = nil
-    end
+    self:_parkGroups()
+    self.container = nil
 end
 
 -- FakeBackend — test-mode / preview. Produces PLAIN Frame slots (not AuraButtons) so
@@ -1069,6 +1113,11 @@ function AuraContainer:Create(parent, config)
     local h = setmetatable({ config = cfg, buttons = {} }, Handle)
     AuraContainer._handles = AuraContainer._handles or setmetatable({}, { __mode = "k" })
     AuraContainer._handles[h] = true   -- weak-keyed registry so a dropped handle GCs (else rebuild-forever on test toggle)
+    -- The parent IS the secure unit button; its .AuraContainer (created securely by the
+    -- SecureGroupHeader's auraContainerTemplate attribute) is what we render into.
+    h.parentButton = parent
+    _handleSeq = _handleSeq + 1
+    h._keyBase = "df" .. _handleSeq
     h.frame = CreateFrame("Frame", nil, parent)
     -- Both modes: h.frame occupies the unit-frame rect (row layout anchors are relative
     -- to it; overlay covers it). To reposition: h:ClearAllPoints() then h:SetPoint(...).
