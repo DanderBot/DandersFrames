@@ -768,9 +768,15 @@ function DF:SafeSetFont(fontString, fontNameOrPath, fontSize, outline)
             -- may not immediately update the rendered text without a text refresh
             -- Note: Some fontStrings have "secret" text that cannot be read or compared,
             -- so we wrap this in pcall to handle those cases safely
+            -- 12.1: a fontstring's text can be SECRET (e.g. a unit name in combat). Reading it
+            -- is fine, but COMPARING a secret (text ~= "") is BLOCKED and TAINTS DandersFrames.
+            -- This runs in the SecureGroupHeader's child-refresh path (Text Designer), so the
+            -- taint poisons the secure header + the 12.1 aura containers → froze auras in combat
+            -- (taint.log: 168× Config.lua:773). Skip the re-render for secret text (issecretvalue
+            -- short-circuits BEFORE any boolean/compare use of the secret).
             pcall(function()
                 local text = fontString:GetText()
-                if text and text ~= "" then
+                if not (issecretvalue and issecretvalue(text)) and text and text ~= "" then
                     fontString:SetText("")
                     fontString:SetText(text)
                 end
