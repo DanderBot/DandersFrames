@@ -1111,15 +1111,6 @@ function DF:CreatePartyHeader()
     -- Template
     DF.partyHeader:SetAttribute("template", "DandersUnitButtonTemplate")
 
-    -- 12.1 (68569): when set BEFORE the header creates its unit buttons, the SecureGroupHeader
-    -- creates one AuraContainer per button (parented to it, exposed as button.AuraContainer) via
-    -- Blizzard's SECURE code — so it's untainted and its aura Show/Hide work in COMBAT. An
-    -- addon-created container is tainted and freezes in combat. Must precede the startingIndex
-    -- force-create below. Gated on the 12.1 container API being present.
-    if DF.AuraContainer and DF.AuraContainer.IsSupported and DF.AuraContainer.IsSupported() then
-        DF.partyHeader:SetAttribute("auraContainerTemplate", "CustomAuraContainerTemplate")
-    end
-
     -- Layout attributes
     local horizontal = db.growHorizontal
     local spacing = db.frameSpacing or 2

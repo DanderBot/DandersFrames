@@ -68,10 +68,7 @@ local DBG = "AURACONTAINER"
 -- taint, native dispel reject) logs ONCE, not once per button.
 local warnedCurve, warnedBorder, warnedNativeDispel = false, false, false
 local warnedRestyle, warnedRefresh, warnedMouse = false, false, false
-local warnedNoContainer = false
--- Per-handle key-namespace counter: multiple consumers (buff, defensive, ...) share the ONE
--- secure AuraContainer that lives on each unit button, so their group/slot keys must be unique.
-local _handleSeq = 0
+local warnedCreate = false
 
 -- ============================================================
 -- CAPABILITY DETECTION  (the version gate + PTR-4 feature gates)
@@ -568,6 +565,13 @@ end
 -- per button (in lazy batches of 10) to style it. isNativeSlots = true. Row layout is the
 -- container's flow layout (SetAuraLayout* translation lands in P1); overlay slots are
 -- addon-anchored via the button AddAuraSlot returns.
+--
+-- Each backend owns its OWN plain container (Krathe's proven ContainerOverlay pattern —
+-- reference ContainerOverlay.lua buildOverlay): insecure CreateFrame is combat-legal for the
+-- aura pipeline (taint.log-proven; the earlier freeze was unrelated secret-value compares,
+-- since fixed). One container per consumer = one flow layout per row (independent
+-- positioning) and a trivial recreate-on-structural-change teardown. The container is
+-- STANDING: built once from config, then Blizzard drives it — no per-UNIT_AURA touches.
 -- ============================================================
 local NativeBackend = {}
 NativeBackend.__index = NativeBackend
@@ -578,35 +582,37 @@ end
 
 function NativeBackend:isNativeSlots() return true end
 
--- Order: SetUnit -> AddAuraGroup/AddAuraSlot(each filter, initializeFrame) -> SetEnabled
--- LAST. SetEnabled gates aura-event registration (IsVisible() and IsEnabled()); without
--- the LAST enable the row renders once then goes permanently stale.
+-- Order (Krathe's ContainerOverlay.lua buildOverlay, proven live in combat on 68569):
+-- CreateFrame("AuraContainer", nil, ours, "CustomAuraContainerTemplate") -> SetAllPoints ->
+-- SetUnit -> AddAuraGroup/AddAuraSlot(each filter, initializeFrame) -> SetEnabled LAST.
+-- SetEnabled gates aura-event registration (IsVisible() and IsEnabled()); without the LAST
+-- enable the row renders once then goes permanently stale. After build the container is
+-- STANDING — Blizzard drives it; DF touches it again only on a structural rebuild, a unit
+-- retarget, or teardown.
 function NativeBackend:build()
     local handle = self.handle
     local config = handle.config
-    -- ACQUIRE the SECURE container the SecureGroupHeader created on the unit button (via the
-    -- auraContainerTemplate attribute). An addon-created container is tainted → its aura
-    -- Show/Hide/create are BLOCKED in combat (renders OOC, freezes in combat). This one is
-    -- Blizzard-created → untainted → combat-safe. It's SHARED per button across consumers
-    -- (buff/defensive/...), so keys are namespaced and we never destroy it.
-    local button = handle.parentButton
-    local c = button and button.AuraContainer
-    if not c then
-        if not warnedNoContainer then
-            warnedNoContainer = true
-            DF:DebugWarn(DBG, "no secure AuraContainer on the unit button (auraContainerTemplate unset on the header, or a non-header frame) — unit=%s", tostring(config.unit))
+
+    -- Never stand up a container in combat: in-lockdown create/enable is a hard client
+    -- error pcall can't catch (ContainerOverlay gotcha 1). Every caller already gates this
+    -- (Create / _rebuild / the regen handler); a stray path defers instead of dying.
+    if InCombatLockdown() then handle:_deferRebuild(); return end
+
+    -- OUR OWN plain per-consumer container, parented to the handle's anchor frame. Insecure
+    -- creation is fine — taint.log proved the old combat freeze was unrelated secret-value
+    -- compares (Config.lua SafeSetFont / Auras.lua legacy scan), both fixed — and this exact
+    -- plain-create pattern runs live in combat in the AD ContainerOverlay PoC.
+    local ok, c = pcall(CreateFrame, "AuraContainer", nil, handle.frame, "CustomAuraContainerTemplate")
+    if not ok or not c then
+        if not warnedCreate then
+            warnedCreate = true
+            DF:DebugWarn(DBG, "CreateFrame(AuraContainer) failed: %s", tostring(c))
         end
         self.container = nil
         return
     end
     self.container = c
-    -- Position the (secure) container over the unit button. The SecureGroupHeader creates it
-    -- with NO anchors and NO size, so without this its flow-laid buttons never resolve a rect
-    -- and never draw. taint.log CONFIRMED this base-Frame call does NOT taint the container —
-    -- the combat freeze was unrelated secret-value compares (Config.lua:773 / Auras.lua:1300),
-    -- now fixed. OOC only (build runs OOC / on regen). config.layout → inbound SetAuraLayout*
-    -- lands in P1, but anchoring the container to the button is DF's job regardless.
-    if not InCombatLockdown() then pcall(function() c:SetAllPoints(button); c:Show() end) end
+    c:SetAllPoints(handle.frame)
     if type(config.unit) == "string" then pcall(function() c:SetUnit(config.unit) end) end
 
     -- Fresh generation: buttons are created in lazy batches (of 10) as needed, so a slot's
@@ -616,12 +622,8 @@ function NativeBackend:build()
     handle._gen = (handle._gen or 0) + 1
     local initFn = handle:_makeInitializeFrame(handle._gen)
 
-    -- Park the previous generation's groups (topology is add-only — no RemoveAuraGroup), then
-    -- add this generation under per-handle + per-gen namespaced keys (no collision with other
-    -- consumers sharing this container, no collision with our own parked-but-not-removed keys).
-    self:_parkGroups()
-    self.groupKeys = {}
-    local keyPrefix = handle._keyBase .. "_g" .. handle._gen .. "_"
+    -- Declare one AuraGroup per filter (row) / one AuraSlot per filter (overlay). The
+    -- container is exclusively ours, so keys need no cross-consumer namespacing.
     local filters = normalizeFilters(config.filter)
     local maxCount = handle:_slotCount()
     local isOverlay = config.mode == "overlay"
@@ -629,72 +631,63 @@ function NativeBackend:build()
         if AuraUtil and AuraUtil.IsValidFilterString and not AuraUtil.IsValidFilterString(f) then
             DF:DebugWarn(DBG, "filter rejected by IsValidFilterString: %s (group skipped)", tostring(f))
         else
-            local key = keyPrefix .. i
+            local key = "df" .. i
             if isOverlay then
-                local ok, btn = pcall(function() return c:AddAuraSlot(key, f, { initializeFrame = initFn }) end)
-                if ok and btn then self.groupKeys[key] = "slot"; pcall(function() btn:SetAllPoints(button) end)
-                elseif not ok then DF:DebugWarn(DBG, "AddAuraSlot failed: %s", tostring(btn)) end
+                local okSlot, btn = pcall(function() return c:AddAuraSlot(key, f, { initializeFrame = initFn }) end)
+                if okSlot and btn then pcall(function() btn:SetAllPoints(handle.frame) end)
+                elseif not okSlot then DF:DebugWarn(DBG, "AddAuraSlot failed: %s", tostring(btn)) end
             else
-                local ok, err = pcall(function() c:AddAuraGroup(key, f, { maxFrameCount = maxCount, initializeFrame = initFn }) end)
-                if ok then self.groupKeys[key] = "group"
-                else DF:DebugWarn(DBG, "AddAuraGroup failed: %s", tostring(err)) end
+                local okGroup, err = pcall(function() c:AddAuraGroup(key, f, { maxFrameCount = maxCount, initializeFrame = initFn }) end)
+                if not okGroup then DF:DebugWarn(DBG, "AddAuraGroup failed: %s", tostring(err)) end
             end
         end
     end
 
-    -- No SetEnabled call: the header-created container defaults enabled=true, and AddAuraGroup
-    -- triggers UpdateEventRegistrations, so it registers UNIT_AURA on its own. Calling the
-    -- base SetEnabled from insecure code would taint it (see the SetAllPoints note above).
+    -- SetEnabled LAST — after the groups/slots + filters are declared (ContainerOverlay.lua
+    -- gotcha 2). This is what arms the parse + UNIT_AURA registration.
+    pcall(function() c:SetEnabled(config.enabled ~= false) end)
 
-    pcall(function()
-        DF:Debug(DBG, "built (native) unit=%s mode=%s groups=%d",
-            tostring(config.unit), tostring(config.mode or "row"), #filters)
-    end)
-end
-
--- Park (don't remove — topology is add-only) this backend's groups by zeroing their frame
--- count, so a rebuild/teardown releases their buttons without destroying the shared container.
-function NativeBackend:_parkGroups()
-    local c = self.container
-    if c and self.groupKeys then
-        for key, kind in pairs(self.groupKeys) do
-            pcall(function()
-                if kind == "group" and c.SetAuraGroupMaxFrameCount then
-                    c:SetAuraGroupMaxFrameCount(key, 0)
-                elseif kind == "slot" and c.SetAuraSlotFilterString then
-                    c:SetAuraSlotFilterString(key, "HELPFUL|!HELPFUL")   -- match-nothing: parks the slot
-                end
-            end)
-        end
-    end
-    self.groupKeys = nil
+    DF:Debug(DBG, "built (native) unit=%s mode=%s groups=%d",
+        tostring(config.unit), tostring(config.mode or "row"), #filters)
 end
 
 function NativeBackend:setUnit(unit)
     if self.container and type(unit) == "string" then pcall(function() self.container:SetUnit(unit) end) end
 end
 
+-- Callers combat-gate this (Handle:_applyEnabled defers to regen in lockdown) — enabling
+-- a container in combat is forbidden, same class of op as creating one.
 function NativeBackend:setEnabled(on)
-    -- No-op: the shared container is enabled by default and must NOT be driven by the base
-    -- SetEnabled from insecure code (taints it → combat block). We hide OUR row by parking our
-    -- groups (maxFrameCount 0), not by disabling the whole container.
+    local c = self.container
+    if c then pcall(function() c:SetEnabled(on and true or false) end) end
 end
 
 -- 68569: UpdateAllAuras() is an addon-callable dirty-mark (processed next OnUpdate while
--- visible) — the real refresh. Fall back to the Hide/Show bounce only if it's absent.
+-- visible) — the real refresh. The Hide/Show bounce fallback is legal again (the container
+-- is ours alone), but only out of combat (Show re-arms the parse, same class as enable).
 function NativeBackend:refresh()
     local c = self.container
     if not c then return end
     if type(c.UpdateAllAuras) == "function" then
         pcall(function() c:UpdateAllAuras() end)
+    elseif not InCombatLockdown() then
+        pcall(function() c:Hide(); c:Show() end)
     end
-    -- (no Hide/Show fallback: the container is shared + button-owned — never bounce it)
 end
 
--- The container is OWNED BY THE UNIT BUTTON (secure header created it) and SHARED across
--- consumers — never Hide/disable/destroy it. Just park OUR groups and drop our ref.
+-- The container is OURS (per-consumer): teardown mirrors ContainerOverlay's teardownEntry —
+-- disable, drop its buttons, hide, release the ref. The next build creates a fresh container
+-- (topology is add-only — no RemoveAuraGroup/Slot — so recreate IS the sanctioned removal).
+-- Callers gate teardown out of combat (Destroy/_rebuild defer to regen in lockdown).
 function NativeBackend:teardown()
-    self:_parkGroups()
+    local c = self.container
+    if c then
+        pcall(function() c:SetEnabled(false) end)
+        if type(c.RemoveAllAuraFrames) == "function" then
+            pcall(function() c:RemoveAllAuraFrames() end)
+        end
+        pcall(function() c:Hide() end)
+    end
     self.container = nil
 end
 
@@ -921,14 +914,10 @@ function Handle:SetSort(sort)
     -- TODO(PTR-4): route to the managed backend's sort setter (rule + direction).
 end
 
--- Force a re-scan of the container. There is NO addon-callable Refresh() on b8f90f2a:
--- container:UpdateAllAuras() is an empty stub on the inbound handle (the real refresh
--- lives on the private mixin, reached only via OnShow/OnHide/OnEnabledChanged/
--- OnUnitChanged), so the sanctioned trigger is a Hide();Show() bounce -> OnShow -> the
--- secure refresh, with no filter rebuild or invalid-unit blip [Krathe, source-confirmed
--- b8f90f2a]. Use on a dynamic-unit consumer (target/focus/mouseover) when the underlying
--- unit changes but the token does not. (In-combat bounce safety is on the PTR audit
--- list; a real Refresh() / wired UpdateAllAuras is a PTR-4 candidate.)
+-- Force a re-scan of the container. 68569: UpdateAllAuras() is an addon-callable
+-- dirty-mark (processed on the next OnUpdate while visible) — the real refresh. Use on
+-- a dynamic-unit consumer (target/focus/mouseover) when the underlying unit changes but
+-- the token does not. Falls back to an out-of-combat Hide/Show bounce if absent.
 function Handle:Refresh()
     if not self.backend then return end
     local ok, err = pcall(function() self.backend:refresh() end)
@@ -1116,11 +1105,8 @@ function AuraContainer:Create(parent, config)
     local h = setmetatable({ config = cfg, buttons = {} }, Handle)
     AuraContainer._handles = AuraContainer._handles or setmetatable({}, { __mode = "k" })
     AuraContainer._handles[h] = true   -- weak-keyed registry so a dropped handle GCs (else rebuild-forever on test toggle)
-    -- The parent IS the secure unit button; its .AuraContainer (created securely by the
-    -- SecureGroupHeader's auraContainerTemplate attribute) is what we render into.
-    h.parentButton = parent
-    _handleSeq = _handleSeq + 1
-    h._keyBase = "df" .. _handleSeq
+    -- h.frame is the plain anchor frame DF positions; the backend parents its OWN
+    -- CustomAuraContainer to it (per-consumer container — Krathe's ContainerOverlay pattern).
     h.frame = CreateFrame("Frame", nil, parent)
     -- Both modes: h.frame occupies the unit-frame rect (row layout anchors are relative
     -- to it; overlay covers it). To reposition: h:ClearAllPoints() then h:SetPoint(...).
