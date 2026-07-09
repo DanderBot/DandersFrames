@@ -600,10 +600,11 @@ function NativeBackend:build()
         return
     end
     self.container = c
-    if not InCombatLockdown() then
-        -- OOC positioning of the (secure) container is legal; leave it enabled+shown.
-        pcall(function() c:SetAllPoints(button); c:Show() end)
-    end
+    -- ⚠ TAINT: do NOT call base Frame methods (SetAllPoints/Show/SetEnabled) on the secure
+    -- container from here — those are un-delegated and taint it, which re-blocks its combat
+    -- button Show/Hide. The header creates it shown + enabled (KeyValue enabled=true) + parented
+    -- to the button; drive it ONLY through the laundered inbound API (SetUnit / AddAuraGroup /
+    -- candidateFilters / layout / sort). Positioning will move to the inbound SetAuraLayout* API.
     if type(config.unit) == "string" then pcall(function() c:SetUnit(config.unit) end) end
 
     -- Fresh generation: buttons are created in lazy batches (of 10) as needed, so a slot's
@@ -639,9 +640,9 @@ function NativeBackend:build()
         end
     end
 
-    -- Enable/show only OOC (build runs OOC or on regen). Shared container: enabling is
-    -- idempotent across consumers; we never DISABLE it (that would kill the other row).
-    if not InCombatLockdown() then pcall(function() c:SetEnabled(config.enabled ~= false) end) end
+    -- No SetEnabled call: the header-created container defaults enabled=true, and AddAuraGroup
+    -- triggers UpdateEventRegistrations, so it registers UNIT_AURA on its own. Calling the
+    -- base SetEnabled from insecure code would taint it (see the SetAllPoints note above).
 
     pcall(function()
         DF:Debug(DBG, "built (native) unit=%s mode=%s groups=%d",
@@ -672,9 +673,9 @@ function NativeBackend:setUnit(unit)
 end
 
 function NativeBackend:setEnabled(on)
-    -- Only ever ENABLE the shared container; disabling would freeze the other consumer's row.
-    -- To hide OUR row we park our groups instead (handled by teardown / maxFrameCount 0).
-    if self.container and on then pcall(function() self.container:SetEnabled(true) end) end
+    -- No-op: the shared container is enabled by default and must NOT be driven by the base
+    -- SetEnabled from insecure code (taints it → combat block). We hide OUR row by parking our
+    -- groups (maxFrameCount 0), not by disabling the whole container.
 end
 
 -- 68569: UpdateAllAuras() is an addon-callable dirty-mark (processed next OnUpdate while
