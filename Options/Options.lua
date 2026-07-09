@@ -5730,16 +5730,16 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         })
         AddToSection(borderGroup, nil, 1)
         
-        -- Stack Count Group (col2)
+        -- Stack Count Group (col2) — the shared TextStyle control block (font/scale/
+        -- outline/shadow/colour/anchor/offsets/justify) + the feature-specific extras.
         local stackCountGroup = GUI:CreateSettingsGroup(self.child, 260)
         stackCountGroup:AddWidget(GUI:CreateHeader(self.child, L["Stack Count"]), 40)
-        stackCountGroup:AddWidget(GUI:CreateFontDropdown(self.child, L["Font"], db, "buffStackFont", function() DF:LightweightUpdateAuraStackText("buff") end), 55)
-        stackCountGroup:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.0, 0.05, db, "buffStackScale", nil, function() DF:LightweightUpdateAuraStackText("buff") end, true), 55)
-        stackCountGroup:AddWidget(GUI:CreateOutlineDropdown(self.child, L["Outline"], db, "buffStackOutline", function() DF:LightweightUpdateAuraStackText("buff") end), 55)
-        stackCountGroup:AddWidget(GUI:CreateShadowCheckbox(self.child, L["Shadow"], db, "buffStackOutline", function() DF:LightweightUpdateAuraStackText("buff") end), 30)
-        stackCountGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "buffStackAnchor", function() DF:LightweightUpdateAuraStackText("buff") end), 55)
-        stackCountGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -150, 150, 1, db, "buffStackX", nil, function() DF:LightweightUpdateAuraStackText("buff") end, true), 55)
-        stackCountGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -150, 150, 1, db, "buffStackY", nil, function() DF:LightweightUpdateAuraStackText("buff") end, true), 55)
+        GUI:CreateTextControls(stackCountGroup, db, "buffStack", {
+            parent   = self.child,
+            include  = { color = true },
+            onChange = function() DF:LightweightUpdateAuraStackText("buff") end,
+            onDrag   = function() DF:LightweightUpdateAuraStackText("buff") end,
+        })
         local buffStackMin = stackCountGroup:AddWidget(GUI:CreateSlider(self.child, L["Min Stacks to Show"], 1, 10, 1, db, "buffStackMinimum", nil, function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 55)
         -- 12.1: a stacks formatter is FORBIDDEN on container rows (it throws on the secret
         -- combat stack count inside Blizzard's dirty pass and bricks the container — see the
@@ -5763,21 +5763,18 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local durationFormatOptions = { NUMBER = L["Number"], SHORT = L["Short"], FULL = L["Full"] }
         local durFormat = durationGroup:AddWidget(GUI:CreateDropdown(self.child, L["Duration Format"], durationFormatOptions, db, "buffDurationFormat", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 55)
         durFormat.disableOn = function(d) return not d.buffShowDuration end
-        local durFont = durationGroup:AddWidget(GUI:CreateFontDropdown(self.child, L["Font"], db, "buffDurationFont", nil), 55)
-        durFont.disableOn = function(d) return not d.buffShowDuration end
-        local durScale = durationGroup:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.0, 0.05, db, "buffDurationScale", nil, function() DF:LightweightUpdateAuraDurationText("buff") end, true), 55)
-        durScale.disableOn = function(d) return not d.buffShowDuration end
-        local durOutline = durationGroup:AddWidget(GUI:CreateOutlineDropdown(self.child, L["Outline"], db, "buffDurationOutline", function() DF:LightweightUpdateAuraDurationText("buff") end), 55)
-        durOutline.disableOn = function(d) return not d.buffShowDuration end
-        local durShadow = durationGroup:AddWidget(GUI:CreateShadowCheckbox(self.child, L["Shadow"], db, "buffDurationOutline", function() DF:LightweightUpdateAuraDurationText("buff") end), 30)
-        durShadow.disableOn = function(d) return not d.buffShowDuration end
-        local durAnchor = durationGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "buffDurationAnchor", function() DF:LightweightUpdateAuraDurationText("buff") end), 55)
-        durAnchor.disableOn = function(d) return not d.buffShowDuration end
-        local durX = durationGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -150, 150, 1, db, "buffDurationX", nil, function() DF:LightweightUpdateAuraDurationText("buff") end, true), 55)
-        durX.disableOn = function(d) return not d.buffShowDuration end
-        local durY = durationGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -150, 150, 1, db, "buffDurationY", nil, function() DF:LightweightUpdateAuraDurationText("buff") end, true), 55)
-        durY.disableOn = function(d) return not d.buffShowDuration end
-        local durColor = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Color by Time Remaining"], db, "buffDurationColorByTime", function() DF:RefreshDurationColorSettings(); DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
+        -- Shared TextStyle control block (font/scale/outline/shadow/colour/anchor/
+        -- offsets/justify). The static colour greys out while Color-by-Time owns it.
+        GUI:CreateTextControls(durationGroup, db, "buffDuration", {
+            parent     = self.child,
+            include    = { color = true },
+            colorLabel = L["Duration Color"],
+            disableOn  = function(d) return not d.buffShowDuration end,
+            colorDisableOn = function(d) return d.buffDurationColorByTime end,
+            onChange   = function() DF:LightweightUpdateAuraDurationText("buff") end,
+            onDrag     = function() DF:LightweightUpdateAuraDurationText("buff") end,
+        })
+        local durColor = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Color by Time Remaining"], db, "buffDurationColorByTime", function() self:RefreshStates(); DF:RefreshDurationColorSettings(); DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
         durColor.disableOn = function(d) return not d.buffShowDuration end
         local durHideAbove = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Above Threshold"], db, "buffDurationHideAboveEnabled", function() DF:RefreshDurationColorSettings(); DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
         durHideAbove.disableOn = function(d) return not d.buffShowDuration end
@@ -6477,30 +6474,18 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             return not d.defensiveIconShowDuration
         end
 
-        local diDurFont = durationGroup:AddWidget(GUI:CreateFontDropdown(self.child, L["Duration Font"], db, "defensiveIconDurationFont", function()
-            if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
-        end), 55)
-        diDurFont.hideOn = HideDefensiveDurationOptions
-
-        local diDurScale = durationGroup:AddWidget(GUI:CreateSlider(self.child, L["Duration Scale"], 0.5, 2.0, 0.05, db, "defensiveIconDurationScale", function()
-            if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
-        end, function() DF:LightweightUpdateDefensiveIcons() end, true), 55)
-        diDurScale.hideOn = HideDefensiveDurationOptions
-
-        local diDurOutline = durationGroup:AddWidget(GUI:CreateOutlineDropdown(self.child, L["Outline"], db, "defensiveIconDurationOutline", function()
-            if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
-        end), 55)
-        diDurOutline.hideOn = HideDefensiveDurationOptions
-        local diDurShadow = durationGroup:AddWidget(GUI:CreateShadowCheckbox(self.child, L["Shadow"], db, "defensiveIconDurationOutline", function()
-            if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
-        end), 30)
-        diDurShadow.hideOn = HideDefensiveDurationOptions
-
-        local diDurColor = durationGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Duration Color"], db, "defensiveIconDurationColor", false, function()
-            if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
-        end, function() DF:LightweightUpdateDefensiveIconColors() end, true), 35)
-        diDurColor.hideOn = HideDefensiveDurationOptions
-        diDurColor.disableOn = function(d) return d.defensiveIconDurationColorByTime end
+        -- Shared TextStyle control block (font/scale/outline/shadow/colour/anchor/
+        -- offsets/justify). The offsets/anchor honor the existing defensiveIconDurationX/Y
+        -- keys (previously config-only); the static colour greys while Color-by-Time owns it.
+        GUI:CreateTextControls(durationGroup, db, "defensiveIconDuration", {
+            parent     = self.child,
+            include    = { color = true },
+            colorLabel = L["Duration Color"],
+            hideOn     = HideDefensiveDurationOptions,
+            colorDisableOn = function(d) return d.defensiveIconDurationColorByTime end,
+            onChange   = function() if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end end,
+            onDrag     = function() DF:LightweightUpdateDefensiveIcons() end,
+        })
 
         local diDurColorByTime = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Color by Time Remaining"], db, "defensiveIconDurationColorByTime", function()
             self:RefreshStates()

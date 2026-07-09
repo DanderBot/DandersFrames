@@ -2392,6 +2392,13 @@ local function BuildDurationFormatter(format, hideAboveT)
         fmt:SetMinInterval(Enum.SecondsFormatterInterval.Seconds)
         fmt:SetMaxIntervalCurve(curve)
         fmt:SetDesiredUnitCount(1)
+        -- SHORT: strip the space between number and unit ("45 s" -> "45s"; the default
+        -- Preserve mode is why Short looked MORE spaced out than Number). Locale-aware:
+        -- deDE/ruRU keep their space by design. FULL keeps the space ("45 Seconds").
+        if format == "SHORT" and fmt.SetStripIntervalWhitespace
+            and Enum.SecondsFormatterIntervalWhitespace then
+            fmt:SetStripIntervalWhitespace(Enum.SecondsFormatterIntervalWhitespace.Strip)
+        end
         return fmt
     end)
     return ok and f or nil
@@ -2477,25 +2484,26 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
     local filter = opts.filterList
     if filter == nil then filter = (prefix == "debuff") and "HARMFUL" or "HELPFUL" end
 
+    local iconSize = g("Size") or 20
     local dur
     if g("ShowDuration") ~= false then
         local durFormat = g("DurationFormat") or "NUMBER"
         local colorByTime = g("DurationColorByTime") and true or false
         local hideAboveT = (g("DurationHideAboveEnabled") and g("DurationHideAboveThreshold")) or nil
-        dur = {
-            show    = true,
-            anchor  = g("DurationAnchor") or "CENTER",
-            offsetX = g("DurationX") or 0,
-            offsetY = g("DurationY") or 0,
-            font    = g("DurationFont"),
-            size    = 10 * (g("DurationScale") or 1),
-            outline = g("DurationOutline"),
-            formatter  = GetDurationFormatter(durFormat, hideAboveT),
-            -- colorByTime: colour BUCKETS via the formatter land in P2 (the smooth curve is
-            -- not addon-reachable — see the GetDurationColorCurve tombstone below). The
-            -- formatKey keeps the flag in the rebuild signature so the P2 wiring hot-applies.
-            formatKey  = durFormat .. (colorByTime and ":C" or "") .. (hideAboveT and (":H" .. tostring(hideAboveT)) or ""),
-        }
+        -- Text styling (font/scale/outline/anchor/offsets/justify/colour) is a shared
+        -- DF.TextStyle spec; the factory applies it via TextStyle:Apply. The justify box
+        -- is the icon rect. Feature fields (show/formatter/formatKey) ride on top.
+        dur = DF.TextStyle:BuildSpec(db, prefix .. "Duration", {
+            baseSize = 10, defaultAnchor = "CENTER", boxW = iconSize, boxH = iconSize,
+        })
+        dur.show = true
+        dur.formatter = GetDurationFormatter(durFormat, hideAboveT)
+        -- colorByTime: colour BUCKETS via the formatter land in P2 (the smooth curve is
+        -- not addon-reachable — see the GetDurationColorCurve tombstone below). While the
+        -- flag is on, the static colour must NOT stomp the (future) bucket escapes.
+        -- The formatKey keeps the flag in the rebuild signature so the P2 wiring hot-applies.
+        if colorByTime then dur.color = nil end
+        dur.formatKey = durFormat .. (colorByTime and ":C" or "") .. (hideAboveT and (":H" .. tostring(hideAboveT)) or "")
     end
 
     -- Buff rows: the aura blacklist as a native exclude map (see BuildBuffExcludeMap).
@@ -2531,17 +2539,18 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
             border = g("ShowBorder") and { db = db, prefix = prefix } or nil,
             cooldown = { show = not g("HideSwipe"), reverse = true, edge = false, numbers = false },
             duration = dur,
-            stacks = {
-                show    = true,
-                anchor  = g("StackAnchor") or "BOTTOMRIGHT",
-                offsetX = g("StackX") or 2,
-                offsetY = g("StackY") or -1,
-                font    = g("StackFont"),
-                size    = 10 * (g("StackScale") or 1),
-                outline = g("StackOutline"),
-                -- No formatter: forbidden on container rows (secret trap — see the
-                -- GetStacksFormatter tombstone above). Native default = counts > 1.
-            },
+            -- Shared TextStyle spec (font/scale/outline/anchor/offsets/justify/colour).
+            -- No formatter: forbidden on container rows (secret trap — see the
+            -- GetStacksFormatter tombstone above). Native default = counts > 1.
+            stacks = (function()
+                local st = DF.TextStyle:BuildSpec(db, prefix .. "Stack", {
+                    baseSize = 10, defaultAnchor = "BOTTOMRIGHT",
+                    defaultOffsetX = 2, defaultOffsetY = -1,
+                    boxW = iconSize, boxH = iconSize,
+                })
+                st.show = true
+                return st
+            end)(),
         },
     }
 end
@@ -2671,22 +2680,21 @@ end
 -- icons. Stacks use the legacy min-2 display. buffFactorySig treats this cfg the same
 -- as a buff cfg (it reads derived fields, not db keys).
 function DF:BuildDefensiveRowConfig(db, unit)
+    local iconSize = db.defensiveIconSize or 24
     local dur
     if db.defensiveIconShowDuration ~= false then
         local colorByTime = db.defensiveIconDurationColorByTime and true or false
-        dur = {
-            show    = true,
-            anchor  = "CENTER",
-            offsetX = db.defensiveIconDurationX or 0,
-            offsetY = db.defensiveIconDurationY or 0,
-            font    = db.defensiveIconDurationFont,
-            size    = 10 * (db.defensiveIconDurationScale or 1),
-            outline = db.defensiveIconDurationOutline,
-            color   = db.defensiveIconDurationColor,
-            formatter  = GetDurationFormatter("NUMBER", nil),
-            -- colorByTime: buckets via the formatter land in P2 (see the tombstone above).
-            formatKey  = "NUMBER" .. (colorByTime and ":C" or ""),
-        }
+        -- Shared TextStyle spec (picks up defensiveIconDurationFont/Scale/Outline/X/Y/
+        -- JustifyH/JustifyV/Color); feature fields ride on top.
+        dur = DF.TextStyle:BuildSpec(db, "defensiveIconDuration", {
+            baseSize = 10, defaultAnchor = "CENTER", boxW = iconSize, boxH = iconSize,
+        })
+        dur.show = true
+        dur.formatter = GetDurationFormatter("NUMBER", nil)
+        -- colorByTime: buckets via the formatter land in P2 (see the tombstone above).
+        -- While on, the static colour must not stomp the (future) bucket escapes.
+        if colorByTime then dur.color = nil end
+        dur.formatKey = "NUMBER" .. (colorByTime and ":C" or "")
     end
 
     return {
@@ -2718,13 +2726,17 @@ function DF:BuildDefensiveRowConfig(db, unit)
             border = (db.defensiveIconShowBorder ~= false) and { db = db, prefix = "defensiveIcon" } or nil,
             cooldown = { show = not db.defensiveIconHideSwipe, reverse = true, edge = false, numbers = false },
             duration = dur,
+            -- TextStyle-shaped spec (defensive stacks have no db keys — legacy fixed
+            -- look, size/outline explicit now that TextStyle owns the render defaults).
+            -- No formatter: forbidden on container rows (secret trap — see the
+            -- GetStacksFormatter tombstone above). Native default = counts > 1.
             stacks = {
                 show      = true,
                 anchor    = "BOTTOMRIGHT",
                 offsetX   = 2,
                 offsetY   = -1,
-                -- No formatter: forbidden on container rows (secret trap — see the
-                -- GetStacksFormatter tombstone above). Native default = counts > 1.
+                size      = 14,
+                outline   = "OUTLINE",
             },
         },
     }

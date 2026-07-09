@@ -5247,6 +5247,91 @@ end
 -- to that consumer — never a separate hand-built panel.
 -- ============================================================
 
+-- ============================================================
+-- SHARED TEXT-STYLE CONTROLS (pairs with DF.TextStyle — the engine consumers
+-- style FontStrings through). Mirrors CreateBorderControls: one builder, every
+-- text block in the addon renders the same control flow instead of a hand-rolled
+-- copy per page. Emits, in the pages' established order:
+--   Font, Scale, Outline, Shadow, [Color], Anchor, Offset X/Y, [Justify H, Justify V]
+-- Key convention: <prefix>Font/Scale/Outline/Anchor/X/Y/JustifyH/JustifyV/Color.
+--
+-- opts:
+--   parent         REQUIRED — the page scroll child (self.child)
+--   include        = { color = false, justify = true, anchor = true, offsets = true }
+--   colorLabel     colour picker label (default L["Text Color"])
+--   disableOn      predicate applied to EVERY created widget (page-level gate)
+--   hideOn         predicate applied to EVERY created widget
+--   colorDisableOn EXTRA disable gate for the colour picker only (e.g. colour-by-time on)
+--   onChange       full-update callback (dropdowns / colour commit)
+--   onDrag         lightweight slider-drag callback (also colour live-preview)
+--   scaleMin/Max/Step, offsetMin/Max — slider ranges (defaults 0.5–2.0 ×0.05, ±150)
+-- Returns the created widgets keyed { font, scale, outline, shadow, color, anchor,
+-- offsetX, offsetY, justifyH, justifyV } so pages can attach extra gates.
+-- ============================================================
+function GUI:CreateTextControls(group, dbTable, prefix, opts)
+    opts = opts or {}
+    local parent   = opts.parent
+    local include  = opts.include or {}
+    local onChange = opts.onChange
+    local onDrag   = opts.onDrag or onChange
+    local L = DF.L
+
+    local scaleMin, scaleMax, scaleStep = opts.scaleMin or 0.5, opts.scaleMax or 2.0, opts.scaleStep or 0.05
+    local offMin, offMax = opts.offsetMin or -150, opts.offsetMax or 150
+
+    local function key(suffix) return prefix .. suffix end
+    local widgets = {}
+
+    -- Apply the shared page gates to a widget, composing with any the widget factory set.
+    local function gate(w)
+        if opts.disableOn then
+            local prev = w.disableOn
+            w.disableOn = function(d) return (opts.disableOn(d) or (prev and prev(d))) and true or false end
+        end
+        if opts.hideOn then w.hideOn = opts.hideOn end
+        return w
+    end
+
+    widgets.font = gate(group:AddWidget(GUI:CreateFontDropdown(parent, L["Font"], dbTable, key("Font"), onChange), 55))
+    widgets.scale = gate(group:AddWidget(GUI:CreateSlider(parent, L["Scale"], scaleMin, scaleMax, scaleStep, dbTable, key("Scale"), nil, onDrag, true), 55))
+    widgets.outline = gate(group:AddWidget(GUI:CreateOutlineDropdown(parent, L["Outline"], dbTable, key("Outline"), onChange), 55))
+    widgets.shadow = gate(group:AddWidget(GUI:CreateShadowCheckbox(parent, L["Shadow"], dbTable, key("Outline"), onChange), 30))
+
+    if include.color then
+        widgets.color = gate(group:AddWidget(GUI:CreateColorPicker(parent, opts.colorLabel or L["Text Color"], dbTable, key("Color"), false, onChange, onDrag, true), 35))
+        if opts.colorDisableOn then
+            local prev = widgets.color.disableOn
+            widgets.color.disableOn = function(d) return (opts.colorDisableOn(d) or (prev and prev(d))) and true or false end
+        end
+    end
+
+    if include.anchor ~= false then
+        local anchorOptions = {
+            CENTER = L["Center"], TOP = L["Top"], BOTTOM = L["Bottom"], LEFT = L["Left"], RIGHT = L["Right"],
+            TOPLEFT = L["Top Left"], TOPRIGHT = L["Top Right"], BOTTOMLEFT = L["Bottom Left"], BOTTOMRIGHT = L["Bottom Right"],
+        }
+        widgets.anchor = gate(group:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], anchorOptions, dbTable, key("Anchor"), onChange), 55))
+    end
+
+    if include.offsets ~= false then
+        widgets.offsetX = gate(group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], offMin, offMax, 1, dbTable, key("X"), nil, onDrag, true), 55))
+        widgets.offsetY = gate(group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], offMin, offMax, 1, dbTable, key("Y"), nil, onDrag, true), 55))
+    end
+
+    -- Justify is OPT-IN (include.justify = true). It's redundant with Anchor for short
+    -- single-token text on a small icon (duration/stacks) and boxing to justify TRUNCATES
+    -- wide text like "59m" — so the aura pages don't expose it. The DF.TextStyle engine
+    -- still honors JustifyH/JustifyV keys for a future wide/fixed-region consumer.
+    if include.justify then
+        local justifyHOptions = { [""] = L["Default"], LEFT = L["Left"], CENTER = L["Center"], RIGHT = L["Right"] }
+        local justifyVOptions = { [""] = L["Default"], TOP = L["Top"], MIDDLE = L["Middle"], BOTTOM = L["Bottom"] }
+        widgets.justifyH = gate(group:AddWidget(GUI:CreateDropdown(parent, L["Justify H"], justifyHOptions, dbTable, key("JustifyH"), onChange), 55))
+        widgets.justifyV = gate(group:AddWidget(GUI:CreateDropdown(parent, L["Justify V"], justifyVOptions, dbTable, key("JustifyV"), onChange), 55))
+    end
+
+    return widgets
+end
+
 -- Small dim inline subheader (section divider inside a SettingsGroup), matching
 -- AD's "State Overrides" / "Icon Effects" dividers.
 function GUI:CreateExpiringSubheader(parent, text)

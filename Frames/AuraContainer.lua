@@ -324,17 +324,16 @@ local function styleButton_regions(slot, config)
         end
     end
 
-    -- DURATION text region (native SetDurationText bind is in bindNative).
+    -- DURATION text region (native SetDurationText bind is in bindNative). Styling is
+    -- a shared DF.TextStyle spec (font/anchor/offsets/justify/colour — colour nil when
+    -- a formatter/curve owns it, TextStyle never stomps in that case).
     local durSpec = style.duration
     if isRow and durSpec and durSpec.show then
         if not slot.dfDur then
             slot.dfDurHolder = makeHolder(slot, durSpec.level or 6)
             slot.dfDur = slot.dfDurHolder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         end
-        slot.dfDur:ClearAllPoints()
-        slot.dfDur:SetPoint(durSpec.anchor or "CENTER", slot.dfDurHolder, durSpec.anchor or "CENTER", durSpec.offsetX or 0, durSpec.offsetY or 0)
-        slot.dfDur:SetTextColor(readColor(durSpec.color, 1, 1, 1, 1))
-        if DF.SafeSetFont then DF:SafeSetFont(slot.dfDur, durSpec.font, durSpec.size or 12, durSpec.outline or "NONE") end
+        DF.TextStyle:Apply(slot.dfDur, durSpec, slot.dfDurHolder)
     end
 
     -- STACK count region (native SetApplicationCount bind is in bindNative).
@@ -344,9 +343,7 @@ local function styleButton_regions(slot, config)
             slot.dfStackHolder = makeHolder(slot, stackSpec.level or 7)
             slot.dfStack = slot.dfStackHolder:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
         end
-        slot.dfStack:ClearAllPoints()
-        slot.dfStack:SetPoint(stackSpec.anchor or "BOTTOMRIGHT", slot.dfStackHolder, stackSpec.anchor or "BOTTOMRIGHT", stackSpec.offsetX or -2, stackSpec.offsetY or 2)
-        if DF.SafeSetFont then DF:SafeSetFont(slot.dfStack, stackSpec.font, stackSpec.size or 14, stackSpec.outline or "OUTLINE") end
+        DF.TextStyle:Apply(slot.dfStack, stackSpec, slot.dfStackHolder)
     end
 
     -- DURATION bar region (native SetDurationBar bind is in bindNative).
@@ -565,11 +562,17 @@ local function applyContainerLayout(c, handle)
     end
 
     -- Row cap: vertical-primary = one per row (column); wrap>0 = N per row; else unlimited.
+    -- HEADROOM: the flow (AnchorUtil.ApplyFlowLayout) wraps when the running row width
+    -- exceeds rowWidth, measuring the button's ACTUAL width — which lands a fraction over
+    -- our `sx` (pixel rounding + border inset). A tight +0.5 slack let that fraction wrap
+    -- one icon early. Half an icon of headroom absorbs the rounding yet stays well under
+    -- the (sx + spX) a whole extra icon would need — so exactly `wrap` icons fit per row.
+    local headroom = sx * 0.5
     local rowWidth
     if verticalPrimary then
-        rowWidth = sx + 0.5
+        rowWidth = sx + headroom
     elseif wrap and wrap >= 1 then
-        rowWidth = wrap * sx + (wrap - 1) * spX + 0.5
+        rowWidth = wrap * sx + (wrap - 1) * spX + headroom
     end   -- nil -> math.huge (no wrap) inside SetAuraLayoutRowWidth
 
     pcall(function()

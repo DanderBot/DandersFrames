@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+* (Auras) Buff and defensive icon text now has a shared styling system, adding a Duration and Stack text colour option. The "Short" duration format no longer shows a stray space (e.g. "45s" not "45 s").
+* (Auras) Fixed Icons Per Row wrapping one icon early on the new 12.1 aura rows.
+
 * (Auras) The new 12.1 aura rows now honor your layout settings — anchor, direction, wrap, offsets, spacing, size and scale were previously ignored (icons piled at the top-left).
 * (Auras) Aura settings apply in real time again on 12.1 — sliders re-flow the row live during the drag instead of waiting for the next aura update.
 * (Auras) Aura Blacklist is back on 12.1 for buffs, now enforced natively by the game's aura engine. Debuff blacklisting is still blocked by a game limitation on friendly frames. Entries set to combat-only or out-of-combat-only can't be enforced on the new rows and stay visible.
