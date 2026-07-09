@@ -518,6 +518,94 @@ local AXIS = {
     UP    = { x = 0, y = 1 }, DOWN = { x = 0, y = -1 },
 }
 
+-- DF growth token -> AnchorUtil.FlowDirection member name.
+local FLOW_NAME = { RIGHT = "Right", LEFT = "Left", UP = "Up", DOWN = "Down" }
+
+-- Translate DF's layout vocabulary (anchor/growth/wrap/size/spacing/offset/scale) onto
+-- the container's NATIVE flow layout. Every setter here is a LIVE mutator (each just
+-- MarkDirty(AuraFrameLayout)-s), so this re-applies on a slider drag without a rebuild.
+--
+-- Geometry model (from Blizzard_CustomAuraContainer.lua + AnchorUtil flow layout):
+--   * The container AUTO-RESIZES to its content (OnLayoutComplete -> SetSize) and its
+--     buttons anchor from the container's layoutAnchorPoint corner. So we anchor the
+--     CONTAINER by that same corner to the unit frame's matching corner + the user's
+--     offsets — the row then grows away from the frame corner exactly like the legacy
+--     hand-anchored rows (whose first icon sat at frame-anchor + offset).
+--   * Wrap: the flow is row-primary; rowWidth caps a row. wrap N icons ->
+--     rowWidth = N*sizeX + (N-1)*spacingX (container-local units).
+--   * Vertical-primary growth (UP_*/DOWN_*): the flow can't run column-primary, so we
+--     force one icon per row (rowWidth = sizeX) and the v-direction stacks the column.
+--     A vertical wrap COUNT is not expressible — single column (legacy parity gap, GUI
+--     note in P2 polish). CENTER growth is not expressible -> falls back to Right.
+--   * Scale: applied to the container itself — buttons, fonts, borders and spacing all
+--     render at row scale (the legacy defensive stride model; buff rows historically
+--     didn't scale the spacing term — the flow can't express that split, and scaling
+--     spacing uniformly is the more consistent behaviour anyway).
+local function applyContainerLayout(c, handle)
+    local config = handle.config
+    local L = config.layout or {}
+    local sx = (L.sizeX or L.size or 32)
+    local spX = (L.spacingX or L.spacing or 4)
+    local scale = tonumber(L.scale) or 1
+    local anchor = (type(L.anchor) == "string" and L.anchor) or "TOPLEFT"
+    local growth = (type(L.growth) == "string" and L.growth) or "RIGHT_DOWN"
+    local wrap = tonumber(L.wrap) or 0
+
+    local primary, secondary = growth:match("^(%a+)_?(%a*)$")
+    primary = primary or "RIGHT"
+    local verticalPrimary = (primary == "UP" or primary == "DOWN")
+
+    local hName, vName
+    if verticalPrimary then
+        vName = FLOW_NAME[primary] or "Down"
+        hName = FLOW_NAME[secondary] or "Right"
+    else
+        hName = FLOW_NAME[primary] or "Right"
+        vName = FLOW_NAME[secondary] or "Down"
+    end
+
+    -- Row cap: vertical-primary = one per row (column); wrap>0 = N per row; else unlimited.
+    local rowWidth
+    if verticalPrimary then
+        rowWidth = sx + 0.5
+    elseif wrap and wrap >= 1 then
+        rowWidth = wrap * sx + (wrap - 1) * spX + 0.5
+    end   -- nil -> math.huge (no wrap) inside SetAuraLayoutRowWidth
+
+    pcall(function()
+        c:SetScale(scale)
+        -- Anchor the container's grow-corner to the frame's matching corner + offsets.
+        -- (SetPoint offsets live in the container's scaled space, matching the legacy
+        -- rows whose offsets rode the scaled buttons.)
+        c:ClearAllPoints()
+        c:SetPoint(anchor, handle.frame, anchor, L.offsetX or 0, L.offsetY or 0)
+        c:SetAuraLayoutAnchorPoint(anchor)
+        if AnchorUtil and AnchorUtil.FlowDirection then
+            local h = resolveEnum(AnchorUtil.FlowDirection, hName)
+            local v = resolveEnum(AnchorUtil.FlowDirection, vName)
+            if h ~= nil and v ~= nil then c:SetAuraLayoutGrowthDirection(h, v) end
+        end
+        c:SetAuraLayoutRowWidth(rowWidth)
+    end)
+end
+
+-- Per-group layout options (stride/spacing; gapX keeps multi-group rows uniformly
+-- spaced — groups continue on the same row with gapX between them).
+local function buildGroupLayout(config)
+    local L = config.layout or {}
+    local sx = (L.sizeX or L.size or 32)
+    local sy = (L.sizeY or L.size or sx)
+    local spX = (L.spacingX or L.spacing or 4)
+    local spY = (L.spacingY or L.spacing or 4)
+    return {
+        elementWidth    = sx,
+        elementHeight   = sy,
+        elementSpacingX = spX,
+        elementSpacingY = spY,
+        gapX            = spX,
+    }
+end
+
 local function layoutRow(handle)
     local config = handle.config
     local L = config.layout or {}
@@ -625,7 +713,12 @@ function NativeBackend:build()
         return
     end
     self.container = c
-    c:SetAllPoints(handle.frame)
+    local isOverlay = config.mode == "overlay"
+    if isOverlay then
+        c:SetAllPoints(handle.frame)          -- overlay covers the host region
+    else
+        applyContainerLayout(c, handle)       -- row: anchor/growth/wrap/offset/scale -> native flow layout
+    end
     if type(config.unit) == "string" then pcall(function() c:SetUnit(config.unit) end) end
 
     -- Fresh generation: buttons are created in lazy batches (of 10) as needed, so a slot's
@@ -636,22 +729,39 @@ function NativeBackend:build()
     local initFn = handle:_makeInitializeFrame(handle._gen)
 
     -- Declare one AuraGroup per filter (row) / one AuraSlot per filter (overlay). The
-    -- container is exclusively ours, so keys need no cross-consumer namespacing.
+    -- container is exclusively ours, so keys need no cross-consumer namespacing. Group
+    -- keys are remembered so ApplyStyle can hot-apply per-group layout (live mutator).
     local filters = normalizeFilters(config.filter)
     local maxCount = handle:_slotCount()
-    local isOverlay = config.mode == "overlay"
+    local groupLayout = (not isOverlay) and buildGroupLayout(config) or nil
+    -- Native candidate filters (spell-ID include/exclude maps, dispel types, maxDuration,
+    -- booleans) — evaluated Blizzard-side per group/slot. ⚠ Spell-ID maps only apply on
+    -- units the player can assist (helpful) / attack (harmful) — a harmful spell-ID map
+    -- on a friendly-frame consumer is silently inert (the Meorawr gate). Structural:
+    -- changing the set is a Rebuild (consumers put it in their row signature).
+    local candidateFilters = config.candidateFilters
+    self.groupKeys = {}
     for i, f in ipairs(filters) do
         if AuraUtil and AuraUtil.IsValidFilterString and not AuraUtil.IsValidFilterString(f) then
             DF:DebugWarn(DBG, "filter rejected by IsValidFilterString: %s (group skipped)", tostring(f))
         else
             local key = "df" .. i
             if isOverlay then
-                local okSlot, btn = pcall(function() return c:AddAuraSlot(key, f, { initializeFrame = initFn }) end)
+                local okSlot, btn = pcall(function()
+                    return c:AddAuraSlot(key, f, { initializeFrame = initFn, candidateFilters = candidateFilters })
+                end)
                 if okSlot and btn then pcall(function() btn:SetAllPoints(handle.frame) end)
                 elseif not okSlot then DF:DebugWarn(DBG, "AddAuraSlot failed: %s", tostring(btn)) end
             else
-                local okGroup, err = pcall(function() c:AddAuraGroup(key, f, { maxFrameCount = maxCount, initializeFrame = initFn }) end)
-                if not okGroup then DF:DebugWarn(DBG, "AddAuraGroup failed: %s", tostring(err)) end
+                local okGroup, err = pcall(function()
+                    c:AddAuraGroup(key, f, { maxFrameCount = maxCount, initializeFrame = initFn,
+                                             layout = groupLayout, candidateFilters = candidateFilters })
+                end)
+                if okGroup then
+                    self.groupKeys[#self.groupKeys + 1] = key
+                else
+                    DF:DebugWarn(DBG, "AddAuraGroup failed: %s", tostring(err))
+                end
             end
         end
     end
@@ -668,6 +778,32 @@ function NativeBackend:setUnit(unit)
     if self.container and type(unit) == "string" then pcall(function() self.container:SetUnit(unit) end) end
 end
 
+-- Hot-apply layout (anchor/growth/wrap/size/spacing/offset/scale) to the LIVE container.
+-- Every underlying setter is a live mutator (MarkDirty only), so a slider drag re-lays
+-- out without a rebuild. Row mode only; the overlay's SetAllPoints never changes.
+-- Callers combat-gate this (ApplyStyle defers to regen in lockdown).
+function NativeBackend:applyLayout()
+    local c = self.container
+    if not c or self.handle.config.mode == "overlay" then return end
+    applyContainerLayout(c, self.handle)
+    if self.groupKeys and c.SetAuraGroupLayout then
+        local groupLayout = buildGroupLayout(self.handle.config)
+        for _, key in ipairs(self.groupKeys) do
+            pcall(function() c:SetAuraGroupLayout(key, groupLayout) end)
+        end
+    end
+    -- ★ PARTITION KICK (live-confirmed 2026-07-09): inbound mutators set the dirty
+    -- flags but cannot ARM the private-side processor — OnDirtyChanged/SetOnUpdateMode
+    -- run across the partition — so the change would sit unprocessed until the next
+    -- UNIT_AURA event ("one event late" slider lag). The intrinsic OnShow runs
+    -- SECURE-side and calls UpdateAllAuras from inside the partition -> arms +
+    -- processes next frame. OOC-only (this whole path is combat-gated by ApplyStyle,
+    -- but guard anyway — Show re-arms the parse, same op class as enable).
+    if not InCombatLockdown() then
+        pcall(function() c:Hide(); c:Show() end)
+    end
+end
+
 -- Callers combat-gate this (Handle:_applyEnabled defers to regen in lockdown) — enabling
 -- a container in combat is forbidden, same class of op as creating one.
 function NativeBackend:setEnabled(on)
@@ -675,16 +811,20 @@ function NativeBackend:setEnabled(on)
     if c then pcall(function() c:SetEnabled(on and true or false) end) end
 end
 
--- 68569: UpdateAllAuras() is an addon-callable dirty-mark (processed next OnUpdate while
--- visible) — the real refresh. The Hide/Show bounce fallback is legal again (the container
--- is ours alone), but only out of combat (Show re-arms the parse, same class as enable).
+-- ★ PARTITION-AWARE REFRESH (live-confirmed 2026-07-09): UpdateAllAuras() from ADDON
+-- context sets the dirty flags but cannot ARM the private-side processor, so on its own
+-- it waits for the next UNIT_AURA event. The Hide/Show bounce crosses the partition
+-- (intrinsic OnShow runs secure-side -> UpdateAllAuras from inside -> arms + processes
+-- next frame) = the immediate refresh, OOC only (Show re-arms the parse, same op class
+-- as enable). In combat: mark-only best-effort — combat aura events are frequent, so the
+-- flags get picked up on the next one.
 function NativeBackend:refresh()
     local c = self.container
     if not c then return end
-    if type(c.UpdateAllAuras) == "function" then
-        pcall(function() c:UpdateAllAuras() end)
-    elseif not InCombatLockdown() then
+    if not InCombatLockdown() then
         pcall(function() c:Hide(); c:Show() end)
+    elseif type(c.UpdateAllAuras) == "function" then
+        pcall(function() c:UpdateAllAuras() end)
     end
 end
 
@@ -795,10 +935,13 @@ function Handle:_bindNativeSlot(slot)
     bindNative(slot, self.config)              -- native setters (native slots only)
 end
 function Handle:_layoutSlots()
-    -- Row mode = the container's own flow layout anchors the buttons (the SetAuraLayout*
-    -- translation lands in P1); overlay = SetAllPoints on the returned button. Only the
-    -- future "slots" mode (per-spell AD buckets) hand-anchors via layoutRow.
-    if self.config.mode == "slots" then layoutRow(self) end
+    -- NATIVE row mode = the container's own flow layout anchors the buttons (wired via
+    -- applyContainerLayout at build; hot-applied via NativeBackend:applyLayout) — never
+    -- hand-anchor those (SetPoint would fight the secure flow layout). PLAIN slots (the
+    -- FakeBackend's test-mode rows, the future "slots" mode) hand-anchor via layoutRow.
+    if self.config.mode == "overlay" then return end
+    if self.backend and self.backend:isNativeSlots() then return end
+    layoutRow(self)
 end
 
 -- Build the per-button styling callback Blizzard invokes (securecallfunction) for each
@@ -896,12 +1039,15 @@ function Handle:ApplyStyle(style, layout)
     end
     -- Row-mode buttons are anchored by the CONTAINER's secure flow layout -- SetPoint-ing
     -- them here would fight it (and touches secretwrapped anchor points). Geometry changes
-    -- go through SetAuraLayout* (P1); only the future "slots" mode hand-anchors. styleButton_regions
-    -- below still re-applies per-button SIZE, which the flow layout reads.
-    if self.config.mode == "slots" then layoutRow(self) end
-    -- Re-run regions on every slot; re-bind natives only on a native backend (explicit via
-    -- isNativeSlots, not relying on plain frames incidentally lacking the setters).
+    -- hot-apply through the live SetAuraLayout*/SetAuraGroupLayout mutators instead; plain
+    -- (fake/slots) rows hand-anchor via layoutRow. styleButton_regions below still
+    -- re-applies per-button SIZE, which the flow layout reads.
     local native = self.backend and self.backend:isNativeSlots()
+    if native then
+        if self.backend.applyLayout then self.backend:applyLayout() end
+    elseif self.config.mode ~= "overlay" then
+        layoutRow(self)
+    end
     for _, b in ipairs(self.buttons) do
         local ok, err = pcall(function()
             styleButton_regions(b, self.config)

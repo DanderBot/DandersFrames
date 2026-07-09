@@ -5540,9 +5540,14 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
     -- Auras > Aura Blacklist
     local pageAuraBlacklist = CreateSubTab("auras", "auras_blacklist", L["Aura Blacklist"])
-    -- 12.1: native aura filters are include-only, so an exclude-by-spellID blacklist
-    -- can't be expressed. Genuine Blizzard limitation, not a roadmap port.
-    GUI:BlockPage12_1(pageAuraBlacklist, "limitation")
+    -- 12.1: UN-BLOCKED (the original "include-only filters" premise was wrong for buffs —
+    -- candidateFilters.excludeSpellIDs works for helpful auras on friendly frames and is
+    -- now wired into the factory buff row via BuildAuraRowConfig). The DEBUFF half of the
+    -- blacklist IS still dead on friendly frames (harmful spell-ID filters only apply to
+    -- attackable units) — that gets a per-section note when the debuff row ports (P3).
+    -- Split combat/OOC-only entries can't be expressed statically and stay visible on
+    -- factory rows (only always-blacklisted entries are excluded).
+    -- GUI:BlockPage12_1(pageAuraBlacklist, "limitation")
     BuildPage(pageAuraBlacklist, function(self, db, Add, AddSpace, AddSyncPoint)
         if DF.BuildAuraBlacklistPage then
             DF.BuildAuraBlacklistPage(GUI, self, db)
@@ -5672,6 +5677,20 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         gridGroup:AddWidget(GUI:CreateHeader(self.child, L["Grid Layout"]), 40)
         local buffWrap = gridGroup:AddWidget(GUI:CreateSlider(self.child, L["Icons Per Row"], 1, 8, 1, db, "buffWrap", nil, function() DF:LightweightUpdateAuraPosition("buff") end, true), 55)
         buffWrap.disableOn = function(d) return not d.showBuffs end
+        -- 12.1: the native flow layout is row-primary — Vertical orientation renders a single
+        -- column, so a per-column wrap count is not expressible there. Blocked only while the
+        -- growth is vertical-primary (flipping Orientation un-frosts it live via RefreshStates).
+        GUI:BlockControl12_1(buffWrap, "limitation", { id = "buffs:wrapvertical", page = L["Buffs"], when = function(d)
+            local g = d.buffGrowth or ""
+            return DF:FactoryOwnsBuffRow(d) and (g:sub(1, 2) == "UP" or g:sub(1, 4) == "DOWN")
+        end })
+        -- CENTER growth direction: not expressible in the native flow layout (factory rows
+        -- fall back to side growth). A dropdown VALUE can't be frosted without trapping the
+        -- selection, so it's tracked in the blocked registry only; the P2 GUI pass removes
+        -- the option for factory-owned rows.
+        GUI:RegisterBlockedMeta("buffs:centerdirection", { page = L["Buffs"],
+            reason = "Center growth direction — no center mode in the 12.1 flow layout (falls back to side growth)",
+            wording = "limitation" })
         local buffPaddingX = gridGroup:AddWidget(GUI:CreateSlider(self.child, L["Spacing X"], -5, 10, 1, db, "buffPaddingX", nil, function() DF:LightweightUpdateAuraPosition("buff") end, true), 55)
         buffPaddingX.disableOn = function(d) return not d.showBuffs end
         local buffPaddingY = gridGroup:AddWidget(GUI:CreateSlider(self.child, L["Spacing Y"], -5, 10, 1, db, "buffPaddingY", nil, function() DF:LightweightUpdateAuraPosition("buff") end, true), 55)
@@ -5721,7 +5740,12 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         stackCountGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "buffStackAnchor", function() DF:LightweightUpdateAuraStackText("buff") end), 55)
         stackCountGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -150, 150, 1, db, "buffStackX", nil, function() DF:LightweightUpdateAuraStackText("buff") end, true), 55)
         stackCountGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -150, 150, 1, db, "buffStackY", nil, function() DF:LightweightUpdateAuraStackText("buff") end, true), 55)
-        stackCountGroup:AddWidget(GUI:CreateSlider(self.child, L["Min Stacks to Show"], 1, 10, 1, db, "buffStackMinimum", nil, function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 55)
+        local buffStackMin = stackCountGroup:AddWidget(GUI:CreateSlider(self.child, L["Min Stacks to Show"], 1, 10, 1, db, "buffStackMinimum", nil, function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 55)
+        -- 12.1: a stacks formatter is FORBIDDEN on container rows (it throws on the secret
+        -- combat stack count inside Blizzard's dirty pass and bricks the container — see the
+        -- Features/Auras.lua tombstone). Native display = counts > 1, so a custom minimum
+        -- is not expressible on the factory row.
+        GUI:BlockControl12_1(buffStackMin, "limitation", { id = "buffs:stackminimum", page = L["Buffs"], when = function(d) return DF:FactoryOwnsBuffRow(d) end })
         -- Grey the whole group when Buffs are off, matching Settings/Position/Grid.
         stackCountGroup.disableChildrenOn = function(d) return not d.showBuffs end
         AddToSection(stackCountGroup, nil, 2)
@@ -6512,14 +6536,25 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         layoutGroup:AddWidget(GUI:CreateGrowthControl(self.child, db, "defensiveBarGrowth", function()
             if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
         end), 155)
+        -- CENTER growth direction: registry-only tracking (see the Buffs page note — a
+        -- dropdown value can't be frosted; factory rows fall back to side growth).
+        GUI:RegisterBlockedMeta("defensive:centerdirection", { page = L["Defensive Icon"],
+            reason = "Center growth direction — no center mode in the 12.1 flow layout (falls back to side growth)",
+            wording = "limitation" })
 
         layoutGroup:AddWidget(GUI:CreateSlider(self.child, L["Max Icons"], 1, 5, 1, db, "defensiveBarMax", function()
             if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
         end, nil, true), 55)
 
-        layoutGroup:AddWidget(GUI:CreateSlider(self.child, L["Icons Per Row"], 1, 5, 1, db, "defensiveBarWrap", function()
+        local defWrap = layoutGroup:AddWidget(GUI:CreateSlider(self.child, L["Icons Per Row"], 1, 5, 1, db, "defensiveBarWrap", function()
             if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
         end, nil, true), 55)
+        -- 12.1: row-primary flow — vertical orientation = single column, wrap count not
+        -- expressible (mirrors the Buffs-page block).
+        GUI:BlockControl12_1(defWrap, "limitation", { id = "defensive:wrapvertical", page = L["Defensive Icon"], when = function(d)
+            local g = d.defensiveBarGrowth or ""
+            return DF:FactoryOwnsDefensiveRow(d) and (g:sub(1, 2) == "UP" or g:sub(1, 4) == "DOWN")
+        end })
 
         layoutGroup:AddWidget(GUI:CreateSlider(self.child, L["Spacing"], -10, 10, 1, db, "defensiveBarSpacing", function()
             if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end

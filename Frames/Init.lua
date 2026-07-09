@@ -1436,6 +1436,17 @@ function DF:UpdateAllFrames()
         print("|cFFFF00FF[DF Flat Debug]|r UpdateAllFrames() called!")
         print("  Full stack: " .. (debugstack(2, 10, 0) or "unknown"))
     end
+
+    -- 12.1 factory rows: GUI callbacks that end in a full update (checkboxes,
+    -- dropdowns) must also re-drive the standing aura containers, or the change
+    -- applies one aura event late. Bump the layout version so the (debounced)
+    -- drive re-applies; placed before the early-return branches so every path is
+    -- covered. Gated on factory ownership so pre-12.1 / legacy paths pay nothing.
+    if DF.InvalidateAuraLayout
+        and ((DF.UseFactoryForBuffs and DF:UseFactoryForBuffs(nil, nil))
+          or (DF.UseFactoryForDefensive and DF:UseFactoryForDefensive(nil, nil))) then
+        DF:InvalidateAuraLayout()
+    end
     
     -- Header mode: party frames are managed by SecureGroupHeaderTemplate
     -- This function is called when NOT in a raid, to show party frames

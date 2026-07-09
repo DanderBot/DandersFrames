@@ -2426,6 +2426,45 @@ end
 -- discrete colour BUCKETS via the duration formatter (|cRRGGBB escapes in AddBreakpoint
 -- format strings — C-side, secret-safe, the NSRT-proven path) in P2.)
 
+-- NATIVE BLACKLIST (buffs): the user's aura blacklist -> candidateFilters.excludeSpellIDs,
+-- evaluated Blizzard-side (works for HELPFUL auras on friendly frames — helpful spell-ID
+-- filters pass the assist gate; the DEBUFF blacklist can NOT be expressed on friendlies).
+-- Alternates are expanded so every variant is excluded, matching the legacy IsBlacklisted
+-- lookup. Split combat/OOC-only entries can't be expressed statically -> they stay VISIBLE
+-- on factory rows (visible degrade, never a silent in-combat surprise); only entries
+-- blacklisted in both states are excluded.
+local function BuildBuffExcludeMap()
+    local bl = DF.db and DF.db.auraBlacklist and DF.db.auraBlacklist.buffs
+    if not bl or not next(bl) then return nil end
+    local map, n = {}, 0
+    for id, entry in pairs(bl) do
+        if entry == true or (type(entry) == "table" and entry.combat and entry.ooc) then
+            map[id] = true
+            n = n + 1
+        end
+    end
+    if n == 0 then return nil end
+    local alts = DF.AuraBlacklist and DF.AuraBlacklist.AlternateSpellIDs
+    if alts then
+        for alt, primary in pairs(alts) do
+            if map[primary] then map[alt] = true end
+        end
+    end
+    return map
+end
+
+-- Stable signature of an excludeSpellIDs map (sorted IDs) — blacklist changes are
+-- STRUCTURAL (candidateFilters are declared at AddAuraGroup), so the row signature
+-- must move when the set does.
+local function excludeSig(cf)
+    local m = cf and cf.excludeSpellIDs
+    if not m then return "" end
+    local ids = {}
+    for id in pairs(m) do ids[#ids + 1] = id end
+    table.sort(ids)
+    return table.concat(ids, ",")
+end
+
 -- Map a prefixed aura-row setting block (buff*/debuff*) -> DF.AuraContainer config.
 -- prefix = "buff" (debuff reuses this later). opts.filterList is the PRE-BUILT native
 -- filter list (buffs: BuildDirectBuffFilters); opts.unit is the initial unit token.
@@ -2459,12 +2498,22 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
         }
     end
 
+    -- Buff rows: the aura blacklist as a native exclude map (see BuildBuffExcludeMap).
+    -- Debuff rows get NO spell-ID filters — harmful spell-ID maps are inert on
+    -- friendly frames (the assist/attack gate), so the debuff blacklist stays legacy.
+    local candidateFilters
+    if prefix == "buff" then
+        local excludeMap = BuildBuffExcludeMap()
+        if excludeMap then candidateFilters = { excludeSpellIDs = excludeMap } end
+    end
+
     return {
         unit     = opts.unit,
         mode     = "row",
         filter   = filter,
         max      = g("Max") or 5,
         enabled  = true,
+        candidateFilters = candidateFilters,
         tooltips = not g("DisableMouse"),          -- factory buttons are always click-through
         layout = {
             size     = g("Size") or 20,
@@ -2510,6 +2559,7 @@ local function buffFactorySig(cfg)
         tostring(s.duration ~= nil), tostring(s.duration and s.duration.formatKey),
         tostring(s.stacks and s.stacks.formatKey),
         tostring(s.border ~= nil), tostring(s.cooldown and s.cooldown.show ~= false),
+        excludeSig(cfg.candidateFilters),   -- blacklist set (structural: declared at AddAuraGroup)
     }, "|")
 end
 
@@ -2747,6 +2797,43 @@ function DF:ToggleBuffFactory()
     local on = DF.db.buffUseFactory
     print("|cffeda55fDandersFrames|r buff factory: " .. (on and "|cff00ff00ON|r" or "|cffff0000OFF|r") .. " — /reload to apply")
     return on
+end
+
+-- Immediately re-drive the factory rows on every active frame (out of combat).
+-- The drives normally run inside the aura update cycle, so a GUI layout change —
+-- which only bumps auraLayoutVersion — would otherwise apply "one aura event late"
+-- (the live slider lag). Called from DF:InvalidateAuraLayout right after the bump.
+-- Cheap when nothing changed: each drive is version-gated and its ApplyStyle path
+-- uses the container's live layout mutators (no rebuild). Pinned-set frames catch
+-- up on their next aura event (they share the same version check).
+local function driveFactoryRowsNow(frame)
+    if not frame or not frame.unit then return end
+    local db = DF:GetFrameDB(frame)
+    if not db then return end
+    if db.showBuffs and DF:UseFactoryForBuffs(frame, db) then
+        DF:DriveBuffFactory(frame, db)
+    end
+    if db.defensiveIconEnabled and DF:UseFactoryForDefensive(frame, db) then
+        DF:DriveDefensiveFactory(frame, db)
+    end
+end
+
+-- DEBOUNCED to one pass per frame-render: GUI callbacks often bump the version
+-- several times in one click (Invalidate + UpdateAllFrames chains), and slider
+-- drags fire per tick — coalescing keeps a 40-man raid drag at one drive pass
+-- per rendered frame instead of one per callback. The 0-delay timer re-checks
+-- combat when it fires (timers can land after lockdown re-engages).
+local factoryRefreshQueued = false
+function DF:RefreshFactoryRows()
+    if factoryRefreshQueued then return end
+    if not (DF.AuraContainer and DF.AuraContainer.IsSupported and DF.AuraContainer.IsSupported()) then return end
+    factoryRefreshQueued = true
+    C_Timer.After(0, function()
+        factoryRefreshQueued = false
+        if InCombatLockdown() then return end   -- drives self-defer in combat; version catches up at next drive
+        if DF.IteratePartyFrames then DF:IteratePartyFrames(driveFactoryRowsNow) end
+        if DF.IterateRaidFrames then DF:IterateRaidFrames(driveFactoryRowsNow) end
+    end)
 end
 
 function DF:UpdateAuras_Enhanced(frame)

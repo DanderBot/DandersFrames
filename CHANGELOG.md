@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+* (Auras) The new 12.1 aura rows now honor your layout settings — anchor, direction, wrap, offsets, spacing, size and scale were previously ignored (icons piled at the top-left).
+* (Auras) Aura settings apply in real time again on 12.1 — sliders re-flow the row live during the drag instead of waiting for the next aura update.
+* (Auras) Aura Blacklist is back on 12.1 for buffs, now enforced natively by the game's aura engine. Debuff blacklisting is still blocked by a game limitation on friendly frames. Entries set to combat-only or out-of-combat-only can't be enforced on the new rows and stay visible.
+* (Interface) Settings the 12.1 rows can't provide are now marked in place: "Min Stacks to Show" (game limitation) and "Icons Per Row" while using vertical orientation (single column only).
+
 * (Auras) Fix the in-combat aura freeze: the stack-count formatter cannot process the protected (secret) stack values 12.1 uses in combat, and the resulting error permanently stopped that frame's aura updates until reload. Stack counts now use the built-in display (shown at 2 or more); the "minimum stacks" setting no longer applies to the new aura rows.
 
 ## [5.0.0]

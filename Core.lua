@@ -127,6 +127,10 @@ DF.auraLayoutVersion = 1
 
 function DF:InvalidateAuraLayout()
     DF.auraLayoutVersion = (DF.auraLayoutVersion or 0) + 1
+    -- 12.1 factory rows: the drives that consume this version run inside the aura
+    -- update cycle (next UNIT_AURA), so without an immediate re-drive a GUI layout
+    -- change applies "one aura event late". Drive them now (OOC; no-op pre-12.1).
+    if DF.RefreshFactoryRows then DF:RefreshFactoryRows() end
 end
 
 -- ============================================================
@@ -759,6 +763,15 @@ function DF:LightweightUpdateAuraPosition(auraType)
     local mode = DF.GUI and DF.GUI.SelectedMode or "party"
     local db = DF.db[mode]
     if not db then return end
+
+    -- 12.1 factory rows: the legacy per-icon repositioning below only moves the (hidden)
+    -- legacy pools. Bump the layout version + re-drive the factory handles so layout
+    -- sliders re-flow DURING the drag (ApplyStyle routes through the container's live
+    -- layout mutators — no rebuild). InvalidateAuraLayout also drives defensives, which
+    -- share most layout keys' cost profile; the drives no-op when nothing changed.
+    if auraType == "buff" and DF.UseFactoryForBuffs and DF:UseFactoryForBuffs(nil, db) then
+        DF:InvalidateAuraLayout()
+    end
     
     local iconsKey = auraType == "buff" and "buffIcons" or "debuffIcons"
     local size = auraType == "buff" and (db.buffSize or 20) or (db.debuffSize or 20)
@@ -1171,6 +1184,12 @@ function DF:LightweightUpdateDefensiveIcons()
     local db = DF.db[mode]
     if not db then return end
 
+    -- 12.1 factory rows: re-drive immediately so this applies live (see the buff
+    -- helpers). The legacy loop below only touches the hidden legacy pool.
+    if DF.UseFactoryForDefensive and DF:UseFactoryForDefensive(nil, db) then
+        DF:InvalidateAuraLayout()
+    end
+
     -- Test mode owns multi-defensive layout (including the CENTER-growth
     -- second pass), so re-anchoring the primary icon here without re-running
     -- that pass would un-centre it and visually overlap icon 2. Delegate to
@@ -1331,6 +1350,12 @@ function DF:LightweightUpdateAuraStackText(auraType)
     local mode = DF.GUI and DF.GUI.SelectedMode or "party"
     local db = DF.db[mode]
     if not db then return end
+
+    -- 12.1 factory rows: re-drive immediately so this applies live (the legacy loop
+    -- below only touches the hidden legacy pools when the factory owns the row).
+    if auraType == "buff" and DF.UseFactoryForBuffs and DF:UseFactoryForBuffs(nil, db) then
+        DF:InvalidateAuraLayout()
+    end
     
     local iconsKey = auraType == "buff" and "buffIcons" or "debuffIcons"
     local scale = auraType == "buff" and (db.buffStackScale or 1) or (db.debuffStackScale or 1)
@@ -1361,6 +1386,12 @@ function DF:LightweightUpdateAuraDurationText(auraType)
     local mode = DF.GUI and DF.GUI.SelectedMode or "party"
     local db = DF.db[mode]
     if not db then return end
+
+    -- 12.1 factory rows: re-drive immediately so this applies live (the legacy loop
+    -- below only touches the hidden legacy pools when the factory owns the row).
+    if auraType == "buff" and DF.UseFactoryForBuffs and DF:UseFactoryForBuffs(nil, db) then
+        DF:InvalidateAuraLayout()
+    end
     
     local iconsKey = auraType == "buff" and "buffIcons" or "debuffIcons"
     local scale = auraType == "buff" and (db.buffDurationScale or 1) or (db.debuffDurationScale or 1)
@@ -1440,6 +1471,12 @@ function DF:LightweightUpdateAuraBorder(auraType)
     local mode = DF.GUI and DF.GUI.SelectedMode or "party"
     local db = DF.db[mode]
     if not db then return end
+
+    -- 12.1 factory rows: re-drive immediately so this applies live (the legacy loop
+    -- below only touches the hidden legacy pools when the factory owns the row).
+    if auraType == "buff" and DF.UseFactoryForBuffs and DF:UseFactoryForBuffs(nil, db) then
+        DF:InvalidateAuraLayout()
+    end
     
     local iconsKey = auraType == "buff" and "buffIcons" or "debuffIcons"
     
@@ -1483,6 +1520,12 @@ function DF:LightweightUpdateFrameLevel(elementType)
     local mode = DF.GUI and DF.GUI.SelectedMode or "party"
     local db = DF.db[mode]
     if not db then return end
+
+    -- 12.1 factory rows: the defensive row's frame level is applied by the drive
+    -- (frameLevelOffset) — re-drive immediately so the slider previews live.
+    if elementType == "defensive" and DF.UseFactoryForDefensive and DF:UseFactoryForDefensive(nil, db) then
+        DF:InvalidateAuraLayout()
+    end
 
     -- Status icons whose full-render frame level (ApplyIconSettings) is
     -- (parent-of-parent level + value); mirror that here so the Frame Level
@@ -2340,6 +2383,12 @@ function DF:LightweightUpdateDefensiveIconColors()
     local mode = DF.GUI and DF.GUI.SelectedMode or "party"
     local db = DF.db[mode]
     if not db then return end
+
+    -- 12.1 factory rows: re-drive immediately so this applies live (see the buff
+    -- helpers). The legacy loop below only touches the hidden legacy pool.
+    if DF.UseFactoryForDefensive and DF:UseFactoryForDefensive(nil, db) then
+        DF:InvalidateAuraLayout()
+    end
 
     -- Same test-mode delegation as LightweightUpdateDefensiveIcons: the test
     -- render owns multi-defensive layout; touching individual icons here can

@@ -79,6 +79,12 @@ function DF.BuildAuraBlacklistPage(guiRef, pageRef, dbRef)
         if DF.RefreshAllVisibleFrames then
             DF:RefreshAllVisibleFrames()
         end
+        -- 12.1 factory rows: the buff blacklist rides candidateFilters.excludeSpellIDs
+        -- (structural — the exclude set is part of the row signature), so an edit here
+        -- must bump + re-drive for the container to rebuild with the new set.
+        if DF.InvalidateAuraLayout then
+            DF:InvalidateAuraLayout()
+        end
     end
 
     -- ========== MINI CHECKBOX HELPER ==========
