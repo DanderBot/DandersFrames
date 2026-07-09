@@ -57,7 +57,7 @@ function DA:BuildFilterString()
     if DA.filterPlayer then table.insert(parts, "PLAYER") end
     if DA.filterRaid then table.insert(parts, "RAID") end
     if DA.filterCancelable then table.insert(parts, "CANCELABLE") end
-    if DA.filterNotCancelable then table.insert(parts, "NOT_CANCELABLE") end
+    if DA.filterNotCancelable then table.insert(parts, "!CANCELABLE") end
     if DA.filterIncludeNameplateOnly then table.insert(parts, "INCLUDENAMEPLATEONLY") end
     if DA.filterMaw then table.insert(parts, "MAW") end
     

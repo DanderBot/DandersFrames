@@ -644,7 +644,11 @@ local function BuildDirectBuffFilters(db)
         filters[#filters + 1] = "HELPFUL|" .. AuraFilters.RaidInCombat .. playerSuffix
     end
     if db.directBuffFilterCancelable then filters[#filters + 1] = "HELPFUL|CANCELABLE" .. playerSuffix end
-    if db.directBuffFilterNotCancelable then filters[#filters + 1] = "HELPFUL|NOT_CANCELABLE" .. playerSuffix end
+    -- 12.1 (68569) removed the NOT_CANCELABLE token; the "!" negation prefix replaces it, and
+    -- AddAuraGroup asserts IsValidFilterString so the old token would hard-error. This branch
+    -- is 12.1-only (TOC 120100), so !CANCELABLE is unconditional (12.0.7 lacks "!" — Krathe's
+    -- live fix is build-gated).
+    if db.directBuffFilterNotCancelable then filters[#filters + 1] = "HELPFUL|!CANCELABLE" .. playerSuffix end
     if db.directBuffFilterBigDefensive and AuraFilters.BigDefensive then
         filters[#filters + 1] = "HELPFUL|" .. AuraFilters.BigDefensive .. playerSuffix
     end

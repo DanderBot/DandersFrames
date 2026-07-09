@@ -31,18 +31,23 @@ local addonName, DF = ...
 --   h:GetFrame() -- the plain positioning frame DF anchors (SetPoint/SetSize on it)
 --   h:Destroy()
 --
--- GOTCHAS baked in (from Krathe's R&D, build-stamped 12.1.0 @ b8f90f2a):
---   1. Buttons are addon-created (CreateFrame("AuraButton",...)) + container:AddAuraFrame(b).
---      NEVER AddAuraFramesFromTemplate (that yields a forbidden object we can't style).
---   2. Order: SetUnit -> AddAuraFilter -> build/style/AddAuraFrame -> SetEnabled LAST.
---   3. Never call container:UpdateAllAuras() (indexes the secret table -> taints).
---   4. Regions passed to a Set* setter MUST be children of that button.
---   5. SetDurationText{textColorCurve} is bugged on this build (forwards the curve
---      without the required `property` -> errors + text vanishes) -> guarded.
---   6. Static DF.Border on buttons is fine; animated glow / OnUpdate on buttons is
---      forbidden (<ForbiddenAspects> + onUpdateMode="disabled"). Static only.
---   7. Cannot read IsShown / spellId / expirationTime / dispelName / presence — all
---      secret. Never branch on them. pcall catches the error but not the taint.
+-- GOTCHAS baked in (12.1.0 @ 68569 — the PTR-4 API; validated in-game via DF_AuraLab):
+--   1. Addons NO LONGER create AuraButtons (AddAuraFrame/AddAuraFramesFromTemplate removed).
+--      The container creates + anchors its own buttons; we register AuraGroups (row) /
+--      AuraSlots (overlay) and Blizzard calls our initializeFrame per button to style it.
+--   2. Order: SetUnit -> AddAuraGroup/AddAuraSlot(each, initializeFrame) -> SetEnabled LAST.
+--      SetEnabled gates aura-event registration (IsVisible() and IsEnabled()).
+--   3. container:UpdateAllAuras() is now an addon-callable dirty-mark (the real refresh).
+--   4. In initializeFrame: build FRESH regions as children of the button. NEVER SetParent
+--      an existing scripted widget onto a button (forbidden-aspect inheritance blocks it).
+--   5. SetDurationText textColorCurve is FIXED on 68569 (dedicated DurationTextBinding:
+--      SetTextColorCurve(curve)) -> smooth gradients return (bindNative wiring lands in P1).
+--   6. Animation on OUR child regions is fine (AnimationGroup:Play + OnUpdate run; the
+--      button's onUpdateMode=disabled doesn't propagate). Only expiry-TRIGGERED anim is dead.
+--   7. Cannot read IsShown / spellId / expirationTime / dispelName / presence — all secret.
+--      Never branch on them. Filtering is Blizzard-side (filterString + candidateFilters).
+--   8. Group topology is add-only: no RemoveAuraGroup/Slot; a filterString change = recreate
+--      the container. candidateFilters / sortMethod / maxFrameCount / layout are live setters.
 -- ============================================================
 
 local CreateFrame = CreateFrame
@@ -70,7 +75,7 @@ local warnedRestyle, warnedRefresh, warnedMouse = false, false, false
 -- is false, Create() returns nil and the feature keeps its existing (pre-12.1)
 -- render path. This keeps the live 12.0.7 client completely unchanged.
 -- The probe creates a live AuraContainer, which hard-errors in combat (uncatchable
--- by pcall) — so IsSupported()/managedAvailable() never probe in lockdown: on a cold
+-- by pcall) — so IsSupported() never probes in lockdown: on a cold
 -- cache they return false WITHOUT caching, and a login warm (below) primes the cache
 -- out of combat. A false/nil taken in that login-into-combat window is TRANSIENT;
 -- consumers must re-check, never latch it.
@@ -80,18 +85,18 @@ local _supported            -- tri-state: nil = not yet probed
 -- Definitive probe: the 12.1 widget types either exist or CreateFrame errors.
 -- Gated first on the interface number so we don't even attempt the probe on old
 -- clients. The probe frame is parented to UIParent and hidden immediately after.
+-- PTR-4 (68569): addons no longer create AuraButtons (AddAuraFrame removed) — the
+-- container creates + anchors its own buttons via AddAuraGroup / AddAuraSlot. So the
+-- positive probe is simply "does the container expose AddAuraGroup".
 local function probeSupported()
     local toc = select(4, GetBuildInfo())
     if type(toc) ~= "number" or toc < 120100 then return false end
     if not (AuraUtil and AuraUtil.IsValidFilterString) then return false end
     local ok, frame = pcall(CreateFrame, "AuraContainer", nil, UIParent, "CustomAuraContainerTemplate")
     if not ok or not frame then return false end
-    -- Confirm the button intrinsic + its template resolve too (a container with no
-    -- styleable button is useless to us).
-    local okB, button = pcall(CreateFrame, "AuraButton", nil, frame, "CustomAuraButtonTemplate")
-    if okB and button then pcall(function() frame:RemoveAllAuraFrames() end) end
+    local hasGroups = type(frame.AddAuraGroup) == "function"
     pcall(function() frame:Hide() end)
-    return okB and button ~= nil
+    return hasGroups
 end
 
 function AuraContainer.IsSupported()
@@ -109,74 +114,15 @@ function AuraContainer.IsSupported()
     return _supported
 end
 
--- PTR-4 gates. The managed AuraContainer (auto-created buttons + Spell-ID / dispel /
--- stealable / max-duration filters + sort) is secure-only on b8f90f2a, so its template
--- does NOT resolve for addons yet — a clean NEGATIVE feature-probe (per Krathe): the day
--- CreateFrame("AuraContainer", …, "ManagedAuraContainerTemplate") starts succeeding, the
--- managed path is live. We probe capability, never a build number.
-local _managed
-local function managedAvailable()
-    if _managed == nil then
-        -- Same combat rule as IsSupported: never create the probe container in lockdown.
-        -- Guard only the UNCACHED probe (inside this nil branch) so a cached _managed still
-        -- answers normally — otherwise HasSort/HasSpellFilter would flap to false mid-combat
-        -- once the WIRED flags flip (Handle:SetSort reaches HasSort un-gated).
-        if InCombatLockdown() then return false end
-        if not (AuraUtil and AuraUtil.IsValidFilterString) then
-            _managed = false
-        else
-            local ok, frame = pcall(CreateFrame, "AuraContainer", nil, UIParent, "ManagedAuraContainerTemplate")
-            if ok and frame then pcall(function() frame:Hide() end) end
-            _managed = (ok and frame ~= nil) and true or false
-        end
-        DF:Debug(DBG, "managedAvailable probe -> %s", tostring(_managed))
-    end
-    return _managed
-end
-
--- ★ These stay FALSE until the factory actually WIRES the managed path — NOT merely when
--- Blizzard's managed template resolves. Otherwise, the day PTR-4 lands, a consumer gating
--- per-spell logic on "true" would get a container that still builds the Custom path and
--- ignores config.spellIDs/sort → silently shows ALL auras instead of one spell.
--- managedAvailable() is the capability probe; flip the WIRED flag when the PTR-4 managed
--- filter/sort is implemented here (Krathe posts the exact symbol from the source sweep).
-local SPELL_FILTER_WIRED = false
-local SORT_WIRED = false
-
--- Per-Spell-ID filter (the Aura Designer's core). Consumers may pass config.spellIDs
--- today; it is accepted and no-ops until this returns true.
-function AuraContainer.HasSpellFilter()
-    return SPELL_FILTER_WIRED and managedAvailable()
-end
-
--- Sort (rule + direction).
-function AuraContainer.HasSort()
-    return SORT_WIRED and managedAvailable()
-end
-
--- Forward-seam guard. PTR-4 adds filtering by dispel type / stealable / max duration
--- (plus the Spell-ID filter + sort above). Consumers may pass these config seams TODAY;
--- they are accepted and no-op until the managed path wires each one. This warns ONCE per
--- seam when a consumer sets one the factory can't honor yet — so nothing silently shows
--- everything. Each lights up when its capability is wired.
-local warnedSeam = {}
-local function warnUnwiredSeam(name, note)
-    if not warnedSeam[name] then
-        warnedSeam[name] = true
-        DF:DebugWarn(DBG, "config.%s is set but not wired yet — ignored (%s)", name, note)
-    end
-end
-local function checkUnwiredSeams(config)
-    if config.spellIDs and not AuraContainer.HasSpellFilter() then
-        warnUnwiredSeam("spellIDs", "per-Spell-ID filter arrives at PTR-4")
-    end
-    if config.sort and not AuraContainer.HasSort() then
-        warnUnwiredSeam("sort", "sort rule/direction arrives at PTR-4")
-    end
-    if config.dispelTypes then warnUnwiredSeam("dispelTypes", "dispel-type filter arrives at PTR-4") end
-    if config.maxDuration then warnUnwiredSeam("maxDuration", "max-duration filter arrives at PTR-4") end
-    if config.stealable then warnUnwiredSeam("stealable", "stealable filter arrives at PTR-4") end
-end
+-- PTR-4 (68569): the managed/custom split collapsed. CustomAuraContainer IS the addon
+-- container (ManagedAuraContainer* is its abstract base) and carries AddAuraGroup /
+-- AddAuraSlot + candidateFilters (spell-ID / dispel-type / maxDuration / stealable) +
+-- sort directly. So the old "managed template not yet resolvable" probe and the WIRED
+-- gate flags are gone — capability == IsSupported(). Per-seam wiring (candidateFilters,
+-- sortMethod) lands in P2/P4; consumers passing those keys before then are simply not
+-- yet honored (no warn — the seams are real config now, not a future-managed no-op).
+function AuraContainer.HasSpellFilter() return AuraContainer.IsSupported() end
+function AuraContainer.HasSort()        return AuraContainer.IsSupported() end
 
 -- Warm the support probe once, out of combat, at login — so no consumer's first
 -- IsSupported() call ever lands the probe in combat (the probe creates a live
@@ -191,7 +137,6 @@ do
             return
         end
         AuraContainer.IsSupported()   -- probes + caches while safe
-        -- (warm managedAvailable() here too once SPELL_FILTER_WIRED / SORT_WIRED flip)
         self:UnregisterAllEvents()
     end)
 end
@@ -613,97 +558,94 @@ end
 -- handle:_acceptSlot; the handle owns positioning/styling/lifecycle and routes
 -- SetUnit/Enable/Refresh/teardown to the active backend. The public API is unchanged.
 --
--- CustomBackend — the 12.1 CustomAuraContainer path: the addon creates the AuraButtons,
--- Blizzard fills them. isNativeSlots = true. (PTR-4 adds a ManagedBackend; F3 adds a
--- fake/test backend; both slot into the same interface.)
+-- NativeBackend — the 68569 CustomAuraContainer path. The CONTAINER creates + anchors its
+-- OWN buttons (AddAuraFrame is removed): we register one AuraGroup per filter (row mode)
+-- or one AuraSlot per filter (overlay mode), and Blizzard invokes our initializeFrame
+-- per button (in lazy batches of 10) to style it. isNativeSlots = true. Row layout is the
+-- container's flow layout (SetAuraLayout* translation lands in P1); overlay slots are
+-- addon-anchored via the button AddAuraSlot returns.
 -- ============================================================
-local CustomBackend = {}
-CustomBackend.__index = CustomBackend
+local NativeBackend = {}
+NativeBackend.__index = NativeBackend
 
-function CustomBackend.new(handle)
-    return setmetatable({ handle = handle }, CustomBackend)
+function NativeBackend.new(handle)
+    return setmetatable({ handle = handle }, NativeBackend)
 end
 
-function CustomBackend:isNativeSlots() return true end
+function NativeBackend:isNativeSlots() return true end
 
--- ORDER MATTERS: SetUnit -> AddAuraFilter -> (create + regions + bindNative + AddAuraFrame)
--- each slot -> layout -> SetEnabled LAST. Native binds run BEFORE AddAuraFrame (register
--- regions before handing over — the proven b8f90f2a pattern).
-function CustomBackend:build()
+-- Order: SetUnit -> AddAuraGroup/AddAuraSlot(each filter, initializeFrame) -> SetEnabled
+-- LAST. SetEnabled gates aura-event registration (IsVisible() and IsEnabled()); without
+-- the LAST enable the row renders once then goes permanently stale.
+function NativeBackend:build()
     local handle = self.handle
     local config = handle.config
-    checkUnwiredSeams(config)
     local c = CreateFrame("AuraContainer", nil, handle.frame, "CustomAuraContainerTemplate")
     c:SetAllPoints(handle.frame)
     self.container = c
+    if type(config.unit) == "string" then c:SetUnit(config.unit) end
 
-    c:SetUnit(config.unit)
+    -- Fresh generation: buttons are created in lazy batches (of 10) as needed, so a slot's
+    -- initializeFrame can fire long after build (incl. mid-combat on pool exhaustion). The
+    -- gen token makes a late callback from a torn-down/rebuilt container no-op.
+    handle._slotCounter = 0
+    handle._gen = (handle._gen or 0) + 1
+    local initFn = handle:_makeInitializeFrame(handle._gen)
 
     local filters = normalizeFilters(config.filter)
     local maxCount = handle:_slotCount()
-    for _, f in ipairs(filters) do
+    local isOverlay = config.mode == "overlay"
+    for i, f in ipairs(filters) do
         if AuraUtil and AuraUtil.IsValidFilterString and not AuraUtil.IsValidFilterString(f) then
-            DF:DebugWarn(DBG, "filter rejected by IsValidFilterString: %s (container will be empty)", tostring(f))
+            DF:DebugWarn(DBG, "filter rejected by IsValidFilterString: %s (group skipped)", tostring(f))
         else
-            c:AddAuraFilter(f, { maxFrameCount = maxCount })
+            local key = "df" .. i
+            if isOverlay then
+                -- AddAuraSlot creates its single button synchronously + returns it (public,
+                -- addon-anchorable). Anchor it over the whole unit frame (presence box).
+                local ok, btn = pcall(function() return c:AddAuraSlot(key, f, { initializeFrame = initFn }) end)
+                if ok and btn then pcall(function() btn:SetAllPoints(handle.frame) end)
+                elseif not ok then DF:DebugWarn(DBG, "AddAuraSlot failed: %s", tostring(btn)) end
+            else
+                local ok, err = pcall(function() c:AddAuraGroup(key, f, { maxFrameCount = maxCount, initializeFrame = initFn }) end)
+                if not ok then DF:DebugWarn(DBG, "AddAuraGroup failed: %s", tostring(err)) end
+            end
         end
     end
 
-    local n = handle:_slotCount()
-    for i = 1, n do
-        local b = CreateFrame("AuraButton", nil, c, "CustomAuraButtonTemplate")
-        if config.mode == "overlay" then b:SetAllPoints(handle.frame) end
-        -- Explicit click-through + tooltip opt-in. The AuraButton intrinsic already forces
-        -- input propagation (AlwaysPropagateInput), but click-off removes it from hit-testing
-        -- entirely so targeting/click-casting reaches the unit frame beneath; hover tooltips
-        -- are opt-in (default off — raid mouseover-healing). Own pcall (a setter throw on this
-        -- new intrinsic must not abort the build loop), separate from the styling pcall so a
-        -- styling fault still can't leave a button click-blocking.
-        -- TODO(PTR-4): the ManagedBackend (Blizzard-created buttons) must apply this too.
-        local okM, errM = pcall(function()
-            b:SetMouseClickEnabled(false)
-            b:SetMouseMotionEnabled(config.tooltips == true)
-        end)
-        if not okM and not warnedMouse then
-            warnedMouse = true
-            DF:DebugWarn(DBG, "mouse suppression failed: %s", tostring(errM))
-        end
-        -- Backstop: a styling fault on one slot must never abort the build loop.
-        local ok, err = pcall(function()
-            handle:_acceptSlot(b, i)     -- cache + regions (source-agnostic)
-            handle:_bindNativeSlot(b)    -- native setters, BEFORE AddAuraFrame
-        end)
-        if not ok then DF:DebugWarn(DBG, "style slot %d failed: %s", i, tostring(err)) end
-        c:AddAuraFrame(b)                -- container adopts it (forbidden view) + binds
-    end
-    handle:_layoutSlots()
-
-    c:SetEnabled(config.enabled ~= false)   -- LAST -> parses + binds with filter + frames present
+    c:SetEnabled(config.enabled ~= false)   -- LAST -> gates UNIT_AURA registration
 
     pcall(function()
-        DF:Debug(DBG, "built (custom) unit=%s mode=%s filters=%d frames=%d",
-            tostring(config.unit), tostring(config.mode or "row"), #filters, c:GetAuraFrameCount())
+        DF:Debug(DBG, "built (native) unit=%s mode=%s groups=%d",
+            tostring(config.unit), tostring(config.mode or "row"), #filters)
     end)
 end
 
-function CustomBackend:setUnit(unit)
-    if self.container then self.container:SetUnit(unit) end
+function NativeBackend:setUnit(unit)
+    if self.container and type(unit) == "string" then self.container:SetUnit(unit) end
 end
 
-function CustomBackend:setEnabled(on)
+function NativeBackend:setEnabled(on)
     if self.container then self.container:SetEnabled(on) end
 end
 
--- Force a re-scan via the Hide();Show() bounce (no callable Refresh on b8f90f2a).
-function CustomBackend:refresh()
-    if not self.container then return end
-    self.container:Hide()
-    self.container:Show()
+-- 68569: UpdateAllAuras() is an addon-callable dirty-mark (processed next OnUpdate while
+-- visible) — the real refresh. Fall back to the Hide/Show bounce only if it's absent.
+function NativeBackend:refresh()
+    local c = self.container
+    if not c then return end
+    if type(c.UpdateAllAuras) == "function" then
+        pcall(function() c:UpdateAllAuras() end)
+    else
+        c:Hide(); c:Show()
+    end
 end
 
-function CustomBackend:teardown()
+-- Full quiesce: SetEnabled(false) + Hide, then drop the ref (RemoveAllAuraFrames is gone;
+-- the container's own button pools park with it — WoW never frees frames regardless).
+function NativeBackend:teardown()
     if self.container then
-        pcall(function() self.container:RemoveAllAuraFrames() end)
+        pcall(function() self.container:SetEnabled(false) end)
         self.container:Hide()
         self.container = nil
     end
@@ -800,7 +742,39 @@ function Handle:_bindNativeSlot(slot)
     bindNative(slot, self.config)              -- native setters (native slots only)
 end
 function Handle:_layoutSlots()
-    if self.config.mode ~= "overlay" then layoutRow(self) end
+    -- Row mode = the container's own flow layout anchors the buttons (the SetAuraLayout*
+    -- translation lands in P1); overlay = SetAllPoints on the returned button. Only the
+    -- future "slots" mode (per-spell AD buckets) hand-anchors via layoutRow.
+    if self.config.mode == "slots" then layoutRow(self) end
+end
+
+-- Build the per-button styling callback Blizzard invokes (securecallfunction) for each
+-- container-created button, in lazy batches of 10 as auras appear -- so this can fire long
+-- after build, including mid-combat. Whole body is pcall-wrapped (an unguarded fault would
+-- abort Blizzard's batch creation); the gen token drops a callback from a torn-down or
+-- rebuilt container; a running counter mirrors the old per-index slot id (batches append,
+-- so indices stay contiguous -- ipairs(self.buttons) in ApplyStyle/layoutRow still holds).
+function Handle:_makeInitializeFrame(gen)
+    local handle = self
+    return function(button)
+        local ok, err = pcall(function()
+            if handle._destroyed or handle._gen ~= gen or not button then return end
+            local i = (handle._slotCounter or 0) + 1
+            handle._slotCounter = i
+            -- Click-through + tooltip opt-in: click-off removes the button from hit-testing so
+            -- targeting/click-casting reaches the unit frame beneath; tooltips default off (raid
+            -- mouseover-healing). No SetCancelAuraButtons -- default is already no-cancel, and it
+            -- takes a click-token string (a table errors).
+            if button.SetMouseClickEnabled then button:SetMouseClickEnabled(false) end
+            if button.SetMouseMotionEnabled then button:SetMouseMotionEnabled(handle.config.tooltips == true) end
+            handle:_acceptSlot(button, i)      -- size + regions (source-agnostic)
+            handle:_bindNativeSlot(button)     -- native inbound setters
+        end)
+        if not ok and not warnedRestyle then
+            warnedRestyle = true
+            DF:DebugWarn(DBG, "initializeFrame styling failed: %s", tostring(err))
+        end
+    end
 end
 
 function Handle:GetFrame() return self.frame end
@@ -856,7 +830,11 @@ function Handle:ApplyStyle(style, layout)
     if type(layout) == "table" then
         self.config.layout = layout   -- optional geometry swap (size/scale/spacing/growth/offsets)
     end
-    if self.config.mode ~= "overlay" then layoutRow(self) end
+    -- Row-mode buttons are anchored by the CONTAINER's secure flow layout -- SetPoint-ing
+    -- them here would fight it (and touches secretwrapped anchor points). Geometry changes
+    -- go through SetAuraLayout* (P1); only the future "slots" mode hand-anchors. styleButton_regions
+    -- below still re-applies per-button SIZE, which the flow layout reads.
+    if self.config.mode == "slots" then layoutRow(self) end
     -- Re-run regions on every slot; re-bind natives only on a native backend (explicit via
     -- isNativeSlots, not relying on plain frames incidentally lacking the setters).
     local native = self.backend and self.backend:isNativeSlots()
@@ -950,6 +928,7 @@ end
 function Handle:_teardownContainer()
     if self.backend then self.backend:teardown(); self.backend = nil end
     wipe(self.buttons)
+    self._slotCounter = 0   -- restart the lazy-batch index for the next build
 end
 
 function Handle:Destroy()
@@ -1031,14 +1010,12 @@ function Handle:_deferRebuild()
     self:_queueOp("rebuild")
 end
 
--- Build via the active backend (only Custom today; a ManagedBackend and a fake/test
--- backend join at PTR-4 / F3 behind the same interface). The backend owns the container
--- + slot production; the handle owns styling/layout/lifecycle. Backend is picked here.
+-- Build via the active backend. Only NativeBackend today (the 68569 container path). Test
+-- mode goes native at P5.5 via SwitchAuraDataProvider (Blizzard's edit-mode fake data feeds
+-- our real containers), which retires the old FakeBackend. The backend owns the container +
+-- slot production; the handle owns styling/layout/lifecycle.
 function Handle:_build()
-    -- Pick the backend: fake/preview slots in test mode (a real container shows nothing on
-    -- a fabricated test unit), else the live CustomAuraContainer. (ManagedBackend at PTR-4.)
-    local BackendClass = AuraContainer._testMode and FakeBackend or CustomBackend
-    self.backend = BackendClass.new(self)
+    self.backend = NativeBackend.new(self)
     self.backend:build()
     self:_updateDynRefresh()   -- auto-bounce on target/focus/mouseover change
 end
