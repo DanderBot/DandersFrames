@@ -2623,8 +2623,14 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
     -- DF.Border below renders always, so non-dispellable keeps the base border.
     local dispel
     if prefix == "debuff" and db.debuffBorderColorByType then
+        -- thickness: match the icon's own DF border so the dispel ring reads as
+        -- "the border took the dispel colour" (flat square line at the same
+        -- weight; inset 0 lands exactly on it, negative insets halo outward).
+        local ringSize = db.debuffBorderSize or 2
+        if db.pixelPerfect and DF.PixelPerfect then ringSize = DF:PixelPerfect(ringSize) end
         dispel = { nativeBorder = true, style = "Color", showWhenHarmful = true,
-                   inset = db.debuffDispelBorderInset or -2 }
+                   inset = db.debuffDispelBorderInset or -2,
+                   thickness = ringSize }
     end
 
     return {

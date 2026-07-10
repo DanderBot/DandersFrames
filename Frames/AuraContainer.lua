@@ -524,10 +524,10 @@ local function styleButton_regions(slot, config)
             slot.dfAuraBorder = slot.dfDispelHolder:CreateTexture(nil, "OVERLAY")
             -- The native Color style only VERTEX-TINTS the region (SetAuraBorderColor →
             -- SetVertexColor; no file is ever assigned) — a blank texture renders
-            -- nothing. Give it the classic debuff-border ring Blizzard's own raid
-            -- frames tint per dispel type.
-            slot.dfAuraBorder:SetTexture("Interface\\Buttons\\UI-Debuff-Overlays")
-            slot.dfAuraBorder:SetTexCoord(0.296875, 0.5703125, 0, 0.515625)
+            -- nothing, so the ART is entirely ours. A flat square ring matching the
+            -- icon's own DF border replaces the old rounded UI-Debuff-Overlays ring,
+            -- which clashed with DF's square borders (Krathe 2026-07-10).
+            slot.dfAuraBorder:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\DF_SquareRing")
         end
         if slot.dfAuraBorder then
             -- Inset re-applied every pass (NOT create-once) so the slider is live.
@@ -536,6 +536,24 @@ local function styleButton_regions(slot, config)
             slot.dfAuraBorder:ClearAllPoints()
             slot.dfAuraBorder:SetPoint("TOPLEFT", slot.dfDispelHolder, "TOPLEFT", ins, -ins)
             slot.dfAuraBorder:SetPoint("BOTTOMRIGHT", slot.dfDispelHolder, "BOTTOMRIGHT", -ins, ins)
+            -- EXACT ring thickness via TexCoord crop: the art is a 128px square
+            -- ring 32 texels (25%) thick with a transparent centre. Cropping the
+            -- outer margin by fraction `a` leaves a ring of (32-128a) texels on a
+            -- (128-256a) source, so at rendered size s the line is
+            --   t = s*(32-128a)/(128-256a)  ->  a = (s-4t)/(4(s-2t)).
+            -- s per axis comes from OUR layout config (never a rect read — the
+            -- buttons' rects are secret/unresolved, §20c), expanded by the inset.
+            -- Recomputed every pass so thickness/size/inset sliders apply live.
+            local t = dispelSpec.thickness or 2
+            local function ringCrop(sEff)
+                if sEff <= 0 or 4 * t >= sEff then return 0 end   -- clamp: max line = size/4
+                local a = (sEff - 4 * t) / (4 * (sEff - 2 * t))
+                if a < 0 then a = 0 elseif a > 0.2495 then a = 0.2495 end
+                return a
+            end
+            local aX = ringCrop(sx - 2 * ins)
+            local aY = ringCrop(sy - 2 * ins)
+            slot.dfAuraBorder:SetTexCoord(aX, 1 - aX, aY, 1 - aY)
         end
         if dispelSpec.nativeSymbol and not slot.dfSymbol then
             slot.dfSymbolHolder = makeHolder(slot, 7)
