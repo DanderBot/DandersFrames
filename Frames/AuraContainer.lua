@@ -195,15 +195,26 @@ local function readColor(c, dr, dg, db, da)
     return c[1] or c.r or dr or 1, c[2] or c.g or dg or 1, c[3] or c.b or db or 1, c[4] or c.a or da or 1
 end
 
--- Normalize config.filter into a clean list of validated filter strings.
+-- Normalize config.filter into a clean list of RECORDS { f, key?, candidateFilters? }.
+-- Accepted inputs: a filter string, a list of filter strings, or a list of records
+-- ({ filter = "HARMFUL", key = "magic", candidateFilters = {...} }) for consumers whose
+-- groups/slots differ per filter (the dispel overlay's per-type slots). A record's
+-- candidateFilters REPLACES config.candidateFilters for that group/slot; its key
+-- replaces the positional "df<i>" key (must be unique within the consumer).
 local function normalizeFilters(filter)
     local out = {}
     if type(filter) == "string" then
-        out[1] = filter
+        out[1] = { f = filter }
     elseif type(filter) == "table" then
-        for _, f in ipairs(filter) do if type(f) == "string" then out[#out + 1] = f end end
+        for _, f in ipairs(filter) do
+            if type(f) == "string" then
+                out[#out + 1] = { f = f }
+            elseif type(f) == "table" and type(f.filter) == "string" then
+                out[#out + 1] = { f = f.filter, key = f.key, candidateFilters = f.candidateFilters }
+            end
+        end
     end
-    if #out == 0 then out[1] = "HELPFUL" end
+    if #out == 0 then out[1] = { f = "HELPFUL" } end
     return out
 end
 
@@ -891,6 +902,21 @@ function NativeBackend:build()
     end
     if type(config.unit) == "string" then pcall(function() c:SetUnit(config.unit) end) end
 
+    -- Container-level aura processing policy (config.processingPolicy = { policy =
+    -- "ProcessAura", options? }): stamps AuraUtil.ProcessAura's classification on every
+    -- candidate BEFORE candidate filters run — required by the processedAuraType
+    -- candidate filter (the native "all dispellable" classification). Enum member is
+    -- resolved by NAME against the securecopy'd global so API drift degrades to no
+    -- policy (and processedAuraType-filtered groups then show nothing) rather than
+    -- erroring the build.
+    if config.processingPolicy and type(config.processingPolicy.policy) == "string" then
+        local pol = resolveEnum(_G.CustomAuraContainerAuraProcessingPolicy, config.processingPolicy.policy)
+        if pol ~= nil then
+            local okPol, errPol = pcall(function() c:SetAuraProcessingPolicy(pol, config.processingPolicy.options) end)
+            if not okPol then DF:DebugWarn(DBG, "SetAuraProcessingPolicy failed: %s", tostring(errPol)) end
+        end
+    end
+
     -- Fresh generation: buttons are created in lazy batches (of 10) as needed, so a slot's
     -- initializeFrame can fire long after build (incl. mid-combat on pool exhaustion). The
     -- gen token makes a late callback from a torn-down/rebuilt container no-op.
@@ -931,21 +957,27 @@ function NativeBackend:build()
         end
     end
     self.groupKeys = {}
-    for i, f in ipairs(filters) do
+    self.slotButtons = isOverlay and {} or nil   -- overlay: key -> native slot button (consumer styling)
+    for i, rec in ipairs(filters) do
+        local f = rec.f
         if AuraUtil and AuraUtil.IsValidFilterString and not AuraUtil.IsValidFilterString(f) then
             DF:DebugWarn(DBG, "filter rejected by IsValidFilterString: %s (group skipped)", tostring(f))
         else
-            local key = "df" .. i
+            local key = rec.key or ("df" .. i)
+            local cf = rec.candidateFilters or candidateFilters
             if isOverlay then
                 local okSlot, btn = pcall(function()
-                    return c:AddAuraSlot(key, f, { initializeFrame = initFn, candidateFilters = candidateFilters })
+                    return c:AddAuraSlot(key, f, { initializeFrame = initFn, candidateFilters = cf,
+                                                   sortMethod = sortMethod, sortDirection = sortDirection })
                 end)
-                if okSlot and btn then pcall(function() btn:SetAllPoints(handle.frame) end)
+                if okSlot and btn then
+                    pcall(function() btn:SetAllPoints(handle.frame) end)
+                    self.slotButtons[key] = btn
                 elseif not okSlot then DF:DebugWarn(DBG, "AddAuraSlot failed: %s", tostring(btn)) end
             else
                 local okGroup, err = pcall(function()
                     c:AddAuraGroup(key, f, { maxFrameCount = maxCount, initializeFrame = initFn,
-                                             layout = groupLayout, candidateFilters = candidateFilters,
+                                             layout = groupLayout, candidateFilters = cf,
                                              sortMethod = sortMethod, sortDirection = sortDirection })
                 end)
                 if okGroup then
@@ -1046,6 +1078,7 @@ function NativeBackend:teardown()
         pcall(function() c:Hide() end)
     end
     self.container = nil
+    self.slotButtons = nil   -- buttons die with the container; consumers re-fetch per drive
 end
 
 -- FakeBackend — test-mode / preview. Produces PLAIN Frame slots (not AuraButtons) so
@@ -1090,8 +1123,8 @@ function FakeBackend:_fill()
     local config = self.handle.config
     if config.mode == "overlay" then return end   -- overlay shows tint/border via regions; no icon data
     local harmful = false
-    for _, f in ipairs(normalizeFilters(config.filter)) do
-        if f:find("HARMFUL") then harmful = true; break end
+    for _, rec in ipairs(normalizeFilters(config.filter)) do
+        if rec.f:find("HARMFUL") then harmful = true; break end
     end
     local pool = harmful and FAKE_HARMFUL or FAKE_HELPFUL
     local staticID = config.style and config.style.icon and config.style.icon.staticSpellID
@@ -1184,6 +1217,15 @@ function Handle:_makeInitializeFrame(gen)
 end
 
 function Handle:GetFrame() return self.frame end
+-- OVERLAY mode only: the live native slot buttons, keyed by the filter record's key
+-- (positional "df<i>" when unkeyed). Consumers decorate these directly (build DF art
+-- on them, register native SetAuraBorder regions). EMPTY until a native build lands
+-- (combat-deferred builds, fake/test backend) and INVALIDATED by every rebuild — never
+-- cache the buttons across drives; re-fetch and key per-button state on the button itself.
+function Handle:GetOverlaySlots()
+    local b = self.backend
+    return (b and b.slotButtons) or nil
+end
 -- MISSING mode only: the always-styled badge frame (icon/border are the consumer's).
 -- Its visibility is engine-driven (shown only while a live container backs the push
 -- geometry); consumers gate the WINDOW (GetFrame) for dead/offline/range guards.
@@ -1567,7 +1609,14 @@ end
 --                                              -- badge = { w, h }, filter + candidateFilters
 --                                              -- select the tracked spell(s); style the frame
 --                                              -- from GetBadgeFrame(); position GetFrame().
---   filter   = "HELPFUL" | { "HARMFUL|RAID_PLAYER_DISPELLABLE", ... },  -- category (now)
+--   filter   = "HELPFUL" | { "HARMFUL|RAID_PLAYER_DISPELLABLE", ... }   -- category (now)
+--              | { { filter = "HARMFUL", key = "magic", candidateFilters = {...} }, ... },
+--                                              -- record form: per-group/slot key + candidate
+--                                              -- filters (overlay consumers fetch their slot
+--                                              -- buttons by key via GetOverlaySlots()).
+--   processingPolicy = { policy = "ProcessAura", options? },  -- container-level; stamps
+--                                              -- ProcessAura classification for the
+--                                              -- processedAuraType candidate filter.
 --   spellIDs = { 774, ... },                    -- PTR-4 only; accepted + no-op now (warns if set)
 --   dispelTypes = { "Magic", "Curse" },         -- PTR-4 only; accepted + no-op now (warns if set)
 --   maxDuration = 30,                            -- PTR-4 only; accepted + no-op now (warns if set)
