@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+* (Auras) Texture-style aura borders no longer scatter, lose their colour or vanish until a /reload on the 12.1 aura rows. The game positions the new aura buttons with protected values that the standard border backdrop can't measure, so aura-icon texture borders now render through a measurement-free path; fine border detail (e.g. double lines) also stays crisp at small icon sizes.
+* (Auras) "Color by Time Remaining" works again on the 12.1 aura rows: duration text colours by time left — red under 5s, orange under 15s, yellow under a minute, green above — evaluated by the game engine itself, so it keeps ticking in combat. (12.1 can no longer colour by percentage of the aura's full duration, so the steps are fixed times; the Short/Full formats use plain-English units while colouring is on.)
 * (Auras) Buff and defensive icon text now has a shared styling system, adding a Duration and Stack text colour option. The "Short" duration format no longer shows a stray space (e.g. "45s" not "45 s").
 * (Auras) Fixed Icons Per Row wrapping one icon early on the new 12.1 aura rows.
 
@@ -25,7 +27,7 @@
 
 * The 12.1 aura rows are being rebuilt on Blizzard's new container system and are under active testing — please report any case where buff or defensive auras stop updating, **especially in combat**.
 * An aura matching more than one filter can show duplicate icons — a 12.1 limitation we're still working around.
-* Some buff/defensive tooltip and duration-colour settings don't yet apply to the new aura rows.
+* Some buff/defensive tooltip settings don't yet apply to the new aura rows.
 * Debuffs, dispel overlay and other non-buff aura displays are not yet ported to the new system and may be blank on 12.1.
 * Dragging certain aura sliders can briefly stutter.
 

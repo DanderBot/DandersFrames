@@ -287,10 +287,14 @@ local function styleButton_regions(slot, config)
 
     -- BORDER via DF.Border (STATIC only — animated forbidden on buttons). DF-owned, so
     -- source-agnostic (works on native + plain slots). pcall-guarded + warn-once.
+    -- secretRect: container buttons are anchored by Blizzard's flow layout with
+    -- secret-wrapped offsets (and have NO anchors yet when initializeFrame runs), so
+    -- TEXTURE-style borders must render via DF.Border's anchor-only piece path —
+    -- BackdropTemplate's Lua tiling math scatters/breaks on secret or unresolved rects.
     local borderSpec = style.border
     if borderSpec and DF.Border then
         if not slot.dfBorder then
-            local ok, w = pcall(function() return DF.Border:New(slot, { solidOnly = true }) end)
+            local ok, w = pcall(function() return DF.Border:New(slot, { solidOnly = true, secretRect = true }) end)
             if ok then slot.dfBorder = w end
         end
         if slot.dfBorder then

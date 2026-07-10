@@ -43,10 +43,17 @@ local Border = DF.Border
 --                     cheap AND safe for secret-tinted colours (e.g. debuff
 --                     dispel-type colours), where CreateColor()/comparisons would
 --                     taint. Do NOT set for borders that can switch to GRADIENT.
+--   secretRect        the host's rect may be SECRET or unresolved when Apply runs
+--                     (12.1 aura-container buttons: Blizzard anchors them with
+--                     secret-wrapped offsets, and initializeFrame fires before any
+--                     anchor exists). TEXTURE style then renders via the anchor-only
+--                     8-piece path instead of BackdropTemplate, whose Lua tiling
+--                     math breaks on such rects. See the piece renderer above Apply.
 function Border:New(parent, opts)
     opts = opts or {}
     local border = CreateFrame("Frame", nil, parent)
     border._solidOnly = opts.solidOnly and true or false
+    border._secretRect = opts.secretRect and true or false
     -- Remember anchorTo on the widget so :Apply can re-anchor when an offsetX/Y
     -- is supplied (SetAllPoints below is the offsetX=offsetY=0 default; :Apply
     -- replaces it with two SetPoint calls translated by the offset).
@@ -55,6 +62,7 @@ function Border:New(parent, opts)
     border:SetFrameLevel(parent:GetFrameLevel() + (opts.frameLevelOffset or 10))
 
     local layer = opts.layer or "BORDER"
+    border._layer = layer   -- texture-piece renderer creates on the same layer
     border.top = border:CreateTexture(nil, layer)
     border.top:SetPoint("TOPLEFT", 0, 0)
     border.top:SetPoint("TOPRIGHT", 0, 0)
@@ -73,7 +81,13 @@ function Border:New(parent, opts)
     border.SetColor = function(self, r, g, b, a)
         a = a or 1
         if self.activeTexture then
-            if self.bd then self.bd:SetBackdropBorderColor(r, g, b, a) end
+            if self._secretRect and self.texPieces then
+                -- Anchor-only piece render: plain SetVertexColor per piece —
+                -- render-side setter, safe for secret-tinted colours.
+                for _, t in pairs(self.texPieces) do t:SetVertexColor(r, g, b, a) end
+            elseif self.bd then
+                self.bd:SetBackdropBorderColor(r, g, b, a)
+            end
         else
             local bm = self._blendMode or "BLEND"
             local edges = { self.top, self.bottom, self.left, self.right }
@@ -1279,6 +1293,82 @@ function Border:RecolorActive(border, r, g, b, a)
     end
 end
 
+-- ============================================================
+-- ANCHOR-ONLY TEXTURE BORDER (secretRect widgets)
+-- Renders an LSM border edgeFile as 8 plain textures — 4 fixed-size corner
+-- squares at the widget's (inset-adjusted) corners + 4 edges anchored
+-- corner-to-corner — using the STANDARD backdrop edgeFile UV layout copied
+-- verbatim from Blizzard_SharedXML/Backdrop.lua (textureUVs), so any texture
+-- that renders via BackdropTemplate renders identically here.
+--
+-- WHY: BackdropTemplate computes its edge-tiling texcoords in Lua from
+-- GetWidth()/GetHeight()/GetEffectiveScale(). On hosts whose rect is SECRET
+-- (12.1 aura-container buttons are anchored with secret-wrapped offsets) or
+-- simply unresolved at Apply time, that math produces scattered tiles or
+-- throws mid-setup. These pieces are pure anchors + constant sizes: nothing
+-- ever reads the rect, so the render is immune to whatever Blizzard does to
+-- the host's geometry. Edges STRETCH along their length instead of tiling —
+-- the single-tile UV window [coordStart, coordEnd] — which also keeps a
+-- multi-line edge art (e.g. a double border) crisp at small sizes.
+-- ============================================================
+local TEX_CS, TEX_CE = 0.0625, 0.9375   -- coordStart / coordEnd (Backdrop.lua)
+-- 8-arg SetTexCoord order: ULx,ULy, LLx,LLy, URx,URy, LRx,LRy. Values are the
+-- Backdrop.lua textureUVs with the repeatX/repeatY axis pinned to one tile.
+local TEX_PIECE_UVS = {
+    tl     = { 0.5078125, TEX_CS, 0.5078125, TEX_CE, 0.6171875, TEX_CS, 0.6171875, TEX_CE },
+    tr     = { 0.6328125, TEX_CS, 0.6328125, TEX_CE, 0.7421875, TEX_CS, 0.7421875, TEX_CE },
+    bl     = { 0.7578125, TEX_CS, 0.7578125, TEX_CE, 0.8671875, TEX_CS, 0.8671875, TEX_CE },
+    br     = { 0.8828125, TEX_CS, 0.8828125, TEX_CE, 0.9921875, TEX_CS, 0.9921875, TEX_CE },
+    top    = { 0.2578125, TEX_CE, 0.3671875, TEX_CE, 0.2578125, TEX_CS, 0.3671875, TEX_CS },
+    bottom = { 0.3828125, TEX_CE, 0.4921875, TEX_CE, 0.3828125, TEX_CS, 0.4921875, TEX_CS },
+    left   = { 0.0078125, TEX_CS, 0.0078125, TEX_CE, 0.1171875, TEX_CS, 0.1171875, TEX_CE },
+    right  = { 0.1328125, TEX_CS, 0.1328125, TEX_CE, 0.2421875, TEX_CS, 0.2421875, TEX_CE },
+}
+
+local function ensureTexPieces(border)
+    if border.texPieces then return border.texPieces end
+    local p = {}
+    for key in pairs(TEX_PIECE_UVS) do
+        local t = border:CreateTexture(nil, border._layer or "BORDER")
+        -- Thin border art must not snap to the pixel grid — snapping collapses
+        -- sub-pixel lines (NineSlice.lua disables it on its pieces the same way;
+        -- part of why fine detail like a double line washed out at small sizes).
+        if t.SetTexelSnappingBias then t:SetTexelSnappingBias(0) end
+        if t.SetSnapToPixelGrid then t:SetSnapToPixelGrid(false) end
+        p[key] = t
+    end
+    border.texPieces = p
+    return p
+end
+
+local function hideTexPieces(border)
+    if not border.texPieces then return end
+    for _, t in pairs(border.texPieces) do t:Hide() end
+end
+
+-- Idempotent: re-anchors/re-paints in place on every Apply (create-once textures).
+local function applyTexPieces(border, edgeFile, size, inset, cr, cg, cb, ca)
+    local p = ensureTexPieces(border)
+    -- Corners: size×size squares at the four inset-adjusted corners.
+    p.tl:ClearAllPoints(); p.tl:SetPoint("TOPLEFT",     border, "TOPLEFT",      inset, -inset); p.tl:SetSize(size, size)
+    p.tr:ClearAllPoints(); p.tr:SetPoint("TOPRIGHT",    border, "TOPRIGHT",    -inset, -inset); p.tr:SetSize(size, size)
+    p.bl:ClearAllPoints(); p.bl:SetPoint("BOTTOMLEFT",  border, "BOTTOMLEFT",   inset,  inset); p.bl:SetSize(size, size)
+    p.br:ClearAllPoints(); p.br:SetPoint("BOTTOMRIGHT", border, "BOTTOMRIGHT", -inset,  inset); p.br:SetSize(size, size)
+    -- Edges: anchored corner-to-corner — thickness comes from the corners,
+    -- length is fully anchor-driven (no size reads, ever).
+    p.top:ClearAllPoints();    p.top:SetPoint("TOPLEFT", p.tl, "TOPRIGHT");        p.top:SetPoint("BOTTOMRIGHT", p.tr, "BOTTOMLEFT")
+    p.bottom:ClearAllPoints(); p.bottom:SetPoint("BOTTOMLEFT", p.bl, "BOTTOMRIGHT"); p.bottom:SetPoint("TOPRIGHT", p.br, "TOPLEFT")
+    p.left:ClearAllPoints();   p.left:SetPoint("TOPLEFT", p.tl, "BOTTOMLEFT");     p.left:SetPoint("BOTTOMRIGHT", p.bl, "TOPRIGHT")
+    p.right:ClearAllPoints();  p.right:SetPoint("TOPRIGHT", p.tr, "BOTTOMRIGHT");  p.right:SetPoint("BOTTOMLEFT", p.br, "TOPLEFT")
+    for key, t in pairs(p) do
+        t:SetTexture(edgeFile)
+        local uv = TEX_PIECE_UVS[key]
+        t:SetTexCoord(uv[1], uv[2], uv[3], uv[4], uv[5], uv[6], uv[7], uv[8])
+        t:SetVertexColor(cr, cg, cb, ca)
+        t:Show()
+    end
+end
+
 -- (Re)configure a border widget from a spec.
 -- spec:
 --   enabled       false hides the border entirely (default: true)
@@ -1343,6 +1433,7 @@ function Border:Apply(border, spec)
     if spec.enabled == false then
         for _, e in ipairs(edges) do if e then e:Hide() end end
         if border.bd then border.bd:Hide() end
+        hideTexPieces(border)
         border.activeTexture = nil
         -- Tear down any running glow when the border is hidden, otherwise
         -- the LCG glow keeps rendering around the unit with no visible
@@ -1373,6 +1464,7 @@ function Border:Apply(border, spec)
         -- silently degrades to SOLID here when the LSM key isn't resolvable.
         border.activeTexture = nil
         if border.bd then border.bd:Hide() end
+        hideTexPieces(border)
 
         -- Re-anchor edges so inset takes effect (and so going inset != 0 → 0
         -- restores the flush layout). Done on every Apply: it's four cheap
@@ -1488,27 +1580,49 @@ function Border:Apply(border, spec)
             for _, e in ipairs(edges) do if e then e:Hide() end end
         end
     else
-        -- Texture mode: a BackdropTemplate child with the LSM border edgeFile.
-        -- spec.blendMode is intentionally ignored here — see doc above.
+        -- Texture mode — TWO renderers behind the same spec:
+        --
+        --  * secretRect widgets (opts.secretRect in :New): 8 ANCHOR-ONLY pieces (4
+        --    fixed-size corners + 4 corner-to-corner edges). The host's rect may be
+        --    SECRET or unresolved — 12.1 CustomAuraContainer buttons are anchored by
+        --    Blizzard's flow layout with secret-wrapped offsets, and at initializeFrame
+        --    time have no anchors at all — and BackdropTemplate:SetupTextureCoordinates
+        --    reads GetWidth/GetHeight/GetEffectiveScale in LUA to compute tile repeats.
+        --    That math on a zero/secret rect scatters the edge tiles ("border breaks
+        --    apart"), and a mid-setup throw leaves pieces uncoloured or missing until
+        --    a /reload happens to re-lay them out of combat. The pieces here are pure
+        --    anchors + constant sizes — NOTHING reads the rect, so Blizzard can anchor
+        --    the host however and whenever it likes. Tradeoff: edges STRETCH instead
+        --    of tile — indistinguishable for line-style borders at icon sizes.
+        --
+        --  * everyone else: the classic BackdropTemplate child (tiling preserved for
+        --    long frame edges). spec.blendMode is intentionally ignored in texture
+        --    mode — see doc above.
         for _, e in ipairs(edges) do if e then e:Hide() end end
-        if not border.bd then
-            border.bd = CreateFrame("Frame", nil, border, "BackdropTemplate")
-        end
-        local bd = border.bd
-        -- Re-anchor with the inset offsets on every Apply so texture borders honour
-        -- BorderInset and update live, matching the solid/gradient edges above.
-        -- (Previously SetAllPoints(border) once at creation: inset was ignored and
-        -- never updated.) inset == 0 reproduces the old flush layout exactly.
-        bd:ClearAllPoints()
-        bd:SetPoint("TOPLEFT", border, "TOPLEFT", inset, -inset)
-        bd:SetPoint("BOTTOMRIGHT", border, "BOTTOMRIGHT", -inset, inset)
-        -- Thickness 0 = no border: hide the backdrop instead of clamping the
-        -- edge to 1px (parity with the solid/gradient path above). The
-        -- animation overlay is a separate frame and keeps running.
+        -- Thickness 0 = no border: hide the texture render instead of clamping the
+        -- edge to 1px (parity with the solid/gradient path above). The animation
+        -- overlay is a separate frame and keeps running.
         if size <= 0 then
-            bd:Hide()
+            if border.bd then border.bd:Hide() end
+            hideTexPieces(border)
             border.activeTexture = nil
+        elseif border._secretRect then
+            if border.bd then border.bd:Hide() end
+            applyTexPieces(border, edgeFile, size, inset, cr, cg, cb, ca)
+            border.activeTexture = texture
         else
+            hideTexPieces(border)
+            if not border.bd then
+                border.bd = CreateFrame("Frame", nil, border, "BackdropTemplate")
+            end
+            local bd = border.bd
+            -- Re-anchor with the inset offsets on every Apply so texture borders honour
+            -- BorderInset and update live, matching the solid/gradient edges above.
+            -- (Previously SetAllPoints(border) once at creation: inset was ignored and
+            -- never updated.) inset == 0 reproduces the old flush layout exactly.
+            bd:ClearAllPoints()
+            bd:SetPoint("TOPLEFT", border, "TOPLEFT", inset, -inset)
+            bd:SetPoint("BOTTOMRIGHT", border, "BOTTOMRIGHT", -inset, inset)
             bd:SetBackdrop({ edgeFile = edgeFile, edgeSize = size })
             bd:SetBackdropBorderColor(cr, cg, cb, ca)
             bd:Show()

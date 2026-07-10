@@ -2346,19 +2346,51 @@ end
 --   FULL   -> "45 Seconds" / "2 Minutes"          (SecondsFormatter, None = full word)
 -- Blizzard's own default is SHORT-like; DF's legacy rows showed NUMBER. Built once per
 -- format and cached (Blizzard securecopies the options table, so one object per format is fine).
-local function BuildDurationFormatter(format, hideAboveT)
+local function BuildDurationFormatter(format, hideAboveT, colorByTime)
     format = format or "NUMBER"
-    -- Hide-above-threshold: show seconds up to the threshold, blank above it. Forces a numeric
-    -- formatter (SecondsFormatter has no empty band). The slider caps at 60s, so no minute/hour
-    -- bands are needed below the threshold.
-    if hideAboveT then
+    -- Hide-above-threshold and/or COLOUR-BY-TIME buckets: both need per-band format
+    -- strings, which only the NumericRuleFormatter has (SecondsFormatter carries none) —
+    -- so SHORT/FULL are emulated with the matching unit suffix (the pre-existing
+    -- hide-above tradeoff: English unit text, not locale-aware).
+    --
+    -- Colour-by-time: the smooth curve is NOT addon-reachable on 12.1 (see the
+    -- GetDurationColorCurve tombstone below). Instead each band's format string EMBEDS a
+    -- |cffRRGGBB escape; the C-side DurationTextBinding evaluates the SECRET remaining
+    -- time against the breakpoints and renders the pre-coloured string — no aura read,
+    -- no addon ticker, secret-safe (the DF_AuraLab-proven formatter trick). Bands are
+    -- the legacy curve's colours discretised on ABSOLUTE remaining time:
+    --   <5s red · 5-15s orange · 15-60s yellow · 60s+ green (fresh).
+    -- (The legacy path coloured by PERCENT of total duration; a static formatter can't
+    -- know the total, so absolute-seconds bands are the 12.1 equivalent.)
+    if hideAboveT or colorByTime then
         if not (C_StringUtil and C_StringUtil.CreateNumericRuleFormatter and Enum and Enum.NumericRuleFormatRounding) then return nil end
         local secFmt = (format == "SHORT" and "%.0fs") or (format == "FULL" and "%.0f Seconds") or "%.0f"
         local ok, f = pcall(function()
             local down = Enum.NumericRuleFormatRounding.Down
             local fmt = C_StringUtil.CreateNumericRuleFormatter()
-            fmt:AddBreakpoint({ threshold = 0,          step = 1, rounding = down, min = 1, format = secFmt })
-            fmt:AddBreakpoint({ threshold = hideAboveT, step = 1, rounding = down, format = "" })
+            -- Highest threshold <= remaining seconds wins.
+            local function add(threshold, fstr, hex, components)
+                if colorByTime then fstr = "|cff" .. hex .. fstr .. "|r" end
+                fmt:AddBreakpoint({ threshold = threshold, step = 1, rounding = down,
+                                    min = 1, format = fstr, components = components })
+            end
+            add(0, secFmt, "ff0000")
+            if colorByTime then
+                -- Colour cuts go in below the hide threshold only — a cut at/above it
+                -- would shadow the blank band. (Hide slider caps at 60s, so the two
+                -- sub-minute cuts are the only ones affected.)
+                if not hideAboveT or hideAboveT > 5  then add(5,  secFmt, "ff8000") end
+                if not hideAboveT or hideAboveT > 15 then add(15, secFmt, "ffff00") end
+            end
+            if hideAboveT then
+                fmt:AddBreakpoint({ threshold = hideAboveT, step = 1, rounding = down, format = "" })
+            else
+                -- 60s+ renders minutes/hours (green = the legacy curve's fresh end).
+                add(60,   (format == "FULL") and "%.0f Minutes" or "%.0fm", "00ff00",
+                    { { div = 60,   step = 1, rounding = down } })
+                add(3600, (format == "FULL") and "%.0f Hours"   or "%.0fh", "00ff00",
+                    { { div = 3600, step = 1, rounding = down } })
+            end
             return fmt
         end)
         return ok and f or nil
@@ -2405,11 +2437,11 @@ local function BuildDurationFormatter(format, hideAboveT)
 end
 
 local durationFormatterCache = {}
-local function GetDurationFormatter(format, hideAboveT)
+local function GetDurationFormatter(format, hideAboveT, colorByTime)
     format = format or "NUMBER"
-    local key = format .. "|" .. tostring(hideAboveT or "")
+    local key = format .. "|" .. tostring(hideAboveT or "") .. (colorByTime and "|C" or "")
     if durationFormatterCache[key] == nil then
-        durationFormatterCache[key] = BuildDurationFormatter(format, hideAboveT) or false
+        durationFormatterCache[key] = BuildDurationFormatter(format, hideAboveT, colorByTime) or false
     end
     return durationFormatterCache[key] or nil
 end
@@ -2431,7 +2463,7 @@ end
 -- binding" cannot work; poking Blizzard-owned binding state on a live button is also the
 -- exact touch class behind the combat dirty-latch freeze. durationColorByTime ships as
 -- discrete colour BUCKETS via the duration formatter (|cRRGGBB escapes in AddBreakpoint
--- format strings — C-side, secret-safe, the NSRT-proven path) in P2.)
+-- format strings — C-side, secret-safe, the NSRT-proven path): BuildDurationFormatter above.)
 
 -- NATIVE BLACKLIST (buffs): the user's aura blacklist -> candidateFilters.excludeSpellIDs,
 -- evaluated Blizzard-side (works for HELPFUL auras on friendly frames — helpful spell-ID
@@ -2497,11 +2529,11 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
             baseSize = 10, defaultAnchor = "CENTER", boxW = iconSize, boxH = iconSize,
         })
         dur.show = true
-        dur.formatter = GetDurationFormatter(durFormat, hideAboveT)
-        -- colorByTime: colour BUCKETS via the formatter land in P2 (the smooth curve is
-        -- not addon-reachable — see the GetDurationColorCurve tombstone below). While the
-        -- flag is on, the static colour must NOT stomp the (future) bucket escapes.
-        -- The formatKey keeps the flag in the rebuild signature so the P2 wiring hot-applies.
+        dur.formatter = GetDurationFormatter(durFormat, hideAboveT, colorByTime)
+        -- colorByTime = colour BUCKETS baked into the formatter's band format strings
+        -- (see BuildDurationFormatter — the smooth curve is not addon-reachable). The
+        -- static colour must not stomp the escapes; formatKey keeps both flags in the
+        -- rebuild signature (the formatter is creation-frozen on the native bind).
         if colorByTime then dur.color = nil end
         dur.formatKey = durFormat .. (colorByTime and ":C" or "") .. (hideAboveT and (":H" .. tostring(hideAboveT)) or "")
     end
@@ -2690,9 +2722,9 @@ function DF:BuildDefensiveRowConfig(db, unit)
             baseSize = 10, defaultAnchor = "CENTER", boxW = iconSize, boxH = iconSize,
         })
         dur.show = true
-        dur.formatter = GetDurationFormatter("NUMBER", nil)
-        -- colorByTime: buckets via the formatter land in P2 (see the tombstone above).
-        -- While on, the static colour must not stomp the (future) bucket escapes.
+        dur.formatter = GetDurationFormatter("NUMBER", nil, colorByTime)
+        -- colorByTime = colour buckets baked into the formatter bands (see
+        -- BuildDurationFormatter). Static colour must not stomp the escapes.
         if colorByTime then dur.color = nil end
         dur.formatKey = "NUMBER" .. (colorByTime and ":C" or "")
     end
