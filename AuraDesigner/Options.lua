@@ -3033,6 +3033,15 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
     local startY = 10 + (yOffset or 0)  -- top padding + optional offset
     local totalHeight = startY
 
+    -- P4.7 (12.1 GUI status overlays): collected here so the block pass at the
+    -- end of BuildTypeContent can frost the effect-settings groups the factory
+    -- can't (yet) drive, WITHOUT touching the trigger tags above (built into
+    -- `parent` before this function runs — the working "which aura" layer).
+    -- expiringGroup / swmCheck / borderCtl are captured for the surgical blocks
+    -- (Expiring, Show When Missing, gradient border style). See block pass below.
+    local builtGroups = {}
+    local expiringGroup, swmCheck, borderCtl, wholeBarCheck
+
     local function AddWidget(widget, height)
         widget:SetPoint("TOPLEFT", parent, "TOPLEFT", 5, -totalHeight)
         if widget.SetWidth then widget:SetWidth(contentWidth - 10) end
@@ -3077,6 +3086,11 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         buildFn(group)
         local h = group:LayoutChildren()
         AddWidget(group, h)
+        -- P4.7: track every effect-settings group so the 12.1 block pass can
+        -- frost them per-type. Tag the Expiring group for its own limitation block.
+        builtGroups[#builtGroups + 1] = group
+        if header == L["Expiring"] then expiringGroup = group end
+        return group
     end
 
     -- Lightweight subheader for inline section dividers inside a
@@ -3665,7 +3679,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- include offset too — this border covers the whole frame, so nudging
         -- it can be useful.  No class/role (it's an aura indicator).
         AddGroup(L["Appearance"], function(g)
-            GUI:CreateBorderControls(g, proxy, "", {
+            borderCtl = GUI:CreateBorderControls(g, proxy, "", {
                 parent  = parent,
                 include = {
                     inset = true, offset = true, blendMode = true,
@@ -3685,9 +3699,10 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             -- border so it fully covers it (on by default).  Off tucks it back
             -- underneath the frame border (the pre-5.4 stacking).
             g:AddWidget(GUI:CreateCheckbox(parent, L["Draw above frame border"], proxy, "drawAboveFrameBorder", RPL), 28)
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Show When Missing"], proxy, "showWhenMissing", function()
+            swmCheck = GUI:CreateCheckbox(parent, L["Show When Missing"], proxy, "showWhenMissing", function()
                 DF.AuraDesigner.Engine:ForceRefreshAllFrames()
-            end), 28)
+            end)
+            g:AddWidget(swmCheck, 28)
         end)
         -- Expiring — full parity with icon/square (Stage 5.4): master enable +
         -- State Overrides (border thickness / colour / alpha / animation swap)
@@ -3722,12 +3737,13 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             -- Tint-mode only: tint the WHOLE bar (incl. missing health) instead of
             -- just the current-health portion. Hidden in Replace mode (there the bar
             -- IS the indicator, so this would hide health loss). Same hideOn as Blend.
-            local wholeBarCheck = GUI:CreateCheckbox(parent, L["Tint Entire Bar"], proxy, "tintWholeBar", RPL)
+            wholeBarCheck = GUI:CreateCheckbox(parent, L["Tint Entire Bar"], proxy, "tintWholeBar", RPL)
             wholeBarCheck.hideOn = function() return (proxy.mode or "Replace") == "Replace" end
             g:AddWidget(wholeBarCheck, 28)
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Show When Missing"], proxy, "showWhenMissing", function()
+            swmCheck = GUI:CreateCheckbox(parent, L["Show When Missing"], proxy, "showWhenMissing", function()
                 DF.AuraDesigner.Engine:ForceRefreshAllFrames()
-            end), 28)
+            end)
+            g:AddWidget(swmCheck, 28)
         end)
         -- Expiring
         AddGroup(L["Expiring"], function(g)
@@ -3762,9 +3778,10 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             local blendSlider = GUI:CreateSlider(parent, L["Blend %"], 0, 1, 0.05, proxy, "blend")
             blendSlider.hideOn = function() return (proxy.mode or "Tint") == "Replace" end
             g:AddWidget(blendSlider, 54)
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Show When Missing"], proxy, "showWhenMissing", function()
+            swmCheck = GUI:CreateCheckbox(parent, L["Show When Missing"], proxy, "showWhenMissing", function()
                 DF.AuraDesigner.Engine:ForceRefreshAllFrames()
-            end), 28)
+            end)
+            g:AddWidget(swmCheck, 28)
         end)
         -- Expiring
         AddGroup(L["Expiring"], function(g)
@@ -4083,6 +4100,77 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 expireLoopSlider:EnableMouse(false)
             end
         end)
+    end
+
+    -- ============================================================
+    -- 12.1 AURA-SYSTEM STATUS OVERLAYS (P4.7 GUI pass)
+    -- Frost the AD effect-settings the 12.1 Blizzard aura system can't drive.
+    -- Every block gates on DF:FactoryOwnsAD(d), so on 12.0.x / legacy
+    -- (adUseFactory=false) nothing frosts and everything stays editable. Only
+    -- the settings GROUPS built above are targeted — the trigger tags (the
+    -- working "which aura" layer) live in `parent` above `startY` and are left
+    -- alone. "roadmap" = temporary (delete the single call site when the port
+    -- lands); "limitation" = permanent (secret-value casualty).
+    -- ============================================================
+    local ADgate = function(d) return DF:FactoryOwnsAD(d) end
+
+    local function BlockGroups(wording, idBase)
+        for _, g in ipairs(builtGroups) do
+            GUI:BlockControl12_1(g, wording, { id = idBase, page = L["Aura Designer"], when = ADgate })
+        end
+    end
+
+    if typeKey == "icon" then
+        -- P4.3: remove when the icon indicator ports to the factory.
+        BlockGroups("roadmap", "ad:icon")
+    elseif typeKey == "square" then
+        -- P4.3/P4.4: remove when the square indicator ports to the factory.
+        BlockGroups("roadmap", "ad:square")
+    elseif typeKey == "bar" then
+        -- P4.4: remove when the bar indicator ports to the factory.
+        BlockGroups("roadmap", "ad:bar")
+    elseif typeKey == "sound" then
+        -- P4.5: remove when the sound indicator ports to the factory.
+        BlockGroups("roadmap", "ad:sound")
+    elseif typeKey == "framealpha" or typeKey == "nametext" or typeKey == "healthtext" then
+        -- Permanent: these indicators need a read-free value the 12.1 aura
+        -- system can't provide, so the whole effect is unavailable.
+        BlockGroups("limitation", "ad:" .. typeKey)
+    elseif typeKey == "healthbar" or typeKey == "background" or typeKey == "border" then
+        -- Base effect settings (colour / mode / style) work on the container
+        -- engine. Two surgical blocks on top:
+        --   * Expiring — permanent limitation (near-expiry pulse / colour-swap /
+        --     alpha ramp all need remaining-time, impossible read-free).
+        if expiringGroup then
+            GUI:BlockControl12_1(expiringGroup, "limitation",
+                { id = "ad:" .. typeKey .. ":expiring", page = L["Aura Designer"], when = ADgate })
+        end
+        --   * Show When Missing — P4.5 roadmap (remove when missing-aura state
+        --     ports to the factory).
+        if swmCheck then
+            GUI:BlockControl12_1(swmCheck, "roadmap",
+                { id = "ad:" .. typeKey .. ":showWhenMissing", page = L["Aura Designer"], when = ADgate })
+        end
+        --   * Tint Entire Bar (healthbar only) — permanent limitation. Factory-owned
+        --     health-bar is ALWAYS whole-bar tinted; the current-health-fill variant
+        --     (tintWholeBar=false) isn't expressible read-free (Section-1 D1 casualty),
+        --     so the toggle does nothing when factory-owned. wholeBarCheck is only ever
+        --     built in the healthbar branch, so the nil guard keeps it healthbar-scoped.
+        if wholeBarCheck then
+            GUI:BlockControl12_1(wholeBarCheck, "limitation",
+                { id = "ad:healthbar:tintwholebar", page = L["Aura Designer"], when = ADgate })
+        end
+        --   * Gradient border style — permanent limitation (degrades to solid on
+        --     secret-anchored slots). Blocks only the gradient pickers/direction,
+        --     which surface under Border Style = Gradient; Solid/Texture stay usable.
+        if typeKey == "border" and borderCtl then
+            for _, wKey in ipairs({ "gradientStart", "gradientEnd", "gradientDirection" }) do
+                if borderCtl[wKey] then
+                    GUI:BlockControl12_1(borderCtl[wKey], "limitation",
+                        { id = "ad:border:gradient", page = L["Aura Designer"], when = ADgate })
+                end
+            end
+        end
     end
 
     totalHeight = totalHeight + 8  -- bottom padding
@@ -5488,6 +5576,18 @@ CreateEffectCard = function(parent, yPos, effect)
                     SwitchTab("effects")
                     RefreshPreviewEffects()
                 end)
+
+                -- P4.7 (12.1 limitation): the multi-trigger AND operator needs to
+                -- evaluate every trigger together, which the 12.1 aura system can't
+                -- do read-free for secret-anchored triggers. Frost the toggle (a
+                -- hand-rolled button, so block it directly) — the trigger tags
+                -- beside it stay editable. Gated on DF:FactoryOwnsAD, so legacy /
+                -- 12.0.x is untouched. Permanent.
+                GUI:BlockControl12_1(opBtn, "limitation", {
+                    id   = "ad:trigger:operator",
+                    page = L["Aura Designer"],
+                    when = function(d) return DF:FactoryOwnsAD(d) end,
+                })
 
             end
 
