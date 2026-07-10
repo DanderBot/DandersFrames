@@ -1303,6 +1303,19 @@ end
 -- gate it (Destroy defers this to regen in combat).
 function Handle:_teardownContainer()
     if self.backend then self.backend:teardown(); self.backend = nil end
+    -- Stop each slot border's animation BEFORE dropping the slot refs. Slot
+    -- borders are secretRect widgets whose OnUpdate motion driver is hosted on
+    -- UIParent (the aura-button subtree disables OnUpdate through descendants),
+    -- so it does NOT auto-hide when the container hides -- an un-stopped driver
+    -- would keep ticking against the torn-down slot's textures. StopAnimation
+    -- clears the OnUpdate + hides the driver; idempotent on borders that had no
+    -- animation running. This is the single teardown chokepoint for winner
+    -- change / de-config / rebuild / destroy (all route through here).
+    if DF.Border then
+        for _, slot in pairs(self.buttons) do
+            if slot and slot.dfBorder then DF.Border:StopAnimation(slot.dfBorder) end
+        end
+    end
     wipe(self.buttons)
     self._slotCounter = 0   -- restart the lazy-batch index for the next build
     -- MISSING mode: with no container the push geometry is gone — park the badge

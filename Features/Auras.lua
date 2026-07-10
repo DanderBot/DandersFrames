@@ -3085,6 +3085,10 @@ local function styleMissingBadge(h, db, frame, info)
     local spec = DF.Border:BuildSpec(db, "missingBuffIcon", { unit = frame.unit, frame = frame, iconMode = true })
     spec.enabled = showBorder
     spec.size = borderSize
+    -- The badge border is secretRect, so an animation driver would be hosted on UIParent
+    -- (see ensureDriver in Border.lua) and this badge is NOT covered by a container
+    -- teardown loop. Keep animation OFF here — never let the badge animate, or its driver
+    -- would tick forever with no teardown.
     spec.animation = nil
     DF.Border:Apply(badge.dfBorder, spec)
 

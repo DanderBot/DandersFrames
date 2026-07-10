@@ -478,9 +478,29 @@ local function getLCG()
 end
 
 -- Lazy-create the shared OnUpdate driver for custom animations.
+--
+-- Parenting: normal borders parent the driver to `border`, so it inherits the
+-- border's shown-state and stops ticking automatically when the border hides.
+-- secretRect borders (AD / aura-container slot children) live inside a
+-- CustomAuraButton subtree whose intrinsic onUpdateMode="disabled" suppresses
+-- OnUpdate through EVERY descendant -- a driver parented under `border` there
+-- would install its OnUpdate but never fire (WIPE/RIPPLE/SEGMENT/DF_PULSATE and
+-- marching DF_DASH all looked frozen). Host those drivers on UIParent so their
+-- OnUpdate actually dispatches; the tick closures capture `border` by reference
+-- and keep driving the border's own child textures (render-side SetAlpha /
+-- drawDashes on OUR textures -- no secret read, no secure op). Visibility still
+-- rides the slot's secret show/hide (the textures are slot children); only the
+-- MOTION now comes from the external driver.
+--
+-- Cost of the external host: the driver no longer auto-hides with the border,
+-- so its teardown is EXPLICIT. StopAnimation (below) clears the OnUpdate +
+-- Hides it, and the aura-container teardown path calls StopAnimation on every
+-- slot border so a de-configured / winner-changed / rebuilt AD border leaves no
+-- orphaned ticking driver.
 local function ensureDriver(border)
     if border.animDriver then return border.animDriver end
-    local d = CreateFrame("Frame", nil, border)
+    local driverParent = border._secretRect and UIParent or border
+    local d = CreateFrame("Frame", nil, driverParent)
     d.elapsed = 0
     border.animDriver = d
     return d
