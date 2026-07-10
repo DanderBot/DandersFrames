@@ -1,6 +1,12 @@
 # DandersFrames Changelog
 
-## [Unreleased]
+## [5.0.0]
+
+### WoW 12.1 (Midnight) Rework
+
+*The 12.1 rework is a big team effort — brought to you by Danders, Krathe and Maelareth. A single change below often includes work from more than one of us, so entries aren't credited individually.*
+
+DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally changed how the game handles auras. This build runs on 12.1 only — 12.0.x stays on 4.7. Every aura row — buffs, debuffs, defensives and missing buffs — now renders through the game's new protected aura engine.
 
 * (Profiles) Refreshed default-profile values (new installs / profile resets only — existing settings are untouched): tighter frame spacing, buff borders on, small buff/debuff position and text offset nudges, and the name text sits slightly higher. The Big Defensive / External Defensive buff filters are no longer on by default — on 12.1 a buff matching several filters shows one icon per match, so the old defaults duplicated defensive buffs on the buff bar; the defensive icons already cover them.
 * (Boss Debuffs) **Boss debuffs are now part of the regular debuff row on 12.1.** WoW's new aura system routes boss debuffs — including private auras, which addons can't see — through the same display engine as everything else, so they appear in the debuff row automatically (with duration, stacks and dispel colouring like any debuff). The separate Boss Debuffs display has been retired on 12.1: keeping it would show every private aura twice. Its settings page notes the change; on WoW versions before 12.1 the feature is unchanged.
@@ -16,22 +22,12 @@
 * (Auras) "Color by Time Remaining" works again on the 12.1 aura rows: duration text colours by time left — red under 5s, orange under 15s, yellow under a minute, green above — evaluated by the game engine itself, so it keeps ticking in combat. (12.1 can no longer colour by percentage of the aura's full duration, so the steps are fixed times; the Short/Full formats use plain-English units while colouring is on.)
 * (Auras) Buff and defensive icon text now has a shared styling system, adding a Duration and Stack text colour option. The "Short" duration format no longer shows a stray space (e.g. "45s" not "45 s").
 * (Auras) Fixed Icons Per Row wrapping one icon early on the new 12.1 aura rows.
-
 * (Auras) The new 12.1 aura rows now honor your layout settings — anchor, direction, wrap, offsets, spacing, size and scale were previously ignored (icons piled at the top-left).
 * (Auras) Aura settings apply in real time again on 12.1 — sliders re-flow the row live during the drag instead of waiting for the next aura update.
 * (Auras) Aura Blacklist is back on 12.1 for buffs, now enforced natively by the game's aura engine. Debuff blacklisting is still blocked by a game limitation on friendly frames. Entries set to combat-only or out-of-combat-only can't be enforced on the new rows and stay visible.
 * (Interface) Settings the 12.1 rows can't provide are now marked in place: "Min Stacks to Show" (game limitation), "Icons Per Row" while using vertical orientation (single column only), and "Border Animation" on buff/defensive icons (the game doesn't allow animation effects on its aura buttons; any previously set animation is ignored rather than risking errors).
-
 * (Auras) Fix the in-combat aura freeze: the stack-count formatter cannot process the protected (secret) stack values 12.1 uses in combat, and the resulting error permanently stopped that frame's aura updates until reload. Stack counts now use the built-in display (shown at 2 or more); the "minimum stacks" setting no longer applies to the new aura rows.
-
-## [5.0.0]
-
-### WoW 12.1 (Midnight) Rework
-
-* (Auras) Rebuilt to work with WoW 12.1's new protected aura system. This build runs on 12.1 only — 12.0.x stays on 4.7.
-* (Auras) Buff and defensive icon rows now render through the new 12.1 aura engine.
 * (Auras) New buff duration format option (Number / Short / Full).
-* (Interface) Settings that 12.1 no longer allows the addon to control are marked in the options panel.
 
 ### Known Issues (12.1 alpha)
 
