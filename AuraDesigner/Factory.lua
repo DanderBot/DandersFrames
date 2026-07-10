@@ -10,9 +10,11 @@ local addonName, DF = ...
 -- identity comes from the STATIC per-spec spell-ID whitelist (Config.SpellIDs), and
 -- Blizzard drives each slot's secret show/hide — we only attach art. Zero secret reads.
 --
--- SCOPE (this file, P4.0 scaffold + P4.1 first slice): gates, identity->includeSpellIDs,
--- and the HEALTH-BAR TINT indicator only. P4.2-P4.7 extend SyncFrame to the rest of the
--- indicator family; the legacy engine stays fully intact behind DF:UseFactoryForAD.
+-- SCOPE (this file, P4.0 scaffold + P4.1 + P4.2): gates, identity->includeSpellIDs, and the
+-- frame-level indicators that CAN be driven read-free — HEALTH-BAR tint, BACKGROUND tint,
+-- and static BORDER. framealpha / nametext / healthtext are 12.1 casualties (see NOTES at
+-- the file foot). Placed indicators (icon/square/bar) are P4.3-P4.4. The legacy engine stays
+-- fully intact behind DF:UseFactoryForAD.
 --
 -- COMBAT / SECRET obligations (delegated to the DF.AuraContainer handle, the #205-proven
 -- path): containers are created/enabled OUT of combat and deferred to PLAYER_REGEN_ENABLED
@@ -137,13 +139,14 @@ local function healthbarBlend(mode, blendCfg, a)
     return (blendCfg or 0.5) * a
 end
 
--- Build the overlay container config for one health-bar indicator. mode="overlay":
--- the slot covers frame.healthBar and its tint texture (child of the slot) inherits the
+-- Build an OVERLAY-TINT container config (health-bar tint, background tint). mode="overlay":
+-- the slot covers the host region and its tint texture (child of the slot) inherits the
 -- slot's secret visibility; DF.AuraContainer handles SetEnabled-last + combat deferral.
--- frameLevelOffset=1 matches the legacy tint overlay (healthBar level + 1, Indicators.lua:1299).
-local function buildHealthbarConfig(frame, map, r, g, b, blend)
+-- levelOffset: health-bar tint = 1 (healthBar level + 1, Indicators.lua:1299); background
+-- tint = 0 (frame level, above the BACKGROUND bg texture, below the +1 bars, Indicators.lua:1615).
+local function buildOverlayTintConfig(unit, map, r, g, b, blend, levelOffset)
     return {
-        unit = frame.unit,
+        unit = unit,
         mode = "overlay",
         -- Buff-only for now: the AD spell-ID whitelist (Config.SpellIDs) carries no
         -- buff/debuff classification and every configured entry is a helpful aura. A
@@ -152,20 +155,147 @@ local function buildHealthbarConfig(frame, map, r, g, b, blend)
         filter = "HELPFUL",
         candidateFilters = { includeSpellIDs = map },
         enabled = true,
-        frameLevelOffset = 1,
+        frameLevelOffset = levelOffset,
         style = { overlay = { tintColor = { r, g, b, blend } } },
     }
 end
 
--- Reused per-call scratch (single-threaded; wiped each SyncFrame) so the desired-set
--- diff allocates nothing per tick.
-local desiredScratch = {}
+-- Build a whole-frame BORDER container config. mode="overlay": the slot covers the unit
+-- frame; DF.Border (secretRect, static art only — animations are forbidden on native
+-- buttons and stripped engine-side) renders as a child of the slot and inherits the slot's
+-- secret visibility. levelOffset 10 lifts the ring above the class border (frame+10 inside
+-- the slot) so it reads as an AD border, mirroring the legacy draw-above default
+-- (Indicators.lua:1145-1147). Z-order polish is a P4.7 concern.
+local function buildBorderConfig(unit, map, spec)
+    return {
+        unit = unit,
+        mode = "overlay",
+        filter = "HELPFUL",
+        candidateFilters = { includeSpellIDs = map },
+        enabled = true,
+        frameLevelOffset = 10,
+        style = { border = { spec = spec } },
+    }
+end
+
+-- Resolve the DF.Border spec for an AD border indicator from its CONFIG block (never a
+-- live aura), mirroring Indicators:ApplyBorderToOverlay: canonical keys via BuildSpec (the
+-- border-key fold ran in SyncFrame), black default colour. Returns nil when the border
+-- resolves disabled (ShowBorder=false) — the caller then renders no container. Animations
+-- are dropped: frame-level expiring border art reads remaining time (unportable, P4.7),
+-- and the container engine strips spec.animation on native buttons anyway.
+local function buildBorderSpec(frame, borderCfg)
+    if not DF.Border then return nil end
+    local spec = DF.Border:BuildSpec(borderCfg, "")
+    if not spec or spec.enabled == false then return nil end
+    if not spec.color then spec.color = { r = 0, g = 0, b = 0, a = 1 } end
+    spec.pixelPerfect = (DF:GetFrameDB(frame) or {}).pixelPerfect
+    spec.animation = nil
+    -- KNOWN DEGRADATION (GRADIENT → solid): the AuraContainer overlay-border builder creates
+    -- the DF.Border with solidOnly=true (AuraContainer.lua:298), because container slots are
+    -- anchored by Blizzard's flow layout with SECRET / unresolved rects and gradient rendering
+    -- needs a resolved rect to compute its direction+extent (the same rect problem that forces
+    -- the secretRect anchor-only path — see AuraContainer.lua:291-294). So a user's GRADIENT
+    -- border style renders as a SOLID ring here (texture styles still render). Threading
+    -- solidOnly=false was deliberately NOT done: that flag lives on the SHARED slot-border
+    -- builder used by the #205 buff/debuff rows too, and enabling gradients on a secret-anchored
+    -- rect is unverified (likely broken), which would be worse than a clean solid. → P4.7 must
+    -- FROST / API-limit-mark the gradient border-style control for factory-owned AD.
+    return spec
+end
+
+-- Order-stable cosmetic signature of a DF.Border spec (scalars + one-level subtables).
+-- Field-name-agnostic so it survives BuildSpec schema tweaks; any change → ApplyStyle
+-- (in-place restyle), never a rebuild (only the identity set is structural).
+local function subSig(t)
+    local keys = {}
+    for kk in pairs(t) do keys[#keys + 1] = kk end
+    tsort(keys)
+    local parts = {}
+    for _, kk in ipairs(keys) do
+        local v = t[kk]
+        local tv = type(v)
+        if tv ~= "table" and tv ~= "function" and tv ~= "userdata" and tv ~= "thread" then
+            parts[#parts + 1] = tostring(kk) .. "=" .. tostring(v)
+        end
+    end
+    return tconcat(parts, ",")
+end
+local function borderSpecSig(spec)
+    if type(spec) ~= "table" then return "" end
+    local keys = {}
+    for kk in pairs(spec) do keys[#keys + 1] = kk end
+    tsort(keys)
+    local parts = {}
+    for _, kk in ipairs(keys) do
+        local v = spec[kk]
+        local tv = type(v)
+        if tv == "table" then
+            parts[#parts + 1] = tostring(kk) .. "={" .. subSig(v) .. "}"
+        elseif tv ~= "function" and tv ~= "userdata" and tv ~= "thread" then
+            parts[#parts + 1] = tostring(kk) .. "=" .. tostring(v)
+        end
+    end
+    return tconcat(parts, "|")
+end
+
+-- Pick the single highest-priority configured indicator of `typeKey` across all configured
+-- auras for this spec. Frame-level effects each target ONE region, so stacking two of the
+-- same type conflicts (double-tint / double-border) — one winner per type, exactly like the
+-- health bar. priority is static config (Engine.lua:502, default 5); ties broken by aura
+-- name for a deterministic, non-flapping winner. `validate(typeCfg)` gates which blocks
+-- count (e.g. healthbar/background need .color, border must be enabled). Read-free.
+local function pickWinner(spec, specAuras, typeKey, validate)
+    if not specAuras then return nil end
+    local bestName, bestCfg, bestMap, bestPrio
+    for auraName, auraCfg in pairs(specAuras) do
+        local typeCfg = (type(auraCfg) == "table") and auraCfg[typeKey]
+        if typeCfg and (not validate or validate(typeCfg)) then
+            local map = unionIdentity(spec, auraName, typeCfg)
+            if map then
+                local prio = auraCfg.priority or 5
+                if (not bestName)
+                    or prio > bestPrio
+                    or (prio == bestPrio and auraName < bestName) then
+                    bestName, bestCfg, bestMap, bestPrio = auraName, typeCfg, map, prio
+                end
+            end
+        end
+    end
+    return bestName, bestCfg, bestMap, bestPrio
+end
+
+-- Tear down every container in a per-type store that is not the current winner (winner
+-- changed, aura de-configured, or the indicator was removed). Destroy is combat-safe.
+local function teardownExcept(store, keepName)
+    for auraName, entry in pairs(store) do
+        if auraName ~= keepName then
+            if entry.handle then entry.handle:Destroy() end
+            store[auraName] = nil
+        end
+    end
+end
+
+-- Release the background anchor frame (the plain non-secure host for the background-tint
+-- container). WoW frames can't be destroyed, so hide + unanchor + forget the ref; a fresh
+-- one is created on the next background config. Call ONLY after the background containers
+-- are torn down (their h.frame parents to this anchor). Hide is combat-safe.
+local function releaseBgAnchor(store)
+    local a = store.bgAnchor
+    if a then
+        a:Hide()
+        a:ClearAllPoints()
+        store.bgAnchor = nil
+    end
+end
 
 -- ============================================================
--- PER-FRAME SYNC  (P4.1 — health-bar tint only)
--- Reads the CONFIGURED health-bar indicators in adDB.auras[spec] (never a live aura
--- list), picks the SINGLE highest-priority one (legacy priority-picks; two overlays
--- would double-darken the bar), and stands up / restyles / tears it down.
+-- PER-FRAME SYNC  (P4.1 health-bar + P4.2 frame-level family)
+-- Reads the CONFIGURED indicators in adDB.auras[spec] (never a live aura list). Each
+-- frame-level effect targets ONE region, so per type we pick the SINGLE highest-priority
+-- winner (stacking two of a type conflicts) and stand it up / restyle / tear it down on
+-- its own DF.AuraContainer. Types ported here: healthbar, background, border. framealpha /
+-- nametext / healthtext are 12.1 casualties (see the notes below + the P4.7 overlay list).
 -- ============================================================
 function Factory:SyncFrame(frame)
     if not frame or not frame.unit then return end
@@ -188,84 +318,149 @@ function Factory:SyncFrame(frame)
     end
 
     -- Same lazy migrations UpdateFrame runs, so adDB.auras[spec] is in the shape we read.
-    -- Priorities included because we now honour auraCfg.priority for the winner pick
-    -- (mirror Engine:UpdateFrame, Engine.lua:391-401). Border-key fold is left for P4.2.
+    -- Priorities: winner pick honours auraCfg.priority. Border-key fold: the border winner
+    -- reads canonical border keys via DF.Border:BuildSpec (mirror Engine.lua:391-401).
     if (not adDB._specScopedV1 or not adDB._specScopedV2) and DF.MigrateAuraDesignerSpecScope then
         DF.MigrateAuraDesignerSpecScope(adDB)
     end
     if DF.MigrateAuraDesignerInstancesLazy then DF.MigrateAuraDesignerInstancesLazy(adDB) end
+    if DF.MigrateAuraDesignerBorderKeysLazy then DF.MigrateAuraDesignerBorderKeysLazy(adDB) end
     if DF.MigrateAuraDesignerPrioritiesLazy then DF.MigrateAuraDesignerPrioritiesLazy(adDB) end
-
-    local healthBar = frame.healthBar
-    if not healthBar then return end
 
     local store = frame.dfADFactory
     if not store then store = {}; frame.dfADFactory = store end
-    local hb = store.healthbar
-    if not hb then hb = {}; store.healthbar = hb end
 
     local specAuras = adDB.auras and adDB.auras[spec]
 
-    -- Pick the single highest-priority configured health-bar indicator. priority is
-    -- static config (Engine.lua:502, default 5); ties broken by aura name for stability
-    -- (deterministic winner across ticks — no flapping). Read-free.
-    local bestName, bestCfg, bestMap, bestPrio
-    if specAuras then
-        for auraName, auraCfg in pairs(specAuras) do
-            local typeCfg = (type(auraCfg) == "table") and auraCfg.healthbar
-            if typeCfg and typeCfg.color then
-                local map = unionIdentity(spec, auraName, typeCfg)
-                if map then
-                    local prio = auraCfg.priority or 5
-                    if (not bestName)
-                        or prio > bestPrio
-                        or (prio == bestPrio and auraName < bestName) then
-                        bestName, bestCfg, bestMap, bestPrio = auraName, typeCfg, map, prio
-                    end
+    -- ---- HEALTH-BAR TINT (child of frame.healthBar, overlay tint) -------------------
+    local healthBar = frame.healthBar
+    if healthBar then
+        local hb = store.healthbar
+        if not hb then hb = {}; store.healthbar = hb end
+
+        local bestName, bestCfg, bestMap = pickWinner(spec, specAuras, "healthbar",
+            function(c) return c.color end)
+
+        if bestName then
+            local r, g, b, a = readADColor(bestCfg.color)
+            local mode = slower(bestCfg.mode or "replace")
+            local blend = healthbarBlend(mode, bestCfg.blend, a)
+
+            local structSig = includeSig(bestMap)
+            -- Cosmetic sig: colour + resolved alpha. A change here is an ApplyStyle (in-place
+            -- tint recolour), NOT a rebuild — only the identity set is structural.
+            local coSig = tconcat({ tostring(r), tostring(g), tostring(b), tostring(blend) }, "|")
+
+            local entry = hb[bestName]
+            if not entry then
+                local handle = DF.AuraContainer:Create(healthBar, buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, 1))
+                if handle then
+                    hb[bestName] = { handle = handle, structSig = structSig, coSig = coSig }
                 end
+            elseif entry.structSig ~= structSig then
+                entry.structSig, entry.coSig = structSig, coSig
+                entry.handle:Rebuild(buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, 1))
+            elseif entry.coSig ~= coSig then
+                entry.coSig = coSig
+                entry.handle:ApplyStyle({ overlay = { tintColor = { r, g, b, blend } } })
             end
         end
+        teardownExcept(hb, bestName)
     end
 
-    local desired = desiredScratch
-    wipe(desired)
+    -- ---- BACKGROUND TINT (child of frame.background, overlay tint) -------------------
+    -- frame.background is a TEXTURE, not a frame, so it can't parent a container. Cover it
+    -- with a plain anchor frame (create-once, combat-safe — non-secure) at the frame's own
+    -- level (legacy bg overlay level, Indicators.lua:1615) and host the container there.
+    if frame.background then
+        local bg = store.background
+        if not bg then bg = {}; store.background = bg end
 
-    if bestName then
-        desired[bestName] = true
+        local bestName, bestCfg, bestMap = pickWinner(spec, specAuras, "background",
+            function(c) return c.color end)
 
-        local r, g, b, a = readADColor(bestCfg.color)
-        local mode = slower(bestCfg.mode or "replace")
-        local blend = healthbarBlend(mode, bestCfg.blend, a)
-
-        local structSig = includeSig(bestMap)
-        -- Cosmetic sig: colour + resolved alpha. A change here is an ApplyStyle (in-place
-        -- tint recolour), NOT a rebuild — only the identity set is structural.
-        local coSig = tconcat({ tostring(r), tostring(g), tostring(b), tostring(blend) }, "|")
-
-        local entry = hb[bestName]
-        if not entry then
-            local handle = DF.AuraContainer:Create(healthBar, buildHealthbarConfig(frame, bestMap, r, g, b, blend))
-            if handle then
-                hb[bestName] = { handle = handle, structSig = structSig, coSig = coSig }
+        if bestName then
+            local bgAnchor = store.bgAnchor
+            if not bgAnchor then
+                bgAnchor = CreateFrame("Frame", nil, frame)
+                bgAnchor:SetAllPoints(frame.background)
+                bgAnchor:SetFrameLevel(frame:GetFrameLevel())
+                store.bgAnchor = bgAnchor
             end
-        elseif entry.structSig ~= structSig then
-            entry.structSig = structSig
-            entry.coSig = coSig
-            entry.handle:Rebuild(buildHealthbarConfig(frame, bestMap, r, g, b, blend))
-        elseif entry.coSig ~= coSig then
-            entry.coSig = coSig
-            entry.handle:ApplyStyle({ overlay = { tintColor = { r, g, b, blend } } })
+
+            local r, g, b, a = readADColor(bestCfg.color)
+            local mode = slower(bestCfg.mode or "tint")   -- background defaults to tint
+            local blend = healthbarBlend(mode, bestCfg.blend, a)
+
+            local structSig = includeSig(bestMap)
+            local coSig = tconcat({ tostring(r), tostring(g), tostring(b), tostring(blend) }, "|")
+
+            local entry = bg[bestName]
+            if not entry then
+                local handle = DF.AuraContainer:Create(bgAnchor, buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, 0))
+                if handle then
+                    bg[bestName] = { handle = handle, structSig = structSig, coSig = coSig }
+                end
+            elseif entry.structSig ~= structSig then
+                entry.structSig, entry.coSig = structSig, coSig
+                entry.handle:Rebuild(buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, 0))
+            elseif entry.coSig ~= coSig then
+                entry.coSig = coSig
+                entry.handle:ApplyStyle({ overlay = { tintColor = { r, g, b, blend } } })
+            end
         end
+        teardownExcept(bg, bestName)
+        -- No background winner this pass → the containers are gone; drop the anchor too.
+        if not bestName then releaseBgAnchor(store) end
     end
 
-    -- Tear down every container that is not the current winner (winner changed, aura
-    -- de-configured, or health-bar indicator removed).
-    for auraName, entry in pairs(hb) do
-        if not desired[auraName] then
-            if entry.handle then entry.handle:Destroy() end
-            hb[auraName] = nil
+    -- ---- BORDER (whole-frame static ring via DF.Border, overlay) ---------------------
+    -- AD borders are a static user-chosen colour per aura (NOT dispel-type driven — every
+    -- AD entry is a helpful buff, so Blizzard's native SetAuraBorder dispel-Color path
+    -- doesn't apply). Rendered as static border art (DF.Border secretRect), shown on
+    -- presence via the slot. Expiring border art (thickness/anim/colour-swap near expiry)
+    -- reads remaining time → unportable, base ring only (P4.7 overlays the Expiring group).
+    do
+        local bd = store.border
+        if not bd then bd = {}; store.border = bd end
+
+        -- Cheap RAW-config gate (no BuildSpec, no allocation on the hot path): BuildSpec
+        -- keys `enabled` off exactly this key (Border.lua:217 → enabled = ShowBorder ~= false),
+        -- so the winner set is identical to a full-spec enabled check. The one real spec is
+        -- built ONCE below, for the chosen winner.
+        local bestName, _, bestMap = pickWinner(spec, specAuras, "border",
+            function(c) return c.ShowBorder ~= false end)
+
+        local bestSpec
+        if bestName then
+            bestSpec = buildBorderSpec(frame, specAuras[bestName].border)
+            if not bestSpec then bestName = nil end   -- resolved disabled → render nothing
         end
+
+        if bestName then
+            local structSig = includeSig(bestMap)
+            local coSig = borderSpecSig(bestSpec)
+
+            local entry = bd[bestName]
+            if not entry then
+                local handle = DF.AuraContainer:Create(frame, buildBorderConfig(frame.unit, bestMap, bestSpec))
+                if handle then
+                    bd[bestName] = { handle = handle, structSig = structSig, coSig = coSig }
+                end
+            elseif entry.structSig ~= structSig then
+                entry.structSig, entry.coSig = structSig, coSig
+                entry.handle:Rebuild(buildBorderConfig(frame.unit, bestMap, bestSpec))
+            elseif entry.coSig ~= coSig then
+                entry.coSig = coSig
+                entry.handle:ApplyStyle({ border = { spec = bestSpec } })
+            end
+        end
+        teardownExcept(bd, bestName)
     end
+
+    -- framealpha / nametext / healthtext: intentionally NOT synced. No read-free,
+    -- combat-safe port exists (see file-foot notes) — their GUI controls get the
+    -- "Blizzard limitation" overlay in P4.7.
 end
 
 -- ============================================================
@@ -275,13 +470,42 @@ end
 function Factory:ClearFrame(frame)
     local store = frame and frame.dfADFactory
     if not store then return end
-    local hb = store.healthbar
-    if hb then
-        for auraName, entry in pairs(hb) do
-            if entry.handle then entry.handle:Destroy() end
-            hb[auraName] = nil
-        end
-    end
+    teardownExcept(store.healthbar or {}, nil)
+    teardownExcept(store.background or {}, nil)
+    teardownExcept(store.border or {}, nil)
+    releaseBgAnchor(store)   -- containers gone above; drop the background anchor too
 end
+
+-- ============================================================
+-- NOTES — 12.1 CASUALTIES (P4.2): framealpha / nametext / healthtext
+-- The attach-and-inherit trick shows a slot-CHILD region on presence, letting Blizzard's
+-- secret show/hide drive it read-free. It works for effects that ARE a child region drawn
+-- over the frame (tint textures, a border ring). It does NOT extend to these three:
+--
+--  * framealpha (ref Indicators:ApplyFrameAlpha) — reduces the WHOLE unit frame's alpha on
+--    presence. There is no additive-child equivalent to reducing a frame's alpha (an overlay
+--    darkens, it can't make the frame transparent — and the plan forbids approximation).
+--    The only mechanism would be an OnShow/OnHide hook on a slot child calling frame:SetAlpha
+--    — which (a) isn't part of DF.AuraContainer's supported style API (runs insecure Lua off
+--    a native button's secret-driven visibility, the taint-adjacent touch the engine warns
+--    against), and (b) collides with DF's existing frame-alpha owners (range fade / OOR
+--    re-assert alpha every update) with no arbitration layer. → casualty. P4.7 overlays the
+--    framealpha type's controls (and its Expiring group).
+--
+--  * healthtext (ref Indicators:ApplyHealthText) — recolours the health-text fontstring on
+--    presence. Recolouring the REAL fontstring needs a presence-gated SetAuraColorOverride
+--    (a Lua call gated on a secret we can't read). The duplicate-fontstring workaround is
+--    impossible here: the health-text STRING is a SECRET value in combat, so a child clone
+--    can't be populated read-free. → hard casualty. P4.7 overlays the healthtext controls.
+--
+--  * nametext (ref Indicators:ApplyNameText) — same recolour-on-presence shape. The unit
+--    NAME is public, so a duplicate fontstring clone is technically read-free (unlike
+--    healthtext) — but it must mirror the Text Designer's live font/anchor/justify AND its
+--    formatted string (class colour, truncation, status suffixes), re-syncing on every TD
+--    re-render, or it ghosts/drifts over the real name. That's a fragile reimplementation of
+--    TD name rendering for a colour tint, and the failure mode is user-visible doubled text.
+--    Rejected on robustness grounds (correctness > coverage). → casualty. P4.7 overlays the
+--    nametext controls. (Revisit only if a clean TD-fontstring clone lands.)
+-- ============================================================
 
 DF:Debug(DBG, "Factory (native AD bridge) loaded")
