@@ -3329,8 +3329,13 @@ function DF:UpdateAuras_Enhanced(frame)
     -- Aura Designer runs when enabled; standard buffs can coexist if showBuffs is on.
     local adEnabled = DF:IsAuraDesignerEnabled(frame)
     if adEnabled then
-        -- Run AD engine (indicators, frame effects, etc.)
-        if DF.AuraDesigner and DF.AuraDesigner.Engine then
+        -- Run AD engine (indicators, frame effects, etc.). On 12.1 the native factory
+        -- bridge (DF.AuraDesigner.Factory) owns AD when DF:UseFactoryForAD is true; the
+        -- legacy read-path engine stays byte-for-byte reachable when the gate is false
+        -- (pre-12.1 clients, test mode, or adUseFactory=false).
+        if DF.AuraDesigner and DF.AuraDesigner.Factory and DF:UseFactoryForAD(frame, db) then
+            DF.AuraDesigner.Factory:SyncFrame(frame)
+        elseif DF.AuraDesigner and DF.AuraDesigner.Engine then
             DF.AuraDesigner.Engine:UpdateFrame(frame)
         end
 

@@ -832,6 +832,10 @@ function Engine:ClearFrame(frame)
     if Indicators then
         Indicators:HideAll(frame)
     end
+    -- Tear down any native-factory AD containers (12.1 path) hung off this frame.
+    if DF.AuraDesigner.Factory then
+        DF.AuraDesigner.Factory:ClearFrame(frame)
+    end
     -- Stop sound engine when AD is disabled
     if not SoundEngine then
         SoundEngine = DF.AuraDesigner.SoundEngine
