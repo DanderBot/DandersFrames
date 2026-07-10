@@ -35,10 +35,12 @@
 
 ### Known Issues (12.1 alpha)
 
-* The 12.1 aura rows are being rebuilt on Blizzard's new container system and are under active testing — please report any case where buff or defensive auras stop updating, **especially in combat**.
-* An aura matching more than one filter can show duplicate icons — a 12.1 limitation we're still working around.
-* Some buff/defensive tooltip settings don't yet apply to the new aura rows.
-* Dispel overlay, Boss Debuffs and other non-row aura displays are not yet ported to the new system and may be blank on 12.1.
+* The 12.1 aura displays are rebuilt on Blizzard's new container system and are under active testing — please report any case where buff, debuff, defensive or missing-buff displays stop updating, **especially in combat**.
+* An aura matching more than one selected filter shows one icon per match (no cross-filter dedup on 12.1). Buffs: "All Buffs" avoids it; Debuffs: "Show All Debuffs" avoids it. Awaiting a game-side fix.
+* Boss debuffs (private auras included) always show in the debuff row on 12.1 and can't be turned off — the game provides no way to exclude them.
+* Some buff/debuff/defensive tooltip settings (anchoring, in-combat disable) can't apply to the new aura rows.
+* The Dispel Overlay and Aura Designer are not yet ported to the new system.
+* Test mode still previews auras with the pre-12.1 renderer; a native preview is planned.
 * Dragging certain aura sliders can briefly stutter.
 
 ## [4.7.0]
