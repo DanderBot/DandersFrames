@@ -689,7 +689,7 @@ end
 -- bottom → left → top → right, matching the highlight system).
 local function drawDashes(border, offset, th, inset, r, g, b, a)
     local pool = ensureDashPool(border)
-    local fw, fh = border:GetWidth(), border:GetHeight()
+    local fw, fh = border._knownW or border:GetWidth(), border._knownH or border:GetHeight()
     if not fw or not fh or fw <= 0 or fh <= 0 then return end
     local width  = fw - inset * 2
     local height = fh - inset * 2
@@ -1415,6 +1415,13 @@ end
 function Border:Apply(border, spec)
     if not border then return end
     spec = spec or {}
+    -- Optional caller-fed geometry: when the border wraps a frame whose live
+    -- size can't be measured safely (e.g. an aura overlay slot whose rect is
+    -- secret on 12.1), the caller passes knownWidth/knownHeight so DF_DASH can
+    -- lay out its dashes from a plain config number instead of GetWidth/Height.
+    -- nil when the caller doesn't feed a size (measured path, unchanged).
+    border._knownW = spec.knownWidth
+    border._knownH = spec.knownHeight
     local edges = { border.top, border.bottom, border.left, border.right }
 
     -- Translate the whole border widget by (offsetX, offsetY). Two opposite

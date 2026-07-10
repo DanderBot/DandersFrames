@@ -4774,6 +4774,7 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
     local lightUpdate  = opts.lightUpdate
     local lightColors  = opts.lightColors
     local typeLabel    = opts.typeLabel or L["Border Animation"]
+    local excludeTypes = opts.excludeTypes   -- optional set of animation-type keys to omit from the dropdown
     local hideExtra    = opts.hideExtra
     local onTypeChange = opts.onTypeChange or function() end
     local showPerfBanner = opts.perfBanner ~= false
@@ -4814,25 +4815,37 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
     -- DF_PULSATE sits next to PULSATE so users compare them at a glance —
     -- both "pulse" effects, but the LCG one renders a particle ring outside
     -- the border while DF Pulsate fades the border's own edge alpha.
+    local animTypeOptions = {
+        NONE = L["None"],
+        PULSATE = L["Pulsate"],
+        DF_PULSATE = L["DF Pulsate"],
+        CHASE = L["Chase"],
+        FLASH = L["Flash"],
+        PROC = L["Proc"],
+        WIPE = L["Wipe"],
+        RIPPLE = L["Ripple"],
+        SEGMENT_REVEAL = L["Segment Reveal"],
+        SIDES_ONLY = L["Sides Only"],
+        CORNERS_ONLY = L["Corners Only"],
+        DF_DASH = L["DF Dash"],
+        -- None first (the "off" option), then alphabetical by label.
+        _order = { "NONE", "CHASE", "CORNERS_ONLY", "DF_DASH", "DF_PULSATE",
+                   "FLASH", "PROC", "PULSATE", "RIPPLE", "SEGMENT_REVEAL",
+                   "SIDES_ONLY", "WIPE" },
+    }
+    -- Optional caller filter: drop any excluded type from both the value map and
+    -- the display order (e.g. the Aura Designer border offers only the taint-safe,
+    -- overlay-recoverable animations — no LCG glows).
+    if excludeTypes then
+        for k in pairs(excludeTypes) do animTypeOptions[k] = nil end
+        local filteredOrder = {}
+        for _, k in ipairs(animTypeOptions._order) do
+            if not excludeTypes[k] then filteredOrder[#filteredOrder + 1] = k end
+        end
+        animTypeOptions._order = filteredOrder
+    end
     w.animationType = group:AddWidget(GUI:CreateDropdown(parent, typeLabel,
-        {
-            NONE = L["None"],
-            PULSATE = L["Pulsate"],
-            DF_PULSATE = L["DF Pulsate"],
-            CHASE = L["Chase"],
-            FLASH = L["Flash"],
-            PROC = L["Proc"],
-            WIPE = L["Wipe"],
-            RIPPLE = L["Ripple"],
-            SEGMENT_REVEAL = L["Segment Reveal"],
-            SIDES_ONLY = L["Sides Only"],
-            CORNERS_ONLY = L["Corners Only"],
-            DF_DASH = L["DF Dash"],
-            -- None first (the "off" option), then alphabetical by label.
-            _order = { "NONE", "CHASE", "CORNERS_ONLY", "DF_DASH", "DF_PULSATE",
-                       "FLASH", "PROC", "PULSATE", "RIPPLE", "SEGMENT_REVEAL",
-                       "SIDES_ONLY", "WIPE" },
-        },
+        animTypeOptions,
         dbTable, animTypeKey, onTypeChange), 55)
     -- Type dropdown respects only the extra gate (e.g. Show Border). With no
     -- extra gate (Expiring override) it's always visible.
@@ -5186,6 +5199,10 @@ function GUI:CreateBorderControls(group, dbTable, prefix, opts)
             lightUpdate  = lightUpdate,
             lightColors  = lightColors,
             typeLabel    = L["Border Animation"],
+            -- Optional caller filter, forwarded from the CreateBorderControls call
+            -- site (e.g. the Aura Designer border restricts to overlay-recoverable
+            -- animation types). nil for every other caller → full type list.
+            excludeTypes = opts.animExcludeTypes,
             hideExtra    = hideOff,
             onTypeChange = function()
                 if refreshStates then refreshStates() end

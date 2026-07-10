@@ -73,6 +73,22 @@ local warnedCurve, warnedBorder, warnedNativeDispel = false, false, false
 local warnedRestyle, warnedRefresh, warnedMouse = false, false, false
 local warnedCreate = false
 
+-- Animations SAFE to run on an OVERLAY-mode border (Aura Designer). These render
+-- entirely on DF-owned child regions of the border (edge alpha ticks + DF_DASH's
+-- own pooled dashes + Wipe/Ripple/SegmentReveal/Corners/Sides overlay pieces), so
+-- they never SetParent a pooled glow onto a Blizzard AuraButton and never taint.
+-- Any type NOT in this set (the LCG glows PULSATE/CHASE/FLASH/PROC, plus any
+-- future/unknown type) is stripped. ROW mode always strips (see below).
+local SAFE_OVERLAY_ANIM = {
+    DF_PULSATE     = true,
+    WIPE           = true,
+    RIPPLE         = true,
+    SEGMENT_REVEAL = true,
+    DF_DASH        = true,
+    CORNERS_ONLY   = true,
+    SIDES_ONLY     = true,
+}
+
 -- ============================================================
 -- CAPABILITY DETECTION  (the version gate + PTR-4 feature gates)
 -- Lazy + cached. IsSupported() is the primary gate every consumer checks; when it
@@ -328,12 +344,17 @@ local function styleButton_regions(slot, config)
                     if iconMode == nil then iconMode = (config.mode ~= "overlay") end
                     spec = DF.Border:BuildSpec(borderSpec.db, borderSpec.prefix, { unit = config.unit, frame = slot, iconMode = iconMode })
                 end
-                -- ANIMATIONS are forbidden on container buttons: LCG re-SetParents its
-                -- pooled glow frames onto the host, which taints on a native AuraButton
-                -- (lab-proven). Strip whatever the profile has set — BuildSpec includes
-                -- spec.animation whenever <prefix>BorderAnimationType ~= NONE (e.g. an
-                -- imported 12.0.x profile). The GUI frosts the control to match.
-                if spec then spec.animation = nil end
+                -- ANIMATION FILTER (single chokepoint for BOTH row and overlay).
+                -- The LCG glows re-SetParent pooled glow frames onto the host, which
+                -- taints on a native AuraButton (lab-proven), so they stay forbidden.
+                -- But OVERLAY-mode (Aura Designer) borders wrap the whole frame and can
+                -- safely run the DF-owned animations in SAFE_OVERLAY_ANIM (edge-alpha
+                -- ticks, DF_DASH marching ants, Wipe/Ripple/etc overlays). ROW mode
+                -- always strips. Any type not in the set is stripped regardless of mode.
+                if spec and spec.animation and not
+                   (config.mode == "overlay" and SAFE_OVERLAY_ANIM[spec.animation.type]) then
+                    spec.animation = nil
+                end
                 if spec then DF.Border:Apply(slot.dfBorder, spec) end
             end)
             if not ok and not warnedBorder then

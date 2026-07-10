@@ -204,15 +204,22 @@ end
 -- live aura), mirroring Indicators:ApplyBorderToOverlay: canonical keys via BuildSpec (the
 -- border-key fold ran in SyncFrame), black default colour. Returns nil when the border
 -- resolves disabled (ShowBorder=false) — the caller then renders no container. Animations
--- are dropped: frame-level expiring border art reads remaining time (unportable, P4.7),
--- and the container engine strips spec.animation on native buttons anyway.
+-- are NO LONGER dropped here: the AuraContainer allowlist (SAFE_OVERLAY_ANIM) is the single
+-- filter, keeping the DF-owned overlay animations and stripping the taint-prone LCG glows.
+-- The GUI restricts the AD dropdown to the recoverable types, so only safe types reach here.
 local function buildBorderSpec(frame, borderCfg)
     if not DF.Border then return nil end
     local spec = DF.Border:BuildSpec(borderCfg, "")
     if not spec or spec.enabled == false then return nil end
     if not spec.color then spec.color = { r = 0, g = 0, b = 0, a = 1 } end
-    spec.pixelPerfect = (DF:GetFrameDB(frame) or {}).pixelPerfect
-    spec.animation = nil
+    local fdb = DF:GetFrameDB(frame) or {}
+    spec.pixelPerfect = fdb.pixelPerfect
+    -- Fed geometry for DF_DASH: the AD border wraps the WHOLE frame (the overlay slot
+    -- does slot:SetAllPoints(handle.frame)), whose live rect is secret on 12.1. Feed the
+    -- frame's own configured width/height so drawDashes lays out from a plain config
+    -- number instead of measuring the secret slot. Ignored by every non-dash path.
+    spec.knownWidth  = fdb.frameWidth
+    spec.knownHeight = fdb.frameHeight
     -- KNOWN DEGRADATION (GRADIENT → solid): the AuraContainer overlay-border builder creates
     -- the DF.Border with solidOnly=true (AuraContainer.lua:298), because container slots are
     -- anchored by Blizzard's flow layout with SECRET / unresolved rects and gradient rendering

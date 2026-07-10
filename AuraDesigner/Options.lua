@@ -3686,6 +3686,11 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                     gradient = true, shadow = true, alpha = true,
                     animate = true,
                 },
+                -- The AD border runs on the AuraContainer overlay path, which only
+                -- recovers the taint-safe DF-owned animations (SAFE_OVERLAY_ANIM in
+                -- AuraContainer.lua). Drop the LCG glows from the dropdown so users
+                -- can't pick a type that gets silently stripped.
+                animExcludeTypes = { PULSATE = true, CHASE = true, FLASH = true, PROC = true },
                 fullUpdate    = RPL,
                 lightUpdate   = RPL,
                 lightColors   = RPL,
