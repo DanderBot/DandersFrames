@@ -1510,6 +1510,51 @@ function Handle:OnTestModeChanged()
 end
 
 -- ============================================================
+-- EDIT-MODE GUARD (shared)
+-- Blizzard Edit Mode swaps the ENTIRE aura data layer: AURA_DATA_PROVIDER_SWITCH
+-- installs the edit-mode sample provider at the AuraUtil level (AuraUtil.lua:19,
+-- AuraUtilDataProvider replaces C_UnitAuras wholesale), so every container in the
+-- game re-parses to random-icon fake auras. Per-container opt-out is IMPOSSIBLE —
+-- deafening a container to the event was live-disproved (DF_AuraLab probe 34's
+-- deaf twin still flipped: the swap is below the container layer). So while a
+-- FOREIGN switch is active we HIDE the factory rows (plain anchor frames — the
+-- drives' shown-caches keep them from re-showing), and restore + refresh when the
+-- real provider returns. DF's own test mode (P5) sets _ownsProviderSwitch around
+-- its switches so its curated preview is exempt from the guard.
+local function ensureProviderWatch()
+    if AuraContainer._providerWatch then return end
+    local f = CreateFrame("Frame")
+    AuraContainer._providerWatch = f
+    f._hidden = setmetatable({}, { __mode = "k" })
+    f._fakeActive = false
+    f:RegisterEvent("AURA_DATA_PROVIDER_SWITCH")
+    f:SetScript("OnEvent", function(self, _, useRealDataProvider)
+        if AuraContainer._ownsProviderSwitch then
+            self._fakeActive = false   -- P5's own preview manages its rows itself
+            return
+        end
+        if useRealDataProvider then
+            self._fakeActive = false
+            for h in pairs(self._hidden) do
+                self._hidden[h] = nil
+                if not h._destroyed then
+                    h:GetFrame():Show()
+                    h:Refresh()        -- re-parse real data (Edit Mode exit is OOC)
+                end
+            end
+        else
+            self._fakeActive = true
+            for h in pairs(AuraContainer._handles or {}) do
+                if not h._destroyed and h:GetFrame():IsShown() then
+                    self._hidden[h] = true
+                    h:GetFrame():Hide()
+                end
+            end
+        end
+    end)
+end
+
+-- ============================================================
 -- PUBLIC CONSTRUCTOR
 -- ============================================================
 -- Create an aura container. Returns a handle, or nil when unsupported (the caller
@@ -1556,6 +1601,7 @@ function AuraContainer:Create(parent, config)
     local h = setmetatable({ config = cfg, buttons = {} }, Handle)
     AuraContainer._handles = AuraContainer._handles or setmetatable({}, { __mode = "k" })
     AuraContainer._handles[h] = true   -- weak-keyed registry so a dropped handle GCs (else rebuild-forever on test toggle)
+    ensureProviderWatch()              -- edit-mode guard (see above); one shared frame
     -- h.frame is the plain anchor frame DF positions; the backend parents its OWN
     -- CustomAuraContainer to it (per-consumer container — Krathe's ContainerOverlay pattern).
     h.frame = CreateFrame("Frame", nil, parent)
@@ -1593,6 +1639,13 @@ function AuraContainer:Create(parent, config)
         h:_deferRebuild()
     else
         h:_build()
+    end
+    -- Born during a foreign fake-data period (e.g. roster change while the user
+    -- sits in Edit Mode): start hidden like the rest, restored on the real switch.
+    local watch = AuraContainer._providerWatch
+    if watch and watch._fakeActive then
+        watch._hidden[h] = true
+        h.frame:Hide()
     end
     return h
 end
