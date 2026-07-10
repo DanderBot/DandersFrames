@@ -3975,33 +3975,16 @@ DF._MainEventDispatcher = function(self, event, arg1)
             end
         end
         
-        -- Force Direct mode filter defaults (v4.0.9):
-        -- Debuffs: All Debuffs enabled (show everything)
-        -- Buffs: All Buffs disabled, My Buffs + Raid In Combat checked
-        -- One-time forced reset using a migration flag
-        for _, mode in ipairs({"party", "raid"}) do
-            local modeDb = DF.db[mode]
-            if modeDb and not modeDb._directFilterDefaultsV409 then
-                modeDb.directDebuffShowAll = true
-                modeDb.directBuffShowAll = false
-                modeDb.directBuffFilterPlayer = true
-                modeDb.directBuffFilterRaidInCombat = true
-                modeDb._directFilterDefaultsV409 = true
-            end
-        end
-        if DandersFramesDB_v2 and DandersFramesDB_v2.profiles then
-            for profileName, profile in pairs(DandersFramesDB_v2.profiles) do
-                for _, mode in ipairs({"party", "raid"}) do
-                    if profile[mode] and not profile[mode]._directFilterDefaultsV409 then
-                        profile[mode].directDebuffShowAll = true
-                        profile[mode].directBuffShowAll = false
-                        profile[mode].directBuffFilterPlayer = true
-                        profile[mode].directBuffFilterRaidInCombat = true
-                        profile[mode]._directFilterDefaultsV409 = true
-                    end
-                end
-            end
-        end
+        -- (Removed) The v4.0.9 / v4.0.9b one-time FORCED filter stamps used to
+        -- live here and below. Unlike every other migration they were not
+        -- no-ops on fresh defaults: a profile reset wipes the migration flags
+        -- along with everything else, so on the next reload both stamps
+        -- re-fired and overwrote the freshly reset filters with 4.0.9-era
+        -- values (All Debuffs off, Big/External Defensives on). Their one-time
+        -- job is long done — upgraded profiles carry the flags, fresh/reset
+        -- profiles get the current Config defaults. Migrations added here MUST
+        -- be no-ops on a fresh default profile (derive from legacy values;
+        -- never unconditional writes behind a profile-stored flag).
 
         -- Migrate the single border dropdown to the Style + Texture split.
         -- Previously borderTexture held either "SOLID" (the built-in border) or an
@@ -4107,40 +4090,9 @@ DF._MainEventDispatcher = function(self, event, arg1)
             end
         end
 
-        -- Force updated Direct mode filter defaults (v4.0.9b):
-        -- Buffs: Raid In Combat + Big Defensive + External Defensive (no Player)
-        -- Debuffs: Show All off, Raid + Crowd Control on
-        for _, mode in ipairs({"party", "raid"}) do
-            local modeDb = DF.db[mode]
-            if modeDb and not modeDb._directFilterDefaultsV2 then
-                modeDb.directBuffShowAll = false
-                modeDb.directBuffFilterPlayer = false
-                modeDb.directBuffFilterRaidInCombat = true
-                modeDb.directBuffFilterBigDefensive = true
-                modeDb.directBuffFilterExternalDefensive = true
-                modeDb.directDebuffShowAll = false
-                modeDb.directDebuffFilterRaid = true
-                modeDb.directDebuffFilterCrowdControl = true
-                modeDb._directFilterDefaultsV2 = true
-            end
-        end
-        if DandersFramesDB_v2 and DandersFramesDB_v2.profiles then
-            for profileName, profile in pairs(DandersFramesDB_v2.profiles) do
-                for _, mode in ipairs({"party", "raid"}) do
-                    if profile[mode] and not profile[mode]._directFilterDefaultsV2 then
-                        profile[mode].directBuffShowAll = false
-                        profile[mode].directBuffFilterPlayer = false
-                        profile[mode].directBuffFilterRaidInCombat = true
-                        profile[mode].directBuffFilterBigDefensive = true
-                        profile[mode].directBuffFilterExternalDefensive = true
-                        profile[mode].directDebuffShowAll = false
-                        profile[mode].directDebuffFilterRaid = true
-                        profile[mode].directDebuffFilterCrowdControl = true
-                        profile[mode]._directFilterDefaultsV2 = true
-                    end
-                end
-            end
-        end
+        -- (Removed) v4.0.9b forced filter stamp — see the note at the v4.0.9
+        -- stamp's former location above (re-fired after profile resets and
+        -- clobbered fresh defaults).
 
         -- Migrate texture paths from old format to new Media folder format (v3.2.0)
         local function MigrateTexturePath(path)
