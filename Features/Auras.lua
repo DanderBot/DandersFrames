@@ -2849,12 +2849,28 @@ function DF:BuildDefensiveRowConfig(db, unit)
         dur.formatKey = "NUMBER" .. (colorByTime and ":C" or "")
     end
 
+    -- SINGLE group (12.1): overlapping groups render DUPLICATE buttons — the container
+    -- has no cross-group dedup and addon-side dedup is impossible (button contents are
+    -- secret). Guardian Spirit proved BIG ∩ EXTERNAL ≠ ∅; externals are classified as
+    -- big defensives (Blizzard's BigDefensive comparator expects them in ONE list), so
+    -- one BIG_DEFENSIVE group covers the row with no dupes. Legacy/test mode keeps the
+    -- two-filter scan + Lua dedup (BuildDirectDefensiveFilters) — different pipeline.
+    -- IN-GAME CHECK: if an external-only defensive (e.g. PS/Ironbark on someone) stops
+    -- showing, external ⊄ big on this build — revert to BuildDirectDefensiveFilters().
+    local factoryFilter
+    if AuraFilters.BigDefensive then factoryFilter = { "HELPFUL|" .. AuraFilters.BigDefensive }
+    elseif AuraFilters.ExternalDefensive then factoryFilter = { "HELPFUL|" .. AuraFilters.ExternalDefensive } end
+
     return {
         unit     = unit,
         mode     = "row",
-        filter   = BuildDirectDefensiveFilters(),
+        filter   = factoryFilter or BuildDirectDefensiveFilters(),
         max      = db.defensiveBarMax or 4,
         enabled  = true,
+        -- Native sort built FOR this row: longest-duration external first, own
+        -- defensives last (AuraUtil.BigDefensiveAuraCompare) — "show me the save
+        -- someone else put on this player". Carried in the row signature.
+        sort     = { method = "BigDefensive" },
         tooltips = (not db.defensiveIconDisableMouse) and db.tooltipDefensiveEnabled ~= false,
         -- Z-order: match the legacy defensive level — contentOverlay+26 = frame+51 when auto
         -- (defensiveIconFrameLevel 0), else the user's own offset. Applied to the container's

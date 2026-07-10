@@ -6563,22 +6563,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         Add(durationGroup, nil, 1)
 
-        -- ===== DURATION POSITION GROUP (Column 2) =====
-        local durPosGroup = GUI:CreateSettingsGroup(self.child, 280)
-        durPosGroup:AddWidget(GUI:CreateHeader(self.child, L["Duration Position"]), 40)
-        durPosGroup.disableChildrenOn = HideDefensiveIconOptions
-
-        local diDurX = durPosGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -20, 20, 1, db, "defensiveIconDurationX", function()
-            if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
-        end, function() DF:LightweightUpdateDefensiveIcons() end, true), 55)
-        diDurX.hideOn = HideDefensiveDurationOptions
-
-        local diDurY = durPosGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -20, 20, 1, db, "defensiveIconDurationY", function()
-            if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
-        end, function() DF:LightweightUpdateDefensiveIcons() end, true), 55)
-        diDurY.hideOn = HideDefensiveDurationOptions
-
-        Add(durPosGroup, nil, 2)
+        -- (The old "Duration Position" group is gone: CreateTextControls above already
+        -- renders Anchor + Offset X/Y on the same defensiveIconDurationX/Y keys — the
+        -- separate group was a duplicate left behind by the TextStyle conversion.)
 
         -- ===== LAYOUT GROUP - DIRECT MODE (Column 1) =====
         local layoutGroup = GUI:CreateSettingsGroup(self.child, 280)
