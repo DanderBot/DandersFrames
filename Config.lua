@@ -1029,15 +1029,6 @@ DF.PartyDefaults = {
     bossDebuffsSpacing = 5,
     bossDebuffsTextScale = 1.0,
 
-    -- Container overlay (native dispel overlay for private auras)
-    -- Enable state + dispel-type are driven by dispelOverlaySource and
-    -- dispelOverlayDispelType (unified across both overlay systems).
-    bossDebuffsContainerOverlayGradientDir = 0,
-    bossDebuffsContainerOverlayAlpha = 1.0,
-    bossDebuffsContainerOverlayFrameLevel = 6,
-    bossDebuffsContainerOverlayStrata = "MEDIUM",
-    bossDebuffsContainerOverlaySizeAdjust = 0,
-
     -- Buff settings
     buffAlpha = 1,
     buffAnchor = "BOTTOMRIGHT",
@@ -1407,26 +1398,20 @@ DF.PartyDefaults = {
     dispelIconPosition = "TOPRIGHT",
     dispelIconSize = 20,
     dispelMagicColor = {r = 0.2, g = 0.6, b = 1},
-    dispelOnlyPlayerTypes = false,
-    dispelOverlayMode = "PLAYER_DISPELLABLE",
     dispelPoisonColor = {r = 0, g = 0.6, b = 0},
-    dispelShowBleed = false,
     dispelShowBorder = true,
-    dispelShowCurse = true,
-    dispelShowDisease = true,
-    dispelShowEnrage = true,
     dispelShowGradient = true,
     dispelShowIcon = true,
-    dispelShowMagic = true,
-    dispelShowPoison = true,
     dispelNameText = false,
 
-    -- Dispel overlay source selector (Phase 1 UI uses bridge to old toggles)
-    -- Values: "off" | "dandersframes" | "blizzard" | "both"
-    dispelOverlaySource = "both",
-    -- Unified "Show Overlay For" shared across all sources.
-    -- Values: 1 = Dispellable By Me, 2 = All Dispellable (Blizzard convention)
+    -- Unified dispel overlay (12.1 container-slot driven, Features/Dispel.lua)
+    dispelOverlayEnabled = true,
+    -- "Show Overlay For": 1 = Dispellable By Me, 2 = All Dispellable (Blizzard convention)
     dispelOverlayDispelType = 2,
+    -- 12.1 unified overlay colour source: "game" = Blizzard palette via the native
+    -- per-slot tint (one overlay at a time); "custom" = per-type slots coloured from
+    -- the DF pickers (full art: borders, EDGE gradients, intensity).
+    dispelOverlayColorSource = "game",
 
     -- External Defensive
     externalDefAnchor = "CENTER",

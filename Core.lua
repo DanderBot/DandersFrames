@@ -1026,7 +1026,14 @@ function DF:LightweightUpdateDispelOverlay()
     local mode = DF.GUI and DF.GUI.SelectedMode or "party"
     local db = DF.db[mode]
     if not db then return end
-    
+
+    -- 12.1 factory overlay: re-drive immediately so colour/alpha/geometry tweaks
+    -- apply live (mirrors LightweightUpdateDefensiveIcons). The legacy loop below
+    -- only touches the hidden legacy overlays.
+    if DF.UseFactoryForDispelOverlay and DF:UseFactoryForDispelOverlay(nil, db) then
+        DF:InvalidateAuraLayout()
+    end
+
     local borderSize = db.dispelBorderSize or 2
     local borderInset = db.dispelBorderInset or 0
     local borderAlpha = db.dispelBorderAlpha or 1
@@ -2551,7 +2558,13 @@ function DF:LightweightUpdateDispelColors()
     local mode = DF.GUI and DF.GUI.SelectedMode or "party"
     local db = DF.db[mode]
     if not db then return end
-    
+
+    -- 12.1 factory overlay: picker drags re-style the slot widgets live (custom
+    -- colour mode statics) — mirrors LightweightUpdateDispelOverlay's redrive.
+    if DF.UseFactoryForDispelOverlay and DF:UseFactoryForDispelOverlay(nil, db) then
+        DF:InvalidateAuraLayout()
+    end
+
     -- Only apply to test mode frames - live frames must use color curves for secret colors
     local inTestMode = (mode == "raid" and DF.raidTestMode) or (mode == "party" and DF.testMode)
     if not inTestMode then return end
@@ -4619,6 +4632,55 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 for _, mode in ipairs({"party", "raid"}) do
                     if profile[mode] then
                         MigrateDandersToHybrid(profile[mode])
+                    end
+                end
+            end
+        end
+
+        -- v5.0 (12.1): Unified dispel overlay — the Blizzard container-overlay
+        -- wrapper is retired (the container slot path covers private auras
+        -- natively), so the v4.3.4 source selector collapses back to a single
+        -- enable bool. NOTE: dispelOverlayEnabled deliberately REUSES the
+        -- pre-v4.3.4 key name — MigrateDispelSource above consumed the legacy
+        -- value into dispelOverlaySource, and this write derives from that
+        -- source, so any stale legacy value is overwritten, never read. Also
+        -- drops the wrapper-only settings and the never-consumed dispelShow*
+        -- family (Config/export-only since inception — 2026-07 audit).
+        local function MigrateDispelSourceToEnabled(modeDb)
+            if modeDb._dispelEnabledV5 then return end
+            modeDb.dispelOverlayEnabled = (modeDb.dispelOverlaySource or "both") ~= "off"
+            modeDb.dispelOverlaySource = nil
+            -- Wrapper-only settings (feature deleted).
+            modeDb.bossDebuffsContainerOverlayEnabled = nil
+            modeDb.bossDebuffsContainerOverlayGradientDir = nil
+            modeDb.bossDebuffsContainerOverlayAlpha = nil
+            modeDb.bossDebuffsContainerOverlayFrameLevel = nil
+            modeDb.bossDebuffsContainerOverlayStrata = nil
+            modeDb.bossDebuffsContainerOverlaySizeAdjust = nil
+            modeDb.bossDebuffsContainerOverlayPulse = nil
+            modeDb.bossDebuffsContainerOverlayDispelMode = nil
+            -- Dead keys (never consumed by any render path).
+            modeDb.dispelOverlayMode = nil
+            modeDb.dispelOnlyPlayerTypes = nil
+            modeDb.dispelShowMagic = nil
+            modeDb.dispelShowCurse = nil
+            modeDb.dispelShowDisease = nil
+            modeDb.dispelShowPoison = nil
+            modeDb.dispelShowBleed = nil
+            modeDb.dispelShowEnrage = nil
+            modeDb._dispelEnabledV5 = true
+        end
+        for _, mode in ipairs({"party", "raid"}) do
+            local modeDb = DF.db[mode]
+            if modeDb then
+                MigrateDispelSourceToEnabled(modeDb)
+            end
+        end
+        if DandersFramesDB_v2 and DandersFramesDB_v2.profiles then
+            for _, profile in pairs(DandersFramesDB_v2.profiles) do
+                for _, mode in ipairs({"party", "raid"}) do
+                    if profile[mode] then
+                        MigrateDispelSourceToEnabled(profile[mode])
                     end
                 end
             end

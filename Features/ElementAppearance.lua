@@ -857,13 +857,38 @@ end
 
 function DF:UpdateDispelOverlayAppearance(frame)
     if not IsDandersFrame(frame) then return end
-    if not frame.dfDispelOverlay then return end
-    
+
     local db = GetDB(frame)
     if not db then return end
-    
+
     if DF.testMode or DF.raidTestMode then return end
-    
+
+    -- 12.1 factory path: one alpha on each slot BUTTON — the whole widget (and the
+    -- game-mode icon slot) rides it, and it MULTIPLIES with the pulse animation's
+    -- widget alpha instead of fighting it. Buttons' Shown is Blizzard-owned; alpha
+    -- is not, so this is the sanctioned dimming channel.
+    local h = frame.dispelFactory
+    if h and h.GetOverlaySlots then
+        local buttons = h:GetOverlaySlots()
+        if buttons then
+            local fDeadAlpha = 1.0
+            if IsDeadOrOffline(frame) and db.fadeDeadFrames then
+                fDeadAlpha = db.fadeDeadBackground or 1
+            end
+            local fInRange = GetInRange(frame)
+            local fOorAlpha = db.oorDispelOverlayAlpha or 0.2
+            for _, btn in pairs(buttons) do
+                if db.oorEnabled then
+                    ApplyOORAlpha(btn, fInRange, fDeadAlpha, fDeadAlpha * fOorAlpha)
+                else
+                    btn:SetAlpha(fDeadAlpha)
+                end
+            end
+        end
+    end
+
+    if not frame.dfDispelOverlay then return end
+
     local deadOrOffline = IsDeadOrOffline(frame)
     local inRange = GetInRange(frame)
     local overlay = frame.dfDispelOverlay

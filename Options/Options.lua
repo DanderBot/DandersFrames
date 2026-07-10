@@ -6292,10 +6292,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         Add(sizeGroup, nil, 1)
 
-        -- Private Aura Dispel Overlay settings moved to the Dispel Overlay tab
-        -- under the "Blizzard" source. The container's enable state and options
-        -- are now driven by dispelOverlaySource and the unified dispel-type
-        -- dropdown. This subsection is intentionally left empty.
+        -- Private Aura Dispel Overlay settings live on the Dispel Overlay tab
+        -- (12.1 unified overlay: dispelOverlayEnabled + the shared dispel-type
+        -- dropdown; private auras are covered natively by the slot filters).
+        -- This subsection is intentionally left empty.
 
         -- See Also links
         AddSpace(20, "both")
@@ -8459,154 +8459,139 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         AddSpace(10, "both")
 
-        local function HideIfSourceOff(d)
-            return d.dispelOverlaySource == "off"
+        local function HideIfDisabled(d)
+            return d.dispelOverlayEnabled == false
         end
-        local function HideIfNotDF(d)
-            local s = d.dispelOverlaySource
-            return s ~= "dandersframes" and s ~= "both"
+        -- Alias kept so the widget wiring below reads unchanged — under the
+        -- unified overlay every appearance control simply follows the toggle.
+        local HideDispelOptions = HideIfDisabled
+
+        -- 12.1: the container factory owns the overlay — the era frosts below
+        -- lift when it does (mirrors the Missing Buffs page's conditional lift).
+        local dispelFactoryOwns = DF.FactoryOwnsDispelOverlay and DF:FactoryOwnsDispelOverlay(db)
+
+        -- "Game colours" (default) shows the game palette via the native tint —
+        -- the custom-only art (borders, per-type pickers, intensity, EDGE) hides
+        -- until the colour source is Custom.
+        local function HideIfGameMode(d)
+            return HideIfDisabled(d) or (d.dispelOverlayColorSource or "game") ~= "custom"
         end
-        local function HideIfNotBlizzard(d)
-            local s = d.dispelOverlaySource
-            return s ~= "blizzard" and s ~= "both"
+
+        -- Every dispel-page callback funnels through here: the version bump
+        -- breaks the 12.1 factory drive's fast-path latch, so structural changes
+        -- (colour source, me/all, icon slots, bleed opt-in) rebuild their slot
+        -- set and pure styling re-applies. Cheap out of combat; no-op impact
+        -- pre-12.1 (the legacy path reads settings directly).
+        local function ApplyDispelSettings()
+            if DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
+            if DF.UpdateAllDispelOverlays then DF:UpdateAllDispelOverlays() end
         end
-        -- Kept for back-compat inside this function — alias for HideIfNotDF.
-        local HideDispelOptions = HideIfNotDF
 
         local function InvalidateCurves()
             if DF.InvalidateDispelColorCurve then DF:InvalidateDispelColorCurve() end
-            if DF.UpdateAllDispelOverlays then DF:UpdateAllDispelOverlays() end
+            ApplyDispelSettings()
         end
 
-        -- Called when the overlay source changes: refresh DF's overlay and
-        -- rebuild the Blizzard container anchor per the new source value.
-        local function OnSourceChanged()
-            if DF.UpdateAllDispelOverlays then DF:UpdateAllDispelOverlays() end
-            if DF.PreviewPrivateAuraAnchors then
-                DF:PreviewPrivateAuraAnchors()
-            elseif DF.UpdateContainerOverlaySettings and DF.IterateAllFrames then
-                DF:IterateAllFrames(function(f)
-                    DF:UpdateContainerOverlaySettings(f)
-                end)
-            end
-        end
         local function OnDispelTypeChanged()
             InvalidateCurves()
-            if DF.UpdateAllDispelOverlays then DF:UpdateAllDispelOverlays() end
-            if DF.UpdateContainerOverlaySettings and DF.IterateAllFrames then
-                DF:IterateAllFrames(function(f)
-                    DF:UpdateContainerOverlaySettings(f)
-                end)
-            end
         end
 
-        -- ===== OVERLAY SOURCE (full-width, always visible) =====
-        -- Segmented button group + themed callout that explains the selected
-        -- mode. Shared "Show Overlay For" dropdown sits below in a narrow
-        -- column-1 group.
-        local sourceHeader = GUI:CreateHeader(self.child, L["Overlay Source"])
-        Add(sourceHeader, 36, "both")
-        GUI:AddSectionNewBadge(sourceHeader, "auras_dispel", "overlaySource")
-
-        -- Four options in the user's preferred display order.
-        local sourceOptions = {
-            { value = "both",          label = L["Hybrid"],   subtitle = L["Recommended"] },
-            { value = "dandersframes", label = "DandersFrames", subtitle = L["No Boss Debuffs"] },
-            { value = "blizzard",      label = L["Blizzard"], subtitle = L["Limited Options"] },
-            { value = "off",           label = L["Off"],      subtitle = "" },
-        }
-
-        local calloutBox  -- forward declaration so the button callback can update it
-        local function UpdateCalloutForSource()
-            local s = db.dispelOverlaySource or "both"
-            if s == "both" then
-                calloutBox:SetContent(L["Hybrid Mode"], L["DandersFrames overlay shows for normal dispellable debuffs. Blizzard overlay activates only when a boss debuff (private aura) is present — private auras are invisible to addons, so only Blizzard can show them."])
-            elseif s == "dandersframes" then
-                calloutBox:SetContent(L["DandersFrames Mode"], L["DandersFrames overlay handles all normal dispellable debuffs with full customisation. Boss debuffs (private auras) are not covered."])
-            elseif s == "blizzard" then
-                calloutBox:SetContent(L["Blizzard Mode"], L["Blizzard's native overlay covers both normal debuffs and boss debuffs (private auras), with limited customisation options."])
-            else
-                calloutBox:SetContent(L["Off Mode"], L["No dispel overlay is displayed."])
-            end
-        end
-
-        local sourceButtons = GUI:CreateSegmentedButtonGroup(self.child, sourceOptions, db, "dispelOverlaySource", function()
-            OnSourceChanged()
-            UpdateCalloutForSource()
-            self:RefreshStates()
-            GUI:RefreshCurrentPage()
-        end, 560)
-        Add(sourceButtons, 42, "both")
-
-        calloutBox = GUI:CreateInfoBanner(self.child, { tone = "info", minHeight = 44 })
-        UpdateCalloutForSource()
-        Add(calloutBox, 66, "both")
-
-        -- Narrow settings group for the shared "Show Overlay For" dropdown.
-        AddSpace(8, "both")
+        -- ===== ENABLE + SHARED SETTINGS =====
+        -- 12.1 unified overlay: ONE container-slot-driven system (Features/
+        -- Dispel.lua factory path) covering normal AND private-aura dispels
+        -- natively. The old Off / DandersFrames / Blizzard / Hybrid source
+        -- selector collapsed into this single toggle when the Blizzard wrapper
+        -- retired (settings migrate: any non-Off source = enabled).
         local settingsGroup = GUI:CreateSettingsGroup(self.child, 280)
         settingsGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 40)
+        settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Dispel Overlay"], db, "dispelOverlayEnabled", function()
+            ApplyDispelSettings()
+            self:RefreshStates()
+            GUI:RefreshCurrentPage()
+        end), 30)
         local dispelIndicatorOptions = { [1]= L["Dispellable By Me"], [2]= L["All Dispellable"] }
         local dispelIndicatorDropdown = settingsGroup:AddWidget(GUI:CreateDropdown(self.child, L["Show Overlay For"], dispelIndicatorOptions, db, "dispelOverlayDispelType", function()
             OnDispelTypeChanged()
         end), 55)
-        dispelIndicatorDropdown.hideOn = HideIfSourceOff
-        settingsGroup.hideOn = HideIfSourceOff
+        dispelIndicatorDropdown.hideOn = HideIfDisabled
+        -- Colour source: Game = the game's dispel palette via the native tint,
+        -- one overlay at a time (Blizzard-identical). Custom = per-type slots
+        -- honouring the pickers, with the full art (borders, EDGE, intensity).
+        local colorSourceOptions = {
+            ["game"] = L["Game Colors"],
+            ["custom"] = L["Custom Colors"],
+            _order = { "game", "custom" },
+        }
+        local colorSourceDropdown = settingsGroup:AddWidget(GUI:CreateDropdown(self.child, L["Color Source"], colorSourceOptions, db, "dispelOverlayColorSource", function()
+            ApplyDispelSettings()
+            self:RefreshStates()
+            GUI:RefreshCurrentPage()
+        end), 55)
+        colorSourceDropdown.hideOn = HideIfDisabled
         Add(settingsGroup, nil, 1)
 
-        -- ===== DANDERSFRAMES COLLAPSIBLE SECTION =====
-        -- Wraps all DandersFrames-overlay SettingsGroups below. Header hides
-        -- entirely when source doesn't include DandersFrames; groups hide
-        -- via their own hideOn + the section's collapsed state.
+        -- ===== APPEARANCE COLLAPSIBLE SECTION =====
+        -- Wraps all overlay-appearance SettingsGroups below. Header hides
+        -- entirely when the overlay is off; groups hide via their own hideOn
+        -- + the section's collapsed state.
         AddSyncPoint()
         AddSpace(10, "both")
-        local dfSection = GUI:CreateCollapsibleSection(self.child, L["DandersFrames Overlay"], true, 560)
-        dfSection.hideOn = HideIfNotDF
-        -- Tag: DandersFrames only ever handles normal dispellable debuffs,
-        -- never private auras, so the tag is static.
-        dfSection:SetTag("[" .. L["Normal Dispels"] .. "]")
+        local dfSection = GUI:CreateCollapsibleSection(self.child, L["Appearance"], true, 560)
+        dfSection.hideOn = HideIfDisabled
         Add(dfSection, 36, "both")
 
         -- Display group (quick toggles) — Column 1
         local displayGroup = GUI:CreateSettingsGroup(self.child, 280)
         displayGroup:AddWidget(GUI:CreateHeader(self.child, L["Display"]), 40)
         local showBorder = displayGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Border"], db, "dispelShowBorder", function()
-            if DF.UpdateAllDispelOverlays then DF:UpdateAllDispelOverlays() end
+            ApplyDispelSettings()
+            self:RefreshStates()
         end), 30)
-        showBorder.hideOn = HideDispelOptions
+        showBorder.hideOn = HideIfGameMode   -- border colour needs Custom (one native tint region)
         local showGradient = displayGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Gradient"], db, "dispelShowGradient", function()
-            if DF.UpdateAllDispelOverlays then DF:UpdateAllDispelOverlays() end
+            ApplyDispelSettings()
+            self:RefreshStates()
         end), 30)
         showGradient.hideOn = HideDispelOptions
+        -- Boolean toggles GREY their dependent controls in place (addon-wide
+        -- convention); hideOn stays for the feature/variant switches only.
+        local DisableIfNoGradient = function(d) return d.dispelShowGradient == false end
+        local DisableIfNoBorder = function(d) return d.dispelShowBorder == false end
+        local DisableIfNoIcon = function(d) return d.dispelShowIcon == false end
         local animate = displayGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Pulse Animation"], db, "dispelAnimate", function()
-            if DF.UpdateAllDispelOverlays then DF:UpdateAllDispelOverlays() end
+            ApplyDispelSettings()
         end), 30)
         animate.hideOn = HideDispelOptions
         local nameTextCheck = displayGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Color Name Text"], db, "dispelNameText", function()
-            if DF.UpdateAllDispelOverlays then DF:UpdateAllDispelOverlays() end
+            ApplyDispelSettings()
         end), 30)
         nameTextCheck.hideOn = HideDispelOptions
+        -- Not yet wired to the 12.1 slot overlay (needs the occlusion-safe name
+        -- tint fast-follow) — marked in place even while the factory owns.
+        GUI:BlockControl12_1(nameTextCheck, "roadmap", { id = "dispel:nametext", page = L["Dispel Overlay"] })
         displayGroup.hideOn = HideDispelOptions
         dfSection:RegisterChild(displayGroup)
-        GUI:BlockControl12_1(displayGroup, "roadmap", { id = "dispel:display", page = L["Dispel Overlay"] })
+        if not dispelFactoryOwns then GUI:BlockControl12_1(displayGroup, "roadmap", { id = "dispel:display", page = L["Dispel Overlay"] }) end
         Add(displayGroup, nil, 1)
 
         -- ===== ICON GROUP (Column 2) =====
         local iconGroup = GUI:CreateSettingsGroup(self.child, 280)
         iconGroup:AddWidget(GUI:CreateHeader(self.child, L["Dispel Type Icon"]), 40)
         local showIcon = iconGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Dispel Icon"], db, "dispelShowIcon", function()
-            if DF.UpdateAllDispelOverlays then DF:UpdateAllDispelOverlays() end
+            ApplyDispelSettings()
+            self:RefreshStates()
         end), 30)
         showIcon.hideOn = HideDispelOptions
-        local HideIconOptions = function(d) return HideIfNotDF(d) or d.dispelShowIcon == false end
         local iconSize = iconGroup:AddWidget(GUI:CreateSlider(self.child, L["Icon Size"], 10, 40, 1, db, "dispelIconSize", function()
-            if DF.UpdateAllDispelOverlays then DF:UpdateAllDispelOverlays() end
+            ApplyDispelSettings()
         end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
-        iconSize.hideOn = HideIconOptions
+        iconSize.hideOn = HideDispelOptions
+        iconSize.disableOn = DisableIfNoIcon
         local iconAlpha = iconGroup:AddWidget(GUI:CreateSlider(self.child, L["Icon Opacity"], 0.1, 1.0, 0.1, db, "dispelIconAlpha", function()
             InvalidateCurves()
         end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
-        iconAlpha.hideOn = HideIconOptions
+        iconAlpha.hideOn = HideDispelOptions
+        iconAlpha.disableOn = DisableIfNoIcon
         local iconPositions = {
             ["CENTER"]= L["Center"], ["TOP"]= L["Top"], ["BOTTOM"]= L["Bottom"],
             ["LEFT"]= L["Left"], ["RIGHT"]= L["Right"],
@@ -8614,40 +8599,46 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             ["BOTTOMLEFT"]= L["Bottom Left"], ["BOTTOMRIGHT"]= L["Bottom Right"],
         }
         local iconPos = iconGroup:AddWidget(GUI:CreateDropdown(self.child, L["Icon Position"], iconPositions, db, "dispelIconPosition", function()
-            if DF.UpdateAllDispelOverlays then DF:UpdateAllDispelOverlays() end
+            ApplyDispelSettings()
         end), 55)
-        iconPos.hideOn = HideIconOptions
+        iconPos.hideOn = HideDispelOptions
+        iconPos.disableOn = DisableIfNoIcon
         local iconOffsetX = iconGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "dispelIconOffsetX", function()
-            if DF.UpdateAllDispelOverlays then DF:UpdateAllDispelOverlays() end
+            ApplyDispelSettings()
         end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
-        iconOffsetX.hideOn = HideIconOptions
+        iconOffsetX.hideOn = HideDispelOptions
+        iconOffsetX.disableOn = DisableIfNoIcon
         local iconOffsetY = iconGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -50, 50, 1, db, "dispelIconOffsetY", function()
-            if DF.UpdateAllDispelOverlays then DF:UpdateAllDispelOverlays() end
+            ApplyDispelSettings()
         end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
-        iconOffsetY.hideOn = HideIconOptions
+        iconOffsetY.hideOn = HideDispelOptions
+        iconOffsetY.disableOn = DisableIfNoIcon
         iconGroup.hideOn = HideDispelOptions
         dfSection:RegisterChild(iconGroup)
-        GUI:BlockControl12_1(iconGroup, "roadmap", { id = "dispel:icon", page = L["Dispel Overlay"] })
+        if not dispelFactoryOwns then GUI:BlockControl12_1(iconGroup, "roadmap", { id = "dispel:icon", page = L["Dispel Overlay"] }) end
         Add(iconGroup, nil, 2)
 
         -- ===== BORDER GROUP (Column 1) =====
         local borderGroup = GUI:CreateSettingsGroup(self.child, 280)
         borderGroup:AddWidget(GUI:CreateHeader(self.child, L["Border"]), 40)
         local borderSize = borderGroup:AddWidget(GUI:CreateSlider(self.child, L["Border Thickness"], 1, 6, 1, db, "dispelBorderSize", function()
-            if DF.UpdateAllDispelOverlays then DF:UpdateAllDispelOverlays() end
+            ApplyDispelSettings()
         end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
         borderSize.hideOn = HideDispelOptions
+        borderSize.disableOn = DisableIfNoBorder
         local borderInset = borderGroup:AddWidget(GUI:CreateSlider(self.child, L["Border Inset"], -4, 4, 1, db, "dispelBorderInset", function()
-            if DF.UpdateAllDispelOverlays then DF:UpdateAllDispelOverlays() end
+            ApplyDispelSettings()
         end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
         borderInset.hideOn = HideDispelOptions
+        borderInset.disableOn = DisableIfNoBorder
         local borderAlpha = borderGroup:AddWidget(GUI:CreateSlider(self.child, L["Border Opacity"], 0.1, 1.0, 0.1, db, "dispelBorderAlpha", function()
             InvalidateCurves()
         end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
         borderAlpha.hideOn = HideDispelOptions
-        borderGroup.hideOn = HideDispelOptions
+        borderAlpha.disableOn = DisableIfNoBorder
+        borderGroup.hideOn = HideIfGameMode   -- border colour needs Custom (one native tint region)
         dfSection:RegisterChild(borderGroup)
-        GUI:BlockControl12_1(borderGroup, "roadmap", { id = "dispel:border", page = L["Dispel Overlay"] })
+        if not dispelFactoryOwns then GUI:BlockControl12_1(borderGroup, "roadmap", { id = "dispel:border", page = L["Dispel Overlay"] }) end
         Add(borderGroup, nil, 1)
 
         -- ===== COLORS GROUP (Column 2) =====
@@ -8673,9 +8664,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             self:Refresh()
         end), 30)
         resetColors.hideOn = HideDispelOptions
-        colorsGroup.hideOn = HideDispelOptions
+        colorsGroup.hideOn = HideIfGameMode   -- pickers only apply with Custom colours
         dfSection:RegisterChild(colorsGroup)
-        GUI:BlockControl12_1(colorsGroup, "limitation", { id = "dispel:colors", page = L["Dispel Overlay"] })
+        if not dispelFactoryOwns then GUI:BlockControl12_1(colorsGroup, "limitation", { id = "dispel:colors", page = L["Dispel Overlay"] }) end
         Add(colorsGroup, nil, 2)
 
         -- ===== GRADIENT GROUP (Column 1) =====
@@ -8687,164 +8678,66 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         }
         local gradStyle = gradientGroup:AddWidget(GUI:CreateDropdown(self.child, L["Gradient Position"], gradientStyles, db, "dispelGradientStyle", function()
             self:RefreshStates()
-            if DF.UpdateAllDispelOverlays then DF:UpdateAllDispelOverlays() end
+            ApplyDispelSettings()
         end), 55)
         gradStyle.hideOn = HideDispelOptions
+        gradStyle.disableOn = DisableIfNoGradient
+        -- EDGE = four textures; the game-colour tint drives ONE region, so game
+        -- mode renders Full Frame instead. Shown only when that fallback is live.
+        local edgeNote = gradientGroup:AddWidget(GUI:CreateLabel(self.child, "|cFF888888" .. L["Edge Glow needs Custom colors. Full Frame is shown instead."] .. "|r", 260), 30)
+        edgeNote.hideOn = function(d)
+            return HideIfDisabled(d)
+                or (d.dispelOverlayColorSource or "game") == "custom"
+                or d.dispelGradientStyle ~= "EDGE"
+        end
         local onHealthCheck = gradientGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show On Current Health Only"], db, "dispelGradientOnCurrentHealth", function()
-            if DF.UpdateAllDispelOverlays then DF:UpdateAllDispelOverlays() end
+            ApplyDispelSettings()
         end), 30)
-        onHealthCheck.hideOn = function(d) return HideIfNotDF(d) or d.dispelGradientStyle ~= "FULL" end
+        onHealthCheck.hideOn = function(d) return HideIfDisabled(d) or d.dispelGradientStyle ~= "FULL" end
+        onHealthCheck.disableOn = DisableIfNoGradient
         local gradSize = gradientGroup:AddWidget(GUI:CreateSlider(self.child, L["Gradient Size"], 0.1, 1.0, 0.1, db, "dispelGradientSize", function()
-            if DF.UpdateAllDispelOverlays then DF:UpdateAllDispelOverlays() end
+            ApplyDispelSettings()
         end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
         gradSize.hideOn = HideDispelOptions
+        gradSize.disableOn = DisableIfNoGradient
         local gradAlpha = gradientGroup:AddWidget(GUI:CreateSlider(self.child, L["Gradient Opacity"], 0.1, 1.0, 0.1, db, "dispelGradientAlpha", function()
             InvalidateCurves()
         end, function() DF:InvalidateDispelColorCurve(); DF:LightweightUpdateDispelOverlay() end, true), 55)
         gradAlpha.hideOn = HideDispelOptions
+        gradAlpha.disableOn = DisableIfNoGradient
         local gradIntensity = gradientGroup:AddWidget(GUI:CreateSlider(self.child, L["Gradient Intensity"], 0.5, 3.0, 0.1, db, "dispelGradientIntensity", function()
             InvalidateCurves()
         end, function() DF:InvalidateDispelColorCurve(); DF:LightweightUpdateDispelOverlay() end, true), 55)
-        gradIntensity.hideOn = HideDispelOptions
+        gradIntensity.hideOn = HideIfGameMode   -- palette-inert in game mode (native tint owns RGB)
+        gradIntensity.disableOn = DisableIfNoGradient
         local blendModes = { ["ADD"]= L["Glow (ADD)"], ["BLEND"]= L["Solid (BLEND)"] }
         local blendDropdown = gradientGroup:AddWidget(GUI:CreateDropdown(self.child, L["Blend Mode"], blendModes, db, "dispelGradientBlendMode", function()
-            if DF.UpdateAllDispelOverlays then DF:UpdateAllDispelOverlays() end
+            ApplyDispelSettings()
         end), 55)
         blendDropdown.hideOn = HideDispelOptions
-        gradientGroup.hideOn = HideDispelOptions
-        dfSection:RegisterChild(gradientGroup)
-        GUI:BlockControl12_1(gradientGroup, "limitation", { id = "dispel:gradient", page = L["Dispel Overlay"] })
-        Add(gradientGroup, nil, 1)
-
-        -- ===== DARKEN GROUP (Column 2) =====
-        local darkenGroup = GUI:CreateSettingsGroup(self.child, 280)
-        darkenGroup:AddWidget(GUI:CreateHeader(self.child, L["Darken Effect"]), 40)
-        local darkenCheck = darkenGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Darken Behind Gradient"], db, "dispelGradientDarkenEnabled", function()
+        blendDropdown.disableOn = DisableIfNoGradient
+        -- Darken effect lives at the bottom of the Gradient group (it only
+        -- renders behind the gradient).
+        local darkenCheck = gradientGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Darken Behind Gradient"], db, "dispelGradientDarkenEnabled", function()
             self:RefreshStates()
-            if DF.UpdateAllDispelOverlays then DF:UpdateAllDispelOverlays() end
+            ApplyDispelSettings()
         end), 30)
         darkenCheck.hideOn = HideDispelOptions
-        local darkenAlpha = darkenGroup:AddWidget(GUI:CreateSlider(self.child, L["Darken Amount"], 0.1, 1.0, 0.05, db, "dispelGradientDarkenAlpha", function()
-            if DF.UpdateAllDispelOverlays then DF:UpdateAllDispelOverlays() end
+        darkenCheck.disableOn = DisableIfNoGradient
+        local darkenAlpha = gradientGroup:AddWidget(GUI:CreateSlider(self.child, L["Darken Amount"], 0.1, 1.0, 0.05, db, "dispelGradientDarkenAlpha", function()
+            ApplyDispelSettings()
         end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
-        -- HIDE when the dispel feature/style is off (variant); GREY when the boolean
-        -- "Darken Behind Gradient" toggle is off (disabled-in-place).
-        darkenAlpha.hideOn = function(d) return HideIfNotDF(d) end
-        darkenAlpha.disableOn = function(d) return not d.dispelGradientDarkenEnabled end
-        darkenGroup.hideOn = HideDispelOptions
-        dfSection:RegisterChild(darkenGroup)
-        GUI:BlockControl12_1(darkenGroup, "limitation", { id = "dispel:darken", page = L["Dispel Overlay"] })
-        Add(darkenGroup, nil, 2)
-
-        -- ===== BLIZZARD OVERLAY COLLAPSIBLE SECTION =====
-        -- Only relevant for sources "blizzard" and "both". Header hides
-        -- entirely when source excludes Blizzard.
-        AddSyncPoint()
-        AddSpace(15, "both")
-        local blizSection = GUI:CreateCollapsibleSection(self.child, L["Blizzard Overlay"], true, 560)
-        blizSection.hideOn = HideIfNotBlizzard
-        -- Tag reflects what the Blizzard overlay actually handles under
-        -- the current source mode:
-        --   Hybrid   → only private auras (DandersFrames handles normals)
-        --   Blizzard → both (Blizzard runs alone for every dispellable)
-        local function UpdateBlizSectionTag()
-            local s = db.dispelOverlaySource or "both"
-            local privateTag = "[" .. L["Private Aura Dispels"] .. "]"
-            local normalTag  = "[" .. L["Normal Dispels"] .. "]"
-            if s == "both" then
-                blizSection:SetTag(privateTag)
-            elseif s == "blizzard" then
-                blizSection:SetTag(normalTag .. " " .. privateTag)
-            else
-                blizSection:SetTag(nil)
-            end
+        -- HIDE when the dispel feature is off (variant); GREY when the boolean
+        -- toggles it depends on are off (disabled-in-place).
+        darkenAlpha.hideOn = HideIfDisabled
+        darkenAlpha.disableOn = function(d)
+            return d.dispelShowGradient == false or not d.dispelGradientDarkenEnabled
         end
-        UpdateBlizSectionTag()
-        blizSection.refreshContent = function(self) UpdateBlizSectionTag() end
-        Add(blizSection, 36, "both")
+        gradientGroup.hideOn = HideDispelOptions
+        dfSection:RegisterChild(gradientGroup)
+        if not dispelFactoryOwns then GUI:BlockControl12_1(gradientGroup, "limitation", { id = "dispel:gradient", page = L["Dispel Overlay"] }) end
+        Add(gradientGroup, nil, 1)
 
-        local blizGroup = GUI:CreateSettingsGroup(self.child, 280)
-        blizGroup:AddWidget(GUI:CreateNote(self.child, L["This overlay is rendered by Blizzard and has limited customisation. It is separate from the DandersFrames overlay above."], {tone = "caution", prefix = "Note", width = 260}), 60)
-
-        local gradientDirOptions = {
-            [0] = L["Top Edge"],
-            [1] = L["Bottom Edge"],
-            [2] = L["Left Edge"],
-        }
-        local blizGradientDir = blizGroup:AddWidget(GUI:CreateDropdown(self.child, L["Gradient Direction"], gradientDirOptions, db, "bossDebuffsContainerOverlayGradientDir", function()
-            if DF.IterateAllFrames then
-                DF:IterateAllFrames(function(f)
-                    if DF.UpdateContainerOverlaySettings then DF:UpdateContainerOverlaySettings(f) end
-                end)
-            end
-        end), 55)
-        blizGradientDir.hideOn = HideIfNotBlizzard
-        local gradientNote = blizGroup:AddWidget(GUI:CreateLabel(self.child, "|cFF888888" .. L["Right Edge is not available in the Blizzard API."] .. "|r", 260), 20)
-        gradientNote.hideOn = HideIfNotBlizzard
-
-        local blizAlpha = blizGroup:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "bossDebuffsContainerOverlayAlpha", function()
-            if DF.IterateAllFrames then
-                DF:IterateAllFrames(function(f)
-                    if DF.UpdateContainerOverlaySettings then DF:UpdateContainerOverlaySettings(f) end
-                end)
-            end
-        end), 40)
-        blizAlpha.hideOn = HideIfNotBlizzard
-
-        local strataOptions = {
-            BACKGROUND = L["Background"],
-            LOW = L["Low"],
-            MEDIUM = L["Medium"],
-            HIGH = L["High"],
-            DIALOG = L["Dialog"],
-            _order = { "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG" },
-        }
-        local blizStrata = blizGroup:AddWidget(GUI:CreateDropdown(self.child, L["Frame Strata"], strataOptions, db, "bossDebuffsContainerOverlayStrata", function()
-            if DF.IterateAllFrames then
-                DF:IterateAllFrames(function(f)
-                    if DF.UpdateContainerOverlaySettings then DF:UpdateContainerOverlaySettings(f) end
-                end)
-            end
-        end), 55)
-        blizStrata.hideOn = HideIfNotBlizzard
-
-        local blizFrameLevel = blizGroup:AddWidget(GUI:CreateSlider(self.child, L["Frame Level"], 0, 50, 1, db, "bossDebuffsContainerOverlayFrameLevel", function()
-            if DF.IterateAllFrames then
-                DF:IterateAllFrames(function(f)
-                    if DF.UpdateContainerOverlaySettings then DF:UpdateContainerOverlaySettings(f) end
-                end)
-            end
-        end), 40)
-        blizFrameLevel.hideOn = HideIfNotBlizzard
-
-        local frameLevelNote = blizGroup:AddWidget(GUI:CreateLabel(self.child, "|cFF888888" .. L["Raise strata or frame level if the overlay is hidden by frame text on short/wide frames."] .. "|r", 260), 30)
-        frameLevelNote.hideOn = HideIfNotBlizzard
-
-        local blizSizeAdjust = blizGroup:AddWidget(GUI:CreateSlider(self.child, L["Inset"], -10, 10, 1, db, "bossDebuffsContainerOverlaySizeAdjust", function()
-            if DF.IterateAllFrames then
-                DF:IterateAllFrames(function(f)
-                    if DF.UpdateContainerOverlaySettings then DF:UpdateContainerOverlaySettings(f) end
-                end)
-            end
-        end), 40)
-        blizSizeAdjust.hideOn = HideIfNotBlizzard
-
-        local editModeBtn = blizGroup:AddWidget(GUI:CreateButton(self.child, L["Open Edit Mode"], 140, 24, function()
-            -- Use :Show() directly instead of ShowUIPanel — DF's GUIFrame is
-            -- in UISpecialFrames, and ShowUIPanel's fullscreen-panel transition
-            -- closes special frames as part of its slot management. :Show()
-            -- bypasses the slot system; edit mode's OnShow still fires.
-            if EditModeManagerFrame then
-                EditModeManagerFrame:Show()
-            end
-        end), 30)
-        editModeBtn.hideOn = HideIfNotBlizzard
-        local editModeNote = blizGroup:AddWidget(GUI:CreateLabel(self.child, "|cFF888888" .. L["Open edit mode to preview the Blizzard dispel overlay."] .. "|r", 260), 25)
-        editModeNote.hideOn = HideIfNotBlizzard
-
-        blizGroup.hideOn = HideIfNotBlizzard
-        blizSection:RegisterChild(blizGroup)
-        Add(blizGroup, nil, 1)
 
         -- See Also links
         AddSpace(20, "both")

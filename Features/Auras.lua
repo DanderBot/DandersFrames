@@ -3309,6 +3309,11 @@ local function driveFactoryRowsNow(frame)
     if db.missingBuffIconEnabled and DF:UseFactoryForMissingBuff(frame, db) then
         DF:DriveMissingBuffFactory(frame, db)
     end
+    -- Un-gated on the enable setting: the drive tears its container down when the
+    -- overlay is off, so a GUI disable applies on this pass rather than one late.
+    if DF.UseFactoryForDispelOverlay and DF:UseFactoryForDispelOverlay(frame, db) then
+        DF:DriveDispelOverlayFactory(frame, db)
+    end
 end
 
 -- DEBOUNCED to one pass per frame-render: GUI callbacks often bump the version
