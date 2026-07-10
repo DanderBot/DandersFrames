@@ -37,12 +37,15 @@ local Border = DF.Border
 --   anchorTo          frame to cover (default: parent)
 --   frameLevelOffset  level above parent (default: 10)
 --   layer             texture draw layer for the solid edges (default: "BORDER")
---   solidOnly         hot-path SOLID border that never uses a gradient. Skips the
---                     SetGradient/CreateColor gradient-clear in both Apply (SOLID)
---                     and SetColor, so live recolours are a bare SetColorTexture —
---                     cheap AND safe for secret-tinted colours (e.g. debuff
---                     dispel-type colours), where CreateColor()/comparisons would
---                     taint. Do NOT set for borders that can switch to GRADIENT.
+--   solidOnly         hot-path SOLID border: skips the SetGradient/CreateColor
+--                     gradient-clear in both Apply (SOLID) and SetColor, so live
+--                     recolours are a bare SetColorTexture — cheap AND safe for
+--                     secret-tinted colours (e.g. debuff dispel-type colours),
+--                     where CreateColor()/comparisons would taint. If a GRADIENT
+--                     style apply does land on the widget (shared GUI prefixes),
+--                     _gradientPainted forces the next solid clear so the
+--                     gradient can't stick; keep spec colours non-secret on any
+--                     widget whose style can reach GRADIENT.
 --   secretRect        the host's rect may be SECRET or unresolved when Apply runs
 --                     (12.1 aura-container buttons: Blizzard anchors them with
 --                     secret-wrapped offsets, and initializeFrame fires before any
@@ -95,11 +98,13 @@ function Border:New(parent, opts)
             -- leftover gradient (set when the border was first painted, even in
             -- SOLID mode) would tint the recolour and wash it out.  Paint a
             -- solid gradient of the new colour first (same pattern Apply uses).
-            -- solidOnly borders never set a gradient (Apply skips it too), so we
-            -- skip this — keeps the recolour a bare SetColorTexture, which is
-            -- both cheaper and safe for secret-tinted colours (CreateColor on a
-            -- secret value taints execution).
-            if not self._solidOnly and CreateColor then
+            -- solidOnly borders normally never set a gradient, so we skip this —
+            -- keeps the recolour a bare SetColorTexture, which is both cheaper
+            -- and safe for secret-tinted colours (CreateColor on a secret value
+            -- taints execution). _gradientPainted overrides the skip: a GRADIENT
+            -- style apply CAN land on a solidOnly widget (shared GUI prefixes),
+            -- and its state must be cleared here too.
+            if (not self._solidOnly or self._gradientPainted) and CreateColor then
                 -- Reset any leftover gradient before the solid SetColorTexture.
                 -- Use the real colour when non-secret (so a Blizzard pipeline that
                 -- leaves the gradient in place still shows the right colour), but
@@ -112,6 +117,7 @@ function Border:New(parent, opts)
                 for _, e in ipairs(edges) do
                     if e.SetGradient then e:SetGradient("HORIZONTAL", clear, clear) end
                 end
+                self._gradientPainted = nil
             end
             for _, e in ipairs(edges) do
                 e:SetColorTexture(r, g, b, a)
@@ -1548,6 +1554,15 @@ function Border:Apply(border, spec)
                 e:SetColorTexture(1, 1, 1, 1)
             end
 
+            -- Remember that these edges carry gradient state, so the solid
+            -- path's clear runs even on a solidOnly widget. solidOnly consumers
+            -- were assumed never to enter this branch, but several share their
+            -- GUI prefix with widgets that DO offer the Gradient style (the
+            -- aura icon borders render on solidOnly container-button widgets):
+            -- switching Gradient -> Solid then skipped the clear and the
+            -- gradient stuck until reload.
+            border._gradientPainted = true
+
             if direction == "HORIZONTAL" then
                 -- WoW HORIZONTAL: min = LEFT, max = RIGHT. start→end naturally
                 -- maps to left→right, no swap.
@@ -1575,10 +1590,12 @@ function Border:Apply(border, spec)
             -- the reliable cross-version way to do this; SetColorTexture alone
             -- can leave the previous min/max colour interpolation in place on
             -- some Blizzard texture pipelines.
-            -- solidOnly borders never enter the GRADIENT branch, so there's
-            -- nothing to clear — skip it so the edges carry no gradient and a
-            -- later bare-SetColorTexture recolour stays clean and secret-safe.
-            if not border._solidOnly and CreateColor then
+            -- solidOnly borders normally carry no gradient, so the clear is
+            -- skipped to keep recolours a bare SetColorTexture (cheap and
+            -- secret-safe) — UNLESS a GRADIENT apply actually painted these
+            -- edges (_gradientPainted), in which case skipping left the
+            -- gradient stuck on Gradient -> Solid style switches.
+            if (not border._solidOnly or border._gradientPainted) and CreateColor then
                 -- Reset any leftover gradient before the solid SetColorTexture.
                 -- Use the real colour when non-secret (so a Blizzard pipeline that
                 -- leaves the gradient in place stays correct), but fall back to
@@ -1592,6 +1609,7 @@ function Border:Apply(border, spec)
                 for _, e in ipairs(edges) do
                     if e.SetGradient then e:SetGradient("HORIZONTAL", clear, clear) end
                 end
+                border._gradientPainted = nil
             end
             for _, e in ipairs(edges) do
                 e:SetColorTexture(cr, cg, cb, ca)
