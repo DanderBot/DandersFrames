@@ -2545,9 +2545,30 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
     if prefix == "buff" then
         local excludeMap = BuildBuffExcludeMap()
         if excludeMap then candidateFilters = { excludeSpellIDs = excludeMap } end
+        -- Native max-TOTAL-duration filter (candidateFilters.maxDuration, seconds).
+        -- Blizzard-side semantics: auras with duration > max OR duration == 0 are
+        -- filtered — i.e. permanent auras are IMPLICITLY always hidden while this
+        -- is on (documented in the GUI tooltip). Structural: declared at AddAuraGroup.
+        if db.buffMaxDurationEnabled and (db.buffMaxDurationMinutes or 0) > 0 then
+            candidateFilters = candidateFilters or {}
+            candidateFilters.maxDuration = (db.buffMaxDurationMinutes or 0) * 60
+        end
+    end
+
+    -- Native sort: the legacy Sort Order dropdown (directBuffSortOrder) mapped onto
+    -- AuraContainerSortMethod member NAMES — TIME/NAME map to the *Only comparators
+    -- (pure single-dimension sorts, matching the legacy Lua sort's behaviour).
+    -- DEFAULT/nil passes nothing = Blizzard's default slot order. The backend
+    -- resolves the name against the securecopy'd global enum at build time.
+    local sort
+    if prefix == "buff" then
+        local o = db.directBuffSortOrder
+        if o == "TIME" then sort = { method = "ExpirationOnly" }
+        elseif o == "NAME" then sort = { method = "NameOnly" } end
     end
 
     return {
+        sort     = sort,
         unit     = opts.unit,
         mode     = "row",
         filter   = filter,
@@ -2601,6 +2622,8 @@ local function buffFactorySig(cfg)
         tostring(s.stacks and s.stacks.formatKey),
         tostring(s.border ~= nil), tostring(s.cooldown and s.cooldown.show ~= false),
         excludeSig(cfg.candidateFilters),   -- blacklist set (structural: declared at AddAuraGroup)
+        tostring(cfg.candidateFilters and cfg.candidateFilters.maxDuration),  -- max-duration filter (structural)
+        tostring(cfg.sort and cfg.sort.method),                               -- native sort (declared at AddAuraGroup)
     }, "|")
 end
 

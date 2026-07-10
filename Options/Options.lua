@@ -5442,8 +5442,23 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             TIME = L["Time Remaining"],
             NAME = L["Alphabetical"],
         }
+        -- Sort works on BOTH paths: legacy rows sort in the Lua scan; factory rows map
+        -- the same key onto the native AuraContainerSortMethod (TIME -> ExpirationOnly,
+        -- NAME -> NameOnly) declared at AddAuraGroup — see BuildAuraRowConfig. (The
+        -- 12.1 frost this control used to carry was lifted once the native mapping landed.)
         local bfSort = buffGroup:AddWidget(GUI:CreateDropdown(self.child, L["Sort Order"], buffSortOptions, db, "directBuffSortOrder", DirectFilterChanged), 55)
-        GUI:BlockControl12_1(bfSort, "roadmap", { id = "filters:buffsort", page = L["Aura Filters"], when = function(d) return DF:FactoryOwnsBuffRow(d) end })
+
+        -- Native-only: max TOTAL duration filter (12.1 candidateFilters.maxDuration).
+        -- Hidden while the legacy render owns the row (not expressible there).
+        local bfMaxDur = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Long Buffs"], db, "buffMaxDurationEnabled", function()
+            DirectFilterChanged()
+            self:RefreshStates()
+        end), 30)
+        bfMaxDur.hideOn = function(d) return not DF:FactoryOwnsBuffRow(d) end
+        bfMaxDur.tooltip = L["Hide buffs whose total duration is longer than the threshold - e.g. hour-long food and flask buffs. Buffs with no duration (permanent auras) are also hidden while this is on."]
+        local bfMaxDurSlider = buffGroup:AddWidget(GUI:CreateSlider(self.child, L["Hide Longer Than (minutes)"], 1, 30, 1, db, "buffMaxDurationMinutes", nil, DirectFilterChanged), 55)
+        bfMaxDurSlider.hideOn = function(d) return not DF:FactoryOwnsBuffRow(d) end
+        bfMaxDurSlider.disableOn = function(d) return not d.buffMaxDurationEnabled end
         Add(buffGroup, nil, 2)
 
         -- ===== DEBUFF FILTERS (Column 1, Direct mode only) =====
@@ -5703,11 +5718,14 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- ===== APPEARANCE SECTION =====
         local appearanceSection = Add(GUI:CreateCollapsibleSection(self.child, L["Appearance"], true), 36, "both")
         currentSection = appearanceSection
-        
+
         local function MasqueControlsBorders(d)
-            return DF.Masque and d.masqueBorderControl
+            -- Masque can't skin the native 12.1 container buttons, so while the
+            -- factory owns the row DF's own border renders regardless of the
+            -- Integrations toggle — don't hide the border controls for it.
+            return DF.Masque and d.masqueBorderControl and not DF:FactoryOwnsBuffRow(d)
         end
-        
+
         -- Border Group (col1)
         local borderGroup = GUI:CreateSettingsGroup(self.child, 260)
         borderGroup:AddWidget(GUI:CreateHeader(self.child, L["Border"]), 40)
@@ -5716,7 +5734,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Full border toolkit via the unified helper (Stage 5.5 Phase 2).  No
         -- class/role colour (aura indicators aren't unit-class).  Hidden when
         -- buffs are off or Masque controls the borders.
-        GUI:CreateBorderControls(borderGroup, db, "buff", {
+        local buffBorderW = GUI:CreateBorderControls(borderGroup, db, "buff", {
             parent        = self.child,
             include       = { inset = true, offset = true, blendMode = true,
                               gradient = true, shadow = true, alpha = true,
@@ -5728,6 +5746,12 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             refreshStates = function() self:RefreshStates() end,
             hideWhen      = function(d) return not d.showBuffs or MasqueControlsBorders(d) end,
         })
+        -- Animations can't run on the 12.1 container buttons (LCG's pooled glow
+        -- frames re-SetParent onto the host — forbidden on native AuraButtons), and
+        -- the factory strips spec.animation on render. Frost to match; candidate
+        -- for deletion in the post-port cleanup sweep.
+        GUI:BlockControl12_1(buffBorderW.animationType, "limitation",
+            { id = "buffs:borderanimation", page = L["Buffs"], when = function(d) return DF:FactoryOwnsBuffRow(d) end })
         AddToSection(borderGroup, nil, 1)
         
         -- Stack Count Group (col2) — the shared TextStyle control block (font/scale/
@@ -5943,6 +5967,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- "Color by Dispel Type" (below) is ON, the border is forced SOLID and
         -- recoloured per dispel type, so Style/Colour/Gradient/Animation here
         -- only take effect when it's OFF (Size/Inset always apply).
+        -- P3 NOTE: when the factory takes over the debuff row, frost the
+        -- animation dropdown like the buff/defensive pages (animations are
+        -- forbidden on container buttons; the factory strips spec.animation).
         GUI:CreateBorderControls(borderGroup, db, "debuff", {
             parent        = self.child,
             include       = { inset = true, offset = true, blendMode = true,
@@ -6438,7 +6465,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- the border edges inward (positive) or outward (negative) relative
         -- to the icon's bounds — independent of borderSize (thickness) and
         -- independent of the artwork's own inset.
-        GUI:CreateBorderControls(borderGroup, db, "defensiveIcon", {
+        local defBorderW = GUI:CreateBorderControls(borderGroup, db, "defensiveIcon", {
             parent       = self.child,
             -- Class/Role colour makes sense here: at a glance, the border
             -- communicates WHO is using the defensive cooldown (their class
@@ -6455,6 +6482,12 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             refreshStates = function() self:RefreshStates() end,
             hideWhen     = function(d) return not d.defensiveIconEnabled end,
         })
+        -- Animations can't run on the 12.1 container buttons (LCG's pooled glow
+        -- frames re-SetParent onto the host — forbidden on native AuraButtons), and
+        -- the factory strips spec.animation on render. Frost to match; candidate
+        -- for deletion in the post-port cleanup sweep.
+        GUI:BlockControl12_1(defBorderW.animationType, "limitation",
+            { id = "defensives:borderanimation", page = L["Defensives"], when = function(d) return DF:FactoryOwnsDefensiveRow(d) end })
         borderGroup.disableChildrenOn = HideDefensiveIconOptions
         Add(borderGroup, nil, 2)
         

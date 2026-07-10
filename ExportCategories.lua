@@ -307,6 +307,8 @@ DF.ExportCategories = {
         "buffDurationScale",
         "buffDurationX",
         "buffDurationY",
+        "buffMaxDurationEnabled",
+        "buffMaxDurationMinutes",
         "buffExpiringBorderAnimationColor",
         "buffExpiringBorderAnimationCornerLength",
         "buffExpiringBorderAnimationFrequency",

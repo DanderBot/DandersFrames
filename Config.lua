@@ -1088,6 +1088,9 @@ DF.PartyDefaults = {
     buffDurationColorByTime = true,
     buffDurationHideAboveEnabled = false,
     buffDurationHideAboveThreshold = 10,
+    -- Native 12.1 max-TOTAL-duration filter (candidateFilters.maxDuration); minutes.
+    buffMaxDurationEnabled = false,
+    buffMaxDurationMinutes = 5,
     buffDurationFont = "DF Roboto SemiBold",
     buffDurationFormat = "NUMBER",
     buffDurationOutline = "SHADOW;OUTLINE",

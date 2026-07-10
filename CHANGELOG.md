@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+* (Auras) Buff "Sort Order" (Aura Filters) works again on the 12.1 rows, now enforced natively by the game's aura engine — Time Remaining and Alphabetical apply in combat too. With the default Time Remaining setting, 12.1 rows sort by time again instead of slot order.
+* (Auras) New "Hide Long Buffs" filter (Aura Filters): hides buffs whose total duration exceeds a threshold — e.g. hour-long food and flask buffs. Evaluated natively by the game (12.1 rows only). Note: permanent buffs with no duration are also hidden while this is on.
+* (Interface) The buff Border settings no longer hide when Masque's "Let Masque control borders" is on — Masque can't skin the new 12.1 aura buttons, so DF's own border applies and its settings stay editable.
 * (Auras) Texture-style aura borders no longer scatter, lose their colour or vanish until a /reload on the 12.1 aura rows. The game positions the new aura buttons with protected values that the standard border backdrop can't measure, so aura-icon texture borders now render through a measurement-free path; fine border detail (e.g. double lines) also stays crisp at small icon sizes.
 * (Auras) "Color by Time Remaining" works again on the 12.1 aura rows: duration text colours by time left — red under 5s, orange under 15s, yellow under a minute, green above — evaluated by the game engine itself, so it keeps ticking in combat. (12.1 can no longer colour by percentage of the aura's full duration, so the steps are fixed times; the Short/Full formats use plain-English units while colouring is on.)
 * (Auras) Buff and defensive icon text now has a shared styling system, adding a Duration and Stack text colour option. The "Short" duration format no longer shows a stray space (e.g. "45s" not "45 s").
@@ -10,7 +13,7 @@
 * (Auras) The new 12.1 aura rows now honor your layout settings — anchor, direction, wrap, offsets, spacing, size and scale were previously ignored (icons piled at the top-left).
 * (Auras) Aura settings apply in real time again on 12.1 — sliders re-flow the row live during the drag instead of waiting for the next aura update.
 * (Auras) Aura Blacklist is back on 12.1 for buffs, now enforced natively by the game's aura engine. Debuff blacklisting is still blocked by a game limitation on friendly frames. Entries set to combat-only or out-of-combat-only can't be enforced on the new rows and stay visible.
-* (Interface) Settings the 12.1 rows can't provide are now marked in place: "Min Stacks to Show" (game limitation) and "Icons Per Row" while using vertical orientation (single column only).
+* (Interface) Settings the 12.1 rows can't provide are now marked in place: "Min Stacks to Show" (game limitation), "Icons Per Row" while using vertical orientation (single column only), and "Border Animation" on buff/defensive icons (the game doesn't allow animation effects on its aura buttons; any previously set animation is ignored rather than risking errors).
 
 * (Auras) Fix the in-combat aura freeze: the stack-count formatter cannot process the protected (secret) stack values 12.1 uses in combat, and the resulting error permanently stopped that frame's aura updates until reload. Stack counts now use the built-in display (shown at 2 or more); the "minimum stacks" setting no longer applies to the new aura rows.
 

@@ -306,6 +306,12 @@ local function styleButton_regions(slot, config)
                     if iconMode == nil then iconMode = (config.mode ~= "overlay") end
                     spec = DF.Border:BuildSpec(borderSpec.db, borderSpec.prefix, { unit = config.unit, frame = slot, iconMode = iconMode })
                 end
+                -- ANIMATIONS are forbidden on container buttons: LCG re-SetParents its
+                -- pooled glow frames onto the host, which taints on a native AuraButton
+                -- (lab-proven). Strip whatever the profile has set — BuildSpec includes
+                -- spec.animation whenever <prefix>BorderAnimationType ~= NONE (e.g. an
+                -- imported 12.0.x profile). The GUI frosts the control to match.
+                if spec then spec.animation = nil end
                 if spec then DF.Border:Apply(slot.dfBorder, spec) end
             end)
             if not ok and not warnedBorder then
@@ -748,6 +754,17 @@ function NativeBackend:build()
     -- on a friendly-frame consumer is silently inert (the Meorawr gate). Structural:
     -- changing the set is a Rebuild (consumers put it in their row signature).
     local candidateFilters = config.candidateFilters
+    -- Native sort (rows only): config.sort = { method = "ExpirationOnly", direction? } holds
+    -- enum MEMBER NAMES; resolve here against the securecopy'd globals so a renamed member
+    -- degrades to Blizzard's default order rather than erroring the build. Structural:
+    -- declared at AddAuraGroup (consumers carry it in their row signature).
+    local sortMethod, sortDirection
+    if config.sort and type(config.sort.method) == "string" and _G.AuraContainerSortMethod then
+        sortMethod = _G.AuraContainerSortMethod[config.sort.method]
+        if sortMethod ~= nil and _G.AuraContainerSortDirection then
+            sortDirection = _G.AuraContainerSortDirection[config.sort.direction or "Normal"]
+        end
+    end
     self.groupKeys = {}
     for i, f in ipairs(filters) do
         if AuraUtil and AuraUtil.IsValidFilterString and not AuraUtil.IsValidFilterString(f) then
@@ -763,7 +780,8 @@ function NativeBackend:build()
             else
                 local okGroup, err = pcall(function()
                     c:AddAuraGroup(key, f, { maxFrameCount = maxCount, initializeFrame = initFn,
-                                             layout = groupLayout, candidateFilters = candidateFilters })
+                                             layout = groupLayout, candidateFilters = candidateFilters,
+                                             sortMethod = sortMethod, sortDirection = sortDirection })
                 end)
                 if okGroup then
                     self.groupKeys[#self.groupKeys + 1] = key
