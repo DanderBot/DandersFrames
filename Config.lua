@@ -1041,7 +1041,7 @@ DF.PartyDefaults = {
     -- Buff settings
     buffAlpha = 1,
     buffAnchor = "BOTTOMRIGHT",
-    buffShowBorder = false,
+    buffShowBorder = true,
     buffBorderInset = 0,
     buffBorderSize = 1,
     -- Canonical border toolkit (Stage 5.5 Phase 2): plugs into BuildSpec +
@@ -1095,7 +1095,7 @@ DF.PartyDefaults = {
     buffDurationFormat = "NUMBER",
     buffDurationOutline = "SHADOW;OUTLINE",
     buffDurationScale = 1.2000000476837,
-    buffDurationX = 0,
+    buffDurationX = 1,
     buffDurationY = 2,
     buffExpiringBorderColor = {r = 1, g = 0.50196081399918, b = 0, a = 1},
     buffExpiringBorderColorByTime = false,
@@ -1137,8 +1137,8 @@ DF.PartyDefaults = {
     directBuffFilterRaidInCombat = true,      -- RAID_IN_COMBAT filter
     directBuffFilterCancelable = false,       -- CANCELABLE filter
     directBuffFilterNotCancelable = false,    -- NOT_CANCELABLE filter
-    directBuffFilterBigDefensive = true,      -- BIG_DEFENSIVE filter (12.0.1)
-    directBuffFilterExternalDefensive = true, -- EXTERNAL_DEFENSIVE filter (12.0.0)
+    directBuffFilterBigDefensive = false,     -- BIG_DEFENSIVE filter (12.0.1) — off by default: on 12.1 an aura matching multiple filter groups renders one icon per match (no cross-group dedup), so shipping these on caused defensive buffs to duplicate on the bar
+    directBuffFilterExternalDefensive = false, -- EXTERNAL_DEFENSIVE filter (12.0.0) — off by default (same dedup reason)
     directBuffSortOrder = "TIME",             -- "DEFAULT" / "TIME" / "NAME"
 
     -- Direct Mode: Debuff Filters
@@ -1152,7 +1152,7 @@ DF.PartyDefaults = {
     buffGrowth = "LEFT_UP",
     buffHideSwipe = false,
     buffMax = 5,
-    buffOffsetX = -1,
+    buffOffsetX = -2,
     buffOffsetY = 5,
     buffPaddingX = 2,
     buffPaddingY = 2,
@@ -1166,8 +1166,8 @@ DF.PartyDefaults = {
     buffStackMinimum = 2,
     buffStackOutline = "SHADOW;OUTLINE",
     buffStackScale = 1,
-    buffStackX = 2,
-    buffStackY = -1,
+    buffStackX = 3,
+    buffStackY = 0,
     buffWrap = 3,
     buffWrapOffsetX = 0,
     buffWrapOffsetY = 0,
@@ -1291,7 +1291,7 @@ DF.PartyDefaults = {
     debuffGrowth = "RIGHT_UP",
     debuffHideSwipe = false,
     debuffMax = 5,
-    debuffOffsetX = 1,
+    debuffOffsetX = 2,
     debuffOffsetY = 5,
     debuffPaddingX = 2,
     debuffPaddingY = 2,
@@ -1443,7 +1443,7 @@ DF.PartyDefaults = {
     -- Frame Dimensions & Layout
     frameHeight = 64,
     framePadding = 0,
-    frameSpacing = 2,
+    frameSpacing = 1,
     frameScale = 1.0,
     frameWidth = 125,
     gridSize = 25,
@@ -1679,7 +1679,7 @@ DF.PartyDefaults = {
     nameTextTruncateMode = "ELLIPSIS",
     nameTextUseClassColor = false,
     nameTextX = 0,
-    nameTextY = -10,
+    nameTextY = -8,
 
     -- Out of Range
     oorAbsorbBarAlpha = 0.20000000298023,
