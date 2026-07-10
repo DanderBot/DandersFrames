@@ -5557,9 +5557,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
     -- Auras > Aura Designer
     local pageAuraDesigner = CreateSubTab("auras", "auras_auradesigner", L["Aura Designer"])
-    -- 12.1: the Aura Designer engine reads secret aura data (spellId/expiration) the
-    -- new aura system no longer exposes. Whole page blocked until it's rebuilt.
-    GUI:BlockPage12_1(pageAuraDesigner, "roadmap")
+    -- 12.1: the Aura Designer is being rebuilt on the native aura container.
+    -- Unblock the page once the factory owns AD (mirrors the Debuffs/Missing Buffs
+    -- pages); per-control API-limit overlays for the not-yet-portable settings land
+    -- in the P4.7 GUI pass.
+    GUI:BlockPage12_1(pageAuraDesigner, "roadmap", function(d)
+        return GUI:IsAuraFactoryActive() and not DF:FactoryOwnsAD(d)
+    end)
     BuildPage(pageAuraDesigner, function(self, db, Add, AddSpace, AddSyncPoint)
         if DF.BuildAuraDesignerPage then
             DF.BuildAuraDesignerPage(GUI, self, db)
