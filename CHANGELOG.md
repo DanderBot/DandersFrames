@@ -28,6 +28,7 @@ DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally chan
 * (Interface) Settings the 12.1 rows can't provide are now marked in place: "Min Stacks to Show" (game limitation), "Icons Per Row" while using vertical orientation (single column only), and "Border Animation" on buff/defensive icons (the game doesn't allow animation effects on its aura buttons; any previously set animation is ignored rather than risking errors).
 * (Auras) Fix the in-combat aura freeze: the stack-count formatter cannot process the protected (secret) stack values 12.1 uses in combat, and the resulting error permanently stopped that frame's aura updates until reload. Stack counts now use the built-in display (shown at 2 or more); the "minimum stacks" setting no longer applies to the new aura rows.
 * (Auras) New buff duration format option (Number / Short / Full).
+* (Aura Designer) **Aura Designer now runs on the 12.1 aura system (work in progress).** Health-bar colouring, background colouring and borders — including animated borders — work again and keep working in combat. Icon, bar, sound and "show when missing" indicators are still being ported and are marked "coming soon" in the panel. A few effects can't be supported on 12.1 and are marked "Blizzard limitation": whole-frame alpha fade, particle-glow border animations, and anything that reacts to an aura's remaining time (near-expiry effects and the multi-trigger "shortest remaining" option). Name-text and health-text colouring will return in a later update.
 
 ### Known Issues (12.1 alpha)
 
@@ -35,8 +36,9 @@ DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally chan
 * An aura matching more than one selected filter shows one icon per match (no cross-filter dedup on 12.1). Buffs: "All Buffs" avoids it; Debuffs: "Show All Debuffs" avoids it. Awaiting a game-side fix.
 * Boss debuffs (private auras included) always show in the debuff row on 12.1 and can't be turned off — the game provides no way to exclude them.
 * Some buff/debuff/defensive tooltip settings (anchoring, in-combat disable) can't apply to the new aura rows.
-* The Dispel Overlay and Aura Designer are not yet ported to the new system.
-* Test mode still previews auras with the pre-12.1 renderer; a native preview is planned.
+* The Dispel Overlay is not yet ported to the new system.
+* Aura Designer is only partly ported (see above) — icon/bar/sound/missing indicators are still coming, and unsupported effects are greyed in the panel.
+* Test mode still previews auras with the pre-12.1 renderer; a native preview is planned (also affects the Aura Designer preview).
 * Dragging certain aura sliders can briefly stutter.
 
 ## [4.7.0]
