@@ -386,9 +386,26 @@ local function styleButton_regions(slot, config)
     local dispelSpec = style.dispel
     if dispelSpec then
         if dispelSpec.nativeBorder and not slot.dfAuraBorder then
-            slot.dfAuraBorder = slot:CreateTexture(nil, "OVERLAY")
-            slot.dfAuraBorder:SetPoint("TOPLEFT", -2, 2)
-            slot.dfAuraBorder:SetPoint("BOTTOMRIGHT", 2, -2)
+            -- HOLDER at +12: DF.Border is a child FRAME at +10, so a slot-level texture
+            -- would render UNDER the static border and the dispel colour would be
+            -- invisible behind it. (Holder-hosted regions are registrar-legal — the
+            -- duration text binds from a holder the same way.)
+            slot.dfDispelHolder = makeHolder(slot, dispelSpec.level or 12)
+            slot.dfAuraBorder = slot.dfDispelHolder:CreateTexture(nil, "OVERLAY")
+            -- The native Color style only VERTEX-TINTS the region (SetAuraBorderColor →
+            -- SetVertexColor; no file is ever assigned) — a blank texture renders
+            -- nothing. Give it the classic debuff-border ring Blizzard's own raid
+            -- frames tint per dispel type.
+            slot.dfAuraBorder:SetTexture("Interface\\Buttons\\UI-Debuff-Overlays")
+            slot.dfAuraBorder:SetTexCoord(0.296875, 0.5703125, 0, 0.515625)
+        end
+        if slot.dfAuraBorder then
+            -- Inset re-applied every pass (NOT create-once) so the slider is live.
+            -- DF.Border sign convention: positive = inward, negative = outward halo.
+            local ins = dispelSpec.inset or -2
+            slot.dfAuraBorder:ClearAllPoints()
+            slot.dfAuraBorder:SetPoint("TOPLEFT", slot.dfDispelHolder, "TOPLEFT", ins, -ins)
+            slot.dfAuraBorder:SetPoint("BOTTOMRIGHT", slot.dfDispelHolder, "BOTTOMRIGHT", -ins, ins)
         end
         if dispelSpec.nativeSymbol and not slot.dfSymbol then
             slot.dfSymbolHolder = makeHolder(slot, 7)

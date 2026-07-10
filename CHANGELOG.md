@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+* (Auras) Debuff settings caught up to the buff row on 12.1: Duration Format (Number/Short/Full), Duration and Stack colour options, debuff filters + Sort Order un-marked (they drive the new rows natively), and debuff/defensive click-through and tooltip enables re-enabled. Settings the rows can't provide are marked in place ("Min Stacks to Show", tooltip anchoring, in-combat tooltip disable).
+* (Click-Casting) Fixed right-click (and modified-click) target/menu erroring on 12.1 with click-casting enabled — a 12.1 game bug breaks the click-delegation mechanism every click-casting addon uses, so those bindings now route through an equivalent macro-based path on 12.1. Behaviour is unchanged; the workaround retires automatically once the game bug is fixed.
+* (Auras) **Debuffs now render through the new 12.1 aura engine** — the debuff row was the last aura row on the legacy path and could show nothing in combat on 12.1. Layout, border, duration text (including Color by Time Remaining and Hide Above Threshold), stack text and sort all work like the buff row. "Color by Dispel Type" uses the game's own dispel border: the standard Magic/Curse/Disease/Poison colours, applied by the game engine — the custom per-type colour pickers can't be honoured on 12.1 (a game limitation; they're marked in place). A new "Dispel Border Inset" slider positions the dispel ring — outward halo around your border (default) through flush/inward. The debuff blacklist remains unenforceable on friendly frames (game limitation).
 * (Auras) Buff "Sort Order" (Aura Filters) works again on the 12.1 rows, now enforced natively by the game's aura engine — Time Remaining and Alphabetical apply in combat too. With the default Time Remaining setting, 12.1 rows sort by time again instead of slot order.
 * (Auras) New "Hide Long Buffs" filter (Aura Filters): hides buffs whose total duration exceeds a threshold — e.g. hour-long food and flask buffs. Evaluated natively by the game (12.1 rows only). Note: permanent buffs with no duration are also hidden while this is on.
 * (Interface) The buff Border settings no longer hide when Masque's "Let Masque control borders" is on — Masque can't skin the new 12.1 aura buttons, so DF's own border applies and its settings stay editable.
@@ -31,7 +34,7 @@
 * The 12.1 aura rows are being rebuilt on Blizzard's new container system and are under active testing — please report any case where buff or defensive auras stop updating, **especially in combat**.
 * An aura matching more than one filter can show duplicate icons — a 12.1 limitation we're still working around.
 * Some buff/defensive tooltip settings don't yet apply to the new aura rows.
-* Debuffs, dispel overlay and other non-buff aura displays are not yet ported to the new system and may be blank on 12.1.
+* Dispel overlay, Boss Debuffs and other non-row aura displays are not yet ported to the new system and may be blank on 12.1.
 * Dragging certain aura sliders can briefly stutter.
 
 ## [4.7.0]

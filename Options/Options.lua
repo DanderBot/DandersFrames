@@ -454,26 +454,30 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local debuffTooltipEnable = debuffTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Debuff Tooltips"], db, "tooltipDebuffEnabled", nil), 30)
         debuffTooltipEnable.keepEnabled = true
         debuffTooltipGroup.disableChildrenOn = function(d) return not d.tooltipDebuffEnabled end
-        debuffTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Disable in Combat"], db, "tooltipDebuffDisableInCombat", function() end), 30)
+        local debuffTtCombat = debuffTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Disable in Combat"], db, "tooltipDebuffDisableInCombat", function() end), 30)
+        GUI:BlockControl12_1(debuffTtCombat, "roadmap", { id = "tooltips:debuffcombat", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsDebuffRow(d) end })
         
         local debuffAnchorValues = {
             DEFAULT = L["Game Default"],
             CURSOR = L["Cursor"],
             FRAME = L["Debuff Icon"],
         }
-        debuffTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor To"], debuffAnchorValues, db, "tooltipDebuffAnchor", function() GUI:RefreshCurrentPage() end), 55)
+        local debuffTtAnchorTo = debuffTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor To"], debuffAnchorValues, db, "tooltipDebuffAnchor", function() GUI:RefreshCurrentPage() end), 55)
+        GUI:BlockControl12_1(debuffTtAnchorTo, "roadmap", { id = "tooltips:debuffanchorto", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsDebuffRow(d) end })
         
         local debuffAnchorPos = debuffTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorPositionValues, db, "tooltipDebuffAnchorPos", function() end), 55)
         debuffAnchorPos.disableOn = function(d) return d.tooltipDebuffAnchor == "DEFAULT" end
+        GUI:BlockControl12_1(debuffAnchorPos, "roadmap", { id = "tooltips:debuffanchorpos", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsDebuffRow(d) end })
         
         local debuffOffsetX = debuffTooltipGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -150, 150, 1, db, "tooltipDebuffX", function() end), 55)
         debuffOffsetX.disableOn = function(d) return d.tooltipDebuffAnchor ~= "FRAME" end
+        GUI:BlockControl12_1(debuffOffsetX, "roadmap", { id = "tooltips:debuffoffsetx", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsDebuffRow(d) end })
         
         local debuffOffsetY = debuffTooltipGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -150, 150, 1, db, "tooltipDebuffY", function() end), 55)
         debuffOffsetY.disableOn = function(d) return d.tooltipDebuffAnchor ~= "FRAME" end
+        GUI:BlockControl12_1(debuffOffsetY, "roadmap", { id = "tooltips:debuffoffsety", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsDebuffRow(d) end })
         
         Add(debuffTooltipGroup, nil, 1)
-        GUI:BlockControl12_1(debuffTooltipGroup, "roadmap", { id = "tooltips:debuffgroup", page = L["Tooltips"] })
         
         -- Defensive Icon Tooltips (Column 2)
         local defTooltipGroup = GUI:CreateSettingsGroup(self.child, 280)
@@ -481,26 +485,30 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local defTooltipEnable = defTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Defensive Icon Tooltips"], db, "tooltipDefensiveEnabled", nil), 30)
         defTooltipEnable.keepEnabled = true
         defTooltipGroup.disableChildrenOn = function(d) return not d.tooltipDefensiveEnabled end
-        defTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Disable in Combat"], db, "tooltipDefensiveDisableInCombat", function() end), 30)
+        local defTtCombat = defTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Disable in Combat"], db, "tooltipDefensiveDisableInCombat", function() end), 30)
+        GUI:BlockControl12_1(defTtCombat, "roadmap", { id = "tooltips:defensivecombat", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsDefensiveRow(d) end })
         
         local defAnchorValues = {
             DEFAULT = L["Game Default"],
             CURSOR = L["Cursor"],
             FRAME = L["Defensive Icon"],
         }
-        defTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor To"], defAnchorValues, db, "tooltipDefensiveAnchor", function() GUI:RefreshCurrentPage() end), 55)
+        local defTtAnchorTo = defTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor To"], defAnchorValues, db, "tooltipDefensiveAnchor", function() GUI:RefreshCurrentPage() end), 55)
+        GUI:BlockControl12_1(defTtAnchorTo, "roadmap", { id = "tooltips:defensiveanchorto", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsDefensiveRow(d) end })
         
         local defAnchorPos = defTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorPositionValues, db, "tooltipDefensiveAnchorPos", function() end), 55)
         defAnchorPos.disableOn = function(d) return d.tooltipDefensiveAnchor == "DEFAULT" end
+        GUI:BlockControl12_1(defAnchorPos, "roadmap", { id = "tooltips:defensiveanchorpos", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsDefensiveRow(d) end })
         
         local defOffsetX = defTooltipGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -100, 100, 1, db, "tooltipDefensiveX", function() end), 55)
         defOffsetX.disableOn = function(d) return d.tooltipDefensiveAnchor ~= "FRAME" end
+        GUI:BlockControl12_1(defOffsetX, "roadmap", { id = "tooltips:defensiveoffsetx", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsDefensiveRow(d) end })
         
         local defOffsetY = defTooltipGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -100, 100, 1, db, "tooltipDefensiveY", function() end), 55)
         defOffsetY.disableOn = function(d) return d.tooltipDefensiveAnchor ~= "FRAME" end
+        GUI:BlockControl12_1(defOffsetY, "roadmap", { id = "tooltips:defensiveoffsety", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsDefensiveRow(d) end })
         
         Add(defTooltipGroup, nil, 2)
-        GUI:BlockControl12_1(defTooltipGroup, "roadmap", { id = "tooltips:defensivegroup", page = L["Tooltips"] })
 
         -- Resurrection Icon Tooltips (Column 3)
         local resTooltipGroup = GUI:CreateSettingsGroup(self.child, 280)
@@ -4101,13 +4109,15 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             if DF.UpdateAuraClickThrough then DF:UpdateAuraClickThrough() end
         end), 30)
         debuffDisableMouse.disableOn = function(d) return not d.showDebuffs end
-        GUI:BlockControl12_1(debuffDisableMouse, "roadmap", { id = "integrations:debuffclickthrough", page = L["Integrations"] })
+        GUI:BlockControl12_1(debuffDisableMouse, "roadmap", { id = "integrations:debuffclickthrough", page = L["Integrations"],
+            when = function(d) return GUI:IsAuraFactoryActive() and not DF:FactoryOwnsDebuffRow(d) end })
         
         local defensiveDisableMouse = clickThroughGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Defensive Icon Click-Through"], db, "defensiveIconDisableMouse", function()
             if DF.UpdateAuraClickThrough then DF:UpdateAuraClickThrough() end
         end), 30)
         defensiveDisableMouse.disableOn = function(d) return not d.defensiveIconEnabled end
-        GUI:BlockControl12_1(defensiveDisableMouse, "roadmap", { id = "integrations:defensiveclickthrough", page = L["Integrations"] })
+        GUI:BlockControl12_1(defensiveDisableMouse, "roadmap", { id = "integrations:defensiveclickthrough", page = L["Integrations"],
+            when = function(d) return GUI:IsAuraFactoryActive() and not DF:FactoryOwnsDefensiveRow(d) end })
         
         local tsDisableMouse = clickThroughGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Targeted Spell Click-Through"], db, "targetedSpellDisableMouse", function()
             if DF.UpdateAuraClickThrough then DF:UpdateAuraClickThrough() end
@@ -5511,7 +5521,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         }
         local dfSort = debuffGroup:AddWidget(GUI:CreateDropdown(self.child, L["Sort Order"], debuffSortOptions, db, "directDebuffSortOrder", DirectFilterChanged), 55)
         Add(debuffGroup, nil, 1)
-        GUI:BlockControl12_1(debuffGroup, "roadmap", { id = "filters:debuffgroup", page = L["Aura Filters"] })
+        -- 12.1: debuff filters + sort feed the factory row natively (P3). Blocked
+        -- only when the 12.1 aura system is active but the factory is toggled off.
+        GUI:BlockControl12_1(debuffGroup, "roadmap", { id = "filters:debuffgroup", page = L["Aura Filters"],
+            when = function(d) return GUI:IsAuraFactoryActive() and not DF:FactoryOwnsDebuffRow(d) end })
 
         -- ===== AURA BLACKLIST (Column 2, under Buff Filters) =====
         -- Pointer section directing users to the dedicated Aura Blacklist tab.
@@ -5872,9 +5885,12 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
     -- Auras > Debuffs (combined Layout + Appearance with collapsible sections)
     local pageDebuffs = CreateSubTab("auras", "auras_debuffs", L["Debuffs"])
-    -- 12.1: the debuff row is still on the legacy secret-reading render; the factory
-    -- serves only the buff row in v1. Blocked until the debuff row is ported.
-    GUI:BlockPage12_1(pageDebuffs, "roadmap")
+    -- 12.1: the debuff row is factory-served (P3). The page blocks only when the
+    -- 12.1 aura system is active but the factory does NOT own the row (dev toggle
+    -- off) -- the same lift pattern the Defensive Icon page used.
+    GUI:BlockPage12_1(pageDebuffs, "roadmap", function(d)
+        return GUI:IsAuraFactoryActive() and not DF:FactoryOwnsDebuffRow(d)
+    end)
     BuildPage(pageDebuffs, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top
         Add(CreateCopyButton(self.child, {"debuff", "showDebuffs"}, L["Debuffs"], "auras_debuffs"), 25, 2)
@@ -5950,7 +5966,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         currentSection = appearanceSection
         
         local function MasqueControlsBorders(d)
-            return DF.Masque and d.masqueBorderControl
+            -- Masque can't skin the native 12.1 container buttons (see the buff page).
+            return DF.Masque and d.masqueBorderControl and not DF:FactoryOwnsDebuffRow(d)
         end
         
         local function InvalidateAndUpdate()
@@ -5967,10 +5984,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- "Color by Dispel Type" (below) is ON, the border is forced SOLID and
         -- recoloured per dispel type, so Style/Colour/Gradient/Animation here
         -- only take effect when it's OFF (Size/Inset always apply).
-        -- P3 NOTE: when the factory takes over the debuff row, frost the
-        -- animation dropdown like the buff/defensive pages (animations are
-        -- forbidden on container buttons; the factory strips spec.animation).
-        GUI:CreateBorderControls(borderGroup, db, "debuff", {
+        local debuffBorderW = GUI:CreateBorderControls(borderGroup, db, "debuff", {
             parent        = self.child,
             include       = { inset = true, offset = true, blendMode = true,
                               gradient = true, shadow = true, alpha = true,
@@ -5982,9 +5996,18 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             refreshStates = function() self:RefreshStates() end,
             hideWhen      = function(d) return not d.showDebuffs or MasqueControlsBorders(d) end,
         })
+        -- Animations can't run on the 12.1 container buttons (see the buff page);
+        -- the factory strips spec.animation on render. Deletion candidate post-port.
+        GUI:BlockControl12_1(debuffBorderW.animationType, "limitation",
+            { id = "debuffs:borderanimation", page = L["Debuffs"], when = function(d) return DF:FactoryOwnsDebuffRow(d) end })
         local colorByType = borderGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Color by Dispel Type"], db, "debuffBorderColorByType", InvalidateAndUpdate), 30)
         colorByType.disableOn = function(d) return not d.debuffShowBorder or MasqueControlsBorders(d) end
         colorByType.hideOn = function(d) return MasqueControlsBorders(d) end
+        -- 12.1 rows: the native dispel ring's inset (+ inward / - outward halo; the
+        -- ring geometry is ours even though Blizzard tints it). Live via restyle.
+        local dispelInset = borderGroup:AddWidget(GUI:CreateSlider(self.child, L["Dispel Border Inset"], -8, 8, 1, db, "debuffDispelBorderInset", nil, function() DF:LightweightUpdateAuraBorder("debuff") end, true), 55)
+        dispelInset.disableOn = function(d) return not d.debuffBorderColorByType or MasqueControlsBorders(d) end
+        dispelInset.hideOn = function(d) return MasqueControlsBorders(d) or not DF:FactoryOwnsDebuffRow(d) end
         AddToSection(borderGroup, nil, 1)
         
         -- Dispel Colors Group (col2)
@@ -6003,6 +6026,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local noneColor = colorsGroup:AddWidget(GUI:CreateColorPicker(self.child, L["None / Physical"], db, "debuffBorderColorNone", false, InvalidateAndUpdate, function() DF:LightweightUpdateDebuffBorderColors() end, true), 30)
         noneColor.disableOn = function(d) return not d.debuffShowBorder or not d.debuffBorderColorByType or MasqueControlsBorders(d) end
         colorsGroup.hideOn = function(d) return MasqueControlsBorders(d) end
+        -- 12.1: the native dispel border is coloured PRIVATE-side from Blizzard's
+        -- standard dispel palette (the aura's dispel type is secret) -- custom
+        -- per-type colours are not expressible on the factory row.
+        GUI:BlockControl12_1(colorsGroup, "limitation",
+            { id = "debuffs:dispelcolors", page = L["Debuffs"], when = function(d) return DF:FactoryOwnsDebuffRow(d) end })
         AddToSection(colorsGroup, nil, 2)
         
         -- Stack Count Group (col1)
@@ -6015,7 +6043,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         stackCountGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "debuffStackAnchor", function() DF:LightweightUpdateAuraStackText("debuff") end), 55)
         stackCountGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -150, 150, 1, db, "debuffStackX", nil, function() DF:LightweightUpdateAuraStackText("debuff") end, true), 55)
         stackCountGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -150, 150, 1, db, "debuffStackY", nil, function() DF:LightweightUpdateAuraStackText("debuff") end, true), 55)
-        stackCountGroup:AddWidget(GUI:CreateSlider(self.child, L["Min Stacks to Show"], 1, 10, 1, db, "debuffStackMinimum", nil), 55)
+        stackCountGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Color"], db, "debuffStackColor", false, function() DF:LightweightUpdateAuraStackText("debuff") end, function() DF:LightweightUpdateAuraStackText("debuff") end, true), 30)
+        local debuffStackMin = stackCountGroup:AddWidget(GUI:CreateSlider(self.child, L["Min Stacks to Show"], 1, 10, 1, db, "debuffStackMinimum", nil), 55)
+        GUI:BlockControl12_1(debuffStackMin, "limitation", { id = "debuffs:stackminimum", page = L["Debuffs"], when = function(d) return DF:FactoryOwnsDebuffRow(d) end })
         -- Grey the whole group when Debuffs are off, matching Settings/Position/Grid.
         stackCountGroup.disableChildrenOn = function(d) return not d.showDebuffs end
         AddToSection(stackCountGroup, nil, 1)
@@ -6029,6 +6059,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end), 30)
         -- Cooldown swipe (radial time-remaining) lives with Duration Text, not Border.
         durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Cooldown Swipe"], db, "debuffHideSwipe", nil), 30)
+        local debuffDurationFormatOptions = { NUMBER = L["Number"], SHORT = L["Short"], FULL = L["Full"] }
+        local durFormat = durationGroup:AddWidget(GUI:CreateDropdown(self.child, L["Duration Format"], debuffDurationFormatOptions, db, "debuffDurationFormat", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 55)
+        durFormat.disableOn = function(d) return not d.debuffShowDuration end
         local durFont = durationGroup:AddWidget(GUI:CreateFontDropdown(self.child, L["Font"], db, "debuffDurationFont", nil), 55)
         durFont.disableOn = function(d) return not d.debuffShowDuration end
         local durScale = durationGroup:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.0, 0.05, db, "debuffDurationScale", nil, function() DF:LightweightUpdateAuraDurationText("debuff") end, true), 55)
@@ -6043,11 +6076,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         durX.disableOn = function(d) return not d.debuffShowDuration end
         local durY = durationGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -150, 150, 1, db, "debuffDurationY", nil, function() DF:LightweightUpdateAuraDurationText("debuff") end, true), 55)
         durY.disableOn = function(d) return not d.debuffShowDuration end
-        local durColor = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Color by Time Remaining"], db, "debuffDurationColorByTime", function() DF:RefreshDurationColorSettings() end), 30)
+        local durColorPick = durationGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Duration Color"], db, "debuffDurationColor", false, function() DF:LightweightUpdateAuraDurationText("debuff") end, function() DF:LightweightUpdateAuraDurationText("debuff") end, true), 30)
+        durColorPick.disableOn = function(d) return not d.debuffShowDuration or d.debuffDurationColorByTime end
+        local durColor = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Color by Time Remaining"], db, "debuffDurationColorByTime", function() self:RefreshStates(); DF:RefreshDurationColorSettings(); DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
         durColor.disableOn = function(d) return not d.debuffShowDuration end
-        local durHideAbove = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Above Threshold"], db, "debuffDurationHideAboveEnabled", function() DF:RefreshDurationColorSettings() end), 30)
+        local durHideAbove = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Above Threshold"], db, "debuffDurationHideAboveEnabled", function() DF:RefreshDurationColorSettings(); DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
         durHideAbove.disableOn = function(d) return not d.debuffShowDuration end
-        local durHideAboveSlider = durationGroup:AddWidget(GUI:CreateSlider(self.child, L["Hide Above (seconds)"], 1, 60, 1, db, "debuffDurationHideAboveThreshold", nil, function() DF:RefreshDurationColorSettings() end), 55)
+        local durHideAboveSlider = durationGroup:AddWidget(GUI:CreateSlider(self.child, L["Hide Above (seconds)"], 1, 60, 1, db, "debuffDurationHideAboveThreshold", nil, function() DF:RefreshDurationColorSettings(); DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 55)
         durHideAboveSlider.disableOn = function(d) return not d.debuffShowDuration or not d.debuffDurationHideAboveEnabled end
         -- Grey the whole group when Debuffs are off (composes with the per-control
         -- debuffShowDuration gates), matching Settings/Position/Grid.

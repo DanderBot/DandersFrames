@@ -934,6 +934,7 @@ L["Hide % Symbol"] = true
 L["Hide Above (seconds)"] = true
 L["Hide Above Threshold"] = true
 L["Hide Long Buffs"] = true
+L["Dispel Border Inset"] = true
 L["Hide Longer Than (minutes)"] = true
 L["Hide buffs whose total duration is longer than the threshold - e.g. hour-long food and flask buffs. Buffs with no duration (permanent auras) are also hidden while this is on."] = true
 L["Hide Blizzard Player Frame"] = true

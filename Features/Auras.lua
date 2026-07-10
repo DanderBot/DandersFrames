@@ -2565,6 +2565,21 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
         local o = db.directBuffSortOrder
         if o == "TIME" then sort = { method = "ExpirationOnly" }
         elseif o == "NAME" then sort = { method = "NameOnly" } end
+    elseif prefix == "debuff" then
+        local o = db.directDebuffSortOrder
+        if o == "TIME" then sort = { method = "ExpirationOnly" }
+        elseif o == "NAME" then sort = { method = "NameOnly" } end
+    end
+
+    -- Debuff rows: NATIVE dispel border when Color-by-Dispel-Type is on. The colour is
+    -- applied PRIVATE-side from Blizzard's palette (ApplyAuraBorder -> GetAuraBorderColor;
+    -- the dispel type is secret) — DF's custom per-type colours are NOT expressible on
+    -- 12.1 rows (pickers frosted). Shows only on dispellable debuffs; the static
+    -- DF.Border below renders always, so non-dispellable keeps the base border.
+    local dispel
+    if prefix == "debuff" and db.debuffBorderColorByType then
+        dispel = { nativeBorder = true, style = "Color", showWhenHarmful = true,
+                   inset = db.debuffDispelBorderInset or -2 }
     end
 
     return {
@@ -2575,7 +2590,10 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
         max      = g("Max") or 5,
         enabled  = true,
         candidateFilters = candidateFilters,
-        tooltips = not g("DisableMouse"),          -- factory buttons are always click-through
+        -- Native hover tooltips: gated on BOTH the Integrations click-through toggle
+        -- and the Tooltips page's per-row Enable (legacy honoured both; in the sig).
+        tooltips = (not g("DisableMouse"))
+            and db["tooltip" .. (prefix == "debuff" and "Debuff" or "Buff") .. "Enabled"] ~= false,
         layout = {
             size     = g("Size") or 20,
             scale    = g("Scale") or 1,
@@ -2592,6 +2610,7 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
             border = g("ShowBorder") and { db = db, prefix = prefix } or nil,
             cooldown = { show = not g("HideSwipe"), reverse = true, edge = false, numbers = false },
             duration = dur,
+            dispel   = dispel,
             -- Shared TextStyle spec (font/scale/outline/anchor/offsets/justify/colour).
             -- No formatter: forbidden on container rows (secret trap — see the
             -- GetStacksFormatter tombstone above). Native default = counts > 1.
@@ -2624,6 +2643,7 @@ local function buffFactorySig(cfg)
         excludeSig(cfg.candidateFilters),   -- blacklist set (structural: declared at AddAuraGroup)
         tostring(cfg.candidateFilters and cfg.candidateFilters.maxDuration),  -- max-duration filter (structural)
         tostring(cfg.sort and cfg.sort.method),                               -- native sort (declared at AddAuraGroup)
+        tostring(s.dispel ~= nil),          -- native dispel border (region is create-once -> Rebuild)
     }, "|")
 end
 
@@ -2703,6 +2723,83 @@ function DF:DriveBuffFactory(frame, db)
 end
 
 -- ============================================================
+-- DEBUFF FACTORY BRIDGE (P3) — mirror of the buff bridge with debuff keys.
+-- Filter list = the native direct-debuff filters; dispel colouring = the native
+-- SetAuraBorder Color style (Blizzard palette — custom per-type colours are not
+-- expressible on 12.1; pickers frosted). Debuff BLACKLIST stays legacy-inert:
+-- harmful spell-ID candidate filters do nothing on friendly frames (Meorawr gate).
+-- ============================================================
+
+-- Render gate (excludes test mode, which paints legacy icons directly).
+function DF:UseFactoryForDebuffs(frame, db)
+    return DF.db and DF.db.debuffUseFactory ~= false
+        and DF.AuraContainer and DF.AuraContainer.IsSupported()
+        and not (DF.testMode or DF.raidTestMode)
+end
+
+-- GUI-facing predicate (does NOT exclude test mode — see FactoryOwnsBuffRow).
+function DF:FactoryOwnsDebuffRow(db)
+    return (DF.db and DF.db.debuffUseFactory ~= false
+        and DF.AuraContainer and DF.AuraContainer.IsSupported()) or false
+end
+
+-- Drive the factory debuff row for one frame. Structure identical to DriveBuffFactory
+-- (see its comments for the build-once / combat-defer / version-gate reasoning).
+function DF:DriveDebuffFactory(frame, db)
+    local h = frame.debuffFactory
+    if not h then
+        h = DF.AuraContainer:Create(frame, DF:BuildAuraRowConfig(db, "debuff", {
+            unit = frame.unit,
+            filterList = BuildDirectDebuffFilters(db),
+        }))
+        frame.debuffFactory = h
+        frame.dfDebuffFactoryVersion = DF.auraLayoutVersion or 0
+        if h then frame.debuffFactorySig = buffFactorySig(h.config) end
+    end
+
+    -- No double row: legacy debuff icons stay hidden while the factory owns the row.
+    if frame.debuffIcons then
+        for _, icon in ipairs(frame.debuffIcons) do icon:Hide() end
+    end
+    if not h then return end
+
+    local rowAlpha = db.debuffAlpha or 1
+    if frame.dfDebuffFactoryAlpha ~= rowAlpha then
+        frame.dfDebuffFactoryAlpha = rowAlpha
+        h:GetFrame():SetAlpha(rowAlpha)
+    end
+
+    if h:GetUnit() ~= frame.unit then
+        h:SetUnit(frame.unit)
+        frame.dfDebuffFactoryHidden = InCombatLockdown() or nil
+    elseif frame.dfDebuffFactoryHidden and not InCombatLockdown() then
+        frame.dfDebuffFactoryHidden = nil
+    end
+    local rowShown = not frame.dfDebuffFactoryHidden
+    if frame.dfDebuffFactoryShown ~= rowShown then
+        frame.dfDebuffFactoryShown = rowShown
+        h:GetFrame():SetShown(rowShown)
+    end
+
+    local ver = DF.auraLayoutVersion or 0
+    if frame.dfDebuffFactoryVersion ~= ver and not InCombatLockdown() then
+        frame.dfDebuffFactoryVersion = ver
+        local cfg = DF:BuildAuraRowConfig(db, "debuff", {
+            unit = frame.unit,
+            filterList = BuildDirectDebuffFilters(db),
+        })
+        h:GetFrame():SetFrameLevel(math.max(0, frame:GetFrameLevel() + (cfg.frameLevelOffset or 40)))
+        local sig = buffFactorySig(cfg)
+        if frame.debuffFactorySig ~= sig then
+            frame.debuffFactorySig = sig
+            h:Rebuild(cfg)                      -- structural — REPLACES the config wholesale
+        else
+            h:ApplyStyle(cfg.style, cfg.layout) -- cosmetics — in place, no leak
+        end
+    end
+end
+
+-- ============================================================
 -- DEFENSIVE-ICON FACTORY BRIDGE (pilot — first non-buff consumer)
 -- Routes the defensive row through DF.AuraContainer on 12.1 using the native
 -- BIG_DEFENSIVE / EXTERNAL_DEFENSIVE filters. Reuses the buff bridge's config SHAPE
@@ -2758,7 +2855,7 @@ function DF:BuildDefensiveRowConfig(db, unit)
         filter   = BuildDirectDefensiveFilters(),
         max      = db.defensiveBarMax or 4,
         enabled  = true,
-        tooltips = not db.defensiveIconDisableMouse,
+        tooltips = (not db.defensiveIconDisableMouse) and db.tooltipDefensiveEnabled ~= false,
         -- Z-order: match the legacy defensive level — contentOverlay+26 = frame+51 when auto
         -- (defensiveIconFrameLevel 0), else the user's own offset. Applied to the container's
         -- anchor frame in AuraContainer:Create + on each layout-version re-apply.
@@ -2880,6 +2977,9 @@ local function driveFactoryRowsNow(frame)
     if db.showBuffs and DF:UseFactoryForBuffs(frame, db) then
         DF:DriveBuffFactory(frame, db)
     end
+    if db.showDebuffs and DF:UseFactoryForDebuffs(frame, db) then
+        DF:DriveDebuffFactory(frame, db)
+    end
     if db.defensiveIconEnabled and DF:UseFactoryForDefensive(frame, db) then
         DF:DriveDefensiveFactory(frame, db)
     end
@@ -2920,6 +3020,11 @@ function DF:UpdateAuras_Enhanced(frame)
     if frame.buffFactory and not buffFactoryActive then
         frame.buffFactory:GetFrame():Hide()
         frame.dfBuffFactoryShown = false   -- keep DriveBuffFactory's shown-cache coherent
+    end
+    local debuffFactoryActive = db.showDebuffs and DF:UseFactoryForDebuffs(frame, db)
+    if frame.debuffFactory and not debuffFactoryActive then
+        frame.debuffFactory:GetFrame():Hide()
+        frame.dfDebuffFactoryShown = false
     end
 
     -- Aura Designer runs when enabled; standard buffs can coexist if showBuffs is on.
@@ -2963,7 +3068,9 @@ function DF:UpdateAuras_Enhanced(frame)
     end
 
     -- Debuff display (always runs — AD doesn't manage debuffs)
-    if db.showDebuffs then
+    if db.showDebuffs and DF:UseFactoryForDebuffs(frame, db) then
+        DF:DriveDebuffFactory(frame, db)       -- 12.1 native container; hides legacy icons
+    elseif db.showDebuffs then
         DF:UpdateAuraIconsDirect(frame, frame.debuffIcons, "DEBUFF", db.debuffMax or 4)
     else
         for _, icon in ipairs(frame.debuffIcons) do icon:Hide() end

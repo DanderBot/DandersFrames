@@ -1223,6 +1223,10 @@ DF.PartyDefaults = {
     debuffBorderColorNone = {r = 0, g = 0, b = 0, a = 1},
     debuffBorderColorPoison = {r = 0, g = 0.6, b = 0},
     debuffShowBorder = true,
+    debuffDispelBorderInset = -2,   -- native dispel ring: + inward / - outward halo
+    debuffDurationFormat = "NUMBER",
+    debuffDurationColor = {r = 1, g = 1, b = 1},
+    debuffStackColor = {r = 1, g = 0.82, b = 0},
     debuffBorderInset = 0,
     debuffBorderSize = 2,
     -- Canonical border toolkit (Stage 5.5 Phase 2).  Static colour, used when

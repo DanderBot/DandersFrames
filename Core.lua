@@ -769,7 +769,8 @@ function DF:LightweightUpdateAuraPosition(auraType)
     -- sliders re-flow DURING the drag (ApplyStyle routes through the container's live
     -- layout mutators — no rebuild). InvalidateAuraLayout also drives defensives, which
     -- share most layout keys' cost profile; the drives no-op when nothing changed.
-    if auraType == "buff" and DF.UseFactoryForBuffs and DF:UseFactoryForBuffs(nil, db) then
+    if (auraType == "buff" and DF.UseFactoryForBuffs and DF:UseFactoryForBuffs(nil, db))
+       or (auraType == "debuff" and DF.UseFactoryForDebuffs and DF:UseFactoryForDebuffs(nil, db)) then
         DF:InvalidateAuraLayout()
     end
     
@@ -1353,7 +1354,8 @@ function DF:LightweightUpdateAuraStackText(auraType)
 
     -- 12.1 factory rows: re-drive immediately so this applies live (the legacy loop
     -- below only touches the hidden legacy pools when the factory owns the row).
-    if auraType == "buff" and DF.UseFactoryForBuffs and DF:UseFactoryForBuffs(nil, db) then
+    if (auraType == "buff" and DF.UseFactoryForBuffs and DF:UseFactoryForBuffs(nil, db))
+       or (auraType == "debuff" and DF.UseFactoryForDebuffs and DF:UseFactoryForDebuffs(nil, db)) then
         DF:InvalidateAuraLayout()
     end
     
@@ -1389,7 +1391,8 @@ function DF:LightweightUpdateAuraDurationText(auraType)
 
     -- 12.1 factory rows: re-drive immediately so this applies live (the legacy loop
     -- below only touches the hidden legacy pools when the factory owns the row).
-    if auraType == "buff" and DF.UseFactoryForBuffs and DF:UseFactoryForBuffs(nil, db) then
+    if (auraType == "buff" and DF.UseFactoryForBuffs and DF:UseFactoryForBuffs(nil, db))
+       or (auraType == "debuff" and DF.UseFactoryForDebuffs and DF:UseFactoryForDebuffs(nil, db)) then
         DF:InvalidateAuraLayout()
     end
     
@@ -1474,7 +1477,8 @@ function DF:LightweightUpdateAuraBorder(auraType)
 
     -- 12.1 factory rows: re-drive immediately so this applies live (the legacy loop
     -- below only touches the hidden legacy pools when the factory owns the row).
-    if auraType == "buff" and DF.UseFactoryForBuffs and DF:UseFactoryForBuffs(nil, db) then
+    if (auraType == "buff" and DF.UseFactoryForBuffs and DF:UseFactoryForBuffs(nil, db))
+       or (auraType == "debuff" and DF.UseFactoryForDebuffs and DF:UseFactoryForDebuffs(nil, db)) then
         DF:InvalidateAuraLayout()
     end
     
