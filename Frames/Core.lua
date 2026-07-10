@@ -111,6 +111,36 @@ end
 -- Export for use in other files
 DF.SetHealthBarValue = SetHealthBarValue
 
+-- Feed a DUPLICATE / mirror StatusBar the same SECRET health percent as the real bar,
+-- render-side only (SetMinMaxValues + SetValue pass the secret straight through — never
+-- read or branched). Value passthrough ONLY: unlike SetHealthBarValue it does NOT re-run
+-- health-threshold fading (UpdateHealthFade). Smoothing mirrors the real bar's per-mode
+-- smoothBars setting so the mirror's fill motion tracks the real bar. Used by the Aura
+-- Designer filled health-mirror overlay (AuraDesigner/Factory.lua). A nil bar is a no-op.
+local function MirrorHealthValue(bar, unit, frame)
+    if not bar then return end
+
+    bar:SetMinMaxValues(0, 100)
+    local pct = GetSafeHealthPercent(unit)
+
+    local db
+    if frame and frame.isRaidFrame then
+        db = DF.GetRaidDB and DF:GetRaidDB()
+    else
+        db = DF.GetDB and DF:GetDB()
+    end
+    local smoothEnabled = db and db.smoothBars
+
+    if smoothEnabled and Enum and Enum.StatusBarInterpolation and Enum.StatusBarInterpolation.ExponentialEaseOut then
+        bar:SetValue(pct, Enum.StatusBarInterpolation.ExponentialEaseOut)
+    else
+        bar:SetValue(pct)
+    end
+end
+
+-- Export for use in other files
+DF.MirrorHealthValue = MirrorHealthValue
+
 -- Helper to set missing health bar value safely
 -- Uses UnitHealthMissing API which is safe with secret values
 -- IMPORTANT: We pass values directly to StatusBar APIs without arithmetic

@@ -264,6 +264,28 @@ local function styleButton_regions(slot, config)
             end
             slot.dfTint:SetColorTexture(readColor(ov.tintColor))
         end
+        -- FILLED HEALTH MIRROR — a StatusBar child of the slot fed the unit's SECRET
+        -- health percent render-side (DF.MirrorHealthValue in the Update loop), so it
+        -- matches the real bar's fill / texture / smooth-motion WITHOUT the addon ever
+        -- reading or branching a secret. Identity (texture/colour/alpha) is static config;
+        -- recolour is SetStatusBarColor (render-side). Visibility rides the slot's secret
+        -- show/hide (attach-and-inherit). onBar hands the bar back so the consumer can feed
+        -- it. ADDITIVE: never touches the tintColor path or the #205 buff/debuff rows.
+        local hm = ov and ov.healthMirror
+        if hm then
+            if not slot.dfHealthMirror then
+                slot.dfHealthMirror = CreateFrame("StatusBar", nil, slot)
+                slot.dfHealthMirror:SetAllPoints(slot)
+                slot.dfHealthMirror:EnableMouse(false)
+                slot.dfHealthMirror:SetMinMaxValues(0, 100)
+            end
+            local sb = slot.dfHealthMirror
+            DF:SafeSetStatusBarTexture(sb, hm.texture)
+            local cr, cg, cb = readColor(hm.color)
+            sb:SetStatusBarColor(cr, cg, cb)
+            sb:SetAlpha(hm.alpha or 1)
+            if type(hm.onBar) == "function" then hm.onBar(sb) end
+        end
     else
         local iconSpec = style.icon
         if iconSpec == nil or iconSpec.show ~= false then

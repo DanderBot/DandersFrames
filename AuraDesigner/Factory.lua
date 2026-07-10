@@ -11,8 +11,9 @@ local addonName, DF = ...
 -- Blizzard drives each slot's secret show/hide — we only attach art. Zero secret reads.
 --
 -- SCOPE (this file, P4.0 scaffold + P4.1 + P4.2): gates, identity->includeSpellIDs, and the
--- frame-level indicators that CAN be driven read-free — HEALTH-BAR tint, BACKGROUND tint,
--- and static BORDER. framealpha / nametext / healthtext are 12.1 casualties (see NOTES at
+-- frame-level indicators that CAN be driven read-free — HEALTH-BAR (filled mirror + flat
+-- tint), BACKGROUND tint, and static BORDER. framealpha / nametext / healthtext are 12.1
+-- casualties (see NOTES at
 -- the file foot). Placed indicators (icon/square/bar) are P4.3-P4.4. The legacy engine stays
 -- fully intact behind DF:UseFactoryForAD.
 --
@@ -131,9 +132,9 @@ end
 -- (Indicators.lua:1325-1329), read from CONFIG only:
 --   replace: overlay opacity = the colour picker's alpha.
 --   tint:    overlay opacity = blend slider x colour alpha (so the bar colour shows through).
--- NOTE: this port renders BOTH modes as a whole-bar overlay tint child of the slot; the
--- legacy tint's current-health tracking (tintWholeBar=false) is not expressible read-free
--- on 12.1 — a documented divergence (see the return message / reviewer notes).
+-- Used by the FLAT whole-bar tint path and to derive the tint-mode mirror's alpha. The
+-- filled-mirror path now expresses current-health-fill tracking read-free (a duplicate
+-- StatusBar fed the secret percent), so tintWholeBar=false is no longer a divergence.
 local function healthbarBlend(mode, blendCfg, a)
     if mode == "replace" then return a end
     return (blendCfg or 0.5) * a
@@ -142,8 +143,11 @@ end
 -- Build an OVERLAY-TINT container config (health-bar tint, background tint). mode="overlay":
 -- the slot covers the host region and its tint texture (child of the slot) inherits the
 -- slot's secret visibility; DF.AuraContainer handles SetEnabled-last + combat deferral.
--- levelOffset: health-bar tint = 1 (healthBar level + 1, Indicators.lua:1299); background
--- tint = 0 (frame level, above the BACKGROUND bg texture, below the +1 bars, Indicators.lua:1615).
+-- levelOffset is added on top of the caller's anchor level; the tint texture then lands a
+-- further +2 above (anchor -> container -> slot nesting). Callers pick the anchor + offset so
+-- the tint seats correctly: health-bar tint hosts on frame.healthBar with offset 1 (tint above
+-- the real fill); background tint hosts on a frame parked at healthBar-3 with offset 0 (tint at
+-- healthBar-1 — above frame.background, below every bar). See the two call sites for the math.
 local function buildOverlayTintConfig(unit, map, r, g, b, blend, levelOffset)
     return {
         unit = unit,
@@ -157,6 +161,24 @@ local function buildOverlayTintConfig(unit, map, r, g, b, blend, levelOffset)
         enabled = true,
         frameLevelOffset = levelOffset,
         style = { overlay = { tintColor = { r, g, b, blend } } },
+    }
+end
+
+-- Build a FILLED HEALTH-MIRROR container config (health-bar indicator, replace/tint fill).
+-- The slot hosts a duplicate StatusBar fed the unit's secret health percent render-side, so
+-- it mirrors the real bar's fill+texture+motion (fixing the flat whole-bar tint patch). Level
+-- offset 1 = healthBar level + 1 (above the real fill, below the +2 power / content overlay),
+-- exactly where the legacy tint sat (Indicators.lua:1299). Colour/texture/alpha are static
+-- config; the onBar callback hands the live bar back so SyncFrame can stash it for feeding.
+local function buildHealthMirrorConfig(unit, map, r, g, b, alpha, texture, onBar)
+    return {
+        unit = unit,
+        mode = "overlay",
+        filter = "HELPFUL",
+        candidateFilters = { includeSpellIDs = map },
+        enabled = true,
+        frameLevelOffset = 1,
+        style = { overlay = { healthMirror = { texture = texture, color = { r, g, b }, alpha = alpha, onBar = onBar } } },
     }
 end
 
@@ -332,7 +354,14 @@ function Factory:SyncFrame(frame)
 
     local specAuras = adDB.auras and adDB.auras[spec]
 
-    -- ---- HEALTH-BAR TINT (child of frame.healthBar, overlay tint) -------------------
+    -- ---- HEALTH BAR (child of frame.healthBar, overlay) -----------------------------
+    -- Two render paths, chosen by config:
+    --   * FILLED MIRROR (replace, or tint without "Tint Entire Bar") — a duplicate StatusBar
+    --     fed the secret health percent render-side, matching the real bar's fill/texture/
+    --     motion. replace = opaque cover (alpha 1); tint = fill-matched tint (alpha = blend).
+    --   * FLAT WHOLE-BAR TINT (tint + tintWholeBar) — the legacy flat texture overlay covering
+    --     the whole bar incl. the missing-health region. Unchanged behaviour.
+    -- Path (flat vs mirror) is folded into structSig so toggling it rebuilds the region fresh.
     local healthBar = frame.healthBar
     if healthBar then
         local hb = store.healthbar
@@ -344,34 +373,69 @@ function Factory:SyncFrame(frame)
         if bestName then
             local r, g, b, a = readADColor(bestCfg.color)
             local mode = slower(bestCfg.mode or "replace")
-            local blend = healthbarBlend(mode, bestCfg.blend, a)
+            -- Whole-bar flat tint only exists in tint mode (mirror Indicators.lua:1338):
+            -- replace mode always uses the fill-matched mirror.
+            local wholeBar = (mode == "tint") and (bestCfg.tintWholeBar and true or false) or false
 
-            local structSig = includeSig(bestMap)
-            -- Cosmetic sig: colour + resolved alpha. A change here is an ApplyStyle (in-place
-            -- tint recolour), NOT a rebuild — only the identity set is structural.
-            local coSig = tconcat({ tostring(r), tostring(g), tostring(b), tostring(blend) }, "|")
-
+            local structSig = includeSig(bestMap) .. "|" .. (wholeBar and "flat" or "mirror")
             local entry = hb[bestName]
-            if not entry then
-                local handle = DF.AuraContainer:Create(healthBar, buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, 1))
-                if handle then
-                    hb[bestName] = { handle = handle, structSig = structSig, coSig = coSig }
+
+            if wholeBar then
+                -- LEGACY FLAT PATH — whole-bar tint texture, no mirror.
+                local blend = healthbarBlend(mode, bestCfg.blend, a)
+                local coSig = tconcat({ "flat", tostring(r), tostring(g), tostring(b), tostring(blend) }, "|")
+                if not entry then
+                    frame.dfADHealthMirror = nil
+                    local handle = DF.AuraContainer:Create(healthBar, buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, 1))
+                    if handle then
+                        hb[bestName] = { handle = handle, structSig = structSig, coSig = coSig }
+                    end
+                elseif entry.structSig ~= structSig then
+                    frame.dfADHealthMirror = nil
+                    entry.structSig, entry.coSig = structSig, coSig
+                    entry.handle:Rebuild(buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, 1))
+                elseif entry.coSig ~= coSig then
+                    entry.coSig = coSig
+                    entry.handle:ApplyStyle({ overlay = { tintColor = { r, g, b, blend } } })
                 end
-            elseif entry.structSig ~= structSig then
-                entry.structSig, entry.coSig = structSig, coSig
-                entry.handle:Rebuild(buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, 1))
-            elseif entry.coSig ~= coSig then
-                entry.coSig = coSig
-                entry.handle:ApplyStyle({ overlay = { tintColor = { r, g, b, blend } } })
+            else
+                -- FILLED MIRROR PATH — duplicate StatusBar fed the secret health percent.
+                local alpha = (mode == "replace") and 1 or healthbarBlend(mode, bestCfg.blend, a)
+                local fdb = DF.GetFrameDB and DF:GetFrameDB(frame)
+                local tex = (fdb and fdb.healthTexture) or "Interface\\TargetingFrame\\UI-StatusBar"
+                local onBar = function(sb) frame.dfADHealthMirror = sb end
+                local coSig = tconcat({ "mirror", tostring(r), tostring(g), tostring(b), tostring(alpha), tostring(tex) }, "|")
+                if not entry then
+                    frame.dfADHealthMirror = nil   -- onBar re-stashes when the slot builds
+                    local handle = DF.AuraContainer:Create(healthBar, buildHealthMirrorConfig(frame.unit, bestMap, r, g, b, alpha, tex, onBar))
+                    if handle then
+                        hb[bestName] = { handle = handle, structSig = structSig, coSig = coSig }
+                    end
+                elseif entry.structSig ~= structSig then
+                    frame.dfADHealthMirror = nil   -- old slot torn down; onBar re-stashes
+                    entry.structSig, entry.coSig = structSig, coSig
+                    entry.handle:Rebuild(buildHealthMirrorConfig(frame.unit, bestMap, r, g, b, alpha, tex, onBar))
+                elseif entry.coSig ~= coSig then
+                    entry.coSig = coSig
+                    entry.handle:ApplyStyle({ overlay = { healthMirror = { texture = tex, color = { r, g, b }, alpha = alpha, onBar = onBar } } })
+                end
             end
         end
         teardownExcept(hb, bestName)
+        -- No health-bar winner this pass → the mirror bar is gone; drop the ref.
+        if not bestName then frame.dfADHealthMirror = nil end
     end
 
     -- ---- BACKGROUND TINT (child of frame.background, overlay tint) -------------------
     -- frame.background is a TEXTURE, not a frame, so it can't parent a container. Cover it
-    -- with a plain anchor frame (create-once, combat-safe — non-secure) at the frame's own
-    -- level (legacy bg overlay level, Indicators.lua:1615) and host the container there.
+    -- with a plain anchor frame (create-once, combat-safe — non-secure) and host the
+    -- container there. LEVEL: the tint texture lands TWO levels above this anchor (the
+    -- DF.AuraContainer overlay nests anchor -> native container -> AuraSlot button, each a
+    -- default +1 child). To seat the tint just under the health bar (at healthBar - 1, i.e.
+    -- above frame.background but below every bar), the anchor must sit at healthBar - 3.
+    -- With the health/missing bars raised to frame+3 (Create.lua), healthBar - 3 == the
+    -- frame's own level, so the anchor never clamps below 0. Explicit dependency on the
+    -- bar level — if the Create.lua raise changes, this follows it.
     if frame.background then
         local bg = store.background
         if not bg then bg = {}; store.background = bg end
@@ -384,9 +448,12 @@ function Factory:SyncFrame(frame)
             if not bgAnchor then
                 bgAnchor = CreateFrame("Frame", nil, frame)
                 bgAnchor:SetAllPoints(frame.background)
-                bgAnchor:SetFrameLevel(frame:GetFrameLevel())
                 store.bgAnchor = bgAnchor
             end
+            -- (Re)assert level every pass — the health bar's level is stable post-create,
+            -- but keep it robust to a frame rebuild that recreates healthBar.
+            local hbLevel = frame.healthBar and frame.healthBar:GetFrameLevel() or 3
+            bgAnchor:SetFrameLevel(math.max(0, hbLevel - 3))
 
             local r, g, b, a = readADColor(bestCfg.color)
             local mode = slower(bestCfg.mode or "tint")   -- background defaults to tint
@@ -474,6 +541,7 @@ function Factory:ClearFrame(frame)
     teardownExcept(store.background or {}, nil)
     teardownExcept(store.border or {}, nil)
     releaseBgAnchor(store)   -- containers gone above; drop the background anchor too
+    frame.dfADHealthMirror = nil   -- health-mirror bar torn down; drop the feed ref
 end
 
 -- ============================================================

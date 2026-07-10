@@ -4151,15 +4151,9 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             GUI:BlockControl12_1(swmCheck, "roadmap",
                 { id = "ad:" .. typeKey .. ":showWhenMissing", page = L["Aura Designer"], when = ADgate })
         end
-        --   * Tint Entire Bar (healthbar only) — permanent limitation. Factory-owned
-        --     health-bar is ALWAYS whole-bar tinted; the current-health-fill variant
-        --     (tintWholeBar=false) isn't expressible read-free (Section-1 D1 casualty),
-        --     so the toggle does nothing when factory-owned. wholeBarCheck is only ever
-        --     built in the healthbar branch, so the nil guard keeps it healthbar-scoped.
-        if wholeBarCheck then
-            GUI:BlockControl12_1(wholeBarCheck, "limitation",
-                { id = "ad:healthbar:tintwholebar", page = L["Aura Designer"], when = ADgate })
-        end
+        --   * Tint Entire Bar (healthbar only) — NO LONGER blocked. The filled health-mirror
+        --     bar makes the current-health-fill variant (tintWholeBar=false) expressible
+        --     read-free, so both settings work under the factory.
         --   * Gradient border style — permanent limitation (degrades to solid on
         --     secret-anchored slots). Blocks only the gradient pickers/direction,
         --     which surface under Border Style = Gradient; Solid/Texture stay usable.

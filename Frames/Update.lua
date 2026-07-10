@@ -669,7 +669,9 @@ function DF:UpdateUnitFrame(frame, source)
     if frame.healthBar then
         -- Use helper function that handles CurveConstants fallback
         DF.SetHealthBarValue(frame.healthBar, unit, frame)
-        
+        -- Feed the Aura Designer filled health-mirror bar (render-side passthrough only)
+        if frame.dfADHealthMirror then DF.MirrorHealthValue(frame.dfADHealthMirror, unit, frame) end
+
         -- Delegate color to ElementAppearance for centralized handling
         -- This prevents conflicts between multiple code paths trying to set color
         DF:UpdateHealthBarAppearance(frame)
@@ -1098,6 +1100,7 @@ function DF:UpdateHealthFast(frame)
     -- ========================================
     if frame.healthBar then
         DF.SetHealthBarValue(frame.healthBar, unit, frame)
+        if frame.dfADHealthMirror then DF.MirrorHealthValue(frame.dfADHealthMirror, unit, frame) end
         DF:UpdateHealthBarAppearance(frame)
     end
 
@@ -1327,6 +1330,7 @@ function DF:UpdateHealth(frame)
 
         -- Update health bar for dead/offline unit using helper
         DF.SetHealthBarValue(frame.healthBar, unit, frame)
+        if frame.dfADHealthMirror then DF.MirrorHealthValue(frame.dfADHealthMirror, unit, frame) end
         DF:ApplyHealthColors(frame)
 
         -- Update missing health bar for dead/offline unit
@@ -1355,7 +1359,8 @@ function DF:UpdateHealth(frame)
     
     -- Update health bar using helper
     DF.SetHealthBarValue(frame.healthBar, unit, frame)
-    
+    if frame.dfADHealthMirror then DF.MirrorHealthValue(frame.dfADHealthMirror, unit, frame) end
+
     -- Update missing health bar
     if frame.missingHealthBar then
         DF.SetMissingHealthBarValue(frame.missingHealthBar, unit, frame)

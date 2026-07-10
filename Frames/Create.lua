@@ -665,7 +665,8 @@ function DF:CreateFrameElements(frame, isRaid)
     frame.missingHealthBar:SetMinMaxValues(0, 1)
     frame.missingHealthBar:SetValue(0)
     frame.missingHealthBar:SetReverseFill(true)
-    frame.missingHealthBar:SetFrameLevel(frame:GetFrameLevel() + 1)
+    -- Match the health bar (frame+3) so the AD background tint (frame+2) sits below both.
+    frame.missingHealthBar:SetFrameLevel(frame:GetFrameLevel() + 3)
     local missingColor = db.missingHealthColor or {r = 0.5, g = 0, b = 0, a = 0.8}
     frame.missingHealthBar:SetStatusBarColor(missingColor.r, missingColor.g, missingColor.b, missingColor.a or 0.8)
     frame.missingHealthBar:Hide()
@@ -679,7 +680,17 @@ function DF:CreateFrameElements(frame, isRaid)
     DF:SafeSetStatusBarTexture(frame.healthBar, db.healthTexture or "Interface\\TargetingFrame\\UI-StatusBar")
     frame.healthBar:SetMinMaxValues(0, 1)
     frame.healthBar:SetValue(1)
-    
+    -- Lift the health bar THREE levels above the frame's own level (N) so the Aura
+    -- Designer background tint stays BELOW it. That tint lives on a DF.AuraContainer
+    -- overlay slot whose host anchor is parked at N; the container nests anchor -> native
+    -- AuraContainer -> AuraSlot button, each a default +1 child, so the tint texture lands
+    -- at N+2 (NOT N — that was the earlier +1 fix's wrong assumption; a plain child frame
+    -- defaults to parent+1, so the bar was already at N+1 and +1 was a no-op). The bar
+    -- stack must clear N+2, hence N+3. Bars derived from healthBar:GetFrameLevel() (power,
+    -- absorb, reduced-max, etc.) and the missing-health bar (raised to match, below) shift
+    -- up with it, so their order among themselves is unchanged.
+    frame.healthBar:SetFrameLevel(frame:GetFrameLevel() + 3)
+
     -- ========================================
     -- CONTENT OVERLAY (for text and icons above bars)
     -- ========================================
@@ -1194,7 +1205,8 @@ function DF:CreateUnitFrame(unit, index, isRaid)
     frame.missingHealthBar:SetMinMaxValues(0, 1)  -- Will be updated dynamically with UnitHealthMax
     frame.missingHealthBar:SetValue(0)
     frame.missingHealthBar:SetReverseFill(true)  -- Fill from right side (where health is missing)
-    frame.missingHealthBar:SetFrameLevel(frame:GetFrameLevel() + 1)  -- Above background, below health bar
+    -- Match the health bar (frame+3) so the AD background tint (frame+2) sits below both.
+    frame.missingHealthBar:SetFrameLevel(frame:GetFrameLevel() + 3)  -- Above background + AD bg tint, level with health bar
     local missingColor = db.missingHealthColor or {r = 0.5, g = 0, b = 0, a = 0.8}
     frame.missingHealthBar:SetStatusBarColor(missingColor.r, missingColor.g, missingColor.b, missingColor.a or 0.8)
     -- Initially hidden, visibility controlled by backgroundMode setting
@@ -1209,7 +1221,17 @@ function DF:CreateUnitFrame(unit, index, isRaid)
     DF:SafeSetStatusBarTexture(frame.healthBar, db.healthTexture or "Interface\\TargetingFrame\\UI-StatusBar")
     frame.healthBar:SetMinMaxValues(0, 1)
     frame.healthBar:SetValue(1)
-    
+    -- Lift the health bar THREE levels above the frame's own level (N) so the Aura
+    -- Designer background tint stays BELOW it. That tint lives on a DF.AuraContainer
+    -- overlay slot whose host anchor is parked at N; the container nests anchor -> native
+    -- AuraContainer -> AuraSlot button, each a default +1 child, so the tint texture lands
+    -- at N+2 (NOT N — that was the earlier +1 fix's wrong assumption; a plain child frame
+    -- defaults to parent+1, so the bar was already at N+1 and +1 was a no-op). The bar
+    -- stack must clear N+2, hence N+3. Bars derived from healthBar:GetFrameLevel() (power,
+    -- absorb, reduced-max, etc.) and the missing-health bar (raised to match, below) shift
+    -- up with it, so their order among themselves is unchanged.
+    frame.healthBar:SetFrameLevel(frame:GetFrameLevel() + 3)
+
     -- ========================================
     -- CONTENT OVERLAY (for text and icons above bars)
     -- ========================================
