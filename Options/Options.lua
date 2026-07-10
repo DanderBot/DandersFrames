@@ -6103,6 +6103,18 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     
     -- Auras > Boss Debuffs (Private Auras)
     local pageBossDebuffs = CreateSubTab("auras", "auras_bossdebuffs", L["Boss Debuffs"])
+    -- 12.1: RETIRED-BY-ABSORPTION — the new aura system routes boss debuffs
+    -- (private auras included) through the regular debuff row, so the separate
+    -- display would double-render them. Custom wording (SetPageBlocked direct):
+    -- neither shared text fits — it isn't "returning later" and the settings
+    -- aren't "unsupported", the feature MOVED. Legacy path (pre-12.1) unchanged.
+    GUI:SetPageBlocked(pageBossDebuffs, {
+        reason  = L["Boss debuffs moved to the Debuffs row on 12.1"],
+        tooltip = L["WoW's 12.1 aura system displays boss debuffs (including private auras) in the regular debuff row, so the separate Boss Debuffs display has been retired. Its settings here apply to WoW versions before 12.1 only."],
+        wording = "limitation",
+        page    = L["Boss Debuffs"],
+        when    = function() return GUI:IsAuraFactoryActive() end,
+    })
     BuildPage(pageBossDebuffs, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top
         Add(CreateCopyButton(self.child, {"bossDebuff"}, L["Boss Debuffs"], "auras_bossdebuffs"), 25, 2)

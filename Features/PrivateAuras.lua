@@ -139,6 +139,27 @@ function DF:SetupPrivateAuraAnchors(frame)
     -- Clear existing anchors first
     DF:ClearPrivateAuraAnchors(frame)
 
+    -- 12.1: RETIRED — boss debuffs (private auras included) flow through the
+    -- container-driven debuff row natively: ManagedAuraContainer feeds private
+    -- auras into the same group parse as public ones (OnUnitPrivateAuraUpdate ->
+    -- ProcessUnitAuraUpdate(AuraContainerPrivateAuraSource), on by default), so
+    -- this separate anchor display would DOUBLE-render every private aura on
+    -- top of the row's copy. The Blizzard-dispel container overlay
+    -- (dispelOverlaySource, below) is a different feature and stays.
+    -- Raid-testing escape hatch: /run DF.db.bossDebuffsLegacyAnchors = true
+    -- (then /reload) re-enables the anchors if a real encounter ever shows
+    -- private auras missing from the row.
+    -- The dispel wrapper (SetupContainerOverlay) normally rides this function's
+    -- tail — keep that leg alive under the same bossDebuffsEnabled condition the
+    -- legacy flow imposed (exact parity; only the boss ICON anchors retire).
+    if DF.AuraContainer and DF.AuraContainer.IsSupported()
+       and not (DF.db and DF.db.bossDebuffsLegacyAnchors) then
+        if db.bossDebuffsEnabled then
+            SetupContainerOverlay(frame, unit, db)
+        end
+        return
+    end
+
     if not db.bossDebuffsEnabled then return end
 
     -- Read settings

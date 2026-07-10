@@ -2213,6 +2213,15 @@ function DF:UpdateTestBossDebuffs(frame)
 
     local db = DF:GetFrameDB(frame)
 
+    -- 12.1: the separate boss-debuff display is retired (boss debuffs render in
+    -- the debuff row natively — see SetupPrivateAuraAnchors) — never paint its
+    -- test icons. Mirrors the render gate incl. the raid-testing escape hatch.
+    if DF.AuraContainer and DF.AuraContainer.IsSupported()
+       and not (DF.db and DF.db.bossDebuffsLegacyAnchors) then
+        DF:HideTestBossDebuffs(frame)
+        return
+    end
+
     -- Check if boss debuffs are enabled (both feature and test mode toggle)
     if not db.bossDebuffsEnabled or not db.testShowBossDebuffs then
         DF:HideTestBossDebuffs(frame)
