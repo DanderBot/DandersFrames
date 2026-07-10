@@ -26,7 +26,8 @@ local addonName, DF = ...
 --   h:SetUnit(unit) / h:SetShown(b) / h:Enable() / h:Disable()
 --   h:ApplyStyle(style) -- in-place cosmetic restyle (no teardown)
 --   h:SetFilter(filter) / h:SetSort(sort) -- structural (rebuild) / PTR-4 no-op now
---   h:Rebuild(configDelta) -- structural rebuild (max / region toggles / frozen opts)
+--   h:Rebuild(config)      -- structural rebuild (max / region toggles / frozen opts); a
+--                             table REPLACES the config wholesale (callers pass complete configs)
 --   h:Refresh() -- force a re-scan (Hide/Show bounce; for dynamic-unit consumers)
 --   h:GetFrame() -- the plain positioning frame DF anchors (SetPoint/SetSize on it)
 --   h:Destroy()
@@ -1076,9 +1077,15 @@ end
 -- Public structural rebuild — for changes ApplyStyle can't do live: max, toggling a
 -- region on/off, or a creation-frozen opt (bar direction, duration expiredText, dispel
 -- flags). Optionally merge a partial config first. Combat-guarded (defers to regen).
-function Handle:Rebuild(configDelta)
-    if type(configDelta) == "table" then
-        for k, v in pairs(configDelta) do self.config[k] = v end
+-- Structural rebuild. `config` REPLACES the handle's config WHOLESALE when given —
+-- both bridge callers (buff/defensive) pass a COMPLETE freshly-built config. The
+-- previous pairs()-merge could never CLEAR a key that went nil: a disabled
+-- max-duration filter / sort / blacklist stayed declared on every later rebuild
+-- (the "toggle does nothing until /reload" bug — candidateFilters survived OFF).
+-- A caller with a genuine partial delta must merge into handle.config itself.
+function Handle:Rebuild(config)
+    if type(config) == "table" then
+        self.config = config
     end
     self:_rebuild()
 end
