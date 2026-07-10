@@ -2553,6 +2553,23 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
             candidateFilters = candidateFilters or {}
             candidateFilters.maxDuration = (db.buffMaxDurationMinutes or 0) * 60
         end
+        -- Missing Buff "Hide From Buff Bar": union every raid-buff ID (all ranks/
+        -- variants) into the exclude map. Legacy did this with an icon-texture match
+        -- in the scan, OUT of combat only (reads); the native filter holds in combat
+        -- too — a strict upgrade. Structural (rides excludeSig in the row signature).
+        if db.missingBuffHideFromBar and DF.RaidBuffs then
+            candidateFilters = candidateFilters or {}
+            local map = candidateFilters.excludeSpellIDs or {}
+            candidateFilters.excludeSpellIDs = map
+            for i = 1, #DF.RaidBuffs do
+                local ids = DF.RaidBuffs[i][1]
+                if type(ids) == "table" then
+                    for j = 1, #ids do map[ids[j]] = true end
+                else
+                    map[ids] = true
+                end
+            end
+        end
     end
 
     -- Native sort: the legacy Sort Order dropdown (directBuffSortOrder) mapped onto
@@ -2969,6 +2986,262 @@ function DF:DriveDefensiveFactory(frame, db)
     end
 end
 
+-- ============================================================
+-- MISSING-BUFF FACTORY BRIDGE — read-free layout-push inversion (probe 32,
+-- live-confirmed 2026-07-10). One "missing"-mode handle per tracked raid buff:
+-- an empty spellID-filtered group parks the badge inside a clip window; the
+-- buff's (blank) button pushes it out. ZERO aura reads — works in combat on
+-- every assistable unit, independent of the transitional whitelist. Replaces
+-- the legacy UnitHasBuff 4-method scan on 12.1.
+-- Behaviour change vs legacy (flagged in the port plan §2.5): manual multi-buff
+-- mode shows EVERY tracked-and-missing buff as a strip of badges — the old
+-- "first missing only" priority pick was a cross-aura read, which is dead.
+-- Class-detection mode (one buff) is identical to legacy.
+-- ============================================================
+
+local MISSING_BADGE_SIZE = 24   -- fallback when missingBuffIconSize is unset; missingBuffIconScale scales the strip
+local MISSING_BADGE_GAP  = 2
+
+-- Render gate (excludes test mode, which paints the legacy missingBuffFrame).
+function DF:UseFactoryForMissingBuff(frame, db)
+    return DF.db and DF.db.missingBuffUseFactory ~= false
+        and DF.AuraContainer and DF.AuraContainer.IsSupported()
+        and not (DF.testMode or DF.raidTestMode)
+end
+
+-- GUI-facing predicate (does NOT exclude test mode — see FactoryOwnsBuffRow).
+function DF:FactoryOwnsMissingBuff(db)
+    return (DF.db and DF.db.missingBuffUseFactory ~= false
+        and DF.AuraContainer and DF.AuraContainer.IsSupported()) or false
+end
+
+-- Tracked raid buffs per settings: class-detection = only YOUR class's buff;
+-- manual = every enabled missingBuffCheck* key. Returns DF.RaidBuffs entries
+-- ({spellIDOrTable, configKey, name, class}) in DF.RaidBuffs order.
+local function missingTrackedBuffs(db)
+    local list = {}
+    local playerKey
+    if db.missingBuffClassDetection then
+        playerKey = DF.ClassToRaidBuff and DF.ClassToRaidBuff[select(2, UnitClass("player"))]
+        if not playerKey then return list end   -- class has no raid buff -> nothing to track
+    end
+    for i = 1, #DF.RaidBuffs do
+        local info = DF.RaidBuffs[i]
+        if (playerKey and info[2] == playerKey) or (not playerKey and db[info[2]]) then
+            list[#list + 1] = info
+        end
+    end
+    return list
+end
+
+-- Structural signature: the tracked set (cell handles are created per entry).
+local function missingFactorySig(tracked)
+    local keys = {}
+    for i = 1, #tracked do keys[i] = tracked[i][2] end
+    return table.concat(keys, ",")
+end
+
+-- Per-cell container config: HELPFUL + includeSpellIDs (any rank/variant ID of
+-- the tracked buff matches). Helpful spell-ID maps apply on assistable units —
+-- exactly the frames this feature targets (the badge is guard-hidden elsewhere).
+local function buildMissingCellConfig(info, unit, size)
+    local ids = type(info[1]) == "table" and info[1] or { info[1] }
+    local map = {}
+    for i = 1, #ids do map[ids[i]] = true end
+    return {
+        unit = unit,
+        mode = "missing",
+        filter = "HELPFUL",
+        candidateFilters = { includeSpellIDs = map },
+        badge = { w = size, h = size },
+        enabled = true,
+    }
+end
+
+-- Paint one cell's badge: spell icon + unified DF.Border (missingBuffIcon* keys).
+-- The badge frame's POSITION derives from the container's secret size (§20c):
+-- never pixel-snap it or read its rect; secretRect borders render anchor-only.
+-- Animation is stripped like the container rows (expiry-triggered anim is dead
+-- and the badge should match the aura buttons' treatment).
+local function styleMissingBadge(h, db, frame, info)
+    local badge = h.GetBadgeFrame and h:GetBadgeFrame()
+    if not badge then return end
+    local firstID = type(info[1]) == "table" and info[1][1] or info[1]
+    if not badge.dfIcon then
+        badge.dfIcon = badge:CreateTexture(nil, "ARTWORK")
+        badge.dfIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    end
+    local iconTex
+    if C_Spell and C_Spell.GetSpellTexture then iconTex = C_Spell.GetSpellTexture(firstID)
+    elseif GetSpellTexture then iconTex = GetSpellTexture(firstID) end
+    badge.dfIcon:SetTexture(iconTex)
+
+    local showBorder = db.missingBuffIconShowBorder ~= false
+    local borderSize = db.missingBuffIconBorderSize or 2
+    if db.pixelPerfect then borderSize = DF:PixelPerfect(borderSize) end
+    if not badge.dfBorder then
+        badge.dfBorder = DF.Border:New(badge, { frameLevelOffset = 0, secretRect = true })
+    end
+    local spec = DF.Border:BuildSpec(db, "missingBuffIcon", { unit = frame.unit, frame = frame, iconMode = true })
+    spec.enabled = showBorder
+    spec.size = borderSize
+    spec.animation = nil
+    DF.Border:Apply(badge.dfBorder, spec)
+
+    local artInset = showBorder and borderSize or 0
+    badge.dfIcon:ClearAllPoints()
+    badge.dfIcon:SetPoint("TOPLEFT", artInset, -artInset)
+    badge.dfIcon:SetPoint("BOTTOMRIGHT", -artInset, artInset)
+end
+
+-- Position/scale/level the strip (the OUR-side outer frame all cells live in) —
+-- the legacy missingBuffFrame positioning block, applied to the strip. The strip
+-- is a plain DF frame (non-secret rect): pixel-snap is fine HERE.
+local function layoutMissingStrip(frame, db, strip, cellCount)
+    local size = db.missingBuffIconSize or MISSING_BADGE_SIZE
+    local w = cellCount * size + math.max(0, cellCount - 1) * MISSING_BADGE_GAP
+    strip:SetSize(math.max(w, 1), size)
+    strip:SetScale(db.missingBuffIconScale or 1.5)
+    local anchor = db.missingBuffIconAnchor or "CENTER"
+    strip:ClearAllPoints()
+    strip:SetPoint(anchor, frame, anchor, db.missingBuffIconX or 0, db.missingBuffIconY or 0)
+    DF:SnapPointToPixelGrid(strip, db.pixelPerfect)
+    local frameLevel = db.missingBuffIconFrameLevel or 0
+    if frameLevel == 0 and frame.contentOverlay then
+        strip:SetFrameLevel(frame.contentOverlay:GetFrameLevel() + 10)
+    else
+        strip:SetFrameLevel(math.max(0, frame:GetFrameLevel() + frameLevel))
+    end
+end
+
+-- Drive the missing-buff strip for one frame. Mirrors the row drives: lazy create,
+-- hide the legacy icon (no double render), guard visibility on the NON-aura state
+-- (dead/offline/range/UnitCanAssist — the read-free mechanism only answers aura
+-- presence), keep cells on the frame's unit, re-apply on a layout-version bump.
+function DF:DriveMissingBuffFactory(frame, db)
+    -- No double render: the legacy icon stays hidden while the factory owns the feature.
+    if frame.missingBuffFrame then frame.missingBuffFrame:Hide() end
+
+    local strip = frame.missingBuffStrip
+    local cells = frame.missingFactory
+
+    -- Feature off -> hide the strip (keep the cells; cheap re-show on re-enable).
+    if not db.missingBuffIconEnabled then
+        if strip and frame.dfMissingStripShown ~= false then
+            strip:Hide()
+            frame.dfMissingStripShown = false
+        end
+        return
+    end
+
+    -- Lazy strip + cells; recreate the cells when the tracked set changes (rare:
+    -- settings toggle / class-detection flip). Handle creation is combat-guarded
+    -- inside the factory (defers the container build to regen).
+    local tracked = missingTrackedBuffs(db)
+    if #tracked == 0 then
+        -- Nothing to track (no manual buffs checked / class has no raid buff):
+        -- drop any stale cells and keep the strip hidden.
+        if cells then
+            for _, h in pairs(cells) do h:Destroy() end
+            frame.missingFactory = nil
+            frame.missingFactorySig = nil
+        end
+        if strip and frame.dfMissingStripShown ~= false then
+            strip:Hide()
+            frame.dfMissingStripShown = false
+        end
+        return
+    end
+    -- Badge size is NOT in the signature: it hot-applies through h:SetBadgeSize
+    -- (live group-layout mutator + our frames) in the version-gated block below —
+    -- a size slider drag must never recreate containers (per-tick churn).
+    local badgeSize = db.missingBuffIconSize or MISSING_BADGE_SIZE
+    local sig = missingFactorySig(tracked)
+    if not strip then
+        strip = CreateFrame("Frame", nil, frame.contentOverlay or frame)
+        frame.missingBuffStrip = strip
+        frame.dfMissingStripShown = nil
+    end
+    if not cells or frame.missingFactorySig ~= sig then
+        if cells then
+            for _, h in pairs(cells) do h:Destroy() end
+        end
+        cells = {}
+        frame.missingFactory = cells
+        frame.missingFactorySig = sig
+        frame.dfMissingFactoryVersion = DF.auraLayoutVersion or 0
+        for i = 1, #tracked do
+            local info = tracked[i]
+            local h = DF.AuraContainer:Create(strip, buildMissingCellConfig(info, frame.unit, badgeSize))
+            if h then
+                h:ClearAllPoints()
+                h:SetPoint("LEFT", strip, "LEFT", (i - 1) * (badgeSize + MISSING_BADGE_GAP), 0)
+                styleMissingBadge(h, db, frame, info)
+                cells[info[2]] = h
+            end
+        end
+        layoutMissingStrip(frame, db, strip, #tracked)
+    end
+
+    -- Non-aura visibility guards: the badge must never claim "missing" on a
+    -- corpse / offline / out-of-range / unassistable unit. All non-secret reads;
+    -- range mirrors the legacy issecretvalue guard. DELIBERATE change vs legacy:
+    -- no UnitIsPlayer — legacy excluded NPC group members because its aura SCAN
+    -- couldn't check them, but raid buffs are castable on follower-dungeon NPCs
+    -- (Krathe-verified) and the read-free widget works on any assistable unit.
+    -- Pets stay excluded (pet frames don't run this feature).
+    local unit = frame.unit
+    local visible = unit and UnitExists(unit)
+        and not UnitIsDeadOrGhost(unit) and UnitIsConnected(unit)
+        and not frame.isPetFrame and UnitCanAssist("player", unit)
+    if visible then
+        local inRange = frame.dfInRange
+        if issecretvalue and issecretvalue(inRange) then
+            visible = false
+        elseif inRange == false then
+            visible = false
+        end
+    end
+    visible = visible and true or false
+    if frame.dfMissingStripShown ~= visible then
+        frame.dfMissingStripShown = visible
+        strip:SetShown(visible)
+    end
+
+    -- Keep cells on the frame's unit (roster churn); refresh the border spec with
+    -- the new unit's class/role colour. Combat: SetUnit self-defers in the factory.
+    local trackedByKey
+    for key, h in pairs(cells) do
+        if h:GetUnit() ~= unit then
+            h:SetUnit(unit)
+            if not trackedByKey then
+                trackedByKey = {}
+                for i = 1, #tracked do trackedByKey[tracked[i][2]] = tracked[i] end
+            end
+            if trackedByKey[key] then styleMissingBadge(h, db, frame, trackedByKey[key]) end
+        end
+    end
+
+    -- Re-apply settings on a layout-version bump only, out of combat (build-once-
+    -- leave-it: the badges/strip are ours, but the cadence mirrors the row drives).
+    -- Size hot-applies per cell (window/badge/cell mutators) + cells re-space.
+    local ver = DF.auraLayoutVersion or 0
+    if frame.dfMissingFactoryVersion ~= ver and not InCombatLockdown() then
+        frame.dfMissingFactoryVersion = ver
+        layoutMissingStrip(frame, db, strip, #tracked)
+        for i = 1, #tracked do
+            local info = tracked[i]
+            local h = cells[info[2]]
+            if h then
+                if h.SetBadgeSize then h:SetBadgeSize(badgeSize, badgeSize) end
+                h:ClearAllPoints()
+                h:SetPoint("LEFT", strip, "LEFT", (i - 1) * (badgeSize + MISSING_BADGE_GAP), 0)
+                styleMissingBadge(h, db, frame, info)
+            end
+        end
+    end
+end
+
 -- Dev toggle for the experimental factory buff path. /reload to apply cleanly.
 function DF:ToggleBuffFactory()
     if not DF.db then return end
@@ -2998,6 +3271,9 @@ local function driveFactoryRowsNow(frame)
     end
     if db.defensiveIconEnabled and DF:UseFactoryForDefensive(frame, db) then
         DF:DriveDefensiveFactory(frame, db)
+    end
+    if db.missingBuffIconEnabled and DF:UseFactoryForMissingBuff(frame, db) then
+        DF:DriveMissingBuffFactory(frame, db)
     end
 end
 
@@ -3041,6 +3317,13 @@ function DF:UpdateAuras_Enhanced(frame)
     if frame.debuffFactory and not debuffFactoryActive then
         frame.debuffFactory:GetFrame():Hide()
         frame.dfDebuffFactoryShown = false
+    end
+    -- Missing-buff strip mirror: hide it when the factory path goes inactive (test
+    -- mode enter / feature off) so the legacy/test render can't double up.
+    local missingFactoryActive = db.missingBuffIconEnabled and DF:UseFactoryForMissingBuff(frame, db)
+    if frame.missingBuffStrip and not missingFactoryActive and frame.dfMissingStripShown then
+        frame.missingBuffStrip:Hide()
+        frame.dfMissingStripShown = false
     end
 
     -- Aura Designer runs when enabled; standard buffs can coexist if showBuffs is on.

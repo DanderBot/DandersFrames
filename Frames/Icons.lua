@@ -751,7 +751,22 @@ function DF:UpdateMissingBuffIcon(frame, forceUpdate)
     
     -- Use raid DB for raid frames, party DB for party frames
     local db = DF:GetFrameDB(frame)
-    
+
+    -- 12.1 FACTORY SEAM: the read-free layout-push widget (Auras.lua bridge) owns
+    -- the feature — the UnitHasBuff scan below reads aura data, which is sealed.
+    -- Routing here keeps this function's trigger cadence (aura events + the OOC
+    -- timer) driving the widget's NON-aura guards. Legacy body stays for pre-12.1
+    -- clients and test mode.
+    if DF.UseFactoryForMissingBuff and DF:UseFactoryForMissingBuff(frame, db) then
+        DF:DriveMissingBuffFactory(frame, db)
+        return
+    end
+    -- Legacy path active (pre-12.1 / test mode): the factory strip must not linger.
+    if frame.missingBuffStrip and frame.dfMissingStripShown then
+        frame.missingBuffStrip:Hide()
+        frame.dfMissingStripShown = false
+    end
+
     -- Check if feature is disabled
     if not db.missingBuffIconEnabled then
         frame.missingBuffFrame:Hide()

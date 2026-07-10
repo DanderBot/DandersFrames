@@ -1291,7 +1291,14 @@ function DF:LightweightUpdateMissingBuff()
     local mode = DF.GUI and DF.GUI.SelectedMode or "party"
     local db = DF.db[mode]
     if not db then return end
-    
+
+    -- 12.1 factory strip: size/scale/position/border apply through the version-gated
+    -- drive — re-drive immediately so sliders preview live (the legacy loop below
+    -- only touches the hidden legacy frames when the factory owns the feature).
+    if DF.UseFactoryForMissingBuff and DF:UseFactoryForMissingBuff(nil, db) then
+        DF:InvalidateAuraLayout()
+    end
+
     local size = db.missingBuffIconSize or 24
     local scale = db.missingBuffIconScale or 1
     local x = db.missingBuffIconX or 0
@@ -1526,8 +1533,10 @@ function DF:LightweightUpdateFrameLevel(elementType)
     if not db then return end
 
     -- 12.1 factory rows: the defensive row's frame level is applied by the drive
-    -- (frameLevelOffset) — re-drive immediately so the slider previews live.
-    if elementType == "defensive" and DF.UseFactoryForDefensive and DF:UseFactoryForDefensive(nil, db) then
+    -- (frameLevelOffset) — re-drive immediately so the slider previews live. The
+    -- missing-buff strip's level is applied the same way (layoutMissingStrip).
+    if (elementType == "defensive" and DF.UseFactoryForDefensive and DF:UseFactoryForDefensive(nil, db))
+       or (elementType == "missingBuff" and DF.UseFactoryForMissingBuff and DF:UseFactoryForMissingBuff(nil, db)) then
         DF:InvalidateAuraLayout()
     end
 
@@ -2366,6 +2375,12 @@ function DF:LightweightUpdateMissingBuffBorderColor()
     local mode = DF.GUI and DF.GUI.SelectedMode or "party"
     local db = DF.db[mode]
     if not db then return end
+
+    -- 12.1 factory strip: badge borders re-spec through the drive (see
+    -- LightweightUpdateMissingBuff); the legacy loop below touches hidden frames.
+    if DF.UseFactoryForMissingBuff and DF:UseFactoryForMissingBuff(nil, db) then
+        DF:InvalidateAuraLayout()
+    end
 
     local function UpdateIcon(frame)
         if frame and frame.missingBuffBorder then

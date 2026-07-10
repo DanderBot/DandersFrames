@@ -705,6 +705,12 @@ end
 -- positioning) and a trivial recreate-on-structural-change teardown. The container is
 -- STANDING: built once from config, then Blizzard drives it — no per-UNIT_AURA touches.
 -- ============================================================
+-- MISSING mode: gap between the container's pinned right edge and the clip window,
+-- and the badge's inset from the container's TOPLEFT — the two cancel so the empty
+-- state parks the badge exactly on the window. Also the extra cell width beyond the
+-- badge, so the pushed badge clears the window with margin.
+local MISSING_PAD = 2
+
 local NativeBackend = {}
 NativeBackend.__index = NativeBackend
 
@@ -745,8 +751,22 @@ function NativeBackend:build()
     end
     self.container = c
     local isOverlay = config.mode == "overlay"
+    local isMissing = config.mode == "missing"
     if isOverlay then
         c:SetAllPoints(handle.frame)          -- overlay covers the host region
+    elseif isMissing then
+        -- LAYOUT-PUSH INVERSION (probe 32, live-confirmed 2026-07-10): pin the container
+        -- just outside the clip window's LEFT edge. The container self-sizes to content
+        -- (secret SetSize each layout pass — Blizzard_CustomAuraContainer.lua:738), so an
+        -- empty group leaves the badge (anchored to the container's TOPLEFT below) parked
+        -- inside the window; one blank button's cell pushes it fully out. The button
+        -- itself always renders LEFT of the window -> clipped, and the container is
+        -- mouse-dead so nothing floats over the unit frame.
+        c:ClearAllPoints()
+        c:SetPoint("TOPRIGHT", handle.frame, "TOPLEFT", -MISSING_PAD, 0)
+        pcall(function() c:SetAuraLayoutAnchorPoint("TOPLEFT") end)
+        pcall(function() if c.SetMouseClickEnabled then c:SetMouseClickEnabled(false) end end)
+        pcall(function() if c.SetMouseMotionEnabled then c:SetMouseMotionEnabled(false) end end)
     else
         applyContainerLayout(c, handle)       -- row: anchor/growth/wrap/offset/scale -> native flow layout
     end
@@ -764,7 +784,16 @@ function NativeBackend:build()
     -- keys are remembered so ApplyStyle can hot-apply per-group layout (live mutator).
     local filters = normalizeFilters(config.filter)
     local maxCount = handle:_slotCount()
-    local groupLayout = (not isOverlay) and buildGroupLayout(config) or nil
+    local groupLayout
+    if isMissing then
+        -- The cell IS the push distance: >= badge width guarantees the badge clears the
+        -- window entirely when the tracked buff is present.
+        local bw = (config.badge and config.badge.w) or 24
+        local bh = (config.badge and config.badge.h) or 24
+        groupLayout = { elementWidth = bw + MISSING_PAD, elementHeight = bh }
+    elseif not isOverlay then
+        groupLayout = buildGroupLayout(config)
+    end
     -- Native candidate filters (spell-ID include/exclude maps, dispel types, maxDuration,
     -- booleans) — evaluated Blizzard-side per group/slot. ⚠ Spell-ID maps only apply on
     -- units the player can assist (helpful) / attack (harmful) — a harmful spell-ID map
@@ -813,6 +842,16 @@ function NativeBackend:build()
     -- gotcha 2). This is what arms the parse + UNIT_AURA registration.
     pcall(function() c:SetEnabled(config.enabled ~= false) end)
 
+    -- MISSING mode: arm the push geometry — hook the badge onto the live container's
+    -- TOPLEFT (+pad puts it exactly on the window while the group is empty) and show it.
+    -- The badge's rect now derives from the container's SECRET size: render-side only,
+    -- never read its position in Lua (no pixel-snap, no GetLeft) — §20c rules.
+    if isMissing and handle.badge then
+        handle.badge:ClearAllPoints()
+        handle.badge:SetPoint("TOPLEFT", c, "TOPLEFT", MISSING_PAD, 0)
+        handle.badge:Show()
+    end
+
     DF:Debug(DBG, "built (native) unit=%s mode=%s groups=%d",
         tostring(config.unit), tostring(config.mode or "row"), #filters)
 end
@@ -827,7 +866,10 @@ end
 -- Callers combat-gate this (ApplyStyle defers to regen in lockdown).
 function NativeBackend:applyLayout()
     local c = self.container
-    if not c or self.handle.config.mode == "overlay" then return end
+    -- Overlay: SetAllPoints never changes. Missing: the push anchor + cell layout are
+    -- the MECHANISM (set at build; badge-size changes are structural -> Rebuild) — a
+    -- hot re-apply here would overwrite them with row semantics.
+    if not c or self.handle.config.mode == "overlay" or self.handle.config.mode == "missing" then return end
     applyContainerLayout(c, self.handle)
     if self.groupKeys and c.SetAuraGroupLayout then
         local groupLayout = buildGroupLayout(self.handle.config)
@@ -968,7 +1010,8 @@ Handle.__index = Handle
 function Handle:_getConfig() return self.config end
 function Handle:_getAnchorFrame() return self.frame end
 function Handle:_slotCount()
-    return (self.config.mode == "overlay") and 1 or (self.config.max or 1)
+    local mode = self.config.mode
+    return (mode == "overlay" or mode == "missing") and 1 or (self.config.max or 1)
 end
 function Handle:_acceptSlot(slot, index)
     self.buttons[index] = slot                 -- cache first (mirror of the pre-split order)
@@ -1006,8 +1049,13 @@ function Handle:_makeInitializeFrame(gen)
             -- takes a click-token string (a table errors).
             if button.SetMouseClickEnabled then button:SetMouseClickEnabled(false) end
             if button.SetMouseMotionEnabled then button:SetMouseMotionEnabled(handle.config.tooltips == true) end
-            handle:_acceptSlot(button, i)      -- size + regions (source-agnostic)
-            handle:_bindNativeSlot(button)     -- native inbound setters
+            -- MISSING mode: the button must render NOTHING — its only job is to occupy
+            -- a layout cell so the container's width pushes the badge out of the clip
+            -- window (probe 32). No regions, no native binds.
+            if handle.config.mode ~= "missing" then
+                handle:_acceptSlot(button, i)      -- size + regions (source-agnostic)
+                handle:_bindNativeSlot(button)     -- native inbound setters
+            end
         end)
         if not ok and not warnedRestyle then
             warnedRestyle = true
@@ -1017,6 +1065,36 @@ function Handle:_makeInitializeFrame(gen)
 end
 
 function Handle:GetFrame() return self.frame end
+-- MISSING mode only: the always-styled badge frame (icon/border are the consumer's).
+-- Its visibility is engine-driven (shown only while a live container backs the push
+-- geometry); consumers gate the WINDOW (GetFrame) for dead/offline/range guards.
+function Handle:GetBadgeFrame() return self.badge end
+-- MISSING mode only: hot-apply a badge/window size change. NOT structural — the
+-- window + badge are plain DF frames and the cell rides the live SetAuraGroupLayout
+-- mutator, so a size slider drag must not recreate containers (per-tick churn).
+-- Callers invoke this OOC (the drives' version-gated blocks are combat-gated); the
+-- OOC Hide/Show bounce arms the private-side processor so the re-lay applies now,
+-- not one aura event late (same partition kick as applyLayout).
+function Handle:SetBadgeSize(w, h)
+    if self.config.mode ~= "missing" or not self.badge then return end
+    local badge = self.config.badge or {}
+    self.config.badge = badge
+    if badge.w == w and badge.h == h then return end
+    badge.w, badge.h = w, h
+    self.frame:SetSize(w, h)
+    self.badge:SetSize(w, h)
+    local backend = self.backend
+    local c = backend and backend.container
+    if c and backend.groupKeys and c.SetAuraGroupLayout then
+        local cellLayout = { elementWidth = w + MISSING_PAD, elementHeight = h }
+        for _, key in ipairs(backend.groupKeys) do
+            pcall(function() c:SetAuraGroupLayout(key, cellLayout) end)
+        end
+        if not InCombatLockdown() then
+            pcall(function() c:Hide(); c:Show() end)
+        end
+    end
+end
 -- Returns the DESIRED unit; while in combat the backend retarget may still be deferred to regen.
 function Handle:GetUnit()  return self.config.unit end
 
@@ -1184,6 +1262,13 @@ function Handle:_teardownContainer()
     if self.backend then self.backend:teardown(); self.backend = nil end
     wipe(self.buttons)
     self._slotCounter = 0   -- restart the lazy-batch index for the next build
+    -- MISSING mode: with no container the push geometry is gone — park the badge
+    -- hidden on the window (never claim "missing" without a live container).
+    if self.badge then
+        self.badge:Hide()
+        self.badge:ClearAllPoints()
+        self.badge:SetPoint("TOPLEFT", self.frame, "TOPLEFT", 0, 0)
+    end
 end
 
 function Handle:Destroy()
@@ -1300,7 +1385,11 @@ end
 --
 -- config = {
 --   unit     = "raid5",
---   mode     = "row" | "overlay",              -- default "row"
+--   mode     = "row" | "overlay" | "missing",  -- default "row"; "missing" = layout-push
+--                                              -- show-when-ABSENT badge (probe 32): pass
+--                                              -- badge = { w, h }, filter + candidateFilters
+--                                              -- select the tracked spell(s); style the frame
+--                                              -- from GetBadgeFrame(); position GetFrame().
 --   filter   = "HELPFUL" | { "HARMFUL|RAID_PLAYER_DISPELLABLE", ... },  -- category (now)
 --   spellIDs = { 774, ... },                    -- PTR-4 only; accepted + no-op now (warns if set)
 --   dispelTypes = { "Magic", "Curse" },         -- PTR-4 only; accepted + no-op now (warns if set)
@@ -1338,9 +1427,29 @@ function AuraContainer:Create(parent, config)
     -- h.frame is the plain anchor frame DF positions; the backend parents its OWN
     -- CustomAuraContainer to it (per-consumer container — Krathe's ContainerOverlay pattern).
     h.frame = CreateFrame("Frame", nil, parent)
-    -- Both modes: h.frame occupies the unit-frame rect (row layout anchors are relative
-    -- to it; overlay covers it). To reposition: h:ClearAllPoints() then h:SetPoint(...).
-    h.frame:SetAllPoints(parent)
+    if cfg.mode == "missing" then
+        -- MISSING mode (probe 32, live-confirmed 2026-07-10): h.frame is a CLIP WINDOW
+        -- exactly the badge's size — the caller positions it. The backend pins its
+        -- container just outside the window's left edge; an empty spellID-filtered
+        -- group parks the badge inside the window ("missing" visible), one blank
+        -- button's cell width pushes it out ("present" renders NOTHING). Zero reads.
+        local bw = (cfg.badge and cfg.badge.w) or 24
+        local bh = (cfg.badge and cfg.badge.h) or 24
+        h.frame:SetClipsChildren(true)
+        h.frame:SetSize(bw, bh)
+        -- The badge is handle-owned (survives container rebuilds). It starts HIDDEN and
+        -- parked on the window: with no live container we must not claim "missing"
+        -- (false-negative until regen beats a false-positive). The backend shows it and
+        -- re-anchors it to the container when a build lands; teardown re-parks it.
+        h.badge = CreateFrame("Frame", nil, h.frame)
+        h.badge:SetSize(bw, bh)
+        h.badge:SetPoint("TOPLEFT", h.frame, "TOPLEFT", 0, 0)
+        h.badge:Hide()
+    else
+        -- Row/overlay: h.frame occupies the unit-frame rect (row layout anchors are
+        -- relative to it; overlay covers it). Reposition: h:ClearAllPoints() + h:SetPoint(...).
+        h.frame:SetAllPoints(parent)
+    end
     -- Z-order: legacy renders host aura icons ABOVE contentOverlay (parent+25, name/health
     -- text). Raising h.frame raises the whole subtree — the native container + AuraButtons +
     -- their holders are all descendants with relative levels (Blizzard sets no fixed levels).

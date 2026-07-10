@@ -935,22 +935,40 @@ end
 
 function DF:UpdateMissingBuffAppearance(frame)
     if not IsDandersFrame(frame) then return end
-    if not frame.missingBuffFrame then return end
-    
-    -- PERF: Skip if missing buff frame isn't visible
-    if not frame.missingBuffFrame:IsShown() then return end
-    
+
+    -- 12.1 factory strip (Auras.lua bridge): the whole strip fades as one — the
+    -- badges are plain DF frames (alpha is ours; the secret geometry only drives
+    -- position). Legacy path below is unchanged for pre-12.1 / test mode.
+    local strip = frame.missingBuffStrip
+    local useStrip = strip and strip:IsShown()
+        and DF.UseFactoryForMissingBuff and DF:UseFactoryForMissingBuff(frame, GetDB(frame))
+
+    if not useStrip then
+        if not frame.missingBuffFrame then return end
+        -- PERF: Skip if missing buff frame isn't visible
+        if not frame.missingBuffFrame:IsShown() then return end
+    end
+
     local db = GetDB(frame)
     if not db then return end
-    
+
     if DF.testMode or DF.raidTestMode then return end
-    
+
     local deadOrOffline = IsDeadOrOffline(frame)
     local inRange = GetInRange(frame)
 
     local alpha = 1.0
     if deadOrOffline and db.fadeDeadFrames then
         alpha = db.fadeDeadIcons or 1.0
+    end
+
+    if useStrip then
+        if db.oorEnabled then
+            ApplyOORAlpha(strip, inRange, alpha, db.oorMissingBuffAlpha or 0.5)
+        else
+            strip:SetAlpha(alpha)
+        end
+        return
     end
 
     if db.oorEnabled then

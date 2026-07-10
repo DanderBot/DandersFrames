@@ -6275,9 +6275,12 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     
     -- Auras > Missing Buffs
     local pageMissingBuffs = CreateSubTab("auras", "auras_missingbuffs", L["Missing Buffs"])
-    -- 12.1: missing-buff detection reads secret aura presence per unit, which the new
-    -- aura system no longer exposes. Blocked until reworked on the Group-Buff source.
-    GUI:BlockPage12_1(pageMissingBuffs, "roadmap")
+    -- 12.1: missing buffs are factory-served (read-free layout-push widget). The page
+    -- blocks only when the 12.1 aura system is active but the factory does NOT own the
+    -- feature (dev toggle off) -- the same lift pattern the Debuffs page used.
+    GUI:BlockPage12_1(pageMissingBuffs, "roadmap", function(d)
+        return GUI:IsAuraFactoryActive() and not DF:FactoryOwnsMissingBuff(d)
+    end)
     BuildPage(pageMissingBuffs, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top
         Add(CreateCopyButton(self.child, {"missingBuff"}, L["Missing Buffs"], "auras_missingbuffs"), 25, 2)
@@ -6294,7 +6297,17 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local function HideManualBuffVariant(d)
             return d.missingBuffClassDetection
         end
-        
+
+        -- 12.1 factory path: settings apply through the version-gated drive, so a
+        -- change must bump the aura layout version (InvalidateAuraLayout re-drives
+        -- every factory widget, missing-buff strip included). Legacy path unchanged.
+        local function refreshMissing()
+            if DF.FactoryOwnsMissingBuff and DF:FactoryOwnsMissingBuff(db) then
+                DF:InvalidateAuraLayout()
+            end
+            if DF.UpdateAllMissingBuffIcons then DF:UpdateAllMissingBuffIcons() end
+        end
+
         local anchorOptions = {
             ["TOPLEFT"]= L["Top Left"], ["TOP"]= L["Top"], ["TOPRIGHT"]= L["Top Right"],
             ["LEFT"]= L["Left"], ["CENTER"]= L["Center"], ["RIGHT"]= L["Right"],
@@ -6305,25 +6318,39 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local settingsGroup = GUI:CreateSettingsGroup(self.child, 280)
         settingsGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 40)
         settingsGroup:AddWidget(GUI:CreateLabel(self.child, L["Shows icon when party members are missing raid buffs."], 250), 30)
-        local mPlusWarn = GUI:CreateInfoBanner(self.child, { tone = "caution" })
-        mPlusWarn:SetText(L["Does NOT work in Mythic+ keystones. In combat, results may be slightly delayed."])
+        -- 12.1 (factory path): the read-free widget works in combat + Mythic+ and
+        -- shows EVERY tracked-and-missing buff (the legacy "first missing only"
+        -- priority pick needed a cross-aura read). Legacy path keeps the caveat.
+        local mbOwns = DF.FactoryOwnsMissingBuff and DF:FactoryOwnsMissingBuff(db)
+        local mPlusWarn = GUI:CreateInfoBanner(self.child, { tone = mbOwns and "info" or "caution" })
+        mPlusWarn:SetText(mbOwns
+            and L["Updates instantly, including in combat and Mythic+. Each tracked buff that is missing shows its own icon."]
+            or L["Does NOT work in Mythic+ keystones. In combat, results may be slightly delayed."])
         settingsGroup:AddWidget(mPlusWarn, 60)
         local missingBuffEnable = settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Missing Buff Icon"], db, "missingBuffIconEnabled", function()
             self:RefreshStates()
-            if DF.UpdateAllMissingBuffIcons then DF:UpdateAllMissingBuffIcons() end
+            refreshMissing()
         end), 30)
         missingBuffEnable.keepEnabled = true
         settingsGroup.disableChildrenOn = HideMissingBuffOptions
         settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Auto-detect (your class's buff)"], db, "missingBuffClassDetection", function()
             self:RefreshStates()
-            if DF.UpdateAllMissingBuffIcons then DF:UpdateAllMissingBuffIcons() end
+            refreshMissing()
         end), 30)
         settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Raid Buffs from Buff Bar"], db, "missingBuffHideFromBar", function()
+            -- Factory: the exclusion is a structural candidate-filter on the BUFF row —
+            -- refreshMissing's InvalidateAuraLayout re-drives it (sig change -> Rebuild).
+            refreshMissing()
             DF:UpdateAllAuras()
         end), 30)
-        settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Debug Mode (print to chat)"], db, "missingBuffIconDebug", function()
+        local mbDebug = settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Debug Mode (print to chat)"], db, "missingBuffIconDebug", function()
             if DF.UpdateAllMissingBuffIcons then DF:UpdateAllMissingBuffIcons() end
         end), 30)
+        -- The debug trace narrates the legacy UnitHasBuff scan, which never runs on
+        -- the read-free 12.1 widget (there is nothing to print — presence is never
+        -- known to Lua). Candidate for deletion in the post-port cleanup sweep.
+        GUI:BlockControl12_1(mbDebug, "limitation",
+            { id = "missingbuffs:debug", page = L["Missing Buffs"], when = function(d) return DF:FactoryOwnsMissingBuff(d) end })
         Add(settingsGroup, nil, 1)
         
         -- ===== BUFFS TO CHECK GROUP (Column 2) =====
@@ -6331,22 +6358,22 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         buffsGroup:AddWidget(GUI:CreateHeader(self.child, L["Buffs to Check (Manual Mode)"]), 40)
         buffsGroup:AddWidget(GUI:CreateLabel(self.child, L["When auto-detect is OFF, select which raid buffs to monitor manually."], 250), 35)
         buffsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Arcane Intellect (Mage)"], db, "missingBuffCheckIntellect", function()
-            if DF.UpdateAllMissingBuffIcons then DF:UpdateAllMissingBuffIcons() end
+            refreshMissing()
         end), 30)
         buffsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Power Word: Fortitude (Priest)"], db, "missingBuffCheckStamina", function()
-            if DF.UpdateAllMissingBuffIcons then DF:UpdateAllMissingBuffIcons() end
+            refreshMissing()
         end), 30)
         buffsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Battle Shout (Warrior)"], db, "missingBuffCheckAttackPower", function()
-            if DF.UpdateAllMissingBuffIcons then DF:UpdateAllMissingBuffIcons() end
+            refreshMissing()
         end), 30)
         buffsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Mark of the Wild (Druid)"], db, "missingBuffCheckVersatility", function()
-            if DF.UpdateAllMissingBuffIcons then DF:UpdateAllMissingBuffIcons() end
+            refreshMissing()
         end), 30)
         buffsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Skyfury (Shaman)"], db, "missingBuffCheckSkyfury", function()
-            if DF.UpdateAllMissingBuffIcons then DF:UpdateAllMissingBuffIcons() end
+            refreshMissing()
         end), 30)
         buffsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Blessing of the Bronze (Evoker)"], db, "missingBuffCheckBronze", function()
-            if DF.UpdateAllMissingBuffIcons then DF:UpdateAllMissingBuffIcons() end
+            refreshMissing()
         end), 30)
         buffsGroup.hideOn = HideManualBuffVariant
         buffsGroup.disableChildrenOn = HideMissingBuffOptions
@@ -6357,13 +6384,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         appearanceGroup:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 40)
         appearanceGroup.disableChildrenOn = HideMissingBuffOptions
         appearanceGroup:AddWidget(GUI:CreateSlider(self.child, L["Icon Size"], 12, 48, 1, db, "missingBuffIconSize", function()
-            if DF.UpdateAllMissingBuffIcons then DF:UpdateAllMissingBuffIcons() end
+            refreshMissing()
         end, function() DF:LightweightUpdateMissingBuff() end, true), 55)
         appearanceGroup:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 3.0, 0.1, db, "missingBuffIconScale", function()
-            if DF.UpdateAllMissingBuffIcons then DF:UpdateAllMissingBuffIcons() end
+            refreshMissing()
         end, function() DF:LightweightUpdateMissingBuff() end, true), 55)
         appearanceGroup:AddWidget(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "missingBuffIconFrameLevel", function()
-            if DF.UpdateAllMissingBuffIcons then DF:UpdateAllMissingBuffIcons() end
+            refreshMissing()
         end, function() DF:LightweightUpdateFrameLevel("missingBuff") end, true), 55)
         Add(appearanceGroup, nil, 1)
         
@@ -6372,13 +6399,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         positionGroup:AddWidget(GUI:CreateHeader(self.child, L["Position"]), 40)
         positionGroup.disableChildrenOn = HideMissingBuffOptions
         positionGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "missingBuffIconAnchor", function()
-            if DF.UpdateAllMissingBuffIcons then DF:UpdateAllMissingBuffIcons() end
+            refreshMissing()
         end), 55)
         positionGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -150, 150, 1, db, "missingBuffIconX", function()
-            if DF.UpdateAllMissingBuffIcons then DF:UpdateAllMissingBuffIcons() end
+            refreshMissing()
         end, function() DF:LightweightUpdateMissingBuff() end, true), 55)
         positionGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -150, 150, 1, db, "missingBuffIconY", function()
-            if DF.UpdateAllMissingBuffIcons then DF:UpdateAllMissingBuffIcons() end
+            refreshMissing()
         end, function() DF:LightweightUpdateMissingBuff() end, true), 55)
         Add(positionGroup, nil, 2)
         
@@ -6392,18 +6419,23 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Skipped: colour-by-time / colour-by-type (no aura-state context here).
         local borderGroup = GUI:CreateSettingsGroup(self.child, 280)
         borderGroup:AddWidget(GUI:CreateHeader(self.child, L["Border"]), 40)
-        GUI:CreateBorderControls(borderGroup, db, "missingBuffIcon", {
+        local mbBorderW = GUI:CreateBorderControls(borderGroup, db, "missingBuffIcon", {
             parent       = self.child,
             include      = { alpha = true, inset = true, offset = true, blendMode = true,
                              gradient = true, shadow = true, animate = true,
                              classColor = true, roleColor = true },
-            fullUpdate   = function() if DF.UpdateAllMissingBuffIcons then DF:UpdateAllMissingBuffIcons() end end,
+            fullUpdate   = function() refreshMissing() end,
             lightUpdate  = function() DF:LightweightUpdateMissingBuff() end,
             lightColors  = function() DF:LightweightUpdateMissingBuffBorderColor() end,
             refreshStates = function() self:RefreshStates() end,
             hideWhen     = function(d) return not d.missingBuffIconEnabled end,
             sizeMin = 0, sizeMax = 6, sizeStep = 1,  -- 0 = animation-only (no solid edge)
         })
+        -- 12.1: the badge's position derives from the container's secret geometry and
+        -- the factory strips spec.animation on render (same treatment as the aura
+        -- rows). Frost to match; candidate for the post-port cleanup sweep.
+        GUI:BlockControl12_1(mbBorderW.animationType, "limitation",
+            { id = "missingbuffs:borderanimation", page = L["Missing Buffs"], when = function(d) return DF:FactoryOwnsMissingBuff(d) end })
         borderGroup.disableChildrenOn = HideMissingBuffOptions
         Add(borderGroup, nil, 1)
         

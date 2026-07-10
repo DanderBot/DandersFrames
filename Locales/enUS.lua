@@ -103,6 +103,7 @@ L["(%d found)"] = true
 L["Go to %s"] = true
 -- Misc GUI fallback strings (banner / confirm)
 L["Does NOT work in Mythic+ keystones. In combat, results may be slightly delayed."] = true
+L["Updates instantly, including in combat and Mythic+. Each tracked buff that is missing shows its own icon."] = true
 -- Footer support links (Discord / PayPal / Patreon)
 L["Need support? Join our Discord"] = true
 L["Join the DandersFrames Discord"] = true
