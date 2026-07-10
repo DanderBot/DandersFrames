@@ -331,6 +331,29 @@ end
 -- Blizzard's native dispel overlay for private auras.
 -- ============================================================
 
+-- 12.1 changed the dispel-overlay attribute surface (live-diagnosed: gradient
+-- gone, icon only): the `show-dispel-indicator-overlay` boolean and
+-- `suppress-dispel-border-icons` are UNREAD, replaced by the
+-- `dispel-indicator-overlay-type` enum (RaidDispelOverlayType: 0 Disabled /
+-- 1 UseDebuffColor / 2 UseBlack) — nil/Disabled zeroes the Gradient+Border+
+-- Background in CompactUnitFrameDispelOverlayMixin:SetDispelType, leaving only
+-- the icon. `aura-organization-type` is UNCHANGED: Enum.RaidAuraOrganizationType
+-- stays 0-based (0 Legacy / 1 BuffsTopDebuffsBottom / 2 BuffsRightDebuffsLeft),
+-- keyed 1:1 with DF's Gradient Direction values — each layout template hardcodes
+-- its DispelOverlay orientation (Top / Bottom / Left edge in that order).
+-- New pulse-animation knob rides `dispel-indicator-overlay-animation`.
+-- Feature-detected on the enum so pre-12.1 keeps the legacy attributes exactly.
+local function ApplyOverlayModeAttributes(wrapper, db)
+    wrapper:SetAttribute("aura-organization-type", db.bossDebuffsContainerOverlayGradientDir or 0)
+    if Enum and Enum.RaidDispelOverlayType then
+        wrapper:SetAttribute("dispel-indicator-overlay-type", Enum.RaidDispelOverlayType.UseDebuffColor)
+        wrapper:SetAttribute("dispel-indicator-overlay-animation", db.bossDebuffsContainerOverlayPulse == true)
+    else
+        wrapper:SetAttribute("show-dispel-indicator-overlay", true)
+        wrapper:SetAttribute("suppress-dispel-border-icons", true)
+    end
+end
+
 SetupContainerOverlay = function(frame, unit, db)
     -- Only run when the source selector includes Blizzard ("blizzard" or "both").
     local src = db.dispelOverlaySource or "both"
@@ -382,15 +405,15 @@ SetupContainerOverlay = function(frame, unit, db)
     wrapper:SetAttribute("ignore-buffs", true)
     wrapper:SetAttribute("ignore-debuffs", true)
     wrapper:SetAttribute("ignore-dispel-debuffs", true)
-    wrapper:SetAttribute("show-dispel-indicator-overlay", true)
-    wrapper:SetAttribute("suppress-dispel-border-icons", true)
+    -- Era-specific overlay mode attributes (12.1 enum vs legacy booleans + the
+    -- orientation base shift) — see ApplyOverlayModeAttributes above.
+    ApplyOverlayModeAttributes(wrapper, db)
     -- dispel-indicator-option drives both the TOPRIGHT dispel icons and the
     -- gradient: Blizzard only calls SetDispelOverlayAura from inside
     -- SetDispelDebuff, which always shows the icon first, so there's no way to
     -- hide the icons without also hiding the gradient.
     -- 1 = dispellable by me. 2 = all dispellable.
     wrapper:SetAttribute("dispel-indicator-option", db.dispelOverlayDispelType or 2)
-    wrapper:SetAttribute("aura-organization-type", db.bossDebuffsContainerOverlayGradientDir)
     wrapper:SetAttribute("group-type", groupType)
     wrapper:SetAttribute("power-bar-used-height", 0)
     wrapper:SetAttribute("icon-size", 10)
@@ -503,6 +526,39 @@ function DF:UpdateContainerOverlayVisibility(frame)
     end)
 end
 
+-- Suspend our private-aura anchors while a FOREIGN fake-data provider is active
+-- (Blizzard Edit Mode): C_UnitAurasPrivate.GetAllPrivateAuras returns nil under
+-- the edit-mode provider and Blizzard's PrivateAuraUnitWatcher feeds it straight
+-- to ipairs (Blizzard_PrivateAurasUI.lua:1150) — a Blizzard bug we trip because
+-- our dispel-wrapper anchor keeps a per-unit watcher alive. Drop the wrapper
+-- anchors on switch-to-fake, rebuild them on switch-to-real. (The retired boss
+-- ICON anchors don't register on 12.1; the bossDebuffsLegacyAnchors dev hatch
+-- accepts this rough edge.) The event doesn't exist pre-12.1 — watcher no-ops.
+do
+    local suspended = {}
+    local providerWatcher = CreateFrame("Frame")
+    providerWatcher:RegisterEvent("AURA_DATA_PROVIDER_SWITCH")
+    providerWatcher:SetScript("OnEvent", function(_, _, useRealDataProvider)
+        if DF.AuraContainer and DF.AuraContainer._ownsProviderSwitch then return end
+        if useRealDataProvider then
+            for frame in pairs(suspended) do
+                suspended[frame] = nil
+                local db = frame.unit and DF:GetFrameDB(frame)
+                if db then
+                    SetupContainerOverlay(frame, frame.bossDebuffAnchoredUnit or frame.unit, db)
+                end
+            end
+        else
+            for frame, anchorID in pairs(containerOverlayAnchors) do
+                C_UnitAuras.RemovePrivateAuraAnchor(anchorID)
+                containerOverlayAnchors[frame] = nil
+                if frame.containerOverlayFrame then frame.containerOverlayFrame:Hide() end
+                suspended[frame] = true
+            end
+        end
+    end)
+end
+
 function DF:UpdateContainerOverlaySettings(frame)
     if not frame then return end
 
@@ -534,9 +590,9 @@ function DF:UpdateContainerOverlaySettings(frame)
         return
     end
 
-    -- Update attributes for live changes
+    -- Update attributes for live changes (incl. the era-specific overlay mode set)
     wrapper:SetAttribute("dispel-indicator-option", db.dispelOverlayDispelType or 2)
-    wrapper:SetAttribute("aura-organization-type", db.bossDebuffsContainerOverlayGradientDir)
+    ApplyOverlayModeAttributes(wrapper, db)
 
     -- Live strata + frame-level adjustment (user may need to raise these above
     -- text on short/wide frames where DF's content overlay covers the gradient,
