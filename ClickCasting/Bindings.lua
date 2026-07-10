@@ -47,16 +47,44 @@ end
 -- Lazily create the per-frame proxy button (out of combat only). useparent-unit
 -- makes the proxy inherit the frame's real unit token (party1, raid3, ...), so
 -- targeting keeps working at any range. Returns nil if we're in combat.
+local proxyCount = 0
 function CC:EnsureClickProxy(frame)
     if frame.dfClickProxy then return frame.dfClickProxy end
     if InCombatLockdown() then return nil end
-    local proxy = CreateFrame("Button", nil, frame, "SecureActionButtonTemplate")
+    -- GLOBAL NAME: the 12.1 macro reroute below reaches the proxy via
+    -- "/click <name> <button>", which needs a named button. Harmless pre-12.1.
+    proxyCount = proxyCount + 1
+    local proxy = CreateFrame("Button", "DFClickProxy" .. proxyCount, frame, "SecureActionButtonTemplate")
     proxy:EnableMouse(false)              -- only ever clicked programmatically
     proxy:RegisterForClicks("AnyUp")      -- fire on the up stroke (menu-safe)
     proxy:SetAttribute("useparent-unit", true)
     proxy:SetAttribute("useOnKeyDown", false)
     frame.dfClickProxy = proxy
     return proxy
+end
+
+-- ★ 12.1 PTR (build 12.1.0): SECURE_ACTIONS.click is BROKEN — Blizzard's new
+-- forbidden-aspects check calls `button:HasAnyForbiddenAspects(...)` where
+-- `button` is the mouse-button STRING, so EVERY delegated type="click" action
+-- throws "attempt to call a nil value" (SecureTemplates.lua:564; verified in the
+-- local dump AND Gethe ptr — hits Clique-style delegation addon-wide). Until
+-- Blizzard fixes it, route the delegation through SECURE_ACTIONS.macro instead:
+-- `/click <proxyName> <button>` clicks the SAME ungated proxy with identical
+-- button + held-modifier resolution, and the macro type is not in the
+-- SecureUnitButton gate's expectBinding set — so the 12.0.7 None-drop still
+-- never fires. RE-CHECK EACH PTR BUILD; delete this path once click is fixed.
+local CLICK_DELEGATE_BROKEN = select(4, GetBuildInfo()) >= 120100
+
+local CLICK_BUTTON_NAME = { ["1"] = "LeftButton", ["2"] = "RightButton",
+                            ["3"] = "MiddleButton", ["4"] = "Button4", ["5"] = "Button5" }
+-- The mouse-button name delegate:Click(button) would have received, derived from
+-- the type attribute: "ctrl-type2" -> "RightButton"; virtual "type-<vbtn>" -> "<vbtn>".
+local function ProxyClickButtonFor(typeAttr)
+    local suffix = typeAttr:match("type(.+)$")
+    if not suffix then return "LeftButton" end
+    local virtual = suffix:match("^%-(.+)$")
+    if virtual then return virtual end
+    return CLICK_BUTTON_NAME[suffix] or "LeftButton"
 end
 
 -- Route a gated action (target / togglemenu) on a DandersFrames frame through
@@ -75,8 +103,19 @@ function CC:RouteProxyAction(frame, typeAttr, clickbuttonAttr, realAction, comba
         if combatCond then AddCombatConditional(frame, typeAttr, realAction, combatCond) end
         return
     end
-    frame:SetAttribute(typeAttr, "click")
-    frame:SetAttribute(clickbuttonAttr, proxy)
+    local macrotextAttr
+    if CLICK_DELEGATE_BROKEN then
+        -- Macro reroute (see CLICK_DELEGATE_BROKEN above): same proxy, same
+        -- button/modifier resolution, but delegated via /click instead of the
+        -- broken SECURE_ACTIONS.click. Proxy fires on the up stroke (AnyUp),
+        -- which is /click's default.
+        macrotextAttr = typeAttr:gsub("type", "macrotext", 1)
+        frame:SetAttribute(typeAttr, "macro")
+        frame:SetAttribute(macrotextAttr, "/click " .. proxy:GetName() .. " " .. ProxyClickButtonFor(typeAttr))
+    else
+        frame:SetAttribute(typeAttr, "click")
+        frame:SetAttribute(clickbuttonAttr, proxy)
+    end
     if combatCond then
         -- Gate on the proxy: the frame always delegates, the proxy decides
         -- whether the action runs based on combat state.
@@ -85,7 +124,7 @@ function CC:RouteProxyAction(frame, typeAttr, clickbuttonAttr, realAction, comba
         proxy:SetAttribute(typeAttr, realAction)
     end
     frame.dfProxyRoutes = frame.dfProxyRoutes or {}
-    frame.dfProxyRoutes[#frame.dfProxyRoutes + 1] = { typeAttr = typeAttr, clickbuttonAttr = clickbuttonAttr }
+    frame.dfProxyRoutes[#frame.dfProxyRoutes + 1] = { typeAttr = typeAttr, clickbuttonAttr = clickbuttonAttr, macrotextAttr = macrotextAttr }
 end
 
 -- Clear proxy routes from a frame: wipe the frame's click/clickbutton attrs,
@@ -95,6 +134,7 @@ function CC:ClearClickProxyRoutes(frame)
         for _, r in ipairs(frame.dfProxyRoutes) do
             frame:SetAttribute(r.typeAttr, "")
             frame:SetAttribute(r.clickbuttonAttr, nil)
+            if r.macrotextAttr then frame:SetAttribute(r.macrotextAttr, nil) end
             if frame.dfClickProxy then
                 frame.dfClickProxy:SetAttribute(r.typeAttr, "")
             end
