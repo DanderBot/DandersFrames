@@ -1176,6 +1176,7 @@ L["Only show casts from enemies that are in combat. Filters out idle mobs castin
 L["Only Show When Tanking"] = true
 L["Only the aura on the caster can be blacklisted. The aura on the target cannot be blacklisted due to Blizzard limitations."] = true
 L["One overlay at a time, colored and switched by the game engine. Includes boss (private) auras."] = true
+L["On 12.1 the game draws aura tooltips at a fixed position beside the icon."] = true
 L["Open Settings"] = true
 L["Only the active layout can be edited\nwhile auto layouts are running."] = true
 L["Out of Combat"] = true

@@ -1588,7 +1588,10 @@ function Handle:_makeInitializeFrame(gen, fixedIndex)
             if button.SetMouseClickEnabled then button:SetMouseClickEnabled(false) end
             -- Tooltips stay OFF in test mode regardless of the setting: hover would
             -- show the underlying SAMPLE aura's real tooltip (random spellbook data),
-            -- not the curated preview icon it appears to be.
+            -- not the curated preview icon it appears to be. Motion is the ONE addon
+            -- lever over the native aura tooltip (the tooltip is a forbidden object
+            -- with a hardcoded anchor); it can't be toggled per-combat because the
+            -- button's mouse state is secret + write-locked in combat (live-verified).
             if button.SetMouseMotionEnabled then
                 button:SetMouseMotionEnabled(handle.config.tooltips == true and not AuraContainer._testMode)
             end
@@ -2059,6 +2062,8 @@ end
 --   tooltips = false,                            -- boolean ONLY; hover = native aura tooltip. Default off
 --                                                -- (raid mouseover-healing). Change needs Rebuild(); in
 --                                                -- overlay mode the button covers the whole unit frame.
+--                                                -- NOTE: can't be toggled per-combat — the button's mouse
+--                                                -- state is secret + write-locked in combat (live-verified).
 --   sort     = { rule, direction },             -- PTR-4 only; accepted + no-op now (warns if set)
 --   layout   = { anchor, growth, wrap, scale, size|sizeX|sizeY, spacing|spacingX|spacingY, offsetX, offsetY },
 --   style    = { icon{show,zoom,inset,staticSpellID}, border, cooldown{show,edge,reverse,numbers},
