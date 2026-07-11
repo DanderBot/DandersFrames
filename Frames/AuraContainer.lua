@@ -45,8 +45,12 @@ local addonName, DF = ...
 --      forwards the curve without the required `property`, and DurationTextBinding is private).
 --      Colour-by-time = discrete BUCKETS via the duration formatter (|c escapes) — P2.
 --      Stacks formatters are FORBIDDEN outright (secret trap — see bindNative).
---   6. Animation on OUR child regions is fine (AnimationGroup:Play + OnUpdate run; the
---      button's onUpdateMode=disabled doesn't propagate). Only expiry-TRIGGERED anim is dead.
+--   6. Animation drivers do NOT run inside the button subtree: onUpdateMode=disabled
+--      propagates, so an OnUpdate/AnimationGroup on a descendant is installed but never
+--      ticks (verified in-game — SetScript/Play merely don't error). Host the driver
+--      OUTSIDE the subtree (e.g. UIParent) and drive our own textures by reference — see
+--      DF.Border ensureDriver (secretRect -> UIParent). Expiry-TRIGGERED anim is separately
+--      dead (needs the sealed timer).
 --   7. Cannot read IsShown / spellId / expirationTime / dispelName / presence — all secret.
 --      Never branch on them. Filtering is Blizzard-side (filterString + candidateFilters).
 --   8. Group topology is add-only: no RemoveAuraGroup/Slot; a filterString change = recreate
