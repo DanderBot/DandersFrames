@@ -1270,6 +1270,25 @@ function Factory:SyncFrame(frame)
     local store = frame.dfADFactory
     if not store then store = {}; frame.dfADFactory = store end
 
+    -- UNIT RETARGET (roster churn): frames are reused across units, but every container's
+    -- unit is declared at Create and none of the sigs carry it — so re-point any live handle
+    -- whose unit no longer matches the frame (mirror DriveMissingBuffFactory's h:SetUnit pass;
+    -- SetUnit self-defers to regen in combat). Cheap per-pass: one config read per handle.
+    do
+        local u = frame.unit
+        for _, storeKey in ipairs({ "healthbar", "background", "border", "placed" }) do
+            local t = store[storeKey]
+            if t then
+                for _, entry in pairs(t) do
+                    local h = entry and entry.handle
+                    if h and h.GetUnit and h:GetUnit() ~= u and h.SetUnit then
+                        h:SetUnit(u)
+                    end
+                end
+            end
+        end
+    end
+
     local specAuras = adDB.auras and adDB.auras[spec]
 
     -- ---- HEALTH BAR (child of frame.healthBar, overlay) -----------------------------
@@ -1733,5 +1752,80 @@ end
 --    Rejected on robustness grounds (correctness > coverage). → casualty. P4.7 overlays the
 --    nametext controls. (Revisit only if a clean TD-fontstring clone lands.)
 -- ============================================================
+
+-- ============================================================
+-- DIAGNOSTICS — /df admissing
+-- Developer probe for the show-when-missing push mechanism. Dumps every AD
+-- missing-mode container AND (as the control group) the Missing Buffs cells
+-- on the same frames, so the two consumers of the identical backend can be
+-- A/B-compared live. Run once with the tracked aura ABSENT and once with it
+-- APPLIED: the container child count is the money reading — if children
+-- appear on apply but the badge stays visible, the anchor/clip side is
+-- broken; if no children appear, the group/filter/enable side is.
+-- Developer output: raw prints by design (slash diagnostic, not localized).
+-- Every read off Blizzard widgets is pcall+secret-guarded.
+-- ============================================================
+do
+    local function safeNum(fn, obj)
+        local ok, v = pcall(fn, obj)
+        if not ok then return "err" end
+        if issecretvalue and issecretvalue(v) then return "secret" end
+        return tostring(v)
+    end
+    local function dumpHandle(tag, key, h)
+        if not h then print("    " .. tag .. " [" .. key .. "] handle=nil") return end
+        local backend = h.backend
+        local c = backend and backend.container
+        local groups = backend and backend.groupKeys and #backend.groupKeys or 0
+        local badge = h.badge
+        local win = h.frame
+        local badgeAnchorOK = "?"
+        if badge and c then
+            local ok, _, relTo = pcall(badge.GetPoint, badge, 1)
+            if ok then badgeAnchorOK = tostring(relTo == c) end
+        end
+        print(("    %s [%s] unit=%s groups=%d container=%s children=%s enabled=%s badgeShown=%s badge->container=%s clip=%s winSize=%sx%s"):format(
+            tag, key, tostring(h.config and h.config.unit),
+            groups, tostring(c ~= nil),
+            c and safeNum(c.GetNumChildren, c) or "-",
+            c and safeNum(c.IsEnabled, c) or "-",
+            badge and safeNum(badge.IsShown, badge) or "-",
+            badgeAnchorOK,
+            win and safeNum(win.DoesClipChildren, win) or "-",
+            win and safeNum(win.GetWidth, win) or "-",
+            win and safeNum(win.GetHeight, win) or "-"))
+    end
+    function DF:DebugADMissing()
+        print("|cff7373f2DandersFrames|r AD missing-mode probe:")
+        local function scan(frame)
+            if not frame or not frame.unit then return end
+            local shown
+            local store = frame.dfADFactory
+            if store then
+                for _, storeKey in ipairs({ "healthbar", "background", "border", "placed" }) do
+                    local t = store[storeKey]
+                    if t then
+                        for key, entry in pairs(t) do
+                            if entry and entry.missing then
+                                if not shown then shown = true; print("  frame unit=" .. tostring(frame.unit)) end
+                                dumpHandle("AD:" .. storeKey, tostring(key), entry.handle)
+                            end
+                        end
+                    end
+                end
+            end
+            -- Control group: the proven Missing Buffs cells on the same frame.
+            if frame.missingFactory then
+                for key, h in pairs(frame.missingFactory) do
+                    if not shown then shown = true; print("  frame unit=" .. tostring(frame.unit)) end
+                    dumpHandle("MB", tostring(key), h)
+                end
+            end
+        end
+        if DF.IteratePartyFrames then DF:IteratePartyFrames(scan) end
+        if DF.IterateRaidFrames then DF:IterateRaidFrames(scan) end
+        print("  (run once with the aura absent, once applied; compare 'children')")
+    end
+end
 
 DF:Debug(DBG, "Factory (native AD bridge) loaded")

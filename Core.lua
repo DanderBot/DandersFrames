@@ -5099,6 +5099,9 @@ DF._MainEventDispatcher = function(self, event, arg1)
             elseif msg == "auras" or msg == "debugauras" then
                 -- Debug command to compare aura filters
                 DF:DebugAuraFilters("player")
+            elseif msg == "admissing" then
+                -- Diagnostic for the Aura Designer show-when-missing push mechanism
+                if DF.DebugADMissing then DF:DebugADMissing() end
             elseif msg == "debugfonts" then
                 -- Debug command to show font info
                 print("|cff00ff00DandersFrames:|r Font Debug")
