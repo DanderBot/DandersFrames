@@ -4578,7 +4578,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
             "myBuffIndicatorShowBorder", "myBuffIndicatorShowGradient",
             "oorMyBuffIndicatorAlpha", "testShowMyBuffIndicator",
             "buffUseFactory", "debuffUseFactory", "defensiveUseFactory",
-            "missingBuffUseFactory", "dispelOverlayUseFactory",
+            "missingBuffUseFactory", "dispelOverlayUseFactory", "adUseFactory",
             -- Boss Debuffs (separate display retired in 5.0.0 -- the game feeds
             -- boss/private auras through the regular debuff row on 12.1).
             "bossDebuffHighlight", "bossDebuffScale", "bossDebuffsAnchor",
@@ -5779,19 +5779,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- Refresh auras now that we're out of combat
         if DF.UpdateAllAuras then
             DF:UpdateAllAuras()
-        end
-        -- Re-configure any AD indicators that were created during combat
-        -- (SetPropagateMouseMotion/Clicks are protected and can't be called in combat)
-        if DF.AuraDesigner and DF.AuraDesigner.Engine then
-            DF.adConfigVersion = (DF.adConfigVersion or 0) + 1
-            local adEngine = DF.AuraDesigner.Engine
-            local function preWarmFrame(frame)
-                if frame and DF:IsAuraDesignerEnabled(frame) then
-                    adEngine:PreWarmIndicators(frame)
-                end
-            end
-            if DF.IteratePartyFrames then DF:IteratePartyFrames(preWarmFrame) end
-            if DF.IterateRaidFrames then DF:IterateRaidFrames(preWarmFrame) end
         end
         -- Update role icons (in case hideInCombat is enabled)
         if DF.UpdateAllRoleIcons then

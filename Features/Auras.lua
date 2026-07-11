@@ -2244,8 +2244,6 @@ function DF:UpdateAuras_Enhanced(frame)
         -- (pre-12.1 clients, test mode, or adUseFactory=false).
         if DF.AuraDesigner and DF.AuraDesigner.Factory and DF:UseFactoryForAD(frame, db) then
             DF.AuraDesigner.Factory:SyncFrame(frame)
-        elseif DF.AuraDesigner and DF.AuraDesigner.Engine then
-            DF.AuraDesigner.Engine:UpdateFrame(frame)
         end
 
     end

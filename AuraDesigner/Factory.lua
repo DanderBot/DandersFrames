@@ -47,8 +47,7 @@ local DBG = "AD"
 -- 12.1 (IsSupported) and OFF in test mode (the legacy preview painter owns test mode
 -- until native test mode ships in P5). Default ON: only an explicit false disables it.
 function DF:UseFactoryForAD(frame, db)
-    return DF.db and DF.db.adUseFactory ~= false
-        and DF.AuraContainer and DF.AuraContainer.IsSupported()
+    return DF.AuraContainer and DF.AuraContainer.IsSupported()
         and not (DF.testMode or DF.raidTestMode)
 end
 
@@ -56,8 +55,7 @@ end
 -- gate it must NOT flip in test mode — else "blocked" overlays would wrongly lift while
 -- previewing (mirror FactoryOwnsBuffRow). Used by P4.7 GUI when() predicates.
 function DF:FactoryOwnsAD(db)
-    return (DF.db and DF.db.adUseFactory ~= false
-        and DF.AuraContainer and DF.AuraContainer.IsSupported()) or false
+    return (DF.AuraContainer and DF.AuraContainer.IsSupported()) or false
 end
 
 -- ============================================================
@@ -1270,7 +1268,7 @@ function Factory:SyncFrame(frame)
     local adDB = DF.ResolveAuraDesigner and DF:ResolveAuraDesigner(frame)
     if not adDB then return end
 
-    -- The factory owns AD here, so Engine:UpdateFrame never runs and never maintains the
+    -- The factory owns AD here (the legacy read-path engine is gone), so nothing maintains the
     -- buff-bar dedup set. Clear any set left populated by a prior legacy run so it can't
     -- wrongly hide real buffs in the buff row. (Cross-group dedup itself is the accepted
     -- decision-3 gap — we just don't leave a stale set behind.)

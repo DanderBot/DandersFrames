@@ -141,7 +141,7 @@ end
 
 -- Hoisted from an inline closure inside ResolveLayoutGroups' sort call.
 -- Module-level so table.sort doesn't allocate a fresh closure every
--- Engine:UpdateFrame call.
+-- Engine:UpdateTestFrame call.
 local function memberIdxSort(a, b)
     return a.memberIdx < b.memberIdx
 end
@@ -152,7 +152,7 @@ end
 -- activeIndicators is a list of small tables, each describing one
 -- tracked-aura indicator for a single frame update. Old code did
 -- `tinsert(activeIndicators, { auraName=..., instanceKey=..., ... })`
--- at 2-4 sites per Engine:UpdateFrame call, allocating a fresh 7-8
+-- at 2-4 sites per Engine:UpdateTestFrame call, allocating a fresh 7-8
 -- field table per tinsert. For a Restoration Druid with ~15 tracked
 -- auras and a few active at any given time, that's 3-10 fresh tables
 -- per call at 1-5 calls/sec per unit in raid — a real contributor to
@@ -160,7 +160,7 @@ end
 -- after Fix A commit 4 landed.
 --
 -- Pool strategy: reuse entries across calls. At the start of each
--- Engine:UpdateFrame, return all entries from the previous run to
+-- Engine:UpdateTestFrame, return all entries from the previous run to
 -- the pool before wiping activeIndicators. New entries come from
 -- AcquireIndicatorEntry which either pulls from the pool or
 -- allocates a single table.
@@ -202,7 +202,7 @@ local function ReleaseIndicatorEntry(entry)
 end
 
 -- Release all entries currently in the active list and wipe it.
--- Called at the start of Engine:UpdateFrame before the new run
+-- Called at the start of Engine:UpdateTestFrame before the new run
 -- rebuilds the list.
 local function ReleaseAndWipeActiveIndicators()
     for i = 1, #activeIndicators do
@@ -305,25 +305,6 @@ local function buildSyntheticAuraData(auraName, spec)
     }
 end
 
--- Check if an aura is within its indicator's expiring threshold
-local function IsAuraExpiring(auraData, config)
-    if not config.expiringEnabled then return false end
-    local duration = auraData.duration
-    local expirationTime = auraData.expirationTime
-    if not expirationTime or expirationTime == 0 or not duration or duration == 0 then
-        return false  -- permanent aura, never expires
-    end
-    local remaining = expirationTime - GetTime()
-    if remaining <= 0 then return false end
-    local threshold = config.expiringThreshold or 5
-    local mode = config.expiringThresholdMode or "PERCENT"
-    if mode == "PERCENT" then
-        return (remaining / duration * 100) <= threshold
-    else
-        return remaining <= threshold
-    end
-end
-
 -- ============================================================
 -- SPEC RESOLUTION
 -- ============================================================
@@ -337,500 +318,6 @@ function Engine:ResolveSpec(adDB)
         return Adapter:GetPlayerSpec()
     end
     return adDB.spec
-end
-
--- ============================================================
--- MAIN UPDATE FUNCTION
--- Called per frame from UpdateAuras when Aura Designer is enabled.
--- ============================================================
-
-function Engine:UpdateFrame(frame)
-    -- Lazy init references
-    if not Adapter then
-        Adapter = DF.AuraDesigner.Adapter
-    end
-    if not Indicators then
-        Indicators = DF.AuraDesigner.Indicators
-    end
-    if not SoundEngine then
-        SoundEngine = DF.AuraDesigner.SoundEngine
-        if SoundEngine then
-            SoundEngine:Init()
-        end
-    end
-    if not Adapter or not Indicators then return end
-
-    -- 12.1 NATIVE-FACTORY GATE (root chokepoint — catches EVERY caller, not just the
-    -- drive seam in Features/Auras.lua). When the factory owns AD rendering, this legacy
-    -- engine must never paint: its aura scan is gated off on 12.1, so it sees an EMPTY
-    -- cache and evaluates every show-when-missing indicator as permanently missing —
-    -- painting ghost icons on top of the factory's (working) missing badges. That is
-    -- exactly what ForceRefreshAllFrames did on every AD edit / spec change. Hide any
-    -- legacy-painted widgets; do NOT call ClearFrame here (it also tears down the
-    -- factory containers and sound registrations, which Factory:SyncFrame owns).
-    if DF.UseFactoryForAD and DF:UseFactoryForAD(frame, DF:GetFrameDB(frame)) then
-        Indicators:HideAll(frame)
-        return
-    end
-
-    -- Pinned set with Hide Auras: clear AD indicators. UpdateFrame doesn't gate on
-    -- adDB.enabled, so the effective-DB flag swap can't suppress AD — guard here.
-    if frame.dfPinnedHideAuras then
-        Indicators:HideAll(frame)
-        return
-    end
-
-    -- Skip invisible frames (e.g. disabled pinned frame children)
-    if not frame:IsVisible() then return end
-
-    local unit = frame.unit
-    if not unit or not UnitExists(unit) then
-        Indicators:HideAll(frame)
-        return
-    end
-
-    local db = DF:GetFrameDB(frame)
-    if not db then return end
-    local adDB = DF:ResolveAuraDesigner(frame)
-    if not adDB then return end
-
-    local spec = self:ResolveSpec(adDB)
-    if not spec then
-        Indicators:HideAll(frame)
-        return
-    end
-
-    -- Lazy migration: ensure spec-scoped format
-    if (not adDB._specScopedV1 or not adDB._specScopedV2) and DF.MigrateAuraDesignerSpecScope then
-        DF.MigrateAuraDesignerSpecScope(adDB)
-    end
-    -- Lazy migration: type-keyed → indicators[] (an imported legacy-shape preset
-    -- would otherwise render no indicators at all).  Runs before the border fold.
-    if DF.MigrateAuraDesignerInstancesLazy then DF.MigrateAuraDesignerInstancesLazy(adDB) end
-    -- Lazy migration: fold legacy border keys (style/color/thickness) on the
-    -- resolved table render actually reads, so a half-migrated block can't render
-    -- via the stale legacy path.
-    if DF.MigrateAuraDesignerBorderKeysLazy then DF.MigrateAuraDesignerBorderKeysLazy(adDB) end
-    if DF.MigrateAuraDesignerPrioritiesLazy then DF.MigrateAuraDesignerPrioritiesLazy(adDB) end
-
-    -- Debug: throttled diagnostic dump
-    local now = GetTime()
-    local shouldLog = (now - debugLastLog) >= DEBUG_INTERVAL
-
-    -- Query adapter for active auras on this unit
-    local activeAuras = Adapter:GetUnitAuras(unit, spec)
-
-    -- Spec-scoped aura configs
-    local specAuras = adDB.auras and adDB.auras[spec]
-
-    -- One-time cleanup: remove non-table entries (e.g. stray nextIndicatorID)
-    if specAuras and not sanitizedSpecAuras[specAuras] then
-        local toRemove
-        for k, v in pairs(specAuras) do
-            if type(v) ~= "table" then
-                if not toRemove then toRemove = {} end
-                toRemove[#toRemove + 1] = k
-            end
-        end
-        if toRemove then
-            for _, k in ipairs(toRemove) do
-                specAuras[k] = nil
-            end
-        end
-        sanitizedSpecAuras[specAuras] = true
-    end
-
-    if shouldLog then
-        debugLastLog = now
-        -- Count active auras from adapter
-        local activeCount = 0
-        for k in pairs(activeAuras) do activeCount = activeCount + 1 end
-        -- Count configured auras and indicators
-        local configCount = 0
-        local configIndicators = 0
-        if specAuras then
-            for auraName, auraCfg in pairs(specAuras) do
-                if type(auraCfg) == "table" then
-                    configCount = configCount + 1
-                    if auraCfg.indicators then
-                        configIndicators = configIndicators + #auraCfg.indicators
-                    end
-                    for _, typeDef in ipairs(FRAME_LEVEL_TYPES) do
-                        if auraCfg[typeDef.key] then configIndicators = configIndicators + 1 end
-                    end
-                end
-            end
-        end
-        local providerName = Adapter:GetSourceName() or "none"
-        DF:Debug("AD", "Engine: unit=%s spec=%s provider=%s active=%d configured=%d indicators=%d", unit, tostring(spec), providerName, activeCount, configCount, configIndicators)
-        -- Log active aura names
-        for auraName in pairs(activeAuras) do
-            DF:Debug("AD", "  active: %s", auraName)
-        end
-        -- Log configured auras with their indicators
-        if specAuras then
-            for auraName, auraCfg in pairs(specAuras) do
-                if type(auraCfg) == "table" then
-                    local types = {}
-                    if auraCfg.indicators then
-                        for _, ind in ipairs(auraCfg.indicators) do
-                            types[#types+1] = ind.type .. "#" .. ind.id
-                        end
-                    end
-                    for _, typeDef in ipairs(FRAME_LEVEL_TYPES) do
-                        local typeCfg = auraCfg[typeDef.key]
-                        if typeCfg then
-                            local trigStr = typeDef.key
-                            if typeCfg.triggers and #typeCfg.triggers > 1 then
-                                trigStr = trigStr .. "(triggers:" .. table.concat(typeCfg.triggers, ",") .. ")"
-                            end
-                            types[#types+1] = trigStr
-                        end
-                    end
-                    DF:Debug("AD", "  config: %s -> %s", auraName, #types > 0 and table.concat(types, ", ") or "(no indicators)")
-                end
-            end
-        end
-    end
-
-    -- Gather configured auras that are currently active.
-    -- Release entries from the previous run back to the pool before
-    -- wiping — they're small and reusable across every call.
-    ReleaseAndWipeActiveIndicators()
-    local auras = specAuras
-    if auras then
-        for auraName, auraCfg in pairs(auras) do
-          if type(auraCfg) == "table" then
-            local auraData = activeAuras[auraName]
-            local wasBlacklisted = false
-            if auraData then
-                -- Skip blacklisted auras
-                local blTable = DF.db and DF.db.auraBlacklist
-                if blTable and auraData.spellId and not issecretvalue(auraData.spellId) and DF.AuraBlacklist and DF.AuraBlacklist.IsBlacklisted(blTable.buffs, auraData.spellId) then
-                    auraData = nil
-                    wasBlacklisted = true
-                end
-            end
-
-            local priority = auraCfg.priority or 5
-
-            -- Placed indicators (must run even without auraData for showWhenMissing)
-            if auraCfg.indicators then
-                for _, indicator in ipairs(auraCfg.indicators) do
-                    local isMissing = not auraData
-                    local wantMissing = indicator.showWhenMissing
-                    -- Bar indicators don't support missing mode (no duration data)
-                    if indicator.type == "bar" then wantMissing = false end
-                    -- Blacklisted aura is present, don't treat as missing
-                    if wantMissing and wasBlacklisted then wantMissing = false end
-
-                    if wantMissing then
-                        -- Always add: missing → synthetic, present → real (ticker handles expiring visibility)
-                        local effectiveAuraData = auraData
-                        if isMissing then
-                            effectiveAuraData = buildSyntheticAuraData(auraName, spec)
-                        end
-                        local entry = AcquireIndicatorEntry()
-                        entry.auraName      = auraName
-                        entry.instanceKey   = GetInstanceKey(auraName, indicator.id)
-                        entry.typeKey       = indicator.type
-                        entry.placed        = true
-                        entry.config        = indicator
-                        entry.auraData      = effectiveAuraData
-                        entry.isMissingAura = isMissing
-                        entry.priority      = priority
-                        tinsert(activeIndicators, entry)
-                    elseif auraData then
-                        local entry = AcquireIndicatorEntry()
-                        entry.auraName    = auraName
-                        entry.instanceKey = GetInstanceKey(auraName, indicator.id)
-                        entry.typeKey     = indicator.type
-                        entry.placed      = true
-                        entry.config      = indicator
-                        entry.auraData    = auraData
-                        -- isMissingAura intentionally left nil (not a missing-aura entry)
-                        entry.priority    = priority
-                        tinsert(activeIndicators, entry)
-                    end
-                end
-            end
-
-            -- Frame-level indicators: check triggers array if present,
-            -- otherwise fall back to owning aura only (legacy behavior)
-            for _, typeDef in ipairs(FRAME_LEVEL_TYPES) do
-                local typeCfg = auraCfg[typeDef.key]
-                if typeCfg then
-                    local triggerAuraData = nil
-                    local triggers = typeCfg.triggers
-                    if triggers then
-                        local useAnd = typeCfg.triggerOperator == "AND"
-                        local pickLowest = typeCfg.triggerDurationPriority ~= "HIGHEST"  -- LOWEST is default
-                        if useAnd then
-                            -- AND mode: fire only if ALL trigger auras are active.
-                            local allActive = true
-                            local bestRemaining = pickLowest and math.huge or -1
-                            local candidate = nil
-                            local secretFallback = nil  -- first active secret aura as fallback
-                            for _, trigName in ipairs(triggers) do
-                                local trigData = activeAuras[trigName]
-                                if not trigData then
-                                    allActive = false
-                                    break
-                                end
-                                if trigData.secret then
-                                    -- Secret aura: can't compare duration in Lua
-                                    -- Keep as fallback only if no whitelist aura is found
-                                    if not secretFallback then
-                                        secretFallback = trigData
-                                    end
-                                else
-                                    local expTime = trigData.expirationTime
-                                    if not expTime or expTime == 0 then
-                                        if not candidate then
-                                            candidate = trigData
-                                        end
-                                        if not pickLowest then
-                                            bestRemaining = math.huge
-                                            candidate = trigData
-                                        end
-                                    else
-                                        local remaining = expTime - now
-                                        if pickLowest then
-                                            if remaining < bestRemaining then
-                                                bestRemaining = remaining
-                                                candidate = trigData
-                                            end
-                                        else
-                                            if remaining > bestRemaining then
-                                                bestRemaining = remaining
-                                                candidate = trigData
-                                            end
-                                        end
-                                    end
-                                end
-                            end
-                            if allActive then
-                                triggerAuraData = candidate or secretFallback
-                            end
-                        else
-                            -- OR mode (default): fire if ANY trigger aura is active.
-                            local bestRemaining = pickLowest and math.huge or -1
-                            local secretFallback = nil
-                            for _, trigName in ipairs(triggers) do
-                                local trigData = activeAuras[trigName]
-                                if trigData then
-                                    if trigData.secret then
-                                        -- Secret aura: can't compare duration in Lua
-                                        if not secretFallback then
-                                            secretFallback = trigData
-                                        end
-                                    else
-                                        local expTime = trigData.expirationTime
-                                        if not expTime or expTime == 0 then
-                                            if not pickLowest then
-                                                triggerAuraData = trigData
-                                                bestRemaining = math.huge
-                                            elseif not triggerAuraData then
-                                                triggerAuraData = trigData
-                                            end
-                                        else
-                                            local remaining = expTime - now
-                                            if pickLowest then
-                                                if remaining < bestRemaining then
-                                                    bestRemaining = remaining
-                                                    triggerAuraData = trigData
-                                                end
-                                            else
-                                                if remaining > bestRemaining then
-                                                    bestRemaining = remaining
-                                                    triggerAuraData = trigData
-                                                end
-                                            end
-                                        end
-                                    end
-                                end
-                            end
-                            -- Use secret fallback only if no whitelist aura was picked
-                            if not triggerAuraData and secretFallback then
-                                triggerAuraData = secretFallback
-                            end
-                        end
-                    else
-                        -- Legacy: just use owning aura
-                        triggerAuraData = auraData
-                    end
-
-                    local showWhenMissing = typeCfg.showWhenMissing
-                    -- Blacklisted aura is present, don't treat as missing
-                    if showWhenMissing and wasBlacklisted then showWhenMissing = false end
-
-                    if showWhenMissing then
-                        -- Always add: missing → synthetic, present → real (ticker handles expiring visibility)
-                        local isTriggerMissing = not triggerAuraData
-                        local effectiveTrigger = triggerAuraData
-                        if isTriggerMissing then
-                            effectiveTrigger = buildSyntheticAuraData(auraName, spec)
-                        end
-                        local entry = AcquireIndicatorEntry()
-                        entry.auraName      = auraName
-                        -- instanceKey intentionally left nil (frame-level indicator)
-                        entry.typeKey       = typeDef.key
-                        entry.placed        = false
-                        entry.config        = typeCfg
-                        entry.auraData      = effectiveTrigger
-                        entry.isMissingAura = isTriggerMissing
-                        entry.priority      = priority
-                        tinsert(activeIndicators, entry)
-                    elseif triggerAuraData then
-                        local entry = AcquireIndicatorEntry()
-                        entry.auraName    = auraName
-                        -- instanceKey intentionally left nil (frame-level indicator)
-                        entry.typeKey     = typeDef.key
-                        entry.placed      = false
-                        entry.config      = typeCfg
-                        entry.auraData    = triggerAuraData
-                        -- isMissingAura intentionally left nil
-                        entry.priority    = priority
-                        tinsert(activeIndicators, entry)
-                    end
-                end
-            end
-          end
-        end
-    end
-
-    -- Expose active auraInstanceIDs on the frame for buff bar deduplication.
-    -- Include auras with ANY indicator type (placed or frame-level) so the
-    -- buff bar doesn't show duplicates of tracked auras.
-    -- Also dedup trigger auras for multi-trigger frame effects.
-    if not frame.dfAD_activeInstanceIDs then
-        frame.dfAD_activeInstanceIDs = {}
-    end
-    wipe(frame.dfAD_activeInstanceIDs)
-    if auras then
-        for auraName, auraCfg in pairs(auras) do
-          if type(auraCfg) == "table" then
-            local auraData = activeAuras[auraName]
-            if auraData and (auraData.auraInstanceID or auraData.dedupInstanceIDs) then
-                local hasIndicator = auraCfg.indicators and #auraCfg.indicators > 0
-                if not hasIndicator then
-                    for _, typeDef in ipairs(FRAME_LEVEL_TYPES) do
-                        if auraCfg[typeDef.key] then
-                            hasIndicator = true
-                            break
-                        end
-                    end
-                end
-                if hasIndicator then
-                    if auraData.auraInstanceID then
-                        frame.dfAD_activeInstanceIDs[auraData.auraInstanceID] = true
-                    end
-                    -- Dedup inferred aura target-side instance IDs (e.g. SR 474750/474760)
-                    if auraData.dedupInstanceIDs then
-                        for id in pairs(auraData.dedupInstanceIDs) do
-                            frame.dfAD_activeInstanceIDs[id] = true
-                        end
-                    end
-                end
-            end
-            -- Also mark trigger auras for dedup when multi-trigger is configured
-            for _, typeDef in ipairs(FRAME_LEVEL_TYPES) do
-                local typeCfg = auraCfg[typeDef.key]
-                if typeCfg and typeCfg.triggers then
-                    for _, trigName in ipairs(typeCfg.triggers) do
-                        local trigData = activeAuras[trigName]
-                        if trigData and trigData.auraInstanceID then
-                            frame.dfAD_activeInstanceIDs[trigData.auraInstanceID] = true
-                        end
-                    end
-                end
-            end
-          end
-        end
-    end
-
-    -- Sort by priority (higher priority wins frame-level conflicts)
-    if #activeIndicators > 1 then
-        sort(activeIndicators, prioritySort)
-    end
-
-    if shouldLog then
-        local inCombat = InCombatLockdown() and "yes" or "no"
-        if #activeIndicators > 0 then
-            DF:Debug("AD", "Dispatching %d indicators for %s (combat=%s)", #activeIndicators, unit, inCombat)
-        else
-            DF:Debug("AD", "No active indicators for %s (combat=%s)", unit, inCombat)
-        end
-    end
-
-    -- Resolve layout group membership and compute active members
-    ResolveLayoutGroups(adDB, activeIndicators, spec)
-
-    -- Dispatch to indicator renderers
-    Indicators:BeginFrame(frame)
-
-    local setmetatable = setmetatable
-    for _, ind in ipairs(activeIndicators) do
-        -- Placed indicators use instanceKey (e.g., "Rejuvenation#1") for pool lookup
-        -- Frame-level indicators use auraName
-        local key = ind.placed and ind.instanceKey or ind.auraName
-        local config = ind.config
-
-        -- Check if this indicator belongs to a layout group
-        if ind.placed and ind.instanceKey then
-            local entry = groupLookup[ind.instanceKey]
-            if entry then
-                local group = entry.group
-                local actives = groupActiveMembers[group.id]
-
-                -- Find this indicator's position among active members
-                local activeIdx = 0
-                if actives then
-                    for i, am in ipairs(actives) do
-                        if am.indicator == ind then activeIdx = i - 1; break end
-                    end
-                end
-
-                -- Compute offset based on grow direction + active index
-                local size = config.size or (adDB.defaults and adDB.defaults.iconSize) or 24
-                local scale = config.scale or (adDB.defaults and adDB.defaults.iconScale) or 1.0
-                local step = (size * scale) + (group.spacing or 2)
-                local oX, oY = ComputeGroupOffset(group, activeIdx, step, actives and #actives or 0)
-
-                -- Create a lightweight metatable wrapper so we don't mutate saved config
-                config = setmetatable({
-                    anchor = group.anchor or "TOPLEFT",
-                    offsetX = oX,
-                    offsetY = oY,
-                }, { __index = ind.config })
-            end
-        end
-
-        -- Configure-once: only reconfigure when AD settings have changed
-        if ind.typeKey == "icon" or ind.typeKey == "square" or ind.typeKey == "bar" then
-            local indicatorFrame = nil
-            if ind.typeKey == "icon" then
-                indicatorFrame = frame.dfAD_icons and frame.dfAD_icons[key]
-            elseif ind.typeKey == "square" then
-                indicatorFrame = frame.dfAD_squares and frame.dfAD_squares[key]
-            elseif ind.typeKey == "bar" then
-                indicatorFrame = frame.dfAD_bars and frame.dfAD_bars[key]
-            end
-            -- Configure if version is stale.  Protected calls
-            -- (SetPropagateMouseMotion/Clicks) are individually guarded inside
-            -- each Configure function, so we can safely run Configure mid-combat
-            -- to ensure indicators always have correct static settings (size,
-            -- color, font, etc.) even when first seen during combat.
-            if not indicatorFrame or indicatorFrame.dfAD_configVersion ~= (DF.adConfigVersion or 0) then
-                Indicators:Configure(frame, ind.typeKey, config, adDB.defaults, key, ind.priority)
-            end
-        end
-
-        Indicators:Apply(frame, ind.typeKey, config, ind.auraData, adDB.defaults, key, ind.priority)
-    end
-
-    -- Hide/revert anything not applied this frame
-    Indicators:EndFrame(frame)
 end
 
 -- ============================================================
@@ -922,7 +409,7 @@ function Engine:UpdateTestFrame(frame)
     local mockCounter = 99000
 
     -- Release entries from the previous call back to the pool before
-    -- rebuilding. Same pattern as Engine:UpdateFrame.
+    -- rebuilding.
     ReleaseAndWipeActiveIndicators()
 
     for auraName, auraCfg in pairs(specAuras) do
@@ -1098,106 +585,30 @@ function Engine:UpdateTestFrame(frame)
 end
 
 -- ============================================================
--- PRE-WARM INDICATOR FRAMES
--- Pre-creates and configures all indicator frames defined in
--- AD config so they are ready before combat. This ensures
--- SetPropagateMouseMotion/Clicks (protected functions) are
--- called outside combat, avoiding ADDON_ACTION_BLOCKED errors.
--- ============================================================
-
-function Engine:PreWarmIndicators(frame)
-    if not Adapter then
-        Adapter = DF.AuraDesigner.Adapter
-    end
-    if not Adapter then return end
-    if not Indicators then
-        Indicators = DF.AuraDesigner.Indicators
-    end
-    if not Indicators then return end
-
-    local db = DF:GetFrameDB(frame)
-    if not db then return end
-    local adDB = DF:ResolveAuraDesigner(frame)
-    if not adDB then return end
-    -- Spec-scope first (mirrors UpdateFrame): the priority flip's flat-vs-spec
-    -- detection needs the table already spec-scoped, or a still-flat adDB can be
-    -- misclassified and skip the flip.
-    if (not adDB._specScopedV1 or not adDB._specScopedV2) and DF.MigrateAuraDesignerSpecScope then
-        DF.MigrateAuraDesignerSpecScope(adDB)
-    end
-    if DF.MigrateAuraDesignerInstancesLazy then DF.MigrateAuraDesignerInstancesLazy(adDB) end
-    if DF.MigrateAuraDesignerBorderKeysLazy then DF.MigrateAuraDesignerBorderKeysLazy(adDB) end
-    if DF.MigrateAuraDesignerPrioritiesLazy then DF.MigrateAuraDesignerPrioritiesLazy(adDB) end
-
-    -- Resolve spec
-    local spec = self:ResolveSpec(adDB)
-    if not spec then return end
-
-    local specAuras = adDB.auras and adDB.auras[spec]
-    if not specAuras then return end
-
-    -- Iterate all configured auras and their placed indicators
-    for auraName, auraCfg in pairs(specAuras) do
-        if type(auraCfg) == "table" and auraCfg.indicators then
-            for _, indicator in ipairs(auraCfg.indicators) do
-                local typeKey = indicator.type
-                if typeKey == "icon" or typeKey == "square" or typeKey == "bar" then
-                    local key = auraName .. "#" .. indicator.id
-                    Indicators:Configure(frame, typeKey, indicator, adDB.defaults, key, auraCfg.priority or 5)
-                end
-            end
-        end
-    end
-end
-
--- ============================================================
 -- FORCE REFRESH ALL AD-ENABLED FRAMES
 -- Re-runs UpdateFrame on every visible AD frame so changed
 -- global defaults (fonts, sizes, etc.) take effect immediately.
 -- ============================================================
 
 function Engine:ForceRefreshAllFrames()
-    -- Bump config version so all indicators reconfigure on next UpdateFrame
+    -- Bump config version so indicators reconfigure on their next paint
+    -- (the test renderer's widgets gate on this).
     DF.adConfigVersion = (DF.adConfigVersion or 0) + 1
 
-    -- Pre-warm: create and configure all indicator frames outside combat
-    -- so SetPropagateMouseMotion/Clicks are set before combat starts
-    local function TryPreWarm(frame)
-        if frame and DF:IsAuraDesignerEnabled(frame) then
-            Engine:PreWarmIndicators(frame)
-        end
-    end
-
-    if not InCombatLockdown() then
-        if DF.IteratePartyFrames then
-            DF:IteratePartyFrames(TryPreWarm)
-        end
-        if DF.IterateRaidFrames then
-            DF:IterateRaidFrames(TryPreWarm)
-        end
-        if DF.PinnedFrames and DF.PinnedFrames.initialized and DF.PinnedFrames.headers then
-            for setIndex = 1, 2 do
-                local header = DF.PinnedFrames.headers[setIndex]
-                if header and header:IsShown() then
-                    for i = 1, 40 do
-                        local child = header:GetAttribute("child" .. i)
-                        if child then TryPreWarm(child) end
-                    end
-                end
-            end
-        end
-    end
-
+    local Factory = DF.AuraDesigner and DF.AuraDesigner.Factory
     local function TryUpdate(frame)
         if not frame then return end
         if DF:IsAuraDesignerEnabled(frame) then
-            if frame:IsVisible() then
-                Engine:UpdateFrame(frame)
+            -- Live 12.1 path: re-sync the factory containers immediately so an
+            -- editor change applies now, not one aura event late.
+            if frame:IsVisible() and Factory and DF.UseFactoryForAD
+                and DF:UseFactoryForAD(frame, DF:GetFrameDB(frame)) then
+                Factory:SyncFrame(frame)
             end
         else
             -- AD is OFF for this frame's mode (toggled off, or a profile swap to
-            -- an AD-off profile) — tear down any leftover indicators so they
-            -- don't freeze on screen (timers stopped) until the next /reload.
+            -- an AD-off profile) -- tear down any leftover indicators so they
+            -- don't linger on screen until the next /reload.
             Engine:ClearFrame(frame)
         end
     end
@@ -1208,8 +619,6 @@ function Engine:ForceRefreshAllFrames()
     if DF.IterateRaidFrames then
         DF:IterateRaidFrames(TryUpdate)
     end
-
-    -- Also refresh pinned frames
     if DF.PinnedFrames and DF.PinnedFrames.initialized and DF.PinnedFrames.headers then
         for setIndex = 1, 2 do
             local header = DF.PinnedFrames.headers[setIndex]
@@ -1222,15 +631,15 @@ function Engine:ForceRefreshAllFrames()
         end
     end
 
-    -- 12.1: the native factory buff row DERIVES its Aura-Designer dedup set from the AD
-    -- config at build time, so an AD config change (or spec change, which calls this) must
-    -- re-drive the buff row for the derived exclusion to follow. Mirror the aura-blacklist
-    -- page's poke: InvalidateAuraLayout bumps the aura layout version and drives the factory
-    -- rows (RefreshFactoryRows) — DriveBuffFactory then rebuilds only when the excluded set
-    -- actually moved (sig-gated). Gated on the factory being supported so the pre-12.1
-    -- legacy path is untouched (RefreshFactoryRows is a no-op there anyway).
-    if DF.AuraContainer and DF.AuraContainer.IsSupported and DF.AuraContainer.IsSupported()
-        and DF.InvalidateAuraLayout then
+    -- The native factory buff row derives its Aura-Designer dedup set from the AD
+    -- config at build time, so an AD config change must re-drive the buff row for
+    -- the derived exclusion to follow (sig-gated, cheap when unchanged).
+    if DF.InvalidateAuraLayout then
         DF:InvalidateAuraLayout()
+    end
+
+    -- Refresh the test previews too when the editor is used with test mode open.
+    if (DF.testMode or DF.raidTestMode) and DF.UpdateAllTestAuraDesigner then
+        DF:UpdateAllTestAuraDesigner()
     end
 end

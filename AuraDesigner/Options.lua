@@ -2987,35 +2987,6 @@ local function CreateExpiringDurationPriorityRow(parent, auraName, typeKey, widt
     end)
     totalH = totalH + 22
 
-    -- Secret aura warning: check if any triggers are secret-tracked
-    local spec = ResolveSpec()
-    local trackable = spec and Adapter and Adapter:GetTrackableAuras(spec)
-    if trackable then
-        local secretLookup = {}
-        for _, info in ipairs(trackable) do
-            if info.secret then secretLookup[info.name] = info.display or info.name end
-        end
-        local secretNames = {}
-        for _, trigName in ipairs(triggers) do
-            if secretLookup[trigName] then
-                secretNames[#secretNames + 1] = secretLookup[trigName]
-            end
-        end
-        if #secretNames > 0 then
-            local warnText = container:CreateFontString(nil, "OVERLAY")
-            GUI:SetSettingsFont(warnText, 8, "")
-            warnText:SetPoint("TOPLEFT", 0, -totalH)
-            warnText:SetWidth(width or 248)
-            warnText:SetJustifyH("LEFT")
-            warnText:SetWordWrap(true)
-            local names = table.concat(secretNames, ", ")
-            local verb = (#secretNames == 1) and L["is secret-tracked"] or L["are secret-tracked"]
-            warnText:SetText(names .. " " .. verb .. ". " .. L["Whitelist buffs take priority for the expiring indicator."])
-            warnText:SetTextColor(0.9, 0.7, 0.3, 0.9)
-            local warnH = warnText:GetStringHeight() + 4
-            totalH = totalH + warnH
-        end
-    end
 
     container:SetHeight(totalH)
     return container, totalH
@@ -4130,8 +4101,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
     -- ============================================================
     -- 12.1 AURA-SYSTEM STATUS OVERLAYS (P4.7 GUI pass)
     -- Frost the AD effect-settings the 12.1 Blizzard aura system can't drive.
-    -- Every block gates on DF:FactoryOwnsAD(d), so on 12.0.x / legacy
-    -- (adUseFactory=false) nothing frosts and everything stays editable. Only
+    -- Every block gates on DF:FactoryOwnsAD(d). Only
     -- the settings GROUPS built above are targeted — the trigger tags (the
     -- working "which aura" layer) live in `parent` above `startY` and are left
     -- alone. "roadmap" = temporary (delete the single call site when the port
@@ -5155,8 +5125,6 @@ local function CreateSpellCard(grid, auraInfo, spec, x, y, CARD_SIZE, isSecret)
 
     if alreadyUsed then
         ApplyBackdrop(card, {r = 0.10, g = 0.10, b = 0.10, a = 0.5}, {r = 0.20, g = 0.20, b = 0.20, a = 0.5})
-    elseif isSecret then
-        ApplyBackdrop(card, {r = 0.12, g = 0.12, b = 0.15, a = 1}, {r = 0.25, g = 0.25, b = 0.32, a = 1})
     else
         ApplyBackdrop(card, {r = 0.14, g = 0.14, b = 0.14, a = 1}, {r = 0.28, g = 0.28, b = 0.28, a = 1})
     end
@@ -5232,7 +5200,6 @@ local function CreateSpellCard(grid, auraInfo, spec, x, y, CARD_SIZE, isSecret)
 
     if not alreadyUsed then
         local borderR, borderG, borderB = 0.28, 0.28, 0.28
-        if isSecret then borderR, borderG, borderB = 0.25, 0.25, 0.32 end
         card:SetScript("OnEnter", function(self)
             local tc = GetThemeColor()
             self:SetBackdropBorderColor(tc.r, tc.g, tc.b, 1)
@@ -5321,82 +5288,20 @@ PopulateSpellGrid = function()
     if gridWidth < 100 then gridWidth = 260 end
     local cols = max(2, math.floor((gridWidth - PADDING * 2 + CARD_GAP) / (CARD_SIZE + CARD_GAP)))
 
-    -- Split auras into whitelisted and secret (inferred tracking)
-    local whitelisted = {}
-    local secret = {}
-    for _, auraInfo in ipairs(auras) do
-        if auraInfo.secret then
-            secret[#secret + 1] = auraInfo
-        else
-            whitelisted[#whitelisted + 1] = auraInfo
-        end
-    end
-
-    -- Section header for whitelisted auras
-    local HEADER_HEIGHT = 20
-    local whitelistHeader = grid:CreateFontString(nil, "OVERLAY")
-    GUI:SetSettingsFont(whitelistHeader, 9, "OUTLINE")
-    whitelistHeader:SetPoint("TOPLEFT", PADDING, -4)
-    whitelistHeader:SetText(L["WHITELISTED"])
-    whitelistHeader:SetTextColor(0.70, 0.70, 0.70, 1)
-
-    -- Render whitelisted auras
+    -- 12.1: every tracked aura renders through the game's native spell-ID
+    -- matching -- the old whitelisted / inferred-tracking split is gone.
+    local TOP_PAD = 6
     local cardIndex = 0
-    for _, auraInfo in ipairs(whitelisted) do
+    for _, auraInfo in ipairs(auras) do
         local row = math.floor(cardIndex / cols)
         local col = cardIndex % cols
         local x = PADDING + col * (CARD_SIZE + CARD_GAP)
-        local y = -(HEADER_HEIGHT + row * (CARD_SIZE + CARD_GAP))
+        local y = -(TOP_PAD + row * (CARD_SIZE + CARD_GAP))
         CreateSpellCard(grid, auraInfo, spec, x, y, CARD_SIZE, false)
         cardIndex = cardIndex + 1
     end
-
-    -- Render secret auras with section separator
-    if #secret > 0 then
-        -- Advance to next full row for separator
-        local separatorRow = math.ceil(cardIndex / cols)
-        if cardIndex > 0 and cardIndex % cols == 0 then
-            separatorRow = cardIndex / cols
-        end
-        local separatorY = -(HEADER_HEIGHT + separatorRow * (CARD_SIZE + CARD_GAP))
-
-        -- Section header label
-        local header = grid:CreateFontString(nil, "OVERLAY")
-        GUI:SetSettingsFont(header, 9, "OUTLINE")
-        header:SetPoint("TOPLEFT", PADDING, separatorY - 2)
-        header:SetText(L["INFERRED TRACKING"])
-        header:SetTextColor(0.70, 0.70, 0.78, 1)
-
-        -- Subtitle explaining what inferred tracking means
-        local subtitle = grid:CreateFontString(nil, "OVERLAY")
-        GUI:SetSettingsFont(subtitle, 8, "")
-        subtitle:SetPoint("TOPLEFT", PADDING, separatorY - 14)
-        subtitle:SetWidth(gridWidth - PADDING * 2)
-        subtitle:SetJustifyH("LEFT")
-        subtitle:SetText(L["Uses cast tracking to identify spells WoW marks as secret. Only tracks your own casts."])
-        subtitle:SetTextColor(0.58, 0.58, 0.62, 1)
-
-        -- Start secret cards after separator (separator takes ~30px)
-        local SEPARATOR_HEIGHT = 32
-        local secretStartY = separatorY - SEPARATOR_HEIGHT
-
-        for si, auraInfo in ipairs(secret) do
-            local sRow = math.floor((si - 1) / cols)
-            local sCol = (si - 1) % cols
-            local x = PADDING + sCol * (CARD_SIZE + CARD_GAP)
-            local y = secretStartY - (sRow * (CARD_SIZE + CARD_GAP))
-            CreateSpellCard(grid, auraInfo, spec, x, y, CARD_SIZE, true)
-        end
-
-        -- Set grid height: whitelisted rows + separator + secret rows
-        local secretRows = math.ceil(#secret / cols)
-        local totalHeight = HEADER_HEIGHT + separatorRow * (CARD_SIZE + CARD_GAP) + SEPARATOR_HEIGHT + secretRows * (CARD_SIZE + CARD_GAP) + PADDING
-        grid:SetHeight(totalHeight)
-    else
-        -- No secret auras — standard height
-        local totalRows = math.ceil(#whitelisted / cols)
-        grid:SetHeight(HEADER_HEIGHT + PADDING + totalRows * (CARD_SIZE + CARD_GAP))
-    end
+    local totalRows = math.ceil(cardIndex / cols)
+    grid:SetHeight(TOP_PAD + PADDING + totalRows * (CARD_SIZE + CARD_GAP))
 end
 
 -- ── CREATE EFFECT CARD ──
