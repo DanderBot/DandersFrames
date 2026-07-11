@@ -651,36 +651,30 @@ end
 
 function DF:UpdateBuffIconsAppearance(frame)
     if not IsDandersFrame(frame) then return end
-    if not frame.buffIcons then return end
-    
+
+    -- 12.1: the buff row is a container; the whole row fades as one (alpha on
+    -- the row's plain anchor frame is ours — secret geometry only drives layout).
+    local row = frame.buffFactory and frame.buffFactory:GetFrame()
+    if not row then return end
+
     local db = GetDB(frame)
     if not db then return end
-    
+
     -- Skip during test mode
     if DF.testMode or DF.raidTestMode then return end
-    
+
     local deadOrOffline = IsDeadOrOffline(frame)
     local inRange = GetInRange(frame)
-    
+
     local alpha = 1.0
     if deadOrOffline and db.fadeDeadFrames then
         alpha = db.fadeDeadAuras or 1.0
     end
 
     if db.oorEnabled then
-        local oorAlpha = db.oorAurasAlpha or 0.2
-
-        for _, icon in ipairs(frame.buffIcons) do
-            if icon then
-                ApplyOORAlpha(icon, inRange, alpha, oorAlpha)
-            end
-        end
+        ApplyOORAlpha(row, inRange, alpha, db.oorAurasAlpha or 0.2)
     else
-        for _, icon in ipairs(frame.buffIcons) do
-            if icon then
-                icon:SetAlpha(alpha)
-            end
-        end
+        row:SetAlpha(alpha)
     end
 end
 
@@ -690,36 +684,28 @@ end
 
 function DF:UpdateDebuffIconsAppearance(frame)
     if not IsDandersFrame(frame) then return end
-    if not frame.debuffIcons then return end
-    
+
+    local row = frame.debuffFactory and frame.debuffFactory:GetFrame()
+    if not row then return end
+
     local db = GetDB(frame)
     if not db then return end
-    
+
     -- Skip during test mode
     if DF.testMode or DF.raidTestMode then return end
-    
+
     local deadOrOffline = IsDeadOrOffline(frame)
     local inRange = GetInRange(frame)
-    
+
     local alpha = 1.0
     if deadOrOffline and db.fadeDeadFrames then
         alpha = db.fadeDeadAuras or 1.0
     end
 
     if db.oorEnabled then
-        local oorAlpha = db.oorAurasAlpha or 0.2
-
-        for _, icon in ipairs(frame.debuffIcons) do
-            if icon then
-                ApplyOORAlpha(icon, inRange, alpha, oorAlpha)
-            end
-        end
+        ApplyOORAlpha(row, inRange, alpha, db.oorAurasAlpha or 0.2)
     else
-        for _, icon in ipairs(frame.debuffIcons) do
-            if icon then
-                icon:SetAlpha(alpha)
-            end
-        end
+        row:SetAlpha(alpha)
     end
 end
 
@@ -949,16 +935,9 @@ function DF:UpdateMissingBuffAppearance(frame)
 
     -- 12.1 factory strip (Auras.lua bridge): the whole strip fades as one — the
     -- badges are plain DF frames (alpha is ours; the secret geometry only drives
-    -- position). Legacy path below is unchanged for pre-12.1 / test mode.
+    -- position).
     local strip = frame.missingBuffStrip
-    local useStrip = strip and strip:IsShown()
-        and DF.UseFactoryForMissingBuff and DF:UseFactoryForMissingBuff(frame, GetDB(frame))
-
-    if not useStrip then
-        if not frame.missingBuffFrame then return end
-        -- PERF: Skip if missing buff frame isn't visible
-        if not frame.missingBuffFrame:IsShown() then return end
-    end
+    if not (strip and strip:IsShown()) then return end
 
     local db = GetDB(frame)
     if not db then return end
@@ -973,24 +952,10 @@ function DF:UpdateMissingBuffAppearance(frame)
         alpha = db.fadeDeadIcons or 1.0
     end
 
-    if useStrip then
-        if db.oorEnabled then
-            ApplyOORAlpha(strip, inRange, alpha, db.oorMissingBuffAlpha or 0.5)
-        else
-            strip:SetAlpha(alpha)
-        end
-        return
-    end
-
     if db.oorEnabled then
-        local oorAlpha = db.oorMissingBuffAlpha or 0.5
-        ApplyOORAlpha(frame.missingBuffIcon, inRange, alpha, oorAlpha)
-        -- Border is the unified DF.Border frame now (was 4 edge textures pre-
-        -- migration); fade the whole border frame like frame.border / icon.border.
-        ApplyOORAlpha(frame.missingBuffBorder, inRange, alpha, oorAlpha)
+        ApplyOORAlpha(strip, inRange, alpha, db.oorMissingBuffAlpha or 0.5)
     else
-        frame.missingBuffIcon:SetAlpha(alpha)
-        if frame.missingBuffBorder then frame.missingBuffBorder:SetAlpha(alpha) end
+        strip:SetAlpha(alpha)
     end
 end
 
@@ -1094,52 +1059,21 @@ end
 
 function DF:UpdateDefensiveIconAppearance(frame)
     if not IsDandersFrame(frame) then return end
-    if not frame.defensiveIcon then return end
-    
-    -- PERF: Skip if defensive icon isn't visible
-    if not frame.defensiveIcon:IsShown() then return end
-    
+
+    local row = frame.defensiveFactory and frame.defensiveFactory:GetFrame()
+    if not row then return end
+
     local db = GetDB(frame)
     if not db then return end
-    
+
     if DF.testMode or DF.raidTestMode then return end
-    
+
     local inRange = GetInRange(frame)
-    local icon = frame.defensiveIcon
-    
-    local alpha = 1.0
 
     if db.oorEnabled then
-        local oorAlpha = db.oorDefensiveIconAlpha or 0.5
-        ApplyOORAlpha(icon.texture, inRange, alpha, oorAlpha)
-        ApplyOORAlpha(icon.border, inRange, alpha, oorAlpha)
-        ApplyOORAlpha(icon.cooldown, inRange, alpha, oorAlpha)
-        ApplyOORAlpha(icon.count, inRange, alpha, oorAlpha)
-
-        -- Additional defensive bar icons also need OOR alpha applied
-        if frame.defensiveBarIcons then
-            for _, extraIcon in pairs(frame.defensiveBarIcons) do
-                ApplyOORAlpha(extraIcon.texture, inRange, alpha, oorAlpha)
-                ApplyOORAlpha(extraIcon.border, inRange, alpha, oorAlpha)
-                ApplyOORAlpha(extraIcon.cooldown, inRange, alpha, oorAlpha)
-                ApplyOORAlpha(extraIcon.count, inRange, alpha, oorAlpha)
-            end
-        end
+        ApplyOORAlpha(row, inRange, 1.0, db.oorDefensiveIconAlpha or 0.5)
     else
-        if icon.texture then icon.texture:SetAlpha(alpha) end
-        if icon.border  then icon.border:SetAlpha(alpha)  end
-        if icon.cooldown then icon.cooldown:SetAlpha(alpha) end
-        if icon.count then icon.count:SetAlpha(alpha) end
-
-        -- Additional defensive bar icons also need alpha applied
-        if frame.defensiveBarIcons then
-            for _, extraIcon in pairs(frame.defensiveBarIcons) do
-                if extraIcon.texture then extraIcon.texture:SetAlpha(alpha) end
-                if extraIcon.border  then extraIcon.border:SetAlpha(alpha)  end
-                if extraIcon.cooldown then extraIcon.cooldown:SetAlpha(alpha) end
-                if extraIcon.count then extraIcon.count:SetAlpha(alpha) end
-            end
-        end
+        row:SetAlpha(1.0)
     end
 end
 

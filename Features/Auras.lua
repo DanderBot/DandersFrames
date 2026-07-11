@@ -923,13 +923,6 @@ function DF:DriveDefensiveFactory(frame, db)
         if h then frame.defensiveFactorySig = buffFactorySig(h.config) end
     end
 
-    -- No double render: keep the legacy defensive icon pool hidden while the factory owns it.
-    if frame.defensiveIcon then frame.defensiveIcon:Hide() end
-    if frame.defensiveBarIcons then
-        for _, icon in pairs(frame.defensiveBarIcons) do
-            if icon and icon.Hide then icon:Hide() end
-        end
-    end
     if not h then return end
 
     -- Keep on the frame's unit; defer a wrong-unit show until regen in combat. Hide via the
@@ -986,7 +979,7 @@ end
 local MISSING_BADGE_SIZE = 24   -- fallback when missingBuffIconSize is unset; missingBuffIconScale scales the strip
 local MISSING_BADGE_GAP  = 2
 
--- Render gate (excludes test mode, which paints the legacy missingBuffFrame).
+-- Render gate (excludes test mode; the test drive calls the factory itself).
 function DF:UseFactoryForMissingBuff(frame, db)
     return DF.AuraContainer and DF.AuraContainer.IsSupported()
         and not (DF.testMode or DF.raidTestMode)
@@ -1081,7 +1074,7 @@ local function styleMissingBadge(h, db, frame, info)
 end
 
 -- Position/scale/level the strip (the OUR-side outer frame all cells live in) —
--- the legacy missingBuffFrame positioning block, applied to the strip. The strip
+-- mirrors the missingBuffIcon* position keys, applied to the strip. The strip
 -- is a plain DF frame (non-secret rect): pixel-snap is fine HERE.
 local function layoutMissingStrip(frame, db, strip, cellCount)
     local size = db.missingBuffIconSize or MISSING_BADGE_SIZE
@@ -1105,8 +1098,6 @@ end
 -- (dead/offline/range/UnitCanAssist — the read-free mechanism only answers aura
 -- presence), keep cells on the frame's unit, re-apply on a layout-version bump.
 function DF:DriveMissingBuffFactory(frame, db)
-    -- No double render: the legacy icon stays hidden while the factory owns the feature.
-    if frame.missingBuffFrame then frame.missingBuffFrame:Hide() end
 
     local strip = frame.missingBuffStrip
     local cells = frame.missingFactory

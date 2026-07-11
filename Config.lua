@@ -1388,16 +1388,6 @@ DF.PartyDefaults = {
     dispelOverlayDispelType = 2,
 
     -- External Defensive
-    externalDefAnchor = "CENTER",
-    externalDefBorderColor = {r = 0, g = 0.8, b = 0, a = 1},
-    externalDefBorderSize = 2,
-    externalDefEnabled = true,
-    externalDefFrameLevel = 0,
-    externalDefScale = 1.5,
-    externalDefShowDuration = true,
-    externalDefStrata = "DEFAULT",
-    externalDefX = 0,
-    externalDefY = 0,
 
     -- Frame Dimensions & Layout
     frameHeight = 64,

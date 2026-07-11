@@ -760,83 +760,9 @@ end
 
 -- Update aura position/size
 function DF:LightweightUpdateAuraPosition(auraType)
-    local mode = DF.GUI and DF.GUI.SelectedMode or "party"
-    local db = DF.db[mode]
-    if not db then return end
-
-    -- 12.1 factory rows: the legacy per-icon repositioning below only moves the (hidden)
-    -- legacy pools. Bump the layout version + re-drive the factory handles so layout
-    -- sliders re-flow DURING the drag (ApplyStyle routes through the container's live
-    -- layout mutators — no rebuild). InvalidateAuraLayout also drives defensives, which
-    -- share most layout keys' cost profile; the drives no-op when nothing changed.
-    if (auraType == "buff" and DF.UseFactoryForBuffs and DF:UseFactoryForBuffs(nil, db))
-       or (auraType == "debuff" and DF.UseFactoryForDebuffs and DF:UseFactoryForDebuffs(nil, db)) then
-        DF:InvalidateAuraLayout()
-    end
-    
-    local iconsKey = auraType == "buff" and "buffIcons" or "debuffIcons"
-    local size = auraType == "buff" and (db.buffSize or 20) or (db.debuffSize or 20)
-    local scale = auraType == "buff" and (db.buffScale or 1) or (db.debuffScale or 1)
-    local alpha = auraType == "buff" and (db.buffAlpha or 1) or (db.debuffAlpha or 1)
-    local anchor = auraType == "buff" and (db.buffAnchor or "BOTTOMLEFT") or (db.debuffAnchor or "BOTTOMRIGHT")
-    local offsetX = auraType == "buff" and (db.buffOffsetX or 0) or (db.debuffOffsetX or 0)
-    local offsetY = auraType == "buff" and (db.buffOffsetY or 0) or (db.debuffOffsetY or 0)
-    local paddingX = auraType == "buff" and (db.buffPaddingX or 1) or (db.debuffPaddingX or 1)
-    local paddingY = auraType == "buff" and (db.buffPaddingY or 1) or (db.debuffPaddingY or 1)
-    local wrap = auraType == "buff" and (db.buffWrap or 4) or (db.debuffWrap or 4)
-    local growth = auraType == "buff" and (db.buffGrowth or "LEFT_UP") or (db.debuffGrowth or "RIGHT_UP")
-    local borderThickness = auraType == "buff" and (db.buffBorderSize or 1) or (db.debuffBorderSize or 1)
-    
-    -- Apply pixel-perfect sizing to size and scale together, adjusting for border
-    if db.pixelPerfect then
-        size, scale, borderThickness = DF:PixelPerfectSizeAndScaleForBorder(size, scale, borderThickness)
-    end
-    
-    -- Parse growth direction
-    local primary, secondary = strsplit("_", growth)
-    primary = primary or "LEFT"
-    secondary = secondary or "UP"
-    
-    local function GetGrowthOffset(direction, iconSize, pad)
-        if direction == "LEFT" then
-            return -(iconSize + pad), 0
-        elseif direction == "RIGHT" then
-            return iconSize + pad, 0
-        elseif direction == "UP" then
-            return 0, iconSize + pad
-        elseif direction == "DOWN" then
-            return 0, -(iconSize + pad)
-        end
-        return 0, 0
-    end
-    
-    -- Use scaled size for growth calculations (final rendered size)
-    local scaledSize = size * scale
-    local primaryX, primaryY = GetGrowthOffset(primary, scaledSize, paddingX)
-    local secondaryX, secondaryY = GetGrowthOffset(secondary, scaledSize, paddingY)
-    
-    local function UpdateAuras(frame)
-        if not frame or not frame[iconsKey] then return end
-        for i, icon in ipairs(frame[iconsKey]) do
-            if icon then
-                local idx = i - 1
-                local row = math.floor(idx / wrap)
-                local col = idx % wrap
-                
-                local x = offsetX + (col * primaryX) + (row * secondaryX)
-                local y = offsetY + (col * primaryY) + (row * secondaryY)
-                
-                icon:SetSize(size, size)
-                icon:SetScale(scale)
-                icon:SetAlpha(alpha)
-                icon:ClearAllPoints()
-                icon:SetPoint(anchor, frame, anchor, x, y)
-                DF:SnapPointToPixelGrid(icon, db.pixelPerfect)
-            end
-        end
-    end
-    
-    IterateFramesInMode(mode, UpdateAuras)
+    -- 12.1: the container rows own this styling; bump the layout version and
+    -- re-drive them so the change applies live (sig-gated, cheap when unchanged).
+    DF:InvalidateAuraLayout()
 end
 
 -- Update highlight thickness/inset
@@ -1203,166 +1129,16 @@ end
 
 -- Update defensive icon settings
 function DF:LightweightUpdateDefensiveIcons()
-    local mode = DF.GUI and DF.GUI.SelectedMode or "party"
-    local db = DF.db[mode]
-    if not db then return end
-
-    -- 12.1 factory rows: re-drive immediately so this applies live (see the buff
-    -- helpers). The legacy loop below only touches the hidden legacy pool.
-    if DF.UseFactoryForDefensive and DF:UseFactoryForDefensive(nil, db) then
-        DF:InvalidateAuraLayout()
-    end
-
-    -- Test mode owns multi-defensive layout (including the CENTER-growth
-    -- second pass), so re-anchoring the primary icon here without re-running
-    -- that pass would un-centre it and visually overlap icon 2. Delegate to
-    -- the full test render — it's what fires on slider drop anyway, just done
-    -- per drag tick too.
-    if (DF.testMode or DF.raidTestMode) and DF.UpdateAllTestDefensiveBar then
-        DF:UpdateAllTestDefensiveBar()
-        return
-    end
-
-    local size = db.defensiveIconSize or 24
-    local scale = db.defensiveIconScale or 1
-    local x = db.defensiveIconX or 0
-    local y = db.defensiveIconY or 0
-    local anchor = db.defensiveIconAnchor or "CENTER"
-    local durScale = db.defensiveIconDurationScale or 1
-    local durX = db.defensiveIconDurationX or 0
-    local durY = db.defensiveIconDurationY or 0
-    local borderSize = db.defensiveIconBorderSize or 2
-    local durFont = db.defensiveIconDurationFont or "Fonts\\FRIZQT__.TTF"
-    local durOutline = db.defensiveIconDurationOutline or "OUTLINE"
-    if durOutline == "NONE" then durOutline = "" end
-    
-    -- Apply pixel perfect to border size 
-    if db.pixelPerfect then
-        borderSize = DF:PixelPerfect(borderSize)
-    end
-    
-    -- Per-icon visual update: border + artwork inset + duration text. Anything
-    -- that's the same for the primary icon AND every multi-defensive bar icon
-    -- (sizes, fonts) lives here. Positioning and per-icon layout (which differs
-    -- across multi-bar slots) stays with UpdateAllDefensiveBars.
-    local showBorder = db.defensiveIconShowBorder ~= false
-    local artInset = showBorder and borderSize or 0
-
-    local function ApplyVisuals(icon)
-        if not icon then return end
-        if icon.border then
-            local spec = DF.Border:BuildSpec(db, "defensiveIcon", { iconMode = true })
-            spec.enabled = showBorder
-            spec.size    = borderSize  -- already pixel-perfected above
-            DF.Border:Apply(icon.border, spec)
-        end
-        if icon.texture then
-            icon.texture:ClearAllPoints()
-            icon.texture:SetPoint("TOPLEFT", artInset, -artInset)
-            icon.texture:SetPoint("BOTTOMRIGHT", -artInset, artInset)
-        end
-
-        if not icon.nativeCooldownText and icon.cooldown then
-            local regions = {icon.cooldown:GetRegions()}
-            for _, region in ipairs(regions) do
-                if region and region.GetObjectType and region:GetObjectType() == "FontString" then
-                    icon.nativeCooldownText = region
-                    break
-                end
-            end
-        end
-        if icon.nativeCooldownText then
-            local durationSize = 10 * durScale
-            DF:SafeSetFont(icon.nativeCooldownText, durFont, durationSize, durOutline)
-            icon.nativeCooldownText:ClearAllPoints()
-            icon.nativeCooldownText:SetPoint("CENTER", icon, "CENTER", durX, durY)
-        end
-    end
-
-    local function UpdateIcon(frame)
-        if not frame or not frame.defensiveIcon then return end
-        local icon = frame.defensiveIcon
-
-        -- Size / scale / position belong to the primary icon only; multi-bar
-        -- slots are laid out by UpdateAllDefensiveBars.
-        icon:SetSize(size, size)
-        icon:SetScale(scale)
-        icon:ClearAllPoints()
-        icon:SetPoint(anchor, frame, anchor, x, y)
-        DF:SnapPointToPixelGrid(icon, db.pixelPerfect)
-
-        ApplyVisuals(icon)
-
-        -- Multi-defensive bar icons share the same border + artwork + duration
-        -- styling as the primary. Without this loop the border slider only
-        -- updated the leftmost icon mid-drag and the rest stayed at the old
-        -- border size, which in test mode also caused a layout reflow that
-        -- temporarily lost one icon.
-        if frame.defensiveBarIcons then
-            for _, extraIcon in pairs(frame.defensiveBarIcons) do
-                ApplyVisuals(extraIcon)
-            end
-        end
-    end
-
-    IterateFramesInMode(mode, UpdateIcon)
+    -- 12.1: the container rows own this styling; bump the layout version and
+    -- re-drive them so the change applies live (sig-gated, cheap when unchanged).
+    DF:InvalidateAuraLayout()
 end
 
 -- Update missing buff icon
 function DF:LightweightUpdateMissingBuff()
-    local mode = DF.GUI and DF.GUI.SelectedMode or "party"
-    local db = DF.db[mode]
-    if not db then return end
-
-    -- 12.1 factory strip: size/scale/position/border apply through the version-gated
-    -- drive — re-drive immediately so sliders preview live (the legacy loop below
-    -- only touches the hidden legacy frames when the factory owns the feature).
-    if DF.UseFactoryForMissingBuff and DF:UseFactoryForMissingBuff(nil, db) then
-        DF:InvalidateAuraLayout()
-    end
-
-    local size = db.missingBuffIconSize or 24
-    local scale = db.missingBuffIconScale or 1
-    local x = db.missingBuffIconX or 0
-    local y = db.missingBuffIconY or 0
-    local anchor = db.missingBuffIconAnchor or "CENTER"
-    local borderSize = db.missingBuffIconBorderSize or 2
-    local showBorder = db.missingBuffIconShowBorder ~= false
-    
-    -- Apply pixel perfect to border size 
-    if db.pixelPerfect then
-        borderSize = DF:PixelPerfect(borderSize)
-    end
-    
-    local function UpdateIcon(frame)
-        if frame and frame.missingBuffFrame then
-            frame.missingBuffFrame:SetSize(size, size)
-            frame.missingBuffFrame:SetScale(scale)
-            frame.missingBuffFrame:ClearAllPoints()
-            frame.missingBuffFrame:SetPoint(anchor, frame, anchor, x, y)
-            DF:SnapPointToPixelGrid(frame.missingBuffFrame, db.pixelPerfect)
-            
-            -- Border via unified DF.Border backend (Stage 4.1). BuildSpec
-            -- reads canonical missingBuffIcon* keys; we override size with
-            -- the locally pixel-perfected value. Icon insets by visible
-            -- border thickness so artwork doesn't overlap edges.
-            if frame.missingBuffBorder then
-                -- unit/frame let BuildSpec resolve Class/Role colour.
-                local spec = DF.Border:BuildSpec(db, "missingBuffIcon", { unit = frame.unit, frame = frame, iconMode = true })
-                spec.enabled = showBorder
-                spec.size    = borderSize
-                DF.Border:Apply(frame.missingBuffBorder, spec)
-            end
-            if frame.missingBuffIcon then
-                local artInset = showBorder and borderSize or 0
-                frame.missingBuffIcon:ClearAllPoints()
-                frame.missingBuffIcon:SetPoint("TOPLEFT", artInset, -artInset)
-                frame.missingBuffIcon:SetPoint("BOTTOMRIGHT", -artInset, artInset)
-            end
-        end
-    end
-    
-    IterateFramesInMode(mode, UpdateIcon)
+    -- 12.1: the missing-buff strip owns the feature; bump the layout version
+    -- and re-drive so size/scale/position/border changes apply live.
+    DF:InvalidateAuraLayout()
 end
 
 -- Update group label settings (lightweight version for slider dragging)
@@ -1377,107 +1153,16 @@ end
 
 -- Update aura stack text settings
 function DF:LightweightUpdateAuraStackText(auraType)
-    local mode = DF.GUI and DF.GUI.SelectedMode or "party"
-    local db = DF.db[mode]
-    if not db then return end
-
-    -- 12.1 factory rows: re-drive immediately so this applies live (the legacy loop
-    -- below only touches the hidden legacy pools when the factory owns the row).
-    if (auraType == "buff" and DF.UseFactoryForBuffs and DF:UseFactoryForBuffs(nil, db))
-       or (auraType == "debuff" and DF.UseFactoryForDebuffs and DF:UseFactoryForDebuffs(nil, db)) then
-        DF:InvalidateAuraLayout()
-    end
-    
-    local iconsKey = auraType == "buff" and "buffIcons" or "debuffIcons"
-    local scale = auraType == "buff" and (db.buffStackScale or 1) or (db.debuffStackScale or 1)
-    local x = auraType == "buff" and (db.buffStackX or 0) or (db.debuffStackX or 0)
-    local y = auraType == "buff" and (db.buffStackY or 0) or (db.debuffStackY or 0)
-    local anchor = auraType == "buff" and (db.buffStackAnchor or "BOTTOMRIGHT") or (db.debuffStackAnchor or "BOTTOMRIGHT")
-    local fontPath = auraType == "buff" and (db.buffStackFont or "Fonts\\FRIZQT__.TTF") or (db.debuffStackFont or "Fonts\\FRIZQT__.TTF")
-    local outline = auraType == "buff" and (db.buffStackOutline or "OUTLINE") or (db.debuffStackOutline or "OUTLINE")
-    if outline == "NONE" then outline = "" end
-    
-    local function UpdateStacks(frame)
-        if not frame or not frame[iconsKey] then return end
-        for _, icon in ipairs(frame[iconsKey]) do
-            if icon and icon.count then
-                local stackSize = 10 * scale
-                DF:SafeSetFont(icon.count, fontPath, stackSize, outline)
-                icon.count:ClearAllPoints()
-                icon.count:SetPoint(anchor, icon, anchor, x, y)
-            end
-        end
-    end
-    
-    IterateFramesInMode(mode, UpdateStacks)
+    -- 12.1: the container rows own this styling; bump the layout version and
+    -- re-drive them so the change applies live (sig-gated, cheap when unchanged).
+    DF:InvalidateAuraLayout()
 end
 
 -- Update aura duration text settings
 function DF:LightweightUpdateAuraDurationText(auraType)
-    local mode = DF.GUI and DF.GUI.SelectedMode or "party"
-    local db = DF.db[mode]
-    if not db then return end
-
-    -- 12.1 factory rows: re-drive immediately so this applies live (the legacy loop
-    -- below only touches the hidden legacy pools when the factory owns the row).
-    if (auraType == "buff" and DF.UseFactoryForBuffs and DF:UseFactoryForBuffs(nil, db))
-       or (auraType == "debuff" and DF.UseFactoryForDebuffs and DF:UseFactoryForDebuffs(nil, db)) then
-        DF:InvalidateAuraLayout()
-    end
-    
-    local iconsKey = auraType == "buff" and "buffIcons" or "debuffIcons"
-    local scale = auraType == "buff" and (db.buffDurationScale or 1) or (db.debuffDurationScale or 1)
-    local anchor = auraType == "buff" and (db.buffDurationAnchor or "CENTER") or (db.debuffDurationAnchor or "CENTER")
-    local x = auraType == "buff" and (db.buffDurationX or 0) or (db.debuffDurationX or 0)
-    local y = auraType == "buff" and (db.buffDurationY or 0) or (db.debuffDurationY or 0)
-    local fontPath = auraType == "buff" and (db.buffDurationFont or "Fonts\\FRIZQT__.TTF") or (db.debuffDurationFont or "Fonts\\FRIZQT__.TTF")
-    local outline = auraType == "buff" and (db.buffDurationOutline or "OUTLINE") or (db.debuffDurationOutline or "OUTLINE")
-    if outline == "NONE" then outline = "" end
-    
-    if DF.debugSliderUpdates then
-        print("|cff00ff00[DF Lightweight]|r UpdateAuraDurationText(" .. auraType .. ") scale=" .. scale .. " x=" .. x .. " y=" .. y)
-    end
-    
-    local function UpdateDuration(frame)
-        if not frame or not frame[iconsKey] then return end
-        local foundCount = 0
-        for _, icon in ipairs(frame[iconsKey]) do
-            if icon then
-                -- Store offsets on icon for OnUpdate handler
-                icon.durationAnchor = anchor
-                icon.durationX = x
-                icon.durationY = y
-                
-                -- Find nativeCooldownText if not already found (canonical helper —
-                -- also creates the hide-above-threshold wrapper this path used to skip)
-                if not icon.nativeCooldownText and icon.cooldown then
-                    DF:EnsureAuraDurationText(icon, db, auraType)
-                end
-                
-                -- Update native cooldown text if it exists
-                if icon.nativeCooldownText then
-                    foundCount = foundCount + 1
-                    local durationSize = 10 * scale
-                    DF:SafeSetFont(icon.nativeCooldownText, fontPath, durationSize, outline)
-                    icon.nativeCooldownText:ClearAllPoints()
-                    icon.nativeCooldownText:SetPoint(anchor, icon, anchor, x, y)
-                end
-                
-                -- Also update custom duration text if it exists (fallback)
-                if icon.duration then
-                    local durationSize = 10 * scale
-                    DF:SafeSetFont(icon.duration, fontPath, durationSize, outline)
-                    icon.duration:ClearAllPoints()
-                    icon.duration:SetPoint(anchor, icon, anchor, x, y)
-                end
-            end
-        end
-        if DF.debugSliderUpdates and foundCount > 0 then
-            print("  - Updated " .. foundCount .. " duration texts on frame")
-        end
-    end
-    
-    IterateFramesInMode(mode, UpdateDuration)
+    -- 12.1: the container rows own this styling; bump the layout version and
+    -- re-drive them so the change applies live (sig-gated, cheap when unchanged).
+    DF:InvalidateAuraLayout()
 end
 
 -- Sync linked sections between party and raid modes
@@ -1500,52 +1185,9 @@ end
 
 -- Update aura border settings (both regular and expiring borders)
 function DF:LightweightUpdateAuraBorder(auraType)
-    local mode = DF.GUI and DF.GUI.SelectedMode or "party"
-    local db = DF.db[mode]
-    if not db then return end
-
-    -- 12.1 factory rows: re-drive immediately so this applies live (the legacy loop
-    -- below only touches the hidden legacy pools when the factory owns the row).
-    if (auraType == "buff" and DF.UseFactoryForBuffs and DF:UseFactoryForBuffs(nil, db))
-       or (auraType == "debuff" and DF.UseFactoryForDebuffs and DF:UseFactoryForDebuffs(nil, db)) then
-        DF:InvalidateAuraLayout()
-    end
-    
-    local iconsKey = auraType == "buff" and "buffIcons" or "debuffIcons"
-    
-    -- Regular border settings
-    local thickness = auraType == "buff" and (db.buffBorderSize or 1) or (db.debuffBorderSize or 1)
-    local inset = auraType == "buff" and (db.buffBorderInset or 0) or (db.debuffBorderInset or 0)
-    
-    -- Expiring border settings (buffs only)
-    local expiringThickness = db.buffExpiringBorderThickness or 2
-    local expiringInset = db.buffExpiringBorderInset or -1
-    
-    if DF.debugSliderUpdates then
-        print("|cff00ff00[DF Lightweight]|r UpdateAuraBorder(" .. auraType .. ") expiringThickness=" .. expiringThickness .. " expiringInset=" .. expiringInset)
-    end
-    
-    local function UpdateBorders(frame)
-        if not frame or not frame[iconsKey] then return end
-        for idx, icon in ipairs(frame[iconsKey]) do
-            if icon then
-                -- Update regular border (DF.Border geometry via shared helper).
-                -- Gated on icon.border, so it only reconfigures an existing
-                -- (enabled) border — pass enabled = true.
-                if icon.border then
-                    DF:ConfigureAuraIconBorder(icon, db, auraType, true)
-                end
-                
-                -- Update expiring border (buffs only) — re-configure the unified
-                -- DF.Border overlay (geometry/colour/style/animation) live.
-                if auraType == "buff" then
-                    DF:ConfigureExpiringBorder(icon, db, "buffExpiring")
-                end
-            end
-        end
-    end
-    
-    IterateFramesInMode(mode, UpdateBorders)
+    -- 12.1: the container rows own this styling; bump the layout version and
+    -- re-drive them so the change applies live (sig-gated, cheap when unchanged).
+    DF:InvalidateAuraLayout()
 end
 
 -- Update frame levels for various elements
@@ -1583,24 +1225,6 @@ function DF:LightweightUpdateFrameLevel(elementType)
         if elementType == "absorb" and frame.dfAbsorbBar then
             local level = db.absorbBarFrameLevel or 10
             frame.dfAbsorbBar:SetFrameLevel(level)
-        elseif elementType == "missingBuff" and frame.missingBuffFrame then
-            local level = db.missingBuffIconFrameLevel or 0
-            if level > 0 then
-                frame.missingBuffFrame:SetFrameLevel(frameBaseLevel + level)
-            else
-                frame.missingBuffFrame:SetFrameLevel(baseLevel + 10)
-            end
-        elseif elementType == "defensive" and frame.defensiveIcon then
-            local level = db.defensiveIconFrameLevel or 0
-            if level > 0 then
-                frame.defensiveIcon:SetFrameLevel(frameBaseLevel + level)
-            else
-                -- +26 keeps the defensive icon above the buff/debuff auras AND
-                -- their borders: an aura icon sits at contentOverlay+15 with its
-                -- DF.Border +10 on top (= +25), so +26 clears the whole aura.
-                -- The defensive is an important alert and shouldn't be obscured.
-                frame.defensiveIcon:SetFrameLevel(baseLevel + 26)
-            end
         elseif elementType == "role" and frame.roleIcon then
             local level = db.roleIconFrameLevel or 0
             if level > 0 then
@@ -2356,124 +1980,29 @@ end
 
 -- Update expiring border color on buff icons
 function DF:LightweightUpdateExpiringBorderColor()
-    local mode = DF.GUI and DF.GUI.SelectedMode or "party"
-    local db = DF.db[mode]
-    if not db then return end
-    
-    local function UpdateIcons(frame)
-        if not frame or not frame.buffIcons then return end
-        for _, icon in ipairs(frame.buffIcons) do
-            -- Re-apply the unified expiring border so a live colour-picker change
-            -- repaints the static colour (and keeps style/animation in sync).
-            DF:ConfigureExpiringBorder(icon, db, "buffExpiring")
-        end
-    end
-
-    IterateFramesInMode(mode, UpdateIcons)
+    -- 12.1: expiring borders can't run on the game's aura rows (secret time);
+    -- the GUI controls are marked as a game limitation. Nothing to restyle.
 end
 
 -- Update expiring tint color on buff icons
 function DF:LightweightUpdateExpiringTintColor()
-    local mode = DF.GUI and DF.GUI.SelectedMode or "party"
-    local db = DF.db[mode]
-    if not db then return end
-    
-    local color = db.buffExpiringTintColor or {r = 1, g = 0.3, b = 0.3, a = 0.3}
-    
-    local function UpdateIcons(frame)
-        if not frame or not frame.buffIcons then return end
-        for _, icon in ipairs(frame.buffIcons) do
-            if icon and icon.expiringTint then
-                icon.expiringTint:SetColorTexture(color.r, color.g, color.b, color.a or 0.3)
-            end
-        end
-    end
-    
-    IterateFramesInMode(mode, UpdateIcons)
+    -- 12.1: expiring tint can't run on the game's aura rows (see above).
 end
 
 -- Update missing buff icon border color
 function DF:LightweightUpdateMissingBuffBorderColor()
-    local mode = DF.GUI and DF.GUI.SelectedMode or "party"
-    local db = DF.db[mode]
-    if not db then return end
-
-    -- 12.1 factory strip: badge borders re-spec through the drive (see
-    -- LightweightUpdateMissingBuff); the legacy loop below touches hidden frames.
-    if DF.UseFactoryForMissingBuff and DF:UseFactoryForMissingBuff(nil, db) then
-        DF:InvalidateAuraLayout()
-    end
-
-    local function UpdateIcon(frame)
-        if frame and frame.missingBuffBorder then
-            -- Route through BuildSpec + Apply (Stage 4.1) so the colour
-            -- pick respects ColorSource / gradient / etc. The full-render
-            -- path in Frames/Icons.lua does the same thing — keeping the
-            -- live drag-update consistent so dragging the picker on a
-            -- gradient or class-coloured border updates correctly.
-            DF.Border:Apply(frame.missingBuffBorder,
-                DF.Border:BuildSpec(db, "missingBuffIcon", { unit = frame.unit, frame = frame, iconMode = true }))
-        end
-    end
-
-    IterateFramesInMode(mode, UpdateIcon)
+    -- 12.1: badge borders re-spec through the strip drive.
+    DF:InvalidateAuraLayout()
 end
 
 -- Update defensive icon colors (border and duration text)
 function DF:LightweightUpdateDefensiveIconColors()
-    local mode = DF.GUI and DF.GUI.SelectedMode or "party"
-    local db = DF.db[mode]
-    if not db then return end
-
-    -- 12.1 factory rows: re-drive immediately so this applies live (see the buff
-    -- helpers). The legacy loop below only touches the hidden legacy pool.
-    if DF.UseFactoryForDefensive and DF:UseFactoryForDefensive(nil, db) then
-        DF:InvalidateAuraLayout()
-    end
-
-    -- Same test-mode delegation as LightweightUpdateDefensiveIcons: the test
-    -- render owns multi-defensive layout; touching individual icons here can
-    -- leave the primary anchored away from the centred-layout position.
+    -- 12.1: the defensive container re-styles through the drive.
+    DF:InvalidateAuraLayout()
+    -- Test previews restyle through the same drive on their next pass.
     if (DF.testMode or DF.raidTestMode) and DF.UpdateAllTestDefensiveBar then
         DF:UpdateAllTestDefensiveBar()
-        return
     end
-
-    local borderColor = db.defensiveIconBorderColor or {r = 0, g = 0, b = 0, a = 1}
-    local durationColor = db.defensiveIconDurationColor or {r = 1, g = 1, b = 1}
-    
-    local function ApplyColors(icon, unit)
-        if not icon then return end
-        if icon.border then
-            -- ctx.unit lets the Class/Role resolvers fire on the live update
-            -- path. ctx.frame additionally lets test frames preview
-            -- Class/Role via GetTestUnitData (Stage 4.0). spec.color is NOT
-            -- overridden — BuildSpec resolves it via the ColorSource per
-            -- unit, so a static override here would clobber CLASS/ROLE.
-            local spec = DF.Border:BuildSpec(db, "defensiveIcon", {
-                unit  = unit,
-                frame = icon.unitFrame,
-                iconMode = true,
-            })
-            DF.Border:Apply(icon.border, spec)
-        end
-        -- Skip duration recolour when colorByTime is active (the row engine owns it then).
-        if not db.defensiveIconDurationColorByTime and icon.nativeCooldownText then
-            icon.nativeCooldownText:SetTextColor(durationColor.r, durationColor.g, durationColor.b, 1)
-        end
-    end
-
-    local function UpdateIcon(frame)
-        if not frame or not frame.defensiveIcon then return end
-        ApplyColors(frame.defensiveIcon, frame.unit)
-        if frame.defensiveBarIcons then
-            for _, extraIcon in pairs(frame.defensiveBarIcons) do
-                ApplyColors(extraIcon, frame.unit)
-            end
-        end
-    end
-
-    IterateFramesInMode(mode, UpdateIcon)
 end
 
 -- Update group label color
@@ -2575,43 +2104,9 @@ end
 -- Update debuff border colors directly (for test mode preview only)
 -- Note: icon.debuffType is only set in test mode, so this only affects test frames
 function DF:LightweightUpdateDebuffBorderColors()
-    local mode = DF.GUI and DF.GUI.SelectedMode or "party"
-    local db = DF.db[mode]
-    if not db then return end
-    
-    -- Only apply to test mode frames
-    local inTestMode = (mode == "raid" and DF.raidTestMode) or (mode == "party" and DF.testMode)
-    if not inTestMode then return end
-    
-    -- Skip if borders not enabled or not using color by type
-    if db.debuffShowBorder == false or db.debuffBorderColorByType == false then
-        return
-    end
-    
-    -- Get color mapping from db
-    local colors = {
-        Magic = db.debuffBorderColorMagic or {r = 0.2, g = 0.6, b = 1.0},
-        Curse = db.debuffBorderColorCurse or {r = 0.6, g = 0.0, b = 1.0},
-        Disease = db.debuffBorderColorDisease or {r = 0.6, g = 0.4, b = 0.0},
-        Poison = db.debuffBorderColorPoison or {r = 0.0, g = 0.6, b = 0.0},
-        Bleed = db.debuffBorderColorBleed or {r = 1.0, g = 0.0, b = 0.0},
-        Enrage = db.debuffBorderColorBleed or {r = 1.0, g = 0.0, b = 0.0},
-    }
-    local defaultColor = db.debuffBorderColorNone or {r = 0.8, g = 0.0, b = 0.0}
-    
-    local function UpdateDebuffColors(frame)
-        if not frame or not frame.debuffIcons then return end
-        for _, icon in ipairs(frame.debuffIcons) do
-            if icon and icon.border and icon:IsShown() then
-                -- Get the debuff type stored on the icon (only set in test mode)
-                local debuffType = icon.debuffType
-                local color = colors[debuffType] or defaultColor
-                icon.border:SetColor(color.r, color.g, color.b, 0.8)
-            end
-        end
-    end
-    
-    IterateFramesInMode(mode, UpdateDebuffColors)
+    -- 12.1: the container rows own this styling; bump the layout version and
+    -- re-drive them so the change applies live (sig-gated, cheap when unchanged).
+    DF:InvalidateAuraLayout()
 end
 
 -- ============================================================
@@ -4589,6 +4084,12 @@ DF._MainEventDispatcher = function(self, event, arg1)
             "bossDebuffsShowCountdown", "bossDebuffsShowNumbers",
             "bossDebuffsSpacing", "bossDebuffsTextScale", "testShowBossDebuffs",
             "bossDebuffsLegacyAnchors", "testBossDebuffCount", "_paIconSizeMigrated", "_paStrataHighV434",
+            -- Old external-defensive icon (its widget died with the legacy pools;
+            -- the settings migrated into defensiveIcon* long ago).
+            "externalDefAnchor", "externalDefBorderColor", "externalDefBorderSize",
+            "externalDefEnabled", "externalDefFrameLevel", "externalDefScale",
+            "externalDefShowDuration", "externalDefStrata", "externalDefX",
+            "externalDefY", "_defensiveIconMigrated",
         }
         local function StripLegacyAuraKeys(modeDb)
             for _, key in ipairs(LEGACY_AURA_KEYS) do
@@ -5811,8 +5312,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
                         if frame.absorbAttachedTexture then frame.absorbAttachedTexture:Hide() end
                         if frame.healAbsorbAttachedTexture then frame.healAbsorbAttachedTexture:Hide() end
                         if frame.absorbOverflowBar then frame.absorbOverflowBar:Hide() end
-                        if frame.defensiveIcon then frame.defensiveIcon:Hide() end
-                        DF:HideTestBossDebuffs(frame)
                         if DF.HideAllTargetedSpells then
                             DF:HideAllTargetedSpells(frame)
                         end
@@ -5837,8 +5336,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
                         if frame.absorbAttachedTexture then frame.absorbAttachedTexture:Hide() end
                         if frame.healAbsorbAttachedTexture then frame.healAbsorbAttachedTexture:Hide() end
                         if frame.absorbOverflowBar then frame.absorbOverflowBar:Hide() end
-                        if frame.defensiveIcon then frame.defensiveIcon:Hide() end
-                        DF:HideTestBossDebuffs(frame)
                         if DF.HideAllTargetedSpells then
                             DF:HideAllTargetedSpells(frame)
                         end

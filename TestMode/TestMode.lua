@@ -1054,12 +1054,6 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     if db.testShowAuras then
         DF:UpdateTestAuras(frame)
     else
-        if frame.buffIcons then
-            for _, icon in ipairs(frame.buffIcons) do icon:Hide() end
-        end
-        if frame.debuffIcons then
-            for _, icon in ipairs(frame.debuffIcons) do icon:Hide() end
-        end
         -- 12.1 factory rows: entering test mode with Show Auras already off
         -- never reaches the UpdateTestAuras seam, so hide them here too (via
         -- the shown-caches the live drives key on).
@@ -1093,32 +1087,19 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
         end
         frame.dfDeadFadeApplied = false
         
-        -- Apply out of range effect to auras
+        -- Apply out of range effect to auras: the container rows fade as one
+        -- (alpha on the row's plain anchor frame is ours to set).
         local buffAlpha = db.buffAlpha or 1
         local debuffAlpha = db.debuffAlpha or 1
+        local buffRow = frame.buffFactory and frame.buffFactory:GetFrame()
+        local debuffRow = frame.debuffFactory and frame.debuffFactory:GetFrame()
         if isOutOfRange then
-            if frame.buffIcons then
-                for _, icon in ipairs(frame.buffIcons) do
-                    icon:SetAlpha(aurasAlpha * buffAlpha)
-                end
-            end
-            if frame.debuffIcons then
-                for _, icon in ipairs(frame.debuffIcons) do
-                    icon:SetAlpha(aurasAlpha * debuffAlpha)
-                end
-            end
+            if buffRow then buffRow:SetAlpha(aurasAlpha * buffAlpha) end
+            if debuffRow then debuffRow:SetAlpha(aurasAlpha * debuffAlpha) end
             frame.dfTestOutOfRange = true
         else
-            if frame.buffIcons then
-                for _, icon in ipairs(frame.buffIcons) do
-                    icon:SetAlpha(buffAlpha)
-                end
-            end
-            if frame.debuffIcons then
-                for _, icon in ipairs(frame.debuffIcons) do
-                    icon:SetAlpha(debuffAlpha)
-                end
-            end
+            if buffRow then buffRow:SetAlpha(buffAlpha) end
+            if debuffRow then debuffRow:SetAlpha(debuffAlpha) end
             frame.dfTestOutOfRange = false
         end
     end
@@ -1166,9 +1147,6 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     if db.testShowMissingBuff then
         DF:UpdateTestMissingBuff(frame)
     else
-        if frame.missingBuffFrame then
-            frame.missingBuffFrame:Hide()
-        end
         -- 12.1 factory strip: hide via the shown-cache the live drive keys on.
         if frame.missingBuffStrip and frame.dfMissingStripShown ~= false then
             frame.dfMissingStripShown = false
@@ -2356,7 +2334,6 @@ function DF:HideTestFrames(silent)
             if frame.absorbAttachedTexture then frame.absorbAttachedTexture:Hide() end
             if frame.healAbsorbAttachedTexture then frame.healAbsorbAttachedTexture:Hide() end
             if frame.absorbOverflowBar then frame.absorbOverflowBar:Hide() end
-            if frame.defensiveIcon then frame.defensiveIcon:Hide() end
             if DF.HideAllTargetedSpells then
                 DF:HideAllTargetedSpells(frame)
             end
@@ -2611,7 +2588,6 @@ function DF:HideRaidTestFrames()
             if frame.absorbAttachedTexture then frame.absorbAttachedTexture:Hide() end
             if frame.healAbsorbAttachedTexture then frame.healAbsorbAttachedTexture:Hide() end
             if frame.absorbOverflowBar then frame.absorbOverflowBar:Hide() end
-            if frame.defensiveIcon then frame.defensiveIcon:Hide() end
             if DF.HideAllTargetedSpells then
                 DF:HideAllTargetedSpells(frame)
             end
@@ -3403,9 +3379,6 @@ function DF:UpdateAllTestMissingBuff()
         if db.testShowMissingBuff then
             DF:UpdateTestMissingBuff(frame)
         else
-            if frame.missingBuffFrame then
-                frame.missingBuffFrame:Hide()
-            end
             -- 12.1 factory strip: hide via the shown-cache the live drive keys on.
             if frame.missingBuffStrip and frame.dfMissingStripShown ~= false then
                 frame.dfMissingStripShown = false
@@ -3487,20 +3460,9 @@ function DF:UpdateAllTestDefensiveBar()
         if not frame then return end
         local db = DF:GetFrameDB(frame)
 
-        -- Unconditional: the painter reads testShowExternalDef itself and hides
-        -- BOTH pipelines (legacy pool + 12.1 container row) when it's off.
+        -- Unconditional: the painter reads testShowExternalDef itself and
+        -- hides the container row when it's off.
         DF:UpdateTestDefensiveBar(frame, testData)
-        if not db.testShowExternalDef then
-            -- Legacy pool extras the painter's hide path doesn't touch.
-            if frame.defensiveIcon and frame.defensiveIcon.cooldown then
-                frame.defensiveIcon.cooldown:Clear()
-            end
-            if frame.defensiveBarIcons then
-                for _, icon in pairs(frame.defensiveBarIcons) do
-                    if icon.cooldown then icon.cooldown:Clear() end
-                end
-            end
-        end
     end
     
     -- Update party test frames

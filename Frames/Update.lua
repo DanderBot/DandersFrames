@@ -385,17 +385,6 @@ function DF:ApplyFrameLayout(frame)
     end
     
     -- ========================================
-    -- MISSING BUFF ICON
-    -- ========================================
-    if frame.missingBuffFrame then
-        local missingBuffSize = db.missingBuffIconSize or 24
-        if db.pixelPerfect then
-            missingBuffSize = DF:PixelPerfect(missingBuffSize)
-        end
-        frame.missingBuffFrame:SetSize(missingBuffSize, missingBuffSize)
-    end
-    
-    -- ========================================
     -- BACKGROUND COLOR & TEXTURE
     -- ========================================
     if frame.background then

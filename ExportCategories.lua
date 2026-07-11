@@ -621,16 +621,6 @@ DF.ExportCategories = {
         "defensiveIconSize",
         "defensiveIconX",
         "defensiveIconY",
-        "externalDefAnchor",
-        "externalDefBorderColor",
-        "externalDefBorderSize",
-        "externalDefEnabled",
-        "externalDefFrameLevel",
-        "externalDefScale",
-        "externalDefShowDuration",
-        "externalDefStrata",
-        "externalDefX",
-        "externalDefY",
     },
     -- Targeted spells (incl. personal)
     targetedSpells = {

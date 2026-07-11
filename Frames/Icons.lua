@@ -74,13 +74,10 @@ end
 
 
 function DF:UpdateMissingBuffIcon(frame, forceUpdate)
-    if not frame or not frame.unit or not frame.missingBuffFrame then return end
-    
+    if not frame or not frame.unit then return end
+
     -- PERF TEST: Skip if disabled
-    if DF.PerfTest and not DF.PerfTest.enableMissingBuff then
-        frame.missingBuffFrame:Hide()
-        return
-    end
+    if DF.PerfTest and not DF.PerfTest.enableMissingBuff then return end
     
     -- Use raid DB for raid frames, party DB for party frames
     local db = DF:GetFrameDB(frame)
@@ -152,20 +149,11 @@ end
 -- kept its own copy that skipped the pixel-perfect scale fold and the
 -- pixel-grid snap (the drift class that caused bug 951).
 --
--- The returned table is a REUSED module scratch table: UpdateDefensiveBar
--- runs on every aura update (~184 calls/sec in a 25-player raid) and this
--- path is kept allocation-free. Every field is written on every call, and
--- the layout is consumed within the same update — never retain it.
-local defensiveBarLayoutScratch = {}
-
 function DF:UpdateDefensiveBar(frame)
-    if not frame or not frame.unit or not frame.defensiveIcon then return end
-    
+    if not frame or not frame.unit then return end
+
     -- PERF TEST: Skip if disabled
-    if DF.PerfTest and not DF.PerfTest.enableDefensive then
-        frame.defensiveIcon:Hide()
-        return
-    end
+    if DF.PerfTest and not DF.PerfTest.enableDefensive then return end
     
     -- Use raid DB for raid frames, party DB for party frames
     local db = DF:GetFrameDB(frame)
@@ -177,7 +165,6 @@ function DF:UpdateDefensiveBar(frame)
             frame.defensiveFactory:GetFrame():Hide()
             frame.dfDefFactoryShown = false   -- keep DriveDefensiveFactory's shown-cache coherent
         end
-        frame.defensiveIcon:Hide()
         return
     end
 
@@ -187,7 +174,6 @@ function DF:UpdateDefensiveBar(frame)
             frame.defensiveFactory:GetFrame():Hide()
             frame.dfDefFactoryShown = false
         end
-        frame.defensiveIcon:Hide()
         return
     end
 
@@ -207,12 +193,6 @@ function DF:UpdateDefensiveBar(frame)
     -- 12.1: the container path above owns all live rendering. The only way
     -- here is the transient in-combat IsSupported()=false window before the
     -- login warm; render nothing rather than read sealed aura data.
-    frame.defensiveIcon:Hide()
-
-    -- (Legacy single-icon BLIZZARD branch removed — all defensive rendering
-    -- now goes through the multi-defensive renderer above. The defensive
-    -- cache is populated identically in both modes via the secret-safe
-    -- IsAuraFilteredOutByInstanceID Direct API.)
 end
 
 -- Update defensive icons for all frames
