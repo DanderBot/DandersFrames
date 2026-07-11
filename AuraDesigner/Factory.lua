@@ -400,15 +400,23 @@ end
 -- RAW-config cosmetic signature of the placed border — the per-tick alloc-free replacement
 -- for borderSpecSig(BuildSpec(...)). Enumerates the exact keys DF.Border:BuildSpec("") reads
 -- that affect the RENDERED row border (style/texture/size/inset/offset/blend/gradient/shadow
--- + legacy thickness/inset fallbacks). ANIMATION keys are OMITTED on purpose: row mode strips
--- animations (AuraContainer SAFE_OVERLAY_ANIM is overlay-only), so an animation-key change
--- can't alter the rendered ring and must not force a restyle. This changes iff the built
--- spec's rendered result changes -> IDENTICAL rebuild/restyle decisions, minus the alloc.
+-- + legacy thickness/inset fallbacks). ANIMATION keys are INCLUDED: placed containers opt
+-- into the DF-owned border animations via config.adBorderAnim, so an animation-key change
+-- alters the rendered ring and must restyle (Apply re-runs Start/StopAnimation with the new
+-- type). This changes iff the built spec's rendered result changes -> IDENTICAL
+-- rebuild/restyle decisions, minus the alloc.
 local PLACED_BORDER_KEYS = {
     "BorderStyle", "BorderTexture", "BorderSize", "borderThickness",
     "BorderInset", "borderInset", "BorderOffsetX", "BorderOffsetY", "BorderBlendMode",
     "BorderGradientEnabled", "BorderGradientDirection",
     "BorderShadowEnabled", "BorderShadowSize", "BorderShadowOffsetX", "BorderShadowOffsetY",
+    -- Animation keys (every scalar BuildSpec folds into spec.animation): needed so
+    -- configuring/changing a border animation on a placed indicator hot-applies.
+    "BorderAnimationType", "BorderAnimationFrequency", "BorderAnimationParticles",
+    "BorderAnimationLength", "BorderAnimationThickness", "BorderAnimationScale",
+    "BorderAnimationInset", "BorderAnimationOffsetX", "BorderAnimationOffsetY",
+    "BorderAnimationMask", "BorderAnimationSidesAxis", "BorderAnimationCornerLength",
+    "BorderAnimationProcStart",
     -- Colour-source keys: not exposed by the AD border UI today (source is always CUSTOM),
     -- but hashed defensively so an imported profile or a future class/role border option
     -- can't leave the border stale until /reload.
@@ -416,6 +424,7 @@ local PLACED_BORDER_KEYS = {
 }
 local PLACED_BORDER_COLOR_KEYS = {
     "BorderColor", "BorderGradientStartColor", "BorderGradientEndColor", "BorderShadowColor",
+    "BorderAnimationColor",
 }
 local function placedBorderRawSig(indicator, borderOn)
     if not borderOn then return "" end
