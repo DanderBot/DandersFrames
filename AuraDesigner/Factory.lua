@@ -1802,6 +1802,54 @@ do
             win and safeNum(win.GetWidth, win) or "-",
             win and safeNum(win.GetHeight, win) or "-"))
     end
+    -- Visual push probe: a bright marker parented to UIParent (so the clip window can
+    -- never hide it), CROSS-ANCHORED to the badge. Anchoring to a secret-derived rect is
+    -- render-side and legal (we never read it). If the layout-push happens, the marker
+    -- visibly slides with the badge; if the marker never moves on aura apply, the
+    -- container never laid out the blank button at all.
+    local markers = {}
+    local function markBadge(tag, h)
+        local badge = h and h.badge
+        if not badge then return end
+        local m = markers[badge]
+        if not m then
+            m = CreateFrame("Frame", nil, UIParent)
+            m:SetSize(10, 10)
+            m:SetFrameStrata("TOOLTIP")
+            local t = m:CreateTexture(nil, "OVERLAY")
+            t:SetAllPoints(m)
+            t:SetColorTexture(tag == "MB" and 0 or 1, tag == "MB" and 1 or 0, 1, 1)
+            markers[badge] = m
+        end
+        m:ClearAllPoints()
+        m:SetPoint("CENTER", badge, "TOPLEFT", 0, 0)
+        m:Show()
+    end
+    function DF:DebugADMissingMark()
+        local n = 0
+        local function scan(frame)
+            local store = frame and frame.dfADFactory
+            if store then
+                for _, storeKey in ipairs({ "healthbar", "background", "border", "placed" }) do
+                    local t = store[storeKey]
+                    if t then
+                        for _, entry in pairs(t) do
+                            if entry and entry.missing and entry.handle then
+                                markBadge("AD", entry.handle); n = n + 1
+                            end
+                        end
+                    end
+                end
+            end
+            if frame and frame.missingFactory then
+                for _, h in pairs(frame.missingFactory) do markBadge("MB", h); n = n + 1 end
+            end
+        end
+        if DF.IteratePartyFrames then DF:IteratePartyFrames(scan) end
+        if DF.IterateRaidFrames then DF:IterateRaidFrames(scan) end
+        print("|cff7373f2DandersFrames|r admissing markers placed: " .. n
+            .. " (magenta = AD, cyan = MB; watch whether they SLIDE when the aura is applied)")
+    end
     function DF:DebugADMissing()
         print("|cff7373f2DandersFrames|r AD missing-mode probe:")
         local function scan(frame)

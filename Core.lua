@@ -5102,6 +5102,9 @@ DF._MainEventDispatcher = function(self, event, arg1)
             elseif msg == "admissing" then
                 -- Diagnostic for the Aura Designer show-when-missing push mechanism
                 if DF.DebugADMissing then DF:DebugADMissing() end
+            elseif msg == "admissing mark" then
+                -- Visual push probe: markers that slide with the missing badges
+                if DF.DebugADMissingMark then DF:DebugADMissingMark() end
             elseif msg == "debugfonts" then
                 -- Debug command to show font info
                 print("|cff00ff00DandersFrames:|r Font Debug")
