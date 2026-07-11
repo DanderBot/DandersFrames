@@ -5924,9 +5924,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         }), 30, "both")
     end)
 
-    -- Auras > My Buff Indicators — DEPRECATED: tab removed from UI, feature force-disabled on load.
-    -- Code kept intact in Features/MyBuffIndicators.lua for potential future re-enablement.
-
     -- Auras > Debuffs (combined Layout + Appearance with collapsible sections)
     local pageDebuffs = CreateSubTab("auras", "auras_debuffs", L["Debuffs"])
     -- 12.1: the debuff row is factory-served (P3). The page blocks only when the

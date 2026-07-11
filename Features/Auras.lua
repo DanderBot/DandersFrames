@@ -209,9 +209,6 @@ local function TriggerAuraUpdateForUnit(unit)
         if DF.UpdateDefensiveBar then
             DF:UpdateDefensiveBar(ourFrame)
         end
-        if DF.UpdateMyBuffIndicator then
-            DF:UpdateMyBuffIndicator(ourFrame)
-        end
         if DF.UpdateMissingBuffIcon then
             -- forceUpdate=true: bypass the cache equality check so a zone-transition
             -- cache wipe can't leave a stale "missing" icon after rebuffing.
@@ -241,9 +238,6 @@ local function TriggerAuraUpdateForUnit(unit)
                         end
                         if DF.UpdateDefensiveBar then
                             DF:UpdateDefensiveBar(child)
-                        end
-                        if DF.UpdateMyBuffIndicator then
-                            DF:UpdateMyBuffIndicator(child)
                         end
                         if DF.UpdateMissingBuffIcon then
                             -- forceUpdate=true: same cache-desync fix as the main fan-out above.
@@ -1116,74 +1110,6 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         end
     end
 end)
-
--- Check if the current player has any buff applied to a unit
--- Blizzard's buffFrames on raid frames already only shows buffs YOU cast
--- DEPRECATED: My Buff Indicator feature is hidden from the UI and force-disabled.
--- This function is kept for potential future re-enablement.
---
--- So we just check if there's anything in the buffs cache
--- Out of combat: filter out raid buffs (like Mark of the Wild) by checking icon texture
--- In combat: can't read aura data, so trust the cache as-is
--- In encounter (M+/boss): aura data is protected even out of combat
---   - In combat: skip filtering, trust cache (same as normal combat)
---   - Out of combat: return false to hide indicators (can't filter, showing raid buff indicators would be misleading)
--- Returns: true = player has a (non-raid) buff on unit, false = no relevant buffs from player
-local function UnitHasMyBuff(unit)
-    local cache = DF.BlizzardAuraCache and DF.BlizzardAuraCache[unit]
-    if not cache then return false end
-    
-    -- Quick check - if no buffs at all, return false
-    if not next(cache.buffs) then return false end
-    
-    -- Encounter check (M+ keystones, boss fights) - aura data is protected
-    local inEncounter = IsEncounterInProgress and IsEncounterInProgress()
-    if inEncounter then
-        if InCombatLockdown() then
-            -- In encounter + in combat: can't filter, trust cache as-is
-            return true
-        else
-            -- In encounter + out of combat: disable to avoid raid buff false positives
-            return false
-        end
-    end
-    
-    -- In combat (non-encounter), aura data is secret - just check if any buff exists
-    if InCombatLockdown() then
-        return true
-    end
-    
-    -- Out of combat, not in encounter - safe to filter out raid buffs by icon texture
-    local raidBuffIcons = DF.GetRaidBuffIcons and DF:GetRaidBuffIcons()
-    
-    for auraInstanceID in pairs(cache.buffs) do
-        -- Safety: skip secret auraInstanceIDs (shouldn't happen but belt-and-suspenders)
-        if issecretvalue(auraInstanceID) then
-            return true
-        end
-        
-        local auraData = C_UnitAuras.GetAuraDataByAuraInstanceID(unit, auraInstanceID)
-        if auraData then
-            local auraIconTexture = auraData.icon
-            -- Check if it's a raid buff by icon texture
-            local isRaidBuff = false
-            if raidBuffIcons and auraIconTexture and not issecretvalue(auraIconTexture) then
-                isRaidBuff = raidBuffIcons[auraIconTexture] == true
-            end
-            
-            if not isRaidBuff then
-                -- Found a non-raid buff (HoT, shield, etc.)
-                return true
-            end
-        end
-    end
-    
-    -- Only raid buffs found (or couldn't read data)
-    return false
-end
-
--- Export for use in other modules (e.g., Features/MyBuffIndicators.lua)
-DF.UnitHasMyBuff = UnitHasMyBuff
 
 -- Canonical discovery/setup for an aura icon's native cooldown countdown text.
 -- Finds the FontString inside the Blizzard cooldown, creates durationHideWrapper

@@ -34,7 +34,6 @@ L["Dispel"] = true
 L["Export for"] = true
 L["Frame Layout"] = true
 L["Import for"] = true
-L["My Buff Indicators"] = true
 L["Profiles include both Party and Raid settings. Exporting and importing always works on the profile as a whole, no matter which mode tab is selected above. Use the 'Export for' and 'Import for' checkboxes in each column to choose which mode's settings are included."] = true
 L["/df diagnostics"] = true
 L["active auto-layout overrides"] = true

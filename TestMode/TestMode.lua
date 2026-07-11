@@ -2279,13 +2279,6 @@ function DF:ShowTestFrames(silent)
         end)
     end
     
-    -- Update my buff indicators for test mode
-    if DF.UpdateAllTestMyBuffIndicator then
-        C_Timer.After(0.1, function()
-            DF:UpdateAllTestMyBuffIndicator()
-        end)
-    end
-    
     -- Update targeted spells for test mode
     if DF.UpdateAllTestTargetedSpell then
         C_Timer.After(0.1, function()
@@ -2735,13 +2728,6 @@ function DF:ShowRaidTestFrames()
     if DF.UpdateAllTestDispelGlow then
         C_Timer.After(0.1, function()
             DF:UpdateAllTestDispelGlow()
-        end)
-    end
-
-    -- Update my buff indicators for test mode
-    if DF.UpdateAllTestMyBuffIndicator then
-        C_Timer.After(0.1, function()
-            DF:UpdateAllTestMyBuffIndicator()
         end)
     end
 
@@ -3535,31 +3521,6 @@ function DF:UpdateAllTestDispelGlow()
             local frame = DF.testRaidFrames[i]
             if frame then
                 DF:UpdateDispelOverlay(frame)
-            end
-        end
-    end
-end
-
-function DF:UpdateAllTestMyBuffIndicator()
-    -- Safety check - MyBuffIndicators module may not be loaded yet
-    if not DF.UpdateMyBuffIndicator then return end
-    
-    -- Update party test frames
-    if DF.testMode then
-        for i = 0, 4 do
-            local frame = DF.testPartyFrames[i]
-            if frame then
-                DF:UpdateMyBuffIndicator(frame)
-            end
-        end
-    end
-    
-    -- Update raid test frames
-    if DF.raidTestMode then
-        for i = 1, 40 do
-            local frame = DF.testRaidFrames[i]
-            if frame then
-                DF:UpdateMyBuffIndicator(frame)
             end
         end
     end

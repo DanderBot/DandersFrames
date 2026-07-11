@@ -1631,18 +1631,6 @@ DF.PartyDefaults = {
     missingBuffIconY = 0,
 
     -- My Buff Indicator (DEPRECATED — hidden from UI, force-disabled on load)
-    myBuffIndicatorAnimate = false,
-    myBuffIndicatorBorderAlpha = 0.8,
-    myBuffIndicatorBorderInset = -1,
-    myBuffIndicatorBorderSize = 3,
-    myBuffIndicatorColor = {r = 0, g = 1, b = 0},
-    myBuffIndicatorEnabled = false,
-    myBuffIndicatorGradientAlpha = 0.4000000059604645,
-    myBuffIndicatorGradientOnCurrentHealth = true,
-    myBuffIndicatorGradientSize = 0.5,
-    myBuffIndicatorGradientStyle = "EDGE",
-    myBuffIndicatorShowBorder = false,
-    myBuffIndicatorShowGradient = true,
 
     -- Name Text
     nameColorClass = false,
@@ -1670,7 +1658,6 @@ DF.PartyDefaults = {
     oorIconsAlpha = 0.5,
     oorMissingBuffAlpha = 0.5,
     oorMissingHealthAlpha = 0.20000000298023,
-    oorMyBuffIndicatorAlpha = 0,
     oorNameTextAlpha = 1,
     oorTextAlpha = 0.55,  -- unified OOR alpha for ALL Text Designer text (replaces the per-element name/health text alphas, which are legacy)
     oorPowerBarAlpha = 0.20000000298023,
@@ -2318,7 +2305,6 @@ DF.PartyDefaults = {
     testShowHealPrediction = false,
     testShowIcons = true,
     testShowMissingBuff = false,
-    testShowMyBuffIndicator = false,
     testShowOutOfRange = false,
     testShowPets = true,
     testShowReducedMaxHealth = true,

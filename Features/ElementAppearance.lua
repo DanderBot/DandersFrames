@@ -941,20 +941,6 @@ function DF:UpdateDispelOverlayAppearance(frame)
 end
 
 -- ============================================================
--- MY BUFF INDICATOR APPEARANCE
--- ============================================================
-
-function DF:UpdateMyBuffIndicatorAppearance(frame)
-    if DF.ApplyMyBuffIndicatorAppearance then
-        DF:ApplyMyBuffIndicatorAppearance(frame)
-    end
-    local db = GetDB(frame)
-    if not db then return end
-    if DF.testMode or DF.raidTestMode then return end
-    if not frame.dfMyBuffOverlay or not frame.dfMyBuffOverlay:IsShown() then return end
-end
-
--- ============================================================
 -- MISSING BUFF ICON APPEARANCE
 -- ============================================================
 
@@ -1482,7 +1468,6 @@ function DF:UpdateAllElementAppearances(frame)
     DF:UpdateReadyCheckIconAppearance(frame)
     DF:UpdateCenterStatusIconAppearance(frame)
     DF:UpdateDispelOverlayAppearance(frame)
-    DF:UpdateMyBuffIndicatorAppearance(frame)
     DF:UpdateMissingBuffAppearance(frame)
     DF:UpdateAbsorbBarAppearance(frame)
     DF:UpdateHealAbsorbBarAppearance(frame)

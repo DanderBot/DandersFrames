@@ -3877,10 +3877,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
             end
         end
 
-        -- Force-disable deprecated My Buff Indicator for all profiles
-        DF.db.party.myBuffIndicatorEnabled = false
-        DF.db.raid.myBuffIndicatorEnabled = false
-        
         -- Migrate any missing settings for raidAutoProfiles
         for key, value in pairs(DF.RaidAutoProfilesDefaults) do
             if DF.db.raidAutoProfiles[key] == nil then
@@ -4566,6 +4562,36 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     if profile[mode] then
                         MigrateDispelSourceToEnabled(profile[mode])
                     end
+                end
+            end
+        end
+
+        -- v5 legacy-aura cleanup: strip saved values for retired features/toggles.
+        -- My Buff Indicators (deprecated + force-disabled since 4.0.12, deleted in
+        -- 5.0.0) and the hidden *UseFactory dev toggles (factory is unconditional).
+        local LEGACY_AURA_KEYS = {
+            "myBuffIndicatorAnimate", "myBuffIndicatorBorderAlpha",
+            "myBuffIndicatorBorderInset", "myBuffIndicatorBorderSize",
+            "myBuffIndicatorColor", "myBuffIndicatorEnabled",
+            "myBuffIndicatorGradientAlpha", "myBuffIndicatorGradientOnCurrentHealth",
+            "myBuffIndicatorGradientSize", "myBuffIndicatorGradientStyle",
+            "myBuffIndicatorShowBorder", "myBuffIndicatorShowGradient",
+            "oorMyBuffIndicatorAlpha", "testShowMyBuffIndicator",
+            "buffUseFactory", "debuffUseFactory", "defensiveUseFactory",
+            "missingBuffUseFactory", "dispelOverlayUseFactory",
+        }
+        local function StripLegacyAuraKeys(modeDb)
+            for _, key in ipairs(LEGACY_AURA_KEYS) do
+                modeDb[key] = nil
+            end
+        end
+        for _, mode in ipairs({"party", "raid"}) do
+            if DF.db[mode] then StripLegacyAuraKeys(DF.db[mode]) end
+        end
+        if DandersFramesDB_v2 and DandersFramesDB_v2.profiles then
+            for _, profile in pairs(DandersFramesDB_v2.profiles) do
+                for _, mode in ipairs({"party", "raid"}) do
+                    if profile[mode] then StripLegacyAuraKeys(profile[mode]) end
                 end
             end
         end

@@ -120,7 +120,6 @@ Features\Sort.lua
 Features\SecureSort.lua
 Features\FrameSort.lua
 Features\Dispel.lua
-Features\MyBuffIndicators.lua
 
 # Aura Designer
 AuraDesigner\Config.lua

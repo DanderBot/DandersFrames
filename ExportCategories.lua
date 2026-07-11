@@ -652,21 +652,6 @@ DF.ExportCategories = {
         "externalDefX",
         "externalDefY",
     },
-    -- My Buff indicators
-    myBuffs = {
-        "myBuffIndicatorAnimate",
-        "myBuffIndicatorBorderAlpha",
-        "myBuffIndicatorBorderInset",
-        "myBuffIndicatorBorderSize",
-        "myBuffIndicatorColor",
-        "myBuffIndicatorEnabled",
-        "myBuffIndicatorGradientAlpha",
-        "myBuffIndicatorGradientOnCurrentHealth",
-        "myBuffIndicatorGradientSize",
-        "myBuffIndicatorGradientStyle",
-        "myBuffIndicatorShowBorder",
-        "myBuffIndicatorShowGradient",
-    },
     -- Targeted spells (incl. personal)
     targetedSpells = {
         "personalTargetedSpellAlpha",
@@ -1235,7 +1220,6 @@ DF.ExportCategories = {
         "oorIconsAlpha",
         "oorMissingBuffAlpha",
         "oorMissingHealthAlpha",
-        "oorMyBuffIndicatorAlpha",
         "oorNameTextAlpha",
         "oorPowerBarAlpha",
         "oorTargetedSpellAlpha",
@@ -1328,7 +1312,6 @@ DF.ExportCategories = {
         "testShowHealPrediction",
         "testShowIcons",
         "testShowMissingBuff",
-        "testShowMyBuffIndicator",
         "testShowOutOfRange",
         "testShowPersonalTargeted",
         "testShowPets",

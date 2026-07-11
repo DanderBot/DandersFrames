@@ -336,7 +336,6 @@ local PROFILED_FUNCTIONS = {
     -- ----------------------------------------------------------
     -- My-Buff Indicators
     -- ----------------------------------------------------------
-    "UpdateMyBuffIndicator",
     "UpdateMyBuffGradientHealth",
 
     -- ----------------------------------------------------------
@@ -375,7 +374,6 @@ local PROFILED_FUNCTIONS = {
     "UpdateAllMissingBuffIcons",
     "UpdateAllFramesStatusIcons",
     "UpdateAllRoleIcons",
-    "UpdateAllMyBuffIndicators",
     "UpdateAllDefensiveBars",
     "UpdateAllExternalDefIcons",
     "UpdateAllElementAppearances",
