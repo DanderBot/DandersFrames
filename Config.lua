@@ -2274,7 +2274,6 @@ DF.PartyDefaults = {
     testShowTargetedList = false,
     testAnimateTargetedList = true,
     testAnimateHealth = false,
-    testBossDebuffCount = 1,
     testBuffCount = 2,
     testDebuffCount = 2,
     testFrameCount = 5,

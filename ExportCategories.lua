@@ -1277,7 +1277,6 @@ DF.ExportCategories = {
         "showMinimapButton",
         "testAnimateHealth",
         "testAnimateTargetedList",
-        "testBossDebuffCount",
         "testBuffCount",
         "testDebuffCount",
         "testPreset",

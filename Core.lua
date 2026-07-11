@@ -4588,7 +4588,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
             "bossDebuffsMax", "bossDebuffsOffsetX", "bossDebuffsOffsetY",
             "bossDebuffsShowCountdown", "bossDebuffsShowNumbers",
             "bossDebuffsSpacing", "bossDebuffsTextScale", "testShowBossDebuffs",
-            "bossDebuffsLegacyAnchors", "_paIconSizeMigrated", "_paStrataHighV434",
+            "bossDebuffsLegacyAnchors", "testBossDebuffCount", "_paIconSizeMigrated", "_paStrataHighV434",
         }
         local function StripLegacyAuraKeys(modeDb)
             for _, key in ipairs(LEGACY_AURA_KEYS) do
