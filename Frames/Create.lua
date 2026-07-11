@@ -1142,18 +1142,6 @@ function DF:CreateFrameElementsExtended(frame, db)
     -- ========================================
     -- AURA CONTAINER AND ICONS
     -- ========================================
-    frame.auraContainer = CreateFrame("Frame", nil, frame.contentOverlay)
-    frame.auraContainer:SetAllPoints(frame)
-    frame.auraContainer:EnableMouse(false)
-    
-    frame.buffIcons = {}
-    frame.debuffIcons = {}
-    
-    -- Create aura icons (8 of each type)
-    for i = 1, 8 do
-        frame.buffIcons[i] = DF:CreateAuraIcon(frame, i, "BUFF")
-        frame.debuffIcons[i] = DF:CreateAuraIcon(frame, i, "DEBUFF")
-    end
 end
 
 function DF:CreateUnitFrame(unit, index, isRaid)
@@ -1689,18 +1677,6 @@ function DF:CreateUnitFrame(unit, index, isRaid)
     -- ========================================
     -- AURA CONTAINER AND ICONS
     -- ========================================
-    frame.auraContainer = CreateFrame("Frame", nil, frame.contentOverlay)
-    frame.auraContainer:SetAllPoints(frame)
-    frame.auraContainer:EnableMouse(false)  -- Don't intercept mouse - let clicks pass to unit frame
-    
-    frame.buffIcons = {}
-    frame.debuffIcons = {}
-    
-    -- Create aura icons (8 of each type)
-    for i = 1, 8 do
-        frame.buffIcons[i] = DF:CreateAuraIcon(frame, i, "BUFF")
-        frame.debuffIcons[i] = DF:CreateAuraIcon(frame, i, "DEBUFF")
-    end
     
     -- ========================================
     -- EVENTS

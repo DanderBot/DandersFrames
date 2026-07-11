@@ -1663,10 +1663,6 @@ function DF:DriveBuffFactory(frame, db)
         if h then frame.buffFactorySig = buffFactorySig(h.config) end
     end
 
-    -- No double row: legacy buff icons stay hidden while the factory owns the row.
-    if frame.buffIcons then
-        for _, icon in ipairs(frame.buffIcons) do icon:Hide() end
-    end
     if not h then return end
 
     -- Row-level opacity (legacy per-icon buffAlpha; container-frame children multiply it).
@@ -1757,10 +1753,6 @@ function DF:DriveDebuffFactory(frame, db)
         if h then frame.debuffFactorySig = buffFactorySig(h.config) end
     end
 
-    -- No double row: legacy debuff icons stay hidden while the factory owns the row.
-    if frame.debuffIcons then
-        for _, icon in ipairs(frame.debuffIcons) do icon:Hide() end
-    end
     if not h then return end
 
     local rowAlpha = db.debuffAlpha or 1
@@ -2330,23 +2322,8 @@ function DF:UpdateAuras_Enhanced(frame)
             DF.AuraDesigner.Engine:UpdateFrame(frame)
         end
 
-        -- If standard buffs are NOT coexisting, hide their icons
-        if not db.showBuffs and frame.buffIcons then
-            for _, icon in ipairs(frame.buffIcons) do icon:Hide() end
-        end
     end
 
-    -- PERFORMANCE: Only re-apply layout when settings have changed (version mismatch).
-    -- Layout (icon positioning, sizing, fonts, borders) is expensive and rarely changes.
-    -- It gets invalidated by DF:InvalidateAuraLayout() when GUI/profile settings change.
-    local layoutVersion = DF.auraLayoutVersion or 0
-    if frame.dfAuraLayoutVersion ~= layoutVersion then
-        if DF.ApplyAuraLayout then
-            DF:ApplyAuraLayout(frame, "BUFF")
-            DF:ApplyAuraLayout(frame, "DEBUFF")
-        end
-        -- Note: dfAuraLayoutVersion is set inside ApplyAuraLayout
-    end
 
     -- Buff display: the native container renders the row (Blizzard-driven).
     -- Shown when: AD is off, OR AD is on with showBuffs enabled (coexistence)

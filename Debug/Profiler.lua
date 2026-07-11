@@ -362,7 +362,6 @@ local PROFILED_FUNCTIONS = {
     -- ----------------------------------------------------------
     "ApplyFrameLayout",
     "ApplyFrameStyle",
-    "ApplyAuraLayout",
     "FullFrameRefresh",
 
     -- ----------------------------------------------------------

@@ -2457,7 +2457,7 @@ function DF:LightweightUpdateDefensiveIconColors()
             })
             DF.Border:Apply(icon.border, spec)
         end
-        -- Skip duration recolour when colorByTime is active — RenderDefensiveBarIcon owns it then.
+        -- Skip duration recolour when colorByTime is active (the row engine owns it then).
         if not db.defensiveIconDurationColorByTime and icon.nativeCooldownText then
             icon.nativeCooldownText:SetTextColor(durationColor.r, durationColor.g, durationColor.b, 1)
         end
@@ -4723,14 +4723,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
             DF:InitializeFrames()
         end
 
-        -- Apply aura click-through settings immediately at ADDON_LOADED.
-        -- SetPropagateMouseMotion() is a protected operation — it must run
-        -- here (not in a delayed PLAYER_LOGIN callback) so it works during
-        -- combat reload when InCombatLockdown() is temporarily false.
-        if DF.UpdateAuraClickThrough then
-            DF:UpdateAuraClickThrough()
-        end
-
         -- Initialize Masque support if available
         local Masque = LibStub and LibStub("Masque", true)
         if Masque then
@@ -5583,9 +5575,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
             
             -- Apply saved CVar settings after world is ready
             DF:ApplySavedCVarSettings()
-            -- NOTE: UpdateAuraClickThrough is called at ADDON_LOADED (not here)
-            -- because SetPropagateMouseMotion() is protected and must run before
-            -- combat lockdown activates on combat reload.
             -- Update rested indicator
             if DF.UpdateRestedIndicator then
                 DF:UpdateRestedIndicator()
@@ -5827,52 +5816,9 @@ DF._MainEventDispatcher = function(self, event, arg1)
             if DF.IteratePartyFrames then DF:IteratePartyFrames(preWarmFrame) end
             if DF.IterateRaidFrames then DF:IterateRaidFrames(preWarmFrame) end
         end
-        -- Re-apply mouse settings on aura icons created during combat
-        if DF.auraIconsNeedMouseFix then
-            DF.auraIconsNeedMouseFix = false
-            local function fixIconMouse(frame)
-                if not frame or not frame:IsShown() then return end
-                -- Fix buff, debuff, and defensive bar icons
-                for _, icons in ipairs({ frame.buffIcons, frame.debuffIcons, frame.defensiveBarIcons }) do
-                    if icons then
-                        for _, icon in ipairs(icons) do
-                            icon:EnableMouse(true)
-                            if icon.SetPropagateMouseMotion then
-                                icon:SetPropagateMouseMotion(true)
-                            end
-                            if icon.SetPropagateMouseClicks then
-                                icon:SetPropagateMouseClicks(true)
-                            end
-                            if icon.SetMouseClickEnabled then
-                                icon:SetMouseClickEnabled(false)
-                            end
-                        end
-                    end
-                end
-                -- Fix single defensive icon
-                if frame.defensiveIcon then
-                    frame.defensiveIcon:EnableMouse(true)
-                    if frame.defensiveIcon.SetPropagateMouseMotion then
-                        frame.defensiveIcon:SetPropagateMouseMotion(true)
-                    end
-                    if frame.defensiveIcon.SetPropagateMouseClicks then
-                        frame.defensiveIcon:SetPropagateMouseClicks(true)
-                    end
-                    if frame.defensiveIcon.SetMouseClickEnabled then
-                        frame.defensiveIcon:SetMouseClickEnabled(false)
-                    end
-                end
-            end
-            if DF.IteratePartyFrames then DF:IteratePartyFrames(fixIconMouse) end
-            if DF.IterateRaidFrames then DF:IterateRaidFrames(fixIconMouse) end
-        end
         -- Update role icons (in case hideInCombat is enabled)
         if DF.UpdateAllRoleIcons then
             DF:UpdateAllRoleIcons()
-        end
-        -- Update aura click-through state (for click-through in combat setting)
-        if DF.UpdateAuraClickThrough then
-            DF:UpdateAuraClickThrough()
         end
         -- Update permanent mover combat state (color/visibility) — delayed to run
         -- after any deferred frame refreshes that might reset backdrop colors
@@ -5974,10 +5920,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- Update role icons (in case hideInCombat is enabled)
         if DF.UpdateAllRoleIcons then
             DF:UpdateAllRoleIcons()
-        end
-        -- Update aura click-through state (for click-through in combat setting)
-        if DF.UpdateAuraClickThrough then
-            DF:UpdateAuraClickThrough()
         end
         -- Refresh auras so combat-aware blacklist filters apply immediately
         if DF.RefreshAllVisibleFrames then

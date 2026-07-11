@@ -3319,10 +3319,6 @@ local function CreatePlayerTestFrame(setIndex, index, container, isRaidMode, isB
     if DF.ApplyFrameStyle then
         DF:ApplyFrameStyle(frame)
     end
-    if DF.ApplyAuraLayout then
-        DF:ApplyAuraLayout(frame, "BUFF")
-        DF:ApplyAuraLayout(frame, "DEBUFF")
-    end
 
     frame:Hide()
     return frame

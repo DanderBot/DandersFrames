@@ -589,9 +589,6 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     local isTestOutOfRange = db.testShowOutOfRange and testData.outOfRange and not testData.status
     frame.dfInRange = not isTestOutOfRange
     
-    -- Store applyLayout flag for UpdateTestAuras to use
-    frame.dfTestApplyLayout = applyLayout
-    
     -- Update health bar (use 0-1 range for test mode)
     frame.healthBar:SetMinMaxValues(0, 1)
     local healthValue = testData.healthPercent
@@ -1912,8 +1909,7 @@ function DF:UpdateTestStatusIcons(frame, testData)
     end
 end
 
--- Lightweight aura update - only updates content, not layout
--- Layout is only applied when frame.dfTestApplyLayout is true
+-- Test aura preview: drive the real 12.1 container rows on the test frame.
 function DF:UpdateTestAuras(frame)
     if not frame then return end
 
@@ -1921,7 +1917,7 @@ function DF:UpdateTestAuras(frame)
     -- create/keep the rows and the game's sample provider + the factory's curated
     -- test paint render them with the user's true layout, borders and fonts. The
     -- drives also hide the legacy hand-painted icon pools (no double render).
-    -- Defensive/missing/dispel keep their own legacy previews for now.
+    -- Defensives, missing buffs and dispel preview through their own drives.
     if DF.AuraContainer and DF.AuraContainer.IsSupported() then
         local db = DF:GetFrameDB(frame)
         if db then
@@ -1952,301 +1948,6 @@ function DF:UpdateTestAuras(frame)
         return
     end
 
-    -- Apply layout only if explicitly requested (e.g., on test mode start)
-    if frame.dfTestApplyLayout then
-        local db = DF:GetFrameDB(frame)
-        DF:ApplyAuraLayout(frame, "BUFF")
-        DF:ApplyAuraLayout(frame, "DEBUFF")
-        frame.dfTestApplyLayout = nil  -- Clear flag after applying
-    end
-
-    DF:UpdateTestAurasContent(frame)
-end
-
--- Update test aura content only (no layout changes)
-function DF:UpdateTestAurasContent(frame)
-    if not frame then return end
-    
-    local db = DF:GetFrameDB(frame)
-    
-    -- Ensure aura layouts are applied (fonts set) before using icons
-    -- This is a safety check in case frames were created before fonts were ready
-    if frame.buffIcons and frame.buffIcons[1] then
-        local testIcon = frame.buffIcons[1]
-        if testIcon.count then
-            local hasFont = false
-            local success, result = pcall(function() return testIcon.count:GetFont() end)
-            if success and result then
-                hasFont = true
-            end
-            if not hasFont then
-                -- Fonts not set yet, apply aura layout now
-                DF:ApplyAuraLayout(frame, "BUFF")
-                DF:ApplyAuraLayout(frame, "DEBUFF")
-            end
-        end
-    end
-    
-    -- Show test buffs - use testBuffCount to limit how many are shown
-    local maxBuffs = db.buffMax or 4
-    local testBuffCount = db.testBuffCount or 3
-    local buffLimit = math.min(testBuffCount, #DF.TestData.buffs, maxBuffs)
-    
-    if frame.buffIcons then
-        for i, icon in ipairs(frame.buffIcons) do
-            local buffData = DF.TestData.buffs[i]
-            if buffData and i <= buffLimit and db.showBuffs ~= false then
-                icon.texture:SetTexture(buffData.icon)
-                
-                -- Ensure count FontString has a font before calling SetText
-                if icon.count then
-                    local hasFont = false
-                    local success, result = pcall(function() return icon.count:GetFont() end)
-                    if success and result then hasFont = true end
-                    if not hasFont then
-                        DF:SafeSetFont(icon.count, "Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
-                    end
-                    
-                    if buffData.stacks and buffData.stacks > 1 then
-                        icon.count:SetText(buffData.stacks)
-                    else
-                        icon.count:SetText("")
-                    end
-                end
-                -- Set a fake cooldown for visual effect
-                if icon.cooldown and buffData.duration then
-                    local startTime = GetTime() - (buffData.duration * 0.3)
-                    icon.cooldown:SetCooldown(startTime, buffData.duration)
-                    
-                    -- Apply swipe visibility from settings
-                    local hideSwipe = db.buffHideSwipe or false
-                    icon.cooldown:SetDrawSwipe(not hideSwipe)
-                    
-                    -- Apply duration visibility from settings
-                    local showDuration = db.buffShowDuration ~= false
-                    icon.cooldown:SetHideCountdownNumbers(not showDuration)
-
-                    -- Discover + set up native cooldown text (canonical helper — keeps
-                    -- the text parented to durationHideWrapper, same as live; test used
-                    -- to steal it into textOverlay, breaking hide-above-threshold)
-                    if not icon.nativeCooldownText then
-                        DF:EnsureAuraDurationText(icon, db, "buff")
-                    end
-                    
-                    -- Apply duration text styling from settings
-                    if icon.nativeCooldownText then
-                        -- Hide/show based on setting
-                        if not showDuration then
-                            icon.nativeCooldownText:Hide()
-                        else
-                            icon.nativeCooldownText:Show()
-                            
-                            local durationScale = db.buffDurationScale or 1.0
-                            local durationFont = db.buffDurationFont or "Fonts\\FRIZQT__.TTF"
-                            local durationOutline = db.buffDurationOutline or "OUTLINE"
-                            if durationOutline == "NONE" then durationOutline = "" end
-                            local durationX = db.buffDurationX or 0
-                            local durationY = db.buffDurationY or 0
-                            local durationAnchor = db.buffDurationAnchor or "CENTER"
-                            local durationSize = 10 * durationScale
-                            
-                            DF:SafeSetFont(icon.nativeCooldownText, durationFont, durationSize, durationOutline)
-                            icon.nativeCooldownText:ClearAllPoints()
-                            icon.nativeCooldownText:SetPoint(durationAnchor, icon, durationAnchor, durationX, durationY)
-
-                            -- Apply color - either fixed or by time remaining
-                            if db.buffDurationColorByTime then
-                                -- Calculate remaining percentage for color (30% elapsed = 70% remaining)
-                                local percentRemaining = 0.7
-                                local r, g, b = DF:GetDurationColorByPercent(percentRemaining)
-                                icon.nativeCooldownText:SetTextColor(r, g, b, 1)
-                            else
-                                local durationColor = db.buffDurationColor or {r = 1, g = 1, b = 1}
-                                icon.nativeCooldownText:SetTextColor(durationColor.r, durationColor.g, durationColor.b, 1)
-                            end
-                        end
-                    end
-                end
-                
-                -- Border visibility (buffs are static-colour: colour/style come
-                -- from ConfigureAuraIconBorder, no per-update recolour).
-                if icon.border then
-                    if db.buffShowBorder ~= false then
-                        icon.border:Show()
-                    else
-                        icon.border:Hide()
-                    end
-                end
-                
-                -- Expiring indicators for test mode (simulate based on elapsed time)
-                -- In test mode, show expiring indicator on first buff regardless of buffExpiringEnabled
-                -- so users can preview what it looks like
-                local isExpiring = (i == 1)  -- First buff shows as expiring for testing
-                
-                -- Tint overlay - show in test mode if tint is enabled (regardless of master switch)
-                local showTint = isExpiring and db.buffExpiringTintEnabled
-                if icon.expiringTint and showTint then
-                    local tc = db.buffExpiringTintColor or {r = 1, g = 0.3, b = 0.3, a = 0.3}
-                    icon.expiringTint:SetColorTexture(tc.r, tc.g, tc.b, tc.a)
-                    icon.expiringTint:Show()
-                elseif icon.expiringTint then
-                    icon.expiringTint:Hide()
-                end
-                
-                -- Border - show in test mode if border is enabled (regardless of master switch)
-                local showBorder = isExpiring and db.buffExpiringBorderEnabled
-                if icon.expiringBorderGate and showBorder then
-                    -- Configure the unified expiring border (geometry/colour/style/
-                    -- animation), then force the gate fully visible for preview.
-                    DF:ConfigureExpiringBorder(icon, db, "buffExpiring")
-                    icon.expiringBorderGate:SetAlpha(1)
-                elseif icon.expiringBorderGate then
-                    icon.expiringBorderGate:SetAlpha(0)
-                end
-                
-                icon.testAuraData = buffData
-                icon:Show()
-            else
-                icon.testAuraData = nil
-                if icon.expiringTint then icon.expiringTint:Hide() end
-                if icon.expiringBorderGate then icon.expiringBorderGate:SetAlpha(0) end
-                icon:Hide()
-            end
-        end
-    end
-    
-    -- Show test debuffs - use testDebuffCount to limit how many are shown
-    local maxDebuffs = db.debuffMax or 4
-    local testDebuffCount = db.testDebuffCount or 3
-    local debuffLimit = math.min(testDebuffCount, #DF.TestData.debuffs, maxDebuffs)
-    
-    if frame.debuffIcons then
-        for i, icon in ipairs(frame.debuffIcons) do
-            local debuffData = DF.TestData.debuffs[i]
-            if debuffData and i <= debuffLimit and db.showDebuffs ~= false then
-                icon.texture:SetTexture(debuffData.icon)
-                -- Store debuff type for lightweight color updates
-                icon.debuffType = debuffData.debuffType
-                
-                -- Ensure count FontString has a font before calling SetText
-                if icon.count then
-                    local hasFont = false
-                    local success, result = pcall(function() return icon.count:GetFont() end)
-                    if success and result then hasFont = true end
-                    if not hasFont then
-                        DF:SafeSetFont(icon.count, "Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
-                    end
-                    
-                    if debuffData.stacks and debuffData.stacks > 1 then
-                        icon.count:SetText(debuffData.stacks)
-                    else
-                        icon.count:SetText("")
-                    end
-                end
-                
-                -- Border visibility and color
-                if icon.border then
-                    if db.debuffShowBorder ~= false then
-                        -- Only colour-by-type recolours per-update; static debuff
-                        -- borders carry colour/style from ConfigureAuraIconBorder.
-                        if db.debuffBorderColorByType ~= false then
-                            -- Shared dispel-type palette (same helper the live colour
-                            -- curve is built from, so defaults can't drift).
-                            local color = DF:GetDebuffTypeColor(db, debuffData.debuffType)
-                            icon.border:SetColor(color.r, color.g, color.b, 0.8)
-                        end
-                        icon.border:Show()
-                    else
-                        icon.border:Hide()
-                    end
-                end
-                
-                -- Set a fake cooldown for visual effect
-                if icon.cooldown and debuffData.duration then
-                    local startTime = GetTime() - (debuffData.duration * 0.5)
-                    icon.cooldown:SetCooldown(startTime, debuffData.duration)
-                    
-                    -- Apply swipe visibility from settings
-                    local hideSwipe = db.debuffHideSwipe or false
-                    icon.cooldown:SetDrawSwipe(not hideSwipe)
-                    
-                    -- Apply duration visibility from settings
-                    local showDuration = db.debuffShowDuration ~= false
-                    icon.cooldown:SetHideCountdownNumbers(not showDuration)
-
-                    -- Discover + set up native cooldown text (canonical helper — keeps
-                    -- the text parented to durationHideWrapper, same as live)
-                    if not icon.nativeCooldownText then
-                        DF:EnsureAuraDurationText(icon, db, "debuff")
-                    end
-                    
-                    -- Apply duration text styling from settings
-                    if icon.nativeCooldownText then
-                        -- Hide/show based on setting
-                        if not showDuration then
-                            icon.nativeCooldownText:Hide()
-                        else
-                            icon.nativeCooldownText:Show()
-                            
-                            local durationScale = db.debuffDurationScale or 1.0
-                            local durationFont = db.debuffDurationFont or "Fonts\\FRIZQT__.TTF"
-                            local durationOutline = db.debuffDurationOutline or "OUTLINE"
-                            if durationOutline == "NONE" then durationOutline = "" end
-                            local durationX = db.debuffDurationX or 0
-                            local durationY = db.debuffDurationY or 0
-                            local durationAnchor = db.debuffDurationAnchor or "CENTER"
-                            local durationSize = 10 * durationScale
-                            
-                            DF:SafeSetFont(icon.nativeCooldownText, durationFont, durationSize, durationOutline)
-                            icon.nativeCooldownText:ClearAllPoints()
-                            icon.nativeCooldownText:SetPoint(durationAnchor, icon, durationAnchor, durationX, durationY)
-
-                            -- Apply color - either fixed or by time remaining
-                            if db.debuffDurationColorByTime then
-                                -- Calculate remaining percentage for color (50% elapsed = 50% remaining)
-                                local percentRemaining = 0.5
-                                local r, g, b = DF:GetDurationColorByPercent(percentRemaining)
-                                icon.nativeCooldownText:SetTextColor(r, g, b, 1)
-                            else
-                                local durationColor = db.debuffDurationColor or {r = 1, g = 1, b = 1}
-                                icon.nativeCooldownText:SetTextColor(durationColor.r, durationColor.g, durationColor.b, 1)
-                            end
-                        end
-                    end
-                end
-                
-                -- Hide expiring indicators for debuffs (not supported)
-                if icon.expiringTint then icon.expiringTint:Hide() end
-                if icon.expiringBorderGate then icon.expiringBorderGate:SetAlpha(0) end
-                
-                icon.testAuraData = debuffData
-                icon:Show()
-            else
-                icon.testAuraData = nil
-                if icon.expiringTint then icon.expiringTint:Hide() end
-                if icon.expiringBorderGate then icon.expiringBorderGate:SetAlpha(0) end
-                icon:Hide()
-            end
-        end
-        
-        -- Store displayed count and reposition for center growth
-        frame.debuffDisplayedCount = debuffLimit
-        local debuffGrowth = db.debuffGrowth or "RIGHT_UP"
-        local debuffPrimary = strsplit("_", debuffGrowth)
-        if debuffPrimary == "CENTER" and debuffLimit > 0 and DF.RepositionCenterGrowthIcons then
-            DF:RepositionCenterGrowthIcons(frame, frame.debuffIcons, "DEBUFF", debuffLimit)
-        end
-    end
-    
-    -- Also store buff count and reposition (buff loop is earlier, do it here for consistency)
-    if frame.buffIcons then
-        frame.buffDisplayedCount = buffLimit
-        local buffGrowth = db.buffGrowth or "LEFT_UP"
-        local buffPrimary = strsplit("_", buffGrowth)
-        if buffPrimary == "CENTER" and buffLimit > 0 and DF.RepositionCenterGrowthIcons then
-            DF:RepositionCenterGrowthIcons(frame, frame.buffIcons, "BUFF", buffLimit)
-        end
-    end
 end
 
 -- Update test boss debuffs (simulated Private Auras)
@@ -3892,7 +3593,7 @@ end
 
 -- Test missing buff icon
 function DF:UpdateTestMissingBuff(frame)
-    if not frame or not frame.missingBuffFrame then return end
+    if not frame then return end
 
     local db = DF:GetFrameDB(frame)
 
@@ -3903,68 +3604,10 @@ function DF:UpdateTestMissingBuff(frame)
     -- test session (empty groups park the badges in their windows); the drive's
     -- unit guards are test-bypassed (fabricated units fail every unit API).
     if DF.FactoryOwnsMissingBuff and DF:FactoryOwnsMissingBuff(db) then
-        frame.missingBuffFrame:Hide()
         DF:DriveMissingBuffFactory(frame, db)
         return
     end
 
-    -- Show a test missing buff icon
-    if db.missingBuffIconEnabled then
-        -- Use Arcane Intellect as test icon
-        frame.missingBuffIcon:SetTexture("Interface\\Icons\\Spell_Holy_MagicalSentry")
-        
-        -- Apply settings
-        local iconSize = db.missingBuffIconSize or 24
-        local scale = db.missingBuffIconScale or 1.5
-        local anchor = db.missingBuffIconAnchor or "CENTER"
-        local x = db.missingBuffIconX or 0
-        local y = db.missingBuffIconY or 0
-        local borderSize = db.missingBuffIconBorderSize or 2
-
-        -- Apply pixel perfect
-        if db.pixelPerfect then
-            iconSize = DF:PixelPerfect(iconSize)
-            borderSize = DF:PixelPerfect(borderSize)
-        end
-        
-        -- Set icon size
-        frame.missingBuffFrame:SetSize(iconSize, iconSize)
-        
-        -- Border via the unified DF.Border backend — mirrors the live
-        -- UpdateMissingBuffIcon path (Icons.lua) so toggling Show Border / size /
-        -- colour / style reflects live in test mode.  The legacy
-        -- missingBuffBorder* edge textures this used to poke no longer exist
-        -- after the DF.Border migration (Create.lua builds frame.missingBuffBorder).
-        local showBorder = db.missingBuffIconShowBorder ~= false
-        if frame.missingBuffBorder then
-            -- frame lets BuildSpec resolve Class/Role colour from test-unit data.
-            local spec = DF.Border:BuildSpec(db, "missingBuffIcon", { unit = frame.unit, frame = frame, iconMode = true })
-            spec.enabled = showBorder
-            spec.size    = borderSize
-            DF.Border:Apply(frame.missingBuffBorder, spec)
-        end
-        local artInset = showBorder and borderSize or 0
-        frame.missingBuffIcon:ClearAllPoints()
-        frame.missingBuffIcon:SetPoint("TOPLEFT", artInset, -artInset)
-        frame.missingBuffIcon:SetPoint("BOTTOMRIGHT", -artInset, artInset)
-        
-        frame.missingBuffFrame:SetScale(scale)
-        frame.missingBuffFrame:ClearAllPoints()
-        frame.missingBuffFrame:SetPoint(anchor, frame, anchor, x, y)
-        
-        -- Apply frame level (controls layering within strata)
-        local frameLevel = db.missingBuffIconFrameLevel or 0
-        if frameLevel == 0 then
-            -- "Auto" - use default relative to content overlay
-            frame.missingBuffFrame:SetFrameLevel(frame.contentOverlay:GetFrameLevel() + 10)
-        else
-            frame.missingBuffFrame:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
-        end
-        
-        frame.missingBuffFrame:Show()
-    else
-        frame.missingBuffFrame:Hide()
-    end
 end
 
 function DF:UpdateAllTestMissingBuff()
@@ -4015,104 +3658,9 @@ local TEST_DEFENSIVE_SPELLS = {
     116849,   -- Life Cocoon
 }
 
--- Render a single test defensive icon with all styling
-local function RenderTestDefensiveIcon(icon, db, textureID, iconSize, borderSize, borderColor, showBorder, showDuration, durationScale, durationFont, durationOutline, durationX, durationY, durationColor, elapsed, duration)
-    -- Set texture
-    local texture = nil
-    if C_Spell and C_Spell.GetSpellTexture then
-        texture = C_Spell.GetSpellTexture(textureID)
-    end
-    if not texture then
-        texture = textureID
-    end
-    icon.texture:SetTexture(texture)
-
-    -- Set a looping cooldown
-    local startTime = GetTime() - elapsed
-    icon.cooldown:SetCooldown(startTime, duration)
-    icon.cooldown:Show()
-    icon.cooldown:SetHideCountdownNumbers(not showDuration)
-
-    -- Swipe toggle
-    local showSwipe = not db.defensiveIconHideSwipe
-    icon.cooldown:SetDrawSwipe(showSwipe)
-
-    -- Find and style the native cooldown text
-    if not icon.nativeCooldownText then
-        local regions = {icon.cooldown:GetRegions()}
-        for _, region in ipairs(regions) do
-            if region and region.GetObjectType and region:GetObjectType() == "FontString" then
-                icon.nativeCooldownText = region
-                break
-            end
-        end
-    end
-
-    -- Apply duration text styling
-    if icon.nativeCooldownText then
-        local durationSize = 10 * durationScale
-        DF:SafeSetFont(icon.nativeCooldownText, durationFont, durationSize, durationOutline)
-        icon.nativeCooldownText:ClearAllPoints()
-        icon.nativeCooldownText:SetPoint("CENTER", icon, "CENTER", durationX, durationY)
-
-        -- Color by time remaining
-        if db.defensiveIconDurationColorByTime then
-            local percentRemaining = 1 - (elapsed / duration)
-            local r, g, b = DF:GetDurationColorByPercent(percentRemaining)
-            icon.nativeCooldownText:SetTextColor(r, g, b, 1)
-        else
-            icon.nativeCooldownText:SetTextColor(durationColor.r, durationColor.g, durationColor.b, 1)
-        end
-    end
-
-    -- Border (unified DF.Border backend). ctx.frame is the test unit frame
-    -- (carries dfIsTestFrame + index + isRaidFrame) so Class/Role resolvers
-    -- can pull the test class/role from GetTestUnitData. Stage 4.0.
-    -- spec.color is NOT overridden — BuildSpec resolves it per the
-    -- ColorSource setting; a static override would clobber CLASS/ROLE.
-    local artInset = showBorder and borderSize or 0
-    if icon.border then
-        local spec = DF.Border:BuildSpec(db, "defensiveIcon", {
-            frame = icon.unitFrame,
-            iconMode = true,
-        })
-        spec.enabled = showBorder
-        spec.size    = borderSize  -- already pixel-perfected above
-        DF.Border:Apply(icon.border, spec)
-    end
-    icon.texture:ClearAllPoints()
-    icon.texture:SetPoint("TOPLEFT", artInset, -artInset)
-    icon.texture:SetPoint("BOTTOMRIGHT", -artInset, artInset)
-
-    -- Size
-    icon:SetSize(iconSize, iconSize)
-
-    -- Clear stack count (ensure font is set first)
-    if icon.count then
-        local hasFont = false
-        local success, result = pcall(function() return icon.count:GetFont() end)
-        if success and result then hasFont = true end
-        if not hasFont then
-            DF:SafeSetFont(icon.count, "Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
-        end
-        icon.count:SetText("")
-    end
-
-    -- Disable clicks
-    if not InCombatLockdown() then
-        if icon.SetMouseClickEnabled then
-            icon:SetMouseClickEnabled(false)
-        end
-    end
-
-    icon:Show()
-end
-
--- Test defensive icon — supports multiple icons with growth/wrap layout
--- (positioning goes through the shared DF:GetDefensiveBarLayout /
--- PositionDefensiveBarIcon / ApplyDefensiveBarCenterGrowth in Frames/Icons.lua)
+-- Test defensive preview: drive the real 12.1 defensive container.
 function DF:UpdateTestDefensiveBar(frame, testData)
-    if not frame or not frame.defensiveIcon then return end
+    if not frame then return end
 
     local db = DF:GetFrameDB(frame)
 
@@ -4121,10 +3669,6 @@ function DF:UpdateTestDefensiveBar(frame, testData)
     -- fonts are live-true; the legacy pool below is a dead pipeline here.
     -- Role-scaled count mirrors the legacy preview shape (tank 3 / healer 1).
     if DF.FactoryOwnsDefensiveRow and DF:FactoryOwnsDefensiveRow(db) then
-        frame.defensiveIcon:Hide()
-        if frame.defensiveBarIcons then
-            for _, icon in pairs(frame.defensiveBarIcons) do icon:Hide() end
-        end
         local role = testData and testData.role
         local show = db.defensiveIconEnabled and db.testShowExternalDef
             and (role == "TANK" or role == "HEALER")
@@ -4151,71 +3695,6 @@ function DF:UpdateTestDefensiveBar(frame, testData)
         return
     end
 
-    -- Show on specific test frames (e.g. tank and healer)
-    local showIcon = testData and (testData.role == "TANK" or testData.role == "HEALER")
-
-    if db.defensiveIconEnabled and db.testShowExternalDef and showIcon then
-        -- Shared layout math — the exact code live uses (pixel-perfect scale
-        -- fold + pixel-grid snap included, which the old test copy skipped).
-        local L = DF:GetDefensiveBarLayout(db)
-        local iconSize, borderSize = L.iconSize, L.borderSize
-        local maxDefs = L.maxDefs
-        local borderColor = db.defensiveIconBorderColor or {r = 0, g = 0.8, b = 0, a = 1}
-        local showDuration = db.defensiveIconShowDuration ~= false
-        local showBorder = db.defensiveIconShowBorder ~= false
-
-        -- Duration text settings
-        local durationScale = db.defensiveIconDurationScale or 1.0
-        local durationFont = db.defensiveIconDurationFont or "Fonts\\FRIZQT__.TTF"
-        local durationOutline = db.defensiveIconDurationOutline or "OUTLINE"
-        if durationOutline == "NONE" then durationOutline = "" end
-        local durationX = db.defensiveIconDurationX or 0
-        local durationY = db.defensiveIconDurationY or 0
-        local durationColor = db.defensiveIconDurationColor or {r = 1, g = 1, b = 1}
-
-        -- Determine how many defensives to show based on role
-        -- Tanks show more defensives, healers show fewer
-        local numDefs
-        if testData.role == "TANK" then
-            numDefs = math.min(3, maxDefs)
-        else
-            numDefs = math.min(1, maxDefs)
-        end
-
-        -- Render each test defensive icon
-        for i = 1, numDefs do
-            local icon = DF:GetOrCreateDefensiveBarIcon(frame, i)
-            if icon then
-                -- Each icon gets a different spell texture and staggered cooldown timing
-                local spellIndex = ((i - 1) % #TEST_DEFENSIVE_SPELLS) + 1
-                local duration = 6 + (i * 2)  -- Stagger durations: 8, 10, 12, 14
-                local elapsed = GetTime() % duration
-
-                RenderTestDefensiveIcon(icon, db, TEST_DEFENSIVE_SPELLS[spellIndex], iconSize, borderSize, borderColor, showBorder, showDuration, durationScale, durationFont, durationOutline, durationX, durationY, durationColor, elapsed, duration)
-                DF:PositionDefensiveBarIcon(frame, db, L, icon, i)
-            end
-        end
-
-        -- CENTER growth: second pass to center icons within each row/column
-        DF:ApplyDefensiveBarCenterGrowth(frame, L, numDefs)
-
-        -- Hide remaining icons beyond what we're showing
-        for i = numDefs + 1, maxDefs do
-            if i == 1 then
-                frame.defensiveIcon:Hide()
-            elseif frame.defensiveBarIcons and frame.defensiveBarIcons[i] then
-                frame.defensiveBarIcons[i]:Hide()
-            end
-        end
-    else
-        -- Hide all defensive icons
-        frame.defensiveIcon:Hide()
-        if frame.defensiveBarIcons then
-            for _, icon in pairs(frame.defensiveBarIcons) do
-                icon:Hide()
-            end
-        end
-    end
 end
 
 function DF:UpdateAllTestDefensiveBar()

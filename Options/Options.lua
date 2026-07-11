@@ -5855,11 +5855,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             onChange   = function() DF:LightweightUpdateAuraDurationText("buff") end,
             onDrag     = function() DF:LightweightUpdateAuraDurationText("buff") end,
         })
-        local durColor = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Color by Time Remaining"], db, "buffDurationColorByTime", function() self:RefreshStates(); DF:RefreshDurationColorSettings(); DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
+        local durColor = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Color by Time Remaining"], db, "buffDurationColorByTime", function() self:RefreshStates(); DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
         durColor.disableOn = function(d) return not d.buffShowDuration end
-        local durHideAbove = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Above Threshold"], db, "buffDurationHideAboveEnabled", function() DF:RefreshDurationColorSettings(); DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
+        local durHideAbove = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Above Threshold"], db, "buffDurationHideAboveEnabled", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
         durHideAbove.disableOn = function(d) return not d.buffShowDuration end
-        local durHideAboveSlider = durationGroup:AddWidget(GUI:CreateSlider(self.child, L["Hide Above (seconds)"], 1, 60, 1, db, "buffDurationHideAboveThreshold", nil, function() DF:RefreshDurationColorSettings(); DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 55)
+        local durHideAboveSlider = durationGroup:AddWidget(GUI:CreateSlider(self.child, L["Hide Above (seconds)"], 1, 60, 1, db, "buffDurationHideAboveThreshold", nil, function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 55)
         durHideAboveSlider.disableOn = function(d) return not d.buffShowDuration or not d.buffDurationHideAboveEnabled end
         -- Grey the whole group when Buffs are off (composes with the per-control
         -- buffShowDuration gates), matching Settings/Position/Grid.
@@ -6122,11 +6122,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         durY.disableOn = function(d) return not d.debuffShowDuration end
         local durColorPick = durationGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Duration Color"], db, "debuffDurationColor", false, function() DF:LightweightUpdateAuraDurationText("debuff") end, function() DF:LightweightUpdateAuraDurationText("debuff") end, true), 30)
         durColorPick.disableOn = function(d) return not d.debuffShowDuration or d.debuffDurationColorByTime end
-        local durColor = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Color by Time Remaining"], db, "debuffDurationColorByTime", function() self:RefreshStates(); DF:RefreshDurationColorSettings(); DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
+        local durColor = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Color by Time Remaining"], db, "debuffDurationColorByTime", function() self:RefreshStates(); DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
         durColor.disableOn = function(d) return not d.debuffShowDuration end
-        local durHideAbove = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Above Threshold"], db, "debuffDurationHideAboveEnabled", function() DF:RefreshDurationColorSettings(); DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
+        local durHideAbove = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Above Threshold"], db, "debuffDurationHideAboveEnabled", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
         durHideAbove.disableOn = function(d) return not d.debuffShowDuration end
-        local durHideAboveSlider = durationGroup:AddWidget(GUI:CreateSlider(self.child, L["Hide Above (seconds)"], 1, 60, 1, db, "debuffDurationHideAboveThreshold", nil, function() DF:RefreshDurationColorSettings(); DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 55)
+        local durHideAboveSlider = durationGroup:AddWidget(GUI:CreateSlider(self.child, L["Hide Above (seconds)"], 1, 60, 1, db, "debuffDurationHideAboveThreshold", nil, function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 55)
         durHideAboveSlider.disableOn = function(d) return not d.debuffShowDuration or not d.debuffDurationHideAboveEnabled end
         -- Grey the whole group when Debuffs are off (composes with the per-control
         -- debuffShowDuration gates), matching Settings/Position/Grid.

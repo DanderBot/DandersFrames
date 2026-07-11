@@ -94,12 +94,6 @@ local function CreateTestFrame(index, isRaid)
         DF:ApplyFrameStyle(frame)
     end
     
-    -- Apply aura layouts to set fonts on aura icons
-    if DF.ApplyAuraLayout then
-        DF:ApplyAuraLayout(frame, "BUFF")
-        DF:ApplyAuraLayout(frame, "DEBUFF")
-    end
-    
     -- Binding tooltip on hover
     frame:SetScript("OnEnter", function(self)
         if DF.ShowBindingTooltip then DF:ShowBindingTooltip(self) end
