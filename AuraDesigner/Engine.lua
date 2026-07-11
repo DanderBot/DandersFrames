@@ -1208,4 +1208,16 @@ function Engine:ForceRefreshAllFrames()
             end
         end
     end
+
+    -- 12.1: the native factory buff row DERIVES its Aura-Designer dedup set from the AD
+    -- config at build time, so an AD config change (or spec change, which calls this) must
+    -- re-drive the buff row for the derived exclusion to follow. Mirror the aura-blacklist
+    -- page's poke: InvalidateAuraLayout bumps the aura layout version and drives the factory
+    -- rows (RefreshFactoryRows) — DriveBuffFactory then rebuilds only when the excluded set
+    -- actually moved (sig-gated). Gated on the factory being supported so the pre-12.1
+    -- legacy path is untouched (RefreshFactoryRows is a no-op there anyway).
+    if DF.AuraContainer and DF.AuraContainer.IsSupported and DF.AuraContainer.IsSupported()
+        and DF.InvalidateAuraLayout then
+        DF:InvalidateAuraLayout()
+    end
 end

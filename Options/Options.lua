@@ -5640,11 +5640,20 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local dedupGroup = GUI:CreateSettingsGroup(self.child, 280)
         dedupGroup:AddWidget(GUI:CreateHeader(self.child, L["Deduplication"]), 40)
         dedupGroup:AddWidget(GUI:CreateLabel(self.child, L["Hide buffs from the buff bar when they are already displayed by the Defensive Bar or Aura Designer."], 250), 45)
-        dedupGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Duplicate Buffs"], db, "buffDeduplicateDefensives", function()
+        local dedupCb = GUI:CreateCheckbox(self.child, L["Hide Duplicate Buffs"], db, "buffDeduplicateDefensives", function()
+            -- Bump the aura layout version so the factory buff row rebuilds with the new
+            -- exclusion set (InvalidateAuraLayout -> RefreshFactoryRows -> DriveBuffFactory);
+            -- UpdateAllAuras re-scans for the legacy (pre-12.1) dedup path.
+            DF:InvalidateAuraLayout()
             DF:UpdateAllAuras()
-        end), 30)
+        end)
+        -- On the 12.1 native buff row only the Aura Designer half of this toggle is
+        -- expressible (the Defensive Bar's contents aren't enumerable as spell IDs
+        -- read-free). The tooltip states the modern behaviour + the known multi-filter
+        -- duplicate limitation.
+        dedupCb.tooltip = L["Auras shown by the Aura Designer are hidden from the buff bar so they don't appear twice. A buff that matches several buff filters can still show more than once."]
+        dedupGroup:AddWidget(dedupCb, 30)
         Add(dedupGroup, nil, 1)
-        GUI:BlockControl12_1(dedupGroup, "roadmap", { id = "buffs:dedup", page = L["Buffs"], when = function(d) return DF:FactoryOwnsBuffRow(d) end })
 
         AddSpace(10, "both")
 

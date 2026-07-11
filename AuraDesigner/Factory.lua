@@ -90,6 +90,61 @@ function DF:BuildADIdentityFilters(spec, auraName)
 end
 
 -- ============================================================
+-- BUFF-BAR DEDUP UNION  (derived — the exclusion set the buff row folds in)
+-- The union of every spell ID tracked by ANY configured Aura Designer indicator for the
+-- frame's ACTIVE spec. Recomputed from the AD config (the source of truth) whenever the
+-- buff row rebuilds, so it stays correct across indicator add/remove, whole-aura delete,
+-- profile import/switch and spec change with NO stored state and NO refcount. Read-free
+-- (static config only): walks adDB.auras[spec] and unions BuildADIdentityFilters (primary
+-- + alternates) for every aura carrying at least one configured indicator of ANY type.
+-- "Tracked" = the aura has an indicator the factory actually RENDERS on 12.1: a non-empty
+-- placed-indicator list (icon/square/bar) or a rendered frame-level key (border / healthbar /
+-- background). Legacy counted EVERY type (nametext/healthtext/framealpha/sound too) and
+-- could — it rendered them all. On the factory path those are casualties (or P4.5-pending
+-- for sound) and render NOTHING, so counting them would hide the aura from the buff bar
+-- with no AD visual replacing it — invisible everywhere. Add each type back here if/when
+-- it is recovered. Returns nil when AD is disabled, off-spec, empty, or the factory doesn't
+-- own AD for this db (caller then contributes nothing). BUFF (HELPFUL) only: every AD entry
+-- is a helpful aura, and a harmful map is inert on friendly frames.
+local function auraHasTrackedIndicator(auraCfg)
+    if type(auraCfg) ~= "table" then return false end
+    local inds = auraCfg.indicators
+    if inds and #inds > 0 then return true end
+    return (auraCfg.border or auraCfg.healthbar or auraCfg.background) and true or false
+end
+
+function DF:GetADTrackedSpellIDs(frame, db)
+    if not frame then return nil end
+    -- Gate: AD must be enabled for this frame AND the native factory must own AD for this
+    -- mode's db (mirror the render gates). Off on either -> contribute nothing.
+    if not (DF.IsAuraDesignerEnabled and DF:IsAuraDesignerEnabled(frame)) then return nil end
+    if not (DF.FactoryOwnsAD and DF:FactoryOwnsAD(db)) then return nil end
+
+    local adDB = DF.ResolveAuraDesigner and DF:ResolveAuraDesigner(frame)
+    if not adDB or not adDB.enabled then return nil end
+
+    -- Active spec resolved exactly as Factory:SyncFrame does (auto -> player's live spec).
+    local Engine = DF.AuraDesigner and DF.AuraDesigner.Engine
+    local spec = Engine and Engine.ResolveSpec and Engine:ResolveSpec(adDB)
+    if not spec then return nil end
+
+    local specAuras = adDB.auras and adDB.auras[spec]
+    if not specAuras then return nil end
+
+    local union
+    for auraName, auraCfg in pairs(specAuras) do
+        if auraHasTrackedIndicator(auraCfg) then
+            local f = DF:BuildADIdentityFilters(spec, auraName)
+            if f and f.includeSpellIDs then
+                union = union or {}
+                for id in pairs(f.includeSpellIDs) do union[id] = true end
+            end
+        end
+    end
+    return union   -- nil when nothing is tracked -> caller unions nothing
+end
+
+-- ============================================================
 -- HELPERS
 -- ============================================================
 

@@ -2578,6 +2578,26 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
                 end
             end
         end
+        -- Aura Designer dedup (derived, read-free). When the legacy "Hide Duplicate Buffs"
+        -- toggle is on AND the native factory owns AD for this frame, hide every aura
+        -- tracked by ANY Aura Designer indicator from the buff bar so it doesn't render
+        -- twice. The set is RECOMPUTED from the AD config every time the row rebuilds
+        -- (GetADTrackedSpellIDs) — no stored-blacklist write, no refcount — so it is
+        -- automatically correct across indicator add/remove, aura delete, profile
+        -- switch and spec change. UNIONED into (never replacing) the manual blacklist
+        -- map above, and folded into the row signature via excludeSig, so a change in
+        -- the tracked set forces a buff-row Rebuild (see buffFactorySig). On 12.1 only
+        -- the AD half of the legacy toggle is expressible — the defensive row's contents
+        -- aren't enumerable as spell IDs read-free (category-filter driven).
+        if db.buffDeduplicateDefensives and opts.frame and DF.GetADTrackedSpellIDs then
+            local adIDs = DF:GetADTrackedSpellIDs(opts.frame, db)
+            if adIDs then
+                candidateFilters = candidateFilters or {}
+                local map = candidateFilters.excludeSpellIDs or {}
+                candidateFilters.excludeSpellIDs = map
+                for id in pairs(adIDs) do map[id] = true end
+            end
+        end
     end
 
     -- Native sort: the legacy Sort Order dropdown (directBuffSortOrder) mapped onto
@@ -2680,6 +2700,7 @@ function DF:DriveBuffFactory(frame, db)
     if not h then
         h = DF.AuraContainer:Create(frame, DF:BuildAuraRowConfig(db, "buff", {
             unit = frame.unit,
+            frame = frame,   -- for the derived Aura Designer buff-bar dedup union
             filterList = BuildDirectBuffFilters(db),
         }))
         frame.buffFactory = h
@@ -2733,6 +2754,7 @@ function DF:DriveBuffFactory(frame, db)
         frame.dfBuffFactoryVersion = ver
         local cfg = DF:BuildAuraRowConfig(db, "buff", {
             unit = frame.unit,
+            frame = frame,   -- for the derived Aura Designer buff-bar dedup union
             filterList = BuildDirectBuffFilters(db),
         })
         -- Re-apply the z-order level (buffs default to +40 = legacy parity). Not part of the sig.

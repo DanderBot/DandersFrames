@@ -460,6 +460,7 @@ L["Aura Filters only affect the"] = true
 L["Auras"] = true
 L["Auras Alpha"] = true
 L["Auras displayed in the"] = true
+L["Auras shown by the Aura Designer are hidden from the buff bar so they don't appear twice. A buff that matches several buff filters can still show more than once."] = true
 L["Auto (Spec Default)"] = true
 L["Auto Layouts"] = true
 L["Auto Layouts is a Raid-only feature. Switch to Raid mode to configure automatic layout switching based on content type and group size."] = true

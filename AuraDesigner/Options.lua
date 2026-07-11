@@ -7368,6 +7368,17 @@ function DF:AuraDesigner_RefreshPage()
     if buffsPage and buffsPage.RefreshStates then
         buffsPage:RefreshStates()
     end
+
+    -- 12.1: the native factory buff row DERIVES its Aura-Designer dedup set from the AD
+    -- config at build time. Indicator add/remove (and other config mutations) funnel
+    -- through this refresh but do NOT otherwise re-drive live frames, so poke the buff
+    -- row here — mirror the aura-blacklist page (InvalidateAuraLayout -> RefreshFactoryRows).
+    -- DriveBuffFactory rebuilds only when the excluded set actually moved (sig-gated), so a
+    -- navigation-only refresh is a cheap no-op. Factory-gated so the pre-12.1 path is untouched.
+    if DF.AuraContainer and DF.AuraContainer.IsSupported and DF.AuraContainer.IsSupported()
+        and DF.InvalidateAuraLayout then
+        DF:InvalidateAuraLayout()
+    end
 end
 
 -- ============================================================
