@@ -2446,6 +2446,14 @@ local function GetDurationFormatter(format, hideAboveT, colorByTime)
     return durationFormatterCache[key] or nil
 end
 
+-- Shared with the Aura Designer factory (P4.4): its placed icon/square/bar duration text
+-- reuses the EXACT same secret-safe colour-by-time BUCKET formatter as the #205 buff/debuff
+-- rows (|cRRGGBB escapes baked into the native NumericRuleFormatter bands, evaluated C-side).
+-- Cached, so repeated SyncFrame calls return the same shared formatter object.
+function DF:GetFactoryDurationFormatter(format, hideAboveT, colorByTime)
+    return GetDurationFormatter(format, hideAboveT, colorByTime)
+end
+
 -- ⚠ STACKS FORMATTERS ARE FORBIDDEN on container rows — do not re-add one.
 -- (Removed 2026-07-09; was the alpha.2 in-combat container freeze.) Blizzard's
 -- ApplyApplicationCount calls formatter:FormatNumber(applications) in LUA with the

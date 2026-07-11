@@ -4146,15 +4146,22 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             GUI:BlockControl12_1(expiringGroup, "limitation",
                 { id = "ad:" .. typeKey .. ":expiring", page = L["Aura Designer"], when = ADgate })
         end
-        --   * Duration "Colour by Time" — temporarily inert (the factory nils the duration
-        --     colour until the P4.4 bucket formatter lands); roadmap, remove in P4.4.
-        if durColorByTimeCtl then
-            GUI:BlockControl12_1(durColorByTimeCtl, "roadmap",
-                { id = "ad:" .. typeKey .. ":durationColorByTime", page = L["Aura Designer"], when = ADgate })
-        end
+        --   * Duration "Colour by Time" — P4.4 SHIPPED: the duration text now colours by
+        --     time via the native bucket formatter (C-side |c escapes), so the roadmap
+        --     overlay is gone and the control is fully editable under the factory.
     elseif typeKey == "bar" then
-        -- P4.4: remove when the bar indicator ports to the factory.
-        BlockGroups("roadmap", "ad:bar")
+        -- P4.4 SHIPPED: the bar renders on the container engine (native SetDurationBar fill
+        -- + texture/colour/orientation + border + duration text). The whole-type roadmap
+        -- overlay is gone. One surgical block remains:
+        --   * Expiring — permanent limitation. The whole group (Bar "Color by Time"/FILL
+        --     colour-by-time, Expiring Colour Override, Expiring Tint, threshold) is
+        --     remaining-time-driven, which is unreadable on the container path. (The
+        --     DURATION-TEXT colour-by-time lives in the separate Duration Text group and
+        --     stays editable — it ports via the bucket formatter, same as icon/square.)
+        if expiringGroup then
+            GUI:BlockControl12_1(expiringGroup, "limitation",
+                { id = "ad:bar:expiring", page = L["Aura Designer"], when = ADgate })
+        end
     elseif typeKey == "sound" then
         -- P4.5: remove when the sound indicator ports to the factory.
         BlockGroups("roadmap", "ad:sound")

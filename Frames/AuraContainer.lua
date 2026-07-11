@@ -423,17 +423,49 @@ local function styleButton_regions(slot, config)
         DF.TextStyle:Apply(slot.dfStack, stackSpec, slot.dfStackHolder)
     end
 
-    -- DURATION bar region (native SetDurationBar bind is in bindNative).
+    -- DURATION bar region (native SetDurationBar bind is in bindNative). Two shapes:
+    --   * barSpec.fill (Aura Designer bar indicator, P4.4): the StatusBar IS the slot
+    --     content, filling it edge-to-edge — no icon, no square, no swipe. Native
+    --     SetDurationBar drives the value from the aura's Duration object (read-free).
+    --     Texture / fill-colour / orientation / reverse-fill / background from config.
+    --   * legacy strip (dormant #205 duration-bar option): a short bar hung below the icon.
     local barSpec = style.bar
     if isRow and barSpec and barSpec.show then
         if not slot.dfBar then
             slot.dfBar = CreateFrame("StatusBar", nil, slot)
             slot.dfBar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
-            slot.dfBar:SetPoint("TOPLEFT", slot, "BOTTOMLEFT", 0, -2)
-            slot.dfBar:SetPoint("TOPRIGHT", slot, "BOTTOMRIGHT", 0, -2)
+            slot.dfBar:SetMinMaxValues(0, 1)   -- native SetDurationBar drives SetValue in [0,1]
         end
-        slot.dfBar:SetStatusBarColor(readColor(barSpec.color, 0.2, 0.9, 0.3, 1))
-        slot.dfBar:SetHeight(barSpec.height or 4)
+        local sb = slot.dfBar
+        if barSpec.fill then
+            -- Re-anchor to fill the slot every pass (idempotent; safe on ApplyStyle).
+            sb:ClearAllPoints()
+            sb:SetAllPoints(slot)
+            if barSpec.texture and DF.SafeSetStatusBarTexture then
+                DF:SafeSetStatusBarTexture(sb, barSpec.texture)
+            end
+            if barSpec.orientation and sb.SetOrientation then sb:SetOrientation(barSpec.orientation) end
+            if sb.SetReverseFill then sb:SetReverseFill(barSpec.reverseFill and true or false) end
+            -- Background texture child (drawn under the fill). Create-once; recolour live.
+            if barSpec.bgColor or barSpec.bgTexture then
+                if not slot.dfBarBG then
+                    slot.dfBarBG = sb:CreateTexture(nil, "BACKGROUND")
+                    slot.dfBarBG:SetAllPoints(sb)
+                end
+                if barSpec.bgTexture then slot.dfBarBG:SetTexture(barSpec.bgTexture) end
+                slot.dfBarBG:SetVertexColor(readColor(barSpec.bgColor, 0.15, 0.15, 0.15, 0.8))
+            elseif slot.dfBarBG then
+                slot.dfBarBG:SetVertexColor(0, 0, 0, 0)   -- background cleared
+            end
+            sb:SetStatusBarColor(readColor(barSpec.color, 1, 1, 1, 1))
+        else
+            if sb:GetNumPoints() == 0 then
+                sb:SetPoint("TOPLEFT", slot, "BOTTOMLEFT", 0, -2)
+                sb:SetPoint("TOPRIGHT", slot, "BOTTOMRIGHT", 0, -2)
+            end
+            sb:SetStatusBarColor(readColor(barSpec.color, 0.2, 0.9, 0.3, 1))
+            sb:SetHeight(barSpec.height or 4)
+        end
     end
 
     -- SPELL name region (native SetSpellName bind is in bindNative).

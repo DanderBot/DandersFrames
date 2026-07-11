@@ -10,13 +10,15 @@ local addonName, DF = ...
 -- identity comes from the STATIC per-spec spell-ID whitelist (Config.SpellIDs), and
 -- Blizzard drives each slot's secret show/hide — we only attach art. Zero secret reads.
 --
--- SCOPE (this file, P4.0 scaffold + P4.1 + P4.2 + P4.3): gates, identity->includeSpellIDs,
+-- SCOPE (this file, P4.0 scaffold + P4.1 + P4.2 + P4.3 + P4.4): gates, identity->includeSpellIDs,
 -- the frame-level indicators that CAN be driven read-free — HEALTH-BAR (filled mirror + flat
--- tint), BACKGROUND tint, static BORDER — and the PLACED ICON / SQUARE indicators (native
--- SetIcon / solid-colour fill + native cooldown + native stacks + static border, one
--- 1-slot container per configured indicator, many coexisting). framealpha / nametext /
--- healthtext are 12.1 casualties (see NOTES at the file foot). The BAR placed indicator is
--- P4.4. The legacy engine stays fully intact behind DF:UseFactoryForAD.
+-- tint), BACKGROUND tint, static BORDER — and the PLACED ICON / SQUARE / BAR indicators (native
+-- SetIcon / solid-colour fill + native cooldown + native stacks + static border for icon/square;
+-- a native SetDurationBar-driven StatusBar for the bar, one 1-slot container per configured
+-- indicator, many coexisting). Placed duration text supports colour-by-time via the #205 discrete
+-- BUCKET formatter (C-side |c escapes — no Lua time read). framealpha / nametext / healthtext are
+-- 12.1 casualties (see NOTES at the file foot). Sound + showWhenMissing are P4.5. The legacy
+-- engine stays fully intact behind DF:UseFactoryForAD.
 --
 -- COMBAT / SECRET obligations (delegated to the DF.AuraContainer handle, the #205-proven
 -- path): containers are created/enabled OUT of combat and deferred to PLAYER_REGEN_ENABLED
@@ -453,6 +455,49 @@ local function buildPlacedLayout(indicator)
     }
 end
 
+-- Shared styleable duration-text spec for EVERY placed indicator (icon / square / bar). The
+-- countdown is filled secret-safe by native SetDurationText (Blizzard formats the remaining
+-- time C-side; no Lua read). "Color by Time Remaining" (P4.4) routes through the #205 discrete
+-- BUCKET formatter (DF:GetFactoryDurationFormatter -> |cRRGGBB escapes baked into the native
+-- NumericRuleFormatter bands, evaluated C-side against the SECRET remaining time: red <5s /
+-- orange <15s / yellow <60s / green fresh — the same thresholds the buff/debuff rows use). The
+-- smooth per-percent curve stays dead on container buttons (buckets only). When colour-by-time
+-- owns the colour the spec leaves `color` nil so DF.TextStyle never stomps the escapes; a static
+-- duration colour applies only when colour-by-time is off. NOTE: the colorByTime flag is part of
+-- the STRUCTURAL signature — SetDurationText binds the formatter ONCE per slot, so a toggle must
+-- Rebuild the slot to swap it (see durationFmtKey + the struct sigs).
+local function buildDurationTextSpec(indicator, defaultShow)
+    local showDuration = indicator.showDuration
+    if showDuration == nil then showDuration = defaultShow end
+    if not showDuration then return nil end
+    local dOutline = indicator.durationOutline or "OUTLINE"
+    if dOutline == "NONE" then dOutline = "" end
+    local colorByTime = indicator.durationColorByTime and true or false
+    local formatter = (colorByTime and DF.GetFactoryDurationFormatter)
+        and DF:GetFactoryDurationFormatter("NUMBER", nil, true) or nil
+    return {
+        show      = true,
+        font      = indicator.durationFont,
+        size      = 10 * (tonumber(indicator.durationScale) or 1),
+        outline   = dOutline,
+        anchor    = indicator.durationAnchor or "CENTER",
+        offsetX   = tonumber(indicator.durationX) or 0,
+        offsetY   = tonumber(indicator.durationY) or 0,
+        formatter = formatter,   -- nil unless colour-by-time; |c escapes own the colour then
+        color     = (not colorByTime) and indicator.durationColor or nil,
+    }
+end
+
+-- Stable duration-text format key for the STRUCTURAL signature: the native SetDurationText
+-- formatter is creation-frozen (bind-once), so a colour-by-time toggle must Rebuild the slot
+-- to swap it. "" when duration text is off. Mirrors #205's dur.formatKey.
+local function durationFmtKey(indicator, defaultShow)
+    local showDuration = indicator.showDuration
+    if showDuration == nil then showDuration = defaultShow end
+    if not showDuration then return "" end
+    return "NUMBER" .. (indicator.durationColorByTime and ":C" or "")
+end
+
 -- Build the style table for a placed icon/square. icon = native spell texture (unless
 -- hideIcon = text-only); square = solid config colour fill (no SetIcon). Both keep the
 -- native cooldown swipe, the styleable duration-text fontstring, the native stack count,
@@ -480,32 +525,13 @@ local function buildPlacedStyle(indicator, isSquare, borderSpec)
     -- (SetDurationCooldown) — no Lua time read. hideSwipe toggles the swipe (also off in
     -- text-only mode). Native countdown numbers are OFF — duration text renders through the
     -- styleable SetDurationText fontstring below (positionable, matching the legacy icon).
-    local showDuration = indicator.showDuration; if showDuration == nil then showDuration = true end
     local hideSwipe = indicator.hideSwipe and true or false
     style.cooldown = { show = true, swipe = (not hideSwipe) and (not hideIcon), numbers = false }
 
     -- Duration text: a DF-owned fontstring the native SetDurationText fills secret-safe
-    -- (Blizzard formats the remaining time C-side; no Lua read). Font/anchor/offset port
-    -- from config. COLOUR-BY-TIME is DEFERRED to the P4.4 bucket formatter (|c escapes) —
-    -- until then, colour-by-time entries show the static/default colour (no smooth curve,
-    -- which is dead on container buttons anyway). A static duration colour still applies.
-    if showDuration then
-        local dOutline = indicator.durationOutline or "OUTLINE"
-        if dOutline == "NONE" then dOutline = "" end
-        local colorByTime = indicator.durationColorByTime
-        style.duration = {
-            show    = true,
-            font    = indicator.durationFont,
-            size    = 10 * (tonumber(indicator.durationScale) or 1),
-            outline = dOutline,
-            anchor  = indicator.durationAnchor or "CENTER",
-            offsetX = tonumber(indicator.durationX) or 0,
-            offsetY = tonumber(indicator.durationY) or 0,
-            -- nil colour lets a future bucket formatter own it; static colour only when
-            -- colour-by-time is off (else the fontstring's default shows until P4.4).
-            color   = (not colorByTime) and indicator.durationColor or nil,
-        }
-    end
+    -- (Blizzard formats the remaining time C-side; no Lua read). Colour-by-time now routes
+    -- through the #205 bucket formatter — see buildDurationTextSpec. Default show = true.
+    style.duration = buildDurationTextSpec(indicator, true)
 
     -- Stacks: native count, shown at >1. NO formatter (secret trap — see bindNative). A
     -- custom stackMinimum is NOT expressible on the no-formatter native path (deferred).
@@ -536,10 +562,12 @@ end
 
 -- STRUCTURAL signature: candidateFilters (declared at build), icon-vs-square, and which
 -- REGIONS exist — hideIcon, stacks on/off, duration text on/off, border on/off — plus
--- frameLevel (set once at Create). styleButton_regions only ever CREATES regions (never
--- hides/removes them), so toggling a region OFF must Rebuild the container to drop it; a
--- plain ApplyStyle would leave the old region visible. A change here forces a whole-
--- container Rebuild (slots can't be patched). Cosmetic styling of a live region is coSig.
+-- frameLevel (set once at Create) and the duration-text FORMAT KEY (SetDurationText binds the
+-- colour-by-time bucket formatter once per slot, so a colorByTime toggle must Rebuild to
+-- re-bind it). styleButton_regions only ever CREATES regions (never hides/removes them), so
+-- toggling a region OFF must Rebuild the container to drop it; a plain ApplyStyle would leave
+-- the old region visible. A change here forces a whole-container Rebuild (slots can't be
+-- patched). Cosmetic styling of a live region is coSig.
 local function placedStructSig(map, isSquare, hideIcon, showStacks, showDuration, borderOn, indicator)
     return includeSig(map)
         .. "|" .. (isSquare and "sq" or "ic")
@@ -548,6 +576,7 @@ local function placedStructSig(map, isSquare, hideIcon, showStacks, showDuration
         .. "|" .. (showDuration and "du" or "")
         .. "|" .. (borderOn and "bd" or "")
         .. "|fl=" .. tostring(tonumber(indicator.frameLevel) or 0)
+        .. "|df=" .. durationFmtKey(indicator, true)
 end
 
 -- COSMETIC signature: size/anchor/offset/scale/alpha, swipe, duration/stack styling, square
@@ -589,6 +618,148 @@ end
 local function applyPlacedAlpha(handle, alpha)
     local f = handle and handle.GetFrame and handle:GetFrame()
     if f then pcall(function() f:SetAlpha(alpha) end) end
+end
+
+-- ============================================================
+-- PLACED BAR INDICATOR  — P4.4
+-- A bar is a placed indicator like icon/square (per-indicator, many coexist, keyed by
+-- instanceKey, torn down by key), but its slot content is a StatusBar bound via native
+-- SetDurationBar: Blizzard drives the fill from the aura's Duration object render-side (no
+-- Lua time read). Identity / size / colour / texture / orientation are static config; the
+-- countdown is the secure-side fill. Duration text rides the SAME styleable SetDurationText
+-- fontstring as icon/square (colour-by-time via the #205 bucket formatter). The FILL colour-
+-- by-time (barColorByTime) and every expiring effect are remaining-time-driven casualties —
+-- GUI-blocked (the Expiring group gets the "limitation" overlay), never approximated here.
+-- ============================================================
+
+-- Bar border spec from CONFIG (read-free). Mirrors buildPlacedBorderSpec minus the hideIcon
+-- gate (a bar has no icon), and the legacy bar's outward-band math: the ring's inner edge sits
+-- at the bar edge (Inset 0 = flush) and grows outward. Gradient degrades to solid on the
+-- secret-anchored slot (P4.7 overlays the gradient control), same casualty as icon/square.
+local function buildBarBorderSpec(frame, indicator)
+    if not DF.Border then return nil end
+    if not placedBorderOn(indicator, false) then return nil end
+    local thickness = indicator.BorderSize or indicator.borderThickness or 1
+    local inset     = indicator.BorderInset or indicator.borderInset or 0
+    local spec = DF.Border:BuildSpec(indicator, "")
+    if not spec then return nil end
+    spec.enabled = true
+    spec.size    = thickness
+    spec.inset   = -(inset + thickness)   -- fully outward from the bar edge (legacy parity)
+    if not spec.color then spec.color = { r = 0, g = 0, b = 0, a = 1 } end
+    local fdb = DF:GetFrameDB(frame) or {}
+    spec.pixelPerfect = fdb.pixelPerfect
+    return spec
+end
+
+-- Layout for the placed bar: sizeX = width, sizeY = height (a bar is not square). matchFrame
+-- Width/Height pull the frame's CONFIGURED size (read-free — mirror the border knownWidth feed)
+-- rather than the secret live rect. Anchor/offset from config (legacy bar default anchor BOTTOM).
+local function buildBarLayout(frame, indicator)
+    local fdb = DF:GetFrameDB(frame) or {}
+    local matchW = indicator.matchFrameWidth; if matchW == nil then matchW = true end
+    local matchH = indicator.matchFrameHeight and true or false
+    local width  = tonumber(indicator.width)  or 60
+    local height = tonumber(indicator.height) or 6
+    if matchW then width  = tonumber(fdb.frameWidth)  or width end
+    if matchH then height = tonumber(fdb.frameHeight) or height end
+    return {
+        anchor  = (type(indicator.anchor) == "string" and indicator.anchor) or "BOTTOM",
+        offsetX = tonumber(indicator.offsetX) or 0,
+        offsetY = tonumber(indicator.offsetY) or 0,
+        sizeX   = math.max(1, width),
+        sizeY   = math.max(1, height),
+        scale   = tonumber(indicator.scale) or 1,
+        growth  = "RIGHT_DOWN",
+        wrap    = 1,
+    }
+end
+
+-- Bar style: the StatusBar fills the slot (no icon / no square / no cooldown swipe — the fill
+-- IS the countdown). Fill colour / texture / orientation / reverse-fill / background from
+-- config; native SetDurationBar (bindNative) drives the value. Duration text via the shared
+-- styleable fontstring (colour-by-time buckets). Interpolation/direction are creation-frozen
+-- opts (bind-once) — Immediate + RemainingTime match the legacy bar's SetTimerDuration call.
+local function buildBarStyle(indicator, borderSpec)
+    local fr, fg, fb, fa = readADColor(indicator.fillColor)
+    local style = {
+        icon     = { show = false },
+        cooldown = { show = false },
+        bar = {
+            show          = true,
+            fill          = true,
+            texture       = indicator.texture,
+            color         = { fr, fg, fb, fa },
+            bgColor       = indicator.bgColor,
+            orientation   = (indicator.orientation == "VERTICAL") and "VERTICAL" or "HORIZONTAL",
+            reverseFill   = indicator.reverseFill and true or false,
+            interpolation = "Immediate",
+            direction     = "RemainingTime",
+        },
+    }
+    -- Legacy bar default for Show Duration is OFF (unlike icon/square, which default ON).
+    style.duration = buildDurationTextSpec(indicator, false)
+    if borderSpec then style.border = { spec = borderSpec } end
+    return style
+end
+
+-- Full row config for one placed bar (max=1 single-slot container). Same frame-level band as
+-- the icon/square placed indicators (40 + per-indicator frameLevel).
+local function buildBarConfig(frame, unit, map, indicator, borderSpec)
+    return {
+        unit = unit,
+        mode = "row",
+        max = 1,
+        filter = "HELPFUL",
+        candidateFilters = { includeSpellIDs = map },
+        enabled = true,
+        tooltips = false,
+        frameLevelOffset = 40 + (tonumber(indicator.frameLevel) or 0),
+        layout = buildBarLayout(frame, indicator),
+        style = buildBarStyle(indicator, borderSpec),
+    }
+end
+
+-- STRUCTURAL signature: identity, duration-text on/off + format key (SetDurationText / SetDuration
+-- Bar bind ONCE), border on/off, frame level. Cosmetic bar styling is barCoSig.
+local function barStructSig(map, indicator, borderOn)
+    return includeSig(map)
+        .. "|bar"
+        .. "|df=" .. durationFmtKey(indicator, false)
+        .. "|" .. (borderOn and "bd" or "")
+        .. "|fl=" .. tostring(tonumber(indicator.frameLevel) or 0)
+end
+
+-- COSMETIC signature: size (width/height + match-frame + the fed frame size), anchor/offset/
+-- scale/alpha, texture/fill/bg/orientation/reverse, duration-text styling, and the raw-config
+-- border sig (no BuildSpec alloc). A change hot-applies via ApplyStyle(style, layout).
+local function barCoSig(frame, indicator, borderOn, alpha)
+    local fdb = DF:GetFrameDB(frame) or {}
+    return tconcat({
+        "w="  .. tostring(tonumber(indicator.width)  or 60),
+        "h="  .. tostring(tonumber(indicator.height) or 6),
+        "mw=" .. tostring(indicator.matchFrameWidth ~= false and 1 or 0) .. ":" .. tostring(fdb.frameWidth),
+        "mh=" .. tostring(indicator.matchFrameHeight and 1 or 0) .. ":" .. tostring(fdb.frameHeight),
+        "an=" .. tostring(indicator.anchor or "BOTTOM"),
+        "ox=" .. tostring(tonumber(indicator.offsetX) or 0),
+        "oy=" .. tostring(tonumber(indicator.offsetY) or 0),
+        "sc=" .. tostring(tonumber(indicator.scale) or 1),
+        "al=" .. tostring(alpha),
+        "tex=" .. tostring(indicator.texture),
+        "or=" .. tostring(indicator.orientation or "HORIZONTAL"),
+        "rf=" .. tostring(indicator.reverseFill and 1 or 0),
+        "fc=" .. colSig(indicator.fillColor),
+        "bc=" .. colSig(indicator.bgColor),
+        "du=" .. tconcat({
+            tostring(indicator.showDuration == true and 1 or 0),
+            tostring(indicator.durationFont), tostring(indicator.durationScale),
+            tostring(indicator.durationOutline), tostring(indicator.durationAnchor),
+            tostring(indicator.durationX), tostring(indicator.durationY),
+            tostring(indicator.durationColorByTime and 1 or 0),
+            colSig(indicator.durationColor),
+        }, ","),
+        "bd=" .. placedBorderRawSig(indicator, borderOn),
+    }, "|")
 end
 
 -- ============================================================
@@ -805,12 +976,14 @@ function Factory:SyncFrame(frame)
         teardownExcept(bd, bestName)
     end
 
-    -- ---- PLACED ICON / SQUARE (per-indicator 1-slot containers) ----------------------
-    -- NO winner pick: every configured icon/square indicator is its own placed display,
-    -- keyed by instanceKey; many coexist. A structural change (identity set / icon-vs-
-    -- square / hideIcon / stacks on-off / frame level) rebuilds the whole container;
-    -- a cosmetic change (size/anchor/offset/scale/alpha/colour/border/stack style)
-    -- hot-applies via ApplyStyle. Torn down per key when the indicator is de-configured.
+    -- ---- PLACED ICON / SQUARE / BAR (per-indicator 1-slot containers) ----------------
+    -- NO winner pick: every configured icon/square/bar indicator is its own placed display,
+    -- keyed by instanceKey; many coexist (all share the `store.placed` store and per-key
+    -- teardown). A structural change (identity set / icon-vs-square / hideIcon / stacks
+    -- on-off / duration-format / frame level) rebuilds the whole container; a cosmetic change
+    -- (size/anchor/offset/scale/alpha/colour/border/stack style) hot-applies via ApplyStyle.
+    -- The bar is another placed indicator (its slot is a StatusBar driven by SetDurationBar) —
+    -- same machinery, its own builders/sigs. Torn down per key when the indicator is removed.
     do
         local placed = store.placed
         if not placed then placed = {}; store.placed = placed end
@@ -822,7 +995,42 @@ function Factory:SyncFrame(frame)
                 if indicators then
                     for _, indicator in ipairs(indicators) do
                         local isSquare = indicator.type == "square"
-                        if isSquare or indicator.type == "icon" then
+                        local isBar = indicator.type == "bar"
+                        if isBar then
+                            local ids = DF:BuildADIdentityFilters(spec, auraName)
+                            local map = ids and ids.includeSpellIDs
+                            if map then
+                                local key = placedKey(auraName, indicator)
+                                live[key] = true
+                                local borderOn = placedBorderOn(indicator, false)
+                                local alpha = tonumber(indicator.alpha) or 1
+                                local structSig = barStructSig(map, indicator, borderOn)
+                                local coSig = barCoSig(frame, indicator, borderOn, alpha)
+
+                                local entry = placed[key]
+                                if not entry then
+                                    local borderSpec = borderOn and buildBarBorderSpec(frame, indicator) or nil
+                                    local handle = DF.AuraContainer:Create(frame,
+                                        buildBarConfig(frame, frame.unit, map, indicator, borderSpec))
+                                    if handle then
+                                        applyPlacedAlpha(handle, alpha)
+                                        placed[key] = { handle = handle, structSig = structSig, coSig = coSig }
+                                    end
+                                elseif entry.structSig ~= structSig then
+                                    local borderSpec = borderOn and buildBarBorderSpec(frame, indicator) or nil
+                                    entry.structSig, entry.coSig = structSig, coSig
+                                    entry.handle:Rebuild(buildBarConfig(frame, frame.unit, map, indicator, borderSpec))
+                                    applyPlacedAlpha(entry.handle, alpha)
+                                elseif entry.coSig ~= coSig then
+                                    local borderSpec = borderOn and buildBarBorderSpec(frame, indicator) or nil
+                                    entry.coSig = coSig
+                                    entry.handle:ApplyStyle(
+                                        buildBarStyle(indicator, borderSpec),
+                                        buildBarLayout(frame, indicator))
+                                    applyPlacedAlpha(entry.handle, alpha)
+                                end
+                            end
+                        elseif isSquare or indicator.type == "icon" then
                             local ids = DF:BuildADIdentityFilters(spec, auraName)
                             local map = ids and ids.includeSpellIDs
                             if map then
@@ -896,7 +1104,7 @@ function Factory:ClearFrame(frame)
     teardownExcept(store.healthbar or {}, nil)
     teardownExcept(store.background or {}, nil)
     teardownExcept(store.border or {}, nil)
-    teardownExcept(store.placed or {}, nil)   -- per-indicator icon/square containers
+    teardownExcept(store.placed or {}, nil)   -- per-indicator icon/square/bar containers
     releaseBgAnchor(store)   -- containers gone above; drop the background anchor too
     frame.dfADHealthMirror = nil   -- health-mirror bar torn down; drop the feed ref
 end
