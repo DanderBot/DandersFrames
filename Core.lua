@@ -5328,20 +5328,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
                         if f and f:IsShown() then dumpFrame(f, "test" .. i) end
                     end
                 end
-            elseif msg == "auratimer" then
-                -- Show aura timer stats
-                if DF.PrintAuraTimerStats then
-                    DF:PrintAuraTimerStats()
-                else
-                    print("|cffff0000DandersFrames:|r Aura timer not available")
-                end
-            elseif msg == "auratimer reset" or msg == "auratreset" then
-                -- Reset aura timer stats
-                if DF.ResetAuraTimerStats then
-                    DF:ResetAuraTimerStats()
-                else
-                    print("|cffff0000DandersFrames:|r Aura timer not available")
-                end
             elseif msg == "testwizard" then
                 if DF.TestPopupWizard then
                     DF:TestPopupWizard()
@@ -5820,10 +5806,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
             end
         end
         
-        -- Clear pre-combat aura snapshot now that live data is readable again
-        if DF.ClearPreCombatSnapshot then
-            DF:ClearPreCombatSnapshot()
-        end
         -- Update missing buff icons now that we're out of combat
         if DF.UpdateAllMissingBuffIcons then
             DF:UpdateAllMissingBuffIcons()
@@ -5996,10 +5978,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- Update aura click-through state (for click-through in combat setting)
         if DF.UpdateAuraClickThrough then
             DF:UpdateAuraClickThrough()
-        end
-        -- Snapshot raid buff auras before combat lockdown hides spell IDs
-        if DF.SnapshotRaidBuffAuras then
-            DF:SnapshotRaidBuffAuras()
         end
         -- Refresh auras so combat-aware blacklist filters apply immediately
         if DF.RefreshAllVisibleFrames then
