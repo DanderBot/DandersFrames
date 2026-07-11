@@ -4658,6 +4658,52 @@ function DF:CreateTestPanel()
         -- in place when Show Auras is off.
         if panel.RefreshDependentEnabled then panel.RefreshDependentEnabled() end
     end, "auras_buffs")
+    panel.showDispelGlowCheck = secAuras:AddCheckbox(L["Dispel Overlay"], "testShowDispelGlow", function()
+        if DF.testMode or DF.raidTestMode then DF:UpdateAllTestDispelGlow() end
+    end, "auras_dispel")
+    panel.showMissingBuffCheck = secAuras:AddCheckbox(L["Missing Buff"], "testShowMissingBuff", function()
+        if DF.testMode or DF.raidTestMode then DF:UpdateAllTestMissingBuff() end
+    end, "auras_missingbuffs")
+    panel.showADCheck = secAuras:AddCheckbox(L["Aura Designer"], "testShowAuraDesigner", function(enabled)
+        if DF.testMode or DF.raidTestMode then DF:UpdateAllTestAuraDesigner() end
+    end, "auras_auradesigner")
+
+    -- Buff/Debuff count sliders
+    local auraSliderRow = CreateFrame("Frame", nil, secAuras.content)
+    auraSliderRow:SetHeight(18)
+
+    local buffLabel = auraSliderRow:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    buffLabel:SetPoint("LEFT", 0, 0)
+    buffLabel:SetText(L["Buffs:"])
+    buffLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+
+    local buffSlider = CreateThemedSlider(auraSliderRow, 55, 0, 5, 1)
+    buffSlider:SetPoint("LEFT", buffLabel, "RIGHT", 5, 0)
+    local buffValue = auraSliderRow:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    buffValue:SetPoint("LEFT", buffSlider, "RIGHT", 4, 0)
+    buffValue:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+    panel.buffValueText = buffValue
+
+    local debuffLabel = auraSliderRow:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    debuffLabel:SetPoint("LEFT", buffValue, "RIGHT", 12, 0)
+    debuffLabel:SetText(L["Debuffs:"])
+    debuffLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+
+    local debuffSlider = CreateThemedSlider(auraSliderRow, 55, 0, 5, 1)
+    debuffSlider:SetPoint("LEFT", debuffLabel, "RIGHT", 5, 0)
+    local debuffValue = auraSliderRow:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    debuffValue:SetPoint("LEFT", debuffSlider, "RIGHT", 4, 0)
+    debuffValue:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+    panel.debuffValueText = debuffValue
+
+    -- Buff slider callbacks
+    local buffSliderDragging = false
+    buffSlider:SetScript("OnMouseDown", function(self, button)
+        if button == "LeftButton" then
+            buffSliderDragging = true
+            DF:OnSliderDragStart(function() if DF.RefreshTestFrames then DF:RefreshTestFrames() end end)
+        end
+    end)
     buffSlider:SetScript("OnMouseUp", function(self, button)
         if button == "LeftButton" and buffSliderDragging then
             buffSliderDragging = false
