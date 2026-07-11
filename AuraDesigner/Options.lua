@@ -3352,6 +3352,11 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                     gradient = true, shadow = true, alpha = true,
                     animate = true,
                 },
+                -- LCG glows taint on native aura buttons and get stripped by the container's
+                -- SAFE_OVERLAY_ANIM allowlist; drop them from the dropdown so a factory-owned
+                -- placed indicator can't offer a type that silently won't animate (mirror the
+                -- frame-level AD border).
+                animExcludeTypes = { PULSATE = true, CHASE = true, FLASH = true, PROC = true },
                 -- IMPORTANT: AD's per-aura proxy only triggers
                 -- RefreshLiveFramesThrottled + RefreshPreviewLightweight
                 -- on direct key assignment (proxy.X = v) via __newindex.
@@ -3482,6 +3487,9 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                     gradient = true, shadow = true, alpha = true,
                     animate = true,
                 },
+                -- LCG glows taint on native aura buttons and get stripped by the container's
+                -- SAFE_OVERLAY_ANIM allowlist; drop them from the dropdown (mirror frame-level AD).
+                animExcludeTypes = { PULSATE = true, CHASE = true, FLASH = true, PROC = true },
                 fullUpdate    = RPL,
                 lightUpdate   = RPL,
                 lightColors   = RPL,
@@ -3603,6 +3611,9 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                     inset = true, blendMode = true, gradient = true,
                     shadow = true, alpha = true, animate = true,
                 },
+                -- LCG glows taint on native aura buttons and get stripped by the container's
+                -- SAFE_OVERLAY_ANIM allowlist; drop them from the dropdown (mirror frame-level AD).
+                animExcludeTypes = { PULSATE = true, CHASE = true, FLASH = true, PROC = true },
                 fullUpdate    = RPL,
                 lightUpdate   = RPL,
                 lightColors   = RPL,

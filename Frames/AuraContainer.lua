@@ -368,12 +368,16 @@ local function styleButton_regions(slot, config)
                 -- ANIMATION FILTER (single chokepoint for BOTH row and overlay).
                 -- The LCG glows re-SetParent pooled glow frames onto the host, which
                 -- taints on a native AuraButton (lab-proven), so they stay forbidden.
-                -- But OVERLAY-mode (Aura Designer) borders wrap the whole frame and can
-                -- safely run the DF-owned animations in SAFE_OVERLAY_ANIM (edge-alpha
-                -- ticks, DF_DASH marching ants, Wipe/Ripple/etc overlays). ROW mode
-                -- always strips. Any type not in the set is stripped regardless of mode.
+                -- But the DF-owned animations in SAFE_OVERLAY_ANIM (edge-alpha ticks,
+                -- DF_DASH marching ants, Wipe/Ripple/etc overlays) run off our OWN border
+                -- textures via the external UIParent driver (secretRect path), so they're
+                -- taint-safe. OVERLAY-mode (frame-level AD) borders always recover them; a
+                -- ROW-mode container opts in with config.adBorderAnim (the Aura Designer
+                -- PLACED icon/square/bar borders) — the #205 buff/debuff rows do NOT set
+                -- the flag, so they still strip in row mode. Any type outside the set is
+                -- stripped regardless of mode.
                 if spec and spec.animation and not
-                   (config.mode == "overlay" and SAFE_OVERLAY_ANIM[spec.animation.type]) then
+                   ((config.mode == "overlay" or config.adBorderAnim) and SAFE_OVERLAY_ANIM[spec.animation.type]) then
                     spec.animation = nil
                 end
                 if spec then DF.Border:Apply(slot.dfBorder, spec) end

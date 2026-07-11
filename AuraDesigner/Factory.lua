@@ -355,9 +355,11 @@ end
 -- enabled gated on ShowBorder AND not hideIcon (a ring around a hidden icon looks broken),
 -- translucent-black default colour. Returns nil when the border resolves off. Gradient
 -- degrades to solid on the secret-anchored slot (P4.7 overlays the gradient control) — same
--- known casualty as the frame-level border. Animations are stripped row-side (AuraContainer
--- SAFE_OVERLAY_ANIM applies to overlay mode only), so expiring/animated borders don't run
--- here — that's the accepted expiring casualty, base ring only.
+-- known casualty as the frame-level border. Border ANIMATIONS now run (the row container sets
+-- config.adBorderAnim, so the SAFE_OVERLAY_ANIM allowlist recovers the DF-owned types); the LCG
+-- glows stay stripped and are removed from the GUI dropdown (animExcludeTypes). knownWidth/
+-- knownHeight are fed so DF_DASH lays its dash count out from the configured icon size instead
+-- of the secret slot rect (mirror the frame-level border's frameWidth/Height feed).
 local function buildPlacedBorderSpec(frame, indicator, hideIcon)
     if not DF.Border then return nil end
     local borderEnabled = indicator.ShowBorder
@@ -375,6 +377,11 @@ local function buildPlacedBorderSpec(frame, indicator, hideIcon)
     if not spec.color then spec.color = { r = 0, g = 0, b = 0, a = 0.8 } end
     local fdb = DF:GetFrameDB(frame) or {}
     spec.pixelPerfect = fdb.pixelPerfect
+    -- Fed geometry for DF_DASH: the icon/square slot is square at the configured size (floored
+    -- at 8, matching buildPlacedLayout), whose live rect is secret on 12.1.
+    local sz = math.max(8, tonumber(indicator.size) or 24)
+    spec.knownWidth  = sz
+    spec.knownHeight = sz
     return spec
 end
 
@@ -466,6 +473,14 @@ end
 -- duration colour applies only when colour-by-time is off. NOTE: the colorByTime flag is part of
 -- the STRUCTURAL signature — SetDurationText binds the formatter ONCE per slot, so a toggle must
 -- Rebuild the slot to swap it (see durationFmtKey + the struct sigs).
+-- Resolve the hide-above-threshold seconds (or nil when off). Legacy default 10s. The native
+-- bucket formatter blanks its bands above this remaining time — evaluated C-side against the
+-- SECRET remaining time, no Lua read (the exact secret-safe path #205 buff/debuff rows use).
+local function durationHideAboveT(indicator)
+    if not indicator.durationHideAboveEnabled then return nil end
+    return tonumber(indicator.durationHideAboveThreshold) or 10
+end
+
 local function buildDurationTextSpec(indicator, defaultShow)
     local showDuration = indicator.showDuration
     if showDuration == nil then showDuration = defaultShow end
@@ -473,8 +488,11 @@ local function buildDurationTextSpec(indicator, defaultShow)
     local dOutline = indicator.durationOutline or "OUTLINE"
     if dOutline == "NONE" then dOutline = "" end
     local colorByTime = indicator.durationColorByTime and true or false
-    local formatter = (colorByTime and DF.GetFactoryDurationFormatter)
-        and DF:GetFactoryDurationFormatter("NUMBER", nil, true) or nil
+    local hideAboveT = durationHideAboveT(indicator)
+    -- One formatter carries BOTH colour-by-time buckets and hide-above blanking (mirror #205's
+    -- BuildDurationFormatter). nil formatter only when neither is on (native default text).
+    local formatter = (((colorByTime or hideAboveT) and DF.GetFactoryDurationFormatter)
+        and DF:GetFactoryDurationFormatter("NUMBER", hideAboveT, colorByTime)) or nil
     return {
         show      = true,
         font      = indicator.durationFont,
@@ -483,19 +501,22 @@ local function buildDurationTextSpec(indicator, defaultShow)
         anchor    = indicator.durationAnchor or "CENTER",
         offsetX   = tonumber(indicator.durationX) or 0,
         offsetY   = tonumber(indicator.durationY) or 0,
-        formatter = formatter,   -- nil unless colour-by-time; |c escapes own the colour then
+        formatter = formatter,   -- nil unless colour-by-time / hide-above; |c escapes own colour
         color     = (not colorByTime) and indicator.durationColor or nil,
     }
 end
 
 -- Stable duration-text format key for the STRUCTURAL signature: the native SetDurationText
--- formatter is creation-frozen (bind-once), so a colour-by-time toggle must Rebuild the slot
--- to swap it. "" when duration text is off. Mirrors #205's dur.formatKey.
+-- formatter is creation-frozen (bind-once), so a colour-by-time OR hide-above change must
+-- Rebuild the slot to swap it. "" when duration text is off. Mirrors #205's dur.formatKey.
 local function durationFmtKey(indicator, defaultShow)
     local showDuration = indicator.showDuration
     if showDuration == nil then showDuration = defaultShow end
     if not showDuration then return "" end
-    return "NUMBER" .. (indicator.durationColorByTime and ":C" or "")
+    local hideAboveT = durationHideAboveT(indicator)
+    return "NUMBER"
+        .. (indicator.durationColorByTime and ":C" or "")
+        .. (hideAboveT and (":H" .. tostring(hideAboveT)) or "")
 end
 
 -- Build the style table for a placed icon/square. icon = native spell texture (unless
@@ -554,6 +575,12 @@ local function buildPlacedConfig(unit, map, indicator, isSquare, borderSpec)
         candidateFilters = { includeSpellIDs = map },
         enabled = true,
         tooltips = false,
+        -- adBorderAnim: opt this ROW container into the DF-owned border animations (edge-alpha
+        -- / DF_DASH / Wipe / Ripple) the shared allowlist otherwise reserves to overlay mode.
+        -- The #205 buff/debuff rows never set it, so they still strip. Safe: the animation runs
+        -- off our own secretRect border textures via the external UIParent driver, not the LCG
+        -- glows (which stay stripped by SAFE_OVERLAY_ANIM regardless).
+        adBorderAnim = true,
         frameLevelOffset = 40 + (tonumber(indicator.frameLevel) or 0),
         layout = buildPlacedLayout(indicator),
         style = buildPlacedStyle(indicator, isSquare, borderSpec),
@@ -632,10 +659,28 @@ end
 -- GUI-blocked (the Expiring group gets the "limitation" overlay), never approximated here.
 -- ============================================================
 
+-- Resolve the placed bar's rendered width/height from CONFIG (read-free): matchFrameWidth/
+-- Height pull the frame's CONFIGURED size (mirror the border knownWidth feed), else the explicit
+-- width/height. Shared by the layout (slot size) and the border's fed DF_DASH geometry so both
+-- agree without measuring the secret slot rect.
+local function resolveBarSize(frame, indicator)
+    local fdb = DF:GetFrameDB(frame) or {}
+    local matchW = indicator.matchFrameWidth; if matchW == nil then matchW = true end
+    local matchH = indicator.matchFrameHeight and true or false
+    local width  = tonumber(indicator.width)  or 60
+    local height = tonumber(indicator.height) or 6
+    if matchW then width  = tonumber(fdb.frameWidth)  or width end
+    if matchH then height = tonumber(fdb.frameHeight) or height end
+    return math.max(1, width), math.max(1, height)
+end
+
 -- Bar border spec from CONFIG (read-free). Mirrors buildPlacedBorderSpec minus the hideIcon
 -- gate (a bar has no icon), and the legacy bar's outward-band math: the ring's inner edge sits
 -- at the bar edge (Inset 0 = flush) and grows outward. Gradient degrades to solid on the
 -- secret-anchored slot (P4.7 overlays the gradient control), same casualty as icon/square.
+-- Border ANIMATIONS run (buildBarConfig sets config.adBorderAnim); LCG glows stay stripped +
+-- GUI-excluded. knownWidth/knownHeight feed DF_DASH the configured bar size (secret slot rect
+-- otherwise), so dashed borders lay out correctly.
 local function buildBarBorderSpec(frame, indicator)
     if not DF.Border then return nil end
     if not placedBorderOn(indicator, false) then return nil end
@@ -649,20 +694,17 @@ local function buildBarBorderSpec(frame, indicator)
     if not spec.color then spec.color = { r = 0, g = 0, b = 0, a = 1 } end
     local fdb = DF:GetFrameDB(frame) or {}
     spec.pixelPerfect = fdb.pixelPerfect
+    local w, h = resolveBarSize(frame, indicator)
+    spec.knownWidth  = w
+    spec.knownHeight = h
     return spec
 end
 
--- Layout for the placed bar: sizeX = width, sizeY = height (a bar is not square). matchFrame
--- Width/Height pull the frame's CONFIGURED size (read-free — mirror the border knownWidth feed)
--- rather than the secret live rect. Anchor/offset from config (legacy bar default anchor BOTTOM).
+-- Layout for the placed bar: sizeX = width, sizeY = height (a bar is not square). Size comes
+-- from resolveBarSize (matchFrameWidth/Height read-free from config). Anchor/offset from config
+-- (legacy bar default anchor BOTTOM).
 local function buildBarLayout(frame, indicator)
-    local fdb = DF:GetFrameDB(frame) or {}
-    local matchW = indicator.matchFrameWidth; if matchW == nil then matchW = true end
-    local matchH = indicator.matchFrameHeight and true or false
-    local width  = tonumber(indicator.width)  or 60
-    local height = tonumber(indicator.height) or 6
-    if matchW then width  = tonumber(fdb.frameWidth)  or width end
-    if matchH then height = tonumber(fdb.frameHeight) or height end
+    local width, height = resolveBarSize(frame, indicator)
     return {
         anchor  = (type(indicator.anchor) == "string" and indicator.anchor) or "BOTTOM",
         offsetX = tonumber(indicator.offsetX) or 0,
@@ -714,6 +756,7 @@ local function buildBarConfig(frame, unit, map, indicator, borderSpec)
         candidateFilters = { includeSpellIDs = map },
         enabled = true,
         tooltips = false,
+        adBorderAnim = true,   -- opt into DF-owned border animations (see buildPlacedConfig)
         frameLevelOffset = 40 + (tonumber(indicator.frameLevel) or 0),
         layout = buildBarLayout(frame, indicator),
         style = buildBarStyle(indicator, borderSpec),
