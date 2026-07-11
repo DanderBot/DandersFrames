@@ -438,6 +438,15 @@ function Render:EnableMirrors(frame, category, parent, color)
         end
     end
     syncMirrors(frame)
+    -- MATERIALIZE: mirrors are only created when their element RENDERS
+    -- (mirrorElement inside updateOne) — but some categories rarely re-render
+    -- on their own (a name element only re-renders on roster/edit, unlike
+    -- health, which ticks constantly). If this registry has no mirrors yet,
+    -- force one category-hinted render so the covers exist immediately
+    -- instead of waiting for an organic re-render that may never come.
+    if next(reg.byId) == nil and DF.UpdateTextDesigner then
+        DF:UpdateTextDesigner(frame, category)
+    end
 end
 
 function Render:DisableMirrors(frame, category)
