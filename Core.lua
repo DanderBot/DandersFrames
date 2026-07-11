@@ -5484,9 +5484,6 @@ function DF:UpdateAll()
     
     -- FIX 2025-01-20: Refresh private aura anchors (boss debuffs) when settings change
     -- This is needed for profile switches where overlay size may have changed
-    if DF.RefreshAllPrivateAuraAnchors then
-        DF:RefreshAllPrivateAuraAnchors()
-    end
 end
 
 -- ============================================================
@@ -5746,9 +5743,6 @@ function DF:FullProfileRefresh()
     end
     
     -- === REFRESH PRIVATE AURAS ===
-    if DF.RefreshAllPrivateAuraAnchors then
-        DF:RefreshAllPrivateAuraAnchors()
-    end
     
     -- === UPDATE RESTED INDICATOR ===
     if DF.UpdateRestedIndicator then

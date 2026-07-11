@@ -1090,10 +1090,6 @@ function FlatRaidFrames:UpdateSorting()
         end)
     end
 
-    -- Schedule private aura reanchor after all attribute changes settle
-    if DF.SchedulePrivateAuraReanchor then
-        DF:SchedulePrivateAuraReanchor()
-    end
 end
 
 -- Alias for backward compatibility

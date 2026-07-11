@@ -5649,10 +5649,6 @@ function DF:ApplyPartyGroupSorting()
     -- NOTE: Frame refresh is handled by OnAttributeChanged when units swap
     -- No need for explicit refresh here - it causes flicker due to double update
 
-    -- Schedule private aura reanchor after all attribute changes settle
-    if DF.SchedulePrivateAuraReanchor then
-        DF:SchedulePrivateAuraReanchor()
-    end
     -- OnFramesSorted callback is fired from the child OnAttributeChanged
     -- handler (see CreatePartyFrame), which catches real unit-attribute
     -- reassignments in both combat and non-combat paths.
@@ -5837,10 +5833,6 @@ function DF:ApplyArenaHeaderSorting()
         DF.arenaHeader:Show()
     end
 
-    -- Schedule private aura reanchor after all attribute changes settle
-    if DF.SchedulePrivateAuraReanchor then
-        DF:SchedulePrivateAuraReanchor()
-    end
     -- OnFramesSorted callback is fired from child OnAttributeChanged.
 end
 
@@ -6831,10 +6823,6 @@ function DF:ApplyHeaderSettings()
     -- Arena: skip raid sorting entirely (arena orientation was already applied above)
     local contentType = DF.GetContentType and DF:GetContentType()
     if contentType == "arena" then
-        -- Schedule private aura reanchor after attribute changes settle
-        if DF.SchedulePrivateAuraReanchor then
-            DF:SchedulePrivateAuraReanchor()
-        end
         return
     end
 
@@ -6906,9 +6894,6 @@ function DF:ApplyHeaderSettings()
     -- Schedule private aura reanchor after ALL attribute changes settle.
     -- This catches the showRaid false/true toggle above which can cause a second
     -- round of unit reassignments after the sorting functions have already run.
-    if DF.SchedulePrivateAuraReanchor then
-        DF:SchedulePrivateAuraReanchor()
-    end
 end
 
 -- ============================================================
