@@ -582,6 +582,7 @@ L["Center"] = true
 L["Center (Horizontal)"] = true
 L["Center (Vertical)"] = true
 L["Center of Group"] = true
+L["Changed in WoW 12.1: hides auras shown by the Aura Designer from the buff bar. It can no longer hide Defensive Bar duplicates, and a buff matching several buff filters may still show more than once."] = true
 L["Choose which groups to display."] = true
 L["Clamp Mode"] = true
 L["Class"] = true

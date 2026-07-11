@@ -16,6 +16,7 @@ local C_RAID       = {r = 1.0, g = 0.5, b = 0.2, a = 1}        -- Raid Orange
 local C_HOVER      = {r = 0.22, g = 0.22, b = 0.22, a = 1}
 local C_TEXT       = {r = 0.9, g = 0.9, b = 0.9, a = 1}
 local C_TEXT_DIM   = {r = 0.6, g = 0.6, b = 0.6, a = 1}
+local C_WARNING    = {r = 0.95, g = 0.35, b = 0.35, a = 1}     -- Soft red: behaviour-change / caution notes
 
 -- Exported palette: other files should theme against these shared tables instead
 -- of re-declaring private copies or hardcoding the raw numbers. These are the
@@ -31,6 +32,7 @@ GUI.Colors = {
     hover      = C_HOVER,
     text       = C_TEXT,
     textDim    = C_TEXT_DIM,
+    warning    = C_WARNING,  -- soft red for behaviour-change / caution notes
 }
 
 DF.SectionRegistry = DF.SectionRegistry or {}

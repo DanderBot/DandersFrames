@@ -5639,7 +5639,14 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         AddSpace(10, "both")
         local dedupGroup = GUI:CreateSettingsGroup(self.child, 280)
         dedupGroup:AddWidget(GUI:CreateHeader(self.child, L["Deduplication"]), 40)
-        dedupGroup:AddWidget(GUI:CreateLabel(self.child, L["Hide buffs from the buff bar when they are already displayed by the Defensive Bar or Aura Designer."], 250), 45)
+        -- 12.1: dedup semantics changed (Aura Designer auras only; the Defensive Bar's
+        -- contents aren't enumerable read-free, and multi-filter duplicates remain a game
+        -- limitation) — show a red behaviour-change note instead of the legacy description.
+        if DF.AuraContainer and DF.AuraContainer.IsSupported and DF.AuraContainer.IsSupported() then
+            dedupGroup:AddWidget(GUI:CreateLabel(self.child, L["Changed in WoW 12.1: hides auras shown by the Aura Designer from the buff bar. It can no longer hide Defensive Bar duplicates, and a buff matching several buff filters may still show more than once."], 250, GUI.Colors.warning), 60)
+        else
+            dedupGroup:AddWidget(GUI:CreateLabel(self.child, L["Hide buffs from the buff bar when they are already displayed by the Defensive Bar or Aura Designer."], 250), 45)
+        end
         local dedupCb = GUI:CreateCheckbox(self.child, L["Hide Duplicate Buffs"], db, "buffDeduplicateDefensives", function()
             -- Bump the aura layout version so the factory buff row rebuilds with the new
             -- exclusion set (InvalidateAuraLayout -> RefreshFactoryRows -> DriveBuffFactory);
