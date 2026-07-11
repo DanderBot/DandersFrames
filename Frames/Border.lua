@@ -388,7 +388,7 @@ function Border:ResolveRoleColor(unit, fallback, roleColors, frame)
 end
 
 -- Colour-by-time-remaining via a C_CurveUtil colour curve. Caller supplies the
--- pre-built curve (e.g. DF.expiringCurves[...]). totalDuration > 0 required
+-- pre-built curve via ctx.timeCurve. totalDuration > 0 required
 -- so we can pass either a remaining-percent (curve expects [0,1]) or a
 -- remaining-duration (curve expects seconds) — `mode` picks which API to call.
 function Border:ResolveTimeColor(curve, remaining, totalDuration, mode, fallback)

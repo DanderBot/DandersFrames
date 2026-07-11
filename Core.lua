@@ -5428,9 +5428,6 @@ function DF:UpdateAll()
         DF:UpdateColorCurve()
     end
     
-    -- Clear expiring curve cache (colors may have changed)
-    DF.expiringCurves = nil
-    
     -- Check which mode we're editing in the GUI
     local editingRaid = DF.GUI and DF.GUI.SelectedMode == "raid"
     
@@ -5542,7 +5539,6 @@ function DF:FullProfileRefresh()
     if DF.UpdateColorCurve then
         DF:UpdateColorCurve()
     end
-    DF.expiringCurves = nil
 
     -- Clear category lookup cache (for export/import)
     DF._categoryLookup = nil

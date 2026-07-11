@@ -46,8 +46,6 @@ local function GetGrowthOffset(direction, iconSize, pad)
 end
 
 -- Shared default tables (avoid per-call allocation)
-local DEFAULT_EXPIRING_BORDER_COLOR = {r = 1, g = 0.5, b = 0, a = 1}
-local DEFAULT_EXPIRING_TINT_COLOR = {r = 1, g = 0.3, b = 0.3, a = 0.3}
 
 function DF:ApplyFrameLayout(frame)
     if not frame then return end
@@ -1433,79 +1431,6 @@ function DF:ApplyFrameStyle(frame)
     if not frame then return end
     -- Use unified layout function
     DF:ApplyFrameLayout(frame)
-end
-
--- Configure the unified expiring border overlay (BUFFS only) from the
--- `<prefix>` key set (prefix = "buffExpiring": buffExpiringBorderEnabled /
--- Thickness / Inset / Color / ColorByTime / AnimationType / …).  Configure-once
--- at layout: paints the static colour + geometry and STARTS the configured
--- animation; the aura timer then only raises/lowers the gate alpha (threshold
--- visibility) and, in Color-by-Time mode, recolours per-tick.  The animation
--- runs continuously while configured (gate alpha hides it above threshold) —
--- same model the legacy pulse used.
-function DF:ConfigureExpiringBorder(icon, db, prefix)
-    if not icon then return end
-    local gate = icon.expiringBorderGate
-    local eb = icon.expiringBorder
-    if not gate or not eb then return end
-
-    -- The master "Enable Expiring Indicators" (<prefix>Enabled, e.g.
-    -- buffExpiringEnabled) gates the WHOLE feature — the border only shows when
-    -- BOTH it and "Show Expiring Border" (<prefix>BorderEnabled) are on.  Mirrors
-    -- AD's expiringFeatureEnabled master.  (nil = on, matching the default.)
-    local enabled = db[prefix .. "Enabled"] ~= false and db[prefix .. "BorderEnabled"]
-    icon.expiringBorderEnabled = enabled and true or false
-    local colorByTime = db[prefix .. "BorderColorByTime"] and true or false
-    icon.expiringBorderColorByTime = colorByTime
-
-    if not enabled then
-        DF.Border:Apply(eb, { enabled = false })  -- hides edges + stops animation
-        if eb.Hide then eb:Hide() end
-        gate:SetAlpha(0)
-        -- Drop any live engine registration so the shared ticker stops driving
-        -- this icon's gate (the per-aura hot path re-registers when re-enabled).
-        if DF.Expiring then DF.Expiring:Unregister(icon) end
-        icon.expiringEntry = nil
-        return
-    end
-
-    -- Color-by-Time recolours per-tick with a SECRET colour, which needs a
-    -- solidOnly border (bare SetColorTexture, no CreateColor/gradient).  When
-    -- it's off the colour is static, so the full style toolkit is available.
-    -- The flag is fixed at New, so re-create when the mode flips.
-    if eb._solidOnly ~= colorByTime then
-        if eb.Hide then eb:Hide() end
-        eb = DF.Border:New(gate, { solidOnly = colorByTime, frameLevelOffset = 0 })
-        icon.expiringBorder = eb
-    end
-
-    local thickness = math.max(1, db[prefix .. "BorderThickness"] or 2)
-    if db.pixelPerfect then thickness = DF:PixelPerfect(thickness) end
-    -- Expiring inset already uses the outward-negative convention (matches
-    -- DF.Border spec.inset directly), so pass it through WITHOUT the iconMode
-    -- sign flip the normal aura border uses.
-    local inset = db[prefix .. "BorderInset"] or -1
-
-    -- Full toolkit (style/gradient/texture/animation) from the expiring keys.
-    local spec = DF.Border:BuildSpec(db, prefix)
-    spec.enabled = true
-    spec.size = thickness
-    spec.inset = inset
-    spec.color = db[prefix .. "BorderColor"]
-    if colorByTime then
-        -- Per-tick secret recolour can't be a two-stop gradient — force a SOLID
-        -- base; the timer supplies the duration-curve colour.
-        spec.style = "SOLID"; spec.gradient = nil
-    end
-    -- The inner border frame is created Hidden (Create.lua); show it so its edges
-    -- render and the animation driver runs.  Visibility is governed by the GATE
-    -- alpha, not the frame's shown state, so this stays Shown while configured.
-    if eb.Show then eb:Show() end
-    DF.Border:Apply(eb, spec)  -- paints edges + starts the configured animation
-
-    -- Start hidden (gate alpha 0); the timer raises it when expiring so a
-    -- freshly-laid-out icon never flashes the expiring border.
-    gate:SetAlpha(0)
 end
 
 -- ============================================================
