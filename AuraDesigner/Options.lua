@@ -3041,6 +3041,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
     -- (Expiring, Show When Missing, gradient border style). See block pass below.
     local builtGroups = {}
     local expiringGroup, swmCheck, borderCtl, wholeBarCheck, swmGroup, durColorByTimeCtl
+    local missingTriggerGroup, expireAlertGroup   -- sound casualties (P4.5 limitation blocks)
 
     local function AddWidget(widget, height)
         widget:SetPoint("TOPLEFT", parent, "TOPLEFT", 5, -totalHeight)
@@ -3091,6 +3092,8 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         builtGroups[#builtGroups + 1] = group
         if header == L["Expiring"] then expiringGroup = group end
         if header == L["Show When Missing"] then swmGroup = group end
+        if header == L["Missing Trigger"] then missingTriggerGroup = group end
+        if header == L["Expire Alert"] then expireAlertGroup = group end
         return group
     end
 
@@ -4141,15 +4144,11 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
     end
 
     if typeKey == "icon" or typeKey == "square" then
-        -- P4.3 SHIPPED: icon/square render on the container engine (native icon / solid
-        -- fill + cooldown + stacks + border + position). The whole-type roadmap overlay is
-        -- gone. Three surgical blocks remain:
-        --   * Show When Missing — presence-inversion state the factory doesn't drive yet
-        --     (P4.5 roadmap; remove when missing mode ports).
-        if swmGroup then
-            GUI:BlockControl12_1(swmGroup, "roadmap",
-                { id = "ad:" .. typeKey .. ":showWhenMissing", page = L["Aura Designer"], when = ADgate })
-        end
+        -- P4.3/P4.5 SHIPPED: icon/square render on the container engine (native icon / solid
+        -- fill + cooldown + stacks + border + position), AND Show When Missing now renders via
+        -- the read-free missing-mode container (static spell icon / colour square while absent).
+        -- The whole-type roadmap and the Show-When-Missing roadmap overlays are gone. One
+        -- surgical block remains:
         --   * Expiring — permanent limitation. The whole group (Expiring Colour Override /
         --     colour-swap, pulse / bounce / whole-alpha-pulse, threshold, duration priority)
         --     is remaining-time-driven, which is unreadable on the container path.
@@ -4174,8 +4173,25 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 { id = "ad:bar:expiring", page = L["Aura Designer"], when = ADgate })
         end
     elseif typeKey == "sound" then
-        -- P4.5: remove when the sound indicator ports to the factory.
-        BlockGroups("roadmap", "ad:sound")
+        -- P4.5 SHIPPED: the sound indicator plays natively ON APPLY via
+        -- C_UnitAuras.AddAuraAppliedSound (read-free, on-apply only). The whole-type roadmap
+        -- overlay is gone; the Sound Alert group (sound picker / volume / preview) stays
+        -- editable. Two surgical limitation blocks — both need a read the container path can't do:
+        --   * Missing Trigger — "alert WHILE the buff is absent" is presence-driven (present-vs-
+        --     total count) plus loop/delay timing. The native hook fires only ON GAIN, never on
+        --     absence. → permanent limitation.
+        --   * Expire Alert — "alert as the buff FADES" is remaining-time-driven; there is no
+        --     AuraRemovedSound / on-fade native hook. → permanent limitation.
+        -- (Per-play VOLUME is also unexpressible on the native path — it plays at the output
+        -- channel's volume — but the slider still drives the Preview button, so it is left live.)
+        if missingTriggerGroup then
+            GUI:BlockControl12_1(missingTriggerGroup, "limitation",
+                { id = "ad:sound:missing", page = L["Aura Designer"], when = ADgate })
+        end
+        if expireAlertGroup then
+            GUI:BlockControl12_1(expireAlertGroup, "limitation",
+                { id = "ad:sound:expire", page = L["Aura Designer"], when = ADgate })
+        end
     elseif typeKey == "framealpha" or typeKey == "nametext" or typeKey == "healthtext" then
         -- Permanent: these indicators need a read-free value the 12.1 aura
         -- system can't provide, so the whole effect is unavailable.
@@ -4189,12 +4205,9 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             GUI:BlockControl12_1(expiringGroup, "limitation",
                 { id = "ad:" .. typeKey .. ":expiring", page = L["Aura Designer"], when = ADgate })
         end
-        --   * Show When Missing — P4.5 roadmap (remove when missing-aura state
-        --     ports to the factory).
-        if swmCheck then
-            GUI:BlockControl12_1(swmCheck, "roadmap",
-                { id = "ad:" .. typeKey .. ":showWhenMissing", page = L["Aura Designer"], when = ADgate })
-        end
+        --   * Show When Missing — P4.5 SHIPPED: the effect now renders via the read-free
+        --     missing-mode container (tint / ring shown while the buff is absent), so the
+        --     roadmap overlay is gone and the checkbox is fully editable under the factory.
         --   * Tint Entire Bar (healthbar only) — NO LONGER blocked. The filled health-mirror
         --     bar makes the current-health-fill variant (tintWholeBar=false) expressible
         --     read-free, so both settings work under the factory.

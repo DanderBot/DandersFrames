@@ -271,6 +271,16 @@ function SoundEngine:RunEvaluation()
         return
     end
 
+    -- 12.1 native-factory gate: when DF.AuraDesigner.Factory owns AD, the sound indicator is
+    -- driven by the read-free native on-apply API (C_UnitAuras.AddAuraAppliedSound via
+    -- Factory:SyncSound). This legacy read-based missing/expire engine's aura reads are sealed
+    -- there, so a sealed read could otherwise misfire "everyone is missing everything." Bail so
+    -- the native path is the sole owner. Legacy stays fully live on 12.0.x / adUseFactory=false.
+    if DF.FactoryOwnsAD and DF:FactoryOwnsAD(db) then
+        self:StopAll()
+        return
+    end
+
     -- Global mute check. nil = default (enabled); only explicit false is muted.
     if adDB.soundEnabled == false then
         self:StopAll()

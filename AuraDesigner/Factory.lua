@@ -97,20 +97,35 @@ end
 -- profile import/switch and spec change with NO stored state and NO refcount. Read-free
 -- (static config only): walks adDB.auras[spec] and unions BuildADIdentityFilters (primary
 -- + alternates) for every aura carrying at least one configured indicator of ANY type.
--- "Tracked" = the aura has an indicator the factory actually RENDERS on 12.1: a non-empty
--- placed-indicator list (icon/square/bar) or a rendered frame-level key (border / healthbar /
--- background). Legacy counted EVERY type (nametext/healthtext/framealpha/sound too) and
--- could — it rendered them all. On the factory path those are casualties (or P4.5-pending
--- for sound) and render NOTHING, so counting them would hide the aura from the buff bar
--- with no AD visual replacing it — invisible everywhere. Add each type back here if/when
--- it is recovered. Returns nil when AD is disabled, off-spec, empty, or the factory doesn't
--- own AD for this db (caller then contributes nothing). BUFF (HELPFUL) only: every AD entry
--- is a helpful aura, and a harmful map is inert on friendly frames.
+-- "Tracked" = the aura has an indicator the factory actually RENDERS ON THE BUFF SLOT (i.e.
+-- while the aura is PRESENT) on 12.1: a PRESENT-mode placed indicator (icon/square/bar) or a
+-- PRESENT-mode frame-level key (border / healthbar / background). Two deliberate exclusions:
+--   * SOUND — now recovered (P4.5: it PLAYS on-apply via C_UnitAuras.AddAuraAppliedSound), but
+--     a sound is NOT a visual replacement for the buff icon. A sound-only aura must keep showing
+--     on the buff bar (audio cue + visible icon), so sound is DELIBERATELY excluded from the
+--     dedup union even though it renders (plays). (nametext / healthtext / framealpha remain
+--     casualties that render nothing — also excluded, add back if/when recovered.)
+--   * SHOW-WHEN-MISSING indicators — a missing-mode indicator shows NOTHING while the aura is
+--     present (it only appears on ABSENCE), so the buff-bar icon is the aura's only present-time
+--     visual and must not be hidden. A missing-ONLY aura therefore contributes nothing to dedup.
+-- Returns nil when AD is disabled, off-spec, empty, or the factory doesn't own AD for this db
+-- (caller then contributes nothing). BUFF (HELPFUL) only: every AD entry is a helpful aura, and
+-- a harmful map is inert on friendly frames.
 local function auraHasTrackedIndicator(auraCfg)
     if type(auraCfg) ~= "table" then return false end
     local inds = auraCfg.indicators
-    if inds and #inds > 0 then return true end
-    return (auraCfg.border or auraCfg.healthbar or auraCfg.background) and true or false
+    if inds then
+        for _, ind in ipairs(inds) do
+            -- Bars ignore missing mode entirely (no duration data when absent — legacy
+            -- Engine.lua:510), so a bar always renders present and always dedups.
+            if ind.type == "bar" or not ind.showWhenMissing then return true end
+        end
+    end
+    local hb, bg, bd = auraCfg.healthbar, auraCfg.background, auraCfg.border
+    if hb and not hb.showWhenMissing then return true end
+    if bg and not bg.showWhenMissing then return true end
+    if bd and not bd.showWhenMissing then return true end
+    return false
 end
 
 function DF:GetADTrackedSpellIDs(frame, db)
@@ -870,6 +885,351 @@ local function barCoSig(frame, indicator, borderOn, alpha)
 end
 
 -- ============================================================
+-- SHOW-WHEN-MISSING  — P4.5
+-- An indicator/effect with showWhenMissing set INVERTS its trigger: it renders while the
+-- tracked aura is ABSENT (a "you're missing this" reminder) instead of on presence. Driven
+-- READ-FREE by DF.AuraContainer's mode="missing" layout-push inversion (probe 32): a clip
+-- WINDOW parks a handle-owned BADGE inside itself while the spellID-filtered group is empty
+-- (aura absent); one blank button's cell pushes the badge fully out of the window when the
+-- aura is present (renders nothing). We size the window/badge to the indicator's art and style
+-- the badge from GetBadgeFrame(). Zero secret reads — identity + geometry + colour are static
+-- config; Blizzard's secret show/hide drives the push.
+--
+-- SCOPE: icon / square (placed) and border / healthbar / background (frame-level). BARS are
+-- excluded — legacy has no missing mode for bars (no duration data when absent, Engine.lua:510),
+-- and the GUI never offered showWhenMissing for a bar. Cooldown / duration text / stacks are
+-- NOT rendered on a missing indicator (nothing to count when the aura is absent).
+--
+-- ANIMATION: missing-window borders must NEVER animate. The badge border is a handle-owned
+-- DF.Border (secretRect -> its animation driver hosts on UIParent), and the badge is NOT a slot
+-- in any handle's self.buttons, so _teardownContainer's StopAnimation loop never reaches it — an
+-- animated badge would leave an orphaned ticker running forever. So every missing badge-border
+-- spec is hard-nilled (spec.animation = nil), exactly the missing-buff badge precedent
+-- (Features/Auras.lua:3122). (StopAnimation is not cleanly reachable from the AD missing teardown
+-- for the same "badge isn't in self.buttons" reason, so hard-nil is the correct choice here.)
+-- ============================================================
+
+-- Primary static spell ID for an AD aura (config, never a live aura): the SpellIDs whitelist
+-- entry, used to fetch the STATIC icon texture (Blizzard won't fill art for an absent aura).
+local function primaryADSpellID(spec, auraName)
+    local specIDs = DF.AuraDesigner.SpellIDs and DF.AuraDesigner.SpellIDs[spec]
+    local p = specIDs and specIDs[auraName]
+    if type(p) == "table" then p = p[1] end
+    return p
+end
+
+-- Static icon texture for a missing indicator (mirror Engine buildSyntheticAuraData): the
+-- AD IconTextures override, else C_Spell.GetSpellTexture on the static primary ID, else the
+-- generic question-mark fallback. Read-free (config + a static spell-ID texture lookup).
+local function missingIconTexture(spec, auraName)
+    local tex = DF.AuraDesigner.IconTextures and DF.AuraDesigner.IconTextures[auraName]
+    if not tex then
+        local pid = primaryADSpellID(spec, auraName)
+        if pid and C_Spell and C_Spell.GetSpellTexture then tex = C_Spell.GetSpellTexture(pid) end
+    end
+    return tex or 136243
+end
+
+-- Missing-mode config for a PLACED icon/square: mode="missing", badge sized to the indicator's
+-- square art. Same frame-level band as the present placed indicators. candidateFilters is the
+-- static identity map (structural — bound at build).
+local function buildPlacedMissingConfig(unit, map, indicator)
+    local size = math.max(8, tonumber(indicator.size) or 24)
+    return {
+        unit = unit,
+        mode = "missing",
+        filter = "HELPFUL",
+        candidateFilters = { includeSpellIDs = map },
+        badge = { w = size, h = size },
+        enabled = true,
+        frameLevelOffset = 40 + (tonumber(indicator.frameLevel) or 0),
+    }
+end
+
+-- Missing-mode config for a FRAME-LEVEL effect (healthbar / background / border): the window/
+-- badge covers the target region, sized READ-FREE from the frame's CONFIGURED width/height
+-- (fdb.frameWidth/frameHeight — the same fed-size the border uses; the live rect is secret on
+-- 12.1). The push cell width (AuraContainer build = badge.w + MISSING_PAD) is therefore >= the
+-- window width, so presence evacuates the whole region FULLY. Frame-level band matches the
+-- present frame-level effects (border uses +10; tints seat lower — see callers).
+local function buildFrameLevelMissingConfig(unit, map, w, h, levelOffset)
+    return {
+        unit = unit,
+        mode = "missing",
+        filter = "HELPFUL",
+        candidateFilters = { includeSpellIDs = map },
+        badge = { w = math.max(1, w), h = math.max(1, h) },
+        enabled = true,
+        frameLevelOffset = levelOffset,
+    }
+end
+
+-- Style a PLACED missing badge: static spell icon (or solid colour square), optional border
+-- (animation stripped), optional desaturate. No cooldown / duration / stacks (nothing to show
+-- while absent). The badge is handle-owned; we attach art to GetBadgeFrame().
+local function stylePlacedMissingBadge(h, frame, spec, auraName, indicator, isSquare)
+    local badge = h.GetBadgeFrame and h:GetBadgeFrame()
+    if not badge then return end
+    local hideIcon = indicator.hideIcon and true or false
+
+    -- Border (config, read-free) — animation ALWAYS stripped on a missing badge (orphan-ticker
+    -- hazard; see section header + Auras.lua:3122). buildPlacedBorderSpec returns nil when the
+    -- border resolves off (or hideIcon), matching the present path.
+    local borderSpec = buildPlacedBorderSpec(frame, indicator, hideIcon)
+    if borderSpec then borderSpec.animation = nil end
+    local artInset = borderSpec and (borderSpec.size or indicator.BorderSize or 1) or 0
+
+    if isSquare then
+        if not badge.dfADFill then badge.dfADFill = badge:CreateTexture(nil, "ARTWORK") end
+        local fill = badge.dfADFill
+        if hideIcon then
+            fill:Hide()
+        else
+            local r, g, b = readADColor(indicator.color)
+            fill:SetColorTexture(r, g, b, 1)
+            fill:ClearAllPoints()
+            fill:SetPoint("TOPLEFT", artInset, -artInset)
+            fill:SetPoint("BOTTOMRIGHT", -artInset, artInset)
+            fill:Show()
+        end
+        if badge.dfADIcon then badge.dfADIcon:Hide() end
+    else
+        if not badge.dfADIcon then
+            badge.dfADIcon = badge:CreateTexture(nil, "ARTWORK")
+            badge.dfADIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        end
+        local icon = badge.dfADIcon
+        icon:SetTexture(missingIconTexture(spec, auraName))
+        icon:SetDesaturated(indicator.missingDesaturate and true or false)
+        icon:SetShown(not hideIcon)
+        icon:ClearAllPoints()
+        icon:SetPoint("TOPLEFT", artInset, -artInset)
+        icon:SetPoint("BOTTOMRIGHT", -artInset, artInset)
+        if badge.dfADFill then badge.dfADFill:Hide() end
+    end
+
+    if borderSpec then
+        if not badge.dfADBorder then
+            badge.dfADBorder = DF.Border:New(badge, { secretRect = true, frameLevelOffset = 0 })
+        end
+        DF.Border:Apply(badge.dfADBorder, borderSpec)
+    elseif badge.dfADBorder then
+        DF.Border:Apply(badge.dfADBorder, { enabled = false })
+    end
+
+    -- Base alpha rides the clip window (combat-safe; alpha is not a secret).
+    local f = h.GetFrame and h:GetFrame()
+    if f then pcall(function() f:SetAlpha(tonumber(indicator.alpha) or 1) end) end
+end
+
+-- Style a FRAME-LEVEL missing badge as a flat TINT fill (healthbar / background colour-when-
+-- missing). The fill covers the whole window (== the region). Colour/blend from config.
+local function styleTintMissingBadge(h, r, g, b, blend)
+    local badge = h.GetBadgeFrame and h:GetBadgeFrame()
+    if not badge then return end
+    if not badge.dfADFill then badge.dfADFill = badge:CreateTexture(nil, "ARTWORK") end
+    badge.dfADFill:SetColorTexture(r, g, b, blend)
+    badge.dfADFill:ClearAllPoints()
+    badge.dfADFill:SetAllPoints(badge)
+    badge.dfADFill:Show()
+end
+
+-- Style a FRAME-LEVEL missing badge as a whole-frame BORDER ring (border-when-missing).
+-- secretRect + animation stripped (orphan-ticker hazard). borderSpec built read-free by the
+-- caller via buildBorderSpec.
+local function styleBorderMissingBadge(h, borderSpec)
+    local badge = h.GetBadgeFrame and h:GetBadgeFrame()
+    if not badge or not borderSpec then return end
+    borderSpec.animation = nil
+    if not badge.dfADBorder then
+        badge.dfADBorder = DF.Border:New(badge, { secretRect = true, frameLevelOffset = 0 })
+    end
+    DF.Border:Apply(badge.dfADBorder, borderSpec)
+end
+
+-- Sync one FRAME-LEVEL missing container (healthbar / background / border winner in missing
+-- mode). structSig = identity-only (candidateFilters bind at build). coSig = the caller's
+-- cosmetic hash; apply(handle) styles the badge. Handles create / identity Destroy+recreate /
+-- cosmetic restyle, re-positions the window over its region, and hot-resizes on a size change.
+-- parent = the frame the window PARENTS to (must be a Frame); anchorTo = the region it covers
+-- (may be a texture, e.g. frame.background); levelOffset = z-band above parent.
+local function syncFrameLevelMissing(store, keyName, map, frame, parent, anchorTo, w, hgt, levelOffset, coSig, apply)
+    w = math.max(1, tonumber(w) or 1); hgt = math.max(1, tonumber(hgt) or 1)
+    local structSig = includeSig(map) .. "|miss"
+    local function place(handle)
+        handle:ClearAllPoints()
+        handle:SetPoint("TOPLEFT", anchorTo, "TOPLEFT", 0, 0)
+    end
+    local entry = store[keyName]
+    -- A missing container's identity is bound at build AND its window/badge sizing is applied
+    -- only in Create (Rebuild leaves h.frame/h.badge at the old size). So an identity change is
+    -- a Destroy+recreate, not a Rebuild — re-running Create resizes cleanly. (Size-only changes
+    -- hot-apply via SetBadgeSize below.)
+    if entry and entry.structSig ~= structSig then
+        entry.handle:Destroy(); store[keyName] = nil; entry = nil
+    end
+    if not entry then
+        local handle = DF.AuraContainer:Create(parent, buildFrameLevelMissingConfig(frame.unit, map, w, hgt, levelOffset))
+        if handle then
+            place(handle)
+            apply(handle)
+            store[keyName] = { handle = handle, structSig = structSig, coSig = coSig, missing = true }
+        end
+    elseif entry.coSig ~= coSig then
+        entry.coSig = coSig
+        if entry.handle.SetBadgeSize then entry.handle:SetBadgeSize(w, hgt) end
+        place(entry.handle)
+        apply(entry.handle)
+    end
+end
+
+-- ============================================================
+-- SOUND INDICATOR  (native on-apply)  — P4.5
+-- The 12.1 revival of the sound indicator. C_UnitAuras.AddAuraAppliedSound({ unitToken,
+-- spellID, soundFileName|soundFileID, outputChannel }) plays a sound when the tracked aura is
+-- APPLIED to the unit — the ONLY read-free sound the API supports (there is NO on-fade /
+-- AuraRemovedSound hook, and no per-play volume). This REPLACES the legacy read-based
+-- SoundEngine on the factory path (which alerted while a buff was MISSING / EXPIRING — both
+-- presence/remaining-time driven, sealed on 12.1). Registration is NOT a secure-frame op, but
+-- the lab did NOT confirm combat-legality, so (re)registration is DEFERRED out of combat, the
+-- same OOC/regen discipline the containers use (consistency over cleverness). Registration
+-- handles are tracked per aura and unregistered on every teardown path — a leaked registration
+-- is the failure mode this is designed against.
+-- ============================================================
+
+local VALID_SOUND_CHANNELS = { Master = true, SFX = true, Music = true, Ambience = true, Dialog = true }
+
+local function resolveSoundChannel(adDB)
+    local ch = adDB and adDB.soundChannel
+    if not ch or not VALID_SOUND_CHANNELS[ch] then ch = "Master" end
+    return ch
+end
+
+-- Resolve the configured sound to the native struct field. DF:GetSoundPath returns a file
+-- PATH string (LSM Fetch), so we pass soundFileName; a raw numeric fileID passes soundFileID.
+-- Returns key, value (or nil when unresolved -> the indicator registers nothing).
+local function resolveSoundArg(soundCfg)
+    local snd = DF:GetSoundPath(soundCfg.soundLSMKey) or soundCfg.soundFile
+    if type(snd) == "number" then return "soundFileID", snd end
+    if type(snd) == "string" and snd ~= "" then return "soundFileName", snd end
+    return nil
+end
+
+local function registerAppliedSound(unit, spellID, argKey, argVal, channel)
+    local add = C_UnitAuras and C_UnitAuras.AddAuraAppliedSound
+    if type(add) ~= "function" then return nil end
+    local args = { unitToken = unit, spellID = spellID, outputChannel = channel }
+    args[argKey] = argVal
+    local ok, id = pcall(add, args)
+    if ok then return id end
+    DF:DebugWarn(DBG, "AddAuraAppliedSound failed (spell %s): %s", tostring(spellID), tostring(id))
+    return nil
+end
+
+local function unregisterAppliedSound(id)
+    local rem = C_UnitAuras and C_UnitAuras.RemoveAuraAppliedSound
+    if id ~= nil and type(rem) == "function" then pcall(rem, id) end
+end
+
+-- OOC-only reconcile of a frame's applied-sound registrations to its CONFIG. Desired = every
+-- enabled sound indicator on the active spec whose identity + sound resolve. Diff against the
+-- per-aura store (keyed by aura name); a changed signature (unit / spell set / sound / channel)
+-- unregisters the old handles then re-registers. Gate off / spec nil / config removed -> desired
+-- empty -> full teardown. Idempotent — safe to call repeatedly (SyncFrame tail, regen flush).
+local function reconcileSoundNow(frame)
+    if not (C_UnitAuras and C_UnitAuras.AddAuraAppliedSound) then return end   -- pre-12.1: legacy owns it
+    local store = frame.dfADFactory
+    if not store then return end
+
+    local desired
+    local enabled = DF.IsAuraDesignerEnabled and DF:IsAuraDesignerEnabled(frame)
+    local db = DF.GetFrameDB and DF:GetFrameDB(frame)
+    local owns = DF.FactoryOwnsAD and DF:FactoryOwnsAD(db)
+    if enabled and owns and frame.unit then
+        local adDB = DF.ResolveAuraDesigner and DF:ResolveAuraDesigner(frame)
+        if adDB and adDB.enabled then
+            local Engine = DF.AuraDesigner and DF.AuraDesigner.Engine
+            local spec = Engine and Engine.ResolveSpec and Engine:ResolveSpec(adDB)
+            local specAuras = spec and adDB.auras and adDB.auras[spec]
+            if specAuras then
+                local channel = resolveSoundChannel(adDB)
+                for auraName, auraCfg in pairs(specAuras) do
+                    local sc = (type(auraCfg) == "table") and auraCfg.sound
+                    if sc and sc.enabled then
+                        local ids = DF:BuildADIdentityFilters(spec, auraName)
+                        local map = ids and ids.includeSpellIDs
+                        local argKey, argVal = resolveSoundArg(sc)
+                        if map and argKey then
+                            desired = desired or {}
+                            desired[auraName] = {
+                                map = map, argKey = argKey, argVal = argVal, channel = channel,
+                                sig = frame.unit .. "|" .. includeSig(map) .. "|"
+                                    .. argKey .. "=" .. tostring(argVal) .. "|" .. channel,
+                            }
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    local soundStore = store.sound
+    if not desired and not soundStore then return end
+    soundStore = soundStore or {}; store.sound = soundStore
+
+    -- Tear down entries no longer desired or whose signature changed.
+    for auraName, entry in pairs(soundStore) do
+        local d = desired and desired[auraName]
+        if not d or d.sig ~= entry.sig then
+            for _, id in ipairs(entry.ids) do unregisterAppliedSound(id) end
+            soundStore[auraName] = nil
+        end
+    end
+    -- Register newly-desired / changed auras (one handle per spell ID in the identity map).
+    if desired then
+        for auraName, d in pairs(desired) do
+            if not soundStore[auraName] then
+                local ids = {}
+                for spellID in pairs(d.map) do
+                    local id = registerAppliedSound(frame.unit, spellID, d.argKey, d.argVal, d.channel)
+                    if id ~= nil then ids[#ids + 1] = id end
+                end
+                soundStore[auraName] = { ids = ids, sig = d.sig }
+            end
+        end
+    end
+end
+
+-- Frames whose sound reconcile is deferred to combat-end (weak-keyed so a dropped frame GCs).
+Factory._soundPending = Factory._soundPending or setmetatable({}, { __mode = "k" })
+local soundRegenFrame
+local function ensureSoundRegen()
+    if soundRegenFrame then return end
+    soundRegenFrame = CreateFrame("Frame")
+    soundRegenFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+    soundRegenFrame:SetScript("OnEvent", function()
+        for f in pairs(Factory._soundPending) do
+            Factory._soundPending[f] = nil
+            reconcileSoundNow(f)
+        end
+    end)
+end
+
+-- Public entry — reconcile a frame's applied-sound registrations. Registration legality in
+-- combat is unverified, so in lockdown we DEFER to PLAYER_REGEN_ENABLED (mirrors the container
+-- OOC discipline); OOC we reconcile immediately.
+function Factory:SyncSound(frame)
+    if not frame or not frame.unit then return end
+    if not (C_UnitAuras and C_UnitAuras.AddAuraAppliedSound) then return end
+    if InCombatLockdown() then
+        Factory._soundPending[frame] = true
+        ensureSoundRegen()
+        return
+    end
+    reconcileSoundNow(frame)
+end
+
+-- ============================================================
 -- PER-FRAME SYNC  (P4.1 health-bar + P4.2 frame-level family)
 -- Reads the CONFIGURED indicators in adDB.auras[spec] (never a live aura list). Each
 -- frame-level effect targets ONE region, so per type we pick the SINGLE highest-priority
@@ -929,6 +1289,28 @@ function Factory:SyncFrame(frame)
             function(c) return c.color end)
 
         if bestName then
+            local existingHB = hb[bestName]
+            local wantMissingHB = bestCfg.showWhenMissing and true or false
+            if existingHB and (existingHB.missing and true or false) ~= wantMissingHB then
+                existingHB.handle:Destroy(); hb[bestName] = nil
+                frame.dfADHealthMirror = nil
+            end
+          if wantMissingHB then
+            -- SHOW-WHEN-MISSING: a flat tint over the health-bar region while the buff is ABSENT.
+            -- Window/badge sized read-free from the frame's CONFIGURED size (the live rect is
+            -- secret on 12.1); single-anchored to the health bar's TOPLEFT so it covers the region
+            -- (config-size approximation — precise region + z-order are P4.7 polish). The filled
+            -- mirror is a present-only concept, so nil the feed ref while in missing mode.
+            frame.dfADHealthMirror = nil
+            local r, g, b, a = readADColor(bestCfg.color)
+            local mode = slower(bestCfg.mode or "replace")
+            local blend = (mode == "replace") and a or healthbarBlend(mode, bestCfg.blend, a)
+            local fdb = (DF.GetFrameDB and DF:GetFrameDB(frame)) or {}
+            local mw, mh = tonumber(fdb.frameWidth) or 100, tonumber(fdb.frameHeight) or 20
+            local coSig = tconcat({ "miss", tostring(r), tostring(g), tostring(b), tostring(blend), tostring(mw), tostring(mh) }, "|")
+            syncFrameLevelMissing(hb, bestName, bestMap, frame, healthBar, healthBar, mw, mh, 1, coSig,
+                function(handle) styleTintMissingBadge(handle, r, g, b, blend) end)
+          else
             local r, g, b, a = readADColor(bestCfg.color)
             local mode = slower(bestCfg.mode or "replace")
             -- Whole-bar flat tint only exists in tint mode (mirror Indicators.lua:1338):
@@ -978,6 +1360,7 @@ function Factory:SyncFrame(frame)
                     entry.handle:ApplyStyle({ overlay = { healthMirror = { texture = tex, color = { r, g, b }, alpha = alpha, onBar = onBar } } })
                 end
             end
+          end
         end
         teardownExcept(hb, bestName)
         -- No health-bar winner this pass → the mirror bar is gone; drop the ref.
@@ -1002,6 +1385,24 @@ function Factory:SyncFrame(frame)
             function(c) return c.color end)
 
         if bestName then
+            local existingBG = bg[bestName]
+            local wantMissingBG = bestCfg.showWhenMissing and true or false
+            if existingBG and (existingBG.missing and true or false) ~= wantMissingBG then
+                existingBG.handle:Destroy(); bg[bestName] = nil
+            end
+          if wantMissingBG then
+            -- SHOW-WHEN-MISSING: flat tint over the background region while the buff is ABSENT.
+            -- Sized read-free from config; anchored to frame.background (parents to `frame`, which
+            -- must be a Frame). z-order below the bars is a P4.7 polish concern (uses offset 0).
+            local r, g, b, a = readADColor(bestCfg.color)
+            local mode = slower(bestCfg.mode or "tint")
+            local blend = healthbarBlend(mode, bestCfg.blend, a)
+            local fdb = (DF.GetFrameDB and DF:GetFrameDB(frame)) or {}
+            local mw, mh = tonumber(fdb.frameWidth) or 100, tonumber(fdb.frameHeight) or 20
+            local coSig = tconcat({ "miss", tostring(r), tostring(g), tostring(b), tostring(blend), tostring(mw), tostring(mh) }, "|")
+            syncFrameLevelMissing(bg, bestName, bestMap, frame, frame, frame.background, mw, mh, 0, coSig,
+                function(handle) styleTintMissingBadge(handle, r, g, b, blend) end)
+          else
             local bgAnchor = store.bgAnchor
             if not bgAnchor then
                 bgAnchor = CreateFrame("Frame", nil, frame)
@@ -1033,6 +1434,7 @@ function Factory:SyncFrame(frame)
                 entry.coSig = coSig
                 entry.handle:ApplyStyle({ overlay = { tintColor = { r, g, b, blend } } })
             end
+          end
         end
         teardownExcept(bg, bestName)
         -- No background winner this pass → the containers are gone; drop the anchor too.
@@ -1063,6 +1465,27 @@ function Factory:SyncFrame(frame)
         end
 
         if bestName then
+            local borderCfg = specAuras[bestName].border
+            local wantMissingBD = (borderCfg and borderCfg.showWhenMissing) and true or false
+            local existingBD = bd[bestName]
+            if existingBD and (existingBD.missing and true or false) ~= wantMissingBD then
+                existingBD.handle:Destroy(); bd[bestName] = nil
+            end
+          if wantMissingBD then
+            -- SHOW-WHEN-MISSING: the ring shows while the buff is ABSENT. Window covers the WHOLE
+            -- frame (config-sized: fdb.frameWidth/Height, live rect secret); badge = the static
+            -- border art with animation STRIPPED (the badge is not a slot in self.buttons, so no
+            -- _teardownContainer StopAnimation loop reaches its UIParent driver -> hard-nil, per
+            -- the missing-buff badge precedent). NEW USE of the missing mechanism at FRAME size —
+            -- the cell push (badge.w + pad) must evacuate the wide window fully on presence
+            -- (flag for in-game validation).
+            local fdb = (DF.GetFrameDB and DF:GetFrameDB(frame)) or {}
+            local mw, mh = tonumber(fdb.frameWidth) or 100, tonumber(fdb.frameHeight) or 20
+            local capturedSpec = bestSpec
+            local coSig = "miss|" .. borderSpecSig(bestSpec) .. "|" .. tostring(mw) .. "x" .. tostring(mh)
+            syncFrameLevelMissing(bd, bestName, bestMap, frame, frame, frame, mw, mh, 10, coSig,
+                function(handle) styleBorderMissingBadge(handle, capturedSpec) end)
+          else
             local structSig = includeSig(bestMap)
             local coSig = borderSpecSig(bestSpec)
 
@@ -1079,6 +1502,7 @@ function Factory:SyncFrame(frame)
                 entry.coSig = coSig
                 entry.handle:ApplyStyle({ border = { spec = bestSpec } })
             end
+          end
         end
         teardownExcept(bd, bestName)
     end
@@ -1144,6 +1568,59 @@ function Factory:SyncFrame(frame)
                                 local key = placedKey(auraName, indicator)
                                 live[key] = true
                                 local hideIcon = indicator.hideIcon and true or false
+                                local wantMissingP = indicator.showWhenMissing and true or false
+                                local existingP = placed[key]
+                                if existingP and (existingP.missing and true or false) ~= wantMissingP then
+                                    existingP.handle:Destroy(); placed[key] = nil
+                                end
+                              if wantMissingP then
+                                -- SHOW-WHEN-MISSING placed icon/square: static spell icon (or solid
+                                -- colour square) + border, shown while the buff is ABSENT. No
+                                -- cooldown / duration / stacks (nothing to count when absent). Border
+                                -- animation is stripped on the badge (orphan-ticker hazard).
+                                local size = math.max(8, tonumber(indicator.size) or 24)
+                                local borderOnM = placedBorderOn(indicator, hideIcon)
+                                local anchorM = (type(indicator.anchor) == "string" and indicator.anchor) or "TOPLEFT"
+                                local oxM, oyM = tonumber(indicator.offsetX) or 0, tonumber(indicator.offsetY) or 0
+                                local scaleM = tonumber(indicator.scale) or 1
+                                local structSig = includeSig(map) .. "|" .. (isSquare and "sq" or "ic")
+                                    .. "|miss|fl=" .. tostring(tonumber(indicator.frameLevel) or 0)
+                                local coSig = tconcat({
+                                    "sz=" .. tostring(size), "sc=" .. tostring(scaleM),
+                                    "an=" .. anchorM, "ox=" .. tostring(oxM), "oy=" .. tostring(oyM),
+                                    "al=" .. tostring(tonumber(indicator.alpha) or 1),
+                                    "hi=" .. tostring(hideIcon and 1 or 0),
+                                    "ds=" .. tostring(indicator.missingDesaturate and 1 or 0),
+                                    "co=" .. (isSquare and colSig(indicator.color) or ""),
+                                    "bd=" .. placedBorderRawSig(indicator, borderOnM),
+                                }, "|")
+                                local function placeM(handle)
+                                    handle:ClearAllPoints()
+                                    handle:SetPoint(anchorM, frame, anchorM, oxM, oyM)
+                                    local f = handle.GetFrame and handle:GetFrame()
+                                    if f then pcall(function() f:SetScale(scaleM) end) end
+                                end
+                                local entry = placed[key]
+                                -- Identity/struct change on a missing container = Destroy+recreate
+                                -- (Rebuild doesn't re-size h.frame/h.badge — only Create does).
+                                if entry and entry.structSig ~= structSig then
+                                    entry.handle:Destroy(); placed[key] = nil; entry = nil
+                                end
+                                if not entry then
+                                    local handle = DF.AuraContainer:Create(frame,
+                                        buildPlacedMissingConfig(frame.unit, map, indicator))
+                                    if handle then
+                                        placeM(handle)
+                                        stylePlacedMissingBadge(handle, frame, spec, auraName, indicator, isSquare)
+                                        placed[key] = { handle = handle, structSig = structSig, coSig = coSig, missing = true }
+                                    end
+                                elseif entry.coSig ~= coSig then
+                                    entry.coSig = coSig
+                                    if entry.handle.SetBadgeSize then entry.handle:SetBadgeSize(size, size) end
+                                    placeM(entry.handle)
+                                    stylePlacedMissingBadge(entry.handle, frame, spec, auraName, indicator, isSquare)
+                                end
+                              else
                                 local showStacks = indicator.showStacks
                                 if showStacks == nil then showStacks = true end
                                 showStacks = showStacks and true or false
@@ -1180,6 +1657,7 @@ function Factory:SyncFrame(frame)
                                         buildPlacedLayout(indicator))
                                     applyPlacedAlpha(entry.handle, alpha)
                                 end
+                              end
                             end
                         end
                     end
@@ -1195,6 +1673,11 @@ function Factory:SyncFrame(frame)
             end
         end
     end
+
+    -- ---- SOUND (native on-apply registrations) --------------------------------------
+    -- Reconcile C_UnitAuras.AddAuraAppliedSound registrations to the sound-indicator config
+    -- (combat-deferred inside SyncSound). NOT a container — its own OOC/regen discipline.
+    self:SyncSound(frame)
 
     -- framealpha / nametext / healthtext: intentionally NOT synced. No read-free,
     -- combat-safe port exists (see file-foot notes) — their GUI controls get the
@@ -1214,6 +1697,9 @@ function Factory:ClearFrame(frame)
     teardownExcept(store.placed or {}, nil)   -- per-indicator icon/square/bar containers
     releaseBgAnchor(store)   -- containers gone above; drop the background anchor too
     frame.dfADHealthMirror = nil   -- health-mirror bar torn down; drop the feed ref
+    -- Sound: reconcile to config with AD now off -> unregisters every applied-sound handle
+    -- (combat-deferred to regen inside SyncSound). No leaked registrations.
+    self:SyncSound(frame)
 end
 
 -- ============================================================
