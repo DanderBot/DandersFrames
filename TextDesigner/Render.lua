@@ -207,8 +207,8 @@ end
 -- category set a group renders is its items' union).
 local function mirrorCategoryMatches(elem, category)
     if CONTENT_HINTS[elem.contentType] == category then return true end
-    if elem.contentType == "group" and type(elem.items) == "table" then
-        for _, raw in ipairs(elem.items) do
+    if elem.contentType == "group" and type(elem.groupItems) == "table" then
+        for _, raw in ipairs(elem.groupItems) do
             local ct = type(raw) == "table" and (raw.contentType or raw.type) or raw
             if CONTENT_HINTS[ct] == category then return true end
         end
