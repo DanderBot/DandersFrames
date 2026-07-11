@@ -6044,12 +6044,6 @@ function DF:FullProfileRefresh()
         DF:RebuildDirectFilterStrings()
     end
 
-    -- Re-scan auras for the new profile's filters (direct is the only
-    -- aura source since 4.6.1; filter strings were rebuilt just above).
-    if DF.DirectScanAllUnits then
-        DF:DirectScanAllUnits()
-    end
-
     -- Clear color curves (colors may have changed)
     if DF.UpdateColorCurve then
         DF:UpdateColorCurve()

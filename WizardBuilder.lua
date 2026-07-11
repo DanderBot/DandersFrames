@@ -1273,8 +1273,8 @@ WB:RegisterBuiltinWizard({
                 if DF.RebuildDirectFilterStrings then
                     DF:RebuildDirectFilterStrings()
                 end
-                if DF.DirectScanAllUnits then
-                    DF:DirectScanAllUnits()
+                if DF.InvalidateAuraLayout then
+                    DF:InvalidateAuraLayout()
                 end
                 DF:Debug("Aura Filter Setup wizard completed")
             end,

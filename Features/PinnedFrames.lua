@@ -1030,7 +1030,6 @@ function PinnedFrames:CreateBossSecureHandler(setIndex, container, bossFrames)
                 local guid = UnitGUID(f.unit)
                 if guid and guid ~= f.dfLastBossGUID then
                     f.dfLastBossGUID = guid
-                    if DF.ScanUnitFull then DF:ScanUnitFull(f.unit) end
                     if DF.FullFrameRefresh then DF:FullFrameRefresh(f) end
                 end
             end
@@ -1197,22 +1196,13 @@ function PinnedFrames:CreateBossFrames(setIndex, container)
                 if DF.UpdatePower then DF:UpdatePower(self) end
 
             elseif event == "UNIT_AURA" then
-                -- Populate aura cache (same logic as directModeSubscriber)
-                local cache = DF.AuraCache and DF.AuraCache[unit]
-                local needsFull = not updateInfo or updateInfo.isFullUpdate
-                    or not cache or not cache.hasFullScan
-                if needsFull then
-                    if DF.ScanUnitFull then DF:ScanUnitFull(unit) end
-                else
-                    if DF.ApplyAuraDelta and not DF:ApplyAuraDelta(unit, updateInfo) then
-                        if DF.ScanUnitFull then DF:ScanUnitFull(unit) end
-                    end
-                end
-                -- Trigger the full filtered aura update pipeline (same path as
-                -- party/raid frames — applies filters, limits, dedup, etc.)
-                if DF.TriggerAuraUpdateForUnit then
-                    DF:TriggerAuraUpdateForUnit(unit)
-                end
+                -- 12.1: the containers render aura content themselves; this
+                -- keeps the frame's factory configs + drives current (sig-gated,
+                -- cheap when nothing changed). Boss frames aren't in unitFrameMap,
+                -- so their own event handler is the drive cadence.
+                if DF.UpdateAuras then DF:UpdateAuras(self) end
+                if DF.UpdateDefensiveBar then DF:UpdateDefensiveBar(self) end
+                if DF.UpdateDispelOverlay then DF:UpdateDispelOverlay(self) end
 
             elseif event == "UNIT_NAME_UPDATE" then
                 if DF.UpdateName then DF:UpdateName(self) end
@@ -1246,7 +1236,6 @@ function PinnedFrames:CreateBossFrames(setIndex, container)
             C_Timer.After(0.1, function()
                 if self and self.unit and self:IsVisible() then
                     -- Populate aura cache for this unit if not yet done
-                    if DF.ScanUnitFull then DF:ScanUnitFull(self.unit) end
                     -- Full refresh ensures Aura Designer BeginFrame/EnsureFrameState runs
                     if DF.FullFrameRefresh then DF:FullFrameRefresh(self) end
                     self.dfLastBossGUID = UnitGUID(self.unit)

@@ -5414,13 +5414,14 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             AddSpace(4, "both")
         end
 
-        -- Callback that rebuilds filter strings and rescans
+        -- Callback that rebuilds the native filter strings and re-drives the
+        -- container rows (they rebuild when their filter signature changes).
         local function DirectFilterChanged()
             if DF.RebuildDirectFilterStrings then
                 DF:RebuildDirectFilterStrings()
             end
-            if DF.DirectScanAllUnits then
-                DF:DirectScanAllUnits()
+            if DF.InvalidateAuraLayout then
+                DF:InvalidateAuraLayout()
             end
         end
 

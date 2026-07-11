@@ -273,7 +273,6 @@ local PROFILED_FUNCTIONS = {
     -- ----------------------------------------------------------
     "UpdateAuras",                  -- Entry point (alias for Enhanced)
     "UpdateAuras_Enhanced",
-    "DirectModeRosterUpdate",
     "RebuildDirectFilterStrings",
 
     -- ----------------------------------------------------------

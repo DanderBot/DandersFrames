@@ -1648,7 +1648,7 @@ function DF:UpdateDispelOverlay(frame)
         -- needs clearing. On a fresh frame with the overlay off, every flag
         -- below is falsy and we skip HideDispelAndInvalidate entirely. This
         -- matters in combat where UpdateDispelOverlay fires many times per
-        -- second per frame via TriggerAuraUpdateForUnit.
+        -- second per frame.
         local hasState = (frame.dfDispelOverlay and frame.dfDispelOverlay:IsShown())
                        or frame.dfDispelNameTextActive
                        or (frame.dfLastDispelAuraID ~= nil)

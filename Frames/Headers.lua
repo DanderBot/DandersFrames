@@ -385,16 +385,6 @@ local function ClearUnitCache(unit)
         unitGuidCache[unit] = nil
         unitRoleCache[unit] = nil
         
-        -- Clear aura cache for this unit to prevent stale debuffs showing on wrong player
-        -- (When roster compacts, raid5 might become a different player but cache still has old data)
-        if DF.BlizzardAuraCache and DF.BlizzardAuraCache[unit] then
-            local cache = DF.BlizzardAuraCache[unit]
-            wipe(cache.buffs)
-            wipe(cache.debuffs)
-            wipe(cache.playerDispellable)
-            wipe(cache.defensives)
-        end
-        
         -- Clear range cache for this unit to prevent stale OOR state on new player
         if DF.ClearRangeCacheForUnit then
             DF:ClearRangeCacheForUnit(unit)
@@ -8609,12 +8599,6 @@ headerChildEventFrame:SetScript("OnEvent", function(self, event, arg1)
     if event == "UNIT_ENTERED_VEHICLE" or event == "UNIT_EXITED_VEHICLE" then
         local unit = arg1
         if unit then
-            -- Invalidate stale aura cache for this unit so defensive icons
-            -- and aura durations don't retain pre-vehicle data (#403, #404)
-            if DF.BlizzardAuraCache then
-                DF.BlizzardAuraCache[unit] = nil
-            end
-
             if DF.UpdateVehicleIcon then
                 local frame = unitFrameMap[unit]
                 if frame and frame.dfEventsEnabled ~= false then

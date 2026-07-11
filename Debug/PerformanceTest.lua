@@ -20,7 +20,6 @@ DF.PerfTest = {
     enableHealPrediction = true,
     enableAbsorbs = true,
     -- Additional systems
-    enableBlizzardAuraCache = true,
     enableTargetedSpells = true,
     enableHealthUpdates = true,
     enablePowerBar = true,
@@ -139,7 +138,6 @@ local function CreatePerfTestFrame()
     
     -- Checkboxes - Column 2 (Additional Systems)
     i = 0
-    CreateCheckbox(frame, "Blizzard Aura Cache", "enableBlizzardAuraCache", col2X, yStart + (i * yStep)); i = i + 1
     CreateCheckbox(frame, "Targeted Spells", "enableTargetedSpells", col2X, yStart + (i * yStep)); i = i + 1
     CreateCheckbox(frame, "Name Updates", "enableNameUpdates", col2X, yStart + (i * yStep)); i = i + 1
     CreateCheckbox(frame, "Role/Leader Icons", "enableRoleLeaderIcons", col2X, yStart + (i * yStep)); i = i + 1
