@@ -3040,7 +3040,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
     -- expiringGroup / swmCheck / borderCtl are captured for the surgical blocks
     -- (Expiring, Show When Missing, gradient border style). See block pass below.
     local builtGroups = {}
-    local expiringGroup, swmCheck, borderCtl, wholeBarCheck
+    local expiringGroup, swmCheck, borderCtl, wholeBarCheck, swmGroup, durColorByTimeCtl
 
     local function AddWidget(widget, height)
         widget:SetPoint("TOPLEFT", parent, "TOPLEFT", 5, -totalHeight)
@@ -3090,6 +3090,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- frost them per-type. Tag the Expiring group for its own limitation block.
         builtGroups[#builtGroups + 1] = group
         if header == L["Expiring"] then expiringGroup = group end
+        if header == L["Show When Missing"] then swmGroup = group end
         return group
     end
 
@@ -3407,7 +3408,8 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateDropdown(parent, L["Duration Anchor"], ANCHOR_OPTIONS, proxy, "durationAnchor"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 1, proxy, "durationX"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, proxy, "durationY"), 54)
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Color by Time Remaining"], proxy, "durationColorByTime"), 28)
+            durColorByTimeCtl = GUI:CreateCheckbox(parent, L["Color by Time Remaining"], proxy, "durationColorByTime")
+            g:AddWidget(durColorByTimeCtl, 28)
             g:AddWidget(GUI:CreateColorPicker(parent, L["Duration Text Color"], proxy, "durationColor", true, RPL, RPL, true), 28)
             local hideAboveSlider
             local function UpdateHideAboveState()
@@ -3514,7 +3516,8 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateDropdown(parent, L["Duration Anchor"], ANCHOR_OPTIONS, proxy, "durationAnchor"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 1, proxy, "durationX"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, proxy, "durationY"), 54)
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Color by Time Remaining"], proxy, "durationColorByTime"), 28)
+            durColorByTimeCtl = GUI:CreateCheckbox(parent, L["Color by Time Remaining"], proxy, "durationColorByTime")
+            g:AddWidget(durColorByTimeCtl, 28)
             g:AddWidget(GUI:CreateColorPicker(parent, L["Duration Text Color"], proxy, "durationColor", true, RPL, RPL, true), 28)
             local hideAboveSlider
             local function UpdateHideAboveState()
@@ -3653,7 +3656,8 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateDropdown(parent, L["Duration Anchor"], ANCHOR_OPTIONS, proxy, "durationAnchor"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 1, proxy, "durationX"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, proxy, "durationY"), 54)
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Color by Time Remaining"], proxy, "durationColorByTime"), 28)
+            durColorByTimeCtl = GUI:CreateCheckbox(parent, L["Color by Time Remaining"], proxy, "durationColorByTime")
+            g:AddWidget(durColorByTimeCtl, 28)
             local hideAboveSlider
             local function UpdateHideAboveState()
                 if not hideAboveSlider then return end
@@ -4125,12 +4129,29 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         end
     end
 
-    if typeKey == "icon" then
-        -- P4.3: remove when the icon indicator ports to the factory.
-        BlockGroups("roadmap", "ad:icon")
-    elseif typeKey == "square" then
-        -- P4.3/P4.4: remove when the square indicator ports to the factory.
-        BlockGroups("roadmap", "ad:square")
+    if typeKey == "icon" or typeKey == "square" then
+        -- P4.3 SHIPPED: icon/square render on the container engine (native icon / solid
+        -- fill + cooldown + stacks + border + position). The whole-type roadmap overlay is
+        -- gone. Three surgical blocks remain:
+        --   * Show When Missing — presence-inversion state the factory doesn't drive yet
+        --     (P4.5 roadmap; remove when missing mode ports).
+        if swmGroup then
+            GUI:BlockControl12_1(swmGroup, "roadmap",
+                { id = "ad:" .. typeKey .. ":showWhenMissing", page = L["Aura Designer"], when = ADgate })
+        end
+        --   * Expiring — permanent limitation. The whole group (Expiring Colour Override /
+        --     colour-swap, pulse / bounce / whole-alpha-pulse, threshold, duration priority)
+        --     is remaining-time-driven, which is unreadable on the container path.
+        if expiringGroup then
+            GUI:BlockControl12_1(expiringGroup, "limitation",
+                { id = "ad:" .. typeKey .. ":expiring", page = L["Aura Designer"], when = ADgate })
+        end
+        --   * Duration "Colour by Time" — temporarily inert (the factory nils the duration
+        --     colour until the P4.4 bucket formatter lands); roadmap, remove in P4.4.
+        if durColorByTimeCtl then
+            GUI:BlockControl12_1(durColorByTimeCtl, "roadmap",
+                { id = "ad:" .. typeKey .. ":durationColorByTime", page = L["Aura Designer"], when = ADgate })
+        end
     elseif typeKey == "bar" then
         -- P4.4: remove when the bar indicator ports to the factory.
         BlockGroups("roadmap", "ad:bar")

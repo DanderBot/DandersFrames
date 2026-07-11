@@ -307,8 +307,25 @@ local function styleButton_regions(slot, config)
             if type(hm.onBar) == "function" then hm.onBar(sb) end
         end
     else
+        -- ROW mode content is EITHER the aura's own ICON texture (native SetIcon fills
+        -- it) OR a solid-colour SQUARE fill (DF-owned static colour — the Aura Designer
+        -- "square" indicator, whose legacy render is a SetColorTexture box, not the spell
+        -- art). A square NEVER binds SetIcon (no dfIcon created), so the icon path is
+        -- skipped whenever a square fill is configured. Both are read-free; the slot's
+        -- secret show/hide drives their visibility (attach-and-inherit).
+        local squareSpec = style.square
+        if squareSpec then
+            if not slot.dfSquare then
+                slot.dfSquare = slot:CreateTexture(nil, "BACKGROUND")
+            end
+            local inset = squareSpec.inset or 0
+            slot.dfSquare:ClearAllPoints()
+            slot.dfSquare:SetPoint("TOPLEFT", inset, -inset)
+            slot.dfSquare:SetPoint("BOTTOMRIGHT", -inset, inset)
+            slot.dfSquare:SetColorTexture(readColor(squareSpec.color))
+        end
         local iconSpec = style.icon
-        if iconSpec == nil or iconSpec.show ~= false then
+        if not squareSpec and (iconSpec == nil or iconSpec.show ~= false) then
             if not slot.dfIcon then
                 slot.dfIcon = slot:CreateTexture(nil, "BACKGROUND")
             end
@@ -374,8 +391,10 @@ local function styleButton_regions(slot, config)
         if not slot.dfCD then
             slot.dfCD = CreateFrame("Cooldown", nil, slot, "CooldownFrameTemplate")
         end
-        slot.dfCD:SetAllPoints(slot.dfIcon or slot)
+        slot.dfCD:SetAllPoints(slot.dfIcon or slot.dfSquare or slot)
         if slot.dfCD.SetDrawEdge then slot.dfCD:SetDrawEdge(cdSpec == nil or cdSpec.edge ~= false) end
+        -- Swipe on by default; cdSpec.swipe=false hides it (AD "Hide Cooldown Swipe").
+        if slot.dfCD.SetDrawSwipe then slot.dfCD:SetDrawSwipe(cdSpec == nil or cdSpec.swipe ~= false) end
         if slot.dfCD.SetReverse then slot.dfCD:SetReverse(cdSpec ~= nil and cdSpec.reverse == true) end
         if slot.dfCD.SetHideCountdownNumbers then
             slot.dfCD:SetHideCountdownNumbers(not (cdSpec and cdSpec.numbers))

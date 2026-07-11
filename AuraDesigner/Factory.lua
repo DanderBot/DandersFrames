@@ -10,12 +10,13 @@ local addonName, DF = ...
 -- identity comes from the STATIC per-spec spell-ID whitelist (Config.SpellIDs), and
 -- Blizzard drives each slot's secret show/hide — we only attach art. Zero secret reads.
 --
--- SCOPE (this file, P4.0 scaffold + P4.1 + P4.2): gates, identity->includeSpellIDs, and the
--- frame-level indicators that CAN be driven read-free — HEALTH-BAR (filled mirror + flat
--- tint), BACKGROUND tint, and static BORDER. framealpha / nametext / healthtext are 12.1
--- casualties (see NOTES at
--- the file foot). Placed indicators (icon/square/bar) are P4.3-P4.4. The legacy engine stays
--- fully intact behind DF:UseFactoryForAD.
+-- SCOPE (this file, P4.0 scaffold + P4.1 + P4.2 + P4.3): gates, identity->includeSpellIDs,
+-- the frame-level indicators that CAN be driven read-free — HEALTH-BAR (filled mirror + flat
+-- tint), BACKGROUND tint, static BORDER — and the PLACED ICON / SQUARE indicators (native
+-- SetIcon / solid-colour fill + native cooldown + native stacks + static border, one
+-- 1-slot container per configured indicator, many coexisting). framealpha / nametext /
+-- healthtext are 12.1 casualties (see NOTES at the file foot). The BAR placed indicator is
+-- P4.4. The legacy engine stays fully intact behind DF:UseFactoryForAD.
 --
 -- COMBAT / SECRET obligations (delegated to the DF.AuraContainer handle, the #205-proven
 -- path): containers are created/enabled OUT of combat and deferred to PLAYER_REGEN_ENABLED
@@ -126,6 +127,13 @@ end
 local function readADColor(c)
     if type(c) ~= "table" then return 1, 1, 1, 1 end
     return c[1] or c.r or 1, c[2] or c.g or 1, c[3] or c.b or 1, c[4] or c.a or 1
+end
+
+-- Stable string form of an AD colour config, for signatures ("" when unset -> default).
+local function colSig(c)
+    if type(c) ~= "table" then return "" end
+    local r, g, b, a = readADColor(c)
+    return tconcat({ tostring(r), tostring(g), tostring(b), tostring(a) }, ",")
 end
 
 -- Health-bar overlay alpha per mode — the exact semantics of Indicators:ApplyHealthBar
@@ -316,6 +324,271 @@ local function releaseBgAnchor(store)
         a:ClearAllPoints()
         store.bgAnchor = nil
     end
+end
+
+-- ============================================================
+-- PLACED INDICATORS (icon / square)  — P4.3
+-- Unlike the frame-level effects (ONE-per-region, single highest-priority winner), each
+-- configured icon/square indicator is its OWN placed display at its OWN position/size, and
+-- MANY coexist (different auras, different spots — or even the same spell shown twice). So
+-- there is NO winner pick: SyncFrame stands up one 1-slot container per configured
+-- indicator, keyed by its stable instanceKey (auraName#id), and tears down by key.
+--
+-- CONTAINER SHAPE: mode="row" with max=1. Row mode is the ONLY mode that builds the icon
+-- content regions (icon texture / cooldown swipe / stack count / border) and binds them to
+-- Blizzard's native inbound setters (SetIcon / SetDurationCooldown / SetApplicationCount) —
+-- overlay mode is a bare presence box. max=1 = a single button; the container's flow layout
+-- anchors that one button at the indicator's configured anchor+offset+size, exactly like the
+-- legacy icon:SetPoint(anchor, frame, anchor, offsetX, offsetY) + SetSize(size, size).
+-- ============================================================
+
+-- Stable per-indicator key (mirror Engine GetInstanceKey: "auraName#id").
+local function placedKey(auraName, indicator)
+    return auraName .. "#" .. tostring(indicator.id)
+end
+
+-- Build the DF.Border spec for a placed icon/square indicator from its CONFIG (read-free),
+-- mirroring Indicators:ConfigureIcon's border block: canonical keys via BuildSpec, AD's
+-- size = BorderSize (band thickness) + inset = -BorderInset (outward extension) semantics,
+-- enabled gated on ShowBorder AND not hideIcon (a ring around a hidden icon looks broken),
+-- translucent-black default colour. Returns nil when the border resolves off. Gradient
+-- degrades to solid on the secret-anchored slot (P4.7 overlays the gradient control) — same
+-- known casualty as the frame-level border. Animations are stripped row-side (AuraContainer
+-- SAFE_OVERLAY_ANIM applies to overlay mode only), so expiring/animated borders don't run
+-- here — that's the accepted expiring casualty, base ring only.
+local function buildPlacedBorderSpec(frame, indicator, hideIcon)
+    if not DF.Border then return nil end
+    local borderEnabled = indicator.ShowBorder
+    if borderEnabled == nil then borderEnabled = indicator.borderEnabled end
+    if borderEnabled == nil then borderEnabled = indicator.showBorder end
+    if borderEnabled == nil then borderEnabled = true end
+    if not borderEnabled or hideIcon then return nil end
+    local thickness = indicator.BorderSize or indicator.borderThickness or 1
+    local inset     = indicator.BorderInset or indicator.borderInset or 0
+    local spec = DF.Border:BuildSpec(indicator, "")
+    if not spec then return nil end
+    spec.enabled = true
+    spec.size    = thickness
+    spec.inset   = -inset
+    if not spec.color then spec.color = { r = 0, g = 0, b = 0, a = 0.8 } end
+    local fdb = DF:GetFrameDB(frame) or {}
+    spec.pixelPerfect = fdb.pixelPerfect
+    return spec
+end
+
+-- Cheap RAW-config border gate (no BuildSpec, no allocation) — the same predicate the built
+-- spec keys off (Border.lua:217, enabled = ShowBorder ~= false), plus not-hideIcon (a ring
+-- around a hidden icon is force-disabled). Used PER-TICK for the structural border-on
+-- decision; the real spec is built ONLY on (re)build / restyle, never every pass (FIX C).
+local function placedBorderOn(indicator, hideIcon)
+    if hideIcon then return false end
+    local e = indicator.ShowBorder
+    if e == nil then e = indicator.borderEnabled end
+    if e == nil then e = indicator.showBorder end
+    return e ~= false
+end
+
+-- RAW-config cosmetic signature of the placed border — the per-tick alloc-free replacement
+-- for borderSpecSig(BuildSpec(...)). Enumerates the exact keys DF.Border:BuildSpec("") reads
+-- that affect the RENDERED row border (style/texture/size/inset/offset/blend/gradient/shadow
+-- + legacy thickness/inset fallbacks). ANIMATION keys are OMITTED on purpose: row mode strips
+-- animations (AuraContainer SAFE_OVERLAY_ANIM is overlay-only), so an animation-key change
+-- can't alter the rendered ring and must not force a restyle. This changes iff the built
+-- spec's rendered result changes -> IDENTICAL rebuild/restyle decisions, minus the alloc.
+local PLACED_BORDER_KEYS = {
+    "BorderStyle", "BorderTexture", "BorderSize", "borderThickness",
+    "BorderInset", "borderInset", "BorderOffsetX", "BorderOffsetY", "BorderBlendMode",
+    "BorderGradientEnabled", "BorderGradientDirection",
+    "BorderShadowEnabled", "BorderShadowSize", "BorderShadowOffsetX", "BorderShadowOffsetY",
+    -- Colour-source keys: not exposed by the AD border UI today (source is always CUSTOM),
+    -- but hashed defensively so an imported profile or a future class/role border option
+    -- can't leave the border stale until /reload.
+    "BorderColorSource", "BorderUseClassColor", "BorderUseRoleColor",
+}
+local PLACED_BORDER_COLOR_KEYS = {
+    "BorderColor", "BorderGradientStartColor", "BorderGradientEndColor", "BorderShadowColor",
+}
+local function placedBorderRawSig(indicator, borderOn)
+    if not borderOn then return "" end
+    local parts = {}
+    for _, kk in ipairs(PLACED_BORDER_KEYS) do
+        parts[#parts + 1] = tostring(indicator[kk])
+    end
+    for _, kk in ipairs(PLACED_BORDER_COLOR_KEYS) do
+        parts[#parts + 1] = colSig(indicator[kk])
+    end
+    return tconcat(parts, ",")
+end
+
+-- Native stack-count TextStyle spec from the AD stack config keys (font/scale/outline/
+-- anchor/offset/colour). Read-free — the COUNT itself is filled secure-side by Blizzard's
+-- SetApplicationCount (no formatter — secret trap), shown at >1.
+local function buildStackSpec(indicator)
+    local outline = indicator.stackOutline or "OUTLINE"
+    if outline == "NONE" then outline = "" end
+    return {
+        show    = true,
+        font    = indicator.stackFont,
+        size    = 10 * (tonumber(indicator.stackScale) or 1),
+        outline = outline,
+        anchor  = indicator.stackAnchor or "BOTTOMRIGHT",
+        offsetX = tonumber(indicator.stackX) or 0,
+        offsetY = tonumber(indicator.stackY) or 0,
+        color   = indicator.stackColor,
+    }
+end
+
+-- Layout for the single placed button: the container anchors it at the indicator's
+-- configured corner + offset (mirror the legacy icon anchor). Size floored at 8 (old
+-- configs predate the current slider floor). Growth/wrap are inert with one slot.
+local function buildPlacedLayout(indicator)
+    return {
+        anchor  = (type(indicator.anchor) == "string" and indicator.anchor) or "TOPLEFT",
+        offsetX = tonumber(indicator.offsetX) or 0,
+        offsetY = tonumber(indicator.offsetY) or 0,
+        size    = math.max(8, tonumber(indicator.size) or 24),
+        scale   = tonumber(indicator.scale) or 1,
+        growth  = "RIGHT_DOWN",
+        wrap    = 1,
+    }
+end
+
+-- Build the style table for a placed icon/square. icon = native spell texture (unless
+-- hideIcon = text-only); square = solid config colour fill (no SetIcon). Both keep the
+-- native cooldown swipe, the styleable duration-text fontstring, the native stack count,
+-- and the static border.
+local function buildPlacedStyle(indicator, isSquare, borderSpec)
+    local hideIcon = indicator.hideIcon and true or false
+    local style = {}
+
+    if isSquare then
+        -- Solid-colour box (legacy SetColorTexture). hideIcon = no fill (text-only). The
+        -- fill insets by the border thickness so the ring frames it (legacy parity).
+        if not hideIcon then
+            local r, g, b = readADColor(indicator.color)
+            local inset = borderSpec and (indicator.BorderSize or indicator.borderThickness or 1) or 0
+            style.square = { color = { r, g, b, 1 }, inset = inset }
+        end
+    else
+        -- Spell icon. hideIcon = text-only: skip the icon texture, keep cooldown/border/
+        -- stacks. Art inset matches the border thickness so the ring frames the art.
+        local inset = borderSpec and (indicator.BorderSize or indicator.borderThickness or 1) or 1
+        style.icon = { show = not hideIcon, inset = inset }
+    end
+
+    -- Cooldown swipe: Blizzard drives it from the matched aura's Duration object
+    -- (SetDurationCooldown) — no Lua time read. hideSwipe toggles the swipe (also off in
+    -- text-only mode). Native countdown numbers are OFF — duration text renders through the
+    -- styleable SetDurationText fontstring below (positionable, matching the legacy icon).
+    local showDuration = indicator.showDuration; if showDuration == nil then showDuration = true end
+    local hideSwipe = indicator.hideSwipe and true or false
+    style.cooldown = { show = true, swipe = (not hideSwipe) and (not hideIcon), numbers = false }
+
+    -- Duration text: a DF-owned fontstring the native SetDurationText fills secret-safe
+    -- (Blizzard formats the remaining time C-side; no Lua read). Font/anchor/offset port
+    -- from config. COLOUR-BY-TIME is DEFERRED to the P4.4 bucket formatter (|c escapes) —
+    -- until then, colour-by-time entries show the static/default colour (no smooth curve,
+    -- which is dead on container buttons anyway). A static duration colour still applies.
+    if showDuration then
+        local dOutline = indicator.durationOutline or "OUTLINE"
+        if dOutline == "NONE" then dOutline = "" end
+        local colorByTime = indicator.durationColorByTime
+        style.duration = {
+            show    = true,
+            font    = indicator.durationFont,
+            size    = 10 * (tonumber(indicator.durationScale) or 1),
+            outline = dOutline,
+            anchor  = indicator.durationAnchor or "CENTER",
+            offsetX = tonumber(indicator.durationX) or 0,
+            offsetY = tonumber(indicator.durationY) or 0,
+            -- nil colour lets a future bucket formatter own it; static colour only when
+            -- colour-by-time is off (else the fontstring's default shows until P4.4).
+            color   = (not colorByTime) and indicator.durationColor or nil,
+        }
+    end
+
+    -- Stacks: native count, shown at >1. NO formatter (secret trap — see bindNative). A
+    -- custom stackMinimum is NOT expressible on the no-formatter native path (deferred).
+    local showStacks = indicator.showStacks; if showStacks == nil then showStacks = true end
+    if showStacks then style.stacks = buildStackSpec(indicator) end
+
+    if borderSpec then style.border = { spec = borderSpec } end
+    return style
+end
+
+-- Full row config for one placed indicator (max=1 single-slot container). frameLevelOffset
+-- 40 = the buff-icon level (above the frame's content overlay) so placed AD indicators read
+-- on top, nudged by the indicator's own frameLevel; z-order polish is a P4.7 concern.
+local function buildPlacedConfig(unit, map, indicator, isSquare, borderSpec)
+    return {
+        unit = unit,
+        mode = "row",
+        max = 1,
+        filter = "HELPFUL",
+        candidateFilters = { includeSpellIDs = map },
+        enabled = true,
+        tooltips = false,
+        frameLevelOffset = 40 + (tonumber(indicator.frameLevel) or 0),
+        layout = buildPlacedLayout(indicator),
+        style = buildPlacedStyle(indicator, isSquare, borderSpec),
+    }
+end
+
+-- STRUCTURAL signature: candidateFilters (declared at build), icon-vs-square, and which
+-- REGIONS exist — hideIcon, stacks on/off, duration text on/off, border on/off — plus
+-- frameLevel (set once at Create). styleButton_regions only ever CREATES regions (never
+-- hides/removes them), so toggling a region OFF must Rebuild the container to drop it; a
+-- plain ApplyStyle would leave the old region visible. A change here forces a whole-
+-- container Rebuild (slots can't be patched). Cosmetic styling of a live region is coSig.
+local function placedStructSig(map, isSquare, hideIcon, showStacks, showDuration, borderOn, indicator)
+    return includeSig(map)
+        .. "|" .. (isSquare and "sq" or "ic")
+        .. "|" .. (hideIcon and "hi" or "")
+        .. "|" .. (showStacks and "st" or "")
+        .. "|" .. (showDuration and "du" or "")
+        .. "|" .. (borderOn and "bd" or "")
+        .. "|fl=" .. tostring(tonumber(indicator.frameLevel) or 0)
+end
+
+-- COSMETIC signature: size/anchor/offset/scale/alpha, swipe, duration/stack styling, square
+-- colour, and the RAW-config border sig (no BuildSpec alloc — FIX C). A change here
+-- hot-applies via ApplyStyle(style, layout); the actual border spec is built only then.
+local function placedCoSig(indicator, isSquare, borderOn, alpha)
+    local parts = {
+        "sz=" .. tostring(math.max(8, tonumber(indicator.size) or 24)),
+        "sc=" .. tostring(tonumber(indicator.scale) or 1),
+        "an=" .. tostring(indicator.anchor or "TOPLEFT"),
+        "ox=" .. tostring(tonumber(indicator.offsetX) or 0),
+        "oy=" .. tostring(tonumber(indicator.offsetY) or 0),
+        "al=" .. tostring(alpha),
+        "sw=" .. tostring(indicator.hideSwipe and 1 or 0),
+        "du=" .. tconcat({
+            tostring(indicator.showDuration ~= false and 1 or 0),
+            tostring(indicator.durationFont), tostring(indicator.durationScale),
+            tostring(indicator.durationOutline), tostring(indicator.durationAnchor),
+            tostring(indicator.durationX), tostring(indicator.durationY),
+            tostring(indicator.durationColorByTime and 1 or 0),
+            colSig(indicator.durationColor),
+        }, ","),
+        "stk=" .. tconcat({
+            tostring(indicator.stackFont), tostring(indicator.stackScale),
+            tostring(indicator.stackOutline), tostring(indicator.stackAnchor),
+            tostring(indicator.stackX), tostring(indicator.stackY),
+            colSig(indicator.stackColor),
+        }, ","),
+        "bd=" .. placedBorderRawSig(indicator, borderOn),
+    }
+    if isSquare then
+        local r, g, b = readADColor(indicator.color)
+        parts[#parts + 1] = "co=" .. tconcat({ tostring(r), tostring(g), tostring(b) }, ",")
+    end
+    return tconcat(parts, "|")
+end
+
+-- Placed base alpha rides the plain anchor frame (combat-safe; alpha is not a secret).
+local function applyPlacedAlpha(handle, alpha)
+    local f = handle and handle.GetFrame and handle:GetFrame()
+    if f then pcall(function() f:SetAlpha(alpha) end) end
 end
 
 -- ============================================================
@@ -532,6 +805,82 @@ function Factory:SyncFrame(frame)
         teardownExcept(bd, bestName)
     end
 
+    -- ---- PLACED ICON / SQUARE (per-indicator 1-slot containers) ----------------------
+    -- NO winner pick: every configured icon/square indicator is its own placed display,
+    -- keyed by instanceKey; many coexist. A structural change (identity set / icon-vs-
+    -- square / hideIcon / stacks on-off / frame level) rebuilds the whole container;
+    -- a cosmetic change (size/anchor/offset/scale/alpha/colour/border/stack style)
+    -- hot-applies via ApplyStyle. Torn down per key when the indicator is de-configured.
+    do
+        local placed = store.placed
+        if not placed then placed = {}; store.placed = placed end
+        local live = {}
+
+        if specAuras then
+            for auraName, auraCfg in pairs(specAuras) do
+                local indicators = (type(auraCfg) == "table") and auraCfg.indicators
+                if indicators then
+                    for _, indicator in ipairs(indicators) do
+                        local isSquare = indicator.type == "square"
+                        if isSquare or indicator.type == "icon" then
+                            local ids = DF:BuildADIdentityFilters(spec, auraName)
+                            local map = ids and ids.includeSpellIDs
+                            if map then
+                                local key = placedKey(auraName, indicator)
+                                live[key] = true
+                                local hideIcon = indicator.hideIcon and true or false
+                                local showStacks = indicator.showStacks
+                                if showStacks == nil then showStacks = true end
+                                showStacks = showStacks and true or false
+                                local showDuration = indicator.showDuration ~= false
+                                local borderOn = placedBorderOn(indicator, hideIcon)
+                                local alpha = tonumber(indicator.alpha) or 1
+
+                                -- Sigs are computed from RAW config every tick (no BuildSpec
+                                -- alloc — FIX C); the actual border spec is built ONLY inside a
+                                -- create/rebuild/restyle branch below, never per pass.
+                                local structSig = placedStructSig(map, isSquare, hideIcon, showStacks,
+                                    showDuration, borderOn, indicator)
+                                local coSig = placedCoSig(indicator, isSquare, borderOn, alpha)
+
+                                local entry = placed[key]
+                                if not entry then
+                                    local borderSpec = borderOn and buildPlacedBorderSpec(frame, indicator, hideIcon) or nil
+                                    local handle = DF.AuraContainer:Create(frame,
+                                        buildPlacedConfig(frame.unit, map, indicator, isSquare, borderSpec))
+                                    if handle then
+                                        applyPlacedAlpha(handle, alpha)
+                                        placed[key] = { handle = handle, structSig = structSig, coSig = coSig }
+                                    end
+                                elseif entry.structSig ~= structSig then
+                                    local borderSpec = borderOn and buildPlacedBorderSpec(frame, indicator, hideIcon) or nil
+                                    entry.structSig, entry.coSig = structSig, coSig
+                                    entry.handle:Rebuild(buildPlacedConfig(frame.unit, map, indicator, isSquare, borderSpec))
+                                    applyPlacedAlpha(entry.handle, alpha)
+                                elseif entry.coSig ~= coSig then
+                                    local borderSpec = borderOn and buildPlacedBorderSpec(frame, indicator, hideIcon) or nil
+                                    entry.coSig = coSig
+                                    entry.handle:ApplyStyle(
+                                        buildPlacedStyle(indicator, isSquare, borderSpec),
+                                        buildPlacedLayout(indicator))
+                                    applyPlacedAlpha(entry.handle, alpha)
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        -- Tear down any placed container whose indicator is gone / de-configured.
+        for key, entry in pairs(placed) do
+            if not live[key] then
+                if entry.handle then entry.handle:Destroy() end
+                placed[key] = nil
+            end
+        end
+    end
+
     -- framealpha / nametext / healthtext: intentionally NOT synced. No read-free,
     -- combat-safe port exists (see file-foot notes) — their GUI controls get the
     -- "Blizzard limitation" overlay in P4.7.
@@ -547,6 +896,7 @@ function Factory:ClearFrame(frame)
     teardownExcept(store.healthbar or {}, nil)
     teardownExcept(store.background or {}, nil)
     teardownExcept(store.border or {}, nil)
+    teardownExcept(store.placed or {}, nil)   -- per-indicator icon/square containers
     releaseBgAnchor(store)   -- containers gone above; drop the background anchor too
     frame.dfADHealthMirror = nil   -- health-mirror bar torn down; drop the feed ref
 end
