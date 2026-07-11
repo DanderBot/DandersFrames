@@ -54,13 +54,6 @@ DF.TestData = {
         {icon = "Interface\\Icons\\Spell_Holy_SealOfSacrifice", name = "Blessing of Sacrifice", duration = 12, stacks = 0, spellID = 6940},
         {icon = "Interface\\Icons\\ability_monk_chicocoon", name = "Life Cocoon", duration = 12, stacks = 0, spellID = 116849},
     },
-    -- Boss debuffs (Private Auras) - these simulate what boss mechanics look like
-    bossDebuffs = {
-        {icon = "Interface\\Icons\\Spell_Shadow_MindFlay", name = "Ethereal Shackles", duration = 8, debuffType = "Magic"},
-        {icon = "Interface\\Icons\\Spell_Fire_Fireball02", name = "Searing Brand", duration = 12, debuffType = "Magic"},
-        {icon = "Interface\\Icons\\Spell_Shadow_ShadowBolt", name = "Shadow Burn", duration = 6, debuffType = nil},
-        {icon = "Interface\\Icons\\Spell_Shadow_DevouringPlague", name = "Devouring Void", duration = 10, debuffType = "Magic"},
-    },
     animationTimer = nil,
     animationPhase = 0,
 }
@@ -1080,8 +1073,6 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
         end
     end
     
-    -- Update test boss debuffs (independent of testShowAuras - has its own testShowBossDebuffs toggle)
-    DF:UpdateTestBossDebuffs(frame)
     
     -- Update status text (Dead, Offline, etc.)
     if testData.status then
@@ -1950,168 +1941,6 @@ function DF:UpdateTestAuras(frame)
 
 end
 
--- Update test boss debuffs (simulated Private Auras)
--- Uses the real SetupPrivateAuraAnchors for positioning so test mode
--- is a pixel-perfect preview of live behavior.
-function DF:UpdateTestBossDebuffs(frame)
-    if not frame then return end
-
-    local db = DF:GetFrameDB(frame)
-
-    -- 12.1: the separate boss-debuff display is retired (boss debuffs render in
-    -- the debuff row natively — see SetupPrivateAuraAnchors) — never paint its
-    -- test icons. Mirrors the render gate incl. the raid-testing escape hatch.
-    if DF.AuraContainer and DF.AuraContainer.IsSupported()
-       and not (DF.db and DF.db.bossDebuffsLegacyAnchors) then
-        DF:HideTestBossDebuffs(frame)
-        return
-    end
-
-    -- Check if boss debuffs are enabled (both feature and test mode toggle)
-    if not db.bossDebuffsEnabled or not db.testShowBossDebuffs then
-        DF:HideTestBossDebuffs(frame)
-        return
-    end
-
-    -- Use the real private aura system for positioning.
-    -- Override unit to "player" so the API call succeeds (player always exists).
-    local savedUnit = frame.unit
-    local savedHideTooltip = db.bossDebuffsHideTooltip
-    db.bossDebuffsHideTooltip = false  -- prevent 0.001px sizing; test icons are real frames, not C-side rendered
-    frame.unit = "player"
-    DF:SetupPrivateAuraAnchors(frame)
-    frame.unit = savedUnit
-    db.bossDebuffsHideTooltip = savedHideTooltip
-
-    -- Now frame.bossDebuffFrames has positioned frames.
-    -- Parent test icon visuals to each frame.
-
-    local maxIcons = db.bossDebuffsMax or 4
-    local showCountdown = db.bossDebuffsShowCountdown ~= false
-    local showNumbers = db.bossDebuffsShowNumbers ~= false
-
-    -- Create test icon frames if they don't exist
-    if not frame.testBossDebuffIcons then
-        frame.testBossDebuffIcons = {}
-    end
-
-    local displayCount = math.min(maxIcons, #DF.TestData.bossDebuffs)
-
-    for i = 1, maxIcons do
-        local container = frame.bossDebuffFrames and frame.bossDebuffFrames[i]
-        local bossDebuffData = DF.TestData.bossDebuffs[i]
-
-        if container and i <= displayCount and bossDebuffData then
-            local icon = frame.testBossDebuffIcons[i]
-            if not icon then
-                icon = CreateFrame("Frame", nil, container)
-
-                -- Icon texture
-                icon.texture = icon:CreateTexture(nil, "ARTWORK")
-                icon.texture:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-
-                -- Cooldown
-                icon.cooldown = CreateFrame("Cooldown", nil, icon, "CooldownFrameTemplate")
-                icon.cooldown:SetDrawEdge(false)
-                icon.cooldown:SetDrawSwipe(true)
-                icon.cooldown:SetReverse(true)
-
-                -- Debug background
-                icon.debugBg = icon:CreateTexture(nil, "BORDER")
-                icon.debugBg:SetAllPoints()
-                local colors = {{1,0,0,0.3}, {0,1,0,0.3}, {0,0,1,0.3}, {1,1,0,0.3}}
-                local c = colors[i] or colors[1]
-                icon.debugBg:SetColorTexture(c[1], c[2], c[3], c[4])
-                icon.debugBg:Hide()
-
-                frame.testBossDebuffIcons[i] = icon
-            end
-
-            -- Re-parent to this container
-            icon:SetParent(container)
-            icon:ClearAllPoints()
-            icon:SetAllPoints(container)
-
-            -- Anchor sub-elements to fill the icon frame
-            icon.texture:SetAllPoints()
-            icon.cooldown:SetAllPoints(icon.texture)
-
-            -- Set icon texture
-            icon.texture:SetTexture(bossDebuffData.icon)
-
-            -- Set cooldown
-            if showCountdown and bossDebuffData.duration then
-                icon.cooldown:Clear()
-                icon.cooldown:SetHideCountdownNumbers(not showNumbers)
-
-                local startTime = GetTime() - (bossDebuffData.duration * 0.3)
-                icon.cooldown:SetCooldown(startTime, bossDebuffData.duration)
-                icon.cooldown:Show()
-            else
-                icon.cooldown:Hide()
-            end
-
-            icon:Show()
-        else
-            -- Hide icon if no container or no data
-            local icon = frame.testBossDebuffIcons[i]
-            if icon then
-                icon:Hide()
-            end
-        end
-    end
-
-    -- Hide any extra icons beyond maxIcons
-    if frame.testBossDebuffIcons then
-        for i = maxIcons + 1, #frame.testBossDebuffIcons do
-            frame.testBossDebuffIcons[i]:Hide()
-        end
-    end
-end
-
--- Hide test boss debuffs when exiting test mode
-function DF:HideTestBossDebuffs(frame)
-    if not frame then return end
-
-    -- Hide test icons
-    if frame.testBossDebuffIcons then
-        for _, icon in ipairs(frame.testBossDebuffIcons) do
-            icon:Hide()
-            if icon.cooldown then
-                icon.cooldown:Clear()
-            end
-        end
-    end
-end
-
--- Update all test boss debuffs (for live preview during slider dragging)
-function DF:UpdateAllTestBossDebuffs()
-    -- Only update if in test mode
-    if not DF.testMode and not DF.raidTestMode then return end
-    
-    local mode = DF.GUI and DF.GUI.SelectedMode or "party"
-    
-    if mode == "raid" and DF.raidTestMode then
-        -- Update raid test frames
-        if DF.testRaidFrames then
-            for _, frame in pairs(DF.testRaidFrames) do
-                if frame and frame:IsShown() then
-                    DF:UpdateTestBossDebuffs(frame)
-                end
-            end
-        end
-    elseif DF.testMode then
-        -- Update party test frames
-        if DF.testPartyFrames then
-            for _, frame in pairs(DF.testPartyFrames) do
-                if frame and frame:IsShown() then
-                    DF:UpdateTestBossDebuffs(frame)
-                end
-            end
-        end
-    end
-end
-
 -- Update test power bar (unified for party and raid)
 function DF:UpdateTestPowerBar(frame, testData)
     if not frame then return end
@@ -2528,7 +2357,6 @@ function DF:HideTestFrames(silent)
             if frame.healAbsorbAttachedTexture then frame.healAbsorbAttachedTexture:Hide() end
             if frame.absorbOverflowBar then frame.absorbOverflowBar:Hide() end
             if frame.defensiveIcon then frame.defensiveIcon:Hide() end
-            DF:HideTestBossDebuffs(frame)
             if DF.HideAllTargetedSpells then
                 DF:HideAllTargetedSpells(frame)
             end
@@ -2784,7 +2612,6 @@ function DF:HideRaidTestFrames()
             if frame.healAbsorbAttachedTexture then frame.healAbsorbAttachedTexture:Hide() end
             if frame.absorbOverflowBar then frame.absorbOverflowBar:Hide() end
             if frame.defensiveIcon then frame.defensiveIcon:Hide() end
-            DF:HideTestBossDebuffs(frame)
             if DF.HideAllTargetedSpells then
                 DF:HideAllTargetedSpells(frame)
             end
@@ -3440,7 +3267,6 @@ function DF:ApplyTestPreset(preset)
         db.testShowTargetedList = false
         db.testShowTargetedSpell = false
         db.testShowPersonalTargeted = false
-        db.testShowBossDebuffs = false
         db.testShowStatusIcons = true
     elseif preset == "COMBAT" then
         db.testAnimateHealth = true
@@ -3453,7 +3279,6 @@ function DF:ApplyTestPreset(preset)
         db.testShowTargetedList = false
         db.testShowTargetedSpell = false
         db.testShowPersonalTargeted = false
-        db.testShowBossDebuffs = true
         db.testShowStatusIcons = true
     elseif preset == "HEALER" then
         db.testAnimateHealth = true
@@ -3466,7 +3291,6 @@ function DF:ApplyTestPreset(preset)
         db.testShowTargetedList = true
         db.testShowTargetedSpell = true
         db.testShowPersonalTargeted = true
-        db.testShowBossDebuffs = true
         db.testShowStatusIcons = true
     elseif preset == "FULL" then
         db.testAnimateHealth = true
@@ -4834,75 +4658,6 @@ function DF:CreateTestPanel()
         -- in place when Show Auras is off.
         if panel.RefreshDependentEnabled then panel.RefreshDependentEnabled() end
     end, "auras_buffs")
-    panel.showBossDebuffsCheck = secAuras:AddCheckbox(L["Boss Debuffs"], "testShowBossDebuffs", function(enabled, isRaidMode)
-        if isRaidMode then
-            if DF.raidTestMode then
-                for i = 1, 40 do
-                    local frame = DF.testRaidFrames[i]
-                    if frame then
-                        if enabled then DF:UpdateTestBossDebuffs(frame)
-                        else DF:HideTestBossDebuffs(frame) end
-                    end
-                end
-            end
-        else
-            if DF.testMode then
-                for i = 0, 4 do
-                    local frame = DF.testPartyFrames[i]
-                    if frame then
-                        if enabled then DF:UpdateTestBossDebuffs(frame)
-                        else DF:HideTestBossDebuffs(frame) end
-                    end
-                end
-            end
-        end
-    end, "auras_bossdebuffs")
-    panel.showDispelGlowCheck = secAuras:AddCheckbox(L["Dispel Overlay"], "testShowDispelGlow", function()
-        if DF.testMode or DF.raidTestMode then DF:UpdateAllTestDispelGlow() end
-    end, "auras_dispel")
-    panel.showMissingBuffCheck = secAuras:AddCheckbox(L["Missing Buff"], "testShowMissingBuff", function()
-        if DF.testMode or DF.raidTestMode then DF:UpdateAllTestMissingBuff() end
-    end, "auras_missingbuffs")
-    panel.showADCheck = secAuras:AddCheckbox(L["Aura Designer"], "testShowAuraDesigner", function(enabled)
-        if DF.testMode or DF.raidTestMode then DF:UpdateAllTestAuraDesigner() end
-    end, "auras_auradesigner")
-
-    -- Buff/Debuff count sliders
-    local auraSliderRow = CreateFrame("Frame", nil, secAuras.content)
-    auraSliderRow:SetHeight(18)
-
-    local buffLabel = auraSliderRow:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    buffLabel:SetPoint("LEFT", 0, 0)
-    buffLabel:SetText(L["Buffs:"])
-    buffLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-
-    local buffSlider = CreateThemedSlider(auraSliderRow, 55, 0, 5, 1)
-    buffSlider:SetPoint("LEFT", buffLabel, "RIGHT", 5, 0)
-    local buffValue = auraSliderRow:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    buffValue:SetPoint("LEFT", buffSlider, "RIGHT", 4, 0)
-    buffValue:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    panel.buffValueText = buffValue
-
-    local debuffLabel = auraSliderRow:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    debuffLabel:SetPoint("LEFT", buffValue, "RIGHT", 12, 0)
-    debuffLabel:SetText(L["Debuffs:"])
-    debuffLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-
-    local debuffSlider = CreateThemedSlider(auraSliderRow, 55, 0, 5, 1)
-    debuffSlider:SetPoint("LEFT", debuffLabel, "RIGHT", 5, 0)
-    local debuffValue = auraSliderRow:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    debuffValue:SetPoint("LEFT", debuffSlider, "RIGHT", 4, 0)
-    debuffValue:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    panel.debuffValueText = debuffValue
-
-    -- Buff slider callbacks
-    local buffSliderDragging = false
-    buffSlider:SetScript("OnMouseDown", function(self, button)
-        if button == "LeftButton" then
-            buffSliderDragging = true
-            DF:OnSliderDragStart(function() if DF.RefreshTestFrames then DF:RefreshTestFrames() end end)
-        end
-    end)
     buffSlider:SetScript("OnMouseUp", function(self, button)
         if button == "LeftButton" and buffSliderDragging then
             buffSliderDragging = false
@@ -5129,7 +4884,6 @@ function DF:CreateTestPanel()
             self.showTextDesignerCheck:SetChecked(db.testShowTextDesigner ~= false)
         end
         self.showAurasCheck:SetChecked(db.testShowAuras)
-        self.showBossDebuffsCheck:SetChecked(db.testShowBossDebuffs)
         self.showDispelGlowCheck:SetChecked(db.testShowDispelGlow)
         self.showMissingBuffCheck:SetChecked(db.testShowMissingBuff)
         self.showADCheck:SetChecked(db.testShowAuraDesigner)

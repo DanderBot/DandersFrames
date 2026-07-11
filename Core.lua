@@ -4579,6 +4579,16 @@ DF._MainEventDispatcher = function(self, event, arg1)
             "oorMyBuffIndicatorAlpha", "testShowMyBuffIndicator",
             "buffUseFactory", "debuffUseFactory", "defensiveUseFactory",
             "missingBuffUseFactory", "dispelOverlayUseFactory",
+            -- Boss Debuffs (separate display retired in 5.0.0 -- the game feeds
+            -- boss/private auras through the regular debuff row on 12.1).
+            "bossDebuffHighlight", "bossDebuffScale", "bossDebuffsAnchor",
+            "bossDebuffsBorderScale", "bossDebuffsEnabled", "bossDebuffsFrameLevel",
+            "bossDebuffsStrata", "bossDebuffsGrowth", "bossDebuffsHideTooltip",
+            "bossDebuffsIconSize", "bossDebuffsIconWidth", "bossDebuffsIconHeight",
+            "bossDebuffsMax", "bossDebuffsOffsetX", "bossDebuffsOffsetY",
+            "bossDebuffsShowCountdown", "bossDebuffsShowNumbers",
+            "bossDebuffsSpacing", "bossDebuffsTextScale", "testShowBossDebuffs",
+            "bossDebuffsLegacyAnchors", "_paIconSizeMigrated", "_paStrataHighV434",
         }
         local function StripLegacyAuraKeys(modeDb)
             for _, key in ipairs(LEGACY_AURA_KEYS) do
@@ -4623,65 +4633,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 for _, mode in ipairs({"party", "raid"}) do
                     if profile[mode] then
                         DropDispelCustomMode(profile[mode])
-                    end
-                end
-            end
-        end
-
-        -- Collapse separate bossDebuffsIconWidth + bossDebuffsIconHeight into
-        -- a single bossDebuffsIconSize. The icon was already always rendered
-        -- as a square at max(width, height) since the iconInfo refactor, so
-        -- migrating to max() is the value-preserving choice. Old W/H keys
-        -- are dropped from the saved profile to keep it tidy.
-        local function MigrateIconSize(modeDb)
-            if modeDb._paIconSizeMigrated then return end
-            if modeDb.bossDebuffsIconWidth or modeDb.bossDebuffsIconHeight then
-                local w = modeDb.bossDebuffsIconWidth or 20
-                local h = modeDb.bossDebuffsIconHeight or 20
-                modeDb.bossDebuffsIconSize = math.max(w, h)
-                modeDb.bossDebuffsIconWidth = nil
-                modeDb.bossDebuffsIconHeight = nil
-            end
-            modeDb._paIconSizeMigrated = true
-        end
-        for _, mode in ipairs({"party", "raid"}) do
-            local modeDb = DF.db[mode]
-            if modeDb then
-                MigrateIconSize(modeDb)
-            end
-        end
-        if DandersFramesDB_v2 and DandersFramesDB_v2.profiles then
-            for _, profile in pairs(DandersFramesDB_v2.profiles) do
-                for _, mode in ipairs({"party", "raid"}) do
-                    if profile[mode] then
-                        MigrateIconSize(profile[mode])
-                    end
-                end
-            end
-        end
-
-        -- v4.3.4: Force private aura icon strata to HIGH across all profiles.
-        -- The 12.0.5 Blizzard refactor calls SetFrameLevel(0) on its private
-        -- aura pool frame; bumping our iconFrame strata pushes that level-0
-        -- child render frame above DF's MEDIUM-strata content regardless of
-        -- frame level. Container overlay strata stays at MEDIUM (it has its
-        -- own working frame-level path). Runs once per profile/mode.
-        local function MigratePAStrataToHigh(modeDb)
-            if modeDb._paStrataHighV434 then return end
-            modeDb.bossDebuffsStrata = "HIGH"
-            modeDb._paStrataHighV434 = true
-        end
-        for _, mode in ipairs({"party", "raid"}) do
-            local modeDb = DF.db[mode]
-            if modeDb then
-                MigratePAStrataToHigh(modeDb)
-            end
-        end
-        if DandersFramesDB_v2 and DandersFramesDB_v2.profiles then
-            for _, profile in pairs(DandersFramesDB_v2.profiles) do
-                for _, mode in ipairs({"party", "raid"}) do
-                    if profile[mode] then
-                        MigratePAStrataToHigh(profile[mode])
                     end
                 end
             end

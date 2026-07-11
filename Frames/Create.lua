@@ -2066,16 +2066,6 @@ function DF:CreateUnitFrame(unit, index, isRaid)
     -- ========================================
     DF:RegisterFrameForPing(frame)
     
-    -- ========================================
-    -- PRIVATE AURA ANCHORS
-    -- ========================================
-    -- Setup is delayed to allow frame to fully initialize
-    C_Timer.After(0.1, function()
-        if DF.SetupPrivateAuraAnchors then
-            DF:SetupPrivateAuraAnchors(frame)
-        end
-    end)
-    
     return frame
 end
 

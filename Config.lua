@@ -1011,23 +1011,6 @@ DF.PartyDefaults = {
     -- profile level on first load; per-mode defaults intentionally absent.
 
     -- Boss Debuffs
-    bossDebuffHighlight = true,
-    bossDebuffScale = 1.2,
-    bossDebuffsAnchor = "TOPLEFT",
-    bossDebuffsBorderScale = 1,
-    bossDebuffsEnabled = true,
-    bossDebuffsFrameLevel = 35,
-    bossDebuffsStrata = "HIGH",
-    bossDebuffsGrowth = "RIGHT",
-    bossDebuffsHideTooltip = false,
-    bossDebuffsIconSize = 20,
-    bossDebuffsMax = 4,
-    bossDebuffsOffsetX = 3,
-    bossDebuffsOffsetY = -13,
-    bossDebuffsShowCountdown = true,
-    bossDebuffsShowNumbers = true,
-    bossDebuffsSpacing = 5,
-    bossDebuffsTextScale = 1.0,
 
     -- Buff settings
     buffAlpha = 1,
@@ -2299,7 +2282,6 @@ DF.PartyDefaults = {
     testShowAbsorbs = false,
     testShowAggro = false,
     testShowAuras = false,
-    testShowBossDebuffs = false,
     testShowDispelGlow = false,
     testShowExternalDef = false,
     testShowHealPrediction = false,

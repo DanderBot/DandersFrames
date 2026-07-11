@@ -581,7 +581,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         Add(GUI:CreateSeeAlso(self.child, {
             {pageId = "auras_buffs", label = L["Buffs"]},
             {pageId = "auras_debuffs", label = L["Debuffs"]},
-            {pageId = "auras_bossdebuffs", label = L["Boss Debuffs"]},
             {pageId = "auras_defensiveicon", label = L["Defensive Icon"]},
         }), 30, "both")
     end)
@@ -5398,9 +5397,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 .. L["Auras displayed in the"] .. " "
                 .. L_link(L["Dispel Overlay"], "auras_dispel") .. ", "
                 .. L_link(L["Defensive Icon"], "auras_defensiveicon") .. ", "
-                .. L_link(L["Aura Designer"], "auras_auradesigner") .. ", "
                 .. L["and"] .. " "
-                .. L_link(L["Boss Debuffs"], "auras_bossdebuffs") .. " "
+                .. L_link(L["Aura Designer"], "auras_auradesigner") .. " "
                 .. L["are independent of Aura Filters."]
 
             local infoBanner = GUI:CreateInfoBanner(self.child, {
@@ -6138,193 +6136,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             {pageId = "display_tooltips", label = L["Debuff Tooltips"]},
             {pageId = "general_integrations", label = L["Integrations"]},
             {pageId = "auras_dispel", label = L["Dispel Overlay"]},
-            {pageId = "auras_bossdebuffs", label = L["Boss Debuffs"]},
         }), 30, "both")
     end)
     
-    -- Auras > Boss Debuffs (Private Auras)
-    local pageBossDebuffs = CreateSubTab("auras", "auras_bossdebuffs", L["Boss Debuffs"])
-    -- 12.1: RETIRED-BY-ABSORPTION — the new aura system routes boss debuffs
-    -- (private auras included) through the regular debuff row, so the separate
-    -- display would double-render them. Custom wording (SetPageBlocked direct):
-    -- neither shared text fits — it isn't "returning later" and the settings
-    -- aren't "unsupported", the feature MOVED. Legacy path (pre-12.1) unchanged.
-    GUI:SetPageBlocked(pageBossDebuffs, {
-        reason  = L["Boss debuffs moved to the Debuffs row on 12.1"],
-        tooltip = L["WoW's 12.1 aura system displays boss debuffs (including private auras) in the regular debuff row, so the separate Boss Debuffs display has been retired. Its settings here apply to WoW versions before 12.1 only."],
-        wording = "limitation",
-        page    = L["Boss Debuffs"],
-        when    = function() return GUI:IsAuraFactoryActive() end,
-    })
-    BuildPage(pageBossDebuffs, function(self, db, Add, AddSpace, AddSyncPoint)
-        -- Copy button at top
-        Add(CreateCopyButton(self.child, {"bossDebuff"}, L["Boss Debuffs"], "auras_bossdebuffs"), 25, 2)
-
-        -- ===== INFO BANNER =====
-        do
-            local tc = GUI.GetThemeColor()
-            local linkColor = string.format("|cFF%02X%02X%02X",
-                math.floor((tc.r or 1) * 255),
-                math.floor((tc.g or 1) * 255),
-                math.floor((tc.b or 1) * 255))
-            local bodyText = L["Boss Debuffs only trigger"] .. " "
-                .. linkColor .. "|HdfPage:auras_dispel|h" .. L["Dispel Overlays"] .. "|h|r "
-                .. L["in Hybrid or Blizzard mode."]
-
-            local bdBanner = GUI:CreateInfoBanner(self.child, {
-                tone = "info",
-                html = true,
-                text = bodyText,
-                onLinkClick = function(pageId)
-                    if GUI.SelectTab then GUI.SelectTab(pageId) end
-                end,
-            })
-            Add(bdBanner, bdBanner.layoutHeight, "both")
-        end
-
-        AddSpace(10, "both")
-        
-        local anchorOptions = {
-            ["TOPLEFT"]= L["Top Left"], ["TOP"]= L["Top"], ["TOPRIGHT"]= L["Top Right"],
-            ["LEFT"]= L["Left"], ["CENTER"]= L["Center"], ["RIGHT"]= L["Right"],
-            ["BOTTOMLEFT"]= L["Bottom Left"], ["BOTTOM"]= L["Bottom"], ["BOTTOMRIGHT"]= L["Bottom Right"],
-        }
-        
-        local function HideBossDebuffOptions(d)
-            return not d.bossDebuffsEnabled
-        end
-
-        -- ===== SETTINGS GROUP (Column 1) =====
-        local settingsGroup = GUI:CreateSettingsGroup(self.child, 280)
-        settingsGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 40)
-        settingsGroup:AddWidget(GUI:CreateLabel(self.child, L["Boss Debuffs (Private Auras) are special debuffs that Blizzard hides from addons."], 250), 35)
-        local bossDebuffEnable = settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Boss Debuffs"], db, "bossDebuffsEnabled", function()
-            self:RefreshStates()
-            if DF.UpdateAllPrivateAuraVisibility then DF:UpdateAllPrivateAuraVisibility() end
-            if DF.UpdateAllTestBossDebuffs then DF:UpdateAllTestBossDebuffs() end
-        end), 30)
-        bossDebuffEnable.keepEnabled = true
-        settingsGroup.disableChildrenOn = HideBossDebuffOptions
-        settingsGroup:AddWidget(GUI:CreateSlider(self.child, L["Max Icons"], 1, 4, 1, db, "bossDebuffsMax", nil, function()
-            if DF.RefreshAllPrivateAuraAnchors then DF:RefreshAllPrivateAuraAnchors() end
-            if DF.UpdateAllTestBossDebuffs then DF:UpdateAllTestBossDebuffs() end
-        end, true), 55)
-        settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Cooldown Swipe"], db, "bossDebuffsShowCountdown", function()
-            self:RefreshStates()
-            if DF.RefreshAllPrivateAuraAnchors then DF:RefreshAllPrivateAuraAnchors() end
-            if DF.UpdateAllTestBossDebuffs then DF:UpdateAllTestBossDebuffs() end
-        end), 30)
-        settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Duration Numbers"], db, "bossDebuffsShowNumbers", function()
-            self:RefreshStates()
-            if DF.RefreshAllPrivateAuraAnchors then DF:RefreshAllPrivateAuraAnchors() end
-            if DF.UpdateAllTestBossDebuffs then DF:UpdateAllTestBossDebuffs() end
-        end), 30)
-        settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Tooltip on Mouseover"], db, "bossDebuffsHideTooltip", function()
-            if DF.RefreshAllPrivateAuraAnchors then DF:RefreshAllPrivateAuraAnchors() end
-            if DF.UpdateAllTestBossDebuffs then DF:UpdateAllTestBossDebuffs() end
-        end), 30)
-        settingsGroup:AddWidget(GUI:CreateSlider(self.child, L["Text Scale"], 0.5, 3.0, 0.05, db, "bossDebuffsTextScale", nil, function()
-            if DF.RefreshAllPrivateAuraAnchors then DF:RefreshAllPrivateAuraAnchors() end
-            if DF.UpdateAllTestBossDebuffs then DF:UpdateAllTestBossDebuffs() end
-        end, true), 55)
-        Add(settingsGroup, nil, 1)
-
-        -- ===== POSITION GROUP (Column 2) =====
-        local positionGroup = GUI:CreateSettingsGroup(self.child, 280)
-        positionGroup:AddWidget(GUI:CreateHeader(self.child, L["Position"]), 40)
-        positionGroup.disableChildrenOn = HideBossDebuffOptions
-        positionGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "bossDebuffsAnchor", function()
-            if DF.UpdateAllPrivateAuraPositions then DF:UpdateAllPrivateAuraPositions() end
-            if DF.UpdateAllTestBossDebuffs then DF:UpdateAllTestBossDebuffs() end
-        end), 55)
-        local growthOptions4 = { RIGHT= L["Right"], LEFT= L["Left"], DOWN= L["Down"], UP= L["Up"] }
-        positionGroup:AddWidget(GUI:CreateDropdown(self.child, L["Growth Direction"], growthOptions4, db, "bossDebuffsGrowth", function()
-            if DF.UpdateAllPrivateAuraPositions then DF:UpdateAllPrivateAuraPositions() end
-            if DF.UpdateAllTestBossDebuffs then DF:UpdateAllTestBossDebuffs() end
-        end), 55)
-        positionGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -150, 150, 1, db, "bossDebuffsOffsetX", nil, function()
-            if DF.UpdateAllPrivateAuraPositions then DF:UpdateAllPrivateAuraPositions() end
-            if DF.UpdateAllTestBossDebuffs then DF:UpdateAllTestBossDebuffs() end
-        end, true), 55)
-        positionGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -150, 150, 1, db, "bossDebuffsOffsetY", nil, function()
-            if DF.UpdateAllPrivateAuraPositions then DF:UpdateAllPrivateAuraPositions() end
-            if DF.UpdateAllTestBossDebuffs then DF:UpdateAllTestBossDebuffs() end
-        end, true), 55)
-        Add(positionGroup, nil, 2)
-        
-        -- ===== SIZE GROUP (Column 1) =====
-        local sizeGroup = GUI:CreateSettingsGroup(self.child, 280)
-        sizeGroup:AddWidget(GUI:CreateHeader(self.child, L["Size & Spacing"]), 40)
-        sizeGroup.disableChildrenOn = HideBossDebuffOptions
-        sizeGroup:AddWidget(GUI:CreateSlider(self.child, L["Icon Size"], 10, 60, 1, db, "bossDebuffsIconSize", nil, function()
-            if DF.PreviewPrivateAuraAnchors then DF:PreviewPrivateAuraAnchors() end
-            if DF.UpdateAllTestBossDebuffs then DF:UpdateAllTestBossDebuffs() end
-            self:RefreshStates()
-        end, true), 40)
-
-        -- Stack text warning note + "Show me" button container
-        local stackNoteContainer = CreateFrame("Frame", nil, self.child)
-        stackNoteContainer:SetSize(250, 55)
-        local stackNoteLabel = stackNoteContainer:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
-        stackNoteLabel:SetPoint("TOPLEFT", stackNoteContainer, "TOPLEFT", 0, 0)
-        stackNoteLabel:SetWidth(250)
-        stackNoteLabel:SetJustifyH("LEFT")
-        stackNoteLabel:SetText(("|c" .. GUI:ToneHex("caution") .. L["Note"] .. ":|r ") .. L["Icons smaller than 30 may hide stack text behind duration text. At small sizes, consider disabling duration numbers."])
-        -- Match the note look: gold "Note:" prefix + dim body (this font defaults to
-        -- gold, which made the whole body gold instead of the CreateNote dim body).
-        stackNoteLabel:SetTextColor(GUI.Colors.textDim.r, GUI.Colors.textDim.g, GUI.Colors.textDim.b)
-        local showMeBtn = CreateFrame("Button", nil, stackNoteContainer, "BackdropTemplate")
-        showMeBtn:SetPoint("TOPLEFT", stackNoteLabel, "BOTTOMLEFT", 0, -4)
-        GUI:StyleButton(showMeBtn, { width = 55, height = 18, text = "|cFFFFFF00" .. L["Show me"] .. "|r" })
-        showMeBtn:SetScript("OnClick", function()
-            DF:HighlightSettings("auras_bossdebuffs", { "bossDebuffsShowNumbers" })
-        end)
-        local stackNote = sizeGroup:AddWidget(stackNoteContainer, 76)
-        stackNote.hideOn = function(d)
-            return not d.bossDebuffsEnabled or (d.bossDebuffsIconSize or 20) >= 30
-        end
-        sizeGroup:AddWidget(GUI:CreateSlider(self.child, L["Border Scale"], -5, 5, 1, db, "bossDebuffsBorderScale", nil, function()
-            if DF.PreviewPrivateAuraAnchors then DF:PreviewPrivateAuraAnchors() end
-            if DF.UpdateAllTestBossDebuffs then DF:UpdateAllTestBossDebuffs() end
-        end, true), 40)
-        sizeGroup:AddWidget(GUI:CreateNote(self.child, L["Set border scale to a negative value to hide the border entirely."], {tone = "success", prefix = "Tip", width = 250}), 50)
-        sizeGroup:AddWidget(GUI:CreateSlider(self.child, L["Spacing"], 0, 20, 1, db, "bossDebuffsSpacing", nil, function()
-            if DF.UpdateAllPrivateAuraPositions then DF:UpdateAllPrivateAuraPositions() end
-            if DF.UpdateAllTestBossDebuffs then DF:UpdateAllTestBossDebuffs() end
-        end, true), 55)
-        sizeGroup:AddWidget(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "bossDebuffsFrameLevel", nil, function()
-            if DF.UpdateAllPrivateAuraFrameLevel then DF:UpdateAllPrivateAuraFrameLevel() end
-            if DF.UpdateAllTestBossDebuffs then DF:UpdateAllTestBossDebuffs() end
-        end, true), 55)
-
-        local bossDebuffStrataOptions = {
-            BACKGROUND = L["Background"],
-            LOW = L["Low"],
-            MEDIUM = L["Medium"],
-            HIGH = L["High"],
-            DIALOG = L["Dialog"],
-            _order = { "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG" },
-        }
-        sizeGroup:AddWidget(GUI:CreateDropdown(self.child, L["Frame Strata"], bossDebuffStrataOptions, db, "bossDebuffsStrata", function()
-            if DF.UpdateAllPrivateAuraStrata then DF:UpdateAllPrivateAuraStrata() end
-            if DF.UpdateAllTestBossDebuffs then DF:UpdateAllTestBossDebuffs() end
-        end), 55)
-        sizeGroup:AddWidget(GUI:CreateLabel(self.child, "|cFF888888" .. L["Raise to HIGH if boss debuff icons render behind the frame on small icon sizes."] .. "|r", 260), 30)
-
-        Add(sizeGroup, nil, 1)
-
-        -- Private Aura Dispel Overlay settings live on the Dispel Overlay tab
-        -- (12.1 unified overlay: dispelOverlayEnabled + the shared dispel-type
-        -- dropdown; private auras are covered natively by the slot filters).
-        -- This subsection is intentionally left empty.
-
-        -- See Also links
-        AddSpace(20, "both")
-        Add(GUI:CreateSeeAlso(self.child, {
-            {pageId = "auras_debuffs", label = L["Debuffs"]},
-            {pageId = "auras_dispel", label = L["Dispel Overlay"]},
-        }), 30, "both")
-    end)
     
     -- Auras > Missing Buffs
     local pageMissingBuffs = CreateSubTab("auras", "auras_missingbuffs", L["Missing Buffs"])

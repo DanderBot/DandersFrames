@@ -192,7 +192,6 @@ local function RefreshOverrideTabMap()
     {"name",                "text_name",            L["Name Text"]},
     -- Auras (specific before generic)
     -- myBuffIndicator removed — feature deprecated and hidden from UI
-    {"bossDebuff",          "auras_bossdebuffs",    L["Boss Debuffs"]},
     {"missingBuff",         "auras_missingbuffs",   L["Missing Buffs"]},
     {"defensiveIcon",       "auras_defensiveicon",  L["Defensive Icon"]},
     {"debuff",              "auras_debuffs",        L["Debuffs"]},

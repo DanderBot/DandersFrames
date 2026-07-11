@@ -502,26 +502,6 @@ DF.ExportCategories = {
         "dispelShowGradient",
         "dispelShowIcon",
     },
-    -- Boss debuffs (private auras)
-    bossDebuffs = {
-        "bossDebuffHighlight",
-        "bossDebuffScale",
-        "bossDebuffsAnchor",
-        "bossDebuffsBorderScale",
-        "bossDebuffsEnabled",
-        "bossDebuffsFrameLevel",
-        "bossDebuffsGrowth",
-        "bossDebuffsHideTooltip",
-        "bossDebuffsIconSize",
-        "bossDebuffsMax",
-        "bossDebuffsOffsetX",
-        "bossDebuffsOffsetY",
-        "bossDebuffsShowCountdown",
-        "bossDebuffsShowNumbers",
-        "bossDebuffsSpacing",
-        "bossDebuffsStrata",
-        "bossDebuffsTextScale",
-    },
     -- Missing raid-buff indicator
     missingBuffs = {
         "missingBuffCheckAttackPower",
@@ -1305,7 +1285,6 @@ DF.ExportCategories = {
         "testShowAggro",
         "testShowAuraDesigner",
         "testShowAuras",
-        "testShowBossDebuffs",
         "testShowClassPower",
         "testShowDispelGlow",
         "testShowExternalDef",
@@ -1403,11 +1382,6 @@ DF.ExportCategoryInfo = {
         name = "Dispel",
         description = "Dispel overlay and indicators",
         order = 5,
-    },
-    bossDebuffs = {
-        name = "Boss Debuffs",
-        description = "Boss debuff (private aura) display",
-        order = 6,
     },
     missingBuffs = {
         name = "Missing Buffs",
@@ -1552,7 +1526,6 @@ end
 -- was trimmed by the new lists), so the stored-name check is the only case
 -- that needs the gate.
 local LEGACY_CATEGORY_EXPANSION = {
-    auras = { "bossDebuffs" },
     icons = { "targetedSpells", "defensives", "missingBuffs", "dispel" },
     text  = { "textDesigner" },
 }

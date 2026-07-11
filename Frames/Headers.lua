@@ -705,11 +705,6 @@ function DF:InitializeHeaderChild(frame)
                 -- No event re-registration needed: global headerChildEventFrame
                 -- uses unitFrameMap[unit] for dispatch, which we just updated above.
 
-                -- Rebind private aura (boss debuff) anchors to new unit token
-                -- Containers stay on the same frame, only the monitored unit changes
-                if DF.ReanchorPrivateAuras then
-                    DF:ReanchorPrivateAuras(self)
-                end
 
                 return
             end
@@ -743,13 +738,6 @@ function DF:InitializeHeaderChild(frame)
             -- occupant's faded appearance. dfInRange is immediately repopulated
             -- by UpdateRange below for accurate OOR state before first render.
             self.dfInRange = nil
-            -- Clear private aura unit tracking so next reanchor won't skip.
-            -- Always nil here — if the unit token is unchanged but a new player
-            -- occupies the slot (same-token/new-GUID fall-through from LEVEL 1),
-            -- the idempotency guard in ReanchorPrivateAuras would otherwise
-            -- short-circuit on the matching token string and leave anchors bound
-            -- to the previous occupant for the rest of the session.
-            self.bossDebuffAnchoredUnit = nil
             -- Cache new unit's GUID
             if actualUnit then
                 -- Clear stale aura/range data that may belong to old occupant of this slot
@@ -786,10 +774,6 @@ function DF:InitializeHeaderChild(frame)
             
             -- Trigger a comprehensive update for the frame
             if actualUnit then
-                -- Rebind private aura (boss debuff) anchors to new unit token
-                if DF.ReanchorPrivateAuras then
-                    DF:ReanchorPrivateAuras(self)
-                end
 
                 C_Timer.After(0, function()
                     if self:IsVisible() and self.unit then
@@ -3915,10 +3899,6 @@ function DF:ApplyRaidGroupSorting()
         print("|cFF00FF00[DF Headers]|r Raid group sorting applied")
     end
 
-    -- Schedule private aura reanchor after all attribute changes settle
-    if DF.SchedulePrivateAuraReanchor then
-        DF:SchedulePrivateAuraReanchor()
-    end
     -- OnFramesSorted callback is fired from child OnAttributeChanged.
 end
 
