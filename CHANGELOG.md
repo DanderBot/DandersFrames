@@ -28,7 +28,7 @@ DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally chan
 * (Interface) Settings the 12.1 rows can't provide are now marked in place: "Min Stacks to Show" (game limitation), "Icons Per Row" while using vertical orientation (single column only), and "Border Animation" on buff/defensive icons (the game doesn't allow animation effects on its aura buttons; any previously set animation is ignored rather than risking errors).
 * (Auras) Fix the in-combat aura freeze: the stack-count formatter cannot process the protected (secret) stack values 12.1 uses in combat, and the resulting error permanently stopped that frame's aura updates until reload. Stack counts now use the built-in display (shown at 2 or more); the "minimum stacks" setting no longer applies to the new aura rows.
 * (Auras) New buff duration format option (Number / Short / Full).
-* (Aura Designer) **Aura Designer now runs on the 12.1 aura system (work in progress).** Health-bar colouring, background colouring and borders — including animated borders — work again and keep working in combat. Icon, bar, sound and "show when missing" indicators are still being ported and are marked "coming soon" in the panel. A few effects can't be supported on 12.1 and are marked "Blizzard limitation": whole-frame alpha fade, particle-glow border animations, and anything that reacts to an aura's remaining time (near-expiry effects and the multi-trigger "shortest remaining" option). Name-text and health-text colouring will return in a later update.
+* (Aura Designer) **The Aura Designer is fully rebuilt on the 12.1 aura system.** Every indicator type works again — and keeps working in combat: icons, squares and bars (with cooldown, stacks, duration text and colour-by-time), health-bar, background, name-text and health-text colouring, borders including animated borders, and sound alerts. "Show When Missing" is back for icons, squares, health-bar/background colours and borders. Auras shown by the Aura Designer are hidden from the buff bar again while "Hide Duplicate Buffs" is on. The few effects 12.1 cannot support stay marked "Blizzard limitation" in the panel: whole-frame alpha fade, anything reacting to an aura's remaining time (near-expiry effects, the multi-trigger "shortest remaining" option, sound on fade or while missing — sounds now play when the aura is gained), particle-glow border animations, and "Show When Missing" for text colours.
 
 ### Known Issues (12.1 alpha)
 
@@ -37,8 +37,8 @@ DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally chan
 * Boss debuffs (private auras included) always show in the debuff row on 12.1 and can't be turned off — the game provides no way to exclude them.
 * Some buff/debuff/defensive tooltip settings (anchoring, in-combat disable) can't apply to the new aura rows.
 * The Dispel Overlay is not yet ported to the new system.
-* Aura Designer is only partly ported (see above) — icon/bar/sound/missing indicators are still coming, and unsupported effects are greyed in the panel.
 * Test mode still previews auras with the pre-12.1 renderer; a native preview is planned (also affects the Aura Designer preview).
+* Aura Designer text colouring is drawn as a cover over the text: it ignores the out-of-range text fade, and group parts with their own inline colours keep them.
 * Dragging certain aura sliders can briefly stutter.
 
 ## [4.7.0]
