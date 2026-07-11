@@ -592,10 +592,12 @@ local function buildDurationTextSpec(indicator, defaultShow)
     if dOutline == "NONE" then dOutline = "" end
     local colorByTime = indicator.durationColorByTime and true or false
     local hideAboveT = durationHideAboveT(indicator)
-    -- One formatter carries BOTH colour-by-time buckets and hide-above blanking (mirror #205's
-    -- BuildDurationFormatter). nil formatter only when neither is on (native default text).
-    local formatter = (((colorByTime or hideAboveT) and DF.GetFactoryDurationFormatter)
-        and DF:GetFactoryDurationFormatter("NUMBER", hideAboveT, colorByTime)) or nil
+    -- Always attach the NUMBER formatter (bare "45" / "2m" / "1h") — the same default the
+    -- buff/debuff/defensive rows use, and what the pre-12.1 icons showed (native cooldown
+    -- numbers). Without it the container's own SetDurationText default renders "45s". The
+    -- one formatter also carries colour-by-time buckets + hide-above blanking when set.
+    local formatter = DF.GetFactoryDurationFormatter
+        and DF:GetFactoryDurationFormatter("NUMBER", hideAboveT, colorByTime) or nil
     return {
         show      = true,
         font      = indicator.durationFont,
