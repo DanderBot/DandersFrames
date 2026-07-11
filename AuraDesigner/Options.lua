@@ -2307,9 +2307,19 @@ local function RenderPreviewIndicator(mockFrame, spec, auraName, info, indicator
     local AC = DF.AuraContainer
     if not (Factory and Factory.BuildPreviewConfig and AC and AC.StylePreviewSlot) then return nil end
 
-    local spellID = info and info.spellIds and info.spellIds[1]
+    -- The aura's real spell ID lives in the spell-pool config (the trackable-
+    -- aura info entries don't carry IDs) — this drives the previewed icon and
+    -- identity, exactly like the live container's filter map.
+    local specIDs = DF.AuraDesigner.SpellIDs and DF.AuraDesigner.SpellIDs[spec]
+    local spellID = specIDs and specIDs[auraName]
+    if type(spellID) == "table" then spellID = spellID[1] end
     local cfg, sig = Factory:BuildPreviewConfig(mockFrame, effectiveConfig, indicator.type or "icon", spellID)
-    if cfg.testEntries and cfg.testEntries[1] then
+    if not (cfg.testEntries and cfg.testEntries[1]) then
+        -- No resolvable spell ID: synthesize an entry from the configured art so
+        -- the paint can never fall back to the generic curated pool.
+        cfg.testEntries = { { name = (info and info.display) or auraName } }
+    end
+    do
         local e = cfg.testEntries[1]
         if not e.icon then e.icon = GetAuraIcon(spec, auraName) end
         e.duration = 15
