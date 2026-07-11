@@ -1373,22 +1373,19 @@ DF.PartyDefaults = {
     defensiveIconX = 0,
     defensiveIconY = 0,
 
-    -- Dispel Overlay
+    -- Dispel Overlay (game-palette colours only — the Custom Colors mode and its
+    -- per-type pickers/intensity were removed 2026-07-11; see Features/Dispel.lua)
     dispelAnimate = false,
     dispelAnimateSpeed = 0.5,
-    dispelBleedColor = {r = 1, g = 0, b = 0},
     dispelBorderAlpha = 1,
     dispelBorderInset = 0,
     dispelBorderSize = 2,
     dispelBorderStyle = "OUTER",
-    dispelCurseColor = {r = 0.6, g = 0, b = 1},
-    dispelDiseaseColor = {r = 0.6, g = 0.4, b = 0},
     dispelFrameLevel = 10,
     dispelGradientAlpha = 1,
     dispelGradientBlendMode = "BLEND",
     dispelGradientDarkenAlpha = 0.40000000596046,
     dispelGradientDarkenEnabled = false,
-    dispelGradientIntensity = 2.600000143051148,
     dispelGradientOnCurrentHealth = true,
     dispelGradientSize = 0.5,
     dispelGradientStyle = "TOP",
@@ -1397,8 +1394,6 @@ DF.PartyDefaults = {
     dispelIconOffsetY = 0,
     dispelIconPosition = "TOPRIGHT",
     dispelIconSize = 20,
-    dispelMagicColor = {r = 0.2, g = 0.6, b = 1},
-    dispelPoisonColor = {r = 0, g = 0.6, b = 0},
     dispelShowBorder = true,
     dispelShowGradient = true,
     dispelShowIcon = true,
@@ -1408,10 +1403,6 @@ DF.PartyDefaults = {
     dispelOverlayEnabled = true,
     -- "Show Overlay For": 1 = Dispellable By Me, 2 = All Dispellable (Blizzard convention)
     dispelOverlayDispelType = 2,
-    -- 12.1 unified overlay colour source: "game" = Blizzard palette via the native
-    -- per-slot tint (one overlay at a time); "custom" = per-type slots coloured from
-    -- the DF pickers (full art: borders, EDGE gradients, intensity).
-    dispelOverlayColorSource = "game",
 
     -- External Defensive
     externalDefAnchor = "CENTER",

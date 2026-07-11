@@ -1027,6 +1027,21 @@ function DF:LightweightUpdateDispelOverlay()
     local db = DF.db[mode]
     if not db then return end
 
+    -- TEST MODE: route the drag tick through the REAL paint — UpdateDispelOverlay's
+    -- test branch carries the mode-aware pieces (game-palette proxy, intensity
+    -- frozen at 1 in game mode, borders/EDGE custom-only, the clip-proof anchor
+    -- proxy). The hand-rolled repaint below predates the Game/Custom split and
+    -- had drifted mode-blind: dragging Opacity in Game mode flashed the custom
+    -- picker colours × intensity and re-showed the borders until release
+    -- (live-caught). Test previews never carry their own copy of styling or
+    -- geometry (mirrors LightweightUpdateDefensiveIcons); the loop below stays
+    -- for pre-12.1 LIVE drags only, where avoiding a full aura re-scan per tick
+    -- is the reason this lightweight path exists.
+    if DF.testMode or DF.raidTestMode then
+        if DF.UpdateAllDispelOverlays then DF:UpdateAllDispelOverlays() end
+        return
+    end
+
     -- 12.1 factory overlay: re-drive immediately so colour/alpha/geometry tweaks
     -- apply live (mirrors LightweightUpdateDefensiveIcons). The legacy loop below
     -- only touches the hidden legacy overlays.
@@ -2554,91 +2569,8 @@ end
 
 -- Update dispel overlay colors directly (for test mode preview only)
 -- IMPORTANT: Only updates test mode frames to preserve secret color handling on live frames
-function DF:LightweightUpdateDispelColors()
-    local mode = DF.GUI and DF.GUI.SelectedMode or "party"
-    local db = DF.db[mode]
-    if not db then return end
-
-    -- 12.1 factory overlay: picker drags re-style the slot widgets live (custom
-    -- colour mode statics) — mirrors LightweightUpdateDispelOverlay's redrive.
-    if DF.UseFactoryForDispelOverlay and DF:UseFactoryForDispelOverlay(nil, db) then
-        DF:InvalidateAuraLayout()
-    end
-
-    -- Only apply to test mode frames - live frames must use color curves for secret colors
-    local inTestMode = (mode == "raid" and DF.raidTestMode) or (mode == "party" and DF.testMode)
-    if not inTestMode then return end
-    
-    -- Get color mapping from db
-    local colors = {
-        Magic = db.dispelMagicColor or {r = 0.2, g = 0.6, b = 1.0},
-        Curse = db.dispelCurseColor or {r = 0.6, g = 0.0, b = 1.0},
-        Disease = db.dispelDiseaseColor or {r = 0.6, g = 0.4, b = 0.0},
-        Poison = db.dispelPoisonColor or {r = 0.0, g = 0.6, b = 0.0},
-        Bleed = db.dispelBleedColor or {r = 1.0, g = 0.0, b = 0.0},
-        Enrage = db.dispelBleedColor or {r = 1.0, g = 0.0, b = 0.0},
-    }
-    
-    local borderAlpha = db.dispelBorderAlpha or 0.8
-    local gradientAlpha = db.dispelGradientAlpha or 0.5
-    local gradientIntensity = db.dispelGradientIntensity or 1.0
-    
-    local function UpdateDispelColor(frame)
-        if not frame or not frame.dfDispelOverlay then return end
-        local overlay = frame.dfDispelOverlay
-        
-        -- Get the current dispel type stored on the overlay
-        local dispelType = overlay.currentDispelType
-        if not dispelType then return end
-        
-        local color = colors[dispelType]
-        if not color then return end
-        
-        local r, g, b = color.r, color.g, color.b
-        
-        -- Update border colors
-        if overlay.borderTop and overlay.borderTop:IsShown() then
-            local tex = overlay.borderTop:GetStatusBarTexture()
-            tex:SetVertexColor(r, g, b, borderAlpha)
-        end
-        if overlay.borderBottom and overlay.borderBottom:IsShown() then
-            local tex = overlay.borderBottom:GetStatusBarTexture()
-            tex:SetVertexColor(r, g, b, borderAlpha)
-        end
-        if overlay.borderLeft and overlay.borderLeft:IsShown() then
-            local tex = overlay.borderLeft:GetStatusBarTexture()
-            tex:SetVertexColor(r, g, b, borderAlpha)
-        end
-        if overlay.borderRight and overlay.borderRight:IsShown() then
-            local tex = overlay.borderRight:GetStatusBarTexture()
-            tex:SetVertexColor(r, g, b, borderAlpha)
-        end
-        
-        -- Update gradient color
-        local gradientStyle = db.dispelGradientStyle or "FULL"
-        if gradientStyle == "EDGE" then
-            -- Update EDGE style gradient textures
-            local ri, gi, bi = r * gradientIntensity, g * gradientIntensity, b * gradientIntensity
-            if overlay.gradientTop and overlay.gradientTop:IsShown() then
-                overlay.gradientTop:SetVertexColor(ri, gi, bi, gradientAlpha)
-            end
-            if overlay.gradientBottom and overlay.gradientBottom:IsShown() then
-                overlay.gradientBottom:SetVertexColor(ri, gi, bi, gradientAlpha)
-            end
-            if overlay.gradientLeft and overlay.gradientLeft:IsShown() then
-                overlay.gradientLeft:SetVertexColor(ri, gi, bi, gradientAlpha)
-            end
-            if overlay.gradientRight and overlay.gradientRight:IsShown() then
-                overlay.gradientRight:SetVertexColor(ri, gi, bi, gradientAlpha)
-            end
-        elseif overlay.gradient and overlay.gradient:IsShown() then
-            local tex = overlay.gradient:GetStatusBarTexture()
-            tex:SetVertexColor(r * gradientIntensity, g * gradientIntensity, b * gradientIntensity, gradientAlpha)
-        end
-    end
-    
-    IterateFramesInMode(mode, UpdateDispelColor)
-end
+-- (DF:LightweightUpdateDispelColors was removed with the dispel Custom Colors
+-- mode, 2026-07-11 — its per-type picker callbacks were its only callers.)
 
 -- Update debuff border colors directly (for test mode preview only)
 -- Note: icon.debuffType is only set in test mode, so this only affects test frames
@@ -4638,6 +4570,38 @@ DF._MainEventDispatcher = function(self, event, arg1)
             end
         end
 
+        -- v5.0 (12.1): the dispel overlay's Custom Colors mode was removed during
+        -- the alpha (never in any distributed build — belt-and-braces for alpha
+        -- profiles only): drop the mode selector, the per-type pickers and the
+        -- intensity multiplier. No-op on fresh defaults (none of these keys exist
+        -- there any more).
+        local function DropDispelCustomMode(modeDb)
+            if modeDb._dispelCustomRemovedV5 then return end
+            modeDb.dispelOverlayColorSource = nil
+            modeDb.dispelGradientIntensity = nil
+            modeDb.dispelMagicColor = nil
+            modeDb.dispelCurseColor = nil
+            modeDb.dispelDiseaseColor = nil
+            modeDb.dispelPoisonColor = nil
+            modeDb.dispelBleedColor = nil
+            modeDb._dispelCustomRemovedV5 = true
+        end
+        for _, mode in ipairs({"party", "raid"}) do
+            local modeDb = DF.db[mode]
+            if modeDb then
+                DropDispelCustomMode(modeDb)
+            end
+        end
+        if DandersFramesDB_v2 and DandersFramesDB_v2.profiles then
+            for _, profile in pairs(DandersFramesDB_v2.profiles) do
+                for _, mode in ipairs({"party", "raid"}) do
+                    if profile[mode] then
+                        DropDispelCustomMode(profile[mode])
+                    end
+                end
+            end
+        end
+
         -- Collapse separate bossDebuffsIconWidth + bossDebuffsIconHeight into
         -- a single bossDebuffsIconSize. The icon was already always rendered
         -- as a square at max(width, height) since the iconInfo refactor, so
@@ -5275,6 +5239,95 @@ DF._MainEventDispatcher = function(self, event, arg1)
                         print(("  %d. %s (%s) motion=%s level=%s%s"):format(i, name, ftype, motion, level, isTip))
                     end
                 end)
+            elseif msg == "dispeldbg" then
+                -- Dev: dump the dispel gradient's REAL render state on every frame
+                -- that has one (legacy overlay = test path; slot widgets = 12.1
+                -- live path) — rect vs parent, fill value, blend, draw order.
+                -- Ground-truth for "strip renders partial width" reports.
+                local function num(v)
+                    if v == nil then return "nil" end
+                    if issecretvalue and issecretvalue(v) then return "SECRET" end
+                    if type(v) == "number" then return string.format("%.1f", v) end
+                    return tostring(v)
+                end
+                local function dumpBar(tag, bar, hostFrame)
+                    if not bar then return end
+                    local mn, mx, val, w, h, pw, lvl, blend, alpha, shown, orient, rev
+                    pcall(function() mn, mx = bar:GetMinMaxValues() end)
+                    pcall(function() val = bar:GetValue() end)
+                    pcall(function() w, h = bar:GetSize() end)
+                    pcall(function() lvl = bar:GetFrameLevel() end)
+                    pcall(function() orient = bar:GetOrientation() end)
+                    pcall(function() rev = bar:GetReverseFill() end)
+                    pcall(function()
+                        local t = bar.GetStatusBarTexture and bar:GetStatusBarTexture()
+                        if t then blend = t:GetBlendMode(); alpha = t:GetAlpha(); shown = t:IsShown() end
+                    end)
+                    pcall(function() if hostFrame and hostFrame.healthBar then pw = hostFrame.healthBar:GetWidth() end end)
+                    print(("  %s: shown=%s rect=%sx%s (hb w=%s) val=%s/%s-%s orient=%s rev=%s blend=%s texAlpha=%s texShown=%s lvl=%s"):format(
+                        tag, tostring(bar:IsShown()), num(w), num(h), num(pw), num(val), num(mn), num(mx),
+                        tostring(orient), tostring(rev), tostring(blend), num(alpha), tostring(shown), num(lvl)))
+                end
+                local function dumpTex(tag, tex)
+                    if not tex then return end
+                    local w, h, blend, alpha, shown, layer, sub
+                    pcall(function() w, h = tex:GetSize() end)
+                    pcall(function() blend = tex:GetBlendMode() end)
+                    pcall(function() alpha = tex:GetAlpha() end)
+                    pcall(function() shown = tex:IsShown() end)
+                    pcall(function() layer, sub = tex:GetDrawLayer() end)
+                    print(("  %s: shown=%s rect=%sx%s blend=%s alpha=%s layer=%s/%s"):format(
+                        tag, tostring(shown), num(w), num(h), tostring(blend), num(alpha), tostring(layer), tostring(sub)))
+                end
+                local function dumpFrame(frame, label)
+                    if not frame then return end
+                    local db2 = DF:GetFrameDB(frame)
+                    print(("|cffeda55fDF dispeldbg %s|r (style=%s onCur=%s hbLvl=%s frameLvl=%s):"):format(
+                        label, tostring(db2 and db2.dispelGradientStyle),
+                        tostring(db2 and db2.dispelGradientOnCurrentHealth),
+                        frame.healthBar and tostring(frame.healthBar:GetFrameLevel()) or "?",
+                        tostring(frame:GetFrameLevel())))
+                    local legacy = frame.dfDispelOverlay
+                    if legacy then
+                        print(("  legacy overlay shown=%s lvl=%s tracks=%s"):format(
+                            tostring(legacy:IsShown()), tostring(legacy:GetFrameLevel()),
+                            tostring(legacy.gradientTracksHealth)))
+                        dumpBar("legacy.gradient", legacy.gradient, frame)
+                    end
+                    local hnd = frame.dispelFactory
+                    local slots = hnd and hnd.GetOverlaySlots and hnd:GetOverlaySlots()
+                    if slots then
+                        for key, btn in pairs(slots) do
+                            local wdg = btn.dfDispelWidget
+                            if wdg then
+                                print(("  slot[%s] widget shown=%s lvl=%s tracks=%s"):format(
+                                    tostring(key), tostring(wdg:IsShown()), tostring(wdg:GetFrameLevel()),
+                                    tostring(wdg.gradientTracksHealth)))
+                                dumpBar("slot.gradient", wdg.gradient, frame)
+                                dumpTex("slot.nativeGradient", wdg.nativeGradient)
+                            end
+                            if btn.dfDispelRing then dumpTex("slot[" .. tostring(key) .. "].ring", btn.dfDispelRing) end
+                            if btn.dfDispelEdgeTex then dumpTex("slot[" .. tostring(key) .. "].edge", btn.dfDispelEdgeTex) end
+                        end
+                    end
+                    -- Neighbours that can overdraw the deficit area
+                    dumpBar("healPrediction", frame.dfHealPredictionBar, frame)
+                    dumpBar("absorb", frame.dfAbsorbBar, frame)
+                end
+                -- Live: every shown frame with any dispel state; Test: shown test frames
+                if DF.IterateAllFrames then
+                    DF:IterateAllFrames(function(f)
+                        if f and f:IsShown() and (f.dfDispelOverlay or f.dispelFactory) then
+                            dumpFrame(f, tostring(f.unit))
+                        end
+                    end)
+                end
+                if DF.testPartyFrames then
+                    for i = 0, 4 do
+                        local f = DF.testPartyFrames[i]
+                        if f and f:IsShown() then dumpFrame(f, "test" .. i) end
+                    end
+                end
             elseif msg == "auratimer" then
                 -- Show aura timer stats
                 if DF.PrintAuraTimerStats then

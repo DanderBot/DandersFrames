@@ -8464,13 +8464,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- lift when it does (mirrors the Missing Buffs page's conditional lift).
         local dispelFactoryOwns = DF.FactoryOwnsDispelOverlay and DF:FactoryOwnsDispelOverlay(db)
 
-        -- "Game colours" (default) shows the game palette via the native tint —
-        -- the custom-only art (borders, per-type pickers, intensity, EDGE) hides
-        -- until the colour source is Custom.
-        local function HideIfGameMode(d)
-            return HideIfDisabled(d) or (d.dispelOverlayColorSource or "game") ~= "custom"
-        end
-
         -- Every dispel-page callback funnels through here: the version bump
         -- breaks the 12.1 factory drive's fast-path latch, so structural changes
         -- (colour source, me/all, icon slots, bleed opt-in) rebuild their slot
@@ -8508,20 +8501,15 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             OnDispelTypeChanged()
         end), 55)
         dispelIndicatorDropdown.hideOn = HideIfDisabled
-        -- Colour source: Game = the game's dispel palette via the native tint,
-        -- one overlay at a time (Blizzard-identical). Custom = per-type slots
-        -- honouring the pickers, with the full art (borders, EDGE, intensity).
-        local colorSourceOptions = {
-            ["game"] = L["Game Colors"],
-            ["custom"] = L["Custom Colors"],
-            _order = { "game", "custom" },
-        }
-        local colorSourceDropdown = settingsGroup:AddWidget(GUI:CreateDropdown(self.child, L["Color Source"], colorSourceOptions, db, "dispelOverlayColorSource", function()
-            ApplyDispelSettings()
-            self:RefreshStates()
-            GUI:RefreshCurrentPage()
-        end), 55)
-        colorSourceDropdown.hideOn = HideIfDisabled
+        -- One system: the game's dispel palette via the native tint, one overlay
+        -- at a time (Blizzard-identical, covers private auras). The Custom Colors
+        -- mode (per-type slots + pickers) was removed 2026-07-11 — its dual-
+        -- overlay quirk wasn't worth the confusion once game mode gained the
+        -- border and edge glow.
+        local overlayNote = settingsGroup:AddWidget(GUI:CreateNote(self.child,
+            L["One overlay at a time, colored and switched by the game engine. Includes boss (private) auras."],
+            { width = 260 }), 40)
+        overlayNote.hideOn = HideIfDisabled
         Add(settingsGroup, nil, 1)
 
         -- ===== APPEARANCE COLLAPSIBLE SECTION =====
@@ -8537,22 +8525,16 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Display group (quick toggles) — Column 1
         local displayGroup = GUI:CreateSettingsGroup(self.child, 280)
         displayGroup:AddWidget(GUI:CreateHeader(self.child, L["Display"]), 40)
-        local showBorder = displayGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Border"], db, "dispelShowBorder", function()
-            ApplyDispelSettings()
-            self:RefreshStates()
-        end), 30)
-        showBorder.hideOn = HideIfGameMode   -- border colour needs Custom (one native tint region)
-        local showGradient = displayGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Gradient"], db, "dispelShowGradient", function()
-            ApplyDispelSettings()
-            self:RefreshStates()
-        end), 30)
-        showGradient.hideOn = HideDispelOptions
+        -- Show Border / Show Gradient are the master toggles for their features, so
+        -- each one now HEADS its own group below (Border / Gradient) — mirroring the
+        -- Show Dispel Icon toggle that heads the Icon group. Keeps every group's
+        -- on/off switch at the top of that group.
         -- Boolean toggles GREY their dependent controls in place (addon-wide
         -- convention); hideOn stays for the feature/variant switches only.
         local DisableIfNoGradient = function(d) return d.dispelShowGradient == false end
         local DisableIfNoBorder = function(d) return d.dispelShowBorder == false end
         local DisableIfNoIcon = function(d) return d.dispelShowIcon == false end
-        local animate = displayGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Pulse Animation"], db, "dispelAnimate", function()
+        local animate = displayGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Pulse Overlay"], db, "dispelAnimate", function()
             ApplyDispelSettings()
         end), 30)
         animate.hideOn = HideDispelOptions
@@ -8615,6 +8597,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- ===== BORDER GROUP (Column 1) =====
         local borderGroup = GUI:CreateSettingsGroup(self.child, 280)
         borderGroup:AddWidget(GUI:CreateHeader(self.child, L["Border"]), 40)
+        local showBorder = borderGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Border"], db, "dispelShowBorder", function()
+            ApplyDispelSettings()
+            self:RefreshStates()
+        end), 30)
+        showBorder.hideOn = HideDispelOptions
         local borderSize = borderGroup:AddWidget(GUI:CreateSlider(self.child, L["Border Thickness"], 1, 6, 1, db, "dispelBorderSize", function()
             ApplyDispelSettings()
         end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
@@ -8630,42 +8617,19 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
         borderAlpha.hideOn = HideDispelOptions
         borderAlpha.disableOn = DisableIfNoBorder
-        borderGroup.hideOn = HideIfGameMode   -- border colour needs Custom (one native tint region)
+        borderGroup.hideOn = HideDispelOptions   -- works in BOTH modes (game = ring slot)
         dfSection:RegisterChild(borderGroup)
         if not dispelFactoryOwns then GUI:BlockControl12_1(borderGroup, "roadmap", { id = "dispel:border", page = L["Dispel Overlay"] }) end
         Add(borderGroup, nil, 1)
 
-        -- ===== COLORS GROUP (Column 2) =====
-        local colorsGroup = GUI:CreateSettingsGroup(self.child, 280)
-        colorsGroup:AddWidget(GUI:CreateHeader(self.child, L["Custom Dispel Colors"]), 40)
-        local magicColor = colorsGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Magic"], db, "dispelMagicColor", false, InvalidateCurves, function() DF:LightweightUpdateDispelColors() end, true), 30)
-        magicColor.hideOn = HideDispelOptions
-        local curseColor = colorsGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Curse"], db, "dispelCurseColor", false, InvalidateCurves, function() DF:LightweightUpdateDispelColors() end, true), 30)
-        curseColor.hideOn = HideDispelOptions
-        local diseaseColor = colorsGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Disease"], db, "dispelDiseaseColor", false, InvalidateCurves, function() DF:LightweightUpdateDispelColors() end, true), 30)
-        diseaseColor.hideOn = HideDispelOptions
-        local poisonColor = colorsGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Poison"], db, "dispelPoisonColor", false, InvalidateCurves, function() DF:LightweightUpdateDispelColors() end, true), 30)
-        poisonColor.hideOn = HideDispelOptions
-        local bleedColor = colorsGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Bleed / Enrage"], db, "dispelBleedColor", false, InvalidateCurves, function() DF:LightweightUpdateDispelColors() end, true), 30)
-        bleedColor.hideOn = HideDispelOptions
-        local resetColors = colorsGroup:AddWidget(GUI:CreateButton(self.child, L["Reset to Defaults"], 130, 22, function()
-            db.dispelMagicColor = {r = 0.2, g = 0.6, b = 1.0}
-            db.dispelCurseColor = {r = 0.6, g = 0.0, b = 1.0}
-            db.dispelDiseaseColor = {r = 0.6, g = 0.4, b = 0.0}
-            db.dispelPoisonColor = {r = 0.0, g = 0.6, b = 0.0}
-            db.dispelBleedColor = {r = 1.0, g = 0.0, b = 0.0}
-            InvalidateCurves()
-            self:Refresh()
-        end), 30)
-        resetColors.hideOn = HideDispelOptions
-        colorsGroup.hideOn = HideIfGameMode   -- pickers only apply with Custom colours
-        dfSection:RegisterChild(colorsGroup)
-        if not dispelFactoryOwns then GUI:BlockControl12_1(colorsGroup, "limitation", { id = "dispel:colors", page = L["Dispel Overlay"] }) end
-        Add(colorsGroup, nil, 2)
-
         -- ===== GRADIENT GROUP (Column 1) =====
         local gradientGroup = GUI:CreateSettingsGroup(self.child, 280)
         gradientGroup:AddWidget(GUI:CreateHeader(self.child, L["Gradient"]), 40)
+        local showGradient = gradientGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Gradient"], db, "dispelShowGradient", function()
+            ApplyDispelSettings()
+            self:RefreshStates()
+        end), 30)
+        showGradient.hideOn = HideDispelOptions
         local gradientStyles = {
             ["FULL"]= L["Full Frame"], ["TOP"]= L["Top Edge"], ["BOTTOM"]= L["Bottom Edge"],
             ["LEFT"]= L["Left Edge"], ["RIGHT"]= L["Right Edge"], ["EDGE"]= L["Edge Glow (All Sides)"],
@@ -8676,14 +8640,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end), 55)
         gradStyle.hideOn = HideDispelOptions
         gradStyle.disableOn = DisableIfNoGradient
-        -- EDGE = four textures; the game-colour tint drives ONE region, so game
-        -- mode renders Full Frame instead. Shown only when that fallback is live.
-        local edgeNote = gradientGroup:AddWidget(GUI:CreateLabel(self.child, "|cFF888888" .. L["Edge Glow needs Custom colors. Full Frame is shown instead."] .. "|r", 260), 30)
-        edgeNote.hideOn = function(d)
-            return HideIfDisabled(d)
-                or (d.dispelOverlayColorSource or "game") == "custom"
-                or d.dispelGradientStyle ~= "EDGE"
-        end
         local onHealthCheck = gradientGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show On Current Health Only"], db, "dispelGradientOnCurrentHealth", function()
             ApplyDispelSettings()
         end), 30)
@@ -8699,11 +8655,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end, function() DF:InvalidateDispelColorCurve(); DF:LightweightUpdateDispelOverlay() end, true), 55)
         gradAlpha.hideOn = HideDispelOptions
         gradAlpha.disableOn = DisableIfNoGradient
-        local gradIntensity = gradientGroup:AddWidget(GUI:CreateSlider(self.child, L["Gradient Intensity"], 0.5, 3.0, 0.1, db, "dispelGradientIntensity", function()
-            InvalidateCurves()
-        end, function() DF:InvalidateDispelColorCurve(); DF:LightweightUpdateDispelOverlay() end, true), 55)
-        gradIntensity.hideOn = HideIfGameMode   -- palette-inert in game mode (native tint owns RGB)
-        gradIntensity.disableOn = DisableIfNoGradient
         local blendModes = { ["ADD"]= L["Glow (ADD)"], ["BLEND"]= L["Solid (BLEND)"] }
         local blendDropdown = gradientGroup:AddWidget(GUI:CreateDropdown(self.child, L["Blend Mode"], blendModes, db, "dispelGradientBlendMode", function()
             ApplyDispelSettings()

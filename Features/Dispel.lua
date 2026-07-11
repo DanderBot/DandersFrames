@@ -276,6 +276,60 @@ end
 -- Addon-created textures CANNOT handle secret colors
 -- ============================================================
 
+-- Pulse = a looping alpha fade (full -> 0.3 -> full, 0.5s each way) attached to a
+-- HOST FRAME, so it MULTIPLIES the alpha of every region parented under that host
+-- (each region keeps its own configured alpha). ONE helper, reused everywhere so
+-- "pulse" means the same thing on every path: the whole dispel overlay breathes,
+-- not just one element. Legacy widget = three hosts (borders / gradient box / icon
+-- box); 12.1 slot path = the main widget + each slot holder.
+local function AttachDispelPulse(hostFrame)
+    local anim = hostFrame:CreateAnimationGroup()
+    anim:SetLooping("REPEAT")
+    local fadeOut = anim:CreateAnimation("Alpha")
+    fadeOut:SetFromAlpha(1); fadeOut:SetToAlpha(0.3); fadeOut:SetDuration(0.5)
+    fadeOut:SetOrder(1); fadeOut:SetSmoothing("IN_OUT")
+    local fadeIn = anim:CreateAnimation("Alpha")
+    fadeIn:SetFromAlpha(0.3); fadeIn:SetToAlpha(1); fadeIn:SetDuration(0.5)
+    fadeIn:SetOrder(2); fadeIn:SetSmoothing("IN_OUT")
+    return anim
+end
+
+-- Slot-holder pulse (12.1 path): lazily build the group on the holder, then
+-- play/stop it, resetting the holder alpha to 1 on stop. Stored on the holder so
+-- every slot family (ring / edge / icon) shares this one code path.
+local function ApplySlotPulse(holder, on)
+    if not holder then return end
+    if not holder._dfDispelPulse then holder._dfDispelPulse = AttachDispelPulse(holder) end
+    if on then
+        if not holder._dfDispelPulse:IsPlaying() then holder._dfDispelPulse:Play() end
+    else
+        if holder._dfDispelPulse:IsPlaying() then holder._dfDispelPulse:Stop() end
+        holder:SetAlpha(1)
+    end
+end
+
+-- Play/stop ALL of a legacy widget's pulse hosts together (borders + gradient box
+-- + icon box). Started in the same call so they stay phase-locked; alpha reset to
+-- 1 on stop.
+local function SetLegacyOverlayPulse(overlay, on)
+    local groups = { overlay.pulseAnim, overlay.gradientPulse, overlay.iconPulse }
+    for i = 1, #groups do
+        local g = groups[i]
+        if g then
+            if on then
+                if not g:IsPlaying() then g:Play() end
+            elseif g:IsPlaying() then
+                g:Stop()
+            end
+        end
+    end
+    if not on then
+        overlay:SetAlpha(1)
+        if overlay.gradientPulseHost then overlay.gradientPulseHost:SetAlpha(1) end
+        if overlay.iconPulseHost then overlay.iconPulseHost:SetAlpha(1) end
+    end
+end
+
 -- Parent-agnostic widget constructor (§24 unified overlay): builds the full
 -- overlay region set on any host. `host` = parent + anchor rect (a unit frame
 -- today; an overlay-mode slot BUTTON on the 12.1 container path — overlay slots
@@ -331,17 +385,34 @@ local function BuildDispelOverlayWidget(host, gradientHost, iconHost)
     overlay.borderRight:GetStatusBarTexture():SetBlendMode("BLEND")  -- Opaque, not additive
     
     -- Dark background behind gradient (helps gradient show on light class colors)
-    -- Parent to the gradient host (healthBar on unit frames) for proper layering
+    -- Parent to the gradient host (healthBar on unit frames) for proper layering.
+    -- When a SEPARATE gradient host is supplied (legacy unit-frame path), the
+    -- gradient family is NOT a child of `overlay`, so the border pulse can't reach
+    -- it. Interpose an invisible pulse BOX at the host's OWN frame level (draw order
+    -- unchanged: the box is a passthrough) that we can fade independently, in sync
+    -- with the borders. On the slot path (gradientHost nil) the regions are children
+    -- of `overlay` and ride its pulse directly — no box, no double-pulse.
     local gradientParent = gradientHost or overlay
+    if gradientHost then
+        local box = CreateFrame("Frame", nil, gradientHost)
+        box:SetAllPoints(gradientHost)
+        box:SetFrameLevel(gradientHost:GetFrameLevel())
+        overlay.gradientPulseHost = box
+        gradientParent = box
+    end
     overlay.gradientDarken = gradientParent:CreateTexture(nil, "ARTWORK", nil, 1)
     overlay.gradientDarken:SetColorTexture(0, 0, 0, 0.5)
     overlay.gradientDarken:Hide()
     
     -- Gradient - use a StatusBar with gradient texture
     -- The texture has built-in alpha gradient, so we just tint it with color
-    -- Parent to healthBar to ensure proper layering above health bar content
+    -- Parent to healthBar to ensure proper layering above health bar content.
+    -- +7 clears the WHOLE health-content band: fill (healthBar itself), absorb
+    -- (+4), heal-absorb (+5), overflow (+3) and reduced-max-health (+6) — the
+    -- dispel wash tints all of it (Krathe's call: the alert renders on top;
+    -- the old +2 left it under absorbs and the reduced-max region).
     overlay.gradient = CreateFrame("StatusBar", nil, gradientParent)
-    overlay.gradient:SetFrameLevel(gradientParent:GetFrameLevel() + 2)  -- Above health bar content
+    overlay.gradient:SetFrameLevel(gradientParent:GetFrameLevel() + 7)
     overlay.gradient:SetMinMaxValues(0, 1)
     overlay.gradient:SetValue(1)
     
@@ -377,8 +448,18 @@ local function BuildDispelOverlayWidget(host, gradientHost, iconHost)
     -- The curve's alpha controls visibility - we never "know" the type
     -- ============================================================
     
-    -- Icon layering parent (contentOverlay at +25 on unit frames; the host itself otherwise)
+    -- Icon layering parent (contentOverlay at +25 on unit frames; the host itself otherwise).
+    -- Same pulse-box treatment as the gradient family: on the legacy path the icons
+    -- live under contentOverlay (not `overlay`), so wrap them in an invisible box at
+    -- the same level that we can fade in sync with the rest of the overlay.
     local iconParent = iconHost or host
+    if iconHost then
+        local box = CreateFrame("Frame", nil, iconHost)
+        box:SetAllPoints(iconHost)
+        box:SetFrameLevel(iconHost:GetFrameLevel())
+        overlay.iconPulseHost = box
+        iconParent = box
+    end
     local iconLevel = iconParent:GetFrameLevel() + 1  -- Just above the icon parent's base
     
     -- Helper to create icon StatusBar with atlas
@@ -416,24 +497,19 @@ local function BuildDispelOverlayWidget(host, gradientHost, iconHost)
         bleed = CreateIconTexture("RaidFrame-Icon-DebuffBleed"),  -- Bleed atlas
     }
     
-    -- Pulse animation
-    overlay.pulseAnim = overlay:CreateAnimationGroup()
-    overlay.pulseAnim:SetLooping("REPEAT")
-    
-    local fadeOut = overlay.pulseAnim:CreateAnimation("Alpha")
-    fadeOut:SetFromAlpha(1)
-    fadeOut:SetToAlpha(0.3)
-    fadeOut:SetDuration(0.5)
-    fadeOut:SetOrder(1)
-    fadeOut:SetSmoothing("IN_OUT")
-    
-    local fadeIn = overlay.pulseAnim:CreateAnimation("Alpha")
-    fadeIn:SetFromAlpha(0.3)
-    fadeIn:SetToAlpha(1)
-    fadeIn:SetDuration(0.5)
-    fadeIn:SetOrder(2)
-    fadeIn:SetSmoothing("IN_OUT")
-    
+    -- Pulse animation. The border group lives on `overlay` (borders are its
+    -- children); the gradient/icon families ride their own boxes when present, so
+    -- the whole overlay breathes as one. All groups share identical timing and are
+    -- played together (SetLegacyOverlayPulse) to stay phase-locked. On the slot path
+    -- only `overlay.pulseAnim` exists (no boxes); the slot holders pulse separately.
+    overlay.pulseAnim = AttachDispelPulse(overlay)
+    if overlay.gradientPulseHost then
+        overlay.gradientPulse = AttachDispelPulse(overlay.gradientPulseHost)
+    end
+    if overlay.iconPulseHost then
+        overlay.iconPulse = AttachDispelPulse(overlay.iconPulseHost)
+    end
+
     overlay:Hide()
     return overlay
 end
@@ -470,10 +546,14 @@ end
 -- the consumer sets overlay.gradientAnchorTarget = frame.healthBar and the layout
 -- anchors there while parenting stays slot-side. Nil = legacy behaviour.
 local function LayoutStateChanged(overlay, db)
-    local gradientParent = overlay.gradientAnchorTarget or (overlay.gradient and overlay.gradient:GetParent())
+    -- Measure the padded-frame anchor proxy when it exists (the rect the layout
+    -- actually uses); the healthBar fallback only applies before the first pass.
+    local gradientParent = overlay.dfGradientAnchorProxy or overlay.gradientAnchorTarget
+        or (overlay.gradient and overlay.gradient:GetParent())
     local parentH = gradientParent and gradientParent:GetHeight() or 40
     local parentW = gradientParent and gradientParent:GetWidth() or 80
     return overlay.dfL_borderSize              ~= db.dispelBorderSize
+        or overlay.dfL_framePadding            ~= db.framePadding
         or overlay.dfL_borderInset             ~= db.dispelBorderInset
         or overlay.dfL_pixelPerfect            ~= db.pixelPerfect
         or overlay.dfL_iconSize                ~= db.dispelIconSize
@@ -491,7 +571,9 @@ local function LayoutStateChanged(overlay, db)
 end
 
 local function CacheLayoutState(overlay, db)
-    local gradientParent = overlay.gradientAnchorTarget or (overlay.gradient and overlay.gradient:GetParent())
+    local gradientParent = overlay.dfGradientAnchorProxy or overlay.gradientAnchorTarget
+        or (overlay.gradient and overlay.gradient:GetParent())
+    overlay.dfL_framePadding            = db.framePadding
     overlay.dfL_borderSize              = db.dispelBorderSize
     overlay.dfL_borderInset             = db.dispelBorderInset
     overlay.dfL_pixelPerfect            = db.pixelPerfect
@@ -571,11 +653,31 @@ local function ApplyOverlayLayout(overlay, db, frame)
         end
     end
     
-    -- Gradient positioning (legacy: parented to healthBar; slot path: anchored to
-    -- gradientAnchorTarget while parented under the slot — see LayoutStateChanged note)
+    -- Gradient positioning. Anchor rect = the frame minus framePadding — the
+    -- UN-CLIPPED health area (identical to the healthBar's normal rect,
+    -- Create.lua). Never anchor to the healthBar itself: reduced-max-health
+    -- "Clip Health Bar" mode re-anchors the healthBar to just the un-reduced
+    -- portion (ReducedMaxHealth.lua), which shrank every gradient with it —
+    -- the wash must span the WHOLE bar, reduced region included (live-caught:
+    -- Top Edge stopping at the clip edge). The proxy is a pure anchor target
+    -- (no regions, nothing renders); parenting of the art stays as built
+    -- (healthBar on the legacy path, the slot widget on the 12.1 path).
     local gradientStyle = db.dispelGradientStyle or "FULL"
     local gradientSize = db.dispelGradientSize or 0.3
-    local gradientParent = overlay.gradientAnchorTarget or overlay.gradient:GetParent()
+    local gradientParent
+    if frame then
+        gradientParent = overlay.dfGradientAnchorProxy
+        if not gradientParent then
+            gradientParent = CreateFrame("Frame", nil, overlay)
+            overlay.dfGradientAnchorProxy = gradientParent
+        end
+        local pad = db.framePadding or 0
+        gradientParent:ClearAllPoints()
+        gradientParent:SetPoint("TOPLEFT", frame, "TOPLEFT", pad, -pad)
+        gradientParent:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -pad, pad)
+    else
+        gradientParent = overlay.gradientAnchorTarget or overlay.gradient:GetParent()
+    end
     local parentHeight = gradientParent and gradientParent:GetHeight() or 40
     local parentWidth = gradientParent and gradientParent:GetWidth() or 80
     
@@ -592,7 +694,21 @@ local function ApplyOverlayLayout(overlay, db, frame)
     
     -- Reset health tracking - only FULL style with onCurrentHealth will set this true
     overlay.gradientTracksHealth = false
-    
+
+    -- Neutralize the FILL state every pass, not just for FULL: the strip styles
+    -- (TOP/BOTTOM/LEFT/RIGHT) render through this same StatusBar, and a stale
+    -- tracking fill left behind by FULL + On Current Health (value = a health
+    -- snapshot, minmax = 0..maxHealth, health-matched orientation/reverse)
+    -- clipped the strips into health-shaped fragments after a style switch
+    -- (live-caught: Top Edge covering only part of the bar — frozen at the last
+    -- fed health on live, at each unit's test health in test mode). The
+    -- FULL+tracking branch below re-configures orientation/reverse and the
+    -- health hook re-feeds minmax/value.
+    overlay.gradient:SetOrientation("HORIZONTAL")
+    overlay.gradient:SetReverseFill(false)
+    overlay.gradient:SetMinMaxValues(0, 1)
+    overlay.gradient:SetValue(1)
+
     if gradientStyle == "EDGE" then
         -- EDGE style - gradients from each edge fading inward
         local edgeSize = parentHeight * gradientSize
@@ -692,17 +808,12 @@ local function ApplyOverlayLayout(overlay, db, frame)
             -- Mark this gradient as tracking health
             overlay.gradientTracksHealth = true
         else
-            -- Standard full frame overlay
+            -- Standard full frame overlay (fill state already neutralized in the
+            -- every-pass reset above)
             overlay.gradient:SetAllPoints(gradientParent)
             if overlay.gradientDarken then
                 overlay.gradientDarken:SetAllPoints(gradientParent)
             end
-            
-            -- Reset to standard status bar mode (full value)
-            overlay.gradient:SetOrientation("HORIZONTAL")
-            overlay.gradient:SetReverseFill(false)
-            overlay.gradient:SetMinMaxValues(0, 1)
-            overlay.gradient:SetValue(1)
             overlay.gradientTracksHealth = false
         end
     end
@@ -721,9 +832,11 @@ function DF:UpdateDispelGradientHealth(frame)
     if not frame then return end
 
     -- Health-tracking gradient StatusBars: the legacy overlay and/or the 12.1 slot
-    -- widgets (custom-colour mode keeps the StatusBar gradient; game mode anchors its
-    -- native carrier to the health bar's FILL texture, so it tracks health with zero
-    -- pushes and never shows up here). Zero-alloc: this runs on every health tick.
+    -- widgets. BOTH colour modes ride this on 12.1 — custom drives the StatusBar's
+    -- fill colour itself; game mode binds the StatusBar's fill TEXTURE as the
+    -- Blizzard-tinted carrier and this hook clips it to health via the bar's value
+    -- (secret-safe: values pass straight to SetValue). Zero-alloc: runs every
+    -- health tick.
     local legacy = frame.dfDispelOverlay
     if legacy and not (legacy.gradient and legacy.gradientTracksHealth and legacy:IsShown()) then
         legacy = nil
@@ -1374,16 +1487,9 @@ local function StyleOverlayRegions(overlay, r, g, b, db, dispelType, oorAlphaMul
         end
     end
 
-    if db.dispelAnimate and overlay.pulseAnim then
-        if not overlay.pulseAnim:IsPlaying() then
-            overlay.pulseAnim:Play()
-        end
-    else
-        if overlay.pulseAnim and overlay.pulseAnim:IsPlaying() then
-            overlay.pulseAnim:Stop()
-        end
-        overlay:SetAlpha(1)
-    end
+    -- Pulse the WHOLE overlay (borders + gradient + icons), not just the borders:
+    -- each family rides its own phase-locked group.
+    SetLegacyOverlayPulse(overlay, db.dispelAnimate)
 end
 
 -- Legacy show path: full styling + the widget lifecycle (Show, test-mode health
@@ -1490,7 +1596,6 @@ end
 -- harmful auras with a dispellable dispelName — incl. private auras, natively).
 -- ============================================================
 
-local DISPEL_CUSTOM_TYPES = { "Magic", "Curse", "Disease", "Poison" }
 local DISPEL_ICON_TYPES = { "Magic", "Curse", "Disease", "Poison", "Bleed" }
 -- Game-mode icon art: the same clean atlases the DF widget's own icons use (the
 -- native SetAuraBorder Atlas style renders a boxed border-with-badge instead).
@@ -1508,60 +1613,65 @@ local warnedTintBind = false
 local function dispelSlotPlan(db)
     local byMe = (db.dispelOverlayDispelType or 2) == 1
     local baseFilter = byMe and "HARMFUL|RAID_PLAYER_DISPELLABLE" or "HARMFUL"
-    local custom = (db.dispelOverlayColorSource or "game") == "custom"
-
-    -- Bleed slot (custom mode): legacy semantics — a non-black bleed colour opts in
-    -- and shows for EVERYONE (not just bleed-dispelling classes), so it always rides
-    -- the classification route rather than RAID_PLAYER_DISPELLABLE.
-    local bleedColor = db.dispelBleedColor
-    local wantBleed = custom and bleedColor
-        and ((bleedColor.r or 0) > 0 or (bleedColor.g or 0) > 0 or (bleedColor.b or 0) > 0)
 
     local dispelEnum = AuraUtil and AuraUtil.AuraUpdateChangedType and AuraUtil.AuraUpdateChangedType.Dispel
     if dispelEnum == nil then
         -- API drift: no ProcessAura classification — degrade to by-me semantics
         -- (pure filter string) rather than an unfiltered HARMFUL slot.
         baseFilter = "HARMFUL|RAID_PLAYER_DISPELLABLE"
-        byMe, wantBleed = true, false
+        byMe = true
     end
-    local needPolicy = (not byMe) or wantBleed
+    local needPolicy = not byMe
     local baseCF = (not byMe) and { processedAuraType = dispelEnum } or nil
 
+    -- One overlay, the game's colours, engine-driven (the Custom Colors mode was
+    -- removed 2026-07-11 — per-type slots with the pickers; the irreducible cost
+    -- was one overlay PER type on multi-type units, judged not worth the
+    -- confusion once game mode gained the border and edge glow).
     local slots = {}
-    if custom then
-        for i = 1, #DISPEL_CUSTOM_TYPES do
-            local t = DISPEL_CUSTOM_TYPES[i]
+    slots[#slots + 1] = { key = "main", filter = baseFilter, candidateFilters = baseCF }
+    -- BORDER: a SECOND any-dispellable slot whose bound carrier is a single
+    -- square-ring texture (transparent centre). One tintable region per slot is
+    -- the hard limit — so the border rides its own slot; the identical filter
+    -- fills it with the same aura as the main slot (no cross-slot dedup),
+    -- keeping border and gradient perfectly in sync.
+    if db.dispelShowBorder ~= false then
+        slots[#slots + 1] = { key = "gameborder", filter = baseFilter, candidateFilters = baseCF }
+    end
+    -- EDGE gradient: FOUR strip slots, one per edge, each binding its own strip
+    -- texture (the same DF_Gradient_* art the legacy EDGE uses). A single-region
+    -- vignette was tried and rejected: TexCoord zoom shows a fading ramp's faint
+    -- inner TAIL, so any Gradient Size below the baked band rendered
+    -- near-invisible (live-caught; crop-scaling only works on SOLID bands like
+    -- the border ring). Same-filter slots all fill with the same aura (proven
+    -- live: main + gameborder), so the four strips stay in sync. Structural:
+    -- the keys put the style flip in the plan signature.
+    if db.dispelShowGradient ~= false and (db.dispelGradientStyle == "EDGE") then
+        for _, edge in ipairs({ "TOP", "BOTTOM", "LEFT", "RIGHT" }) do
+            slots[#slots + 1] = { key = "edge" .. edge, filter = baseFilter,
+                candidateFilters = baseCF, edgeSide = edge }
+        end
+    end
+    -- Type icon: per-type slots (includeDispelTypes = type knowledge WITHOUT a
+    -- native bind) carrying DF's clean RaidFrame-Icon atlases. The native Atlas
+    -- style was tried first and rejected: its ui-debuff-border-*-icon art is a
+    -- BUTTON BORDER with a badge — renders as a boxed icon (Krathe, 2026-07-10).
+    -- Bleed self-gates: byMe filter only matches if the player can dispel bleeds;
+    -- all-mode includes it via the classification route.
+    if db.dispelShowIcon ~= false then
+        for i = 1, #DISPEL_ICON_TYPES do
+            local t = DISPEL_ICON_TYPES[i]
             local cf = { includeDispelTypes = { [t] = true } }
             if baseCF then cf.processedAuraType = dispelEnum end
-            slots[#slots + 1] = { key = t, filter = baseFilter, candidateFilters = cf, dispelType = t }
-        end
-        if wantBleed then
-            slots[#slots + 1] = { key = "Bleed", filter = "HARMFUL", dispelType = "Bleed",
-                candidateFilters = { includeDispelTypes = { Bleed = true }, processedAuraType = dispelEnum } }
-        end
-    else
-        slots[#slots + 1] = { key = "main", filter = baseFilter, candidateFilters = baseCF }
-        -- Type icon: per-type slots (includeDispelTypes = type knowledge WITHOUT a
-        -- native bind) carrying DF's clean RaidFrame-Icon atlases. The native Atlas
-        -- style was tried first and rejected: its ui-debuff-border-*-icon art is a
-        -- BUTTON BORDER with a badge — renders as a boxed icon (Krathe, 2026-07-10).
-        -- Bleed self-gates: byMe filter only matches if the player can dispel bleeds;
-        -- all-mode includes it via the classification route.
-        if db.dispelShowIcon ~= false then
-            for i = 1, #DISPEL_ICON_TYPES do
-                local t = DISPEL_ICON_TYPES[i]
-                local cf = { includeDispelTypes = { [t] = true } }
-                if baseCF then cf.processedAuraType = dispelEnum end
-                slots[#slots + 1] = { key = "icon" .. t, filter = baseFilter, candidateFilters = cf, iconType = t }
-            end
+            slots[#slots + 1] = { key = "icon" .. t, filter = baseFilter, candidateFilters = cf, iconType = t }
         end
     end
     return slots, needPolicy
 end
 
--- Structural signature: colour source, me/all, icon slot, bleed opt-in — anything
--- that changes the SLOT SET (topology is add-only, so set changes are a rebuild).
--- Pure styling (colours, alphas, geometry) hot-applies via the style pass instead.
+-- Structural signature: me/all, border slot, icon slots — anything that changes
+-- the SLOT SET (topology is add-only, so set changes are a rebuild).
+-- Pure styling (alphas, geometry) hot-applies via the style pass instead.
 local function dispelFactoryPlanAndSig(db)
     local slots, needPolicy = dispelSlotPlan(db)
     if not slots then return nil end
@@ -1582,8 +1692,21 @@ local function EnsureSlotWidget(btn, frame)
         btn.dfDispelWidget = w
         w:Show()
         local base = frame:GetFrameLevel()
-        w:SetFrameLevel(base + 2)              -- darken/edge textures + native carrier band
-        w.gradient:SetFrameLevel(base + 3)     -- legacy healthBar+2
+        -- Levels are derived from the REAL healthBar level (frame+3, Create.lua),
+        -- mirroring the legacy widget whose gradient is a healthBar CHILD at
+        -- healthBar+2. The old hardcoded base+2/base+3 assumed healthBar sat at
+        -- frame+1 — that level-tied the gradient with the health bar itself, so
+        -- the (secret-driven) fill rendered OVER the strip on live frames and
+        -- the overlay only showed across the missing-health area (live-caught:
+        -- Top Edge covering the deficit only).
+        local hbLvl = (frame.healthBar and frame.healthBar:GetFrameLevel()) or (base + 3)
+        -- +7/+8 clear the whole health-content band (fill, absorb +4, heal-absorb
+        -- +5, overflow +3, reduced-max +6) — matches the legacy widget's gradient
+        -- at healthBar+7. w carries the game-mode tint CARRIER (and darken/edge
+        -- textures), which must clear the band too; the gradient bar sits one
+        -- above so its fill is never level-tied with its own parent.
+        w:SetFrameLevel(hbLvl + 7)
+        w.gradient:SetFrameLevel(hbLvl + 8)
         w.borderTop:SetFrameLevel(base + 7)    -- legacy overlay(+6)+1
         w.borderBottom:SetFrameLevel(base + 7)
         w.borderLeft:SetFrameLevel(base + 7)
@@ -1604,17 +1727,85 @@ end
 -- secure-side with the real dispel type); OUR knobs ride region alpha, texture file
 -- and blend mode — properties the native path never touches. Geometry comes from the
 -- shared ApplyOverlayLayout pass (it positions the hidden gradient StatusBar; the
--- carrier pins to its rect). EDGE (4 textures) can't ride one region -> FULL fallback.
+-- carrier pins to its rect). EDGE rides four dedicated strip slots
+-- (StyleGameEdgeSlot); the border rides its OWN slot (StyleGameBorderSlot) —
+-- one bindable region per slot.
 local function StyleGameMainSlot(btn, frame, db)
     local w = EnsureSlotWidget(btn, frame)
     if not w.nativeGradient then
         -- ARTWORK sub-layer 2: above the darken texture (sub 1) on the same widget.
         w.nativeGradient = w:CreateTexture(nil, "ARTWORK", nil, 2)
     end
-    if not btn._dfDispelTintBound and btn.SetAuraBorder then
-        btn._dfDispelTintBound = true
+
+    -- Shared geometry pass (borders/icons/gradient rects + gradientTracksHealth).
+    -- It SHOWS nothing we don't re-show below; every colour-carrying region stays
+    -- hidden in game mode except the tracking StatusBar (whose FILL texture is the
+    -- Blizzard-driven carrier — see below).
+    ApplyOverlayLayout(w, db, frame)
+    w.borderTop:Hide(); w.borderBottom:Hide(); w.borderLeft:Hide(); w.borderRight:Hide()
+    if w.gradientTop then w.gradientTop:Hide() end
+    if w.gradientBottom then w.gradientBottom:Hide() end
+    if w.gradientLeft then w.gradientLeft:Hide() end
+    if w.gradientRight then w.gradientRight:Hide() end
+    for _, icon in pairs(w.icons) do icon:Hide() end
+
+    -- Dress the carrier. Show/Hide of the carrier is Blizzard-owned -> a disabled
+    -- gradient is expressed as alpha 0, never Hide(). Intensity is palette-inert by
+    -- design ("game colours" = Blizzard's exact palette).
+    --
+    -- "On current health" (FULL + dispelGradientOnCurrentHealth, flagged by
+    -- ApplyOverlayLayout as gradientTracksHealth): the carrier is the widget
+    -- StatusBar's own FILL TEXTURE — Blizzard tints/shows it, while
+    -- UpdateDispelGradientHealth drives the bar's value with the unit's (secret)
+    -- health, so the bar clips the tint to current health. This replaces
+    -- anchoring a plain texture to the HEALTH bar's fill-texture rect: our own
+    -- bar's clipping is guaranteed regardless of how 12.1's secret-health
+    -- StatusBars expose (or don't expose) their fill through the texture rect.
+    local style = db.dispelGradientStyle or "FULL"
+    local showGradient = db.dispelShowGradient ~= false
+    local carrier
+    if w.gradientTracksHealth then
+        w.gradient:SetStatusBarTexture(GRADIENT_TEXTURES[style] or GRADIENT_TEXTURES.FULL)
+        carrier = w.gradient:GetStatusBarTexture()   -- re-fetch AFTER SetStatusBarTexture
+        w.gradient:Show()
+        -- The plain-texture carrier may be left SHOWN by Blizzard's last
+        -- SetShown before a rebind — it's unmanaged after the rebind, hide it.
+        w.nativeGradient:Hide()
+    else
+        -- NOTE: never Show() the carrier here — its shown state is Blizzard's
+        -- presence gate (a forced Show would tint aura-less units until the next
+        -- aura event). The rebind below re-asserts it via UpdateAuraDisplay.
+        carrier = w.nativeGradient
+        w.gradient:Hide()
+        w.nativeGradient:ClearAllPoints()
+        if style == "EDGE" then
+            -- EDGE renders through FOUR dedicated strip slots (StyleGameEdgeSlot)
+            -- — a single bound region can't carry a size-scalable four-edge ramp:
+            -- TexCoord-zooming a gradient shows only the ramp's faint inner tail
+            -- (live-caught; crop-scaling works on the border's SOLID band only).
+            -- Park the main carrier with NO ANCHORS: a rect-less region cannot
+            -- render, PERIOD. (Parking on a full-frame rect at alpha 0 was
+            -- live-caught rendering at alpha 1 — something in the update flow
+            -- restored the region alpha; anchor-less parking can't be stomped.)
+            w.nativeGradient:SetTexCoord(0, 1, 0, 1)
+        else
+            w.nativeGradient:SetTexture(GRADIENT_TEXTURES[style] or GRADIENT_TEXTURES.FULL)
+            w.nativeGradient:SetTexCoord(0, 1, 0, 1)
+            -- The hidden StatusBar holds the style's rect (TOP/BOTTOM/LEFT/RIGHT
+            -- strips, static FULL) — pin the carrier onto it.
+            w.nativeGradient:SetAllPoints(w.gradient)
+        end
+    end
+    carrier:SetBlendMode(db.dispelGradientBlendMode or "ADD")
+    carrier:SetAlpha((showGradient and style ~= "EDGE") and (db.dispelGradientAlpha or 0.5) or 0)
+
+    -- (Re)bind whenever the carrier region changed (style/tracking flip):
+    -- SetAuraBorder REPLACES the registered region (Blizzard_CustomAuraButton.lua:82,
+    -- single-region), so a stale bind would tint the wrong texture.
+    if btn._dfDispelBoundCarrier ~= carrier and btn.SetAuraBorder then
+        btn._dfDispelBoundCarrier = carrier
         local ok, err = pcall(function()
-            btn:SetAuraBorder(w.nativeGradient, {
+            btn:SetAuraBorder(carrier, {
                 style = (_G.AuraButtonBorderStyle and _G.AuraButtonBorderStyle.Color) or 1,
                 showWhenHarmful = true,
                 showWhenHelpful = false,
@@ -1627,39 +1818,6 @@ local function StyleGameMainSlot(btn, frame, db)
         end
     end
 
-    -- Shared geometry pass (borders/icons/gradient rects + gradientTracksHealth).
-    -- It SHOWS nothing; every colour-carrying region stays hidden in game mode.
-    ApplyOverlayLayout(w, db, frame)
-    w.gradient:Hide()
-    w.borderTop:Hide(); w.borderBottom:Hide(); w.borderLeft:Hide(); w.borderRight:Hide()
-    if w.gradientTop then w.gradientTop:Hide() end
-    if w.gradientBottom then w.gradientBottom:Hide() end
-    if w.gradientLeft then w.gradientLeft:Hide() end
-    if w.gradientRight then w.gradientRight:Hide() end
-    for _, icon in pairs(w.icons) do icon:Hide() end
-
-    -- Dress the carrier. Show/Hide is Blizzard-owned -> a disabled gradient is
-    -- expressed as alpha 0, never Hide(). Intensity is palette-inert by design
-    -- ("game colours" = Blizzard's exact palette).
-    local style = db.dispelGradientStyle or "FULL"
-    local showGradient = db.dispelShowGradient ~= false
-    w.nativeGradient:SetTexture(GRADIENT_TEXTURES[style] or GRADIENT_TEXTURES.FULL)
-    w.nativeGradient:SetBlendMode(db.dispelGradientBlendMode or "ADD")
-    w.nativeGradient:SetAlpha(showGradient and (db.dispelGradientAlpha or 0.5) or 0)
-    w.nativeGradient:ClearAllPoints()
-    local hb = frame.healthBar
-    if style == "EDGE" then
-        if hb then w.nativeGradient:SetAllPoints(hb) else w.nativeGradient:SetAllPoints(w) end
-    elseif w.gradientTracksHealth and hb and hb.GetStatusBarTexture and hb:GetStatusBarTexture() then
-        -- "On current health": pin to the health bar's FILL texture — the carrier
-        -- follows the fill rect with zero per-tick pushes.
-        w.nativeGradient:SetAllPoints(hb:GetStatusBarTexture())
-    else
-        -- The hidden StatusBar holds the style's rect (TOP/BOTTOM/LEFT/RIGHT strips,
-        -- static FULL) — pin the carrier onto it.
-        w.nativeGradient:SetAllPoints(w.gradient)
-    end
-
     -- Darken + pulse are type-independent -> fully supported in game mode. They only
     -- render while the slot button is shown (= a dispellable aura matched).
     if w.gradientDarken then
@@ -1670,6 +1828,10 @@ local function StyleGameMainSlot(btn, frame, db)
             w.gradientDarken:Hide()
         end
     end
+    -- Pulse the main widget (gradient + darken). The border ring, edge strips and
+    -- type icons pulse via their OWN slot holders (ApplySlotPulse) so the whole
+    -- overlay breathes together — all groups share the same timing and are (re)played
+    -- in the same style pass, keeping them phase-locked.
     if db.dispelAnimate then
         if not w.pulseAnim:IsPlaying() then w.pulseAnim:Play() end
     else
@@ -1709,6 +1871,133 @@ local function StyleGameTypeIconSlot(btn, frame, db, typeName)
     tex:SetPoint(pos, btn.dfDispelIconHolder, pos, db.dispelIconOffsetX or 0, db.dispelIconOffsetY or 0)
     tex:SetSize(size, size)
     tex:SetAlpha(db.dispelIconAlpha or 1)
+    ApplySlotPulse(btn.dfDispelIconHolder, db.dispelAnimate)
+end
+
+-- GAME-COLOUR mode, border slot: ONE square-ring texture (solid band, transparent
+-- centre — Media/DF_SquareBorder) bound as this slot's carrier; Blizzard tints and
+-- shows it with the same aura the main slot carries. Nine-slice pins the band at a
+-- uniform, configurable thickness on any frame shape (stretched ring art would
+-- render thicker sides than top on wide frames); the solid band makes the slice
+-- semantics-proof — any margin ≤ the 32px art band samples solid white.
+local function StyleGameBorderSlot(btn, frame, db)
+    local ring = btn.dfDispelRing
+    if not ring then
+        local holder = CreateFrame("Frame", nil, btn)
+        holder:SetAllPoints(btn)
+        -- Just above the gradient band (hbLvl+7/+8, EnsureSlotWidget) — mirrors
+        -- the custom borders sitting above the custom gradient.
+        local hbLvl = (frame.healthBar and frame.healthBar:GetFrameLevel())
+            or (frame:GetFrameLevel() + 3)
+        holder:SetFrameLevel(hbLvl + 9)
+        ring = holder:CreateTexture(nil, "ARTWORK")
+        ring:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\DF_SquareBorder")
+        btn.dfDispelRing = ring
+        btn.dfDispelRingHolder = holder
+    end
+    local thickness = db.dispelBorderSize or 2
+    if db.pixelPerfect then thickness = DF:PixelPerfect(thickness) end
+    local inset = db.dispelBorderInset or 0
+    -- Positive inset EXPANDS outward — same convention as the legacy borders.
+    ring:ClearAllPoints()
+    ring:SetPoint("TOPLEFT", btn, "TOPLEFT", -inset, inset)
+    ring:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", inset, -inset)
+    ring:SetAlpha(db.dispelBorderAlpha or 0.8)
+    ring:SetBlendMode("BLEND")
+    -- Uniform thickness via ASYMMETRIC TexCoord crop (the DF_SquareRing
+    -- technique): zoom into the art independently per axis so the 25% art band
+    -- renders at exactly `thickness` px on every edge regardless of the frame's
+    -- aspect ratio. Solve (B - c)/(1 - 2c) = t/dim for the crop c per axis.
+    -- (SetTextureSliceMargins was tried first and rejected: its margins cut the
+    -- SOURCE texture, so any margin below the art band leaves band pixels in
+    -- the stretchable centre — the border blew up to a quarter of the frame,
+    -- live-caught.) The frame rect is OURS (readable); style re-runs on layout
+    -- version bumps, so a frame resize catches up on the next dispel pass.
+    local rw = (frame:GetWidth() or 80) + 2 * inset
+    local rh = (frame:GetHeight() or 40) + 2 * inset
+    local B = 0.25   -- art band fraction (32px of the 128px file)
+    local function cropFor(dim)
+        local f = thickness / math.max(dim, 1)
+        if f >= B then return 0 end   -- degenerate (tiny frame): draw the art uncropped
+        return (B - f) / (1 - 2 * f)
+    end
+    local cx, cy = cropFor(rw), cropFor(rh)
+    ring:SetTexCoord(cx, 1 - cx, cy, 1 - cy)
+    if btn._dfDispelBoundCarrier ~= ring and btn.SetAuraBorder then
+        btn._dfDispelBoundCarrier = ring
+        local ok, err = pcall(function()
+            btn:SetAuraBorder(ring, {
+                style = (_G.AuraButtonBorderStyle and _G.AuraButtonBorderStyle.Color) or 1,
+                showWhenHarmful = true,
+                showWhenHelpful = false,
+                showIcon = false,
+            })
+        end)
+        if not ok and not warnedTintBind then
+            warnedTintBind = true
+            if DF.DebugWarn then DF:DebugWarn("Dispel", "SetAuraBorder ring bind failed: %s", tostring(err)) end
+        end
+    end
+    ApplySlotPulse(btn.dfDispelRingHolder, db.dispelAnimate)
+end
+
+-- GAME mode, EDGE strip slot: one slot per edge, each binding its own gradient
+-- strip texture, positioned from settings on the padded frame rect (immune to
+-- the reduced-max health-bar clip). Geometry mirrors ApplyOverlayLayout's EDGE
+-- branch: strip depth = padded frame dimension × Gradient Size.
+local function StyleGameEdgeSlot(btn, frame, db, edge)
+    local tex = btn.dfDispelEdgeTex
+    if not tex then
+        local holder = CreateFrame("Frame", nil, btn)
+        holder:SetAllPoints(btn)
+        local hbLvl = (frame.healthBar and frame.healthBar:GetFrameLevel())
+            or (frame:GetFrameLevel() + 3)
+        holder:SetFrameLevel(hbLvl + 7)   -- the gradient band (EnsureSlotWidget scheme)
+        tex = holder:CreateTexture(nil, "ARTWORK", nil, 2)
+        btn.dfDispelEdgeTex = tex
+        btn.dfDispelEdgeHolder = holder
+    end
+    tex:SetTexture(EDGE_GRADIENT_TEXTURES[edge])
+    local pad = db.framePadding or 0
+    local gradientSize = db.dispelGradientSize or 0.3
+    local innerW = math.max((frame:GetWidth() or 80) - 2 * pad, 1)
+    local innerH = math.max((frame:GetHeight() or 40) - 2 * pad, 1)
+    local dH = innerH * gradientSize   -- strip depth, horizontal strips
+    local dW = innerW * gradientSize   -- strip depth, vertical strips
+    -- Rect from TWO DIAGONAL POINTS only (the ring's proven pattern on these
+    -- holders) — no SetHeight/SetWidth on regions inside the button subtree.
+    tex:ClearAllPoints()
+    if edge == "TOP" then
+        tex:SetPoint("TOPLEFT", frame, "TOPLEFT", pad, -pad)
+        tex:SetPoint("BOTTOMRIGHT", frame, "TOPRIGHT", -pad, -(pad + dH))
+    elseif edge == "BOTTOM" then
+        tex:SetPoint("TOPLEFT", frame, "BOTTOMLEFT", pad, pad + dH)
+        tex:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -pad, pad)
+    elseif edge == "LEFT" then
+        tex:SetPoint("TOPLEFT", frame, "TOPLEFT", pad, -pad)
+        tex:SetPoint("BOTTOMRIGHT", frame, "BOTTOMLEFT", pad + dW, pad)
+    else -- RIGHT
+        tex:SetPoint("TOPLEFT", frame, "TOPRIGHT", -(pad + dW), -pad)
+        tex:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -pad, pad)
+    end
+    tex:SetBlendMode(db.dispelGradientBlendMode or "ADD")
+    tex:SetAlpha(db.dispelGradientAlpha or 0.5)
+    if btn._dfDispelBoundCarrier ~= tex and btn.SetAuraBorder then
+        btn._dfDispelBoundCarrier = tex
+        local ok, err = pcall(function()
+            btn:SetAuraBorder(tex, {
+                style = (_G.AuraButtonBorderStyle and _G.AuraButtonBorderStyle.Color) or 1,
+                showWhenHarmful = true,
+                showWhenHelpful = false,
+                showIcon = false,
+            })
+        end)
+        if not ok and not warnedTintBind then
+            warnedTintBind = true
+            if DF.DebugWarn then DF:DebugWarn("Dispel", "SetAuraBorder edge bind failed: %s", tostring(err)) end
+        end
+    end
+    ApplySlotPulse(btn.dfDispelEdgeHolder, db.dispelAnimate)
 end
 
 -- Style every live slot button per the plan. Returns false while no buttons exist
@@ -1716,25 +2005,29 @@ end
 local function StyleDispelSlots(frame, db, h, slots)
     local buttons = h.GetOverlaySlots and h:GetOverlaySlots()
     if not buttons or not next(buttons) then return false end
-    local custom = (db.dispelOverlayColorSource or "game") == "custom"
     local styled = false
     for i = 1, #slots do
         local info = slots[i]
         local btn = buttons[info.key]
         if btn then
             styled = true
-            if custom then
-                -- Type known at declare time -> the FULL art styles statically from
-                -- the DF pickers (same colour source as the legacy/test paint).
-                local w = EnsureSlotWidget(btn, frame)
-                local r, g, b = GetTestDispelColor(info.dispelType, db)
-                StyleOverlayRegions(w, r, g, b, db, info.dispelType, 1.0, frame)
-            elseif info.iconType then
+            if info.iconType then
                 StyleGameTypeIconSlot(btn, frame, db, info.iconType)
+            elseif info.edgeSide then
+                StyleGameEdgeSlot(btn, frame, db, info.edgeSide)
+            elseif info.key == "gameborder" then
+                StyleGameBorderSlot(btn, frame, db)
             else
                 StyleGameMainSlot(btn, frame, db)
             end
         end
+    end
+    -- Seed any health-tracking gradient bars now (both colour modes): the health
+    -- hook only fires on health CHANGES, and the layout pass just neutralized the
+    -- fill to full — without a seed a tracking bar renders full until the first
+    -- health tick. Early-outs when nothing tracks.
+    if styled and DF.UpdateDispelGradientHealth then
+        DF:UpdateDispelGradientHealth(frame)
     end
     return styled
 end
@@ -1896,26 +2189,15 @@ function DF:UpdateDispelOverlay(frame)
 
         if testData and testData.dispelType then
             local overlay = CreateDispelOverlay(frame)
+            -- Preview what the container path renders live: Blizzard's palette
+            -- colour on the shared art (the game engine owns the RGB live; the
+            -- legacy widget's border/EDGE regions are geometry-matched
+            -- stand-ins for the ring slot / vignette carrier). GetTestDispelColor
+            -- is the fallback when the palette API is unavailable.
             local r, g, b = GetTestDispelColor(testData.dispelType, db)
-            local paintDB = db
-
-            -- GAME colour mode: preview what the container path renders live —
-            -- Blizzard's palette colour on the gradient + the type icon only
-            -- (StyleGameMainSlot: borders are custom-only, intensity is
-            -- palette-inert, EDGE falls back to the FULL carrier). The custom
-            -- mode needs nothing: its live styling uses this same art and the
-            -- same picker colours (StyleDispelSlots custom branch).
-            if (db.dispelOverlayColorSource or "game") ~= "custom" then
-                if AuraUtil and AuraUtil.GetAuraBorderColor then
-                    local ok, c = pcall(AuraUtil.GetAuraBorderColor, testData.dispelType)
-                    if ok and c then r, g, b = c:GetRGB() end
-                end
-                paintDB = setmetatable({
-                    dispelShowBorder        = false,
-                    dispelGradientIntensity = 1.0,
-                    dispelGradientStyle     = (db.dispelGradientStyle == "EDGE") and "FULL"
-                                              or db.dispelGradientStyle,
-                }, { __index = db })
+            if AuraUtil and AuraUtil.GetAuraBorderColor then
+                local ok, c = pcall(AuraUtil.GetAuraBorderColor, testData.dispelType)
+                if ok and c then r, g, b = c:GetRGB() end
             end
 
             -- Calculate OOR alpha multiplier for test mode
@@ -1925,7 +2207,7 @@ function DF:UpdateDispelOverlay(frame)
                 oorMultiplier = oorDispelAlpha
             end
 
-            ShowOverlayWithRGB(overlay, r, g, b, paintDB, testData.dispelType, oorMultiplier, frame, testData)
+            ShowOverlayWithRGB(overlay, r, g, b, db, testData.dispelType, oorMultiplier, frame, testData)
             -- Test mode doesn't use the last-rendered-aura skip — it has
             -- its own lifecycle and can re-render every tick cheaply.
             frame.dfLastDispelAuraID = nil
@@ -2192,7 +2474,6 @@ function DF:DebugDispel(unit)
     local db = DF:GetDB()
     print("  dispelOverlayEnabled: " .. tostring(db and db.dispelOverlayEnabled))
     print("  dispelOverlayDispelType: " .. tostring(db and db.dispelOverlayDispelType))
-    print("  dispelOverlayColorSource: " .. tostring(db and db.dispelOverlayColorSource))
     
     -- Get debuffs sorted by expiration
     local sortRule = Enum.UnitAuraSortRule and Enum.UnitAuraSortRule.Expiration or 3
