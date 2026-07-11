@@ -306,6 +306,23 @@ local function styleButton_regions(slot, config)
             sb:SetAlpha(hm.alpha or 1)
             if type(hm.onBar) == "function" then hm.onBar(sb) end
         end
+        -- MIRROR HOST — a plain child frame of the slot handed back to the consumer
+        -- (the Aura Designer name/health text colour-by-cover). The consumer parents
+        -- Text-Designer mirror FontStrings to it: the host contributes ONLY the slot's
+        -- secret visibility chain (aura present -> host visible -> covers render); the
+        -- mirrors position themselves by anchoring to the real FontStrings. onHost fires
+        -- every style pass (create + ApplyStyle + Blizzard re-init) so the consumer's
+        -- EnableMirrors registration is always current. ADDITIVE: only the AD text
+        -- consumer sets it; tintColor/healthMirror and the #205 rows are untouched.
+        local mh = ov and ov.mirrorHost
+        if mh then
+            if not slot.dfMirrorHost then
+                slot.dfMirrorHost = CreateFrame("Frame", nil, slot)
+                slot.dfMirrorHost:SetAllPoints(slot)
+                slot.dfMirrorHost:EnableMouse(false)
+            end
+            if type(mh.onHost) == "function" then mh.onHost(slot.dfMirrorHost) end
+        end
     else
         -- ROW mode content is EITHER the aura's own ICON texture (native SetIcon fills
         -- it) OR a solid-colour SQUARE fill (DF-owned static colour — the Aura Designer

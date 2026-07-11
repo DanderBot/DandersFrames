@@ -125,6 +125,11 @@ local function auraHasTrackedIndicator(auraCfg)
     if hb and not hb.showWhenMissing then return true end
     if bg and not bg.showWhenMissing then return true end
     if bd and not bd.showWhenMissing then return true end
+    -- Text colour-by-cover (recovered): a present-mode name/health text indicator is a
+    -- rendering visual, so it dedups. SWM-flagged text renders nothing (unsupported).
+    local nt, ht = auraCfg.nametext, auraCfg.healthtext
+    if nt and nt.color and not nt.showWhenMissing then return true end
+    if ht and ht.color and not ht.showWhenMissing then return true end
     return false
 end
 
@@ -277,6 +282,27 @@ local function buildBorderConfig(unit, map, spec)
         enabled = true,
         frameLevelOffset = 10,
         style = { border = { spec = spec } },
+    }
+end
+
+-- AD text-colour types -> the Text Designer mirror category they cover.
+local TEXT_MIRROR_TYPES = { nametext = "name", healthtext = "health" }
+
+-- Overlay container whose only style region is a MIRROR HOST: a plain slot-child frame
+-- handed back via onHost, to which the Text Designer parents its colour-by-cover mirror
+-- FontStrings (Render:EnableMirrors). The host contributes ONLY the slot's secret
+-- visibility (aura present -> covers render); the mirrors position themselves on the
+-- real FontStrings. frameLevelOffset 30: the host lands ~frame+32 (anchor + container +
+-- slot nesting), above the TD overlay (frame+25) so the cover draws over the real text.
+local function buildMirrorHostConfig(unit, map, onHost)
+    return {
+        unit = unit,
+        mode = "overlay",
+        filter = "HELPFUL",
+        candidateFilters = { includeSpellIDs = map },
+        enabled = true,
+        frameLevelOffset = 30,
+        style = { overlay = { mirrorHost = { onHost = onHost } } },
     }
 end
 
@@ -1276,7 +1302,8 @@ function Factory:SyncFrame(frame)
     -- SetUnit self-defers to regen in combat). Cheap per-pass: one config read per handle.
     do
         local u = frame.unit
-        for _, storeKey in ipairs({ "healthbar", "background", "border", "placed" }) do
+        for _, storeKey in ipairs({ "healthbar", "background", "border", "placed",
+                                    "nametext", "healthtext" }) do
             local t = store[storeKey]
             if t then
                 for _, entry in pairs(t) do
@@ -1526,6 +1553,66 @@ function Factory:SyncFrame(frame)
         teardownExcept(bd, bestName)
     end
 
+    -- ---- NAME / HEALTH TEXT (colour-by-cover via Text Designer mirrors) --------------
+    -- Recovered 12.1 casualties. The factory never touches the real fontstrings: it
+    -- stands up an overlay container whose slot-child HOST is handed to the Text
+    -- Designer (Render:EnableMirrors), which keeps glyph-identical coloured covers in
+    -- sync with the real elements. Aura present -> slot shows -> covers render over the
+    -- text; absent -> covers hide. Single highest-priority winner per category (one
+    -- cover colour per element, like the other frame-level effects). Show-when-missing
+    -- is NOT supported for text (rendering an SWM indicator present-mode would invert
+    -- the user's intent) — SWM-flagged text indicators render nothing and don't dedup.
+    do
+        local TDRender = DF.TextDesigner and DF.TextDesigner.Render
+        for typeKey, category in pairs(TEXT_MIRROR_TYPES) do
+            local st = store[typeKey]
+            if not st then st = {}; store[typeKey] = st end
+
+            local bestName, bestCfg, bestMap = pickWinner(spec, specAuras, typeKey,
+                function(c) return c.color and not c.showWhenMissing end)
+            if bestName and TDRender then
+                local r, g, b, a = readADColor(bestCfg.color)
+                local color = { r = r, g = g, b = b, a = a }
+                local structSig = includeSig(bestMap)
+                local coSig = colSig(bestCfg.color)
+                -- onHost fires on every style pass (create/ApplyStyle/Blizzard re-init):
+                -- stash the host for the TD-teardown recovery below and (re)register the
+                -- mirrors — EnableMirrors is idempotent per parent and restamps colour.
+                local function onHost(host)
+                    local e = st[bestName]
+                    if e then e.host = host end
+                    st._lastHost = host
+                    TDRender:EnableMirrors(frame, category, host, color)
+                end
+                local entry = st[bestName]
+                if not entry then
+                    local handle = DF.AuraContainer:Create(frame,
+                        buildMirrorHostConfig(frame.unit, bestMap, onHost))
+                    if handle then
+                        st[bestName] = { handle = handle, structSig = structSig,
+                                         coSig = coSig, host = st._lastHost }
+                    end
+                elseif entry.structSig ~= structSig then
+                    entry.structSig, entry.coSig = structSig, coSig
+                    entry.handle:Rebuild(buildMirrorHostConfig(frame.unit, bestMap, onHost))
+                elseif entry.coSig ~= coSig then
+                    entry.coSig = coSig
+                    entry.handle:ApplyStyle({ overlay = { mirrorHost = { onHost = onHost } } })
+                elseif entry.host and not (frame._tdMirrors and frame._tdMirrors[category]) then
+                    -- TD Teardown (mode/profile switch) dropped the mirror registry while
+                    -- our container persisted — re-register on the stashed host. Cheap
+                    -- nil-check per pass, only fires after a TD teardown.
+                    TDRender:EnableMirrors(frame, category, entry.host, color)
+                end
+            elseif TDRender then
+                TDRender:DisableMirrors(frame, category)
+            end
+            -- _lastHost is a scratch field, not an entry: keep teardownExcept off it.
+            st._lastHost = nil
+            teardownExcept(st, bestName)
+        end
+    end
+
     -- ---- PLACED ICON / SQUARE / BAR (per-indicator 1-slot containers) ----------------
     -- NO winner pick: every configured icon/square/bar indicator is its own placed display,
     -- keyed by instanceKey; many coexist (all share the `store.placed` store and per-key
@@ -1714,6 +1801,13 @@ function Factory:ClearFrame(frame)
     teardownExcept(store.background or {}, nil)
     teardownExcept(store.border or {}, nil)
     teardownExcept(store.placed or {}, nil)   -- per-indicator icon/square/bar containers
+    teardownExcept(store.nametext or {}, nil)
+    teardownExcept(store.healthtext or {}, nil)
+    -- Release the Text Designer mirror covers owned by the two text containers above.
+    if DF.TextDesigner and DF.TextDesigner.Render then
+        DF.TextDesigner.Render:DisableMirrors(frame, "name")
+        DF.TextDesigner.Render:DisableMirrors(frame, "health")
+    end
     releaseBgAnchor(store)   -- containers gone above; drop the background anchor too
     frame.dfADHealthMirror = nil   -- health-mirror bar torn down; drop the feed ref
     -- Sound: reconcile to config with AD now off -> unregisters every applied-sound handle
@@ -1737,20 +1831,17 @@ end
 --    re-assert alpha every update) with no arbitration layer. → casualty. P4.7 overlays the
 --    framealpha type's controls (and its Expiring group).
 --
---  * healthtext (ref Indicators:ApplyHealthText) — recolours the health-text fontstring on
---    presence. Recolouring the REAL fontstring needs a presence-gated SetAuraColorOverride
---    (a Lua call gated on a secret we can't read). The duplicate-fontstring workaround is
---    impossible here: the health-text STRING is a SECRET value in combat, so a child clone
---    can't be populated read-free. → hard casualty. P4.7 overlays the healthtext controls.
---
---  * nametext (ref Indicators:ApplyNameText) — same recolour-on-presence shape. The unit
---    NAME is public, so a duplicate fontstring clone is technically read-free (unlike
---    healthtext) — but it must mirror the Text Designer's live font/anchor/justify AND its
---    formatted string (class colour, truncation, status suffixes), re-syncing on every TD
---    re-render, or it ghosts/drifts over the real name. That's a fragile reimplementation of
---    TD name rendering for a colour tint, and the failure mode is user-visible doubled text.
---    Rejected on robustness grounds (correctness > coverage). → casualty. P4.7 overlays the
---    nametext controls. (Revisit only if a clean TD-fontstring clone lands.)
+--  * nametext / healthtext — RECOVERED (colour-by-cover). Originally written off: the
+--    real fontstring can't be recoloured (presence-gated call on a secret), and a clone
+--    was thought impossible for health text ("the string is secret in combat"). Both
+--    conclusions fell to the secret-passthrough finding: FontStrings ACCEPT secret
+--    values, so the Text Designer feeds a duplicate cover FontString the SAME resolved
+--    font + SafeText value it gives the real element (glyph-identical by construction,
+--    zero reads — TextDesigner/Render.lua EnableMirrors), and the cover rides an AD
+--    overlay slot's secret visibility. See the NAME / HEALTH TEXT block in SyncFrame.
+--    Residual limits: expiring colour swaps stay dead (remaining-time), text SWM is
+--    unsupported, inline |c codes in group items keep their embedded colour, and the
+--    cover ignores the OOR text fade (it lives outside the TD overlay).
 -- ============================================================
 
 -- ============================================================

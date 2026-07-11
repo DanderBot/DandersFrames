@@ -3831,9 +3831,10 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- Appearance
         AddGroup(L["Appearance"], function(g)
             g:AddWidget(GUI:CreateColorPicker(parent, L["Color"], proxy, "color", true, RPL, RPL, true), 28)
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Show When Missing"], proxy, "showWhenMissing", function()
+            swmCheck = GUI:CreateCheckbox(parent, L["Show When Missing"], proxy, "showWhenMissing", function()
                 DF.AuraDesigner.Engine:ForceRefreshAllFrames()
-            end), 28)
+            end)
+            g:AddWidget(swmCheck, 28)
         end)
         -- Expiring
         AddGroup(L["Expiring"], function(g)
@@ -3855,9 +3856,10 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- Appearance
         AddGroup(L["Appearance"], function(g)
             g:AddWidget(GUI:CreateColorPicker(parent, L["Color"], proxy, "color", true, RPL, RPL, true), 28)
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Show When Missing"], proxy, "showWhenMissing", function()
+            swmCheck = GUI:CreateCheckbox(parent, L["Show When Missing"], proxy, "showWhenMissing", function()
                 DF.AuraDesigner.Engine:ForceRefreshAllFrames()
-            end), 28)
+            end)
+            g:AddWidget(swmCheck, 28)
         end)
         -- Expiring
         AddGroup(L["Expiring"], function(g)
@@ -4192,10 +4194,26 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             GUI:BlockControl12_1(expireAlertGroup, "limitation",
                 { id = "ad:sound:expire", page = L["Aura Designer"], when = ADgate })
         end
-    elseif typeKey == "framealpha" or typeKey == "nametext" or typeKey == "healthtext" then
-        -- Permanent: these indicators need a read-free value the 12.1 aura
-        -- system can't provide, so the whole effect is unavailable.
-        BlockGroups("limitation", "ad:" .. typeKey)
+    elseif typeKey == "framealpha" then
+        -- Permanent: whole-frame alpha needs frame:SetAlpha gated on secret presence
+        -- and collides with the range/OOR alpha owners — the whole effect is unavailable.
+        BlockGroups("limitation", "ad:framealpha")
+    elseif typeKey == "nametext" or typeKey == "healthtext" then
+        -- RECOVERED (colour-by-cover): the base Color works — the Text Designer keeps a
+        -- glyph-identical coloured cover in sync with the real element (Render mirrors)
+        -- and the aura slot's secret visibility shows it on presence. Two surgical blocks:
+        --   * Show When Missing — unsupported for text covers (drawing the cover in
+        --     present-mode would invert the intent; a text missing-window is future work).
+        if swmCheck then
+            GUI:BlockControl12_1(swmCheck, "limitation",
+                { id = "ad:" .. typeKey .. ":swm", page = L["Aura Designer"], when = ADgate })
+        end
+        --   * Expiring — permanent limitation (the colour swap near expiry needs
+        --     remaining-time, unreadable on the container path).
+        if expiringGroup then
+            GUI:BlockControl12_1(expiringGroup, "limitation",
+                { id = "ad:" .. typeKey .. ":expiring", page = L["Aura Designer"], when = ADgate })
+        end
     elseif typeKey == "healthbar" or typeKey == "background" or typeKey == "border" then
         -- Base effect settings (colour / mode / style) work on the container
         -- engine. Two surgical blocks on top:
