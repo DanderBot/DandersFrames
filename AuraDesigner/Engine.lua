@@ -360,6 +360,19 @@ function Engine:UpdateFrame(frame)
     end
     if not Adapter or not Indicators then return end
 
+    -- 12.1 NATIVE-FACTORY GATE (root chokepoint — catches EVERY caller, not just the
+    -- drive seam in Features/Auras.lua). When the factory owns AD rendering, this legacy
+    -- engine must never paint: its aura scan is gated off on 12.1, so it sees an EMPTY
+    -- cache and evaluates every show-when-missing indicator as permanently missing —
+    -- painting ghost icons on top of the factory's (working) missing badges. That is
+    -- exactly what ForceRefreshAllFrames did on every AD edit / spec change. Hide any
+    -- legacy-painted widgets; do NOT call ClearFrame here (it also tears down the
+    -- factory containers and sound registrations, which Factory:SyncFrame owns).
+    if DF.UseFactoryForAD and DF:UseFactoryForAD(frame, DF:GetFrameDB(frame)) then
+        Indicators:HideAll(frame)
+        return
+    end
+
     -- Pinned set with Hide Auras: clear AD indicators. UpdateFrame doesn't gate on
     -- adDB.enabled, so the effective-DB flag swap can't suppress AD — guard here.
     if frame.dfPinnedHideAuras then

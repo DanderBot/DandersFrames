@@ -942,11 +942,7 @@ local function buildPlacedMissingConfig(unit, map, indicator)
         candidateFilters = { includeSpellIDs = map },
         badge = { w = size, h = size },
         enabled = true,
-        -- NO frameLevelOffset / scale: the missing-mode container environment mirrors the
-        -- proven Missing Buffs cells 1:1 (plain parent, default level, no scale) — see the
-        -- create site. The push mechanism failed in-game when hosted on the secure unit
-        -- button with a level offset + scale, while the identically-declared MB cells
-        -- worked; parity removes every environmental delta.
+        frameLevelOffset = 40 + (tonumber(indicator.frameLevel) or 0),
     }
 end
 
@@ -1620,9 +1616,8 @@ function Factory:SyncFrame(frame)
                                 local function placeM(handle)
                                     handle:ClearAllPoints()
                                     handle:SetPoint(anchorM, frame, anchorM, oxM, oyM)
-                                    -- NOTE: no SetScale — environment parity with the proven
-                                    -- Missing Buffs cells (scale is temporarily inert on
-                                    -- missing-mode indicators; see buildPlacedMissingConfig).
+                                    local f = handle.GetFrame and handle:GetFrame()
+                                    if f then pcall(function() f:SetScale(scaleM) end) end
                                 end
                                 local entry = placed[key]
                                 -- Identity/struct change on a missing container = Destroy+recreate
@@ -1631,9 +1626,7 @@ function Factory:SyncFrame(frame)
                                     entry.handle:Destroy(); placed[key] = nil; entry = nil
                                 end
                                 if not entry then
-                                    -- PARENT = contentOverlay (plain, non-secure), NOT the secure
-                                    -- unit button: mirrors the Missing Buffs strip environment.
-                                    local handle = DF.AuraContainer:Create(frame.contentOverlay or frame,
+                                    local handle = DF.AuraContainer:Create(frame,
                                         buildPlacedMissingConfig(frame.unit, map, indicator))
                                     if handle then
                                         placeM(handle)
