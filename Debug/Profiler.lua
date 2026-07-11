@@ -273,11 +273,6 @@ local PROFILED_FUNCTIONS = {
     -- ----------------------------------------------------------
     "UpdateAuras",                  -- Entry point (alias for Enhanced)
     "UpdateAuras_Enhanced",
-    "UpdateAuraIcons",              -- Legacy path (kept for comparison)
-    "UpdateAuraIconsDirect",        -- Merged collect+display (Tier 3)
-    "CollectBuffs",
-    "CollectDebuffs",
-    "RepositionCenterGrowthIcons",
     "DirectModeRosterUpdate",
     "RebuildDirectFilterStrings",
 
