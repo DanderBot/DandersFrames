@@ -170,6 +170,7 @@ local function applyAppearance(fs, frame, elem, globalDefaults)
         fs._useClassColor = false
         fs:SetTextColor(app.color.r, app.color.g, app.color.b, app.color.a or 1)
     end
+    return app   -- resolved appearance, reused by the AD mirror sync
 end
 
 -- Applies position to the FontString (separate from appearance so we can
@@ -179,6 +180,90 @@ local function applyPosition(fs, frame, elem, fontStringsById, enabledById)
     local target = resolveAnchorTarget(elem, frame, fontStringsById, enabledById)
     fs:SetPoint(elem.anchor or "CENTER", target, elem.anchor or "CENTER",
         elem.offsetX or 0, elem.offsetY or 0)
+end
+
+-- ============================================================
+-- AURA DESIGNER MIRRORS (12.1 name/health text colour-by-cover)
+-- A mirror is a DUPLICATE FontString parented to a region the Aura Designer
+-- owns (an aura-slot child whose visibility Blizzard drives from the tracked
+-- aura's secret presence). Aura present -> the slot shows -> the coloured
+-- cover renders over the real text; absent -> the cover hides and the real
+-- text shows. Recolour-by-cover: the REAL FontString is never touched, so
+-- nothing is gated on a secret.
+-- SYNC-AT-SOURCE: the mirror is fed inside updateOne from the SAME resolved
+-- inputs as the real FontString — DF:SafeSetFont with the same font/size/
+-- outline (so pixel-perfect adjustments match, glyph-identical cover) and
+-- SetText with the same SafeText value (secrets pass through unread; never
+-- compare/measure/string-op mirror text). Position tracks via SetAllPoints
+-- on the real FontString (render-side, secret rects fine). Colour is the one
+-- property never copied — the mirror keeps the AD override colour.
+-- KNOWN LIMIT: inline |c colour codes embedded by group items keep their
+-- embedded colour under the cover (SetTextColor can't override them, and
+-- stripping possibly-secret text is forbidden).
+-- ============================================================
+
+-- Does this element belong to a mirror category? Single elements match via
+-- CONTENT_HINTS; a "group" element matches when ANY of its items does (the
+-- category set a group renders is its items' union).
+local function mirrorCategoryMatches(elem, category)
+    if CONTENT_HINTS[elem.contentType] == category then return true end
+    if elem.contentType == "group" and type(elem.items) == "table" then
+        for _, raw in ipairs(elem.items) do
+            local ct = type(raw) == "table" and (raw.contentType or raw.type) or raw
+            if CONTENT_HINTS[ct] == category then return true end
+        end
+    end
+    return false
+end
+
+-- Feed one rendered element to every matching mirror (called from updateOne
+-- with the element's resolved appearance + the exact safe text just set on
+-- the real FontString). A registered-but-no-longer-matching mirror (the user
+-- re-typed a group's items) is hidden so it can't linger as a stale cover.
+local function mirrorElement(frame, elem, fs, app, safeText)
+    for _, reg in pairs(frame._tdMirrors) do
+        local m = reg.byId[elem.id]
+        if mirrorCategoryMatches(elem, reg.category) then
+            if not m then
+                m = reg.parent:CreateFontString(nil, "OVERLAY")
+                m:SetAllPoints(fs)   -- anchors track the real text render-side
+                local c = reg.color
+                m:SetTextColor(c.r, c.g, c.b, c.a or 1)
+                reg.byId[elem.id] = m
+            end
+            -- Same setter, same resolved inputs -> identical rendering.
+            DF:SafeSetFont(m, fontPath(app.font), app.fontSize, app.outline)
+            -- Same SafeText value the real FontString just received (secret
+            -- passthrough; pcall + warn-once purely as a degrade path).
+            local ok = pcall(m.SetText, m, safeText)
+            if ok then
+                m:SetShown(fs:IsShown())
+            else
+                m:Hide()
+                if not Render._mirrorWarned then
+                    Render._mirrorWarned = true
+                    DF:DebugWarn("TD", "mirror SetText failed — AD text colour degraded off")
+                end
+            end
+        elseif m then
+            m:Hide()
+        end
+    end
+end
+
+-- Post-render visibility pass: mirrors follow their real FontStrings' shown
+-- state (covers disabled/deleted elements and the master-off path — every
+-- hide funnels through here). Content/appearance are owned by mirrorElement.
+local function syncMirrors(frame)
+    local regs = frame._tdMirrors
+    if not regs then return end
+    local fss = frame._tdFontStrings
+    for _, reg in pairs(regs) do
+        for id, m in pairs(reg.byId) do
+            local fs = fss and fss[id]
+            if fs then m:SetShown(fs:IsShown()) else m:Hide() end
+        end
+    end
 end
 
 -- ============================================================
@@ -196,7 +281,7 @@ local function updateOne(frame, elem, source, globalDefaults, enabledById)
         return
     end
     local fs = acquireFontString(frame, elem)
-    applyAppearance(fs, frame, elem, globalDefaults)
+    local app = applyAppearance(fs, frame, elem, globalDefaults)
     applyPosition(fs, frame, elem, frame._tdFontStrings, enabledById)
     -- Apply class color if requested
     if fs._useClassColor then
@@ -218,81 +303,12 @@ local function updateOne(frame, elem, source, globalDefaults, enabledById)
         fs:SetTextColor(ov.r, ov.g, ov.b, ov.a or 1)
     end
     local text = getResolver():Resolve(elem, source)
-    fs:SetText(getMS().SafeText(text))
+    local safeText = getMS().SafeText(text)
+    fs:SetText(safeText)
     fs:Show()
-end
-
--- ============================================================
--- AURA DESIGNER MIRRORS (12.1 name/health text colour-by-cover)
--- A mirror is a DUPLICATE FontString parented to a region the Aura Designer
--- owns (an aura-slot child whose visibility Blizzard drives from the tracked
--- aura's secret presence). TD keeps every mirror glyph-identical to its real
--- FontString — font, anchors, justify, shadow, text — EXCEPT the colour,
--- which stays the AD override colour. Aura present -> the slot shows -> the
--- coloured cover renders over the real text; absent -> the cover hides and
--- the real text shows. Recolour-by-cover: the REAL FontString is never
--- touched, so nothing is gated on a secret.
--- SECRET RULES: the text copy passes the real FontString's content through
--- GetText -> SetText without inspecting it (FontStrings accept secret
--- values; only Lua string ops on them error). Never compare, measure or
--- string-op mirror text. Everything else copied is a plain getter.
--- ============================================================
-
-local function syncOneMirror(reg, id, fs)
-    local m = reg.byId[id]
-    if not m then
-        m = reg.parent:CreateFontString(nil, "OVERLAY")
-        m:SetAllPoints(fs)   -- anchors track the real text render-side (secret rects OK)
-        local c = reg.color
-        m:SetTextColor(c.r, c.g, c.b, c.a or 1)
-        reg.byId[id] = m
-    end
-    -- Font / justify / shadow: plain getters, never secret.
-    pcall(function()
-        local path, size, flags = fs:GetFont()
-        if path then m:SetFont(path, size, flags) end
-        m:SetJustifyH(fs:GetJustifyH())
-        m:SetJustifyV(fs:GetJustifyV())
-        local sr, sg, sb, sa = fs:GetShadowColor()
-        if sr then m:SetShadowColor(sr, sg, sb, sa) end
-        local sx, sy = fs:GetShadowOffset()
-        if sx then m:SetShadowOffset(sx, sy) end
-    end)
-    -- Text: SECRET PASSTHROUGH — hand the value straight across, never inspect
-    -- it. pcall + warn-once: if a client build ever rejects the round-trip we
-    -- degrade to a hidden mirror instead of an error storm.
-    local ok = pcall(function() m:SetText(fs:GetText()) end)
-    if ok then
-        m:SetShown(fs:IsShown())
-    else
-        m:Hide()
-        if not Render._mirrorWarned then
-            Render._mirrorWarned = true
-            DF:DebugWarn("TD", "mirror text passthrough failed (GetText->SetText) — AD text colour degraded off")
-        end
-    end
-end
-
--- Post-render pass: sync every registered mirror to its real FontString and
--- hide mirrors whose element vanished. Runs at the END of UpdateFrame (after
--- every hide in the pass has landed), on the master-off early-out, and from
--- EnableMirrors. Zero work when no mirrors are registered.
-local function syncMirrors(frame)
-    local regs = frame._tdMirrors
-    if not regs then return end
-    local fss = frame._tdFontStrings
-    for _, reg in pairs(regs) do
-        for id, m in pairs(reg.byId) do
-            local fs = fss and fss[id]
-            if not fs or fs._tdCategory ~= reg.category then m:Hide() end
-        end
-        if fss then
-            for id, fs in pairs(fss) do
-                if fs._tdCategory == reg.category then
-                    syncOneMirror(reg, id, fs)
-                end
-            end
-        end
+    -- AD mirrors: feed the coloured cover the SAME resolved appearance + text.
+    if frame._tdMirrors then
+        mirrorElement(frame, elem, fs, app, safeText)
     end
 end
 
