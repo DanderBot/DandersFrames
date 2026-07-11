@@ -223,6 +223,80 @@ local function updateOne(frame, elem, source, globalDefaults, enabledById)
 end
 
 -- ============================================================
+-- AURA DESIGNER MIRRORS (12.1 name/health text colour-by-cover)
+-- A mirror is a DUPLICATE FontString parented to a region the Aura Designer
+-- owns (an aura-slot child whose visibility Blizzard drives from the tracked
+-- aura's secret presence). TD keeps every mirror glyph-identical to its real
+-- FontString — font, anchors, justify, shadow, text — EXCEPT the colour,
+-- which stays the AD override colour. Aura present -> the slot shows -> the
+-- coloured cover renders over the real text; absent -> the cover hides and
+-- the real text shows. Recolour-by-cover: the REAL FontString is never
+-- touched, so nothing is gated on a secret.
+-- SECRET RULES: the text copy passes the real FontString's content through
+-- GetText -> SetText without inspecting it (FontStrings accept secret
+-- values; only Lua string ops on them error). Never compare, measure or
+-- string-op mirror text. Everything else copied is a plain getter.
+-- ============================================================
+
+local function syncOneMirror(reg, id, fs)
+    local m = reg.byId[id]
+    if not m then
+        m = reg.parent:CreateFontString(nil, "OVERLAY")
+        m:SetAllPoints(fs)   -- anchors track the real text render-side (secret rects OK)
+        local c = reg.color
+        m:SetTextColor(c.r, c.g, c.b, c.a or 1)
+        reg.byId[id] = m
+    end
+    -- Font / justify / shadow: plain getters, never secret.
+    pcall(function()
+        local path, size, flags = fs:GetFont()
+        if path then m:SetFont(path, size, flags) end
+        m:SetJustifyH(fs:GetJustifyH())
+        m:SetJustifyV(fs:GetJustifyV())
+        local sr, sg, sb, sa = fs:GetShadowColor()
+        if sr then m:SetShadowColor(sr, sg, sb, sa) end
+        local sx, sy = fs:GetShadowOffset()
+        if sx then m:SetShadowOffset(sx, sy) end
+    end)
+    -- Text: SECRET PASSTHROUGH — hand the value straight across, never inspect
+    -- it. pcall + warn-once: if a client build ever rejects the round-trip we
+    -- degrade to a hidden mirror instead of an error storm.
+    local ok = pcall(function() m:SetText(fs:GetText()) end)
+    if ok then
+        m:SetShown(fs:IsShown())
+    else
+        m:Hide()
+        if not Render._mirrorWarned then
+            Render._mirrorWarned = true
+            DF:DebugWarn("TD", "mirror text passthrough failed (GetText->SetText) — AD text colour degraded off")
+        end
+    end
+end
+
+-- Post-render pass: sync every registered mirror to its real FontString and
+-- hide mirrors whose element vanished. Runs at the END of UpdateFrame (after
+-- every hide in the pass has landed), on the master-off early-out, and from
+-- EnableMirrors. Zero work when no mirrors are registered.
+local function syncMirrors(frame)
+    local regs = frame._tdMirrors
+    if not regs then return end
+    local fss = frame._tdFontStrings
+    for _, reg in pairs(regs) do
+        for id, m in pairs(reg.byId) do
+            local fs = fss and fss[id]
+            if not fs or fs._tdCategory ~= reg.category then m:Hide() end
+        end
+        if fss then
+            for id, fs in pairs(fss) do
+                if fs._tdCategory == reg.category then
+                    syncOneMirror(reg, id, fs)
+                end
+            end
+        end
+    end
+end
+
+-- ============================================================
 -- PUBLIC ENTRY POINTS
 -- ============================================================
 
@@ -247,6 +321,7 @@ function Render:UpdateFrame(frame, tdDB, source, hint, isPreview)
         if frame._tdFontStrings then
             for _, fs in pairs(frame._tdFontStrings) do fs:Hide() end
         end
+        syncMirrors(frame)   -- mirrors follow their (now hidden) real FontStrings
         return
     end
     hint = hint or "all"
@@ -314,6 +389,47 @@ function Render:UpdateFrame(frame, tdDB, source, hint, isPreview)
             ov:SetAlpha(1)
         end
     end
+
+    -- Aura Designer mirrors: replay this render onto every registered mirror
+    -- (all hides in the pass have landed by now, so visibility copies clean).
+    syncMirrors(frame)
+end
+
+-- ============================================================
+-- AURA DESIGNER MIRROR API
+-- ============================================================
+
+-- Enable colour-by-cover mirrors for a category ("name"/"health"). parent is
+-- the AD-owned region (an aura-slot child — its secret visibility gates the
+-- cover); color is the AD override colour. Re-calling with a new colour
+-- restamps live mirrors; a new parent (container rebuilt) drops the old
+-- mirrors and materializes fresh ones on the next sync.
+function Render:EnableMirrors(frame, category, parent, color)
+    if not (frame and category and parent and color) then return end
+    frame._tdMirrors = frame._tdMirrors or {}
+    local reg = frame._tdMirrors[category]
+    if reg and reg.parent ~= parent then
+        for _, m in pairs(reg.byId) do m:Hide(); m:ClearAllPoints() end
+        reg = nil
+    end
+    if not reg then
+        reg = { category = category, parent = parent, color = color, byId = {} }
+        frame._tdMirrors[category] = reg
+    else
+        reg.color = color
+        for _, m in pairs(reg.byId) do
+            m:SetTextColor(color.r, color.g, color.b, color.a or 1)
+        end
+    end
+    syncMirrors(frame)
+end
+
+function Render:DisableMirrors(frame, category)
+    local regs = frame and frame._tdMirrors
+    local reg = regs and regs[category]
+    if not reg then return end
+    for _, m in pairs(reg.byId) do m:Hide(); m:ClearAllPoints() end
+    regs[category] = nil
 end
 
 -- Tears down all FontStrings on a frame (mode switch, profile change).
@@ -326,6 +442,12 @@ function Render:Teardown(frame)
             -- never call SetScript/GetScript("OnUpdate") on them (it errors).
         end
         wipe(frame._tdFontStrings)
+    end
+    if frame._tdMirrors then
+        for _, reg in pairs(frame._tdMirrors) do
+            for _, m in pairs(reg.byId) do m:Hide(); m:ClearAllPoints() end
+        end
+        frame._tdMirrors = nil
     end
     if frame._tdOverlay then
         frame._tdOverlay:Hide()
@@ -417,4 +539,50 @@ function Render:ClearAuraColorOverride(frame, category)
     frame._tdAuraColor[category] = nil
     -- Re-render this category so TD reapplies its normal / class colour.
     DF:UpdateTextDesigner(frame, category)
+end
+
+-- ============================================================
+-- DIAGNOSTICS — /df tdmirror
+-- Developer probe for the mirror engine ahead of the AD factory wiring:
+-- toggles ALWAYS-VISIBLE mirrors (magenta name / cyan health) on the
+-- player's frame. Validates the two things the feature stands on: the
+-- GetText->SetText secret passthrough (health text keeps ticking in combat
+-- with no error) and cover fidelity (the coloured copy sits glyph-perfect
+-- over the real text). Developer output: raw prints by design.
+-- ============================================================
+function DF:DebugTDMirror()
+    local target
+    local function findPlayer(frame)
+        if not target and frame and frame.unit == "player" then target = frame end
+    end
+    if DF.IteratePartyFrames then DF:IteratePartyFrames(findPlayer) end
+    if not target and DF.IterateRaidFrames then DF:IterateRaidFrames(findPlayer) end
+    if not target then
+        print("|cff7373f2DandersFrames|r tdmirror: no player unit frame found")
+        return
+    end
+    if target._tdMirrorProbeOn then
+        target._tdMirrorProbeOn = nil
+        Render:DisableMirrors(target, "name")
+        Render:DisableMirrors(target, "health")
+        if target._tdMirrorProbeHolder then target._tdMirrorProbeHolder:Hide() end
+        print("|cff7373f2DandersFrames|r tdmirror: probe OFF")
+        return
+    end
+    local holder = target._tdMirrorProbeHolder
+    if not holder then
+        holder = CreateFrame("Frame", nil, target._tdOverlay or target)
+        holder:SetAllPoints(target)
+        holder:SetFrameLevel(((target._tdOverlay and target._tdOverlay:GetFrameLevel())
+            or (target:GetFrameLevel() + 25)) + 5)
+        target._tdMirrorProbeHolder = holder
+    end
+    holder:Show()
+    target._tdMirrorProbeOn = true
+    Render:EnableMirrors(target, "name",   holder, { r = 1, g = 0, b = 1, a = 1 })
+    Render:EnableMirrors(target, "health", holder, { r = 0, g = 1, b = 1, a = 1 })
+    if DF.UpdateTextDesigner then DF:UpdateTextDesigner(target, "all") end
+    print("|cff7373f2DandersFrames|r tdmirror: probe ON — name should read MAGENTA, health CYAN,"
+        .. " glyph-perfect over the real text, health still ticking in combat. Run again to toggle off."
+        .. " (Needs Text Designer enabled with name/health elements.)")
 end

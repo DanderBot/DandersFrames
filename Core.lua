@@ -5105,6 +5105,9 @@ DF._MainEventDispatcher = function(self, event, arg1)
             elseif msg == "admissing mark" then
                 -- Visual push probe: markers that slide with the missing badges
                 if DF.DebugADMissingMark then DF:DebugADMissingMark() end
+            elseif msg == "tdmirror" then
+                -- Text Designer mirror probe (AD name/health text colour groundwork)
+                if DF.DebugTDMirror then DF:DebugTDMirror() end
             elseif msg == "debugfonts" then
                 -- Debug command to show font info
                 print("|cff00ff00DandersFrames:|r Font Debug")
