@@ -15,13 +15,11 @@ local wipe = table.wipe
 
 
 DF.AuraDesigner = DF.AuraDesigner or {}
-DF.adConfigVersion = 0
 
 local Engine = {}
 DF.AuraDesigner.Engine = Engine
 
 local Adapter   -- Set during init
-local Indicators -- Set during init (AuraDesigner/Indicators.lua)
 local SoundEngine -- Set during init (AuraDesigner/SoundEngine.lua)
 
 -- ============================================================
@@ -45,12 +43,6 @@ end
 -- ============================================================
 
 function Engine:ClearFrame(frame)
-    if not Indicators then
-        Indicators = DF.AuraDesigner.Indicators
-    end
-    if Indicators then
-        Indicators:HideAll(frame)
-    end
     -- Tear down any native-factory AD containers (12.1 path) hung off this frame.
     if DF.AuraDesigner.Factory then
         DF.AuraDesigner.Factory:ClearFrame(frame)
@@ -75,10 +67,6 @@ end
 -- ============================================================
 
 function Engine:ForceRefreshAllFrames()
-    -- Bump config version so indicators reconfigure on their next paint
-    -- (the test renderer's widgets gate on this).
-    DF.adConfigVersion = (DF.adConfigVersion or 0) + 1
-
     local Factory = DF.AuraDesigner and DF.AuraDesigner.Factory
     local function TryUpdate(frame)
         if not frame then return end

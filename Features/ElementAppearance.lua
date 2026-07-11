@@ -1113,196 +1113,37 @@ end
 function DF:UpdateAuraDesignerAppearance(frame)
     if not IsDandersFrame(frame) then return end
 
+    -- 12.1: AD indicators are factory containers; fade each container's plain
+    -- anchor frame (base config alpha times the OOR fade — alpha is ours even
+    -- though the slot geometry is secret).
+    local store = frame.dfADFactory
+    if not store then return end
+
     local db = GetDB(frame)
     if not db then return end
 
     if DF.testMode or DF.raidTestMode then return end
 
     local inRange = GetInRange(frame)
+    local oorOn = db.oorEnabled
+    local oorAlpha = db.oorAuraDesignerAlpha or 0.2
 
-    -- Keep the AD tint overlay full-size (matching ApplyHealthBar). The opaque frame
-    -- border (frame level +10) sits above the overlay and covers its outer ring, so a
-    -- full-size overlay fills the whole visible bar with no missing edge pixels. (This
-    -- pass re-anchors on range changes because ApplyHealthBar only runs on aura apply.)
-    local _ov = frame.dfAD and frame.dfAD.tintOverlay
-    if _ov and frame.healthBar then
-        _ov:ClearAllPoints()
-        _ov:SetAllPoints(frame.healthBar)
-    end
-
-    if db.oorEnabled then
-        local oorAlpha = db.oorAuraDesignerAlpha or 0.2
-
-        -- Icons
-        if frame.dfAD_icons then
-            for _, icon in pairs(frame.dfAD_icons) do
-                if icon and icon:IsShown() then
-                    ApplyOORAlpha(icon, inRange, icon.dfBaseAlpha or 1.0, oorAlpha)
+    for _, storeKey in ipairs({ "healthbar", "background", "border", "placed",
+                                "nametext", "healthtext" }) do
+        local t = store[storeKey]
+        if t then
+            for _, entry in pairs(t) do
+                local h = entry and entry.handle
+                local f = h and h.GetFrame and h:GetFrame()
+                if f then
+                    local base = h._dfADBaseAlpha or 1.0
+                    if oorOn then
+                        ApplyOORAlpha(f, inRange, base, oorAlpha)
+                    else
+                        f:SetAlpha(base)
+                    end
                 end
             end
-        end
-        -- Squares
-        if frame.dfAD_squares then
-            for _, sq in pairs(frame.dfAD_squares) do
-                if sq and sq:IsShown() then
-                    ApplyOORAlpha(sq, inRange, sq.dfBaseAlpha or 1.0, oorAlpha)
-                end
-            end
-        end
-        -- Bars
-        if frame.dfAD_bars then
-            for _, bar in pairs(frame.dfAD_bars) do
-                if bar and bar:IsShown() then
-                    ApplyOORAlpha(bar, inRange, bar.dfBaseAlpha or 1.0, oorAlpha)
-                end
-            end
-        end
-        -- Border-type indicator(s) — the whole-frame AD border and any per-aura
-        -- custom borders hang off the FRAME, not a faded element, so they need
-        -- explicit dimming here (see FadeADBorderWidget).
-        local secretRange = issecretvalue and issecretvalue(inRange)
-        FadeADBorderWidget(frame.dfAD_border, inRange, oorAlpha, secretRange)
-        if frame.dfAD_customBorders then
-            for _, b in pairs(frame.dfAD_customBorders) do
-                FadeADBorderWidget(b, inRange, oorAlpha, secretRange)
-            end
-        end
-        -- AD health bar OOR fade. Compute the OOR-aware effective blend once, then
-        -- apply it to whichever layer the active mode uses:
-        --   replace → the real health bar texture's FRAME alpha (single layer)
-        --   tint    → the colour overlay's SetStatusBarColor alpha
-        -- (SetStatusBarColor, not the overlay's SetAlpha, so it doesn't compound
-        -- with the blend baked into the colour: blend × oorAlpha = e.g. 0.5 × 0.2 =
-        -- 0.1 would be nearly invisible OOR.)
-        local adState = frame.dfAD
-        if adState and adState.healthbar then
-            -- Use the current displayed color (healthbarCurrent*), which the expiring
-            -- ticker updates to the expiring color when past the threshold. Falling back
-            -- to healthbarR/G/B (the configured active color) covers the non-expiring
-            -- case and initial setup before any ticker callback has fired.
-            local r = adState.healthbarCurrentR or adState.healthbarR or 1
-            local g = adState.healthbarCurrentG or adState.healthbarG or 1
-            local b = adState.healthbarCurrentB or adState.healthbarB or 1
-            -- Use the blend matching the currently displayed colour (the expiring
-            -- ticker swaps this to the expiring colour's alpha) so OOR handling
-            -- doesn't reset it back to the base alpha.
-            local blend   = adState.healthbarCurrentBlend or adState.healthbarBlend or 0.5
-
-            local effectiveBlend
-            if issecretvalue and issecretvalue(inRange) then
-                -- Secret boolean fallback — can't branch; leave at configured blend.
-                effectiveBlend = blend
-            elseif inRange then
-                effectiveBlend = blend
-                adState.healthbarOOR = false
-            else
-                effectiveBlend = oorAlpha
-                adState.healthbarOOR = true
-            end
-            -- Record the alpha used so expiring callbacks (ticker) and
-            -- UpdateHealthBarAppearance can match it rather than resetting to full
-            -- blend when the unit is OOR.
-            adState.healthbarEffectiveBlend = effectiveBlend
-
-            -- While pulsing, the shared ticker owns the pulsing layer's frame alpha
-            -- (replace → bar texture; tint → overlay). Skip the steady-alpha write so
-            -- the OOR re-assert can't stutter the pulse; the ticker reads the blend we
-            -- just stored. The tint COLOUR (SetStatusBarColor) still updates — the
-            -- pulse rides the overlay's frame alpha on a separate channel.
-            if adState.healthbarMode == "replace" then
-                local hbTex = frame.healthBar and frame.healthBar:GetStatusBarTexture()
-                if hbTex and not adState.healthbarPulseOn then hbTex:SetAlpha(effectiveBlend) end
-            else
-                local tintOverlay = adState.tintOverlay
-                if tintOverlay and tintOverlay:IsShown() then
-                    tintOverlay:SetStatusBarColor(r, g, b, effectiveBlend)
-                    if not adState.healthbarPulseOn then tintOverlay:SetAlpha(1.0) end
-                end
-            end
-        end
-
-        -- AD background colour overlay OOR fade. Mirrors the tint overlay: OOR
-        -- rides the colour alpha (SetStatusBarColor); the per-element pulse owns
-        -- the overlay's frame alpha on a separate channel, so the two multiply.
-        if adState and adState.background and adState.bgOverlay then
-            local br = adState.bgCurrentR or adState.bgR or 1
-            local bgc = adState.bgCurrentG or adState.bgG or 1
-            local bb = adState.bgCurrentB or adState.bgB or 1
-            local bBlend = adState.bgCurrentBlend or adState.bgBlend or 0.5
-            local bEff
-            if issecretvalue and issecretvalue(inRange) then
-                bEff = bBlend
-            elseif inRange then
-                bEff = bBlend
-                adState.bgOOR = false
-            else
-                bEff = oorAlpha
-                adState.bgOOR = true
-            end
-            adState.bgEffectiveBlend = bEff
-            adState.bgOverlay:SetStatusBarColor(br, bgc, bb, bEff)
-        end
-    else
-        -- Frame-level mode: restore each indicator's base alpha
-        if frame.dfAD_icons then
-            for _, icon in pairs(frame.dfAD_icons) do
-                if icon then icon:SetAlpha(icon.dfBaseAlpha or 1.0) end
-            end
-        end
-        if frame.dfAD_squares then
-            for _, sq in pairs(frame.dfAD_squares) do
-                if sq then sq:SetAlpha(sq.dfBaseAlpha or 1.0) end
-            end
-        end
-        if frame.dfAD_bars then
-            for _, bar in pairs(frame.dfAD_bars) do
-                if bar then bar:SetAlpha(bar.dfBaseAlpha or 1.0) end
-            end
-        end
-        -- Border-type indicator(s): frame-level mode fades via the frame cascade,
-        -- so reset the widget to full alpha (see ResetADBorderWidget).
-        ResetADBorderWidget(frame.dfAD_border)
-        if frame.dfAD_customBorders then
-            for _, b in pairs(frame.dfAD_customBorders) do ResetADBorderWidget(b) end
-        end
-        -- AD health bar: frame-level mode — the frame cascade handles OOR alpha, so
-        -- the effective blend is always the configured blend. Apply to whichever
-        -- layer the active mode uses (replace → real bar texture; tint → overlay).
-        local adState = frame.dfAD
-        if adState and adState.healthbar then
-            -- Use the current displayed color (healthbarCurrent*) so the expiring
-            -- color is preserved rather than reset to the active configured color.
-            local r = adState.healthbarCurrentR or adState.healthbarR or 1
-            local g = adState.healthbarCurrentG or adState.healthbarG or 1
-            local b = adState.healthbarCurrentB or adState.healthbarB or 1
-            local blend = adState.healthbarCurrentBlend or adState.healthbarBlend or 0.5
-            adState.healthbarOOR = false
-            adState.healthbarEffectiveBlend = blend
-            -- Defer the steady-alpha write while pulsing (ticker owns it); see the
-            -- element-specific branch above.
-            if adState.healthbarMode == "replace" then
-                local hbTex = frame.healthBar and frame.healthBar:GetStatusBarTexture()
-                if hbTex and not adState.healthbarPulseOn then hbTex:SetAlpha(blend) end
-            else
-                local tintOverlay = adState.tintOverlay
-                if tintOverlay and tintOverlay:IsShown() then
-                    tintOverlay:SetStatusBarColor(r, g, b, blend)
-                    if not adState.healthbarPulseOn then tintOverlay:SetAlpha(1.0) end
-                end
-            end
-        end
-
-        -- AD background overlay: frame-level mode fades via the frame cascade
-        -- (the overlay is a child of the frame), so just keep the colour alpha at
-        -- the base blend rather than a stale OOR value.
-        if adState and adState.background and adState.bgOverlay then
-            local br = adState.bgCurrentR or adState.bgR or 1
-            local bgc = adState.bgCurrentG or adState.bgG or 1
-            local bb = adState.bgCurrentB or adState.bgB or 1
-            local bBlend = adState.bgCurrentBlend or adState.bgBlend or 0.5
-            adState.bgOOR = false
-            adState.bgEffectiveBlend = bBlend
-            adState.bgOverlay:SetStatusBarColor(br, bgc, bb, bBlend)
         end
     end
 end

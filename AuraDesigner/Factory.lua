@@ -766,6 +766,7 @@ end
 
 -- Placed base alpha rides the plain anchor frame (combat-safe; alpha is not a secret).
 local function applyPlacedAlpha(handle, alpha)
+    handle._dfADBaseAlpha = alpha   -- read by the OOR fade (ElementAppearance)
     local f = handle and handle.GetFrame and handle:GetFrame()
     if f then pcall(function() f:SetAlpha(alpha) end) end
 end
@@ -885,6 +886,51 @@ local function buildBarConfig(frame, unit, map, indicator, borderSpec)
         layout = buildBarLayout(frame, indicator),
         style = buildBarStyle(indicator, borderSpec),
     }
+end
+
+-- ============================================================
+-- EDITOR PREVIEW CONFIG (AD editor canvas)
+-- The same style/layout the live container gets, minus the container-only
+-- parts — the editor styles a plain PREVIEW SLOT with it
+-- (AuraContainer.StylePreviewSlot/PaintPreviewSlot), so the canvas preview
+-- is the factory's own rendering. Returns (config, structSig): the editor
+-- recreates its slot frame when the sig changes (regions are create-only,
+-- mirror the live Rebuild rule).
+-- ============================================================
+function Factory:BuildPreviewConfig(frame, indicator, typeKey, spellID)
+    local entries = spellID and testEntryForMap({ [spellID] = true }) or nil
+    if typeKey == "bar" then
+        local borderSpec = placedBorderOn(indicator, false)
+            and buildPlacedBorderSpec(frame, indicator, false) or nil
+        local cfg = {
+            mode = "row", max = 1, filter = "HELPFUL",
+            adBorderAnim = true,
+            layout = buildBarLayout(frame, indicator),
+            style = buildBarStyle(indicator, borderSpec),
+            testEntries = entries,
+        }
+        local sig = "bar|" .. tostring(borderSpec ~= nil)
+            .. "|" .. tostring(cfg.style.duration ~= nil)
+            .. "|" .. durationFmtKey(indicator, false)
+        return cfg, sig
+    end
+    local isSquare = (typeKey == "square")
+    local hideIcon = indicator.hideIcon and true or false
+    local borderSpec = placedBorderOn(indicator, hideIcon)
+        and buildPlacedBorderSpec(frame, indicator, hideIcon) or nil
+    local cfg = {
+        mode = "row", max = 1, filter = "HELPFUL",
+        adBorderAnim = true,
+        layout = buildPlacedLayout(indicator),
+        style = buildPlacedStyle(indicator, isSquare, borderSpec),
+        testEntries = entries,
+    }
+    local sig = (isSquare and "square|" or "icon|") .. tostring(hideIcon)
+        .. "|" .. tostring(cfg.style.stacks ~= nil)
+        .. "|" .. tostring(cfg.style.duration ~= nil)
+        .. "|" .. tostring(borderSpec ~= nil)
+        .. "|" .. durationFmtKey(indicator, true)
+    return cfg, sig
 end
 
 -- STRUCTURAL signature: identity, duration-text on/off + format key (SetDurationText / SetDuration

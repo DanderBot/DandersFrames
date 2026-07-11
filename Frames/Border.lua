@@ -1005,7 +1005,7 @@ end
 
 -- Build a comparable hash of the animation spec so StartAnimation can no-op
 -- when called with the same config the border is already running.  Consumer
--- refresh paths (AD's RefreshLiveFramesThrottled bumps adConfigVersion → next
+-- refresh paths (AD's RefreshLiveFramesThrottled re-syncs the containers → next
 -- UpdateFrame calls Configure on every visible AD-enabled frame → Apply on
 -- every border → StartAnimation) fire many times per second.  Without this
 -- dedupe, every call ran StopAnimation which reset the OnUpdate driver's

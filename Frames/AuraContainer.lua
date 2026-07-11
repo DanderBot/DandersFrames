@@ -2138,3 +2138,21 @@ function AuraContainer:Create(parent, config)
     end
     return h
 end
+
+-- ============================================================
+-- PREVIEW SLOTS (GUI surfaces that can't host a real container)
+-- A plain frame styled + painted by the same styler/curated paint the
+-- container slots use — the AD editor canvas renders through these so
+-- its preview IS the factory's own rendering. No container, no aura
+-- data: styling + the curated entry only.
+-- ============================================================
+
+function AuraContainer.StylePreviewSlot(slot, config)
+    styleButton_regions(slot, config)
+end
+
+function AuraContainer.PaintPreviewSlot(slot, config, index)
+    -- Duck-typed handle: the paint core only reads .config (and the duration
+    -- formatter inside it).
+    Handle._paintTestSlot({ config = config }, slot, index or 1)
+end

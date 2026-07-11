@@ -5637,12 +5637,9 @@ function DF:FullProfileRefresh()
         DF:UpdateRaidLayout()
     end
 
-    -- Re-apply Aura Designer indicators from the new profile.  AD indicators are
-    -- built from the live config and version-gated, so on a profile swap they
-    -- keep the previous profile's look until /reload.  ForceRefreshAllFrames
-    -- bumps adConfigVersion (forces every indicator to reconfigure) and
-    -- pre-warms all frames' indicators.  Safe here — FullProfileRefresh already
-    -- bailed out above if in combat.
+    -- Re-apply Aura Designer indicators from the new profile: re-syncs the
+    -- factory containers (sig-gated, so only what actually changed rebuilds).
+    -- Safe here — FullProfileRefresh already bailed out above if in combat.
     if DF.AuraDesigner and DF.AuraDesigner.Engine and DF.AuraDesigner.Engine.ForceRefreshAllFrames then
         DF.AuraDesigner.Engine:ForceRefreshAllFrames()
     end
@@ -5734,9 +5731,6 @@ function DF:FullProfileRefresh()
         DF:UpdateAllFrameAppearances()
     end
     
-    -- Bump AD config version so indicators reconfigure with new profile settings
-    DF.adConfigVersion = (DF.adConfigVersion or 0) + 1
-
     -- === REFRESH AURAS ===
     if DF.UpdateAllAuras then
         DF:UpdateAllAuras()

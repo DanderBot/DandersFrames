@@ -1253,20 +1253,6 @@ function PinnedFrames:CreateBossFrames(setIndex, container)
             end
             self.dfEventsEnabled = false
 
-            -- Hide all AD indicator widgets before releasing the pool tables.
-            -- Without this, icons/squares/bars stay parented to the frame with
-            -- IsShown() == true, and reappear from the previous NPC when the
-            -- boss slot re-fills with a new unit.
-            if DF.AuraDesigner and DF.AuraDesigner.Indicators then
-                DF.AuraDesigner.Indicators:HideAll(self)
-            end
-
-            self.dfAD = nil
-            self.dfAD_icons = nil
-            self.dfAD_squares = nil
-            self.dfAD_bars = nil
-            self.dfAD_configVersion = nil
-            self.dfAD_activeInstanceIDs = nil
             self.dfLastBossGUID = nil
         end)
 

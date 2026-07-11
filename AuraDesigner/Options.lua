@@ -1354,7 +1354,7 @@ end
 -- Called from proxy __newindex so every setting change updates the preview in real-time
 local RefreshPreviewLightweight
 
--- Throttled live-frame refresh: bumps adConfigVersion and re-runs UpdateFrame on all
+-- Throttled live-frame refresh: re-syncs the factory containers on all
 -- visible AD-enabled frames. Debounced so rapid slider drags only trigger one refresh.
 local pendingLiveRefresh = false
 local function RefreshLiveFramesThrottled()
@@ -2286,20 +2286,93 @@ local function ClearPlacedIndicators()
     -- Clean up AD indicator maps on the mockFrame
     if framePreview and framePreview.mockFrame then
         local mock = framePreview.mockFrame
-        if mock.dfAD_icons then
-            for _, icon in pairs(mock.dfAD_icons) do icon:Hide() end
-            wipe(mock.dfAD_icons)
-        end
-        if mock.dfAD_squares then
-            for _, sq in pairs(mock.dfAD_squares) do sq:Hide() end
-            wipe(mock.dfAD_squares)
-        end
-        if mock.dfAD_bars then
-            for _, bar in pairs(mock.dfAD_bars) do bar:Hide() end
-            wipe(mock.dfAD_bars)
+        if mock.dfADPreviewSlots then
+            for _, rec in pairs(mock.dfADPreviewSlots) do rec.slot:Hide() end
         end
         mock.dfAD = nil
     end
+end
+
+-- ============================================================
+-- NATIVE PREVIEW SLOTS (12.1)
+-- Each placed indicator on the canvas is a PREVIEW SLOT: a plain frame
+-- styled + painted by the container engine's own styler with the exact
+-- config the live factory builds (Factory:BuildPreviewConfig) — the
+-- preview IS the live rendering. Slots are pooled per instanceKey and
+-- recreated when the structural sig changes (regions are create-only).
+-- ============================================================
+
+local function RenderPreviewIndicator(mockFrame, spec, auraName, info, indicator, effectiveConfig, instanceKey)
+    local Factory = DF.AuraDesigner and DF.AuraDesigner.Factory
+    local AC = DF.AuraContainer
+    if not (Factory and Factory.BuildPreviewConfig and AC and AC.StylePreviewSlot) then return nil end
+
+    local spellID = info and info.spellIds and info.spellIds[1]
+    local cfg, sig = Factory:BuildPreviewConfig(mockFrame, effectiveConfig, indicator.type or "icon", spellID)
+    if cfg.testEntries and cfg.testEntries[1] then
+        local e = cfg.testEntries[1]
+        if not e.icon then e.icon = GetAuraIcon(spec, auraName) end
+        e.duration = 15
+        e.stacks = (indicator.type ~= "bar") and 3 or 0
+    end
+
+    local store = mockFrame.dfADPreviewSlots
+    if not store then store = {}; mockFrame.dfADPreviewSlots = store end
+    local rec = store[instanceKey]
+    if rec and rec.sig ~= sig then
+        rec.slot:Hide()
+        rec = nil
+    end
+    if not rec then
+        rec = { slot = CreateFrame("Frame", nil, mockFrame), sig = sig }
+        store[instanceKey] = rec
+    end
+    local slot = rec.slot
+    AC.StylePreviewSlot(slot, cfg)
+
+    local lay = cfg.layout or {}
+    if lay.sizeX then
+        slot:SetSize(lay.sizeX, lay.sizeY or lay.sizeX)
+    else
+        local s = lay.size or 24
+        slot:SetSize(s, s)
+    end
+    slot:SetScale(lay.scale or 1)
+    slot:ClearAllPoints()
+    slot:SetPoint(lay.anchor or "TOPLEFT", mockFrame, lay.anchor or "TOPLEFT", lay.offsetX or 0, lay.offsetY or 0)
+    slot:SetFrameStrata(mockFrame:GetFrameStrata())
+    slot:SetFrameLevel(mockFrame:GetFrameLevel() + 8)
+    AC.PaintPreviewSlot(slot, cfg, 1)
+    slot:Show()
+    return slot
+end
+
+local function WirePreviewIndicator(slot, capturedAura, capturedID, spec)
+    slot:EnableMouse(true)
+    if slot.SetMouseClickEnabled then slot:SetMouseClickEnabled(true) end
+    slot:SetScript("OnMouseUp", function(_, button)
+        if dragState.isDragging then return end
+        if button == "RightButton" then
+            -- Don't delete grouped indicators (managed by layout group)
+            if not GetIndicatorLayoutGroup(capturedAura, capturedID) then
+                RemoveIndicatorInstance(capturedAura, capturedID)
+                DF:AuraDesigner_RefreshPage()
+            end
+        elseif button == "LeftButton" then
+            -- Collapse all cards and expand only the clicked one
+            local cardKey = "placed:" .. capturedAura .. "#" .. capturedID
+            wipe(expandedCards)
+            expandedCards[cardKey] = true
+            activeTab = "effects"
+            DF:AuraDesigner_RefreshPage()
+        end
+    end)
+    slot:RegisterForDrag("LeftButton")
+    slot:SetScript("OnDragStart", function()
+        -- Don't drag grouped indicators (position managed by layout group)
+        if GetIndicatorLayoutGroup(capturedAura, capturedID) then return end
+        StartMoveDrag(capturedAura, capturedID, spec)
+    end)
 end
 
 local function RefreshPlacedIndicators()
@@ -2322,8 +2395,6 @@ local function RefreshPlacedIndicators()
         infoLookup[info.name] = info
     end
 
-    local Indicators = DF.AuraDesigner and DF.AuraDesigner.Indicators
-    if not Indicators then return end
 
     -- Build layout group position lookup for preview
     -- In preview all indicators are visible, so compute positions for all members
@@ -2415,136 +2486,10 @@ local function RefreshPlacedIndicators()
                     }, { __index = indicator })
                 end
 
-                if indicator.type == "icon" then
-                    local tex = GetAuraIcon(spec, auraName)
-                    local mockAuraData = {
-                        spellId = info.spellIds and info.spellIds[1] or 0,
-                        icon = tex,
-                        duration = 15,
-                        expirationTime = GetTime() + 10,
-                        stacks = 3,
-                    }
-                    Indicators:ConfigureIcon(mockFrame, effectiveConfig, adDB.defaults, instanceKey)
-                    Indicators:UpdateIcon(mockFrame, effectiveConfig, mockAuraData, adDB.defaults, instanceKey)
-
-                    local iconMap = mockFrame.dfAD_icons
-                    local icon = iconMap and iconMap[instanceKey]
-                    if icon then
-                        icon:SetFrameStrata(mockFrame:GetFrameStrata())
-                        icon:SetFrameLevel(mockFrame:GetFrameLevel() + 8)
-                        icon:EnableMouse(true)
-                        if icon.SetMouseClickEnabled then
-                            icon:SetMouseClickEnabled(true)
-                        end
-                        icon:SetScript("OnMouseUp", function(_, button)
-                            if dragState.isDragging then return end
-                            if button == "RightButton" then
-                                -- Don't delete grouped indicators (managed by layout group)
-                                if not GetIndicatorLayoutGroup(capturedAura, capturedID) then
-                                    RemoveIndicatorInstance(capturedAura, capturedID)
-                                    DF:AuraDesigner_RefreshPage()
-                                end
-                            elseif button == "LeftButton" then
-                                -- Collapse all cards and expand only the clicked one
-                                local cardKey = "placed:" .. capturedAura .. "#" .. capturedID
-                                wipe(expandedCards)
-                                expandedCards[cardKey] = true
-                                activeTab = "effects"
-                                DF:AuraDesigner_RefreshPage()
-                            end
-                        end)
-                        icon:RegisterForDrag("LeftButton")
-                        icon:SetScript("OnDragStart", function()
-                            -- Don't drag grouped indicators (position managed by layout group)
-                            if GetIndicatorLayoutGroup(capturedAura, capturedID) then return end
-                            StartMoveDrag(capturedAura, capturedID, spec)
-                        end)
-                        tinsert(placedIndicators, icon)
-                    end
-
-                elseif indicator.type == "square" then
-                    local mockAuraData = {
-                        spellId = info.spellIds and info.spellIds[1] or 0,
-                        icon = GetAuraIcon(spec, auraName),
-                        duration = 15,
-                        expirationTime = GetTime() + 10,
-                        stacks = 3,
-                    }
-                    Indicators:ConfigureSquare(mockFrame, effectiveConfig, adDB.defaults, instanceKey)
-                    Indicators:UpdateSquare(mockFrame, effectiveConfig, mockAuraData, adDB.defaults, instanceKey)
-
-                    local sqMap = mockFrame.dfAD_squares
-                    local sq = sqMap and sqMap[instanceKey]
-                    if sq then
-                        sq:SetFrameStrata(mockFrame:GetFrameStrata())
-                        sq:SetFrameLevel(mockFrame:GetFrameLevel() + 8)
-                        sq:EnableMouse(true)
-                        sq:SetScript("OnMouseUp", function(_, button)
-                            if dragState.isDragging then return end
-                            if button == "RightButton" then
-                                if not GetIndicatorLayoutGroup(capturedAura, capturedID) then
-                                    RemoveIndicatorInstance(capturedAura, capturedID)
-                                    DF:AuraDesigner_RefreshPage()
-                                end
-                            elseif button == "LeftButton" then
-                                -- Collapse all cards and expand only the clicked one
-                                local cardKey = "placed:" .. capturedAura .. "#" .. capturedID
-                                wipe(expandedCards)
-                                expandedCards[cardKey] = true
-                                activeTab = "effects"
-                                DF:AuraDesigner_RefreshPage()
-                            end
-                        end)
-                        sq:RegisterForDrag("LeftButton")
-                        sq:SetScript("OnDragStart", function()
-                            -- Don't drag grouped indicators (position managed by layout group)
-                            if GetIndicatorLayoutGroup(capturedAura, capturedID) then return end
-                            StartMoveDrag(capturedAura, capturedID, spec)
-                        end)
-                        tinsert(placedIndicators, sq)
-                    end
-
-                elseif indicator.type == "bar" then
-                    local mockAuraData = {
-                        spellId = info.spellIds and info.spellIds[1] or 0,
-                        icon = GetAuraIcon(spec, auraName),
-                        duration = 15,
-                        expirationTime = GetTime() + 10,
-                        stacks = 0,
-                    }
-                    Indicators:ConfigureBar(mockFrame, effectiveConfig, adDB.defaults, instanceKey)
-                    Indicators:UpdateBar(mockFrame, effectiveConfig, mockAuraData, adDB.defaults, instanceKey)
-
-                    local barMap = mockFrame.dfAD_bars
-                    local bar = barMap and barMap[instanceKey]
-                    if bar then
-                        bar:SetFrameStrata(mockFrame:GetFrameStrata())
-                        bar:SetFrameLevel(mockFrame:GetFrameLevel() + 7)
-                        bar:EnableMouse(true)
-                        bar:SetScript("OnMouseUp", function(_, button)
-                            if dragState.isDragging then return end
-                            if button == "RightButton" then
-                                if not GetIndicatorLayoutGroup(capturedAura, capturedID) then
-                                    RemoveIndicatorInstance(capturedAura, capturedID)
-                                    DF:AuraDesigner_RefreshPage()
-                                end
-                            elseif button == "LeftButton" then
-                                -- Collapse all cards and expand only the clicked one
-                                local cardKey = "placed:" .. capturedAura .. "#" .. capturedID
-                                wipe(expandedCards)
-                                expandedCards[cardKey] = true
-                                activeTab = "effects"
-                                DF:AuraDesigner_RefreshPage()
-                            end
-                        end)
-                        bar:RegisterForDrag("LeftButton")
-                        bar:SetScript("OnDragStart", function()
-                            -- Don't drag grouped indicators (position managed by layout group)
-                            if GetIndicatorLayoutGroup(capturedAura, capturedID) then return end
-                            StartMoveDrag(capturedAura, capturedID, spec)
-                        end)
-                        tinsert(placedIndicators, bar)
-                    end
+                local slot = RenderPreviewIndicator(mockFrame, spec, auraName, info, indicator, effectiveConfig, instanceKey)
+                if slot then
+                    WirePreviewIndicator(slot, capturedAura, capturedID, spec)
+                    tinsert(placedIndicators, slot)
                 end
             end
         end
@@ -2715,8 +2660,6 @@ end
 RefreshPreviewLightweight = function()
     if not framePreview or not framePreview.mockFrame then return end
     local mockFrame = framePreview.mockFrame
-    local Indicators = DF.AuraDesigner and DF.AuraDesigner.Indicators
-    if not Indicators then return end
 
     local adDB = GetAuraDesignerDB()
     local spec = ResolveSpec()
@@ -2797,50 +2740,17 @@ RefreshPreviewLightweight = function()
                     }, { __index = indicator })
                 end
 
-                if indicator.type == "icon" then
-                    local iconMap = mockFrame.dfAD_icons
-                    local icon = iconMap and iconMap[instanceKey]
-                    if icon then
-                        local tex = GetAuraIcon(spec, auraName)
-                        local mockAuraData = {
-                            spellId = 0, icon = tex,
-                            duration = 15, expirationTime = GetTime() + 10,
-                            stacks = 3,
-                        }
-                        Indicators:ConfigureIcon(mockFrame, effectiveConfig, adDB.defaults, instanceKey)
-                        Indicators:UpdateIcon(mockFrame, effectiveConfig, mockAuraData, adDB.defaults, instanceKey)
-                        -- Re-enable mouse (ConfigureIcon disables it for real unit frames)
-                        icon:EnableMouse(true)
-                        if icon.SetMouseClickEnabled then icon:SetMouseClickEnabled(true) end
+                -- Restyle/repaint through the shared preview slot (recreated only
+                -- when the structural sig changes; cosmetic changes restyle in place).
+                local infoLW = nil
+                if Adapter and Adapter.GetTrackableAuras then
+                    for _, ti in ipairs(Adapter:GetTrackableAuras(spec)) do
+                        if ti.name == auraName then infoLW = ti; break end
                     end
-                elseif indicator.type == "square" then
-                    local sqMap = mockFrame.dfAD_squares
-                    local sq = sqMap and sqMap[instanceKey]
-                    if sq then
-                        local mockAuraData = {
-                            spellId = 0, icon = nil,
-                            duration = 15, expirationTime = GetTime() + 10,
-                            stacks = 3,
-                        }
-                        Indicators:ConfigureSquare(mockFrame, effectiveConfig, adDB.defaults, instanceKey)
-                        Indicators:UpdateSquare(mockFrame, effectiveConfig, mockAuraData, adDB.defaults, instanceKey)
-                        sq:EnableMouse(true)
-                    end
-                elseif indicator.type == "bar" then
-                    local barMap = mockFrame.dfAD_bars
-                    local bar = barMap and barMap[instanceKey]
-                    if bar then
-                        local mockAuraData = {
-                            spellId = 0, icon = nil,
-                            duration = 15, expirationTime = GetTime() + 10,
-                            stacks = 0,
-                        }
-                        Indicators:ConfigureBar(mockFrame, effectiveConfig, adDB.defaults, instanceKey)
-                        Indicators:UpdateBar(mockFrame, effectiveConfig, mockAuraData, adDB.defaults, instanceKey)
-                        -- Re-enable mouse (ConfigureBar disables it for real unit frames)
-                        bar:EnableMouse(true)
-                        if bar.SetMouseClickEnabled then bar:SetMouseClickEnabled(true) end
-                    end
+                end
+                local slot = RenderPreviewIndicator(mockFrame, spec, auraName, infoLW, indicator, effectiveConfig, instanceKey)
+                if slot then
+                    WirePreviewIndicator(slot, auraName, indicator.id, spec)
                 end
             end
         end

@@ -128,7 +128,6 @@ AuraDesigner\Config.lua
 #   path or after the guard is rewritten to use string comparison.
 AuraDesigner\AuraAdapter.lua
 AuraDesigner\Engine.lua
-AuraDesigner\Indicators.lua
 AuraDesigner\Factory.lua
 AuraDesigner\SoundEngine.lua
 AuraDesigner\Options.lua
