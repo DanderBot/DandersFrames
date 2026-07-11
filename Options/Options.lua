@@ -5730,15 +5730,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- growth is vertical-primary (flipping Orientation un-frosts it live via RefreshStates).
         GUI:BlockControl12_1(buffWrap, "limitation", { id = "buffs:wrapvertical", page = L["Buffs"], when = function(d)
             local g = d.buffGrowth or ""
-            return DF:FactoryOwnsBuffRow(d) and (g:sub(1, 2) == "UP" or g:sub(1, 4) == "DOWN")
+            -- Vertical-primary AND vertical-centred growth both render a single column.
+            return DF:FactoryOwnsBuffRow(d) and (g:sub(1, 2) == "UP" or g:sub(1, 4) == "DOWN"
+                or g == "CENTER_LEFT" or g == "CENTER_RIGHT")
         end })
-        -- CENTER growth direction: not expressible in the native flow layout (factory rows
-        -- fall back to side growth). A dropdown VALUE can't be frosted without trapping the
-        -- selection, so it's tracked in the blocked registry only; the P2 GUI pass removes
-        -- the option for factory-owned rows.
-        GUI:RegisterBlockedMeta("buffs:centerdirection", { page = L["Buffs"],
-            reason = "Center growth direction — no center mode in the 12.1 flow layout (falls back to side growth)",
-            wording = "limitation" })
+        -- CENTER growth direction: supported on factory rows since the centre-pinned
+        -- box in AuraContainer.lua resolveGrowthLayout (the self-sizing container
+        -- keeps the row centred) — the old blocked-registry entry is gone.
         local buffPaddingX = gridGroup:AddWidget(GUI:CreateSlider(self.child, L["Spacing X"], -5, 10, 1, db, "buffPaddingX", nil, function() DF:LightweightUpdateAuraPosition("buff") end, true), 55)
         buffPaddingX.disableOn = function(d) return not d.showBuffs end
         local buffPaddingY = gridGroup:AddWidget(GUI:CreateSlider(self.child, L["Spacing Y"], -5, 10, 1, db, "buffPaddingY", nil, function() DF:LightweightUpdateAuraPosition("buff") end, true), 55)
@@ -6631,21 +6629,15 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- renders Anchor + Offset X/Y on the same defensiveIconDurationX/Y keys — the
         -- separate group was a duplicate left behind by the TextStyle conversion.)
 
-        -- ===== LAYOUT GROUP - DIRECT MODE (Column 1) =====
+        -- ===== LAYOUT GROUP (Column 1) =====
         local layoutGroup = GUI:CreateSettingsGroup(self.child, 280)
-        layoutGroup:AddWidget(GUI:CreateHeader(self.child, L["Layout (Direct Mode)"]), 40)
-        layoutGroup:AddWidget(GUI:CreateLabel(self.child, L["Controls how multiple defensive icons are arranged when using Direct aura mode."], 250), 45)
+        layoutGroup:AddWidget(GUI:CreateHeader(self.child, L["Layout"]), 40)
+        layoutGroup:AddWidget(GUI:CreateLabel(self.child, L["Controls how multiple defensive icons are arranged."], 250), 45)
         layoutGroup.disableChildrenOn = HideDefensiveIconOptions
 
         layoutGroup:AddWidget(GUI:CreateGrowthControl(self.child, db, "defensiveBarGrowth", function()
             if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
         end), 155)
-        -- CENTER growth direction: registry-only tracking (see the Buffs page note — a
-        -- dropdown value can't be frosted; factory rows fall back to side growth).
-        GUI:RegisterBlockedMeta("defensive:centerdirection", { page = L["Defensive Icon"],
-            reason = "Center growth direction — no center mode in the 12.1 flow layout (falls back to side growth)",
-            wording = "limitation" })
-
         layoutGroup:AddWidget(GUI:CreateSlider(self.child, L["Max Icons"], 1, 5, 1, db, "defensiveBarMax", function()
             if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
         end, nil, true), 55)
@@ -6657,7 +6649,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- expressible (mirrors the Buffs-page block).
         GUI:BlockControl12_1(defWrap, "limitation", { id = "defensive:wrapvertical", page = L["Defensive Icon"], when = function(d)
             local g = d.defensiveBarGrowth or ""
-            return DF:FactoryOwnsDefensiveRow(d) and (g:sub(1, 2) == "UP" or g:sub(1, 4) == "DOWN")
+            -- Vertical-primary AND vertical-centred growth both render a single column.
+            return DF:FactoryOwnsDefensiveRow(d) and (g:sub(1, 2) == "UP" or g:sub(1, 4) == "DOWN"
+                or g == "CENTER_LEFT" or g == "CENTER_RIGHT")
         end })
 
         layoutGroup:AddWidget(GUI:CreateSlider(self.child, L["Spacing"], -10, 10, 1, db, "defensiveBarSpacing", function()

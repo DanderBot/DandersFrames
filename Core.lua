@@ -5224,6 +5224,57 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 if DF.PrintBlockedSettings then
                     DF:PrintBlockedSettings()
                 end
+            elseif msg == "testids" then
+                -- Dev: audit the test pool's spell IDs against this client —
+                -- what each stored ID resolves to, and whether a name lookup
+                -- can find the current ID (for re-hardcoding after reshuffles).
+                -- Results also land in the SavedVariables root (flushed by the
+                -- next /reload) so they can be read from disk — no chat copy.
+                local dump = {}
+                for _, poolName in ipairs({ "buffs", "debuffs" }) do
+                    print("|cffeda55fDF testids:|r " .. poolName)
+                    for i, e in ipairs(DF.TestData[poolName] or {}) do
+                        local stored = "-"
+                        if e.spellID then
+                            local ok, nm = pcall(C_Spell.GetSpellName, e.spellID)
+                            stored = e.spellID .. " -> " .. tostring(ok and nm or "ERR")
+                        end
+                        local byName = "-"
+                        local ok2, info = pcall(C_Spell.GetSpellInfo, e.name)
+                        if ok2 and type(info) == "table" and info.spellID then
+                            byName = tostring(info.spellID) .. " (" .. tostring(info.name) .. ")"
+                        end
+                        local line = ("%s | %d. %s | stored: %s | byName: %s"):format(poolName, i, e.name, stored, byName)
+                        print("  " .. line)
+                        dump[#dump + 1] = line
+                    end
+                end
+                if DandersFramesDB_v2 then
+                    DandersFramesDB_v2.testIDsDump = dump
+                    print("|cffeda55fDF testids:|r dump saved — /reload to flush it to disk.")
+                end
+            elseif msg == "mousefoci" then
+                -- Dev: after 2s, dump the frame stack under the cursor with mouse
+                -- flags — pinpoints which frame is winning hover (tooltip leaks).
+                print("|cffeda55fDandersFrames:|r hover the target for 2 seconds...")
+                C_Timer.After(2, function()
+                    local foci = GetMouseFoci and GetMouseFoci() or {}
+                    print("|cffeda55fDF mousefoci:|r " .. #foci .. " frame(s) under cursor:")
+                    for i, f in ipairs(foci) do
+                        local name = "?"
+                        pcall(function() name = f:GetName() or "(anon)" end)
+                        local ftype = "?"
+                        pcall(function() ftype = f:GetObjectType() end)
+                        local motion, level = "?", "?"
+                        pcall(function() motion = tostring(f:IsMouseMotionEnabled()) end)
+                        pcall(function() level = tostring(f:GetFrameLevel()) end)
+                        local isTip = ""
+                        pcall(function()
+                            if f._name or f._spellID then isTip = " |cff40ff40[DF test tip: " .. tostring(f._name) .. "]|r" end
+                        end)
+                        print(("  %d. %s (%s) motion=%s level=%s%s"):format(i, name, ftype, motion, level, isTip))
+                    end
+                end)
             elseif msg == "auratimer" then
                 -- Show aura timer stats
                 if DF.PrintAuraTimerStats then

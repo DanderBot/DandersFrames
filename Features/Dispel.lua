@@ -1897,6 +1897,26 @@ function DF:UpdateDispelOverlay(frame)
         if testData and testData.dispelType then
             local overlay = CreateDispelOverlay(frame)
             local r, g, b = GetTestDispelColor(testData.dispelType, db)
+            local paintDB = db
+
+            -- GAME colour mode: preview what the container path renders live —
+            -- Blizzard's palette colour on the gradient + the type icon only
+            -- (StyleGameMainSlot: borders are custom-only, intensity is
+            -- palette-inert, EDGE falls back to the FULL carrier). The custom
+            -- mode needs nothing: its live styling uses this same art and the
+            -- same picker colours (StyleDispelSlots custom branch).
+            if (db.dispelOverlayColorSource or "game") ~= "custom" then
+                if AuraUtil and AuraUtil.GetAuraBorderColor then
+                    local ok, c = pcall(AuraUtil.GetAuraBorderColor, testData.dispelType)
+                    if ok and c then r, g, b = c:GetRGB() end
+                end
+                paintDB = setmetatable({
+                    dispelShowBorder        = false,
+                    dispelGradientIntensity = 1.0,
+                    dispelGradientStyle     = (db.dispelGradientStyle == "EDGE") and "FULL"
+                                              or db.dispelGradientStyle,
+                }, { __index = db })
+            end
 
             -- Calculate OOR alpha multiplier for test mode
             local oorMultiplier = 1.0
@@ -1905,7 +1925,7 @@ function DF:UpdateDispelOverlay(frame)
                 oorMultiplier = oorDispelAlpha
             end
 
-            ShowOverlayWithRGB(overlay, r, g, b, db, testData.dispelType, oorMultiplier, frame, testData)
+            ShowOverlayWithRGB(overlay, r, g, b, paintDB, testData.dispelType, oorMultiplier, frame, testData)
             -- Test mode doesn't use the last-rendered-aura skip — it has
             -- its own lifecycle and can re-render every tick cheaply.
             frame.dfLastDispelAuraID = nil

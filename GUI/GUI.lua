@@ -5675,9 +5675,13 @@ function GUI:CreateGrowthControl(parent, db, dbKey, callback)
         HORIZONTAL = { UP = L["Up"], DOWN = L["Down"], _order = {"UP", "DOWN"} },
         VERTICAL = { LEFT = L["Left"], RIGHT = L["Right"], _order = {"LEFT", "RIGHT"} },
     }
+    -- "From Center" (not "Center"): the row grows OUTWARD in both directions from the
+    -- anchor — a behaviour, not a direction like Left/Right — so the label reads true.
+    -- Stored value stays CENTER (a separate locale key from the generic L["Center"]
+    -- used by anchor pickers elsewhere).
     local DIR_OPTIONS = {
-        HORIZONTAL = { LEFT = L["Left"], CENTER = L["Center"], RIGHT = L["Right"], _order = {"LEFT", "CENTER", "RIGHT"} },
-        VERTICAL = { UP = L["Up"], CENTER = L["Center"], DOWN = L["Down"], _order = {"UP", "CENTER", "DOWN"} },
+        HORIZONTAL = { LEFT = L["Left"], CENTER = L["From Center"], RIGHT = L["Right"], _order = {"LEFT", "CENTER", "RIGHT"} },
+        VERTICAL = { UP = L["Up"], CENTER = L["From Center"], DOWN = L["Down"], _order = {"UP", "CENTER", "DOWN"} },
     }
 
     -- Shared write-back: recompose and save
@@ -5846,7 +5850,10 @@ function GUI:CreateGrowthControl(parent, db, dbKey, callback)
         function(val) curWrap = val end
     )
 
-    dirDD = BuildMiniDropdown(-100, L["Direction"], DIR_OPTIONS[curOrientation],
+    -- "Grow" (not "Direction"): the values describe how the row GROWS from the anchor
+    -- (toward a side, or outward from center) — clearer than "Direction", which reads
+    -- oddly against the "From Center" value.
+    dirDD = BuildMiniDropdown(-100, L["Grow"], DIR_OPTIONS[curOrientation],
         function() return curDirection end,
         function(val) curDirection = val end
     )

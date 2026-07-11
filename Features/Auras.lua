@@ -2639,6 +2639,11 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
         mode     = "row",
         filter   = filter,
         max      = g("Max") or 5,
+        -- Test-mode preview cap: the test panel's Buffs/Debuffs count sliders
+        -- (hot-applied via Handle:SetTestMax from the test drive seam).
+        testMax  = (prefix == "buff" and (db.testBuffCount or 2))
+                or (prefix == "debuff" and (db.testDebuffCount or 2))
+                or nil,
         enabled  = true,
         candidateFilters = candidateFilters,
         -- Native hover tooltips: gated on BOTH the Integrations click-through toggle
@@ -2924,6 +2929,9 @@ function DF:BuildDefensiveRowConfig(db, unit)
         -- defensives last (AuraUtil.BigDefensiveAuraCompare) — "show me the save
         -- someone else put on this player". Carried in the row signature.
         sort     = { method = "BigDefensive" },
+        -- P5 preview: HELPFUL category alone would page the buff pool — show
+        -- curated defensives instead (TestMode drives testMax per role).
+        testPool = "defensives",
         tooltips = (not db.defensiveIconDisableMouse) and db.tooltipDefensiveEnabled ~= false,
         -- Z-order: match the legacy defensive level — contentOverlay+26 = frame+51 when auto
         -- (defensiveIconFrameLevel 0), else the user's own offset. Applied to the container's
@@ -3231,15 +3239,25 @@ function DF:DriveMissingBuffFactory(frame, db)
     -- (Krathe-verified) and the read-free widget works on any assistable unit.
     -- Pets stay excluded (pet frames don't run this feature).
     local unit = frame.unit
-    local visible = unit and UnitExists(unit)
-        and not UnitIsDeadOrGhost(unit) and UnitIsConnected(unit)
-        and not frame.isPetFrame and UnitCanAssist("player", unit)
-    if visible then
-        local inRange = frame.dfInRange
-        if issecretvalue and issecretvalue(inRange) then
-            visible = false
-        elseif inRange == false then
-            visible = false
+    local visible
+    if DF.AuraContainer and DF.AuraContainer._testMode then
+        -- P5 preview: fabricated test units fail every unit API — visibility is
+        -- the test panel's toggle (UpdateTestMissingBuff gates on it before
+        -- calling). The badges show because missing containers stay DISABLED
+        -- for the test session (the provider bounce skips them), so every
+        -- group is empty and every badge sits parked in its window.
+        visible = true
+    else
+        visible = unit and UnitExists(unit)
+            and not UnitIsDeadOrGhost(unit) and UnitIsConnected(unit)
+            and not frame.isPetFrame and UnitCanAssist("player", unit)
+        if visible then
+            local inRange = frame.dfInRange
+            if issecretvalue and issecretvalue(inRange) then
+                visible = false
+            elseif inRange == false then
+                visible = false
+            end
         end
     end
     visible = visible and true or false

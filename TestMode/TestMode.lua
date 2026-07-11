@@ -18,30 +18,41 @@ DF.TestData = {
         {name = "Alexandrosthegreat", class = "PALADIN", role = "DAMAGER", specID = 70, health = 0, maxHealth = 90000, absorb = 0, healAbsorb = 0, healPrediction = 0, status = "Dead", outOfRange = false, raidTarget = nil, dispelType = nil, centerStatus = "resurrect", isAFK = false, isPhased = false, inVehicle = false, hasMyBuff = false, reducedMaxPct = 0},  -- Dead unit, being resurrected
         {name = "Xx", class = "ROGUE", role = "DAMAGER", specID = 260, health = 0.30, maxHealth = 70000, absorb = 0.05, healAbsorb = 0.12, healPrediction = 0.25, status = nil, outOfRange = false, raidTarget = nil, dispelType = "Poison", centerStatus = nil, isAFK = false, isPhased = true, inVehicle = true, hasMyBuff = true, reducedMaxPct = 0.45},  -- Phased, in vehicle, has HoT
     },
-    -- Test aura data - expanded for testing layouts
+    -- Test aura data - expanded for testing layouts. spellID (where a stable,
+    -- still-live spell matches) lets the 12.1 container preview show the REAL
+    -- spell tooltip on hover; entries without one fall back to a name tooltip.
     buffs = {
-        {icon = "Interface\\Icons\\Spell_Holy_PowerWordShield", name = "Power Word: Shield", duration = 30, stacks = 0},
-        {icon = "Interface\\Icons\\Spell_Nature_Rejuvenation", name = "Rejuvenation", duration = 12, stacks = 0},
-        {icon = "Interface\\Icons\\Spell_Holy_Renew", name = "Renew", duration = 15, stacks = 3},
-        {icon = "Interface\\Icons\\Spell_Holy_BlessingOfProtection", name = "Blessing of Protection", duration = 10, stacks = 0},
-        {icon = "Interface\\Icons\\Spell_Nature_Regenerate", name = "Regrowth", duration = 12, stacks = 0},
-        {icon = "Interface\\Icons\\Spell_Holy_Restoration", name = "Restoration", duration = 8, stacks = 0},
-        {icon = "Interface\\Icons\\Spell_Holy_GreaterHeal", name = "Greater Heal", duration = 6, stacks = 2},
-        {icon = "Interface\\Icons\\Spell_Nature_LightningShield", name = "Lightning Shield", duration = 600, stacks = 9},
-        {icon = "Interface\\Icons\\Spell_Holy_DivineShield", name = "Seal of Righteousness", duration = 0, stacks = 0},
-        {icon = "Interface\\Icons\\Spell_Holy_WordFortitude", name = "Blessing of Kings", duration = 0, stacks = 0},
+        {icon = "Interface\\Icons\\Spell_Holy_PowerWordShield", name = "Power Word: Shield", duration = 30, stacks = 0, spellID = 17},
+        {icon = "Interface\\Icons\\Spell_Nature_Rejuvenation", name = "Rejuvenation", duration = 12, stacks = 0, spellID = 774},
+        {icon = "Interface\\Icons\\Spell_Holy_Renew", name = "Renew", duration = 15, stacks = 3, spellID = 139},
+        {icon = "Interface\\Icons\\Spell_Holy_BlessingOfProtection", name = "Blessing of Protection", duration = 10, stacks = 0, spellID = 1022},
+        {icon = "Interface\\Icons\\Spell_Nature_Regenerate", name = "Regrowth", duration = 12, stacks = 0, spellID = 8936},
+        {icon = "Interface\\Icons\\Spell_Nature_Riptide", name = "Riptide", duration = 8, stacks = 0, spellID = 61295},
+        {icon = "Interface\\Icons\\Spell_Holy_GreaterHeal", name = "Heal", duration = 6, stacks = 2, spellID = 2060},
+        {icon = "Interface\\Icons\\Spell_Nature_LightningShield", name = "Lightning Shield", duration = 600, stacks = 9, spellID = 192106},
+        {icon = "Interface\\Icons\\Spell_Holy_DivineShield", name = "Divine Shield", duration = 8, stacks = 0, spellID = 642},
+        {icon = "Interface\\Icons\\Spell_Holy_WordFortitude", name = "Power Word: Fortitude", duration = 0, stacks = 0, spellID = 21562},
     },
     debuffs = {
-        {icon = "Interface\\Icons\\Spell_Shadow_ShadowWordPain", name = "Shadow Word: Pain", duration = 18, stacks = 0, debuffType = "Magic"},
-        {icon = "Interface\\Icons\\Spell_Nature_NullifyPoison", name = "Deadly Poison", duration = 8, stacks = 2, debuffType = "Poison"},
-        {icon = "Interface\\Icons\\Spell_Shadow_CurseOfSargeras", name = "Curse of Tongues", duration = 30, stacks = 0, debuffType = "Curse"},
-        {icon = "Interface\\Icons\\Ability_Rogue_Garrote", name = "Garrote", duration = 18, stacks = 0, debuffType = nil},
-        {icon = "Interface\\Icons\\Spell_Shadow_AbominationExplosion", name = "Disease", duration = 21, stacks = 0, debuffType = "Disease"},
-        {icon = "Interface\\Icons\\Spell_Fire_Immolation", name = "Immolate", duration = 15, stacks = 0, debuffType = "Magic"},
-        {icon = "Interface\\Icons\\Ability_Druid_Rake", name = "Rake", duration = 15, stacks = 0, debuffType = nil},
-        {icon = "Interface\\Icons\\Spell_Nature_Slow", name = "Slow", duration = 12, stacks = 0, debuffType = "Magic"},
-        {icon = "Interface\\Icons\\Spell_DeathKnight_FrostFever", name = "Plague", duration = 24, stacks = 3, debuffType = "Disease"},
-        {icon = "Interface\\Icons\\Spell_Shadow_Possession", name = "Fear", duration = 8, stacks = 0, debuffType = "Magic"},
+        {icon = "Interface\\Icons\\Spell_Shadow_ShadowWordPain", name = "Shadow Word: Pain", duration = 18, stacks = 0, debuffType = "Magic", spellID = 589},
+        {icon = "Interface\\Icons\\Spell_Nature_NullifyPoison", name = "Deadly Poison", duration = 8, stacks = 2, debuffType = "Poison", spellID = 2823},
+        {icon = "Interface\\Icons\\Spell_Shadow_CurseOfSargeras", name = "Curse of Tongues", duration = 30, stacks = 0, debuffType = "Curse", spellID = 1714},
+        {icon = "Interface\\Icons\\Ability_Rogue_Garrote", name = "Garrote", duration = 18, stacks = 0, debuffType = nil, spellID = 703},
+        {icon = "Interface\\Icons\\Spell_Shadow_AbominationExplosion", name = "Blood Plague", duration = 21, stacks = 0, debuffType = "Disease", spellID = 55078},
+        {icon = "Interface\\Icons\\Spell_Fire_Immolation", name = "Immolate", duration = 15, stacks = 0, debuffType = "Magic", spellID = 348},
+        {icon = "Interface\\Icons\\Ability_Druid_Rake", name = "Rake", duration = 15, stacks = 0, debuffType = nil, spellID = 1822},
+        {icon = "Interface\\Icons\\Spell_Nature_Slow", name = "Slow", duration = 12, stacks = 0, debuffType = "Magic", spellID = 31589},
+        {icon = "Interface\\Icons\\Spell_DeathKnight_FrostFever", name = "Frost Fever", duration = 24, stacks = 3, debuffType = "Disease", spellID = 55095},
+        {icon = "Interface\\Icons\\Spell_Shadow_Possession", name = "Fear", duration = 8, stacks = 0, debuffType = "Magic", spellID = 5782},
+    },
+    -- Defensive externals for the 12.1 container preview (config.testPool =
+    -- "defensives" on the defensive row). Same spells the legacy test painter
+    -- cycled; icons are the fallback when the spell ID doesn't validate.
+    defensives = {
+        {icon = "Interface\\Icons\\Spell_Holy_PainSupression", name = "Pain Suppression", duration = 8, stacks = 0, spellID = 33206},
+        {icon = "Interface\\Icons\\spell_druid_ironbark", name = "Ironbark", duration = 12, stacks = 0, spellID = 102342},
+        {icon = "Interface\\Icons\\Spell_Holy_SealOfSacrifice", name = "Blessing of Sacrifice", duration = 12, stacks = 0, spellID = 6940},
+        {icon = "Interface\\Icons\\ability_monk_chicocoon", name = "Life Cocoon", duration = 12, stacks = 0, spellID = 116849},
     },
     -- Boss debuffs (Private Auras) - these simulate what boss mechanics look like
     bossDebuffs = {
@@ -1059,6 +1070,17 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
         if frame.debuffIcons then
             for _, icon in ipairs(frame.debuffIcons) do icon:Hide() end
         end
+        -- 12.1 factory rows: entering test mode with Show Auras already off
+        -- never reaches the UpdateTestAuras seam, so hide them here too (via
+        -- the shown-caches the live drives key on).
+        if frame.buffFactory then
+            frame.buffFactory:GetFrame():Hide()
+            frame.dfBuffFactoryShown = false
+        end
+        if frame.debuffFactory then
+            frame.debuffFactory:GetFrame():Hide()
+            frame.dfDebuffFactoryShown = false
+        end
     end
     
     -- Update test boss debuffs (independent of testShowAuras - has its own testShowBossDebuffs toggle)
@@ -1143,27 +1165,13 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     -- Always update status icons (they have their own checkbox testShowStatusIcons)
     DF:UpdateTestStatusIcons(frame, testData)
     
-    -- Update dispel overlay if enabled (uses real dispel system which has test mode support)
-    -- OOR alpha is now handled inside UpdateDispelOverlay for test mode
-    if db.testShowDispelGlow then
-        if DF.UpdateDispelOverlay then
-            DF:UpdateDispelOverlay(frame)
-        end
-    else
-        -- Hide dispel overlay when test checkbox is off
-        if frame.dfDispelOverlay then
-            local overlay = frame.dfDispelOverlay
-            if overlay.borderTop then overlay.borderTop:Hide() end
-            if overlay.borderBottom then overlay.borderBottom:Hide() end
-            if overlay.borderLeft then overlay.borderLeft:Hide() end
-            if overlay.borderRight then overlay.borderRight:Hide() end
-            if overlay.gradient then overlay.gradient:Hide() end
-            if overlay.icons then
-                for _, icon in pairs(overlay.icons) do
-                    icon:Hide()
-                end
-            end
-        end
+    -- Update dispel overlay (uses the real dispel system, which has test mode
+    -- support). Unconditional: UpdateDispelOverlay reads testShowDispelGlow
+    -- itself, and its OFF path (HideDispelAndInvalidate) hides the FULL region
+    -- set — the manual hide this replaces missed the EDGE gradients and the
+    -- darken layer, leaving them behind when the checkbox was unticked.
+    if DF.UpdateDispelOverlay then
+        DF:UpdateDispelOverlay(frame)
     end
     
     -- Update missing buff icon if enabled
@@ -1173,16 +1181,17 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
         if frame.missingBuffFrame then
             frame.missingBuffFrame:Hide()
         end
-    end
-    
-    -- Update defensive icon if enabled
-    if db.testShowExternalDef then
-        DF:UpdateTestDefensiveBar(frame, testData)
-    else
-        if frame.defensiveIcon then
-            frame.defensiveIcon:Hide()
+        -- 12.1 factory strip: hide via the shown-cache the live drive keys on.
+        if frame.missingBuffStrip and frame.dfMissingStripShown ~= false then
+            frame.dfMissingStripShown = false
+            frame.missingBuffStrip:Hide()
         end
     end
+    
+    -- Update defensive icons. Unconditional: the painter reads
+    -- testShowExternalDef itself (it must also hide the 12.1 container row
+    -- when the toggle is off, not just the legacy icon).
+    DF:UpdateTestDefensiveBar(frame, testData)
     
     -- Update class power pips for test mode
     if db.classPowerEnabled and db.testShowClassPower ~= false then
@@ -1907,7 +1916,42 @@ end
 -- Layout is only applied when frame.dfTestApplyLayout is true
 function DF:UpdateTestAuras(frame)
     if not frame then return end
-    
+
+    -- 12.1 (P5): test frames preview through the REAL containers — the drives
+    -- create/keep the rows and the game's sample provider + the factory's curated
+    -- test paint render them with the user's true layout, borders and fonts. The
+    -- drives also hide the legacy hand-painted icon pools (no double render).
+    -- Defensive/missing/dispel keep their own legacy previews for now.
+    if DF.AuraContainer and DF.AuraContainer.IsSupported() then
+        local db = DF:GetFrameDB(frame)
+        if db then
+            -- The test panel's "Show Auras" toggle gates the preview rows on top
+            -- of the real row enables. Off -> hide the row frames directly and
+            -- keep the drives' shown-caches coherent so re-enabling re-shows.
+            local showAuras = db.testShowAuras ~= false
+            if db.showBuffs and showAuras and DF.DriveBuffFactory then
+                DF:DriveBuffFactory(frame, db)
+                -- Test count slider hot-applies (structural: the handle rebuilds).
+                if frame.buffFactory and frame.buffFactory.SetTestMax then
+                    frame.buffFactory:SetTestMax(db.testBuffCount or 2)
+                end
+            elseif frame.buffFactory then
+                frame.buffFactory:GetFrame():Hide()
+                frame.dfBuffFactoryShown = false
+            end
+            if db.showDebuffs and showAuras and DF.DriveDebuffFactory then
+                DF:DriveDebuffFactory(frame, db)
+                if frame.debuffFactory and frame.debuffFactory.SetTestMax then
+                    frame.debuffFactory:SetTestMax(db.testDebuffCount or 2)
+                end
+            elseif frame.debuffFactory then
+                frame.debuffFactory:GetFrame():Hide()
+                frame.dfDebuffFactoryShown = false
+            end
+        end
+        return
+    end
+
     -- Apply layout only if explicitly requested (e.g., on test mode start)
     if frame.dfTestApplyLayout then
         local db = DF:GetFrameDB(frame)
@@ -1915,7 +1959,7 @@ function DF:UpdateTestAuras(frame)
         DF:ApplyAuraLayout(frame, "DEBUFF")
         frame.dfTestApplyLayout = nil  -- Clear flag after applying
     end
-    
+
     DF:UpdateTestAurasContent(frame)
 end
 
@@ -2472,7 +2516,12 @@ function DF:ShowTestFrames(silent)
 
     local db = DF:GetDB()
     DF.testMode = true
-    
+    -- 12.1 container preview (P5): flip the factory into test mode BEFORE any test
+    -- frame renders — handle builds read the flag (sample provider + curated paint).
+    if DF.AuraContainer and DF.AuraContainer.SetTestMode then
+        DF.AuraContainer.SetTestMode(true)
+    end
+
     -- Ensure test frame pool is created
     if not DF.testFramePoolInitialized then
         DF:CreateTestFramePool()
@@ -2759,7 +2808,12 @@ DF.lastLayoutRefresh = 0
 
 function DF:HideTestFrames(silent)
     DF.testMode = false
-    
+    -- Restore the real aura provider only when NEITHER test mode remains active
+    -- (party + raid share the global data-provider switch).
+    if DF.AuraContainer and DF.AuraContainer.SetTestMode then
+        DF.AuraContainer.SetTestMode(DF.raidTestMode and true or false)
+    end
+
     -- Stop animation only if raid test mode isn't using it
     local raidDb = DF:GetRaidDB()
     if not (DF.raidTestMode and raidDb.testAnimateHealth) then
@@ -2918,7 +2972,12 @@ function DF:ShowRaidTestFrames()
 
     local db = DF:GetRaidDB()
     DF.raidTestMode = true
-    
+    -- 12.1 container preview (P5): flip the factory into test mode BEFORE any test
+    -- frame renders — handle builds read the flag (sample provider + curated paint).
+    if DF.AuraContainer and DF.AuraContainer.SetTestMode then
+        DF.AuraContainer.SetTestMode(true)
+    end
+
     -- Ensure test frame pool is created
     if not DF.testFramePoolInitialized then
         DF:CreateTestFramePool()
@@ -3012,7 +3071,12 @@ end
 -- Hide raid test frames
 function DF:HideRaidTestFrames()
     DF.raidTestMode = false
-    
+    -- Restore the real aura provider only when NEITHER test mode remains active
+    -- (party + raid share the global data-provider switch).
+    if DF.AuraContainer and DF.AuraContainer.SetTestMode then
+        DF.AuraContainer.SetTestMode(DF.testMode and true or false)
+    end
+
     -- Stop animation if party test mode isn't using it
     local partyDb = DF:GetDB()
     if not (DF.testMode and partyDb.testAnimateHealth) then
@@ -3829,9 +3893,21 @@ end
 -- Test missing buff icon
 function DF:UpdateTestMissingBuff(frame)
     if not frame or not frame.missingBuffFrame then return end
-    
+
     local db = DF:GetFrameDB(frame)
-    
+
+    -- 12.1: the live missing-buff display is the factory badge STRIP (one badge
+    -- per tracked buff, real spell icons — Auras.lua) — preview through the same
+    -- drive so geometry and styling are live-true. Every badge renders "missing"
+    -- because the provider bounce leaves missing containers DISABLED for the
+    -- test session (empty groups park the badges in their windows); the drive's
+    -- unit guards are test-bypassed (fabricated units fail every unit API).
+    if DF.FactoryOwnsMissingBuff and DF:FactoryOwnsMissingBuff(db) then
+        frame.missingBuffFrame:Hide()
+        DF:DriveMissingBuffFactory(frame, db)
+        return
+    end
+
     -- Show a test missing buff icon
     if db.missingBuffIconEnabled then
         -- Use Arcane Intellect as test icon
@@ -3895,12 +3971,17 @@ function DF:UpdateAllTestMissingBuff()
     local function UpdateFrame(frame)
         if not frame then return end
         local db = DF:GetFrameDB(frame)
-        
+
         if db.testShowMissingBuff then
             DF:UpdateTestMissingBuff(frame)
         else
             if frame.missingBuffFrame then
                 frame.missingBuffFrame:Hide()
+            end
+            -- 12.1 factory strip: hide via the shown-cache the live drive keys on.
+            if frame.missingBuffStrip and frame.dfMissingStripShown ~= false then
+                frame.dfMissingStripShown = false
+                frame.missingBuffStrip:Hide()
             end
         end
     end
@@ -4035,10 +4116,45 @@ function DF:UpdateTestDefensiveBar(frame, testData)
 
     local db = DF:GetFrameDB(frame)
 
+    -- 12.1: the live defensive row is a container (DriveDefensiveFactory) —
+    -- preview through the SAME container (P5 hybrid) so styling, layout and
+    -- fonts are live-true; the legacy pool below is a dead pipeline here.
+    -- Role-scaled count mirrors the legacy preview shape (tank 3 / healer 1).
+    if DF.FactoryOwnsDefensiveRow and DF:FactoryOwnsDefensiveRow(db) then
+        frame.defensiveIcon:Hide()
+        if frame.defensiveBarIcons then
+            for _, icon in pairs(frame.defensiveBarIcons) do icon:Hide() end
+        end
+        local role = testData and testData.role
+        local show = db.defensiveIconEnabled and db.testShowExternalDef
+            and (role == "TANK" or role == "HEALER")
+        if show then
+            DF:DriveDefensiveFactory(frame, db)
+            local h = frame.defensiveFactory
+            if h then
+                if h.SetTestMax then
+                    h:SetTestMax(math.min(role == "TANK" and 3 or 1, db.defensiveBarMax or 4))
+                end
+                if frame.dfDefFactoryShown ~= true then
+                    frame.dfDefFactoryShown = true
+                    h:GetFrame():Show()
+                end
+            end
+        elseif frame.defensiveFactory then
+            -- Hide via the shown-cache the live drive keys on, so exiting test
+            -- mode (or re-ticking the toggle) re-shows through the normal path.
+            if frame.dfDefFactoryShown ~= false then
+                frame.dfDefFactoryShown = false
+                frame.defensiveFactory:GetFrame():Hide()
+            end
+        end
+        return
+    end
+
     -- Show on specific test frames (e.g. tank and healer)
     local showIcon = testData and (testData.role == "TANK" or testData.role == "HEALER")
 
-    if db.defensiveIconEnabled and showIcon then
+    if db.defensiveIconEnabled and db.testShowExternalDef and showIcon then
         -- Shared layout math — the exact code live uses (pixel-perfect scale
         -- fold + pixel-grid snap included, which the old test copy skipped).
         local L = DF:GetDefensiveBarLayout(db)
@@ -4106,21 +4222,17 @@ function DF:UpdateAllTestDefensiveBar()
     local function UpdateFrame(frame, testData)
         if not frame then return end
         local db = DF:GetFrameDB(frame)
-        
-        if db.testShowExternalDef then
-            DF:UpdateTestDefensiveBar(frame, testData)
-        else
-            if frame.defensiveIcon then
-                frame.defensiveIcon:Hide()
-                -- Clear cooldown
-                if frame.defensiveIcon.cooldown then
-                    frame.defensiveIcon.cooldown:Clear()
-                end
+
+        -- Unconditional: the painter reads testShowExternalDef itself and hides
+        -- BOTH pipelines (legacy pool + 12.1 container row) when it's off.
+        DF:UpdateTestDefensiveBar(frame, testData)
+        if not db.testShowExternalDef then
+            -- Legacy pool extras the painter's hide path doesn't touch.
+            if frame.defensiveIcon and frame.defensiveIcon.cooldown then
+                frame.defensiveIcon.cooldown:Clear()
             end
-            -- Also hide multi-defensive bar icons
             if frame.defensiveBarIcons then
                 for _, icon in pairs(frame.defensiveBarIcons) do
-                    icon:Hide()
                     if icon.cooldown then icon.cooldown:Clear() end
                 end
             end
@@ -5260,7 +5372,24 @@ function DF:CreateTestPanel()
     -- --- AURAS ---
     local secAuras = CreateSection(panel, L["Auras"], "auras")
     panel.showAurasCheck = secAuras:AddCheckbox(L["Show Auras"], "testShowAuras", function(enabled, isRaidMode)
-        if enabled and not isRaidMode and DF.testMode then DF:RefreshTestFramesWithLayout() end
+        -- Refresh on BOTH states: the 12.1 preview rows show/hide through the
+        -- UpdateTestAuras seam, so disabling needs a pass too (the old callback
+        -- only refreshed on enable, which left the container rows visible).
+        if not isRaidMode and DF.testMode then
+            if enabled then
+                DF:RefreshTestFramesWithLayout()
+            elseif DF.testPartyFrames then
+                for i = 0, 4 do
+                    local f = DF.testPartyFrames[i]
+                    if f and f:IsShown() then DF:UpdateTestAuras(f) end
+                end
+            end
+        elseif isRaidMode and DF.raidTestMode and DF.testRaidFrames then
+            for i = 1, 40 do
+                local f = DF.testRaidFrames[i]
+                if f and f:IsShown() then DF:UpdateTestAuras(f) end
+            end
+        end
         -- Buff/Debuff count sliders only matter while auras are shown; grey them
         -- in place when Show Auras is off.
         if panel.RefreshDependentEnabled then panel.RefreshDependentEnabled() end

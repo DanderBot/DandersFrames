@@ -165,20 +165,83 @@ do
     end)
 end
 
--- TEST MODE. A real CustomAuraContainer reads REAL unit auras, so it shows nothing on a
--- fabricated test unit — DF's test mode must drive containers through the FakeBackend
--- (plain frames + pushed fake data) so users can preview aura settings. DF's test mode
--- calls SetTestMode(true/false) on toggle; every live handle rebuilds onto the right
--- backend. Global (all frames are test frames when test mode is on).
+-- TEST MODE (P5 hybrid, probe 33 live-proven). A real CustomAuraContainer reads real
+-- unit auras — nothing renders on a fabricated test unit. Instead of faking the
+-- CONTAINER we fake the DATA: the game's own sample provider
+-- (C_UnitAuras.SwitchAuraDataProvider — what Edit Mode uses) drives PRESENCE, the
+-- real container drives GEOMETRY, and the test initializeFrame paints DF's curated
+-- test icons instead of binding the native setters (the sample auras wear random
+-- spellbook icons — never shown). Rows preview with the user's true layout, borders,
+-- fonts and cooldown regions.
+--
+-- ORDER MATTERS (born-deaf containers, probe 33): a container built AFTER a provider
+-- switch never hears the event and stays on the previous source — so entry rebuilds
+-- every handle FIRST, then bounces the provider (reset -> switch) so a fresh event
+-- reaches the just-built rows. Exit resets the provider FIRST so the rebuilt live
+-- rows parse real data immediately. _ownsProviderSwitch stays set for the whole
+-- test-mode duration so the edit-mode guard (ensureProviderWatch) never hides our
+-- own preview. The switch is GLOBAL — Blizzard's own aura displays show sample data
+-- while DF test mode is open (restored on exit; accepted trade-off).
+-- Coalesced provider bounce (reset -> switch). Only the EVENT flips a container
+-- onto the sample source, and a container built AFTER a switch never heard it —
+-- so EVERY native build during test mode queues a bounce (handles are created
+-- lazily by the drives' first test pass, well after SetTestMode's own rebuild).
+-- Next-frame + coalesced: one bounce covers a whole batch of builds.
+function AuraContainer._queueTestBounce()
+    if AuraContainer._bouncePending then return end
+    AuraContainer._bouncePending = true
+    C_Timer.After(0, function()
+        AuraContainer._bouncePending = nil
+        if not AuraContainer._testMode then return end   -- exited before the tick
+        pcall(function()
+            if C_UnitAuras.ResetAuraDataProvider then C_UnitAuras.ResetAuraDataProvider() end
+        end)
+        local ok = pcall(function() C_UnitAuras.SwitchAuraDataProvider() end)
+        if not ok then pcall(function() C_UnitAuras.SwitchAuraDataProvider(false) end) end
+        -- Test containers are built DISABLED (see NativeBackend:build) so they never
+        -- parse real auras before the sample source is live — enable them all now,
+        -- with a refresh kick so the parse runs this frame instead of next event.
+        -- MISSING mode stays DISABLED for the whole test session: its groups then
+        -- never fill, so every badge sits parked in its window — the "missing"
+        -- preview. Enabling would fill the groups with sample HELPFUL auras
+        -- (spell-ID filters are stripped in test) and push every badge out.
+        for h in pairs(AuraContainer._handles or {}) do
+            if not h._destroyed and h.backend and h.config and h.config.enabled ~= false
+               and h.config.mode ~= "missing" then
+                if h.backend.setEnabled then pcall(function() h.backend:setEnabled(true) end) end
+                if h.backend.refresh then pcall(function() h.backend:refresh() end) end
+            end
+        end
+    end)
+end
+
 function AuraContainer.SetTestMode(on)
     on = on and true or false
     if (AuraContainer._testMode or false) == on then return end
     AuraContainer._testMode = on
     DF:Debug(DBG, "SetTestMode -> %s", tostring(on))
-    if AuraContainer._handles then
-        for h in pairs(AuraContainer._handles) do
-            if not h._destroyed then pcall(function() h:OnTestModeChanged() end) end
+
+    local function rebuildAll()
+        if AuraContainer._handles then
+            for h in pairs(AuraContainer._handles) do
+                if not h._destroyed then pcall(function() h:OnTestModeChanged() end) end
+            end
         end
+    end
+
+    if on then
+        AuraContainer._ownsProviderSwitch = true
+        rebuildAll()
+        AuraContainer._queueTestBounce()
+        AuraContainer._startTestTicker()
+    else
+        AuraContainer._stopTestTicker()
+        pcall(function()
+            if C_UnitAuras.ResetAuraDataProvider then C_UnitAuras.ResetAuraDataProvider()
+            else C_UnitAuras.SwitchAuraDataProvider(true) end
+        end)
+        AuraContainer._ownsProviderSwitch = false
+        rebuildAll()
     end
 end
 
@@ -714,28 +777,77 @@ local FLOW_NAME = { RIGHT = "Right", LEFT = "Left", UP = "Up", DOWN = "Down" }
 --     render at row scale (the legacy defensive stride model; buff rows historically
 --     didn't scale the spacing term — the flow can't express that split, and scaling
 --     spacing uniformly is the more consistent behaviour anyway).
+-- Resolve config.layout into flow parameters: flow direction names, the corner the
+-- flow fills from (flowAnchor), and how the container box pins to the user's anchor
+-- point (pinPoint + pinX/pinY offsets).
+--
+-- CENTER growth ("Direction: Center" — legacy did this with a second positioning
+-- pass, Icons.lua ApplyDefensiveBarCenterGrowth): the native flow has no centering
+-- concept, but the container SELF-SIZES to content each layout pass (secret SetSize,
+-- Blizzard_CustomAuraContainer.lua:738) — so fill the box from a fixed corner and
+-- pin the box's centre-of-edge to the user's anchor point; the render then keeps
+-- the row centred as icons come and go, in combat, with zero reads. pinX/pinY fold
+-- in the icon-anchor offset the legacy pass produced (legacy anchored each ICON's
+-- own `anchor` point at the target; the box pin is edge-based), so the common
+-- single-row case lands where the legacy pass put it. Multi-row blocks fill from
+-- the box corner (flow order) rather than centring each row individually —
+-- accepted approximation, the flow owns button placement.
+local function resolveGrowthLayout(L)
+    local sx = (L.sizeX or L.size or 32)
+    local sy = (L.sizeY or L.size or sx)
+    local anchor = (type(L.anchor) == "string" and L.anchor) or "TOPLEFT"
+    local growth = (type(L.growth) == "string" and L.growth) or "RIGHT_DOWN"
+    local primary, secondary = growth:match("^(%a+)_?(%a*)$")
+    primary = primary or "RIGHT"
+    local out = {
+        sx = sx, sy = sy,
+        spX = (L.spacingX or L.spacing or 4),
+        spY = (L.spacingY or L.spacing or 4),
+        anchor = anchor, primary = primary, secondary = secondary,
+        pinPoint = anchor, flowAnchor = anchor, pinX = 0, pinY = 0,
+        center = (primary == "CENTER"),
+        verticalPrimary = (primary == "UP" or primary == "DOWN"),
+    }
+    if out.center then
+        -- Vertical/horizontal component of the user's anchor point within an icon
+        -- (TOP edge = 0 .. BOTTOM edge = sy), for the legacy icon-anchor fold.
+        local vC = (anchor:find("TOP") and 0) or (anchor:find("BOTTOM") and sy) or sy / 2
+        local hC = (anchor:find("LEFT") and 0) or (anchor:find("RIGHT") and sx) or sx / 2
+        if secondary == "LEFT" or secondary == "RIGHT" then
+            -- Vertical stack centred on the anchor; renders as a single column
+            -- (native-flow limitation, same as UP/DOWN primary growth).
+            out.verticalPrimary = true
+            out.vName, out.hName = "Down", FLOW_NAME[secondary] or "Right"
+            out.flowAnchor = (secondary == "LEFT") and "TOPRIGHT" or "TOPLEFT"
+            out.pinPoint = (secondary == "LEFT") and "RIGHT" or "LEFT"
+            out.pinX = (secondary == "LEFT") and (sx - hC) or -hC
+            out.pinY = sy / 2 - vC
+        else
+            -- Horizontal row centred on the anchor; extra rows toward `secondary`.
+            out.hName, out.vName = "Right", FLOW_NAME[secondary] or "Down"
+            out.flowAnchor = (secondary == "UP") and "BOTTOMLEFT" or "TOPLEFT"
+            out.pinPoint = (secondary == "UP") and "BOTTOM" or "TOP"
+            out.pinX = sx / 2 - hC
+            out.pinY = (secondary == "UP") and (vC - sy) or vC
+        end
+    elseif out.verticalPrimary then
+        out.vName = FLOW_NAME[primary] or "Down"
+        out.hName = FLOW_NAME[secondary] or "Right"
+    else
+        out.hName = FLOW_NAME[primary] or "Right"
+        out.vName = FLOW_NAME[secondary] or "Down"
+    end
+    return out
+end
+
 local function applyContainerLayout(c, handle)
     local config = handle.config
     local L = config.layout or {}
-    local sx = (L.sizeX or L.size or 32)
-    local spX = (L.spacingX or L.spacing or 4)
+    local G = resolveGrowthLayout(L)
+    local sx = G.sx
+    local spX = G.spX
     local scale = tonumber(L.scale) or 1
-    local anchor = (type(L.anchor) == "string" and L.anchor) or "TOPLEFT"
-    local growth = (type(L.growth) == "string" and L.growth) or "RIGHT_DOWN"
     local wrap = tonumber(L.wrap) or 0
-
-    local primary, secondary = growth:match("^(%a+)_?(%a*)$")
-    primary = primary or "RIGHT"
-    local verticalPrimary = (primary == "UP" or primary == "DOWN")
-
-    local hName, vName
-    if verticalPrimary then
-        vName = FLOW_NAME[primary] or "Down"
-        hName = FLOW_NAME[secondary] or "Right"
-    else
-        hName = FLOW_NAME[primary] or "Right"
-        vName = FLOW_NAME[secondary] or "Down"
-    end
 
     -- Row cap: vertical-primary = one per row (column); wrap>0 = N per row; else unlimited.
     -- HEADROOM: the flow (AnchorUtil.ApplyFlowLayout) wraps when the running row width
@@ -745,7 +857,7 @@ local function applyContainerLayout(c, handle)
     -- the (sx + spX) a whole extra icon would need — so exactly `wrap` icons fit per row.
     local headroom = sx * 0.5
     local rowWidth
-    if verticalPrimary then
+    if G.verticalPrimary then
         rowWidth = sx + headroom
     elseif wrap and wrap >= 1 then
         rowWidth = wrap * sx + (wrap - 1) * spX + headroom
@@ -753,23 +865,31 @@ local function applyContainerLayout(c, handle)
 
     pcall(function()
         c:SetScale(scale)
-        -- Anchor the container's grow-corner to the frame's matching corner + offsets.
-        -- (SetPoint offsets live in the container's scaled space, matching the legacy
-        -- rows whose offsets rode the scaled buttons.)
+        -- Pin the container to the frame's anchor point + offsets. Directional
+        -- growth: the grow-corner pins to the frame's matching point (SetPoint
+        -- offsets live in the container's scaled space, matching the legacy rows
+        -- whose offsets rode the scaled buttons). CENTER growth: the box's
+        -- centre-of-edge pins instead (see resolveGrowthLayout).
         c:ClearAllPoints()
-        c:SetPoint(anchor, handle.frame, anchor, L.offsetX or 0, L.offsetY or 0)
-        c:SetAuraLayoutAnchorPoint(anchor)
+        c:SetPoint(G.pinPoint, handle.frame, G.anchor,
+            (L.offsetX or 0) + G.pinX, (L.offsetY or 0) + G.pinY)
+        c:SetAuraLayoutAnchorPoint(G.flowAnchor)
         if AnchorUtil and AnchorUtil.FlowDirection then
-            local h = resolveEnum(AnchorUtil.FlowDirection, hName)
-            local v = resolveEnum(AnchorUtil.FlowDirection, vName)
+            local h = resolveEnum(AnchorUtil.FlowDirection, G.hName)
+            local v = resolveEnum(AnchorUtil.FlowDirection, G.vName)
             if h ~= nil and v ~= nil then c:SetAuraLayoutGrowthDirection(h, v) end
         end
         c:SetAuraLayoutRowWidth(rowWidth)
     end)
 end
 
--- Per-group layout options (stride/spacing; gapX keeps multi-group rows uniformly
--- spaced — groups continue on the same row with gapX between them).
+-- Per-group layout options (stride/spacing). gapX stays 0: the flow advances its
+-- cursor by width + elementSpacingX after EVERY element — including a group's
+-- last — and then adds gapX before the next group (AnchorUtil.ApplyFlowLayout),
+-- so any non-zero gapX renders group boundaries at spacing + gapX. The original
+-- gapX = spacing DOUBLED the gap between filter blocks on multi-filter rows
+-- (and between every button of the per-slot test rows) — live-reported. With
+-- gapX = 0 groups still continue on the same row, uniformly spaced.
 local function buildGroupLayout(config)
     local L = config.layout or {}
     local sx = (L.sizeX or L.size or 32)
@@ -781,7 +901,7 @@ local function buildGroupLayout(config)
         elementHeight   = sy,
         elementSpacingX = spX,
         elementSpacingY = spY,
-        gapX            = spX,
+        gapX            = 0,
     }
 end
 
@@ -918,7 +1038,11 @@ function NativeBackend:build()
     else
         applyContainerLayout(c, handle)       -- row: anchor/growth/wrap/offset/scale -> native flow layout
     end
-    if type(config.unit) == "string" then pcall(function() c:SetUnit(config.unit) end) end
+    -- TEST MODE (P5): the sample provider feeds any requested token identically, but
+    -- test frames carry fabricated units — parse "player" so presence is guaranteed.
+    local testMode = AuraContainer._testMode
+    local unit = testMode and "player" or config.unit
+    if type(unit) == "string" then pcall(function() c:SetUnit(unit) end) end
 
     -- Container-level aura processing policy (config.processingPolicy = { policy =
     -- "ProcessAura", options? }): stamps AuraUtil.ProcessAura's classification on every
@@ -926,8 +1050,8 @@ function NativeBackend:build()
     -- candidate filter (the native "all dispellable" classification). Enum member is
     -- resolved by NAME against the securecopy'd global so API drift degrades to no
     -- policy (and processedAuraType-filtered groups then show nothing) rather than
-    -- erroring the build.
-    if config.processingPolicy and type(config.processingPolicy.policy) == "string" then
+    -- erroring the build. Skipped in test mode (sample data carries no classification).
+    if not testMode and config.processingPolicy and type(config.processingPolicy.policy) == "string" then
         local pol = resolveEnum(_G.CustomAuraContainerAuraProcessingPolicy, config.processingPolicy.policy)
         if pol ~= nil then
             local okPol, errPol = pcall(function() c:SetAuraProcessingPolicy(pol, config.processingPolicy.options) end)
@@ -968,7 +1092,7 @@ function NativeBackend:build()
     -- degrades to Blizzard's default order rather than erroring the build. Structural:
     -- declared at AddAuraGroup (consumers carry it in their row signature).
     local sortMethod, sortDirection
-    if config.sort and type(config.sort.method) == "string" and _G.AuraContainerSortMethod then
+    if not testMode and config.sort and type(config.sort.method) == "string" and _G.AuraContainerSortMethod then
         sortMethod = _G.AuraContainerSortMethod[config.sort.method]
         if sortMethod ~= nil and _G.AuraContainerSortDirection then
             sortDirection = _G.AuraContainerSortDirection[config.sort.direction or "Normal"]
@@ -976,13 +1100,44 @@ function NativeBackend:build()
     end
     self.groupKeys = {}
     self.slotButtons = isOverlay and {} or nil   -- overlay: key -> native slot button (consumer styling)
+    if testMode and not isOverlay and not isMissing then
+        -- PER-SLOT TEST GROUPS (P5). Two hard-won facts drive this shape:
+        --  * The flow lays buttons out by the container's own aura ordering, NOT
+        --    by button creation order — indexing the curated paint/hover zones by
+        --    creation order landed them on the wrong buttons (live-diagnosed
+        --    twice: Lightning Shield mid-row, mismatched tooltips).
+        --  * Groups render in DECLARATION order, so one group per preview slot
+        --    (maxFrameCount = 1) pins slot k to layout position k determinately.
+        --    Groups don't dedupe against each other, so every group shows exactly
+        --    one sample — the row length always equals the test count, even when
+        --    the sample set is short. Plain category filter only: the sample
+        --    provider's matching is a bare-token check and its auras carry no
+        --    raid flags / spell IDs / durations (§23 gotcha c).
+        local category = (filters[1] and filters[1].f:find("HARMFUL")) and "HARMFUL" or "HELPFUL"
+        filters = {}   -- the normal declaration loop below is skipped
+        for k = 1, maxCount do
+            local key = "dfTest" .. k
+            local okGroup, err = pcall(function()
+                c:AddAuraGroup(key, category, {
+                    maxFrameCount = 1,
+                    initializeFrame = handle:_makeInitializeFrame(handle._gen, k),
+                    layout = groupLayout,   -- gapX = 0 (buildGroupLayout) = uniform spacing
+                })
+            end)
+            if okGroup then
+                self.groupKeys[#self.groupKeys + 1] = key
+            else
+                DF:DebugWarn(DBG, "test group failed: %s", tostring(err))
+            end
+        end
+    end
     for i, rec in ipairs(filters) do
         local f = rec.f
+        local cf = (not testMode) and (rec.candidateFilters or candidateFilters) or nil
         if AuraUtil and AuraUtil.IsValidFilterString and not AuraUtil.IsValidFilterString(f) then
             DF:DebugWarn(DBG, "filter rejected by IsValidFilterString: %s (group skipped)", tostring(f))
         else
             local key = rec.key or ("df" .. i)
-            local cf = rec.candidateFilters or candidateFilters
             if isOverlay then
                 local okSlot, btn = pcall(function()
                     return c:AddAuraSlot(key, f, { initializeFrame = initFn, candidateFilters = cf,
@@ -1009,7 +1164,16 @@ function NativeBackend:build()
 
     -- SetEnabled LAST — after the groups/slots + filters are declared (ContainerOverlay.lua
     -- gotcha 2). This is what arms the parse + UNIT_AURA registration.
-    pcall(function() c:SetEnabled(config.enabled ~= false) end)
+    -- TEST MODE: stay DISABLED until the provider bounce lands (the bounce enables
+    -- us) — an enabled container parses the player's REAL auras for a tick first,
+    -- creating buttons whose creation order no longer matches the sample set's
+    -- display order once it arrives; paints and hover zones then land on the
+    -- wrong buttons (live-diagnosed: Lightning Shield at slot 4, PoM tooltips).
+    pcall(function() c:SetEnabled(config.enabled ~= false and not testMode) end)
+
+    -- TEST MODE: every native build while the sample provider should be active
+    -- queues the coalesced bounce — this container was born deaf to the switch.
+    if testMode then AuraContainer._queueTestBounce() end
 
     -- MISSING mode: arm the push geometry — hook the badge onto the live container's
     -- TOPLEFT (+pad puts it exactly on the window while the group is empty) and show it.
@@ -1017,7 +1181,16 @@ function NativeBackend:build()
     -- never read its position in Lua (no pixel-snap, no GetLeft) — §20c rules.
     if isMissing and handle.badge then
         handle.badge:ClearAllPoints()
-        handle.badge:SetPoint("TOPLEFT", c, "TOPLEFT", MISSING_PAD, 0)
+        if testMode then
+            -- P5 preview: the container stays DISABLED all test session (the
+            -- bounce skips missing mode) and a never-laid-out container has NO
+            -- resolvable rect (its secret SetSize only runs while enabled) — a
+            -- badge anchored to it renders NOTHING (live-caught). Park the
+            -- badge on the WINDOW instead: that IS the "missing" position.
+            handle.badge:SetPoint("TOPLEFT", handle.frame, "TOPLEFT", 0, 0)
+        else
+            handle.badge:SetPoint("TOPLEFT", c, "TOPLEFT", MISSING_PAD, 0)
+        end
         handle.badge:Show()
     end
 
@@ -1026,6 +1199,9 @@ function NativeBackend:build()
 end
 
 function NativeBackend:setUnit(unit)
+    -- Test mode parses "player" regardless of the frame's (fabricated) unit; the
+    -- handle's config still tracks the live token for the rebuild back.
+    if AuraContainer._testMode then return end
     if self.container and type(unit) == "string" then pcall(function() self.container:SetUnit(unit) end) end
 end
 
@@ -1099,78 +1275,6 @@ function NativeBackend:teardown()
     self.slotButtons = nil   -- buttons die with the container; consumers re-fetch per drive
 end
 
--- FakeBackend — test-mode / preview. Produces PLAIN Frame slots (not AuraButtons) so
--- styleButton_regions renders them identically to live, and PUSHES fake data (a plain
--- frame has no native setters). isNativeSlots = false. Used when test mode is active,
--- because a real CustomAuraContainer reads REAL unit auras and shows nothing on a
--- fabricated test unit. (PTR-4's EditMode data-provider is the eventual pixel-accurate
--- replacement; until then this is the preview bridge.)
-local FAKE_HELPFUL = { 774, 139, 17, 1459, 21562, 33763 }
-local FAKE_HARMFUL = { 589, 980, 348, 172, 30108, 27243 }
-
-local FakeBackend = {}
-FakeBackend.__index = FakeBackend
-
-function FakeBackend.new(handle)
-    return setmetatable({ handle = handle, slots = {} }, FakeBackend)
-end
-
-function FakeBackend:isNativeSlots() return false end
-
-function FakeBackend:build()
-    local handle = self.handle
-    local config = handle.config
-    self.slots = {}
-    local n = handle:_slotCount()
-    for i = 1, n do
-        local slot = CreateFrame("Frame", nil, handle.frame)
-        if config.mode == "overlay" then slot:SetAllPoints(handle.frame) end
-        local ok, err = pcall(function() handle:_acceptSlot(slot, i) end)  -- regions only; NO native bind
-        if not ok then DF:DebugWarn(DBG, "fake slot %d failed: %s", i, tostring(err)) end
-        self.slots[i] = slot
-    end
-    handle:_layoutSlots()
-    self:_fill()
-    self:setEnabled(config.enabled ~= false)   -- honour disabled state (mirror Custom's SetEnabled)
-    DF:Debug(DBG, "built (fake) unit=%s mode=%s slots=%d", tostring(config.unit), tostring(config.mode or "row"), n)
-end
-
--- Push representative fake data so styling previews as it will live. The cooldown swipe
--- animates itself off SetCooldown; other regions get static preview values.
-function FakeBackend:_fill()
-    local config = self.handle.config
-    if config.mode == "overlay" then return end   -- overlay shows tint/border via regions; no icon data
-    local harmful = false
-    for _, rec in ipairs(normalizeFilters(config.filter)) do
-        if rec.f:find("HARMFUL") then harmful = true; break end
-    end
-    local pool = harmful and FAKE_HARMFUL or FAKE_HELPFUL
-    local staticID = config.style and config.style.icon and config.style.icon.staticSpellID
-    for i, slot in ipairs(self.slots) do
-        if slot.dfIcon and not staticID and C_Spell and C_Spell.GetSpellTexture then
-            local tex = C_Spell.GetSpellTexture(pool[((i - 1) % #pool) + 1])
-            if tex then slot.dfIcon:SetTexture(tex) end
-        end
-        if slot.dfCD and slot.dfCD.SetCooldown then
-            slot.dfCD:SetCooldown(GetTime() - ((i * 3) % 18), 18)   -- self-animating fake swipe
-        end
-        if slot.dfStack then slot.dfStack:SetText(i > 1 and tostring(i) or "") end
-        if slot.dfDur then slot.dfDur:SetText("12") end
-        if slot.dfBar then slot.dfBar:SetMinMaxValues(0, 1); slot.dfBar:SetValue(0.65) end
-    end
-end
-
-function FakeBackend:setUnit(unit) end   -- fake data is unit-independent
-function FakeBackend:setEnabled(on)
-    on = on and true or false
-    for _, slot in ipairs(self.slots) do slot:SetShown(on) end
-end
-function FakeBackend:refresh() self:_fill() end
-function FakeBackend:teardown()
-    for _, slot in ipairs(self.slots) do slot:Hide() end
-    self.slots = {}
-end
-
 local Handle = {}
 Handle.__index = Handle
 
@@ -1181,7 +1285,13 @@ function Handle:_getConfig() return self.config end
 function Handle:_getAnchorFrame() return self.frame end
 function Handle:_slotCount()
     local mode = self.config.mode
-    return (mode == "overlay" or mode == "missing") and 1 or (self.config.max or 1)
+    if mode == "overlay" or mode == "missing" then return 1 end
+    -- Test mode: the preview honours the test panel's count slider (config.testMax),
+    -- still capped by the row's own max — mirrors the legacy painter's min() chain.
+    if AuraContainer._testMode and self.config.testMax then
+        return math.min(self.config.testMax, self.config.max or self.config.testMax)
+    end
+    return self.config.max or 1
 end
 function Handle:_acceptSlot(slot, index)
     self.buttons[index] = slot                 -- cache first (mirror of the pre-split order)
@@ -1190,11 +1300,269 @@ end
 function Handle:_bindNativeSlot(slot)
     bindNative(slot, self.config)              -- native setters (native slots only)
 end
+-- Countdown text for the test preview. The row's OWN duration formatter renders
+-- it whenever one is configured — the same object the live native binding uses —
+-- so format (Number/Short/Full), the colour-by-time buckets (|cff escapes) and
+-- the hide-above-threshold blank band all mirror live exactly. Plain fallback
+-- ("14s"/"10m") only when the row runs Blizzard's default formatting.
+local function formatTestDuration(handle, rem)
+    local durSpec = handle.config.style and handle.config.style.duration
+    local f = durSpec and durSpec.formatter
+    if f then
+        local ok, s
+        if f.FormatNumber then ok, s = pcall(f.FormatNumber, f, rem)
+        elseif f.Format then ok, s = pcall(f.Format, f, rem) end
+        if ok and type(s) == "string" then return s end
+    end
+    if rem >= 60 then return math.floor(rem / 60 + 0.5) .. "m" end
+    local s = math.ceil(rem)
+    return s > 0 and (s .. "s") or ""
+end
+
+-- TEST MODE paint (P5 hybrid): push DF's curated preview data onto the regions
+-- styleButton_regions just built — the SAME regions the native binds would drive
+-- live, so the preview is styling-true (borders, fonts, insets, swipe). Harmful
+-- rows page through the debuff pool (dispel-typed edges), everything else the
+-- buff pool. Regions are unbound in test mode, so their Shown state is OURS here.
+function Handle:_paintTestSlot(slot, index)
+    local recs = normalizeFilters(self.config.filter)
+    local harmful = recs[1] and recs[1].f:find("HARMFUL")
+    local td = DF.TestData
+    -- config.testPool names a curated TestData pool for rows whose category
+    -- filter alone would mispreview (the defensive row is HELPFUL but must show
+    -- defensives, not raid buffs). Falls back to the category pools.
+    local pool = td and ((self.config.testPool and td[self.config.testPool])
+        or (harmful and td.debuffs or td.buffs))
+    if not pool or #pool == 0 then return end
+    local e = pool[((index - 1) % #pool) + 1]
+    -- Belt-and-braces: native hover must NEVER win in test mode (it tooltips the
+    -- hidden SAMPLE aura). Re-asserted every paint pass, not just at creation.
+    if slot.SetMouseMotionEnabled then pcall(function() slot:SetMouseMotionEnabled(false) end) end
+
+    -- Validate the entry's spell ID up front (FAIL-CLOSED: kept only when the
+    -- game POSITIVELY confirms the name) — it drives BOTH the icon and the
+    -- tooltip below, so they can never disagree. Stale ID? Try resolving by
+    -- NAME (cached per entry; the name-equality gate rejects override results).
+    local sid
+    if e.spellID and C_Spell and C_Spell.GetSpellName then
+        local ok, nm = pcall(C_Spell.GetSpellName, e.spellID)
+        if ok and nm == e.name then sid = e.spellID end
+    end
+    if not sid and C_Spell and C_Spell.GetSpellInfo and e._resolvedID ~= false then
+        if e._resolvedID then
+            sid = e._resolvedID
+        else
+            local ok, info = pcall(C_Spell.GetSpellInfo, e.name)
+            if ok and type(info) == "table" and info.spellID and info.name == e.name then
+                e._resolvedID = info.spellID
+                sid = info.spellID
+            else
+                e._resolvedID = false   -- don't retry every paint
+            end
+        end
+    end
+
+    -- Adopt the player's SPEC OVERRIDE wholesale (Krathe's call): the preview
+    -- shows the spell as this spec knows it — icon, name and tooltip move
+    -- TOGETHER (a 12.1 Holy priest previews Holy Fire, not Shadow Word: Pain).
+    -- GetSpellTexture resolves overrides anyway; resolving explicitly here keeps
+    -- all three surfaces on the same spell instead of a mixed identity.
+    local dispName = e.name
+    if sid and C_Spell.GetOverrideSpell then
+        local ok, oid = pcall(C_Spell.GetOverrideSpell, sid)
+        if ok and type(oid) == "number" and oid ~= 0 and oid ~= sid then
+            local ok2, onm = pcall(C_Spell.GetSpellName, oid)
+            if ok2 and type(onm) == "string" and onm ~= "" then
+                sid, dispName = oid, onm
+            end
+        end
+    end
+
+    local iconSpec = self.config.style and self.config.style.icon
+    if slot.dfIcon and not (iconSpec and iconSpec.staticSpellID) then
+        -- The GAME's icon for the validated spell (hand-maintained icon paths
+        -- drift from the real art); the entry's hardcoded icon is the fallback.
+        local tex = sid and C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(sid)
+        if tex or e.icon then slot.dfIcon:SetTexture(tex or e.icon) end
+    end
+    do
+        -- Live countdown: stagger per slot so the row doesn't tick in unison; the
+        -- shared test ticker (SetTestMode) counts the text down and loops timer +
+        -- swipe at zero. Permanent auras (duration 0) show no timer.
+        local d = e.duration or 0
+        if d > 0 then
+            local offset = (index * 3) % math.max(d - 1, 1)
+            slot._dfTestDur = d
+            slot._dfTestExpiry = GetTime() + (d - offset)
+            if slot.dfCD and slot.dfCD.SetCooldown then
+                slot.dfCD:SetCooldown(GetTime() - offset, d)
+            end
+            if slot.dfDur then slot.dfDur:SetText(formatTestDuration(self, d - offset)) end
+        else
+            slot._dfTestDur = nil
+            if slot.dfDur then slot.dfDur:SetText("") end
+        end
+    end
+    if slot.dfStack then slot.dfStack:SetText((e.stacks or 0) > 1 and tostring(e.stacks) or "") end
+    if slot.dfBar then slot.dfBar:SetMinMaxValues(0, 1); slot.dfBar:SetValue(0.65) end
+    if slot.dfName then slot.dfName:SetText(dispName or "") end
+    -- Dispel ring: no native SetAuraBorder bind in test mode -> tint + show it
+    -- ourselves from the game palette (the ring art/thickness were already styled).
+    if slot.dfAuraBorder then
+        local shown = false
+        if e.debuffType and AuraUtil and AuraUtil.GetAuraBorderColor then
+            shown = pcall(function()
+                local c = AuraUtil.GetAuraBorderColor(e.debuffType)
+                slot.dfAuraBorder:SetVertexColor(c:GetRGB())
+            end)
+        end
+        slot.dfAuraBorder:SetShown(shown and true or false)
+    end
+
+    -- Hover tooltip (parity with the legacy test icons), showing the curated
+    -- aura's name — the native tooltip path would show the hidden SAMPLE aura's
+    -- random data. The hover frames live in OUR subtree and are positioned from
+    -- OUR layout settings — NEVER from the button: a child created inside a
+    -- native button inherits its forbidden aspects (no scripts/hover), and
+    -- anchoring an insecure frame TO the button throws (both live-disproved;
+    -- the throw silently aborted this paint and took the ring tint with it).
+    -- LAST in the paint so any residual error can't take other art down.
+    -- Index-keyed + handle-owned: rebuilds reposition instead of leaking;
+    -- _teardownContainer hides the lot. Clicks pass through.
+    if self.config.tooltips == true then
+        self._testTips = self._testTips or {}
+        local tip = self._testTips[index]
+        if not tip then
+            tip = CreateFrame("Frame", nil, self.frame)
+            self._testTips[index] = tip
+            tip:EnableMouse(true)
+            if tip.SetMouseClickEnabled then tip:SetMouseClickEnabled(false) end
+            tip:SetScript("OnEnter", function(s)
+                if not GameTooltip then return end
+                GameTooltip:SetOwner(s, "ANCHOR_RIGHT")
+                -- Real spell tooltip when the pool entry carries a live spell ID.
+                -- dontOverride (arg 4) is LOAD-BEARING: without it the tooltip
+                -- resolves the player's SPEC OVERRIDE and renders a different
+                -- spell (live-caught on a 12.1 priest: SW:P drew Holy Fire, PW:S
+                -- drew Prayer of Mending — documented override behaviour, not a
+                -- bug; Krathe's catch). The rendered title is still ground-truth
+                -- checked; any residual mismatch falls back to the name tag.
+                local shown = false
+                if s._spellID and GameTooltip.SetSpellByID then
+                    shown = pcall(GameTooltip.SetSpellByID, GameTooltip, s._spellID, nil, nil, true)
+                    if shown then
+                        local title = GameTooltipTextLeft1 and GameTooltipTextLeft1:GetText()
+                        if GameTooltip:NumLines() == 0 or title ~= s._name then shown = false end
+                    end
+                end
+                if not shown and s._name then
+                    GameTooltip:SetOwner(s, "ANCHOR_RIGHT")   -- reset any wrong render
+                    GameTooltip:SetText(s._name, 1, 1, 1)
+                end
+                GameTooltip:Show()
+            end)
+            tip:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+        end
+        self:_positionTestTip(tip, index)
+        tip:SetFrameLevel(self.frame:GetFrameLevel() + 60)   -- above the buttons for hover
+        tip._name = dispName            -- override-resolved, matches the icon
+        tip._spellID = sid              -- validated + override-resolved up top
+        tip:Show()
+    elseif self._testTips and self._testTips[index] then
+        self._testTips[index]:Hide()
+    end
+end
+
+-- Shared 1s ticker driving the preview countdowns (test mode only; started and
+-- stopped by SetTestMode). Loops each timer + swipe at zero so the preview
+-- animates indefinitely. Buttons die with their containers, so stale state
+-- can't outlive a rebuild (handle.buttons is wiped on teardown).
+function AuraContainer._startTestTicker()
+    if AuraContainer._testTicker then return end
+    AuraContainer._testTicker = C_Timer.NewTicker(1, function()
+        local now = GetTime()
+        for h in pairs(AuraContainer._handles or {}) do
+            if not h._destroyed and h.buttons then
+                for _, b in ipairs(h.buttons) do
+                    if b._dfTestDur and b.dfDur then
+                        local rem = (b._dfTestExpiry or 0) - now
+                        if rem <= 0 then
+                            rem = b._dfTestDur
+                            b._dfTestExpiry = now + rem
+                            if b.dfCD and b.dfCD.SetCooldown then
+                                pcall(function() b.dfCD:SetCooldown(now, b._dfTestDur) end)
+                            end
+                        end
+                        b.dfDur:SetText(formatTestDuration(h, rem))
+                    end
+                end
+            end
+        end
+    end)
+end
+
+function AuraContainer._stopTestTicker()
+    if AuraContainer._testTicker then
+        AuraContainer._testTicker:Cancel()
+        AuraContainer._testTicker = nil
+    end
+end
+
+-- Place a test hover tip over button `index` from the layout SETTINGS (the same
+-- vocabulary applyContainerLayout translates onto the native flow, so the zones
+-- land on the rendered buttons; layoutRow is the reference math). Settings-derived
+-- by necessity — the buttons' own rects are off-limits to insecure anchors.
+function Handle:_positionTestTip(tip, index)
+    local L = self.config.layout or {}
+    local G = resolveGrowthLayout(L)
+    local sx, sy, spX, spY = G.sx, G.sy, G.spX, G.spY
+    local scale = tonumber(L.scale) or 1
+    local n = math.max(self:_slotCount(), 1)
+    -- Vertical-primary growth renders as a single column on the native flow.
+    local wrap = G.verticalPrimary and 1 or (tonumber(L.wrap) or 0)
+    if wrap < 1 then wrap = n end
+    local idx = index - 1
+    tip:SetSize(sx * scale, sy * scale)
+    tip:ClearAllPoints()
+    if G.center then
+        -- Mirror the centre-pinned box (resolveGrowthLayout): the box's
+        -- centre-of-edge sits at the user's anchor + pin offsets and fills from
+        -- its corner — anchor each tip by its CENTRE at the icon's rendered centre.
+        local x, y
+        if G.verticalPrimary then
+            -- Single centred column.
+            local colH = n * sy + (n - 1) * spY
+            x = (L.offsetX or 0) + (G.pinX + ((G.secondary == "LEFT") and -sx / 2 or sx / 2)) * scale
+            y = (L.offsetY or 0) + (G.pinY + colH / 2 - idx * (sy + spY) - sy / 2) * scale
+        else
+            local col = idx % wrap
+            local row = math.floor(idx / wrap)
+            local m = math.min(wrap, n)
+            local rowW = m * sx + (m - 1) * spX
+            local rowDir = (G.secondary == "UP") and 1 or -1
+            x = (L.offsetX or 0) + (G.pinX + col * (sx + spX) - rowW / 2 + sx / 2) * scale
+            y = (L.offsetY or 0) + (G.pinY + rowDir * (row * (sy + spY) + sy / 2)) * scale
+        end
+        tip:SetPoint("CENTER", self.frame, G.anchor, x, y)
+        return
+    end
+    -- Directional growth: replicate the flow from the anchor corner. The container
+    -- itself is scaled; in handle.frame space each step and the element size render
+    -- multiplied by scale. User offsets are container-anchor offsets in parent
+    -- space (unscaled).
+    local pAxis = AXIS[G.primary] or AXIS.RIGHT
+    local sAxis = AXIS[G.secondary] or AXIS.DOWN
+    local col = idx % wrap
+    local row = math.floor(idx / wrap)
+    local x = (L.offsetX or 0) + (pAxis.x * col + sAxis.x * row) * (sx + spX) * scale
+    local y = (L.offsetY or 0) + (pAxis.y * col + sAxis.y * row) * (sy + spY) * scale
+    tip:SetPoint(G.anchor, self.frame, G.anchor, x, y)
+end
 function Handle:_layoutSlots()
     -- NATIVE row mode = the container's own flow layout anchors the buttons (wired via
     -- applyContainerLayout at build; hot-applied via NativeBackend:applyLayout) — never
-    -- hand-anchor those (SetPoint would fight the secure flow layout). PLAIN slots (the
-    -- FakeBackend's test-mode rows, the future "slots" mode) hand-anchor via layoutRow.
+    -- hand-anchor those (SetPoint would fight the secure flow layout). PLAIN slots
+    -- (a future non-native "slots" mode) would hand-anchor via layoutRow.
     if self.config.mode == "overlay" then return end
     if self.backend and self.backend:isNativeSlots() then return end
     layoutRow(self)
@@ -1206,7 +1574,7 @@ end
 -- abort Blizzard's batch creation); the gen token drops a callback from a torn-down or
 -- rebuilt container; a running counter mirrors the old per-index slot id (batches append,
 -- so indices stay contiguous -- ipairs(self.buttons) in ApplyStyle/layoutRow still holds).
-function Handle:_makeInitializeFrame(gen)
+function Handle:_makeInitializeFrame(gen, fixedIndex)
     local handle = self
     return function(button)
         local ok, err = pcall(function()
@@ -1218,13 +1586,29 @@ function Handle:_makeInitializeFrame(gen)
             -- mouseover-healing). No SetCancelAuraButtons -- default is already no-cancel, and it
             -- takes a click-token string (a table errors).
             if button.SetMouseClickEnabled then button:SetMouseClickEnabled(false) end
-            if button.SetMouseMotionEnabled then button:SetMouseMotionEnabled(handle.config.tooltips == true) end
+            -- Tooltips stay OFF in test mode regardless of the setting: hover would
+            -- show the underlying SAMPLE aura's real tooltip (random spellbook data),
+            -- not the curated preview icon it appears to be.
+            if button.SetMouseMotionEnabled then
+                button:SetMouseMotionEnabled(handle.config.tooltips == true and not AuraContainer._testMode)
+            end
             -- MISSING mode: the button must render NOTHING — its only job is to occupy
             -- a layout cell so the container's width pushes the badge out of the clip
             -- window (probe 32). No regions, no native binds.
             if handle.config.mode ~= "missing" then
                 handle:_acceptSlot(button, i)      -- size + regions (source-agnostic)
-                handle:_bindNativeSlot(button)     -- native inbound setters
+                if AuraContainer._testMode then
+                    -- P5 hybrid preview: the sample provider drives presence and the
+                    -- real flow drives geometry, but the sample auras' own data is
+                    -- never shown — no native binds; paint the curated pool instead.
+                    -- fixedIndex = the per-slot test group's position (creation order
+                    -- is NOT layout order; the group key is) — stamped on the button
+                    -- so ApplyStyle repaints the same entry.
+                    button._dfTestIndex = fixedIndex or i
+                    handle:_paintTestSlot(button, button._dfTestIndex)
+                else
+                    handle:_bindNativeSlot(button)     -- native inbound setters
+                end
             end
         end)
         if not ok and not warnedRestyle then
@@ -1339,8 +1723,8 @@ function Handle:ApplyStyle(style, layout)
     end
     -- Row-mode buttons are anchored by the CONTAINER's secure flow layout -- SetPoint-ing
     -- them here would fight it (and touches secretwrapped anchor points). Geometry changes
-    -- hot-apply through the live SetAuraLayout*/SetAuraGroupLayout mutators instead; plain
-    -- (fake/slots) rows hand-anchor via layoutRow. styleButton_regions below still
+    -- hot-apply through the live SetAuraLayout*/SetAuraGroupLayout mutators instead; a
+    -- future non-native "slots" mode would hand-anchor via layoutRow. styleButton_regions below still
     -- re-applies per-button SIZE, which the flow layout reads.
     local native = self.backend and self.backend:isNativeSlots()
     if native then
@@ -1348,10 +1732,24 @@ function Handle:ApplyStyle(style, layout)
     elseif self.config.mode ~= "overlay" then
         layoutRow(self)
     end
-    for _, b in ipairs(self.buttons) do
+    for i, b in ipairs(self.buttons) do
         local ok, err = pcall(function()
             styleButton_regions(b, self.config)
-            if native then bindNative(b, self.config) end
+            if native then
+                if AuraContainer._testMode then
+                    -- TEST MODE: re-PAINT, never bind. Binding here was the P5
+                    -- preview killer: any settings refresh re-ran this loop and
+                    -- registered the native setters on the preview buttons, so
+                    -- Blizzard instantly overwrote the curated icons with the
+                    -- sample auras' random art and zero durations (static swipes)
+                    -- — until the next rebuild repainted them (Krathe 2026-07-10).
+                    -- _dfTestIndex = the button's per-slot group position (creation
+                    -- order ≠ layout order).
+                    self:_paintTestSlot(b, b._dfTestIndex or i)
+                else
+                    bindNative(b, self.config)
+                end
+            end
         end)
         if not ok and not warnedRestyle then
             warnedRestyle = true
@@ -1454,6 +1852,11 @@ function Handle:_teardownContainer()
     end
     wipe(self.buttons)
     self._slotCounter = 0   -- restart the lazy-batch index for the next build
+    -- Test-mode hover tips are handle-owned (anchored over the dying buttons):
+    -- hide the lot; a test build re-anchors/re-shows the ones it needs.
+    if self._testTips then
+        for _, t in pairs(self._testTips) do t:Hide() end
+    end
     -- MISSING mode: with no container the push geometry is gone — park the badge
     -- hidden on the window (never claim "missing" without a live container).
     if self.badge then
@@ -1553,20 +1956,31 @@ function Handle:_deferRebuild()
     self:_queueOp("rebuild")
 end
 
--- Build via the active backend. Only NativeBackend today (the 68569 container path). Test
--- mode goes native at P5.5 via SwitchAuraDataProvider (Blizzard's edit-mode fake data feeds
--- our real containers), which retires the old FakeBackend. The backend owns the container +
--- slot production; the handle owns styling/layout/lifecycle.
+-- Build via the (only) backend. Test mode uses the SAME native containers — the
+-- sample data provider feeds them and initializeFrame paints the curated preview
+-- (see AuraContainer.SetTestMode). The backend owns the container + slot
+-- production; the handle owns styling/layout/lifecycle.
 function Handle:_build()
     self.backend = NativeBackend.new(self)
     self.backend:build()
     self:_updateDynRefresh()   -- auto-bounce on target/focus/mouseover change
 end
 
--- Test mode toggled -> rebuild onto the other backend (fake <-> custom). Combat-guarded
--- via _rebuild. Called by AuraContainer.SetTestMode for every live handle.
+-- Test mode toggled -> rebuild (the build reads AuraContainer._testMode: test
+-- transforms the filters/unit and swaps native binds for the curated paint).
+-- Combat-guarded via _rebuild. Called by AuraContainer.SetTestMode per handle.
 function Handle:OnTestModeChanged()
     self:_rebuild()
+end
+
+-- TEST MODE row cap (the test panel's Buffs/Debuffs count sliders). Structural —
+-- maxFrameCount is declared at AddAuraGroup — so a change while the preview is
+-- live rebuilds; outside test mode it's just recorded for the next enter.
+function Handle:SetTestMax(n)
+    n = tonumber(n)
+    if self.config.testMax == n then return end
+    self.config.testMax = n
+    if AuraContainer._testMode then self:_rebuild() end
 end
 
 -- ============================================================
