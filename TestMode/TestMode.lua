@@ -3909,16 +3909,20 @@ end
 -- ============================================================
 
 function DF:UpdateAllTestAuraDesigner()
-    local ADEngine = DF.AuraDesigner and DF.AuraDesigner.Engine
-    if not ADEngine then return end
+    local Factory = DF.AuraDesigner and DF.AuraDesigner.Factory
+    if not Factory then return end
 
+    -- 12.1: preview through the REAL factory containers (P6 hybrid). The test
+    -- provider bounce supplies presence, the shared test paint puts each placed
+    -- indicator's OWN configured spell on it (config.testEntries), and frame
+    -- effects (health bar / background / border winners) apply exactly as live.
     local function UpdateFrame(frame)
         if not frame or not frame:IsShown() then return end
         local db = DF:GetFrameDB(frame)
         if db and db.testShowAuraDesigner and DF:IsAuraDesignerEnabled(frame) then
-            ADEngine:UpdateTestFrame(frame)
+            Factory:SyncFrame(frame)
         else
-            ADEngine:ClearFrame(frame)
+            Factory:ClearFrame(frame)
         end
     end
 

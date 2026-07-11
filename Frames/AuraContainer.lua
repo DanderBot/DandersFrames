@@ -1328,11 +1328,14 @@ function Handle:_paintTestSlot(slot, index)
     local recs = normalizeFilters(self.config.filter)
     local harmful = recs[1] and recs[1].f:find("HARMFUL")
     local td = DF.TestData
+    -- config.testEntries carries per-container curated entries (the Aura
+    -- Designer's placed indicators preview their own configured spell);
     -- config.testPool names a curated TestData pool for rows whose category
     -- filter alone would mispreview (the defensive row is HELPFUL but must show
     -- defensives, not raid buffs). Falls back to the category pools.
-    local pool = td and ((self.config.testPool and td[self.config.testPool])
-        or (harmful and td.debuffs or td.buffs))
+    local pool = self.config.testEntries
+        or (td and ((self.config.testPool and td[self.config.testPool])
+        or (harmful and td.debuffs or td.buffs)))
     if not pool or #pool == 0 then return end
     local e = pool[((index - 1) % #pool) + 1]
     -- Belt-and-braces: native hover must NEVER win in test mode (it tooltips the

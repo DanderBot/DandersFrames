@@ -9,6 +9,7 @@
 DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally changed how the game handles auras. This build runs on 12.1 only — 12.0.x stays on 4.7. Every aura row — buffs, debuffs, defensives and missing buffs — now renders through the game's new protected aura engine.
 
 * (Tooltips) **The aura tooltip Enable toggles now apply immediately on the 12.1 aura rows** — turning Buff / Debuff / Defensive Icon tooltips on or off used to do nothing until the next unrelated settings change. The remaining tooltip options can't apply to aura icons on 12.1 and are marked in place: the game draws its aura tooltip at a fixed spot beside the icon with no addon hook (Anchor / Offset), and the icon's mouse state is protected during combat so hover can't be dropped per-combat (Disable in Combat). All of these keep working for Frame and Binding tooltips, which aren't aura-driven.
+* (Aura Designer) **Test mode previews the Aura Designer through the real 12.1 engine** — each placed indicator renders in its actual container wearing its own configured spell's icon, name and tooltip identity, with live-true position, borders, animations and fonts; frame effects (health-bar colour, background, frame border) apply exactly as they do live. The old hand-painted preview is gone, and preview sounds are no longer registered with the game while test mode is open.
 * (Auras) **Out-of-range and dead-unit fading works on the 12.1 aura displays again** — buff/debuff rows, defensive icons and the missing-buff strip now dim as one when the unit is out of range (with your configured out-of-range alphas), live and in test mode. This was a known gap since the rework.
 * (Aura Designer) The spell picker shows one unified grid — the separate "Inferred Tracking" section (and its cast-tracking caveats) is gone. On 12.1 every tracked aura works the same way, driven by the game's native spell-ID matching, so the whitelisted/inferred distinction no longer exists.
 * (Interface) The deprecated My Buff Indicators feature (hidden from the UI and force-disabled since 4.0.12) has been fully removed. Its successors — the missing-buff display and the Aura Designer — cover its use cases on the new aura engine.
@@ -51,7 +52,7 @@ DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally chan
 * Boss debuffs (private auras included) always show in the debuff row on 12.1 and can't be turned off — the game provides no way to exclude them.
 * Aura tooltips on 12.1 are drawn by the game beside the icon — tooltip Anchor/Offset and Disable in Combat can't apply to the new aura rows (game limitation).
 * Dispel Overlay: "Color Name Text" is not yet wired to the new overlay (marked in place). A unit with dispellable debuffs of two different types can show both type icons overlapped (rare).
-* The Aura Designer's own live preview still uses the pre-12.1 renderer; a native preview is planned.
+* The Aura Designer's EDITOR preview panes (inside the designer window) still use the pre-12.1 renderer; a native version is planned. The test-mode preview on the frames is already native.
 * Aura Designer text colouring is drawn as a cover over the text: it ignores the out-of-range text fade, and group parts with their own inline colours keep them.
 * Dragging certain aura sliders can briefly stutter.
 

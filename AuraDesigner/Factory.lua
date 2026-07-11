@@ -669,6 +669,25 @@ end
 -- Full row config for one placed indicator (max=1 single-slot container). frameLevelOffset
 -- 40 = the buff-icon level (above the frame's content overlay) so placed AD indicators read
 -- on top, nudged by the indicator's own frameLevel; z-order polish is a P4.7 concern.
+-- Test-preview entry for a placed container: the indicator previews its OWN
+-- configured spell (icon/name/tooltip resolved from the live spell ID by the
+-- shared test paint). Built at config time -- one tiny table per container.
+local function testEntryForMap(map)
+    local id = map and next(map)
+    if not id then return nil end
+    local name
+    if C_Spell and C_Spell.GetSpellName then
+        local ok, nm = pcall(C_Spell.GetSpellName, id)
+        if ok then name = nm end
+    end
+    local icon
+    if C_Spell and C_Spell.GetSpellTexture then
+        local ok, tex = pcall(C_Spell.GetSpellTexture, id)
+        if ok then icon = tex end
+    end
+    return { { spellID = id, name = name, icon = icon, duration = 12, stacks = 0 } }
+end
+
 local function buildPlacedConfig(unit, map, indicator, isSquare, borderSpec)
     return {
         unit = unit,
@@ -676,6 +695,7 @@ local function buildPlacedConfig(unit, map, indicator, isSquare, borderSpec)
         max = 1,
         filter = "HELPFUL",
         candidateFilters = { includeSpellIDs = map },
+        testEntries = testEntryForMap(map),
         enabled = true,
         tooltips = false,
         -- adBorderAnim: opt this ROW container into the DF-owned border animations (edge-alpha
@@ -857,6 +877,7 @@ local function buildBarConfig(frame, unit, map, indicator, borderSpec)
         max = 1,
         filter = "HELPFUL",
         candidateFilters = { includeSpellIDs = map },
+        testEntries = testEntryForMap(map),
         enabled = true,
         tooltips = false,
         adBorderAnim = true,   -- opt into DF-owned border animations (see buildPlacedConfig)
@@ -1781,7 +1802,10 @@ function Factory:SyncFrame(frame)
     -- ---- SOUND (native on-apply registrations) --------------------------------------
     -- Reconcile C_UnitAuras.AddAuraAppliedSound registrations to the sound-indicator config
     -- (combat-deferred inside SyncSound). NOT a container — its own OOC/regen discipline.
-    self:SyncSound(frame)
+    -- Skipped in test mode: previews must not register real on-apply sounds.
+    if not (DF.testMode or DF.raidTestMode) then
+        self:SyncSound(frame)
+    end
 
     -- framealpha / nametext / healthtext: intentionally NOT synced. No read-free,
     -- combat-safe port exists (see file-foot notes) — their GUI controls get the
