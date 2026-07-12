@@ -438,14 +438,17 @@ local function excludeSig(cf)
 end
 
 -- Include-map counterpart (filter-registry selection resolved to includeSpellIDs) —
--- same structural rule: the row signature must move when the set does.
+-- same structural rule: the row signature must move when the set does. Presence-marked
+-- ("I:" prefix) so an EMPTY-but-present include map (include-nothing, e.g. the only
+-- selected custom filter has zero spells) still differs from no map at all — the
+-- all -> include-nothing transition must Rebuild.
 local function includeSig(cf)
     local m = cf and cf.includeSpellIDs
     if not m then return "" end
     local ids = {}
     for id in pairs(m) do ids[#ids + 1] = id end
     table.sort(ids)
-    return table.concat(ids, ",")
+    return "I:" .. table.concat(ids, ",")
 end
 
 -- Map a prefixed aura-row setting block (buff*/debuff*) -> DF.AuraContainer config.
