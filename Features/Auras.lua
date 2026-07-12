@@ -54,38 +54,11 @@ local cachedRaidDebuffFilters = nil
 local cachedDefensiveFilters = nil   -- mode-independent
 local cachedDispelFilter = nil       -- mode-independent (single string, no OR needed)
 
--- Build individual filter strings for buffs (OR logic via post-classification)
--- Returns nil (show all) or table of "HELPFUL|CLASSIFICATION" strings
+-- Build the filter string for buffs. One native group: category selection is
+-- expressed via candidateFilters spell-ID maps (see BuildAuraRowConfig), so the
+-- filterString only carries HELPFUL + Only Mine.
 local function BuildDirectBuffFilters(db)
-    local onlyMine = db.directBuffOnlyMine
-    local playerSuffix = onlyMine and "|PLAYER" or ""
-
-    if db.directBuffShowAll then
-        return onlyMine and {"HELPFUL|PLAYER"} or nil
-    end
-
-    local filters = {}
-    if db.directBuffFilterRaid then filters[#filters + 1] = "HELPFUL|RAID" .. playerSuffix end
-    if db.directBuffFilterRaidInCombat and AuraFilters.RaidInCombat then
-        filters[#filters + 1] = "HELPFUL|" .. AuraFilters.RaidInCombat .. playerSuffix
-    end
-    if db.directBuffFilterCancelable then filters[#filters + 1] = "HELPFUL|CANCELABLE" .. playerSuffix end
-    -- 12.1 (68569) removed the NOT_CANCELABLE token; the "!" negation prefix replaces it, and
-    -- AddAuraGroup asserts IsValidFilterString so the old token would hard-error. This branch
-    -- is 12.1-only (TOC 120100), so !CANCELABLE is unconditional (12.0.7 lacks "!" — Krathe's
-    -- live fix is build-gated).
-    if db.directBuffFilterNotCancelable then filters[#filters + 1] = "HELPFUL|!CANCELABLE" .. playerSuffix end
-    if db.directBuffFilterBigDefensive and AuraFilters.BigDefensive then
-        filters[#filters + 1] = "HELPFUL|" .. AuraFilters.BigDefensive .. playerSuffix
-    end
-    if db.directBuffFilterExternalDefensive and AuraFilters.ExternalDefensive then
-        filters[#filters + 1] = "HELPFUL|" .. AuraFilters.ExternalDefensive .. playerSuffix
-    end
-    -- No sub-filters selected: show all mine or show all
-    if #filters == 0 then
-        return onlyMine and {"HELPFUL|PLAYER"} or nil
-    end
-    return filters
+    return { db.directBuffOnlyMine and "HELPFUL|PLAYER" or "HELPFUL" }
 end
 
 -- Build individual filter strings for debuffs (OR logic via post-classification)
@@ -464,6 +437,17 @@ local function excludeSig(cf)
     return table.concat(ids, ",")
 end
 
+-- Include-map counterpart (filter-registry selection resolved to includeSpellIDs) —
+-- same structural rule: the row signature must move when the set does.
+local function includeSig(cf)
+    local m = cf and cf.includeSpellIDs
+    if not m then return "" end
+    local ids = {}
+    for id in pairs(m) do ids[#ids + 1] = id end
+    table.sort(ids)
+    return table.concat(ids, ",")
+end
+
 -- Map a prefixed aura-row setting block (buff*/debuff*) -> DF.AuraContainer config.
 -- prefix = "buff" (debuff reuses this later). opts.filterList is the PRE-BUILT native
 -- filter list (buffs: BuildDirectBuffFilters); opts.unit is the initial unit token.
@@ -549,6 +533,28 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
                 candidateFilters.excludeSpellIDs = map
                 for id in pairs(adIDs) do map[id] = true end
             end
+        end
+        -- FILTER REGISTRY: fold the category selection into this group's spec.
+        -- include-mode (categories selected) subtracts the exclude union above so
+        -- blacklist / dedup / missing-buff still win inside one map; exclude-mode
+        -- (Uncategorised on) unions the known-but-unselected set into it. "all"
+        -- (Show All / empty selection) leaves the exclude union untouched — the
+        -- pre-registry behavior, byte-for-byte.
+        local res = DF.FilterRegistry:ResolveSelection(db.buffFilterSelection, db.directBuffShowAll)
+        if res.kind == "include" then
+            local inc = {}
+            local excl = candidateFilters and candidateFilters.excludeSpellIDs
+            for id in pairs(res.map) do
+                if not (excl and excl[id]) then inc[id] = true end
+            end
+            candidateFilters = candidateFilters or {}
+            candidateFilters.includeSpellIDs = inc
+            candidateFilters.excludeSpellIDs = nil  -- redundant after subtraction
+        elseif res.kind == "exclude" then
+            candidateFilters = candidateFilters or {}
+            local excl = candidateFilters.excludeSpellIDs or {}
+            for id in pairs(res.map) do excl[id] = true end
+            candidateFilters.excludeSpellIDs = excl
         end
     end
 
@@ -649,6 +655,7 @@ local function buffFactorySig(cfg)
         tostring(s.stacks and s.stacks.formatKey),
         tostring(s.border ~= nil), tostring(s.cooldown and s.cooldown.show ~= false),
         excludeSig(cfg.candidateFilters),   -- blacklist set (structural: declared at AddAuraGroup)
+        includeSig(cfg.candidateFilters),   -- filter-registry include set (structural, same rule)
         tostring(cfg.candidateFilters and cfg.candidateFilters.maxDuration),  -- max-duration filter (structural)
         tostring(cfg.sort and cfg.sort.method),                               -- native sort (declared at AddAuraGroup)
         tostring(s.dispel ~= nil),          -- native dispel border (region is create-once -> Rebuild)
