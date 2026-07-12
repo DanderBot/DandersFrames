@@ -5375,16 +5375,19 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end
 
         -- Copy button at top. buffFilterSelection is an exact-key entry: the
-        -- registry matcher is a plain string-prefix test (CopySectionSettings /
-        -- ResetSectionSettings in Profile.lua), and a full key is just a prefix
-        -- that matches only itself. The selection table is DeepCopy'd by the
+        -- registry matcher is a string-prefix test with longest-match-wins
+        -- ownership (DF:SectionOwnsKey in Profile.lua), and a full key is just
+        -- a prefix that matches only itself. Longest-match means this page's
+        -- "debuffFilter" / "debuffMaxDuration" / "buffMaxDuration" entries
+        -- take those keys away from the Buffs/Debuffs layout pages' broad
+        -- "buff"/"debuff" prefixes. The selection table is DeepCopy'd by the
         -- copy path, so the modes never alias one table.
         -- defensiveFilterSelection deliberately does NOT appear here: the
         -- Defensive Icon page owns that key (its own registration includes
         -- it), and listing it on both pages made this page's section
         -- reset/copy silently touch another page's setting.
         -- debuffFilter/debuffMaxDuration carry the 12.1 debuff category keys.
-        Add(CreateCopyButton(self.child, {"directBuff", "directDebuff", "buffFilterSelection", "debuffFilter", "debuffMaxDuration"}, L["Aura Filters"], "auras_filters"), 25, 2)
+        Add(CreateCopyButton(self.child, {"directBuff", "directDebuff", "buffFilterSelection", "debuffFilter", "debuffMaxDuration", "buffMaxDuration"}, L["Aura Filters"], "auras_filters"), 25, 2)
 
         -- ===== INFO BANNER =====
         -- Explains that Aura Filters only affect buff/debuff bars, with inline

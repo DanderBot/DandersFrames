@@ -47,6 +47,41 @@ function DF:CopyProfile(srcMode, destMode)
     print("|cff00ff00DandersFrames:|r " .. format(L["Copied settings from %s to %s."], s, d))
 end
 
+-- ============================================================
+-- SECTION KEY OWNERSHIP (longest-match-wins)
+-- Shared matcher for section Copy/Reset/Sync. A db key can string-match
+-- prefixes registered by several pages (e.g. "debuffFilterBoss" matches the
+-- Debuffs layout page's "debuff" AND the Aura Filters page's "debuffFilter").
+-- Ownership goes to the page holding the LONGEST matching prefix across the
+-- whole SectionRegistry, so overlapping registrations don't copy/reset each
+-- other's keys. Two pages registering the IDENTICAL prefix would tie — that's
+-- a registration bug; in a tie both pages keep the key (legacy behaviour).
+-- ============================================================
+
+-- Returns true if `key` belongs to the section registered with `prefixes`.
+function DF:SectionOwnsKey(prefixes, key)
+    -- Longest matching prefix within this section
+    local own = 0
+    for _, prefix in ipairs(prefixes) do
+        if #prefix > own and key:sub(1, #prefix) == prefix then
+            own = #prefix
+        end
+    end
+    if own == 0 then return false end
+
+    -- Any registered section with a STRICTLY longer matching prefix wins
+    -- instead. (Scanning this section's own registry entry is harmless: its
+    -- matches can never exceed `own`.)
+    for _, otherPrefixes in pairs(DF.SectionRegistry or {}) do
+        for _, prefix in ipairs(otherPrefixes) do
+            if #prefix > own and key:sub(1, #prefix) == prefix then
+                return false
+            end
+        end
+    end
+    return true
+end
+
 -- Copies matching settings between Party and Raid (no refresh, no print)
 -- Used by SyncLinkedSections for automatic background syncing
 function DF:CopySectionSettingsRaw(prefixes, srcMode)
@@ -61,14 +96,11 @@ function DF:CopySectionSettingsRaw(prefixes, srcMode)
     if mt and mt.__realTable then src = mt.__realTable end
 
     for key, value in pairs(src) do
-        for _, prefix in ipairs(prefixes) do
-            if key:sub(1, #prefix) == prefix then
-                if type(value) == "table" then
-                    DF.db[destMode][key] = DF:DeepCopy(value)
-                else
-                    DF.db[destMode][key] = value
-                end
-                break
+        if DF:SectionOwnsKey(prefixes, key) then
+            if type(value) == "table" then
+                DF.db[destMode][key] = DF:DeepCopy(value)
+            else
+                DF.db[destMode][key] = value
             end
         end
     end
@@ -94,17 +126,14 @@ function DF:CopySectionSettings(prefixes, srcMode)
 
     local count = 0
     for key, value in pairs(src) do
-        for _, prefix in ipairs(prefixes) do
-            if key:sub(1, #prefix) == prefix then
-                -- Deep copy if table, otherwise direct assign
-                if type(value) == "table" then
-                    DF.db[destMode][key] = DF:DeepCopy(value)
-                else
-                    DF.db[destMode][key] = value
-                end
-                count = count + 1
-                break
+        if DF:SectionOwnsKey(prefixes, key) then
+            -- Deep copy if table, otherwise direct assign
+            if type(value) == "table" then
+                DF.db[destMode][key] = DF:DeepCopy(value)
+            else
+                DF.db[destMode][key] = value
             end
+            count = count + 1
         end
     end
 
@@ -144,21 +173,18 @@ function DF:ResetSectionSettings(prefixes, mode)
     for key in pairs(src) do keys[#keys + 1] = key end
 
     for _, key in ipairs(keys) do
-        for _, prefix in ipairs(prefixes) do
-            if key:sub(1, #prefix) == prefix then
-                local defaultVal = defaults[key]
-                if defaultVal == nil then
-                    -- Key has no default; clear it so the migration system can
-                    -- backfill cleanly on next load.
-                    DF.db[mode][key] = nil
-                elseif type(defaultVal) == "table" then
-                    DF.db[mode][key] = DF:DeepCopy(defaultVal)
-                else
-                    DF.db[mode][key] = defaultVal
-                end
-                count = count + 1
-                break
+        if DF:SectionOwnsKey(prefixes, key) then
+            local defaultVal = defaults[key]
+            if defaultVal == nil then
+                -- Key has no default; clear it so the migration system can
+                -- backfill cleanly on next load.
+                DF.db[mode][key] = nil
+            elseif type(defaultVal) == "table" then
+                DF.db[mode][key] = DF:DeepCopy(defaultVal)
+            else
+                DF.db[mode][key] = defaultVal
             end
+            count = count + 1
         end
     end
 
