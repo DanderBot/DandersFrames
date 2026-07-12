@@ -48,9 +48,7 @@ local AuraFilters = AuraUtil and AuraUtil.AuraFilters or {}
 -- Each is nil (show all / unavailable) or a table of individual filter strings
 -- e.g. {"HELPFUL|PLAYER", "HELPFUL|RAID", "HELPFUL|BIG_DEFENSIVE"}
 local cachedPartyBuffFilters = nil
-local cachedPartyDebuffFilters = nil
 local cachedRaidBuffFilters = nil
-local cachedRaidDebuffFilters = nil
 local cachedDefensiveFilters = nil   -- mode-independent
 local cachedDispelFilter = nil       -- mode-independent (single string, no OR needed)
 
@@ -61,24 +59,86 @@ local function BuildDirectBuffFilters(db)
     return { db.directBuffOnlyMine and "HELPFUL|PLAYER" or "HELPFUL" }
 end
 
--- Build individual filter strings for debuffs (OR logic via post-classification)
--- Returns nil (show all) or table of "HARMFUL|CLASSIFICATION" strings
+-- Blizzard's AuraUtil.DispellableDebuffTypes verbatim — the map form of the
+-- Dispellable filter in "ALL" mode. Shared READ-ONLY by reference: Blizzard
+-- reads it from candidateFilters, we never mutate it (each record's cf table
+-- itself is per-record; only this inner map is shared).
+local DISPEL_TYPES = { Magic = true, Curse = true, Disease = true, Poison = true, Bleed = true }
+
+-- Build the debuff filter records (native 12.1 category filters).
+-- Returns nil (show all) or an array of records { filter, key, candidateFilters }
+-- — the record form normalizeFilters accepts; each record becomes one container
+-- group behind the single visual debuff row.
+--
+-- Dedup at build time (token ownership order: dispel > cc > raid): a group's
+-- filterString appends "|!TOKEN" for every enabled token-backed filter with
+-- higher priority than itself; the boolean-backed groups (bossrole, priority)
+-- negate ALL enabled token filters. Dispellable in "ALL" mode has no token —
+-- it dedups by merging excludeDispelTypes into every OTHER record instead
+-- (same ownership outcome: the dispel group owns the overlap). A record never
+-- negates its own token. Priority×Boss/Role overlap is accepted (bools can't
+-- be negated).
 local function BuildDirectDebuffFilters(db)
     if db.directDebuffShowAll then return nil end
+    local dispelOn = db.debuffFilterDispellable
+    local playerMode = dispelOn and db.directDebuffDispellableMode ~= "ALL"
+    -- CC needs its Blizzard token; skip the group entirely if unavailable
+    local ccToken = db.debuffFilterCrowdControl and AuraFilters.CrowdControl or nil
+    local raidOn = db.debuffFilterRaid
+    local dispelToken = AuraFilters.RaidPlayerDispellable or "RAID_PLAYER_DISPELLABLE"
+    local maxDur = db.debuffMaxDurationEnabled and (db.debuffMaxDurationMinutes or 5) * 60 or nil
+    local keepImportant = db.debuffMaxDurationKeepImportant
+
+    -- Negation suffix for a group, given which higher-priority token filters
+    -- apply to it. ALL-mode dispel dedups via excludeDispelTypes (see cfFor).
+    local function neg(excludeDispel, excludeCC, excludeRaid)
+        local s = ""
+        if excludeDispel and playerMode then s = s .. "|!" .. dispelToken end
+        if excludeCC and ccToken then s = s .. "|!" .. ccToken end
+        if excludeRaid and raidOn then s = s .. "|!RAID" end
+        return s
+    end
+    -- candidateFilters for one record. Hands each record its OWN table (extra
+    -- is per-record); important groups (bossrole/priority) are exempt from
+    -- maxDuration when Keep Important is on.
+    local function cfFor(important, extra)
+        local cf = extra or {}
+        if dispelOn and not playerMode then cf.excludeDispelTypes = DISPEL_TYPES end
+        if maxDur and not (important and keepImportant) then cf.maxDuration = maxDur end
+        if next(cf) == nil then return nil end
+        return cf
+    end
+
     local filters = {}
-    if db.directDebuffFilterRaid then filters[#filters + 1] = "HARMFUL|RAID" end
-    if db.directDebuffFilterRaidInCombat and AuraFilters.RaidInCombat then
-        filters[#filters + 1] = "HARMFUL|" .. AuraFilters.RaidInCombat
+    local boss, role = db.debuffFilterBoss, db.debuffFilterRole
+    if boss or role then
+        local flag = (boss and role) and "isBossOrRoleAura" or (boss and "isBossAura" or "isRoleAura")
+        filters[#filters + 1] = { filter = "HARMFUL" .. neg(true, true, true), key = "bossrole",
+                                  candidateFilters = cfFor(true, { [flag] = true }) }
     end
-    if db.directDebuffFilterCrowdControl and AuraFilters.CrowdControl then
-        filters[#filters + 1] = "HARMFUL|" .. AuraFilters.CrowdControl
+    if db.debuffFilterPriority then
+        filters[#filters + 1] = { filter = "HARMFUL" .. neg(true, true, true), key = "priority",
+                                  candidateFilters = cfFor(true, { isPriorityAura = true }) }
     end
-    if db.directDebuffDispellableMode == "PLAYER" then
-        filters[#filters + 1] = "HARMFUL|" .. (AuraFilters.RaidPlayerDispellable or "RAID_PLAYER_DISPELLABLE")
+    if ccToken then
+        filters[#filters + 1] = { filter = "HARMFUL|" .. ccToken .. neg(true, false, false),
+                                  key = "cc", candidateFilters = cfFor(false) }
     end
-    -- Note: directDebuffDispellableMode == "ALL" has no Blizzard filter constant —
-    -- No sub-filters selected = show all (backward compat)
-    if #filters == 0 then return nil end
+    if raidOn then
+        filters[#filters + 1] = { filter = "HARMFUL|RAID" .. neg(true, true, false),
+                                  key = "raid", candidateFilters = cfFor(false) }
+    end
+    if dispelOn then
+        if playerMode then
+            filters[#filters + 1] = { filter = "HARMFUL|" .. dispelToken,
+                                      key = "dispel", candidateFilters = cfFor(false) }
+        else
+            local cf = { includeDispelTypes = DISPEL_TYPES }
+            if maxDur then cf.maxDuration = maxDur end
+            filters[#filters + 1] = { filter = "HARMFUL", key = "dispel", candidateFilters = cf }
+        end
+    end
+    if #filters == 0 then return nil end  -- nothing selected: safe fallback = show all
     return filters
 end
 
@@ -104,16 +164,15 @@ local function BuildDirectDispelFilter()
 end
 
 -- Rebuild cached filter tables from current settings (per mode)
+-- (Debuff filters are not cached — the debuff driver builds them fresh.)
 function DF:RebuildDirectFilterStrings()
     local partyDb = DF:GetDB("party")
     local raidDb = DF:GetDB("raid")
     if partyDb then
         cachedPartyBuffFilters = BuildDirectBuffFilters(partyDb)
-        cachedPartyDebuffFilters = BuildDirectDebuffFilters(partyDb)
     end
     if raidDb then
         cachedRaidBuffFilters = BuildDirectBuffFilters(raidDb)
-        cachedRaidDebuffFilters = BuildDirectDebuffFilters(raidDb)
     end
     -- Defensive and dispel are mode-independent, clear to rebuild on next use
     cachedDefensiveFilters = nil
@@ -644,11 +703,51 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
     }
 end
 
+-- Canonical signature of one record's candidateFilters: boolean flags by name,
+-- maxDuration, and sorted includeDispelTypes/excludeDispelTypes keys. Sorted
+-- throughout so table-insertion order never moves the signature.
+local function cfSig(cf)
+    if not cf then return "" end
+    local parts = {}
+    for k, v in pairs(cf) do
+        if type(v) == "boolean" then parts[#parts + 1] = k .. "=" .. tostring(v) end
+    end
+    table.sort(parts)
+    if cf.maxDuration then parts[#parts + 1] = "max=" .. tostring(cf.maxDuration) end
+    local function mapKeys(m)
+        local keys = {}
+        for k in pairs(m) do keys[#keys + 1] = tostring(k) end
+        table.sort(keys)
+        return table.concat(keys, ",")
+    end
+    if cf.includeDispelTypes then parts[#parts + 1] = "incDispel=" .. mapKeys(cf.includeDispelTypes) end
+    if cf.excludeDispelTypes then parts[#parts + 1] = "excDispel=" .. mapKeys(cf.excludeDispelTypes) end
+    return table.concat(parts, "&")
+end
+
+-- Serialize cfg.filter for the row signature. Handles the three shapes
+-- normalizeFilters accepts: plain string, array of strings (buff row — MUST
+-- produce the exact same sig as the old table.concat(f, ";") so upgrades
+-- don't spuriously rebuild buff rows), and array of records
+-- { filter, key, candidateFilters } (debuff row).
+local function filterListSig(f)
+    if type(f) ~= "table" then return f end
+    local parts = {}
+    for i = 1, #f do
+        local entry = f[i]
+        if type(entry) == "table" then
+            parts[i] = tostring(entry.filter) .. "#" .. tostring(entry.key) .. "#" .. cfSig(entry.candidateFilters)
+        else
+            parts[i] = entry
+        end
+    end
+    return table.concat(parts, ";")
+end
+
 -- Structural signature: a change here needs a Rebuild (new container); everything else is
 -- an in-place ApplyStyle (no frame leak — WoW never GCs frames).
 local function buffFactorySig(cfg)
-    local f = cfg.filter
-    if type(f) == "table" then f = table.concat(f, ";") end
+    local f = filterListSig(cfg.filter)
     -- Include region-presence toggles: ApplyStyle can't CREATE or REMOVE a region, so a
     -- show/hide flip (duration / border / swipe) must take the Rebuild path.
     local s = cfg.style
