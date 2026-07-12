@@ -91,6 +91,8 @@ local SAFE_OVERLAY_ANIM = {
     DF_DASH        = true,
     CORNERS_ONLY   = true,
     SIDES_ONLY     = true,
+    COMET          = true,
+    BLINK          = true,
 }
 -- Exposed so non-container consumers that apply a secretRect border directly
 -- (the missing-buff badge) can restrict to the same taint-safe DF-owned set.

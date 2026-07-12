@@ -4793,14 +4793,14 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
     -- DF_DASH: Frequency = march SPEED (0 = static dashed), Thickness = dash
     -- thickness, Inset = dash inset.
     local hasFrequency = { PULSATE=1, DF_PULSATE=1, CHASE=1, FLASH=1, PROC=1,
-                           WIPE=1, RIPPLE=1, SEGMENT_REVEAL=1, DF_DASH=1 }
+                           WIPE=1, RIPPLE=1, SEGMENT_REVEAL=1, DF_DASH=1, COMET=1, BLINK=1 }
     local hasParticles = { PULSATE=1, CHASE=1 }
     local hasThickness = { PULSATE=1, WIPE=1, RIPPLE=1, SEGMENT_REVEAL=1,
-                           SIDES_ONLY=1, CORNERS_ONLY=1, DF_DASH=1 }
+                           SIDES_ONLY=1, CORNERS_ONLY=1, DF_DASH=1, COMET=1, BLINK=1 }
     -- Inset / Offset apply to every non-NONE effect EXCEPT DF_PULSATE (which
     -- modulates the border's own edges and has no separate animRect).
     local hasPositioning = { PULSATE=1, CHASE=1, FLASH=1, PROC=1, WIPE=1, RIPPLE=1,
-                             SEGMENT_REVEAL=1, SIDES_ONLY=1, CORNERS_ONLY=1, DF_DASH=1 }
+                             SEGMENT_REVEAL=1, SIDES_ONLY=1, CORNERS_ONLY=1, DF_DASH=1, COMET=1, BLINK=1 }
     local pulsateOnly  = { PULSATE=1 }
     local chaseOnly    = { CHASE=1 }
     local sidesOnly    = { SIDES_ONLY=1 }
@@ -4830,10 +4830,12 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
         SIDES_ONLY = L["Sides Only"],
         CORNERS_ONLY = L["Corners Only"],
         DF_DASH = L["DF Dash"],
+        COMET = L["Comet"],
+        BLINK = L["Blink"],
         -- None first (the "off" option), then alphabetical by label.
-        _order = { "NONE", "CHASE", "CORNERS_ONLY", "DF_DASH", "DF_PULSATE",
-                   "FLASH", "PROC", "PULSATE", "RIPPLE", "SEGMENT_REVEAL",
-                   "SIDES_ONLY", "WIPE" },
+        _order = { "NONE", "BLINK", "CHASE", "COMET", "CORNERS_ONLY", "DF_DASH",
+                   "DF_PULSATE", "FLASH", "PROC", "PULSATE", "RIPPLE",
+                   "SEGMENT_REVEAL", "SIDES_ONLY", "WIPE" },
     }
     -- Optional caller filter: drop any excluded type from both the value map and
     -- the display order (e.g. the Aura Designer border offers only the taint-safe,

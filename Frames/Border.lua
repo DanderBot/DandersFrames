@@ -873,6 +873,38 @@ customTicks.SEGMENT_REVEAL = function(border, anim, elapsed)
     end
 end
 
+-- COMET: a bright head travels the perimeter clockwise with a fading tail
+-- trailing behind it. Like WIPE but asymmetric — the edge the head just left
+-- dims gradually instead of symmetrically, reading as a comet / "chase". A
+-- DF-owned stand-in for the LCG AutocastGlow that can't run on aura buttons.
+customTicks.COMET = function(border, anim, elapsed)
+    local o = border.animOverlay; if not o then return end
+    local period = tickPeriod(anim, 2)
+    local t = (elapsed % period) / period
+    local tail = 0.45   -- trail length as a fraction of the loop
+    local function comet(c)
+        local d = (t - c) % 1          -- how far the head has passed this edge
+        if d <= tail then return 1 - d / tail end
+        return 0
+    end
+    if o.top    then o.top:SetAlpha(comet(0))     end
+    if o.right  then o.right:SetAlpha(comet(0.25)) end
+    if o.bottom then o.bottom:SetAlpha(comet(0.5)) end
+    if o.left   then o.left:SetAlpha(comet(0.75))  end
+end
+
+-- BLINK: a hard on/off strobe on all four edges together — a crisp "alert"
+-- pulse, distinct from DF_PULSATE's smooth fade. Frequency is blinks/second.
+customTicks.BLINK = function(border, anim, elapsed)
+    local o = border.animOverlay; if not o then return end
+    local period = tickPeriod(anim, 1)
+    local on = ((elapsed % period) / period) < 0.5 and 1 or 0
+    if o.top    then o.top:SetAlpha(on)    end
+    if o.right  then o.right:SetAlpha(on)  end
+    if o.bottom then o.bottom:SetAlpha(on) end
+    if o.left   then o.left:SetAlpha(on)   end
+end
+
 -- ===== STATIC SHAPE MODES =====
 
 -- SIDES_ONLY: reveal the overlay textures (anim.thickness, anim.color) on
@@ -1062,7 +1094,7 @@ end
 -- OnUpdate-driver effects: those whose motion is driven by the shared anim
 -- driver's OnUpdate (as opposed to LCG glows or the static shape modes). The dedupe in
 -- StartAnimation verifies the driver is actually live for these before no-opping.
-local DRIVER_ANIMS = { DF_DASH = true, WIPE = true, RIPPLE = true, SEGMENT_REVEAL = true, DF_PULSATE = true }
+local DRIVER_ANIMS = { DF_DASH = true, WIPE = true, RIPPLE = true, SEGMENT_REVEAL = true, DF_PULSATE = true, COMET = true, BLINK = true }
 
 function Border:StartAnimation(border, spec)
     if not border or not spec or not spec.animation then
