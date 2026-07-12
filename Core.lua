@@ -4106,6 +4106,21 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 end
             end
         end
+        -- The *UseFactory dev toggles lived at the profile ROOT (DF.db.adUseFactory,
+        -- not per-mode), so strip them there too. Harmless orphans otherwise.
+        local ROOT_LEGACY_KEYS = { "buffUseFactory", "debuffUseFactory",
+            "defensiveUseFactory", "missingBuffUseFactory", "dispelOverlayUseFactory",
+            "adUseFactory" }
+        local function StripRootLegacyKeys(root)
+            if not root then return end
+            for _, key in ipairs(ROOT_LEGACY_KEYS) do root[key] = nil end
+        end
+        StripRootLegacyKeys(DF.db)
+        if DandersFramesDB_v2 and DandersFramesDB_v2.profiles then
+            for _, profile in pairs(DandersFramesDB_v2.profiles) do
+                StripRootLegacyKeys(profile)
+            end
+        end
 
         -- v5.0 (12.1): the dispel overlay's Custom Colors mode was removed during
         -- the alpha (never in any distributed build — belt-and-braces for alpha

@@ -17,8 +17,8 @@ local addonName, DF = ...
 -- a native SetDurationBar-driven StatusBar for the bar, one 1-slot container per configured
 -- indicator, many coexisting). Placed duration text supports colour-by-time via the #205 discrete
 -- BUCKET formatter (C-side |c escapes — no Lua time read). framealpha / nametext / healthtext are
--- 12.1 casualties (see NOTES at the file foot). Sound + showWhenMissing are P4.5. The legacy
--- engine stays fully intact behind DF:UseFactoryForAD.
+-- 12.1 casualties (see NOTES at the file foot). Sound + showWhenMissing are P4.5. The factory
+-- is the only AD render path now — the legacy read-path engine was removed.
 --
 -- COMBAT / SECRET obligations (delegated to the DF.AuraContainer handle, the #205-proven
 -- path): containers are created/enabled OUT of combat and deferred to PLAYER_REGEN_ENABLED
@@ -44,8 +44,8 @@ local DBG = "AD"
 -- ============================================================
 
 -- Render gate: is the native AD path active for this frame right now? Hard-gated to
--- 12.1 (IsSupported) and OFF in test mode (the legacy preview painter owns test mode
--- until native test mode ships in P5). Default ON: only an explicit false disables it.
+-- 12.1 (IsSupported) and OFF in test mode — the test drives call the factory
+-- themselves (DF:UpdateAllTestAuraDesigner), so the live path must not double-drive.
 function DF:UseFactoryForAD(frame, db)
     return DF.AuraContainer and DF.AuraContainer.IsSupported()
         and not (DF.testMode or DF.raidTestMode)

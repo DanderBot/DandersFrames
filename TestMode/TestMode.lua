@@ -1171,15 +1171,16 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
         end
     end
 
-    -- Update Aura Designer test indicators
-    if db.testShowAuraDesigner and DF:IsAuraDesignerEnabled(frame) then
-        local ADEngine = DF.AuraDesigner and DF.AuraDesigner.Engine
-        if ADEngine and ADEngine.UpdateTestFrame then
-            ADEngine:UpdateTestFrame(frame)
+    -- Update Aura Designer test indicators through the factory containers — the
+    -- SAME path as the bulk DF:UpdateAllTestAuraDesigner, so the per-frame and
+    -- bulk previews can't drift (the legacy Engine:UpdateTestFrame is gone).
+    local ADFactory = DF.AuraDesigner and DF.AuraDesigner.Factory
+    if ADFactory then
+        if db.testShowAuraDesigner and DF:IsAuraDesignerEnabled(frame) then
+            ADFactory:SyncFrame(frame)
+        else
+            ADFactory:ClearFrame(frame)
         end
-    else
-        local ADEngine = DF.AuraDesigner and DF.AuraDesigner.Engine
-        if ADEngine then ADEngine:ClearFrame(frame) end
     end
 
     -- Update selection and aggro highlights for test mode

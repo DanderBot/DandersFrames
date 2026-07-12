@@ -121,10 +121,6 @@ Features\Dispel.lua
 
 # Aura Designer
 AuraDesigner\Config.lua
-#   secret in some cases, which floods the error log via the UNIT_AURA guard.
-#   Only consumer is Symbiotic Relationship target inference for Resto Druid;
-#   minor functionality loss. Re-enable once Blizzard provides a non-secret
-#   path or after the guard is rewritten to use string comparison.
 AuraDesigner\AuraAdapter.lua
 AuraDesigner\Engine.lua
 AuraDesigner\Factory.lua
