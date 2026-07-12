@@ -1107,12 +1107,16 @@ DF.PartyDefaults = {
     -- Direct Mode: Buff Filters
     directBuffShowAll = false,                -- Show all buffs (ignores sub-filters)
     directBuffOnlyMine = true,               -- Restrict all buff filters to player-cast only
-    directBuffFilterRaid = false,             -- RAID filter
-    directBuffFilterRaidInCombat = true,      -- RAID_IN_COMBAT filter
-    directBuffFilterCancelable = false,       -- CANCELABLE filter
-    directBuffFilterNotCancelable = false,    -- NOT_CANCELABLE filter
-    directBuffFilterBigDefensive = false,     -- BIG_DEFENSIVE filter (12.0.1) — off by default: on 12.1 an aura matching multiple filter groups renders one icon per match (no cross-group dedup), so shipping these on caused defensive buffs to duplicate on the bar
-    directBuffFilterExternalDefensive = false, -- EXTERNAL_DEFENSIVE filter (12.0.0) — off by default (same dedup reason)
+    buffFilterSelection = {
+        presets = { healing = true, raidBuffs = true },
+        customs = {},
+        uncategorised = false,
+    },
+    defensiveFilterSelection = {
+        presets = { defensives = true, externalDefensives = true },
+        customs = {},
+        uncategorised = false,
+    },
     directBuffSortOrder = "TIME",             -- "DEFAULT" / "TIME" / "NAME"
 
     -- Direct Mode: Debuff Filters
