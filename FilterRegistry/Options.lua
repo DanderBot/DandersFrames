@@ -14,12 +14,95 @@ local tinsert = table.insert
 local tsort = table.sort
 local mmax = math.max
 local CreateFrame = CreateFrame
+local C_Timer = C_Timer
 local RAID_CLASS_COLORS = RAID_CLASS_COLORS
 local LOCALIZED_CLASS_NAMES_MALE = LOCALIZED_CLASS_NAMES_MALE
 
 local L = DF.L
 
 local FALLBACK_ICON = 134400 -- question mark
+
+local function Trim(s)
+    return (s or ""):match("^%s*(.-)%s*$")
+end
+
+-- ============================================================
+-- NAME PROMPT + DELETE CONFIRM
+-- Same StaticPopup idiom as the Designer preset bar in GUI/GUI.lua:
+-- structural dialog definitions here, per-call handlers assigned in
+-- the launchers (the StaticPopup `data` field and the editbox field
+-- name both vary across client versions, so we avoid relying on them).
+-- ============================================================
+
+StaticPopupDialogs["DANDERSFRAMES_FILTER_NAME"] = {
+    text = "%s",
+    button1 = ACCEPT or "Accept",
+    button2 = CANCEL or "Cancel",
+    hasEditBox = true,
+    editBoxWidth = 220,
+    maxLetters = 40,
+    EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
+    timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
+}
+
+StaticPopupDialogs["DANDERSFRAMES_FILTER_DELETE"] = {
+    text = "%s",
+    button1 = DELETE or "Delete",
+    button2 = CANCEL or "Cancel",
+    timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
+}
+
+local function PromptFilterName(titleText, default, callback)
+    local dialog = StaticPopupDialogs["DANDERSFRAMES_FILTER_NAME"]
+    dialog.OnShow = function(self)
+        local eb = self.EditBox or self.editBox or (self.GetEditBox and self:GetEditBox())
+        if eb then
+            eb:SetText(default or "")
+            eb:HighlightText()
+            eb:SetFocus()
+        end
+    end
+    dialog.OnAccept = function(self)
+        local eb = self.EditBox or self.editBox or (self.GetEditBox and self:GetEditBox())
+        if callback and eb then callback(eb:GetText()) end
+    end
+    dialog.EditBoxOnEnterPressed = function(self)
+        if callback then callback(self:GetText()) end
+        local p = self:GetParent()
+        if p then p:Hide() end
+    end
+    StaticPopup_Show("DANDERSFRAMES_FILTER_NAME", titleText)
+end
+
+local function ConfirmDeleteFilter(displayName, onAccept)
+    local dialog = StaticPopupDialogs["DANDERSFRAMES_FILTER_DELETE"]
+    dialog.OnAccept = function() onAccept() end
+    StaticPopup_Show("DANDERSFRAMES_FILTER_DELETE",
+        format(L["Delete filter \"%s\"? It will also be removed from every profile that uses it."], displayName))
+end
+
+-- Deleting a custom filter must also unhook it from every profile's
+-- per-mode selections (both the buff and defensive rows), or stale ids
+-- linger in SavedVariables forever. Nil-safe against profiles that
+-- predate the selection tables or are missing a mode entirely.
+local function ScrubDeletedFilter(cfId)
+    local sv = DandersFramesDB_v2
+    local profiles = sv and sv.profiles
+    if type(profiles) ~= "table" then return end
+    for _, profile in pairs(profiles) do
+        if type(profile) == "table" then
+            for i = 1, 2 do
+                local mode = (i == 1) and profile.party or profile.raid
+                if type(mode) == "table" then
+                    local sel = mode.buffFilterSelection
+                    if sel and sel.customs then sel.customs[cfId] = nil end
+                    sel = mode.defensiveFilterSelection
+                    if sel and sel.customs then sel.customs[cfId] = nil end
+                end
+            end
+        end
+    end
+end
 
 -- Fixed grouping order for the spell list (token-alphabetical); records with
 -- class == "ALL" (or no class) group last under L["All Classes"].
@@ -62,7 +145,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     local R = DF.FilterRegistry
 
     -- ========== LAYOUT CONSTANTS ==========
-    local PANEL_H = 460
+    local PANEL_H = 490
     local LEFT_W = 240
     local LEFT_ROW_H = 24
     local SECTION_H = 22
@@ -74,7 +157,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     local selKey = R.Categories[1] and R.Categories[1].key
     local searchText = "" -- lowercased query
 
-    local RefreshLeft, RefreshRight, RefreshAll -- forward declarations
+    local RefreshLeft, RefreshRight, RefreshAll, UpdateActionStates -- forward declarations
 
     -- ========== CHANGE PROPAGATION ==========
     -- The aura pipeline's reaction to a filter-definition change. Mirrors the
@@ -111,6 +194,18 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         return n
     end
 
+    -- Display name of the current selection (duplicate-prompt prefill)
+    local function CurrentDisplayName()
+        if selKind == "preset" then
+            for _, cat in ipairs(R.Categories) do
+                if cat.key == selKey then return L[cat.name] end
+            end
+            return selKey and tostring(selKey) or ""
+        end
+        local f = R:GetCustomFilter(selKey)
+        return f and (f.name or tostring(selKey)) or ""
+    end
+
     -- ========== INFO BANNER ==========
     local banner = GUI:CreateInfoBanner(parent, {
         tone = "info",
@@ -127,7 +222,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
 
     local leftScroll = CreateFrame("ScrollFrame", nil, leftPanel, "ScrollFrameTemplate")
     leftScroll:SetPoint("TOPLEFT", 4, -4)
-    leftScroll:SetPoint("BOTTOMRIGHT", -24, 4)
+    leftScroll:SetPoint("BOTTOMRIGHT", -24, 60) -- bottom strip: 2 rows of action buttons
     DF.GUI.StyleScrollBar(leftScroll)
 
     local leftContent = CreateFrame("Frame", nil, leftScroll)
@@ -162,9 +257,9 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     local searchBox = GUI:CreateEditBox(rightArea, "", nil, nil, nil, 170, L["Search..."])
     searchBox:SetPoint("TOPRIGHT", 0, 11)
 
-    -- List background
+    -- List background (top leaves room for the title row + add-by-ID row)
     local listBg = CreateFrame("Frame", nil, rightArea, "BackdropTemplate")
-    listBg:SetPoint("TOPLEFT", 0, -34)
+    listBg:SetPoint("TOPLEFT", 0, -64)
     listBg:SetPoint("BOTTOMRIGHT", 0, 0)
     GUI:CreatePanelBackdrop(listBg, { borderColor = { r = 0.20, g = 0.20, b = 0.20, a = 1 } })
 
@@ -183,6 +278,192 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
 
     local emptyText = listBg:CreateFontString(nil, "OVERLAY", "DFFontDisableSmall")
     emptyText:SetPoint("CENTER", listBg, "CENTER", 0, 0)
+
+    -- ========== ADD-BY-ID ROW ==========
+    -- Second header row between the title row and the spell list. Active for
+    -- custom filters; greyed out while a preset is selected (presets are
+    -- curated — the Add button's tooltip explains).
+    -- CreateEditBox reserves 15px for its (empty) label, so the frame sits at
+    -- -19 to land the editbox body at -34..-58; the list starts at -64.
+    local addBox = GUI:CreateEditBox(rightArea, "", nil, nil, nil, 110, L["Spell ID"])
+    addBox:SetPoint("TOPLEFT", 0, -19)
+
+    -- Echo line: transient add-by-ID feedback, auto-hides after ~4s
+    local echoText = rightArea:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
+    echoText:SetJustifyH("LEFT")
+    echoText:SetWordWrap(false)
+    echoText:SetTextColor(0.6, 0.6, 0.6)
+    echoText:Hide()
+
+    -- Generation counter so a re-add while a message is visible restarts the
+    -- 4s window instead of the old timer hiding the new message early.
+    local echoGen = 0
+    local lastEchoSel
+    local function HideEcho()
+        echoGen = echoGen + 1
+        echoText:Hide()
+    end
+    local function Echo(msg)
+        echoGen = echoGen + 1
+        local gen = echoGen
+        echoText:SetText(msg)
+        echoText:Show()
+        C_Timer.After(4, function()
+            if echoGen == gen then echoText:Hide() end
+        end)
+    end
+
+    local function DoAddSpell()
+        if selKind ~= "custom" or not R:GetCustomFilter(selKey) then return end
+        local text = Trim(addBox.EditBox:GetText())
+        if text == "" then return end
+        -- Integers only: tonumber() also accepts floats/hex, which are never
+        -- valid spell ids
+        if not text:match("^%d+$") then
+            Echo(L["Enter a valid spell ID."])
+            return
+        end
+        local idNum = tonumber(text)
+        local result = R:AddSpellToCustom(selKey, idNum)
+        if result == "spell" then
+            local rec = R.ByID[idNum]
+            Echo(format(L["Added %s."], (R:GetSpellDisplay(rec))))
+        elseif result == "raw" then
+            Echo(format(L["Added #%d as an unknown spell ID — name and icon will show if the ID is valid."], idNum))
+        elseif result == "exists" then
+            Echo(L["Already in this filter."])
+            return
+        else
+            return
+        end
+        addBox.EditBox:SetText("")
+        DirectFilterChangedProxy()
+        RefreshAll()
+    end
+
+    local addBtn = GUI:CreateButton(rightArea, L["Add"], 50, 22, function(self)
+        if self.dfDisabled then return end
+        DoAddSpell()
+    end)
+    addBtn:SetPoint("LEFT", addBox.EditBox, "RIGHT", 6, 0)
+    -- HookScript (not SetScript): StyleButton owns OnEnter for the hover wash
+    addBtn:HookScript("OnEnter", function(self)
+        if self.dfDisabled then
+            GUI:ShowTooltip(self, { title = L["Presets are curated — add spells to a custom filter instead."] })
+        end
+    end)
+    addBtn:HookScript("OnLeave", function() GUI:HideTooltip() end)
+
+    -- Enter in the box adds too (the helper's own OnEnterPressed only saves
+    -- db-backed values — this box has no db binding)
+    addBox.EditBox:HookScript("OnEnterPressed", DoAddSpell)
+
+    echoText:SetPoint("LEFT", addBtn, "RIGHT", 10, 0)
+    -- Right edge pinned at the add-row's vertical center (-46 = editbox middle)
+    echoText:SetPoint("RIGHT", rightArea, "TOPRIGHT", 0, -46)
+
+    -- ========== RESET TO STOCK (preset header) ==========
+    -- Only shown while the selected preset has per-profile overrides
+    local resetBtn = GUI:CreateButton(rightArea, L["Reset to stock"], 110, 20, function()
+        if selKind ~= "preset" or not selKey then return end
+        R:ResetPreset(selKey)
+        DirectFilterChangedProxy()
+        RefreshAll()
+    end)
+    resetBtn:SetPoint("LEFT", countText, "RIGHT", 12, 0)
+    resetBtn:Hide()
+
+    -- ========== LEFT COLUMN ACTION BUTTONS ==========
+    -- Created after the search box on purpose: SelectFilter clears the active
+    -- search, so these handlers must close over the searchBox local.
+    local LEFT_BTN_W = (LEFT_W - 12 - 4) / 2 -- two per row: 6px margins, 4px gap
+
+    local function SelectFilter(kind, key)
+        selKind, selKey = kind, key
+        -- Clear the search when switching filters (SetText fires
+        -- OnTextChanged, which syncs searchText and refreshes the list)
+        if searchBox.EditBox:GetText() ~= "" then
+            searchBox.EditBox:SetText("")
+        end
+        RefreshAll()
+    end
+
+    local newBtn = GUI:CreateButton(leftPanel, L["New Filter"], LEFT_BTN_W, 22, function()
+        PromptFilterName(L["Name the new filter:"], "", function(text)
+            text = Trim(text)
+            if text == "" then return end
+            SelectFilter("custom", R:CreateCustomFilter(text))
+        end)
+    end)
+    newBtn:SetPoint("BOTTOMLEFT", 6, 32)
+
+    local dupBtn = GUI:CreateButton(leftPanel, L["Duplicate"], LEFT_BTN_W, 22, function(self)
+        if self.dfDisabled or not selKey then return end
+        local src = selKey -- capture: selection may move before the prompt closes
+        PromptFilterName(L["Name the duplicated filter:"], CurrentDisplayName() .. " copy", function(text)
+            text = Trim(text)
+            if text == "" then return end
+            SelectFilter("custom", R:DuplicateFilter(src, text))
+        end)
+    end)
+    dupBtn:SetPoint("BOTTOMRIGHT", -6, 32)
+
+    local renameBtn = GUI:CreateButton(leftPanel, L["Rename"], LEFT_BTN_W, 22, function(self)
+        if self.dfDisabled then return end
+        local id = selKey
+        local f = R:GetCustomFilter(id)
+        if not f then return end
+        PromptFilterName(L["Rename filter:"], f.name or "", function(text)
+            text = Trim(text)
+            if text == "" then return end
+            R:RenameCustomFilter(id, text)
+            RefreshAll()
+        end)
+    end)
+    renameBtn:SetPoint("BOTTOMLEFT", 6, 6)
+
+    local delBtn = GUI:CreateButton(leftPanel, L["Delete"], LEFT_BTN_W, 22, function(self)
+        if self.dfDisabled then return end
+        local id = selKey
+        local f = R:GetCustomFilter(id)
+        if not f then return end
+        ConfirmDeleteFilter(f.name or tostring(id), function()
+            R:DeleteCustomFilter(id)
+            ScrubDeletedFilter(id)
+            if selKind == "custom" and selKey == id then
+                -- Move selection off the deleted filter (RefreshRight's guard
+                -- would also catch this, but be explicit)
+                selKind = "preset"
+                selKey = R.Categories[1] and R.Categories[1].key
+            end
+            DirectFilterChangedProxy()
+            RefreshAll()
+        end)
+    end)
+    delBtn:SetPoint("BOTTOMRIGHT", -6, 6)
+
+    -- Grey-when-disabled: SetDisabled keeps the button natively enabled so
+    -- this tooltip can explain WHY (the OnClick handlers early-out instead)
+    local function HookDisabledTooltip(btn, title)
+        btn:HookScript("OnEnter", function(self)
+            if self.dfDisabled then
+                GUI:ShowTooltip(self, { title = title })
+            end
+        end)
+        btn:HookScript("OnLeave", function() GUI:HideTooltip() end)
+    end
+    HookDisabledTooltip(renameBtn, L["Built-in presets can't be renamed or deleted."])
+    HookDisabledTooltip(delBtn, L["Built-in presets can't be renamed or deleted."])
+
+    UpdateActionStates = function()
+        local isCustom = selKind == "custom" and R:GetCustomFilter(selKey) ~= nil
+        dupBtn:SetDisabled(selKey == nil)
+        renameBtn:SetDisabled(not isCustom)
+        delBtn:SetDisabled(not isCustom)
+        addBox:SetEnabled(isCustom)
+        addBtn:SetDisabled(not isCustom)
+        resetBtn:SetShown((selKind == "preset" and selKey ~= nil and R:IsPresetModified(selKey)) or false)
+    end
 
     -- ========== LEFT ROW POOL ==========
     local leftRows = {}
@@ -354,6 +635,10 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         row.icon:SetTexture(item.icon or FALLBACK_ICON)
         row.name:SetText(item.name)
         row.chip:SetText(item.chip or "")
+        -- Chip hugs the row's action control: 64px Enable/Disable button in
+        -- the preset view, 18px remove "x" in the custom view
+        row.chip:ClearAllPoints()
+        row.chip:SetPoint("RIGHT", isPreset and -76 or -30, 0)
         row._spellID = item.tooltipID
         row._raw = item.raw
         row._rowToggles = isPreset
@@ -445,6 +730,13 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
             selKey = R.Categories[1] and R.Categories[1].key
         end
         local isPreset = selKind == "preset"
+
+        -- Hide any lingering add-by-ID echo once the selection changes
+        local selIdent = selKind .. "|" .. tostring(selKey)
+        if selIdent ~= lastEchoSel then
+            lastEchoSel = selIdent
+            HideEcho()
+        end
 
         local tc = GUI.GetThemeColor()
         titleText:SetTextColor(tc.r, tc.g, tc.b)
@@ -592,6 +884,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     RefreshAll = function()
         RefreshLeft()
         RefreshRight()
+        UpdateActionStates()
     end
     pageRef._fdRefreshAll = RefreshAll
 
