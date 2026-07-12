@@ -137,6 +137,11 @@ TextDesigner\Migration.lua
 TextDesigner\Preview.lua
 TextDesigner\Options.lua
 
+# Filter Registry
+FilterRegistry\SpellDB.lua
+FilterRegistry\Registry.lua
+FilterRegistry\Options.lua
+
 # Aura Blacklist
 AuraBlacklist\Config.lua
 AuraBlacklist\Options.lua

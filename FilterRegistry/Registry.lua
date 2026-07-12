@@ -1,0 +1,3 @@
+-- FilterRegistry/Registry.lua  (placeholder — filled in Task 2)
+local addonName, DF = ...
+DF.FilterRegistry = DF.FilterRegistry or {}
