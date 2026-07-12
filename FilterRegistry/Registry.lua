@@ -68,6 +68,8 @@ end
 function R:AddSpellToCustom(id, spellID)
     local f = self:GetCustomFilter(id)
     if not f then return end
+    spellID = tonumber(spellID)
+    if not spellID then return end
     local rec = R.ByID[spellID]
     if rec then
         if f.spells[rec.id] then return "exists" end
