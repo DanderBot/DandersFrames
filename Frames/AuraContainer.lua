@@ -460,6 +460,10 @@ local function styleButton_regions(slot, config)
                     local iconMode = borderSpec.iconMode
                     if iconMode == nil then iconMode = (config.mode ~= "overlay") end
                     spec = DF.Border:BuildSpec(borderSpec.db, borderSpec.prefix, { unit = config.unit, frame = slot, iconMode = iconMode })
+                    -- DF_DASH lays its dash count out from the frame's width/height, but a
+                    -- row slot's rect is SECRET on 12.1 (reading GetWidth taints). Feed the
+                    -- configured slot size so the dashes size from it, not the secret rect.
+                    if spec then spec.knownWidth, spec.knownHeight = sx, sy end
                 end
                 -- ANIMATION FILTER (single chokepoint for BOTH row and overlay).
                 -- The LCG glows re-SetParent pooled glow frames onto the host, which

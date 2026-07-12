@@ -1061,6 +1061,11 @@ local function styleMissingBadge(h, db, frame, info)
     local spec = DF.Border:BuildSpec(db, "missingBuffIcon", { unit = frame.unit, frame = frame, iconMode = true })
     spec.enabled = showBorder
     spec.size = borderSize
+    -- DF_DASH sizes its dash layout from the border's frame width/height; the badge's
+    -- rect is SECRET (secretRect on the container button subtree, reading it taints), so
+    -- feed the configured badge size for the dash math to use instead.
+    spec.knownWidth = db.missingBuffIconSize or MISSING_BADGE_SIZE
+    spec.knownHeight = spec.knownWidth
     -- Animate only via the DF-owned (taint-safe) types — the LCG glows SetParent
     -- their pooled frames onto the secretRect badge, which is forbidden on the native
     -- button subtree. Continuous animation is safe now: the shared anim driver hosts on
