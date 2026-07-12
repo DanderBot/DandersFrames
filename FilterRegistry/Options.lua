@@ -159,7 +159,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     local selKey = R.Categories[1] and R.Categories[1].key
     local searchText = "" -- lowercased query
 
-    local RefreshLeft, RefreshRight, RefreshAll, UpdateActionStates -- forward declarations
+    local RefreshLeft, RefreshRight, RefreshAll, UpdateActionStates, OpenPicker -- forward declarations
 
     -- ========== CHANGE PROPAGATION ==========
     -- The aura pipeline's reaction to a filter-definition change. Mirrors the
@@ -194,6 +194,22 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         for _ in pairs(f.spells) do n = n + 1 end
         for _ in pairs(f.rawIDs) do n = n + 1 end
         return n
+    end
+
+    -- Class-coloured spell name. Disabled/already-added rows keep their 40%
+    -- alpha dim ON TOP of the class colour — the colour is scaled (0.61 ≈ the
+    -- 0.55/0.90 ratio of the neutral dim), never dropped. Records without a
+    -- valid class token ("ALL", raw ids) keep the neutral colours.
+    local function ApplyNameColor(fs, classToken, dim)
+        local cc = classToken and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classToken]
+        if cc then
+            local m = dim and 0.61 or 1
+            fs:SetTextColor(cc.r * m, cc.g * m, cc.b * m)
+        elseif dim then
+            fs:SetTextColor(0.55, 0.55, 0.55)
+        else
+            fs:SetTextColor(0.90, 0.90, 0.90)
+        end
     end
 
     -- Display name of the current selection (duplicate-prompt prefill)
@@ -280,12 +296,23 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     resetBtn:SetPoint("LEFT", countText, "RIGHT", 12, 0)
     resetBtn:Hide()
 
-    -- Row 2: search box, stretched across the header (placeholder-only; not
-    -- db-backed). CreateEditBox reserves 15px for its (empty) label, so the
-    -- frame sits at -15 to land the editbox body at -30..-54.
+    -- Row 2: the Add-from-Database picker button is right-anchored; the
+    -- search box stretches between the panel's left edge and the button, so
+    -- it shrinks instead of overlapping. Active for custom filters; greyed
+    -- out while a preset is selected (same tooltip pattern as add-by-ID).
+    local dbBtn = GUI:CreateButton(headerPanel, L["Add from Database"], 130, 22, function(self)
+        if self.dfDisabled then return end
+        if selKind ~= "custom" or not R:GetCustomFilter(selKey) then return end
+        OpenPicker(selKey)
+    end)
+    dbBtn:SetPoint("TOPRIGHT", -10, -30)
+
+    -- Search box (placeholder-only; not db-backed). CreateEditBox reserves
+    -- 15px for its (empty) label, so the frame sits at -15 to land the
+    -- editbox body at -30..-54, level with the picker button.
     local searchBox = GUI:CreateEditBox(headerPanel, "", nil, nil, nil, 170, L["Search..."])
     searchBox:SetPoint("TOPLEFT", 10, -15)
-    searchBox:SetPoint("TOPRIGHT", -10, -15)
+    searchBox:SetPoint("TOPRIGHT", dbBtn, "TOPLEFT", -8, 15)
 
     -- List background sits below the header panel
     local listBg = CreateFrame("Frame", nil, rightArea, "BackdropTemplate")
@@ -490,6 +517,216 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     end
     HookDisabledTooltip(renameBtn, L["Built-in presets can't be renamed or deleted."])
     HookDisabledTooltip(delBtn, L["Built-in presets can't be renamed or deleted."])
+    HookDisabledTooltip(dbBtn, L["Presets are curated — add spells to a custom filter instead."])
+
+    -- ========== ADD-FROM-DATABASE PICKER ==========
+    -- In-page overlay covering both columns (the spell DB is far too large
+    -- for a StaticPopup): its own search box + pooled list of every DB spell,
+    -- flat-sorted by name. Clicking a row adds the spell to the target custom
+    -- filter; rows already in the filter render dimmed with a check instead
+    -- of being clickable. Esc or the close button dismisses.
+    local picker = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    picker:SetPoint("TOPLEFT", leftPanel, "TOPLEFT", 0, 0)
+    picker:SetPoint("BOTTOMRIGHT", rightArea, "BOTTOMRIGHT", 0, 0)
+    picker:SetFrameLevel(parent:GetFrameLevel() + 30)
+    GUI:CreatePanelBackdrop(picker, { bgAlpha = 0.98, borderColor = { r = 0.20, g = 0.20, b = 0.20, a = 1 } })
+    picker:EnableMouse(true) -- swallow clicks aimed at the page underneath
+    picker:Hide()
+
+    local pickerTarget -- custom filter id the picker adds into
+    local pickerSearch = "" -- lowercased query
+    local RefreshPicker
+
+    -- Close on Escape (same idiom as the Aura Designer popups)
+    picker:EnableKeyboard(true)
+    picker:SetPropagateKeyboardInput(true)
+    picker:SetScript("OnKeyDown", function(self, key)
+        if key == "ESCAPE" then
+            self:SetPropagateKeyboardInput(false)
+            self:Hide()
+        else
+            self:SetPropagateKeyboardInput(true)
+        end
+    end)
+
+    local pickerTitle = picker:CreateFontString(nil, "OVERLAY", "DFFontNormal")
+    pickerTitle:SetPoint("TOPLEFT", 10, -11)
+    pickerTitle:SetText(L["Add from Database"])
+
+    local pickerTargetText = picker:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
+    pickerTargetText:SetPoint("LEFT", pickerTitle, "RIGHT", 10, 0)
+    pickerTargetText:SetTextColor(0.5, 0.5, 0.5)
+
+    local pickerClose = GUI:CreateCloseButton(picker, {
+        size = 20,
+        onClick = function() picker:Hide() end,
+    })
+    pickerClose:SetPoint("TOPRIGHT", -8, -8)
+
+    -- Search box, stretched to clear the close button (body at -33..-57)
+    local pickerSearchBox = GUI:CreateEditBox(picker, "", nil, nil, nil, 170, L["Search..."])
+    pickerSearchBox:SetPoint("TOPLEFT", 10, -18)
+    pickerSearchBox:SetPoint("TOPRIGHT", -36, -18)
+
+    local pickerListBg = CreateFrame("Frame", nil, picker, "BackdropTemplate")
+    pickerListBg:SetPoint("TOPLEFT", 10, -64)
+    pickerListBg:SetPoint("BOTTOMRIGHT", -10, 10)
+    GUI:CreatePanelBackdrop(pickerListBg, { borderColor = { r = 0.20, g = 0.20, b = 0.20, a = 1 } })
+
+    local pickerScroll = CreateFrame("ScrollFrame", nil, pickerListBg, "ScrollFrameTemplate")
+    pickerScroll:SetPoint("TOPLEFT", 4, -4)
+    pickerScroll:SetPoint("BOTTOMRIGHT", -24, 4)
+    DF.GUI.StyleScrollBar(pickerScroll)
+
+    local pickerContent = CreateFrame("Frame", nil, pickerScroll)
+    pickerContent:SetSize(400, 1)
+    pickerScroll:SetScrollChild(pickerContent)
+    pickerScroll:SetScript("OnSizeChanged", function(_, w)
+        if w and w > 0 then pickerContent:SetWidth(w) end
+    end)
+
+    local pickerEmpty = pickerListBg:CreateFontString(nil, "OVERLAY", "DFFontDisableSmall")
+    pickerEmpty:SetPoint("CENTER", pickerListBg, "CENTER", 0, 0)
+    pickerEmpty:SetText(L["No results found"])
+    pickerEmpty:Hide()
+
+    -- Flat name-sorted index over the whole DB, built once on first open
+    -- (names cached for the sort + search; icons fetched fresh at bind).
+    local pickerIndex
+    local function GetPickerIndex()
+        if not pickerIndex then
+            pickerIndex = {}
+            for _, rec in ipairs(R.Spells) do
+                local name = R:GetSpellDisplay(rec)
+                pickerIndex[#pickerIndex + 1] = { rec = rec, name = name, lower = name:lower() }
+            end
+            tsort(pickerIndex, function(a, b)
+                if a.name ~= b.name then return a.name < b.name end
+                return a.rec.id < b.rec.id
+            end)
+        end
+        return pickerIndex
+    end
+
+    -- Picker row pool (same pooled-row idiom as the main spell list)
+    local pickerRows = {}
+    local function AcquirePickerRow(i)
+        local row = pickerRows[i]
+        if row then
+            row:Show()
+            return row
+        end
+        row = CreateFrame("Button", nil, pickerContent, "BackdropTemplate")
+        row:SetHeight(SPELL_ROW_H - 2)
+        row:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
+        row:SetBackdropColor(0.08, 0.08, 0.08, 0.6)
+
+        row.icon = row:CreateTexture(nil, "ARTWORK")
+        row.icon:SetSize(20, 20)
+        row.icon:SetPoint("LEFT", 6, 0)
+        row.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+        -- "Already added" affordance: green check instead of clickability
+        row.check = row:CreateTexture(nil, "OVERLAY")
+        row.check:SetSize(14, 14)
+        row.check:SetPoint("RIGHT", -8, 0)
+        row.check:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\check")
+        row.check:SetVertexColor(0.4, 0.85, 0.5)
+
+        row.name = row:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+        row.name:SetPoint("LEFT", row.icon, "RIGHT", 6, 0)
+        row.name:SetPoint("RIGHT", row.check, "LEFT", -6, 0)
+        row.name:SetJustifyH("LEFT")
+
+        row:SetScript("OnClick", function(self)
+            if self._added or not self._rec then return end
+            if R:AddSpellToCustom(pickerTarget, self._rec.id) then
+                DirectFilterChangedProxy()
+                RefreshAll() -- rebinds this list too, so the row shows its check
+            end
+        end)
+        row:SetScript("OnEnter", function(self)
+            if not self._added then
+                self:SetBackdropColor(0.12, 0.12, 0.12, 0.8)
+            end
+            if self._rec then
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:SetSpellByID(self._rec.id)
+                GameTooltip:Show()
+            end
+        end)
+        row:SetScript("OnLeave", function(self)
+            self:SetBackdropColor(0.08, 0.08, 0.08, 0.6)
+            GUI:HideTooltip()
+        end)
+
+        pickerRows[i] = row
+        return row
+    end
+
+    local function BindPickerRow(row, y, entry, added)
+        row:ClearAllPoints()
+        row:SetPoint("TOPLEFT", 0, -y)
+        row:SetPoint("TOPRIGHT", 0, -y)
+        local rec = entry.rec
+        local _, icon = R:GetSpellDisplay(rec)
+        row.icon:SetTexture(icon or FALLBACK_ICON)
+        row.name:SetText(entry.name)
+        row._rec, row._added = rec, added
+
+        row.check:SetShown(added)
+        row.icon:SetAlpha(added and 0.4 or 1)
+        row.name:SetAlpha(added and 0.4 or 1)
+        ApplyNameColor(row.name, rec.class, added)
+        row:SetBackdropColor(0.08, 0.08, 0.08, 0.6) -- clear any lingering hover
+    end
+
+    RefreshPicker = function()
+        local f = R:GetCustomFilter(pickerTarget)
+        if not f then
+            picker:Hide()
+            return
+        end
+        pickerTargetText:SetText(f.name or tostring(pickerTarget))
+        local tc = GUI.GetThemeColor()
+        pickerTitle:SetTextColor(tc.r, tc.g, tc.b)
+
+        local y = 4
+        local used = 0
+        for _, entry in ipairs(GetPickerIndex()) do
+            if pickerSearch == "" or entry.lower:find(pickerSearch, 1, true) then
+                used = used + 1
+                local row = AcquirePickerRow(used)
+                BindPickerRow(row, y, entry, f.spells[entry.rec.id] ~= nil)
+                y = y + SPELL_ROW_H
+            end
+        end
+        for j = used + 1, #pickerRows do
+            pickerRows[j]:Hide()
+        end
+        pickerEmpty:SetShown(used == 0)
+        pickerContent:SetHeight(mmax(1, y + 4))
+    end
+
+    OpenPicker = function(cfId)
+        pickerTarget = cfId
+        -- Clear the search (SetText fires OnTextChanged, which syncs
+        -- pickerSearch; the refresh below renders the full list)
+        if pickerSearchBox.EditBox:GetText() ~= "" then
+            pickerSearchBox.EditBox:SetText("")
+        end
+        picker:Show()
+        RefreshPicker()
+    end
+
+    -- HookScript (not SetScript): CreateEditBox already hooks OnTextChanged
+    -- for its placeholder handling.
+    pickerSearchBox.EditBox:HookScript("OnTextChanged", function(eb)
+        local q = (eb:GetText() or ""):lower()
+        if q == pickerSearch then return end
+        pickerSearch = q
+        if picker:IsShown() then RefreshPicker() end
+    end)
 
     UpdateActionStates = function()
         local isCustom = selKind == "custom" and R:GetCustomFilter(selKey) ~= nil
@@ -498,6 +735,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         delBtn:SetDisabled(not isCustom)
         addBox:SetEnabled(isCustom)
         addBtn:SetDisabled(not isCustom)
+        dbBtn:SetDisabled(not isCustom)
         resetBtn:SetShown((selKind == "preset" and selKey ~= nil and R:IsPresetModified(selKey)) or false)
     end
 
@@ -630,9 +868,25 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         })
         row.remove:SetPoint("RIGHT", -6, 0)
 
-        -- Right-aligned chip: "+N" extra spellIDs, or the unknown-ID caption
+        -- 'i' info button: hovering lists the spell's canonical + variant IDs.
+        -- Same Media\Icons "info" asset the info banners use (via CreateButton's
+        -- iconName param); repositioned per bind next to the row's action.
+        row.info = GUI:CreateButton(row, nil, 18, 18, nil, "info")
+        row.info.Icon:SetVertexColor(0.6, 0.6, 0.6)
+        row.info:HookScript("OnEnter", function(self)
+            if row._infoTitle then
+                GUI:ShowTooltip(self, {
+                    title = row._infoTitle,
+                    lines = { format(L["Spell IDs: %s"], row._infoIDs or "") },
+                })
+            end
+        end)
+        row.info:HookScript("OnLeave", function() GUI:HideTooltip() end)
+
+        -- Right-aligned chip: "+N" extra spellIDs, or the unknown-ID caption.
+        -- Anchored to the info button, so it follows per-bind repositioning.
         row.chip = row:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
-        row.chip:SetPoint("RIGHT", -76, 0)
+        row.chip:SetPoint("RIGHT", row.info, "LEFT", -6, 0)
         row.chip:SetJustifyH("RIGHT")
         row.chip:SetTextColor(0.5, 0.5, 0.5)
 
@@ -671,22 +925,29 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         row.icon:SetTexture(item.icon or FALLBACK_ICON)
         row.name:SetText(item.name)
         row.chip:SetText(item.chip or "")
-        -- Chip hugs the row's action control: 64px Enable/Disable button in
-        -- the preset view, 18px remove "x" in the custom view
-        row.chip:ClearAllPoints()
-        row.chip:SetPoint("RIGHT", isPreset and -76 or -30, 0)
+        -- Info button hugs the row's action control: 64px Enable/Disable
+        -- button in the preset view, 18px remove "x" in the custom view.
+        -- The chip is anchored to the info button, so it follows.
+        row.info:ClearAllPoints()
+        row.info:SetPoint("RIGHT", isPreset and -74 or -28, 0)
         row._spellID = item.tooltipID
         row._raw = item.raw
         row._rowToggles = isPreset
 
+        -- Info tooltip data: canonical + variant IDs for known spells, just
+        -- the raw ID otherwise. Rebuilt on every bind like the rest.
+        row._infoTitle = item.name
+        local rec = item.rec
+        if rec and rec.alts and #rec.alts > 0 then
+            row._infoIDs = rec.id .. ", " .. table.concat(rec.alts, ", ")
+        else
+            row._infoIDs = tostring(rec and rec.id or item.id)
+        end
+
         local dim = isPreset and not item.enabled
         row.icon:SetAlpha(dim and 0.4 or 1)
         row.name:SetAlpha(dim and 0.4 or 1)
-        if dim then
-            row.name:SetTextColor(0.55, 0.55, 0.55)
-        else
-            row.name:SetTextColor(0.90, 0.90, 0.90)
-        end
+        ApplyNameColor(row.name, rec and rec.class, dim)
 
         if isPreset then
             row.action:Show()
@@ -921,6 +1182,16 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         RefreshLeft()
         RefreshRight()
         UpdateActionStates()
+        -- Keep the picker coherent: hide it when the selection moved off its
+        -- target custom filter (or the filter was deleted); otherwise
+        -- re-render so newly-added rows pick up their check/dim state.
+        if picker:IsShown() then
+            if selKind == "custom" and selKey == pickerTarget and R:GetCustomFilter(pickerTarget) then
+                RefreshPicker()
+            else
+                picker:Hide()
+            end
+        end
     end
     pageRef._fdRefreshAll = RefreshAll
 
