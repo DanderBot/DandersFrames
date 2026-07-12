@@ -15,6 +15,7 @@ local tsort = table.sort
 local mmax = math.max
 local CreateFrame = CreateFrame
 local C_Timer = C_Timer
+local GetBuildInfo = GetBuildInfo
 local RAID_CLASS_COLORS = RAID_CLASS_COLORS
 local LOCALIZED_CLASS_NAMES_MALE = LOCALIZED_CLASS_NAMES_MALE
 
@@ -441,6 +442,25 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         end)
     end)
     delBtn:SetPoint("BOTTOMRIGHT", -6, 6)
+
+    -- ========== DATABASE FRESHNESS NOTE ==========
+    -- Static by design: the stamp and the client build can't change
+    -- mid-session, so the text is computed once at page build (no refresh
+    -- wiring). Parented to leftPanel so it survives DoBuild's rebuild pass
+    -- like the rest of the panel; it hangs just below the panel's frame.
+    do
+        local stamp = R.DBStamp
+        if stamp then
+            local freshText = format(L["Spell database: %s (build %d)"], stamp.harvest, stamp.gameBuild)
+            local clientBuild = tonumber((select(2, GetBuildInfo())))
+            if clientBuild and clientBuild > stamp.gameBuild then
+                freshText = freshText .. "  |c" .. GUI:ToneHex("caution")
+                    .. L["Spell database may be outdated."] .. "|r"
+            end
+            local freshLabel = GUI:CreateLabel(leftPanel, freshText, LEFT_W)
+            freshLabel:SetPoint("TOPLEFT", leftPanel, "BOTTOMLEFT", 0, -2)
+        end
+    end
 
     -- Grey-when-disabled: SetDisabled keeps the button natively enabled so
     -- this tooltip can explain WHY (the OnClick handlers early-out instead)
@@ -913,7 +933,8 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     spacer:SetSize(1, 1)
     spacer.layoutCol = "both"
     local bannerH = (banner:GetHeight() > 0) and banner:GetHeight() or (banner.layoutHeight or 34)
-    spacer.layoutHeight = 22 + bannerH + PANEL_H + 20
+    -- +24: the database-freshness label hangs below the left panel
+    spacer.layoutHeight = 22 + bannerH + PANEL_H + 24 + 20
     pageRef._fdSpacer = spacer
     if pageRef.children then
         tinsert(pageRef.children, spacer)
