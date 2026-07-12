@@ -92,6 +92,9 @@ local SAFE_OVERLAY_ANIM = {
     CORNERS_ONLY   = true,
     SIDES_ONLY     = true,
 }
+-- Exposed so non-container consumers that apply a secretRect border directly
+-- (the missing-buff badge) can restrict to the same taint-safe DF-owned set.
+AuraContainer.SAFE_BORDER_ANIM = SAFE_OVERLAY_ANIM
 
 -- ============================================================
 -- CAPABILITY DETECTION  (the version gate + PTR-4 feature gates)
@@ -1866,6 +1869,7 @@ function Handle:_teardownContainer()
     -- MISSING mode: with no container the push geometry is gone — park the badge
     -- hidden on the window (never claim "missing" without a live container).
     if self.badge then
+        if DF.Border and self.badge.dfBorder then DF.Border:StopAnimation(self.badge.dfBorder) end
         self.badge:Hide()
         self.badge:ClearAllPoints()
         self.badge:SetPoint("TOPLEFT", self.frame, "TOPLEFT", 0, 0)

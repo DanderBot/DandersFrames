@@ -862,6 +862,7 @@ function DF:BuildDefensiveRowConfig(db, unit)
     return {
         unit     = unit,
         mode     = "row",
+        adBorderAnim = true,   -- opt into DF-owned border animations (see buildPlacedConfig)
         filter   = factoryFilter or BuildDirectDefensiveFilters(),
         max      = db.defensiveBarMax or 4,
         enabled  = true,
@@ -1060,11 +1061,15 @@ local function styleMissingBadge(h, db, frame, info)
     local spec = DF.Border:BuildSpec(db, "missingBuffIcon", { unit = frame.unit, frame = frame, iconMode = true })
     spec.enabled = showBorder
     spec.size = borderSize
-    -- The badge border is secretRect, so an animation driver would be hosted on UIParent
-    -- (see ensureDriver in Border.lua) and this badge is NOT covered by a container
-    -- teardown loop. Keep animation OFF here — never let the badge animate, or its driver
-    -- would tick forever with no teardown.
-    spec.animation = nil
+    -- Animate only via the DF-owned (taint-safe) types — the LCG glows SetParent
+    -- their pooled frames onto the secretRect badge, which is forbidden on the native
+    -- button subtree. Continuous animation is safe now: the shared anim driver hosts on
+    -- UIParent and the badge's border is torn down in _teardownContainer's StopAnimation
+    -- pass (the GUI already hides the LCG types; this guards stale/imported profiles).
+    local safeAnim = DF.AuraContainer and DF.AuraContainer.SAFE_BORDER_ANIM
+    if spec.animation and not (safeAnim and safeAnim[spec.animation.type]) then
+        spec.animation = nil
+    end
     DF.Border:Apply(badge.dfBorder, spec)
 
     local artInset = showBorder and borderSize or 0

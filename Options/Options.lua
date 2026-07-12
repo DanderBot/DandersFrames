@@ -6292,6 +6292,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             include      = { alpha = true, inset = true, offset = true, blendMode = true,
                              gradient = true, shadow = true, animate = true,
                              classColor = true, roleColor = true },
+            -- Only the DF-owned (secretRect-driven) animations work on 12.1 buttons;
+            -- the LCG glows SetParent onto the native button (forbidden). Hide them.
+            animExcludeTypes = { PULSATE = true, CHASE = true, FLASH = true, PROC = true },
             fullUpdate   = function() refreshMissing() end,
             lightUpdate  = function() DF:LightweightUpdateMissingBuff() end,
             lightColors  = function() DF:LightweightUpdateMissingBuffBorderColor() end,
@@ -6299,11 +6302,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             hideWhen     = function(d) return not d.missingBuffIconEnabled end,
             sizeMin = 0, sizeMax = 6, sizeStep = 1,  -- 0 = animation-only (no solid edge)
         })
-        -- 12.1: the badge's position derives from the container's secret geometry and
-        -- the factory strips spec.animation on render (same treatment as the aura
-        -- rows). Frost to match; candidate for the post-port cleanup sweep.
-        GUI:BlockControl12_1(mbBorderW.animationType, "limitation",
-            { id = "missingbuffs:borderanimation", page = L["Missing Buffs"], when = function(d) return DF:FactoryOwnsMissingBuff(d) end })
         borderGroup.disableChildrenOn = HideMissingBuffOptions
         Add(borderGroup, nil, 1)
         
@@ -6411,18 +6409,15 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                              gradient = true, shadow = true, alpha = true,
                              classColor = true, roleColor = true,
                              animate = true },
+            -- DF-owned animations only (see the missing-buff note); LCG glows are
+            -- forbidden on native aura buttons.
+            animExcludeTypes = { PULSATE = true, CHASE = true, FLASH = true, PROC = true },
             fullUpdate   = function() if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end end,
             lightUpdate  = function() DF:LightweightUpdateDefensiveIcons() end,
             lightColors  = function() DF:LightweightUpdateDefensiveIconColors() end,
             refreshStates = function() self:RefreshStates() end,
             hideWhen     = function(d) return not d.defensiveIconEnabled end,
         })
-        -- Animations can't run on the 12.1 container buttons (LCG's pooled glow
-        -- frames re-SetParent onto the host — forbidden on native AuraButtons), and
-        -- the factory strips spec.animation on render. Frost to match; candidate
-        -- for deletion in the post-port cleanup sweep.
-        GUI:BlockControl12_1(defBorderW.animationType, "limitation",
-            { id = "defensives:borderanimation", page = L["Defensives"], when = function(d) return DF:FactoryOwnsDefensiveRow(d) end })
         borderGroup.disableChildrenOn = HideDefensiveIconOptions
         Add(borderGroup, nil, 2)
         
