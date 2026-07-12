@@ -5374,12 +5374,16 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             AddSpace(4, "both")
         end
 
-        -- Copy button at top. The selection keys are exact-key entries: the
+        -- Copy button at top. buffFilterSelection is an exact-key entry: the
         -- registry matcher is a plain string-prefix test (CopySectionSettings /
         -- ResetSectionSettings in Profile.lua), and a full key is just a prefix
-        -- that matches only itself. Both selection tables are DeepCopy'd by the
+        -- that matches only itself. The selection table is DeepCopy'd by the
         -- copy path, so the modes never alias one table.
-        Add(CreateCopyButton(self.child, {"directBuff", "directDebuff", "buffFilterSelection", "defensiveFilterSelection"}, L["Aura Filters"], "auras_filters"), 25, 2)
+        -- defensiveFilterSelection deliberately does NOT appear here: the
+        -- Defensive Icon page owns that key (its own registration includes
+        -- it), and listing it on both pages made this page's section
+        -- reset/copy silently touch another page's setting.
+        Add(CreateCopyButton(self.child, {"directBuff", "directDebuff", "buffFilterSelection"}, L["Aura Filters"], "auras_filters"), 25, 2)
 
         -- ===== INFO BANNER =====
         -- Explains that Aura Filters only affect buff/debuff bars, with inline
@@ -5491,7 +5495,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end)
         for _, cfId in ipairs(sortedCustoms) do
             local f = R:GetCustomFilter(cfId)
-            SelectionCheckbox(format("%s |cff888888(%s)|r", f.name or cfId, L["Custom"]),
+            SelectionCheckbox(format("%s |c%s(%s)|r", f.name or cfId, GUI:ToneHex("info"), L["Custom"]),
                 function() return db.buffFilterSelection.customs[cfId] or false end,
                 function(v) db.buffFilterSelection.customs[cfId] = v or nil end)
         end
@@ -6551,7 +6555,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end)
             for _, cfId in ipairs(sortedCustoms) do
                 local f = R:GetCustomFilter(cfId)
-                SelectionCheckbox(format("%s |cff888888(%s)|r", f.name or cfId, L["Custom"]),
+                SelectionCheckbox(format("%s |c%s(%s)|r", f.name or cfId, GUI:ToneHex("info"), L["Custom"]),
                     function() return db.defensiveFilterSelection.customs[cfId] or false end,
                     function(v) db.defensiveFilterSelection.customs[cfId] = v or nil end)
             end
