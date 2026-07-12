@@ -145,3 +145,105 @@ function R:GetSpellDisplay(rec)
     if type(icon) ~= "number" then icon = FALLBACK_ICON end
     return name, icon
 end
+
+-- ------------------------------------------------------------
+-- RESOLVER
+-- Selection -> exactly one candidateFilters spell-ID map.
+-- include: union of all variant IDs of every effectively-enabled
+--   selected spell. exclude (Uncategorised on): union of all variant
+--   IDs of every KNOWN spell that is NOT selected — complement math
+--   keeps it one container group.
+-- ------------------------------------------------------------
+local function addRecordIDs(map, rec)
+    map[rec.id] = true
+    if rec.alts then
+        for _, alt in ipairs(rec.alts) do map[alt] = true end
+    end
+end
+
+-- Is this record effectively selected by the selection?
+local function recordSelected(self, rec, selection)
+    if selection.presets then
+        for catKey in pairs(rec.cats) do
+            if selection.presets[catKey] and self:IsSpellEnabled(catKey, rec) then
+                return true
+            end
+        end
+    end
+    if selection.customs then
+        for cfId in pairs(selection.customs) do
+            local f = self:GetCustomFilter(cfId)
+            if f and f.spells[rec.id] then return true end
+        end
+    end
+    return false
+end
+
+function R:ResolveSelection(selection, showAll)
+    if showAll or not selection then return { kind = "all" } end
+    local anySel = (selection.presets and next(selection.presets))
+        or (selection.customs and next(selection.customs))
+    if not anySel and not selection.uncategorised then
+        return { kind = "all" } -- nothing selected: safe fallback
+    end
+
+    if selection.uncategorised then
+        local map = {}
+        for _, rec in ipairs(R.Spells) do
+            if not recordSelected(self, rec, selection) then
+                addRecordIDs(map, rec)
+            end
+        end
+        -- Raw IDs from UNSELECTED custom filters are known-but-unselected too
+        for cfId, f in pairs(self:GetStore().customFilters) do
+            if not (selection.customs and selection.customs[cfId]) then
+                for rid in pairs(f.rawIDs) do map[rid] = true end
+            end
+        end
+        -- ...but never exclude a raw ID that a SELECTED custom also carries
+        if selection.customs then
+            for cfId in pairs(selection.customs) do
+                local f = self:GetCustomFilter(cfId)
+                if f then for rid in pairs(f.rawIDs) do map[rid] = nil end end
+            end
+        end
+        return { kind = "exclude", map = map }
+    end
+
+    local map = {}
+    if selection.presets then
+        for catKey in pairs(selection.presets) do
+            local recs = R.ByCategory[catKey]
+            if recs then
+                for _, rec in ipairs(recs) do
+                    if self:IsSpellEnabled(catKey, rec) then addRecordIDs(map, rec) end
+                end
+            end
+        end
+    end
+    if selection.customs then
+        for cfId in pairs(selection.customs) do
+            local f = self:GetCustomFilter(cfId)
+            if f then
+                for sid in pairs(f.spells) do
+                    local rec = R.ByID[sid]
+                    if rec then addRecordIDs(map, rec) else map[sid] = true end
+                end
+                for rid in pairs(f.rawIDs) do map[rid] = true end
+            end
+        end
+    end
+    return { kind = "include", map = map }
+end
+
+-- Stable signature: kind + sorted ids. Structural rebuilds key off this.
+local sigIDs = {}
+function R:SelectionSignature(selection, showAll)
+    local res = self:ResolveSelection(selection, showAll)
+    if res.kind == "all" then return "all" end
+    local n = 0
+    for id in pairs(res.map) do n = n + 1; sigIDs[n] = id end
+    for i = #sigIDs, n + 1, -1 do sigIDs[i] = nil end
+    table.sort(sigIDs)
+    return res.kind .. ":" .. table.concat(sigIDs, ",")
+end
