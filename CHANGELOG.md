@@ -8,7 +8,7 @@
 
 DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally changed how the game handles auras. This build runs on 12.1 only — 12.0.x stays on 4.7. Every aura row — buffs, debuffs, defensives and missing buffs — now renders through the game's new protected aura engine.
 
-* (Auras) **New: Buff Filters.** The buff and defensive bars are now filtered by curated spell categories — healing spells, raid buffs, defensives, movement and more. Pick the categories you want on the Aura Filters page.
+* (Auras) **New: Buff Filters.** The buff and defensive bars are now filtered by curated spell categories — healing spells, raid buffs, defensives, movement and more. Pick the buff bar's categories on the Aura Filters page and the defensive bar's on the Defensive Icon page.
 * (Interface) **New: Filter Designer.** A new settings page (Auras → Filter Designer) lets you see every spell in each category, disable individual spells, and build your own custom filters — including adding any spell by ID.
 * (Auras) Buff filter preferences have been reset to new defaults as part of this rework.
 * (Profiles) Custom filters and your category tweaks are included when sharing profiles.

@@ -693,6 +693,7 @@ L["Deduplication"] = true
 L["Default"] = true
 L["Default (Slot Order)"] = true
 L["Defensive buffs from other players, like Pain Suppression or Blessing of Sacrifice."] = true
+L["Defensive Filters"] = true
 L["Defensive Icon"] = true
 L["Defensive Icon Alpha"] = true
 L["Defensive Icon Click-Through"] = true

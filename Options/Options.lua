@@ -6392,8 +6392,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     -- reproduce yet (not cleanly addressable, left as-is): border animation (inlined in the
     -- shared border helper) and CENTER growth (a dropdown option that falls back to RIGHT).
     BuildPage(pageDefensiveIcon, function(self, db, Add, AddSpace, AddSyncPoint)
-        -- Copy button at top
-        Add(CreateCopyButton(self.child, {"defensiveIcon"}, L["Defensive Icon"], "auras_defensiveicon"), 25, 2)
+        -- Copy button at top. defensiveFilterSelection is an exact-key entry
+        -- (prefix matcher, see Profile.lua) so the category selection edited on
+        -- this page rides this page's Copy/Sync/Reset. It is also registered on
+        -- the Aura Filters page — overlap is fine, both DeepCopy the same value.
+        Add(CreateCopyButton(self.child, {"defensiveIcon", "defensiveFilterSelection"}, L["Defensive Icon"], "auras_defensiveicon"), 25, 2)
         
         local anchorOptions = {
             CENTER= L["Center"], TOP= L["Top"], BOTTOM= L["Bottom"], LEFT= L["Left"], RIGHT= L["Right"],
@@ -6491,7 +6494,111 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         })
         borderGroup.disableChildrenOn = HideDefensiveIconOptions
         Add(borderGroup, nil, 2)
-        
+
+        -- ===== DEFENSIVE FILTERS GROUP (Column 2) =====
+        -- Category filter selection for the defensive row (Filter Registry
+        -- presets + custom filters). Mirrors the Aura Filters page's buff
+        -- selection list. Each row toggles a key inside
+        -- db.defensiveFilterSelection — always mutate the inner tables in
+        -- place (the aura pipeline holds references to them; never reassign).
+        -- No Show All / Only Mine here: the defensive row resolves with
+        -- showAll hard-false and has no such keys (see BuildDefensiveRowConfig).
+        do
+            local filterGroup = GUI:CreateSettingsGroup(self.child, 280)
+            filterGroup:AddWidget(GUI:CreateHeader(self.child, L["Defensive Filters"]), 40)
+            filterGroup.disableChildrenOn = HideDefensiveIconOptions
+
+            filterGroup:AddWidget(GUI:CreateLabel(self.child, "|cff888888" .. L["Enabled filters are combined \226\128\148 buffs matching any selected filter will be shown."] .. "|r", 250), 35)
+
+            -- Rebuild the native filter strings and re-drive the container rows
+            -- (same pair as the Aura Filters page's DirectFilterChanged — this
+            -- page has no local equivalent).
+            local function DefensiveFilterChanged()
+                if DF.RebuildDirectFilterStrings then
+                    DF:RebuildDirectFilterStrings()
+                end
+                if DF.InvalidateAuraLayout then
+                    DF:InvalidateAuraLayout()
+                end
+            end
+
+            local R = DF.FilterRegistry
+            local function SelectionCheckbox(labelText, getSel, setSel)
+                return filterGroup:AddWidget(GUI:CreateCheckbox(self.child, labelText, nil, nil, DefensiveFilterChanged, getSel, setSel), 30)
+            end
+
+            for _, cat in ipairs(R.Categories) do
+                local key = cat.key
+                local enabled, total = R:PresetCounts(key)
+                local counts = R:IsPresetModified(key)
+                    and format("(%d/%d, %s)", enabled, total, L["Modified"])
+                    or  format("(%d/%d)", enabled, total)
+                SelectionCheckbox(format("%s |cff888888%s|r", L[cat.name], counts),
+                    function() return db.defensiveFilterSelection.presets[key] or false end,
+                    function(v) db.defensiveFilterSelection.presets[key] = v or nil end)
+            end
+
+            -- Custom filters, sorted by name for a stable order (the store is id-keyed)
+            local sortedCustoms = {}
+            for cfId in pairs(R:GetStore().customFilters) do
+                sortedCustoms[#sortedCustoms + 1] = cfId
+            end
+            table.sort(sortedCustoms, function(a, b)
+                local fa, fb = R:GetCustomFilter(a), R:GetCustomFilter(b)
+                local na, nb = (fa and fa.name or ""), (fb and fb.name or "")
+                if na ~= nb then return na < nb end
+                return a < b
+            end)
+            for _, cfId in ipairs(sortedCustoms) do
+                local f = R:GetCustomFilter(cfId)
+                SelectionCheckbox(format("%s |cff888888(%s)|r", f.name or cfId, L["Custom"]),
+                    function() return db.defensiveFilterSelection.customs[cfId] or false end,
+                    function(v) db.defensiveFilterSelection.customs[cfId] = v or nil end)
+            end
+
+            -- Complement bucket: buffs that belong to no category
+            SelectionCheckbox(L["Uncategorised Buffs"],
+                function() return db.defensiveFilterSelection.uncategorised end,
+                function(v) db.defensiveFilterSelection.uncategorised = v and true or false end)
+
+            local defManage = filterGroup:AddWidget(GUI:CreateButton(self.child, L["Manage Filters"], 140, 22, function()
+                if GUI.SelectTab and GUI.Pages and GUI.Pages["auras_filterdesigner"] then
+                    GUI.SelectTab("auras_filterdesigner")
+                end
+            end), 30)
+            defManage.disableOn = function() return not (GUI.Pages and GUI.Pages["auras_filterdesigner"]) end
+
+            -- The page build is cached across tab switches, but preset counts and
+            -- the custom-filter list can change while this page is hidden (Filter
+            -- Designer edits). On show, invalidate the page cache when the registry
+            -- signature moved so RefreshCached() rebuilds fresh rows instead of
+            -- serving stale ones (same idiom as the Aura Filters page).
+            local function RegistrySignature()
+                local parts = {}
+                for _, cat in ipairs(R.Categories) do
+                    local enabled, total = R:PresetCounts(cat.key)
+                    parts[#parts + 1] = format("%s:%d/%d%s", cat.key, enabled, total,
+                        R:IsPresetModified(cat.key) and "*" or "")
+                end
+                for cfId, f in pairs(R:GetStore().customFilters) do
+                    parts[#parts + 1] = cfId .. "=" .. (f.name or "")
+                end
+                table.sort(parts)
+                return table.concat(parts, ";")
+            end
+            self.dfDefFilterSignature = RegistrySignature()
+            if not self.dfDefFilterSigHooked then
+                self.dfDefFilterSigHooked = true
+                self:HookScript("OnShow", function(page)
+                    if page.dfDefFilterSignature ~= RegistrySignature() then
+                        page:Invalidate()
+                    end
+                end)
+            end
+
+            Add(filterGroup, nil, 2)
+        end
+
         -- ===== DURATION GROUP (Column 1) =====
         local durationGroup = GUI:CreateSettingsGroup(self.child, 280)
         durationGroup:AddWidget(GUI:CreateHeader(self.child, L["Duration Text"]), 40)
