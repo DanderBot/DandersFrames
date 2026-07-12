@@ -5448,29 +5448,90 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local buffSubInfo = buffGroup:AddWidget(GUI:CreateLabel(self.child, "|cff888888" .. L["Enabled filters are combined \226\128\148 buffs matching any selected filter will be shown."] .. "|r", 250), 35)
         buffSubInfo.hideOn = HideBuffSubFilters
 
-        local bfRaid = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Raid Buffs"], db, "directBuffFilterRaid", DirectFilterChanged), 30)
-        bfRaid.hideOn = HideBuffSubFilters
-        bfRaid.tooltip = L["Buffs flagged by Blizzard to show up on raid frames."]
+        -- Category filter selection (Filter Registry presets + custom filters).
+        -- Replaces the legacy Blizzard-token checkboxes. Each row toggles a key
+        -- inside db.buffFilterSelection — always mutate the inner tables in place
+        -- (the aura pipeline holds references to them; never reassign them).
+        -- |cff888888 matches the page's existing secondary-text colour (see the
+        -- combined-filters info labels on this page).
+        local R = DF.FilterRegistry
+        local function SelectionCheckbox(labelText, getSel, setSel)
+            -- CreateCheckbox's OnClick already runs the page RefreshStates via
+            -- its parent (self.child), same as the legacy rows relied on.
+            local cb = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, labelText, nil, nil, DirectFilterChanged, getSel, setSel), 30)
+            cb.hideOn = HideBuffSubFilters
+            return cb
+        end
 
-        local bfRaidIC = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Raid In Combat"], db, "directBuffFilterRaidInCombat", DirectFilterChanged), 30)
-        bfRaidIC.hideOn = HideBuffSubFilters
-        bfRaidIC.tooltip = L["Buffs flagged to show on raid frames during combat, such as self-cast HoTs."]
+        for _, cat in ipairs(R.Categories) do
+            local key = cat.key
+            local enabled, total = R:PresetCounts(key)
+            local counts = R:IsPresetModified(key)
+                and format("(%d/%d, %s)", enabled, total, L["Modified"])
+                or  format("(%d/%d)", enabled, total)
+            SelectionCheckbox(format("%s |cff888888%s|r", L[cat.name], counts),
+                function() return db.buffFilterSelection.presets[key] or false end,
+                function(v) db.buffFilterSelection.presets[key] = v or nil end)
+        end
 
-        local bfCancel = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Cancelable"], db, "directBuffFilterCancelable", DirectFilterChanged), 30)
-        bfCancel.hideOn = HideBuffSubFilters
-        bfCancel.tooltip = L["Buffs that can be right-click cancelled."]
+        -- Custom filters, sorted by name for a stable order (the store is id-keyed)
+        local sortedCustoms = {}
+        for cfId in pairs(R:GetStore().customFilters) do
+            sortedCustoms[#sortedCustoms + 1] = cfId
+        end
+        table.sort(sortedCustoms, function(a, b)
+            local fa, fb = R:GetCustomFilter(a), R:GetCustomFilter(b)
+            local na, nb = (fa and fa.name or ""), (fb and fb.name or "")
+            if na ~= nb then return na < nb end
+            return a < b
+        end)
+        for _, cfId in ipairs(sortedCustoms) do
+            local f = R:GetCustomFilter(cfId)
+            SelectionCheckbox(format("%s |cff888888(%s)|r", f.name or cfId, L["Custom"]),
+                function() return db.buffFilterSelection.customs[cfId] or false end,
+                function(v) db.buffFilterSelection.customs[cfId] = v or nil end)
+        end
 
-        local bfNotCancel = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Not Cancelable"], db, "directBuffFilterNotCancelable", DirectFilterChanged), 30)
-        bfNotCancel.hideOn = HideBuffSubFilters
-        bfNotCancel.tooltip = L["Buffs that cannot be cancelled by the player."]
+        -- Complement bucket: buffs that belong to no category
+        SelectionCheckbox(L["Uncategorised Buffs"],
+            function() return db.buffFilterSelection.uncategorised end,
+            function(v) db.buffFilterSelection.uncategorised = v and true or false end)
 
-        local bfBigDef = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Big Defensives"], db, "directBuffFilterBigDefensive", DirectFilterChanged), 30)
-        bfBigDef.hideOn = HideBuffSubFilters
-        bfBigDef.tooltip = L["Major defensive cooldowns like Divine Shield, Ice Block, or Barkskin."]
+        local bfManage = buffGroup:AddWidget(GUI:CreateButton(self.child, L["Manage Filters"], 140, 22, function()
+            -- The Filter Designer page ships in a later step; no-op until the
+            -- page id exists so the button can't strand the panel on a blank page.
+            if GUI.SelectTab and GUI.Pages and GUI.Pages["auras_filterdesigner"] then
+                GUI.SelectTab("auras_filterdesigner")
+            end
+        end), 30)
+        bfManage.disableOn = function() return not (GUI.Pages and GUI.Pages["auras_filterdesigner"]) end
 
-        local bfExtDef = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["External Defensives"], db, "directBuffFilterExternalDefensive", DirectFilterChanged), 30)
-        bfExtDef.hideOn = HideBuffSubFilters
-        bfExtDef.tooltip = L["Defensive buffs from other players, like Pain Suppression or Blessing of Sacrifice."]
+        -- The page build is cached across tab switches, but preset counts and the
+        -- custom-filter list can change while this page is hidden (Filter Designer
+        -- edits). On show, invalidate the page cache when the registry signature
+        -- moved so RefreshCached() rebuilds fresh rows instead of serving stale ones.
+        local function RegistrySignature()
+            local parts = {}
+            for _, cat in ipairs(R.Categories) do
+                local enabled, total = R:PresetCounts(cat.key)
+                parts[#parts + 1] = format("%s:%d/%d%s", cat.key, enabled, total,
+                    R:IsPresetModified(cat.key) and "*" or "")
+            end
+            for cfId, f in pairs(R:GetStore().customFilters) do
+                parts[#parts + 1] = cfId .. "=" .. (f.name or "")
+            end
+            table.sort(parts)
+            return table.concat(parts, ";")
+        end
+        self.dfBuffFilterSignature = RegistrySignature()
+        if not self.dfBuffFilterSigHooked then
+            self.dfBuffFilterSigHooked = true
+            self:HookScript("OnShow", function(page)
+                if page.dfBuffFilterSignature ~= RegistrySignature() then
+                    page:Invalidate()
+                end
+            end)
+        end
 
         local buffSortOptions = {
             DEFAULT = L["Default (Slot Order)"],
