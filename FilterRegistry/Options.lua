@@ -152,6 +152,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     local SECTION_H = 22
     local SPELL_ROW_H = 26
     local CLASS_HEADER_H = 22
+    local HEADER_H = 92 -- right-column header panel (3 stacked rows)
 
     -- ========== STATE ==========
     local selKind = "preset" -- "preset" | "custom"
@@ -240,27 +241,55 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     local presetLabel = CreateSectionLabel(L["Built-in Presets"])
     local customLabel = CreateSectionLabel(L["Custom Filters"])
 
-    -- ========== RIGHT COLUMN: HEADER + SEARCH + SPELL LIST ==========
+    -- ========== RIGHT COLUMN: HEADER PANEL + SPELL LIST ==========
     local rightArea = CreateFrame("Frame", nil, parent)
     rightArea:SetPoint("TOPLEFT", leftPanel, "TOPRIGHT", 12, 0)
     rightArea:SetPoint("RIGHT", parent, "RIGHT", -10, 0)
     rightArea:SetHeight(PANEL_H)
 
-    local titleText = rightArea:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    titleText:SetPoint("TOPLEFT", 0, -8)
+    -- Header container: title/counts/reset (row 1), search (row 2) and
+    -- add-by-ID (row 3) share one backdrop panel whose TOP aligns with the
+    -- left panel's TOP, so both columns start at the same height. Each row
+    -- flows in a single direction, so no header control can overlap another
+    -- at any GUI width.
+    local headerPanel = CreateFrame("Frame", nil, rightArea, "BackdropTemplate")
+    headerPanel:SetPoint("TOPLEFT", 0, 0)
+    headerPanel:SetPoint("TOPRIGHT", 0, 0)
+    headerPanel:SetHeight(HEADER_H)
+    GUI:CreatePanelBackdrop(headerPanel, { borderColor = { r = 0.20, g = 0.20, b = 0.20, a = 1 } })
+
+    -- Row 1: title + counts + reset, flowing left-to-right only.
+    local titleText = headerPanel:CreateFontString(nil, "OVERLAY", "DFFontNormal")
+    titleText:SetPoint("TOPLEFT", 10, -10)
     titleText:SetJustifyH("LEFT")
 
-    local countText = rightArea:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
+    local countText = headerPanel:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
     countText:SetPoint("LEFT", titleText, "RIGHT", 10, 0)
     countText:SetTextColor(0.5, 0.5, 0.5)
 
-    -- Search box (placeholder-only; not db-backed)
-    local searchBox = GUI:CreateEditBox(rightArea, "", nil, nil, nil, 170, L["Search..."])
-    searchBox:SetPoint("TOPRIGHT", 0, 11)
+    -- ========== RESET TO STOCK (header row 1) ==========
+    -- Only shown while the selected preset has per-profile overrides. Flows
+    -- after the counts, so it can no longer collide with the search box at
+    -- narrow GUI widths (search lives on its own row below).
+    local resetBtn = GUI:CreateButton(headerPanel, L["Reset to stock"], 110, 20, function()
+        if selKind ~= "preset" or not selKey then return end
+        R:ResetPreset(selKey)
+        DirectFilterChangedProxy()
+        RefreshAll()
+    end)
+    resetBtn:SetPoint("LEFT", countText, "RIGHT", 12, 0)
+    resetBtn:Hide()
 
-    -- List background (top leaves room for the title row + add-by-ID row)
+    -- Row 2: search box, stretched across the header (placeholder-only; not
+    -- db-backed). CreateEditBox reserves 15px for its (empty) label, so the
+    -- frame sits at -15 to land the editbox body at -30..-54.
+    local searchBox = GUI:CreateEditBox(headerPanel, "", nil, nil, nil, 170, L["Search..."])
+    searchBox:SetPoint("TOPLEFT", 10, -15)
+    searchBox:SetPoint("TOPRIGHT", -10, -15)
+
+    -- List background sits below the header panel
     local listBg = CreateFrame("Frame", nil, rightArea, "BackdropTemplate")
-    listBg:SetPoint("TOPLEFT", 0, -64)
+    listBg:SetPoint("TOPLEFT", headerPanel, "BOTTOMLEFT", 0, -8)
     listBg:SetPoint("BOTTOMRIGHT", 0, 0)
     GUI:CreatePanelBackdrop(listBg, { borderColor = { r = 0.20, g = 0.20, b = 0.20, a = 1 } })
 
@@ -280,17 +309,15 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     local emptyText = listBg:CreateFontString(nil, "OVERLAY", "DFFontDisableSmall")
     emptyText:SetPoint("CENTER", listBg, "CENTER", 0, 0)
 
-    -- ========== ADD-BY-ID ROW ==========
-    -- Second header row between the title row and the spell list. Active for
-    -- custom filters; greyed out while a preset is selected (presets are
-    -- curated — the Add button's tooltip explains).
-    -- CreateEditBox reserves 15px for its (empty) label, so the frame sits at
-    -- -19 to land the editbox body at -34..-58; the list starts at -64.
-    local addBox = GUI:CreateEditBox(rightArea, "", nil, nil, nil, 110, L["Spell ID"])
-    addBox:SetPoint("TOPLEFT", 0, -19)
+    -- ========== ADD-BY-ID ROW (header row 3) ==========
+    -- Active for custom filters; greyed out while a preset is selected
+    -- (presets are curated — the Add button's tooltip explains).
+    -- Frame at -43 lands the editbox body at -58..-82.
+    local addBox = GUI:CreateEditBox(headerPanel, "", nil, nil, nil, 90, L["Spell ID"])
+    addBox:SetPoint("TOPLEFT", 10, -43)
 
     -- Echo line: transient add-by-ID feedback, auto-hides after ~4s
-    local echoText = rightArea:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
+    local echoText = headerPanel:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
     echoText:SetJustifyH("LEFT")
     echoText:SetWordWrap(false)
     echoText:SetTextColor(0.6, 0.6, 0.6)
@@ -342,7 +369,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         RefreshAll()
     end
 
-    local addBtn = GUI:CreateButton(rightArea, L["Add"], 50, 22, function(self)
+    local addBtn = GUI:CreateButton(headerPanel, L["Add"], 50, 22, function(self)
         if self.dfDisabled then return end
         DoAddSpell()
     end)
@@ -360,19 +387,8 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     addBox.EditBox:HookScript("OnEnterPressed", DoAddSpell)
 
     echoText:SetPoint("LEFT", addBtn, "RIGHT", 10, 0)
-    -- Right edge pinned at the add-row's vertical center (-46 = editbox middle)
-    echoText:SetPoint("RIGHT", rightArea, "TOPRIGHT", 0, -46)
-
-    -- ========== RESET TO STOCK (preset header) ==========
-    -- Only shown while the selected preset has per-profile overrides
-    local resetBtn = GUI:CreateButton(rightArea, L["Reset to stock"], 110, 20, function()
-        if selKind ~= "preset" or not selKey then return end
-        R:ResetPreset(selKey)
-        DirectFilterChangedProxy()
-        RefreshAll()
-    end)
-    resetBtn:SetPoint("LEFT", countText, "RIGHT", 12, 0)
-    resetBtn:Hide()
+    -- Right edge pinned at the add-row's vertical center (-70 = editbox middle)
+    echoText:SetPoint("RIGHT", headerPanel, "TOPRIGHT", -10, -70)
 
     -- ========== LEFT COLUMN ACTION BUTTONS ==========
     -- Created after the search box on purpose: SelectFilter clears the active
