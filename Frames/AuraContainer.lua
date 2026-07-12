@@ -79,20 +79,19 @@ local warnedCreate = false
 
 -- Animations SAFE to run on an OVERLAY-mode border (Aura Designer). These render
 -- entirely on DF-owned child regions of the border (edge alpha ticks + DF_DASH's
--- own pooled dashes + Wipe/Ripple/SegmentReveal/Corners/Sides overlay pieces), so
--- they never SetParent a pooled glow onto a Blizzard AuraButton and never taint.
--- Any type NOT in this set (the LCG glows PULSATE/CHASE/FLASH/PROC, plus any
--- future/unknown type) is stripped. ROW mode always strips (see below).
+-- own dash / sparkle / flipbook / overlay textures on our own frames), so they
+-- never re-parent anything onto a Blizzard AuraButton and never taint.
+-- Any type NOT in this set (a future/unknown type) is stripped. ROW mode always
+-- strips (see below).
 local SAFE_OVERLAY_ANIM = {
     DF_PULSATE     = true,
-    WIPE           = true,
-    RIPPLE         = true,
-    SEGMENT_REVEAL = true,
     DF_DASH        = true,
     CORNERS_ONLY   = true,
-    SIDES_ONLY     = true,
-    COMET          = true,
     BLINK          = true,
+    DF_ORBIT       = true,
+    DF_PROC        = true,
+    DF_FLASH       = true,
+    DF_PIXEL       = true,
 }
 -- Exposed so non-container consumers that apply a secretRect border directly
 -- (the missing-buff badge) can restrict to the same taint-safe DF-owned set.

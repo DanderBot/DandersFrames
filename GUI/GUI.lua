@@ -4792,18 +4792,20 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
     -- sync with StartAnimation's branches in Frames/Border.lua.
     -- DF_DASH: Frequency = march SPEED (0 = static dashed), Thickness = dash
     -- thickness, Inset = dash inset.
-    local hasFrequency = { PULSATE=1, DF_PULSATE=1, CHASE=1, FLASH=1, PROC=1,
-                           WIPE=1, RIPPLE=1, SEGMENT_REVEAL=1, DF_DASH=1, COMET=1, BLINK=1 }
-    local hasParticles = { PULSATE=1, CHASE=1 }
-    local hasThickness = { PULSATE=1, WIPE=1, RIPPLE=1, SEGMENT_REVEAL=1,
-                           SIDES_ONLY=1, CORNERS_ONLY=1, DF_DASH=1, COMET=1, BLINK=1 }
+    local hasFrequency = { DF_PULSATE=1,
+                           DF_DASH=1, BLINK=1, DF_ORBIT=1, DF_PROC=1, DF_FLASH=1, DF_PIXEL=1 }
+    local hasParticles = { DF_ORBIT=1, DF_PIXEL=1 }
+    -- CORNERS_ONLY is hidden from the type dropdown below, but keep its param
+    -- entries so an indicator that still carries a saved CORNERS_ONLY value shows
+    -- the right controls.
+    local hasThickness = { CORNERS_ONLY=1, DF_DASH=1, BLINK=1, DF_PIXEL=1 }
     -- Inset / Offset apply to every non-NONE effect EXCEPT DF_PULSATE (which
     -- modulates the border's own edges and has no separate animRect).
-    local hasPositioning = { PULSATE=1, CHASE=1, FLASH=1, PROC=1, WIPE=1, RIPPLE=1,
-                             SEGMENT_REVEAL=1, SIDES_ONLY=1, CORNERS_ONLY=1, DF_DASH=1, COMET=1, BLINK=1 }
-    local pulsateOnly  = { PULSATE=1 }
-    local chaseOnly    = { CHASE=1 }
-    local sidesOnly    = { SIDES_ONLY=1 }
+    local hasPositioning = { CORNERS_ONLY=1, DF_DASH=1, BLINK=1, DF_ORBIT=1, DF_PROC=1, DF_FLASH=1, DF_PIXEL=1 }
+    -- Scale slider = sparkle size (DF Chase).
+    local hasScale     = { DF_ORBIT=1 }
+    -- Length slider = bar length (DF Pixel's chasing bars).
+    local hasLength    = { DF_PIXEL=1 }
     local cornersOnly  = { CORNERS_ONLY=1 }
     local function hideUnless(set)
         return function()
@@ -4814,28 +4816,22 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
 
     local w = {}
 
-    -- DF_PULSATE sits next to PULSATE so users compare them at a glance —
-    -- both "pulse" effects, but the LCG one renders a particle ring outside
-    -- the border while DF Pulsate fades the border's own edge alpha.
+    -- All DF-owned border effects (no external glow library). The "DF " labels
+    -- are kept from when they sat alongside the retired LCG glows.
     local animTypeOptions = {
         NONE = L["None"],
-        PULSATE = L["Pulsate"],
         DF_PULSATE = L["DF Pulsate"],
-        CHASE = L["Chase"],
-        FLASH = L["Flash"],
-        PROC = L["Proc"],
-        WIPE = L["Wipe"],
-        RIPPLE = L["Ripple"],
-        SEGMENT_REVEAL = L["Segment Reveal"],
-        SIDES_ONLY = L["Sides Only"],
-        CORNERS_ONLY = L["Corners Only"],
+        DF_ORBIT = L["DF Chase"],
         DF_DASH = L["DF Dash"],
-        COMET = L["Comet"],
+        DF_FLASH = L["DF Flash"],
+        DF_PIXEL = L["DF Pixel"],
+        DF_PROC = L["DF Proc"],
         BLINK = L["Blink"],
-        -- None first (the "off" option), then alphabetical by label.
-        _order = { "NONE", "BLINK", "CHASE", "COMET", "CORNERS_ONLY", "DF_DASH",
-                   "DF_PULSATE", "FLASH", "PROC", "PULSATE", "RIPPLE",
-                   "SEGMENT_REVEAL", "SIDES_ONLY", "WIPE" },
+        -- None first (the "off" option), then alphabetical by label. CORNERS_ONLY
+        -- is intentionally absent — it's kept in the engine (an existing saved
+        -- value still renders) but no longer offered as a pickable animation.
+        _order = { "NONE", "BLINK", "DF_ORBIT",
+                   "DF_DASH", "DF_FLASH", "DF_PIXEL", "DF_PROC", "DF_PULSATE" },
     }
     -- Optional caller filter: drop any excluded type from both the value map and
     -- the display order (e.g. the Aura Designer border offers only the taint-safe,
@@ -4893,7 +4889,7 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
     w.animationLength = group:AddWidget(GUI:CreateSlider(parent, L["Animation Length"],
         1, 30, 1, dbTable, aKey("Length"),
         fullUpdate, lightUpdate, true), 55)
-    w.animationLength.hideOn = hideUnless(pulsateOnly)
+    w.animationLength.hideOn = hideUnless(hasLength)
 
     w.animationThickness = group:AddWidget(GUI:CreateSlider(parent, L["Animation Thickness"],
         1, 12, 1, dbTable, aKey("Thickness"),
@@ -4903,7 +4899,7 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
     w.animationScale = group:AddWidget(GUI:CreateSlider(parent, L["Animation Scale"],
         0.5, 3, 0.05, dbTable, aKey("Scale"),
         fullUpdate, lightUpdate, true), 55)
-    w.animationScale.hideOn = hideUnless(chaseOnly)
+    w.animationScale.hideOn = hideUnless(hasScale)
 
     w.animationInset = group:AddWidget(GUI:CreateSlider(parent, L["Animation Inset"],
         -50, 50, 1, dbTable, aKey("Inset"),
@@ -4920,21 +4916,10 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
         fullUpdate, lightUpdate, true), 55)
     w.animationOffsetY.hideOn = hideUnless(hasPositioning)
 
-    w.animationMask = group:AddWidget(GUI:CreateCheckbox(parent, L["Pulsate Backing Frame"],
-        dbTable, aKey("Mask"), fullUpdate), 30)
-    w.animationMask.hideOn = hideUnless(pulsateOnly)
-
-    -- PROC only: opt in to the one-shot "proc start" flash (off by default —
-    -- see ProcGlow_Start in Frames/Border.lua for why it's not on for a
-    -- continuous border animation).
-    w.animationProcStart = group:AddWidget(GUI:CreateCheckbox(parent, L["Proc Start Flash"],
+    -- DF Flash / DF Proc: skip the one-shot intro burst (glow-only).
+    w.animationHideIntro = group:AddWidget(GUI:CreateCheckbox(parent, L["Hide Intro Flash"],
         dbTable, aKey("ProcStart"), fullUpdate), 30)
-    w.animationProcStart.hideOn = hideUnless({ PROC = 1 })
-
-    w.animationSidesAxis = group:AddWidget(GUI:CreateDropdown(parent, L["Sides Axis"],
-        { HORIZONTAL = L["Horizontal"], VERTICAL = L["Vertical"] },
-        dbTable, aKey("SidesAxis"), fullUpdate), 55)
-    w.animationSidesAxis.hideOn = hideUnless(sidesOnly)
+    w.animationHideIntro.hideOn = hideUnless({ DF_FLASH = 1, DF_PROC = 1 })
 
     w.animationCornerLength = group:AddWidget(GUI:CreateSlider(parent, L["Corner Length"],
         2, 40, 1, dbTable, aKey("CornerLength"),

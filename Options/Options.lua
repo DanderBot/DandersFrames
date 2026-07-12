@@ -5802,10 +5802,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             refreshStates = function() self:RefreshStates() end,
             hideWhen      = function(d) return not d.showBuffs or MasqueControlsBorders(d) end,
         })
-        -- Animations can't run on the 12.1 container buttons (LCG's pooled glow
-        -- frames re-SetParent onto the host — forbidden on native AuraButtons), and
-        -- the factory strips spec.animation on render. Frost to match; candidate
-        -- for deletion in the post-port cleanup sweep.
+        -- Buff/debuff rows can hold many icons; animating each is a perf hit, so
+        -- row-mode containers strip spec.animation (SAFE_OVERLAY_ANIM only recovers
+        -- it in overlay / AD mode). Frost the control to match — DF border
+        -- animations are offered on the low-count elements (Defensive / Missing)
+        -- and the Aura Designer instead.
         GUI:BlockControl12_1(buffBorderW.animationType, "limitation",
             { id = "buffs:borderanimation", page = L["Buffs"], when = function(d) return DF:FactoryOwnsBuffRow(d) end })
         AddToSection(borderGroup, nil, 1)
@@ -6292,9 +6293,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             include      = { alpha = true, inset = true, offset = true, blendMode = true,
                              gradient = true, shadow = true, animate = true,
                              classColor = true, roleColor = true },
-            -- Only the DF-owned (secretRect-driven) animations work on 12.1 buttons;
-            -- the LCG glows SetParent onto the native button (forbidden). Hide them.
-            animExcludeTypes = { PULSATE = true, CHASE = true, FLASH = true, PROC = true },
             fullUpdate   = function() refreshMissing() end,
             lightUpdate  = function() DF:LightweightUpdateMissingBuff() end,
             lightColors  = function() DF:LightweightUpdateMissingBuffBorderColor() end,
@@ -6409,9 +6407,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                              gradient = true, shadow = true, alpha = true,
                              classColor = true, roleColor = true,
                              animate = true },
-            -- DF-owned animations only (see the missing-buff note); LCG glows are
-            -- forbidden on native aura buttons.
-            animExcludeTypes = { PULSATE = true, CHASE = true, FLASH = true, PROC = true },
             fullUpdate   = function() if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end end,
             lightUpdate  = function() DF:LightweightUpdateDefensiveIcons() end,
             lightColors  = function() DF:LightweightUpdateDefensiveIconColors() end,
