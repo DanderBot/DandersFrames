@@ -459,12 +459,15 @@ end
 
 -- Embed the aura filter registry payload: the profile's preset overrides
 -- (profile-root diffs) plus a snapshot of the account-wide custom filters
--- the exported selection tables actually reference. Nothing is embedded
--- when there is nothing to carry — no empty tables bloating the string.
+-- the exported selection tables actually reference.
 local function EmbedCustomFilterData(exportData)
-    if DF.db.filterPresetOverrides and next(DF.db.filterPresetOverrides) then
-        exportData.filterPresetOverrides = DF:DeepCopy(DF.db.filterPresetOverrides)
-    end
+    -- The overrides table is ALWAYS embedded when this runs (auras included
+    -- in the export) — even when empty. Import uses replace semantics
+    -- (matching the aura blacklist), so an exporter on stock presets must
+    -- carry an explicit {} for the importer to clear its local preset tweaks;
+    -- omitting the key would keep them and render the rows differently than
+    -- on the exporter's screen.
+    exportData.filterPresetOverrides = DF:DeepCopy(DF.db.filterPresetOverrides or {})
     local refs = {}
     local function collectRefs(mode)
         if type(mode) ~= "table" then return end
@@ -892,6 +895,12 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
         end
     end
     if aurasImported then
+        -- Replace semantics (aura blacklist precedent): the embedded overrides
+        -- table fully replaces the local one — INCLUDING an embedded empty
+        -- table, which resets local preset tweaks to stock so the rows render
+        -- as they did on the exporter's screen. Back-compat: strings exported
+        -- before overrides were always embedded lack the key entirely when the
+        -- exporter had none — an absent key must leave local overrides alone.
         if importData.filterPresetOverrides then
             DF.db.filterPresetOverrides = DF:DeepCopy(importData.filterPresetOverrides)
         end
