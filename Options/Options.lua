@@ -5641,6 +5641,12 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         }), 30, "both")
     end)
 
+    -- Auras > Filter Designer (buff filter registry editor)
+    local pageFilterDesigner = CreateSubTab("auras", "auras_filterdesigner", L["Filter Designer"])
+    BuildPage(pageFilterDesigner, function(self, db, Add, AddSpace, AddSyncPoint)
+        if DF.BuildFilterDesignerPage then DF.BuildFilterDesignerPage(GUI, self, db) end
+    end)
+
     -- Auras > Aura Designer
     local pageAuraDesigner = CreateSubTab("auras", "auras_auradesigner", L["Aura Designer"])
     -- 12.1: the Aura Designer is being rebuilt on the native aura container.
