@@ -1153,18 +1153,36 @@ WB:RegisterBuiltinWizard({
     name = "Aura Filter Setup",
     description = L["Guided setup for configuring which buffs and debuffs appear on your frames."],
     build = function()
-        -- All the Direct API filter keys to highlight when user wants to configure themselves
+        -- All the Direct API filter keys to highlight when user wants to configure
+        -- themselves. The buff category-selection checkboxes (buffFilterSelection)
+        -- carry no dbKey, so they can't be highlighted — they sit between the
+        -- highlighted controls on the same page.
         local directFilterKeys = {
             "directBuffShowAll", "directBuffOnlyMine",
-            "directBuffFilterRaid", "directBuffFilterRaidInCombat",
-            "directBuffFilterCancelable", "directBuffFilterNotCancelable",
-            "directBuffFilterBigDefensive",
-            "directBuffFilterExternalDefensive", "directBuffSortOrder",
+            "directBuffSortOrder",
             "directDebuffShowAll", "directDebuffFilterRaid",
             "directDebuffFilterRaidInCombat", "directDebuffFilterCrowdControl",
             "directDebuffDispellableMode",
             "directDebuffSortOrder",
         }
+
+        -- Reset a filter selection to the recommended presets, mutating the
+        -- existing subtables in place (the aura pipeline and GUI hold references
+        -- to them — never reassign). Creates the full shape if the profile
+        -- predates the selection model.
+        local function ApplyRecommendedSelection(db, selKey, presets)
+            local sel = db[selKey]
+            if not sel then
+                sel = { presets = {}, customs = {}, uncategorised = false }
+                db[selKey] = sel
+            end
+            if not sel.presets then sel.presets = {} end
+            if not sel.customs then sel.customs = {} end
+            wipe(sel.presets)
+            for k in pairs(presets) do sel.presets[k] = true end
+            wipe(sel.customs)
+            sel.uncategorised = false
+        end
 
         return {
             title = L["Aura Filter Setup"],
@@ -1207,15 +1225,11 @@ WB:RegisterBuiltinWizard({
             settingsMap = {
                 direct_config = {
                     defaults = {
-                        -- Buff defaults
+                        -- Buff defaults (category selections are applied in
+                        -- onComplete — they're nested tables that must be
+                        -- mutated in place, which settingsMap can't express)
                         ["party.directBuffShowAll"] = false,
                         ["party.directBuffOnlyMine"] = true,
-                        ["party.directBuffFilterRaid"] = true,
-                        ["party.directBuffFilterRaidInCombat"] = true,
-                        ["party.directBuffFilterCancelable"] = false,
-                        ["party.directBuffFilterNotCancelable"] = false,
-                        ["party.directBuffFilterBigDefensive"] = true,
-                        ["party.directBuffFilterExternalDefensive"] = true,
                         ["party.directBuffSortOrder"] = "TIME",
                         -- Debuff defaults
                         ["party.directDebuffShowAll"] = true,
@@ -1227,12 +1241,6 @@ WB:RegisterBuiltinWizard({
                         -- Same for raid
                         ["raid.directBuffShowAll"] = false,
                         ["raid.directBuffOnlyMine"] = true,
-                        ["raid.directBuffFilterRaid"] = true,
-                        ["raid.directBuffFilterRaidInCombat"] = true,
-                        ["raid.directBuffFilterCancelable"] = false,
-                        ["raid.directBuffFilterNotCancelable"] = false,
-                        ["raid.directBuffFilterBigDefensive"] = true,
-                        ["raid.directBuffFilterExternalDefensive"] = true,
                         ["raid.directBuffSortOrder"] = "TIME",
                         ["raid.directDebuffShowAll"] = true,
                         ["raid.directDebuffFilterRaid"] = true,
@@ -1246,6 +1254,21 @@ WB:RegisterBuiltinWizard({
                 },
             },
             onComplete = function(answers)
+                -- Recommended category selections (mirrors the factory defaults):
+                -- buff row shows healing + raid buffs; own + external defensives
+                -- show on the dedicated defensive row instead of the buff row
+                -- (putting them on both would duplicate their icons).
+                if answers.direct_config == "defaults" and DF.db then
+                    for _, mode in ipairs({ "party", "raid" }) do
+                        local db = DF.db[mode]
+                        if db then
+                            ApplyRecommendedSelection(db, "buffFilterSelection",
+                                { healing = true, raidBuffs = true })
+                            ApplyRecommendedSelection(db, "defensiveFilterSelection",
+                                { defensives = true, externalDefensives = true })
+                        end
+                    end
+                end
                 -- If user chose manual config, open the aura filters tab and highlight settings
                 if answers.direct_config == "manual" then
                     C_Timer.After(0.2, function()
