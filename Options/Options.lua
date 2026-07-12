@@ -5374,8 +5374,12 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             AddSpace(4, "both")
         end
 
-        -- Copy button at top
-        Add(CreateCopyButton(self.child, {"directBuff", "directDebuff"}, L["Aura Filters"], "auras_filters"), 25, 2)
+        -- Copy button at top. The selection keys are exact-key entries: the
+        -- registry matcher is a plain string-prefix test (CopySectionSettings /
+        -- ResetSectionSettings in Profile.lua), and a full key is just a prefix
+        -- that matches only itself. Both selection tables are DeepCopy'd by the
+        -- copy path, so the modes never alias one table.
+        Add(CreateCopyButton(self.child, {"directBuff", "directDebuff", "buffFilterSelection", "defensiveFilterSelection"}, L["Aura Filters"], "auras_filters"), 25, 2)
 
         -- ===== INFO BANNER =====
         -- Explains that Aura Filters only affect buff/debuff bars, with inline
