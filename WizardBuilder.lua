@@ -1292,7 +1292,14 @@ WB:RegisterBuiltinWizard({
                         end)
                     end)
                 end
-                -- Rebuild aura filters after settings change
+                -- Rebuild aura filters after settings change.
+                -- ORDERING CONTRACT: these two calls must stay the LAST
+                -- statements of onComplete — after every selection write above.
+                -- CompleteWizard's settingsMap apply (and its UpdateAll) runs
+                -- BEFORE onComplete, so this pair is the only refresh that sees
+                -- the buffFilterSelection/defensiveFilterSelection writes;
+                -- InvalidateAuraLayout re-drives the container rows so the new
+                -- selections apply immediately (sig change -> Rebuild).
                 if DF.RebuildDirectFilterStrings then
                     DF:RebuildDirectFilterStrings()
                 end
