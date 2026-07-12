@@ -555,10 +555,19 @@ local function styleButton_regions(slot, config)
                     slot.dfBarBG = sb:CreateTexture(nil, "BACKGROUND")
                     slot.dfBarBG:SetAllPoints(sb)
                 end
-                if barSpec.bgTexture then slot.dfBarBG:SetTexture(barSpec.bgTexture) end
-                slot.dfBarBG:SetVertexColor(readColor(barSpec.bgColor, 0.15, 0.15, 0.15, 0.8))
+                local cr, cg, cb, ca = readColor(barSpec.bgColor, 0.15, 0.15, 0.15, 0.8)
+                if barSpec.bgTexture then
+                    -- Textured background: tint the supplied texture via vertex colour.
+                    slot.dfBarBG:SetTexture(barSpec.bgTexture)
+                    slot.dfBarBG:SetVertexColor(cr, cg, cb, ca)
+                else
+                    -- Solid colour, no texture: paint it directly. SetVertexColor alone
+                    -- tints NOTHING when the texture has no source, so a bgColor set
+                    -- without a bgTexture never showed (this bug).
+                    slot.dfBarBG:SetColorTexture(cr, cg, cb, ca)
+                end
             elseif slot.dfBarBG then
-                slot.dfBarBG:SetVertexColor(0, 0, 0, 0)   -- background cleared
+                slot.dfBarBG:SetColorTexture(0, 0, 0, 0)   -- background cleared
             end
             sb:SetStatusBarColor(readColor(barSpec.color, 1, 1, 1, 1))
         else
@@ -1210,7 +1219,24 @@ function NativeBackend:setUnit(unit)
     -- Test mode parses "player" regardless of the frame's (fabricated) unit; the
     -- handle's config still tracks the live token for the rebuild back.
     if AuraContainer._testMode then return end
-    if self.container and type(unit) == "string" then pcall(function() self.container:SetUnit(unit) end) end
+    local c = self.container
+    if c and type(unit) == "string" then
+        pcall(function() c:SetUnit(unit) end)
+        -- ★ PARTITION KICK (same mechanism as applyLayout/refresh, live-confirmed
+        -- 2026-07-09): the inbound SetUnit writes the token + MarkDirty(FullAuraRebuild)
+        -- but cannot ARM the private-side dirty processor, so the retarget sits
+        -- unprocessed — the container keeps DISPLAYING the old unit's last parse on a
+        -- frame that now shows someone else (roster churn: stale AD bars/tints on the
+        -- wrong player; the native-bound fill empties when the old aura instance dies,
+        -- leaving a stuck empty rectangle). The Hide/Show bounce runs the intrinsic
+        -- OnShow SECURE-side -> UpdateEventRegistrations + UpdateAllAuras from inside
+        -- the partition -> re-registers events for the NEW unit + arms + processes.
+        -- OOC only (Handle:SetUnit defers to regen in combat, but guard anyway; in
+        -- combat the marked flags flush on the next combat aura event).
+        if not InCombatLockdown() then
+            pcall(function() c:Hide(); c:Show() end)
+        end
+    end
 end
 
 -- Hot-apply layout (anchor/growth/wrap/size/spacing/offset/scale) to the LIVE container.
