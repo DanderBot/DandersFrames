@@ -89,6 +89,57 @@ function R:RemoveSpellFromCustom(id, spellID)
 end
 
 -- ------------------------------------------------------------
+-- IMPORT MERGE (profile import embeds custom filter snapshots)
+-- Content = spells + rawIDs; the name is deliberately ignored, so a
+-- content-equal local filter is reused even if it was renamed. The
+-- content scan covers the WHOLE store (not just the same id) so
+-- re-importing a string never duplicates filters: a filter that
+-- landed under a fresh id on the first import is found by content
+-- on the second. Anything without a content match imports under a
+-- fresh id. Returns an oldId -> newId map for remapping the
+-- imported selection tables.
+-- ------------------------------------------------------------
+local function setsEqual(x, y)
+    for k in pairs(x) do if not y[k] then return false end end
+    for k in pairs(y) do if not x[k] then return false end end
+    return true
+end
+
+local function sameContent(a, b)
+    return setsEqual(a.spells or {}, b.spells or {})
+        and setsEqual(a.rawIDs or {}, b.rawIDs or {})
+end
+
+function R:ImportCustomFilters(imported)
+    local store = self:GetStore()
+    local remap = {}
+    for cfId, def in pairs(imported) do
+        local existing = store.customFilters[cfId]
+        if existing and sameContent(existing, def) then
+            remap[cfId] = cfId
+        else
+            local reuse
+            for otherId, other in pairs(store.customFilters) do
+                if sameContent(other, def) then
+                    reuse = otherId
+                    break
+                end
+            end
+            if reuse then
+                remap[cfId] = reuse
+            else
+                local newId = self:CreateCustomFilter(def.name or cfId)
+                local dst = store.customFilters[newId]
+                for sid in pairs(def.spells or {}) do dst.spells[sid] = true end
+                for rid in pairs(def.rawIDs or {}) do dst.rawIDs[rid] = true end
+                remap[cfId] = newId
+            end
+        end
+    end
+    return remap
+end
+
+-- ------------------------------------------------------------
 -- PER-PROFILE PRESET OVERRIDES (diff-only)
 -- ------------------------------------------------------------
 function R:GetOverrides()

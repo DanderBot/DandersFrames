@@ -457,6 +457,37 @@ local function StripInternalKeys(t)
     return t
 end
 
+-- Embed the aura filter registry payload: the profile's preset overrides
+-- (profile-root diffs) plus a snapshot of the account-wide custom filters
+-- the exported selection tables actually reference. Nothing is embedded
+-- when there is nothing to carry — no empty tables bloating the string.
+local function EmbedCustomFilterData(exportData)
+    if DF.db.filterPresetOverrides and next(DF.db.filterPresetOverrides) then
+        exportData.filterPresetOverrides = DF:DeepCopy(DF.db.filterPresetOverrides)
+    end
+    local refs = {}
+    local function collectRefs(mode)
+        if type(mode) ~= "table" then return end
+        for _, selKey in ipairs({ "buffFilterSelection", "defensiveFilterSelection" }) do
+            local sel = mode[selKey]
+            if sel and sel.customs then
+                for cfId in pairs(sel.customs) do refs[cfId] = true end
+            end
+        end
+    end
+    collectRefs(exportData.party)
+    collectRefs(exportData.raid)
+    if next(refs) and DF.FilterRegistry then
+        local store = DF.FilterRegistry:GetStore()
+        for cfId in pairs(refs) do
+            if store.customFilters[cfId] then
+                exportData.customAuraFilters = exportData.customAuraFilters or {}
+                exportData.customAuraFilters[cfId] = DF:DeepCopy(store.customFilters[cfId])
+            end
+        end
+    end
+end
+
 function DF:ExportProfile(categories, frameTypes, profileName)
     local L = DF.L
     local LibSerialize = LibStub and LibStub("LibSerialize", true)
@@ -516,6 +547,8 @@ function DF:ExportProfile(categories, frameTypes, profileName)
         if DF.db.auraBlacklist then
             exportData.auraBlacklist = DF:DeepCopy(DF.db.auraBlacklist)
         end
+        -- Include filter preset overrides + referenced custom filters
+        EmbedCustomFilterData(exportData)
         -- Include the designer preset LIBRARIES (profile-root). Post-migration
         -- the mode tables only carry preset NAME strings — without the
         -- libraries the receiver's refs dangle and all AD/TD content is lost.
@@ -548,6 +581,12 @@ function DF:ExportProfile(categories, frameTypes, profileName)
         -- Aura blacklist: top-level key, include with auras category
         if categorySet.auras and DF.db.auraBlacklist then
             exportData.auraBlacklist = DF:DeepCopy(DF.db.auraBlacklist)
+        end
+        -- Filter preset overrides + referenced custom filters: top-level
+        -- keys, travel with the auras category (the selection tables that
+        -- reference them are in the auras key list)
+        if categorySet.auras then
+            EmbedCustomFilterData(exportData)
         end
         -- Designer preset libraries: travel with their own categories (the
         -- mode tables only carry preset NAME refs). autoLayout AND pinnedFrames
@@ -812,6 +851,7 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
             classColors = DF:DeepCopy(DF.db.classColors or {}),
             powerColors = DF:DeepCopy(DF.db.powerColors or {}),
             auraBlacklist = DF:DeepCopy(DF.db.auraBlacklist or { buffs = {}, debuffs = {} }),
+            filterPresetOverrides = DF:DeepCopy(DF.db.filterPresetOverrides or {}),
             -- Designer preset LIBRARIES (profile-root): the copied mode tables
             -- carry preset NAME refs, so omitting these would leave the new
             -- profile with dangling refs → empty Default → all AD/TD gone.
@@ -833,6 +873,46 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
         DF:WrapDB()
         
         print("|cff00ff00DandersFrames:|r " .. format(L["Created new profile: %s"], profileName))
+    end
+
+    -- Aura filter registry payload. Runs BEFORE the mode tables are applied:
+    -- imported custom filters merge into the account-wide store first, and the
+    -- oldId -> newId remap is applied to the IMPORTED selection tables — the
+    -- apply below then carries the fixed selections into DF.db by plain
+    -- assignment. Remapping the payload (never DF.db directly) can't disturb
+    -- selections in a mode or profile the import doesn't touch. Gated like the
+    -- aura blacklist: only when the auras category is being imported.
+    local aurasImported = importInfo.isFullExport and not selectedCategories
+    if not aurasImported then
+        for _, cat in ipairs(selectedCategories or importInfo.detectedCategories or {}) do
+            if cat == "auras" then
+                aurasImported = true
+                break
+            end
+        end
+    end
+    if aurasImported then
+        if importData.filterPresetOverrides then
+            DF.db.filterPresetOverrides = DF:DeepCopy(importData.filterPresetOverrides)
+        end
+        if importData.customAuraFilters and DF.FilterRegistry then
+            local remap = DF.FilterRegistry:ImportCustomFilters(importData.customAuraFilters)
+            local function remapSel(mode)
+                if type(mode) ~= "table" then return end
+                for _, selKey in ipairs({ "buffFilterSelection", "defensiveFilterSelection" }) do
+                    local sel = mode[selKey]
+                    if sel and sel.customs then
+                        local fixed = {}
+                        for cfId in pairs(sel.customs) do
+                            fixed[remap[cfId] or cfId] = true
+                        end
+                        sel.customs = fixed
+                    end
+                end
+            end
+            remapSel(importData.party)
+            remapSel(importData.raid)
+        end
     end
 
     -- If it's a full export (legacy or "all categories"), use direct replacement
