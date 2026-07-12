@@ -2144,6 +2144,12 @@ function DF:RefreshTestFrames()
             end
         end
     end
+
+    -- Pinned test frames follow the same settings changes (data/style refresh,
+    -- no re-layout) — otherwise they only updated on Test Mode entry / reload.
+    if DF.PinnedFrames and DF.PinnedFrames.RefreshTestMode then
+        DF.PinnedFrames:RefreshTestMode(false)
+    end
 end
 
 -- Apply layout/style settings to a test frame (fonts, sizes, textures, borders, etc.)
@@ -2289,6 +2295,12 @@ function DF:RefreshTestFramesWithLayout()
         if raidDb.raidUseGroups and raidDb.groupLabelEnabled and DF.UpdateRaidGroupLabels then
             DF:UpdateRaidGroupLabels()
         end
+    end
+
+    -- Pinned test frames follow the same layout changes (re-apply geometry, then
+    -- render) — otherwise they only updated on Test Mode entry / reload.
+    if DF.PinnedFrames and DF.PinnedFrames.RefreshTestMode then
+        DF.PinnedFrames:RefreshTestMode(true)
     end
 
     -- Update highlights
@@ -3940,6 +3952,20 @@ function DF:UpdateAllTestAuraDesigner()
         for i = 1, testFrameCount do
             local frame = DF.testRaidFrames and DF.testRaidFrames[i]
             if frame then UpdateFrame(frame) end
+        end
+    end
+
+    -- Pinned test frames carry their OWN AD/TD preset overrides, so refresh their
+    -- indicators too (same UpdateFrame path; IsShown-guarded, so hidden pool slots
+    -- no-op). Without this an AD change reflects on the main test frames but not
+    -- the pinned preview.
+    if DF.PinnedFrames and DF.PinnedFrames.IsTestModeActive
+        and DF.PinnedFrames:IsTestModeActive() then
+        for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
+            local pool = DF.PinnedFrames.testFrames and DF.PinnedFrames.testFrames[setIndex]
+            if pool then
+                for _, f in ipairs(pool) do UpdateFrame(f) end
+            end
         end
     end
 end
