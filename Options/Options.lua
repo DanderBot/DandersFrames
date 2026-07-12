@@ -5383,7 +5383,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Defensive Icon page owns that key (its own registration includes
         -- it), and listing it on both pages made this page's section
         -- reset/copy silently touch another page's setting.
-        Add(CreateCopyButton(self.child, {"directBuff", "directDebuff", "buffFilterSelection"}, L["Aura Filters"], "auras_filters"), 25, 2)
+        -- debuffFilter/debuffMaxDuration carry the 12.1 debuff category keys.
+        Add(CreateCopyButton(self.child, {"directBuff", "directDebuff", "buffFilterSelection", "debuffFilter", "debuffMaxDuration"}, L["Aura Filters"], "auras_filters"), 25, 2)
 
         -- ===== INFO BANNER =====
         -- Explains that Aura Filters only affect buff/debuff bars, with inline
@@ -5579,34 +5580,70 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end), 30)
         dfAll.tooltip = L["Show every debuff with no filtering."]
 
-        -- ===== WARNING BANNER: All Debuffs disabled =====
+        -- ===== INFO BANNER: All Debuffs enabled =====
+        -- Shown while All Debuffs is ON: the curated categories replaced the old
+        -- "enable All Debuffs" advice, so the nudge now points the other way.
         local debuffWarningBanner = GUI:CreateInfoBanner(self.child, {
             tone = "info",
-            text = L["Recommended: enable 'All Debuffs' to see all relevant debuffs, especially for healers."],
+            text = L["Recommended: use the category filters instead of 'All Debuffs' - they cover the important debuffs without the clutter."],
         })
         debuffWarningBanner.hideOn = function(d)
-            return d.directDebuffShowAll
+            return not d.directDebuffShowAll
         end
         debuffGroup:AddWidget(debuffWarningBanner, debuffWarningBanner.layoutHeight)
 
         local debuffSubInfo = debuffGroup:AddWidget(GUI:CreateLabel(self.child, "|cff888888" .. L["Enabled filters are combined \226\128\148 debuffs matching any selected filter will be shown."] .. "|r", 250), 35)
         debuffSubInfo.hideOn = HideDebuffSubFilters
 
-        local dfRaid = debuffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Raid Debuffs"], db, "directDebuffFilterRaid", DirectFilterChanged), 30)
-        dfRaid.hideOn = HideDebuffSubFilters
-        dfRaid.tooltip = L["Debuffs relevant in a raid context."]
+        -- Native 12.1 category filters (flat per-mode booleans; Blizzard-curated
+        -- membership). Every change routes through DirectFilterChanged, which
+        -- rebuilds the filter records and re-drives the container rows.
+        local dfBoss = debuffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Boss Debuffs"], db, "debuffFilterBoss", DirectFilterChanged), 30)
+        dfBoss.hideOn = HideDebuffSubFilters
+        dfBoss.tooltip = L["Debuffs applied by dungeon and raid bosses."]
 
-        local dfRaidIC = debuffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Raid In Combat"], db, "directDebuffFilterRaidInCombat", DirectFilterChanged), 30)
-        dfRaidIC.hideOn = HideDebuffSubFilters
-        dfRaidIC.tooltip = L["Debuffs relevant during combat in a raid context."]
+        local dfRole = debuffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Role Debuffs"], db, "debuffFilterRole", DirectFilterChanged), 30)
+        dfRole.hideOn = HideDebuffSubFilters
+        dfRole.tooltip = L["Debuffs Blizzard flags as important for your role."]
 
-        local dfCC = debuffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Crowd Control"], db, "directDebuffFilterCrowdControl", DirectFilterChanged), 30)
+        local dfPriority = debuffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Priority Debuffs"], db, "debuffFilterPriority", DirectFilterChanged), 30)
+        dfPriority.hideOn = HideDebuffSubFilters
+        dfPriority.tooltip = L["Debuffs Blizzard flags as high priority."]
+
+        local dfCC = debuffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Crowd Control"], db, "debuffFilterCrowdControl", DirectFilterChanged), 30)
         dfCC.hideOn = HideDebuffSubFilters
         dfCC.tooltip = L["CC effects like stuns, roots, and incapacitates."]
 
-        local dfDispelToggle = debuffGroup:AddWidget(GUI:CreateToggleSwitch(self.child, L["Dispellable By Me"], L["All Dispellable"], db, "directDebuffDispellableMode", "PLAYER", "ALL", DirectFilterChanged), 30)
-        dfDispelToggle.hideOn = HideDebuffSubFilters
+        local dfRaid = debuffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Raid Debuffs"], db, "debuffFilterRaid", DirectFilterChanged), 30)
+        dfRaid.hideOn = HideDebuffSubFilters
+        local dfRaidHint = debuffGroup:AddWidget(GUI:CreateLabel(self.child, "|cff888888" .. L["Other debuffs Blizzard flags for raid frames."] .. "|r", 250), 20)
+        dfRaidHint.hideOn = HideDebuffSubFilters
+
+        local dfDispellable = debuffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Dispellable Debuffs"], db, "debuffFilterDispellable", function()
+            DirectFilterChanged()
+            self:RefreshStates()
+        end), 30)
+        dfDispellable.hideOn = HideDebuffSubFilters
+        dfDispellable.tooltip = L["Debuffs that can be dispelled. Use the toggle below to choose which dispels count."]
+
+        -- Mode toggle, indented under Dispellable Debuffs. The group layout has
+        -- no per-child indent, so a wrapper row supplies the offset (same
+        -- composed-row idea as the Nicknames marker dropdowns). searchEntry is
+        -- forwarded so HighlightSettings (wizard) still finds the dbKey on the
+        -- group child it inspects.
+        local dfDispelModeRow = CreateFrame("Frame", nil, self.child)
+        dfDispelModeRow:SetSize(250, 24)
+        local dfDispelToggle = GUI:CreateToggleSwitch(self.child, L["Dispellable By Me"], L["All Dispellable"], db, "directDebuffDispellableMode", "PLAYER", "ALL", DirectFilterChanged)
+        dfDispelToggle:SetParent(dfDispelModeRow)
+        dfDispelToggle:ClearAllPoints()
+        dfDispelToggle:SetPoint("TOPLEFT", dfDispelModeRow, "TOPLEFT", 16, 0)
+        dfDispelToggle:SetPoint("BOTTOMRIGHT", dfDispelModeRow, "BOTTOMRIGHT", 0, 0)
         dfDispelToggle.tooltip = L["Dispellable By Me: only debuffs you can dispel. All Dispellable: any debuff that can be dispelled."]
+        dfDispelModeRow.searchEntry = dfDispelToggle.searchEntry
+        dfDispelModeRow.hideOn = function(d)
+            return d.directDebuffShowAll or not d.debuffFilterDispellable
+        end
+        debuffGroup:AddWidget(dfDispelModeRow, 30)
 
         local debuffSortOptions = {
             DEFAULT = L["Default (Slot Order)"],
@@ -5614,11 +5651,42 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             NAME = L["Alphabetical"],
         }
         local dfSort = debuffGroup:AddWidget(GUI:CreateDropdown(self.child, L["Sort Order"], debuffSortOptions, db, "directDebuffSortOrder", DirectFilterChanged), 55)
+
+        -- Native-only: max TOTAL duration filter (12.1 candidateFilters.maxDuration).
+        -- Hidden while the legacy render owns the row, and while All Debuffs is on
+        -- (the resolver returns nil then — every category filter is ignored).
+        local function HideDebuffMaxDurControls(d)
+            return d.directDebuffShowAll or not DF:FactoryOwnsDebuffRow(d)
+        end
+        local dfMaxDur = debuffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Long Debuffs"], db, "debuffMaxDurationEnabled", function()
+            DirectFilterChanged()
+            self:RefreshStates()
+        end), 30)
+        dfMaxDur.hideOn = HideDebuffMaxDurControls
+        dfMaxDur.tooltip = L["Hide debuffs whose total duration is longer than the threshold. Debuffs with no duration (permanent auras) are also hidden while this is on."]
+        local dfMaxDurSlider = debuffGroup:AddWidget(GUI:CreateSlider(self.child, L["Hide Longer Than (minutes)"], 1, 30, 1, db, "debuffMaxDurationMinutes", nil, DirectFilterChanged), 55)
+        dfMaxDurSlider.hideOn = HideDebuffMaxDurControls
+        dfMaxDurSlider.disableOn = function(d) return not d.debuffMaxDurationEnabled end
+
+        -- Keep-important checkbox, indented under Hide Long Debuffs (same wrapper
+        -- pattern as the dispellable mode toggle above; SetEnabled forwards so
+        -- disableOn greys the inner checkbox).
+        local dfKeepImportantRow = CreateFrame("Frame", nil, self.child)
+        dfKeepImportantRow:SetSize(250, 24)
+        local dfKeepImportant = GUI:CreateCheckbox(self.child, L["Keep important debuffs"], db, "debuffMaxDurationKeepImportant", DirectFilterChanged)
+        dfKeepImportant:SetParent(dfKeepImportantRow)
+        dfKeepImportant:ClearAllPoints()
+        dfKeepImportant:SetPoint("TOPLEFT", dfKeepImportantRow, "TOPLEFT", 16, 0)
+        dfKeepImportant:SetPoint("BOTTOMRIGHT", dfKeepImportantRow, "BOTTOMRIGHT", 0, 0)
+        dfKeepImportant.tooltip = L["Boss, Role, and Priority debuffs stay visible even when their duration is over the threshold."]
+        dfKeepImportantRow.searchEntry = dfKeepImportant.searchEntry
+        dfKeepImportantRow.hideOn = HideDebuffMaxDurControls
+        dfKeepImportantRow.disableOn = function(d) return not d.debuffMaxDurationEnabled end
+        dfKeepImportantRow.SetEnabled = function(_, enabled)
+            if dfKeepImportant.SetEnabled then dfKeepImportant:SetEnabled(enabled) end
+        end
+        debuffGroup:AddWidget(dfKeepImportantRow, 30)
         Add(debuffGroup, nil, 1)
-        -- 12.1: debuff filters + sort feed the factory row natively (P3). Blocked
-        -- only when the 12.1 aura system is active but the factory is toggled off.
-        GUI:BlockControl12_1(debuffGroup, "roadmap", { id = "filters:debuffgroup", page = L["Aura Filters"],
-            when = function(d) return GUI:IsAuraFactoryActive() and not DF:FactoryOwnsDebuffRow(d) end })
 
         -- ===== AURA BLACKLIST (Column 2, under Buff Filters) =====
         -- Pointer section directing users to the dedicated Aura Blacklist tab.
