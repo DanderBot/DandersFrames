@@ -857,6 +857,10 @@ function DF:BuildDefensiveRowConfig(db, unit)
         dur.formatKey = "NUMBER" .. (colorByTime and ":C" or "")
     end
 
+    -- FILTER REGISTRY: the category selection drives the row as ONE plain HELPFUL
+    -- group + a spell-ID map (include = selected presets/customs; exclude =
+    -- Uncategorised complement). "all" (empty/absent selection) keeps the legacy
+    -- token fallback below — the pre-registry behavior, byte-for-byte.
     -- SINGLE group (12.1): overlapping groups render DUPLICATE buttons — the container
     -- has no cross-group dedup and addon-side dedup is impossible (button contents are
     -- secret). Guardian Spirit proved BIG ∩ EXTERNAL ≠ ∅; externals are classified as
@@ -865,15 +869,25 @@ function DF:BuildDefensiveRowConfig(db, unit)
     -- two-filter scan + Lua dedup (BuildDirectDefensiveFilters) — different pipeline.
     -- IN-GAME CHECK: if an external-only defensive (e.g. PS/Ironbark on someone) stops
     -- showing, external ⊄ big on this build — revert to BuildDirectDefensiveFilters().
-    local factoryFilter
-    if AuraFilters.BigDefensive then factoryFilter = { "HELPFUL|" .. AuraFilters.BigDefensive }
-    elseif AuraFilters.ExternalDefensive then factoryFilter = { "HELPFUL|" .. AuraFilters.ExternalDefensive } end
+    local factoryFilter, defensiveCandidates
+    local res = DF.FilterRegistry:ResolveSelection(db.defensiveFilterSelection, false)
+    if res.kind == "include" then
+        factoryFilter = { "HELPFUL" }
+        defensiveCandidates = { includeSpellIDs = res.map }
+    elseif res.kind == "exclude" then
+        factoryFilter = { "HELPFUL" }
+        defensiveCandidates = { excludeSpellIDs = res.map }
+    else -- "all": legacy token fallback (empty selection safety net)
+        if AuraFilters.BigDefensive then factoryFilter = { "HELPFUL|" .. AuraFilters.BigDefensive }
+        elseif AuraFilters.ExternalDefensive then factoryFilter = { "HELPFUL|" .. AuraFilters.ExternalDefensive } end
+    end
 
     return {
         unit     = unit,
         mode     = "row",
         adBorderAnim = true,   -- opt into DF-owned border animations (see buildPlacedConfig)
         filter   = factoryFilter or BuildDirectDefensiveFilters(),
+        candidateFilters = defensiveCandidates,
         max      = db.defensiveBarMax or 4,
         enabled  = true,
         -- Native sort built FOR this row: longest-duration external first, own
