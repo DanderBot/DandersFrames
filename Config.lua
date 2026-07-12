@@ -1120,11 +1120,17 @@ DF.PartyDefaults = {
     directBuffSortOrder = "TIME",             -- "DEFAULT" / "TIME" / "NAME"
 
     -- Direct Mode: Debuff Filters
-    directDebuffShowAll = true,               -- Show all debuffs (ignores sub-filters)
-    directDebuffFilterRaid = true,            -- RAID filter
-    directDebuffFilterRaidInCombat = true,    -- RAID_IN_COMBAT filter
-    directDebuffFilterCrowdControl = true,    -- CROWD_CONTROL filter
-    directDebuffDispellableMode = "PLAYER",  -- "PLAYER" (RAID_PLAYER_DISPELLABLE) or "ALL" (dispelName ~= nil)
+    directDebuffShowAll = false,              -- Show all debuffs (ignores category filters)
+    debuffFilterBoss = true,                  -- Boss debuffs (native isBossAura)
+    debuffFilterRole = true,                  -- Role debuffs (native isRoleAura)
+    debuffFilterPriority = true,              -- Priority debuffs (native isPriorityAura)
+    debuffFilterCrowdControl = true,          -- Crowd control (CROWD_CONTROL token)
+    debuffFilterRaid = false,                 -- Other raid-flagged debuffs (RAID token)
+    debuffFilterDispellable = true,           -- Dispellable debuffs (mode below)
+    directDebuffDispellableMode = "PLAYER",  -- "PLAYER" (dispellable by me) or "ALL" (any dispel type)
+    debuffMaxDurationEnabled = false,         -- Hide long debuffs
+    debuffMaxDurationMinutes = 5,             -- ... threshold (base duration)
+    debuffMaxDurationKeepImportant = true,    -- ... but keep Boss/Role/Priority visible
     directDebuffSortOrder = "TIME",           -- "DEFAULT" / "TIME" / "NAME"
 
     buffGrowth = "LEFT_UP",
