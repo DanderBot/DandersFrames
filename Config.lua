@@ -1271,7 +1271,6 @@ DF.PartyDefaults = {
     debuffExpiringThresholdMode = "PERCENT",
     debuffExpiringTintColor = {r = 1, g = 0.30196079611778, b = 0.30196079611778, a = 0.81119740009308},
     debuffExpiringTintEnabled = true,
-    debuffFilterMode = "BLIZZARD",
     debuffGrowth = "RIGHT_UP",
     debuffHideSwipe = false,
     debuffMax = 5,

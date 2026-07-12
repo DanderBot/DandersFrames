@@ -86,7 +86,7 @@ local function BuildDirectDebuffFilters(db)
     local ccToken = db.debuffFilterCrowdControl and AuraFilters.CrowdControl or nil
     local raidOn = db.debuffFilterRaid
     local dispelToken = AuraFilters.RaidPlayerDispellable or "RAID_PLAYER_DISPELLABLE"
-    local maxDur = db.debuffMaxDurationEnabled and (db.debuffMaxDurationMinutes or 5) * 60 or nil
+    local maxDur = db.debuffMaxDurationEnabled and (db.debuffMaxDurationMinutes or 0) > 0 and (db.debuffMaxDurationMinutes or 0) * 60 or nil
     local keepImportant = db.debuffMaxDurationKeepImportant
 
     -- Negation suffix for a group, given which higher-priority token filters

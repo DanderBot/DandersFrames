@@ -435,7 +435,6 @@ DF.ExportCategories = {
         "debuffFilterBoss",
         "debuffFilterCrowdControl",
         "debuffFilterDispellable",
-        "debuffFilterMode",
         "debuffFilterPriority",
         "debuffFilterRaid",
         "debuffFilterRole",
