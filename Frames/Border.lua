@@ -459,7 +459,7 @@ end
 -- 2. Custom OnUpdate animators — operate directly on the 4 edge textures
 --    by modulating SetAlpha each frame. No LCG involved. Tick functions
 --    live in `customTicks` below; the shared driver frame is created
---    lazily via ensureDriver(border).
+--    lazily via the shared anim driver (registerAnimTick).
 --      "WIPE"           sweep a bright highlight clockwise around perimeter
 --      "RIPPLE"         all edges pulse alpha with per-edge phase offsets
 --      "SEGMENT_REVEAL" edges fade in sequentially top→right→bottom→left
@@ -503,13 +503,45 @@ end
 -- Hides it, and the aura-container teardown path calls StopAnimation on every
 -- slot border so a de-configured / winner-changed / rebuilt AD border leaves no
 -- orphaned ticking driver.
-local function ensureDriver(border)
-    if border.animDriver then return border.animDriver end
-    local driverParent = border._secretRect and UIParent or border
-    local d = CreateFrame("Frame", nil, driverParent)
-    d.elapsed = 0
-    border.animDriver = d
-    return d
+-- Shared OnUpdate driver: ONE UIParent-hosted frame ticks a registry of every
+-- animated border, instead of a CreateFrame + OnUpdate per border. secretRect
+-- borders (AD / aura-container slot children) MUST be driven externally — the
+-- button subtree's onUpdateMode="disabled" suppresses OnUpdate through every
+-- descendant, so a driver parented under the border there would install but never
+-- fire. A single shared host keeps the per-border cost to one registry entry.
+--
+-- Each entry carries its own accumulated elapsed; ticks get (border, elapsed, dt)
+-- — elapsed for offset/phase-from-absolute effects (custom overlays, DF_DASH), dt
+-- for the DF_PULSATE phase accumulator. A NORMAL border is skipped while hidden
+-- (preserving the old per-border driver's auto-hide); secretRect borders always
+-- tick (their textures' visibility rides the slot's secret show/hide, and a tick
+-- on a hidden texture is a harmless SetAlpha — same as the prior UIParent driver).
+local animRegistry = {}   -- [border] = { fn = fn, elapsed = number }
+local sharedAnimDriver
+local function ensureSharedAnimDriver()
+    if sharedAnimDriver then return sharedAnimDriver end
+    sharedAnimDriver = CreateFrame("Frame", nil, UIParent)
+    sharedAnimDriver:SetScript("OnUpdate", function(_, dt)
+        for border, e in pairs(animRegistry) do
+            if border._secretRect or border:IsShown() then
+                e.elapsed = e.elapsed + dt
+                e.fn(border, e.elapsed, dt)
+            end
+        end
+    end)
+    return sharedAnimDriver
+end
+-- Register/replace this border's per-frame tick. initialElapsed seeds the
+-- accumulator (DF_DASH resumes its march across restarts; others start at 0).
+local function registerAnimTick(border, fn, initialElapsed)
+    ensureSharedAnimDriver()
+    local e = animRegistry[border]
+    if not e then e = {}; animRegistry[border] = e end
+    e.fn = fn
+    e.elapsed = initialElapsed or 0
+end
+local function unregisterAnimTick(border)
+    animRegistry[border] = nil
 end
 
 -- Reset all four edges to fully opaque. Called from StopAnimation so the
@@ -963,11 +995,7 @@ function Border:StopAnimation(border)
         if border.animRect    then stopAll(border.animRect)    end
         if border.glowExtent  then stopAll(border.glowExtent)  end
     end
-    if border.animDriver then
-        border.animDriver:SetScript("OnUpdate", nil)
-        border.animDriver:Hide()
-        border.animDriver.elapsed = 0
-    end
+    unregisterAnimTick(border)
     -- Hide all overlay sets from prior animation passes. The cornerExtras
     -- field is from a previous-rev CORNERS_ONLY implementation; we keep
     -- the Hide-loop for backward compat on profiles where the field was
@@ -1031,8 +1059,8 @@ local function animSpecHash(anim)
     }, "|")
 end
 
--- OnUpdate-driver effects: those whose motion is driven by border.animDriver's
--- OnUpdate (as opposed to LCG glows or the static shape modes). The dedupe in
+-- OnUpdate-driver effects: those whose motion is driven by the shared anim
+-- driver's OnUpdate (as opposed to LCG glows or the static shape modes). The dedupe in
 -- StartAnimation verifies the driver is actually live for these before no-opping.
 local DRIVER_ANIMS = { DF_DASH = true, WIPE = true, RIPPLE = true, SEGMENT_REVEAL = true, DF_PULSATE = true }
 
@@ -1059,9 +1087,7 @@ function Border:StartAnimation(border, spec)
     -- frequency slider off 1 and back" symptom). When the driver is dead, fall
     -- through and restart instead of no-opping.
     if border._animHash == newHash then
-        local d = border.animDriver
-        if not DRIVER_ANIMS[border.activeAnimation]
-           or (d and d:IsShown() and d:GetScript("OnUpdate")) then
+        if not DRIVER_ANIMS[border.activeAnimation] or animRegistry[border] then
             return
         end
     end
@@ -1171,12 +1197,8 @@ function Border:StartAnimation(border, spec)
     local tick = customTicks[anim.type]
     if tick then
         setupAnimOverlay(border, anim)
-        local d = ensureDriver(border)
-        d.elapsed = 0
-        d:Show()
-        d:SetScript("OnUpdate", function(self, dt)
-            self.elapsed = (self.elapsed or 0) + dt
-            tick(border, anim, self.elapsed)
+        registerAnimTick(border, function(b, el)
+            tick(b, anim, el)
         end)
         border.activeAnimation = anim.type
         return
@@ -1189,7 +1211,7 @@ function Border:StartAnimation(border, spec)
     -- AD's legacy expiring border pulse; exposed as a first-class animation
     -- type so it works as either a continuous Border Animation OR as the
     -- value the new Expiring Animation dropdown will swap in below
-    -- threshold (Stage 5.1d.2+).  Uses ensureDriver's OnUpdate frame; on
+    -- threshold (Stage 5.1d.2+).  Uses the shared anim driver; on
     -- StopAnimation the existing resetEdgeAlphas() restores the edges
     -- back to alpha 1 so the next render is clean.
     if anim.type == "DF_PULSATE" then
@@ -1208,8 +1230,6 @@ function Border:StartAnimation(border, spec)
         -- path at the top of StartAnimation can change the pulse speed on the
         -- already-running driver without re-SetScript'ing.
         border._dfPulsatePeriod = 2 / rawFreq
-        local d = ensureDriver(border)
-        d:Show()
         -- Advance a PHASE accumulator in [0,1) by dt/period each frame rather
         -- than deriving phase from absolute elapsed.  Two consequences:
         --   * Changing the period (frequency) only changes how fast the phase
@@ -1221,7 +1241,7 @@ function Border:StartAnimation(border, spec)
         -- wave = (1 - cos(2π·phase)) / 2 is a smooth 0→1→0 (full→low→full)
         -- curve with zero-slope endpoints, so each cycle blends seamlessly
         -- into the next with no visible seam at the loop point.
-        d:SetScript("OnUpdate", function(self, dt)
+        registerAnimTick(border, function(border, el, dt)
             local p = border._dfPulsatePeriod or 2
             local ph = ((border._dfPulsatePhase or 0) + dt / p) % 1
             border._dfPulsatePhase = ph
@@ -1256,16 +1276,12 @@ function Border:StartAnimation(border, spec)
             -- Marching: OnUpdate advances the offset, reading colour/size from
             -- the fields so a live recolour is picked up next tick.  elapsed
             -- persists across restarts so a spec change doesn't snap the ants.
-            local d = ensureDriver(border)
-            d.elapsed = border._dfDashElapsed or 0
-            d:Show()
-            d:SetScript("OnUpdate", function(self, dt)
-                self.elapsed = (self.elapsed or 0) + dt
-                border._dfDashElapsed = self.elapsed
-                local offset = (self.elapsed * marchSpeed) % DF_DASH_PATTERN
+            registerAnimTick(border, function(border, el)
+                border._dfDashElapsed = el
+                local offset = (el * marchSpeed) % DF_DASH_PATTERN
                 drawDashes(border, offset, border._dfDashTh, border._dfDashInset,
                     border._dfDashR, border._dfDashG, border._dfDashB, border._dfDashA)
-            end)
+            end, border._dfDashElapsed or 0)
         else
             -- Static: draw once, no driver (cheaper).
             drawDashes(border, 0, border._dfDashTh, border._dfDashInset, r, g, b, a)
