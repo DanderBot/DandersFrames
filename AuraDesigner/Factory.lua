@@ -136,6 +136,28 @@ end
 -- Returns nil when AD is disabled, off-spec, empty, or the factory doesn't own AD for this db
 -- (caller then contributes nothing). BUFF (HELPFUL) only: every AD entry is a helpful aura, and
 -- a harmful map is inert on friendly frames.
+-- FILTER-GROUP RESOLUTION CACHE (A5 hot-path). Resolving a group's selection
+-- walks the registry and signing it sorts the full id map (100+ ids for preset
+-- links) — too heavy to run per frame per aura event. Cache the resolved result
+-- AND its signature per GROUP TABLE (weak keys: deleted groups GC), keyed to
+-- DF.auraLayoutVersion: every live-link invalidation (filter edit via the
+-- DirectFilterChangedProxy chain, group link/unlink, eye toggle, custom-filter
+-- delete) already bumps that version. Within a version, SyncFrame does a plain
+-- string compare of the cached sig; on a version change each group resolves +
+-- signs exactly ONCE (SelectionSignature takes the pre-resolved result — no
+-- double resolve). Profile/spec switches swap the group TABLES themselves, so
+-- identity keying self-invalidates even without a version bump.
+local fgroupResCache = setmetatable({}, { __mode = "k" })
+local function resolveFilterGroup(R, group)
+    local ver = DF.auraLayoutVersion or 0
+    local c = fgroupResCache[group]
+    if c and c.version == ver then return c.res, c.sig end
+    local res = R:ResolveSelection(group.filterSelection, false)
+    local sig = R:SelectionSignature(group.filterSelection, false, res)
+    fgroupResCache[group] = { version = ver, res = res, sig = sig }
+    return res, sig
+end
+
 local function auraHasTrackedIndicator(auraCfg)
     if type(auraCfg) ~= "table" then return false end
     local inds = auraCfg.indicators
@@ -199,7 +221,7 @@ function DF:GetADTrackedSpellIDs(frame, db)
     if groups then
         for _, group in ipairs(groups) do
             if type(group) == "table" and group.kind == "filter" and group.enabled ~= false then
-                local res = R:ResolveSelection(group.filterSelection, false)
+                local res = resolveFilterGroup(R, group)   -- version-cached, no re-resolve
                 if res.kind == "include" and res.map then
                     for id in pairs(res.map) do
                         union = union or {}   -- only allocate when the map has entries
@@ -1116,6 +1138,10 @@ local function buildFilterGroupConfig(unit, map, group)
     }
 end
 
+-- Exclude-kind guard warned once per group id (per session) — the sync runs per
+-- frame per aura event, so an unconditional DebugWarn would spam the console.
+local fgroupExcludeWarned = {}
+
 -- COSMETIC signature: the layout fields hot-apply via ApplyStyle(style, layout).
 -- Identity (selection signature) + max slot count are structural (declared at
 -- AddAuraGroup / container build) and folded into structSig at the call site.
@@ -2030,11 +2056,13 @@ function Factory:SyncFrame(frame)
         if groups then
             for _, group in ipairs(groups) do
                 if type(group) == "table" and group.kind == "filter" and group.enabled ~= false then
-                    local res = R:ResolveSelection(group.filterSelection, false)
+                    -- Version-cached: within one auraLayoutVersion this is a table
+                    -- lookup; the resolve + full-map sort run once per version.
+                    local res, selSig = resolveFilterGroup(R, group)
                     if res.kind == "include" and res.map and next(res.map) then
                         local key = "fgroup:" .. tostring(group.id)
                         live[key] = true
-                        local structSig = R:SelectionSignature(group.filterSelection, false)
+                        local structSig = selSig
                             .. "|max=" .. tostring(math.max(1, tonumber(group.maxIcons) or 8))
                         local coSig = filterGroupCoSig(group)
 
@@ -2056,8 +2084,12 @@ function Factory:SyncFrame(frame)
                         -- Unreachable from the group UI (no Uncategorised option in the
                         -- group picker) — guard anyway: an exclude map on a group would
                         -- render "everything except", never what a filter group means.
-                        DF:DebugWarn(DBG, "Filter group %s resolved to an exclude selection; skipping",
-                            tostring(group.id))
+                        -- Warn once per group id (this sync runs per aura event).
+                        if not fgroupExcludeWarned[group.id] then
+                            fgroupExcludeWarned[group.id] = true
+                            DF:DebugWarn(DBG, "Filter group %s resolved to an exclude selection; skipping",
+                                tostring(group.id))
+                        end
                     end
                     -- res.kind == "all" (empty/no selection): render nothing — the group
                     -- stays dormant until a filter is linked (an unfiltered include-all

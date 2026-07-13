@@ -315,9 +315,12 @@ function R:ResolveSelection(selection, showAll)
 end
 
 -- Stable signature: kind + sorted ids. Structural rebuilds key off this.
+-- `resolved` (optional) is a pre-computed ResolveSelection result for the SAME
+-- selection/showAll pair — pass it when the caller already resolved, so no
+-- path ever resolves the selection twice (A5 hot-path review).
 local sigIDs = {}
-function R:SelectionSignature(selection, showAll)
-    local res = self:ResolveSelection(selection, showAll)
+function R:SelectionSignature(selection, showAll, resolved)
+    local res = resolved or self:ResolveSelection(selection, showAll)
     if res.kind == "all" then return "all" end
     local n = 0
     for id in pairs(res.map) do n = n + 1; sigIDs[n] = id end
