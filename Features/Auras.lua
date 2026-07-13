@@ -457,36 +457,14 @@ end
 -- discrete colour BUCKETS via the duration formatter (|cRRGGBB escapes in AddBreakpoint
 -- format strings — C-side, secret-safe, the NSRT-proven path): BuildDurationFormatter above.)
 
--- NATIVE BLACKLIST (buffs): the user's aura blacklist -> candidateFilters.excludeSpellIDs,
--- evaluated Blizzard-side (works for HELPFUL auras on friendly frames — helpful spell-ID
--- filters pass the assist gate; the DEBUFF blacklist can NOT be expressed on friendlies).
--- Alternates are expanded so every variant is excluded, matching the legacy IsBlacklisted
--- lookup. Split combat/OOC-only entries can't be expressed statically -> they stay VISIBLE
--- on factory rows (visible degrade, never a silent in-combat surprise); only entries
--- blacklisted in both states are excluded.
-local function BuildBuffExcludeMap()
-    local bl = DF.db and DF.db.auraBlacklist and DF.db.auraBlacklist.buffs
-    if not bl or not next(bl) then return nil end
-    local map, n = {}, 0
-    for id, entry in pairs(bl) do
-        if entry == true or (type(entry) == "table" and entry.combat and entry.ooc) then
-            map[id] = true
-            n = n + 1
-        end
-    end
-    if n == 0 then return nil end
-    local alts = DF.AuraBlacklist and DF.AuraBlacklist.AlternateSpellIDs
-    if alts then
-        for alt, primary in pairs(alts) do
-            if map[primary] then map[alt] = true end
-        end
-    end
-    return map
-end
+-- (Removed 2026-07-13: BuildBuffExcludeMap / the manual aura blacklist. The filter
+-- registry supersedes it — per-spell control lives in Filter Designer presets and
+-- per-row filter selections. The stored data (DF.db.auraBlacklist) is kept but no
+-- longer enforced; the Aura Blacklist page is a retirement notice.)
 
--- Stable signature of an excludeSpellIDs map (sorted IDs) — blacklist changes are
--- STRUCTURAL (candidateFilters are declared at AddAuraGroup), so the row signature
--- must move when the set does.
+-- Stable signature of an excludeSpellIDs map (sorted IDs) — exclude-set changes
+-- (AD-dedup, missing-buff hide) are STRUCTURAL (candidateFilters are declared at
+-- AddAuraGroup), so the row signature must move when the set does.
 local function excludeSig(cf)
     local m = cf and cf.excludeSpellIDs
     if not m then return "" end
@@ -544,13 +522,11 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
         dur.formatKey = durFormat .. (colorByTime and ":C" or "") .. (hideAboveT and (":H" .. tostring(hideAboveT)) or "")
     end
 
-    -- Buff rows: the aura blacklist as a native exclude map (see BuildBuffExcludeMap).
+    -- Buff rows get native spell-ID exclude maps (AD-dedup + missing-buff hide below).
     -- Debuff rows get NO spell-ID filters — harmful spell-ID maps are inert on
-    -- friendly frames (the assist/attack gate), so the debuff blacklist stays legacy.
+    -- friendly frames (the assist/attack gate).
     local candidateFilters
     if prefix == "buff" then
-        local excludeMap = BuildBuffExcludeMap()
-        if excludeMap then candidateFilters = { excludeSpellIDs = excludeMap } end
         -- Native max-TOTAL-duration filter (candidateFilters.maxDuration, seconds).
         -- Blizzard-side semantics: auras with duration > max OR duration == 0 are
         -- filtered — i.e. permanent auras are IMPLICITLY always hidden while this
@@ -580,9 +556,9 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
         -- toggle is on AND the native factory owns AD for this frame, hide every aura
         -- tracked by ANY Aura Designer indicator from the buff bar so it doesn't render
         -- twice. The set is RECOMPUTED from the AD config every time the row rebuilds
-        -- (GetADTrackedSpellIDs) — no stored-blacklist write, no refcount — so it is
+        -- (GetADTrackedSpellIDs) — no stored write, no refcount — so it is
         -- automatically correct across indicator add/remove, aura delete, profile
-        -- switch and spec change. UNIONED into (never replacing) the manual blacklist
+        -- switch and spec change. UNIONED into (never replacing) the exclude
         -- map above, and folded into the row signature via excludeSig, so a change in
         -- the tracked set forces a buff-row Rebuild (see buffFactorySig). On 12.1 only
         -- the AD half of the legacy toggle is expressible — the defensive row's contents
@@ -598,7 +574,7 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
         end
         -- FILTER REGISTRY: fold the category selection into this group's spec.
         -- include-mode (categories selected) subtracts the exclude union above so
-        -- blacklist / dedup / missing-buff still win inside one map; exclude-mode
+        -- AD-dedup / missing-buff still win inside one map; exclude-mode
         -- (Uncategorised on) unions the known-but-unselected set into it. "all"
         -- (Show All / empty selection) leaves the exclude union untouched — the
         -- pre-registry behavior, byte-for-byte.
@@ -756,7 +732,7 @@ local function buffFactorySig(cfg)
         tostring(s.duration ~= nil), tostring(s.duration and s.duration.formatKey),
         tostring(s.stacks and s.stacks.formatKey),
         tostring(s.border ~= nil), tostring(s.cooldown and s.cooldown.show ~= false),
-        excludeSig(cfg.candidateFilters),   -- blacklist set (structural: declared at AddAuraGroup)
+        excludeSig(cfg.candidateFilters),   -- exclude set (structural: declared at AddAuraGroup)
         includeSig(cfg.candidateFilters),   -- filter-registry include set (structural, same rule)
         tostring(cfg.candidateFilters and cfg.candidateFilters.maxDuration),  -- max-duration filter (structural)
         tostring(cfg.sort and cfg.sort.method),                               -- native sort (declared at AddAuraGroup)
@@ -841,8 +817,8 @@ end
 -- DEBUFF FACTORY BRIDGE (P3) — mirror of the buff bridge with debuff keys.
 -- Filter list = the native direct-debuff filters; dispel colouring = the native
 -- SetAuraBorder Color style (Blizzard palette — custom per-type colours are not
--- expressible on 12.1; pickers frosted). Debuff BLACKLIST stays legacy-inert:
--- harmful spell-ID candidate filters do nothing on friendly frames (Meorawr gate).
+-- expressible on 12.1; pickers frosted). Debuff rows get NO spell-ID candidate
+-- filters: harmful spell-ID maps do nothing on friendly frames (Meorawr gate).
 -- ============================================================
 
 -- Render gate (excludes test mode, which paints legacy icons directly).

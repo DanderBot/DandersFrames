@@ -60,8 +60,8 @@ end
 
 -- ============================================================
 -- IDENTITY  (static spell-ID whitelist -> native includeSpellIDs map)
--- Mirrors the shape of Auras.lua BuildBuffExcludeMap: a { includeSpellIDs = map }
--- table Blizzard evaluates container-side. Built purely from the static per-spec
+-- A { includeSpellIDs = map } candidate-filter table Blizzard evaluates
+-- container-side. Built purely from the static per-spec
 -- config (SpellIDs + AlternateSpellIDs), never from a live aura. Returns nil when the
 -- aura name has no known spell ID (caller then skips — an empty include map would
 -- wrongly match EVERY helpful aura).

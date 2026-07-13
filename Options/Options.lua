@@ -5742,15 +5742,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     end)
 
     -- Auras > Aura Blacklist
+    -- RETIRED: superseded by the filter registry (Aura Filters + Filter Designer);
+    -- the debuff half was already unenforceable on friendly frames. The page stays
+    -- registered and builds a retirement notice with links to the replacements
+    -- (see AuraBlacklist/Options.lua). Stored data is kept but no longer enforced.
     local pageAuraBlacklist = CreateSubTab("auras", "auras_blacklist", L["Aura Blacklist"])
-    -- 12.1: UN-BLOCKED (the original "include-only filters" premise was wrong for buffs —
-    -- candidateFilters.excludeSpellIDs works for helpful auras on friendly frames and is
-    -- now wired into the factory buff row via BuildAuraRowConfig). The DEBUFF half of the
-    -- blacklist IS still dead on friendly frames (harmful spell-ID filters only apply to
-    -- attackable units) — that gets a per-section note when the debuff row ports (P3).
-    -- Split combat/OOC-only entries can't be expressed statically and stay visible on
-    -- factory rows (only always-blacklisted entries are excluded).
-    -- GUI:BlockPage12_1(pageAuraBlacklist, "limitation")
     BuildPage(pageAuraBlacklist, function(self, db, Add, AddSpace, AddSyncPoint)
         if DF.BuildAuraBlacklistPage then
             DF.BuildAuraBlacklistPage(GUI, self, db)
