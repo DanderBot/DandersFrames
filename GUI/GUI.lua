@@ -4854,10 +4854,19 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
     -- Perf warning: animations run an OnUpdate (or LCG internal animation)
     -- per active border, which adds up in 20-30 player raids.
     if showPerfBanner then
+        -- staticHeight ONLY where the host reflows widget WIDTHS on every layout
+        -- pass — i.e. the Aura Designer indicator card (its parent carries
+        -- dfAD_ReflowWidgets). There a self-sizing banner feeds a SetHeight ->
+        -- OnSizeChanged -> relayout -> SetWidth loop that drops FPS, so we predict
+        -- a fixed height instead. On normal settings pages the host lays out once,
+        -- so the banner MUST self-size to its wrapped text: a fixed height
+        -- overflows (text spills past the box) on narrow windows until a manual
+        -- drag forces a relayout.
+        local reflowingHost = parent and parent.dfAD_ReflowWidgets ~= nil
         local perfBanner = GUI:CreateInfoBanner(parent, {
             tone = "caution",
             text = L["Animations run per-border and may impact FPS in larger raids. Use sparingly on high-priority alerts."],
-            staticHeight = true,
+            staticHeight = reflowingHost or nil,
             minHeight    = 56,
         })
         w.animationPerfBanner = group:AddWidget(perfBanner, perfBanner.layoutHeight)
