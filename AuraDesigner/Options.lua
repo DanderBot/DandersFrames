@@ -5539,6 +5539,16 @@ CreateEffectCard = function(parent, yPos, effect)
                 SwitchTab("effects")
                 RefreshPlacedIndicators()
                 RefreshPreviewEffects()
+                -- Structural change: the container must rebuild AND the buff-row
+                -- dedup union shrinks (deleted = no longer tracked), so run the
+                -- full refresh path (mirror the eye toggle) — without this the
+                -- deleted indicator's buff-row icon stays suppressed until an
+                -- unrelated rebuild.
+                DF:InvalidateAuraLayout()
+                DF:UpdateAllFrames()
+                if DF.AuraDesigner.Engine and DF.AuraDesigner.Engine.ForceRefreshAllFrames then
+                    DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+                end
             end,
         })
         delBtn:SetPoint("RIGHT", -4, 0)
@@ -6382,6 +6392,13 @@ BuildLayoutGroupsTab = function()
                     DeleteLayoutGroup(capturedGroupID)
                     SwitchTab("layout")
                     RefreshPlacedIndicators()
+                    -- Deleting a group deletes its member indicators — same
+                    -- structural refresh as the effect-card delete / eye toggle.
+                    DF:InvalidateAuraLayout()
+                    DF:UpdateAllFrames()
+                    if DF.AuraDesigner.Engine and DF.AuraDesigner.Engine.ForceRefreshAllFrames then
+                        DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+                    end
                 end,
             })
             delBtn:SetPoint("RIGHT", -4, 0)
