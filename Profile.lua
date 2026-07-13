@@ -485,27 +485,57 @@ end
 
 -- Embed the aura filter registry payload: the profile's preset overrides
 -- (profile-root diffs) plus a snapshot of the account-wide custom filters
--- the exported selection tables actually reference.
-local function EmbedCustomFilterData(exportData)
-    -- The overrides table is ALWAYS embedded when this runs (auras included
-    -- in the export) — even when empty. Import uses replace semantics
+-- the exported payload actually references — from the mode selection tables
+-- AND from Aura Designer filter groups inside the exported preset libraries.
+-- Must run AFTER exportData.auraDesignerPresets is attached (when it rides).
+-- includeOverrides: the overrides table only travels with the auras category
+-- (its import-side replace semantics are auras-gated too).
+local function EmbedCustomFilterData(exportData, includeOverrides)
+    -- The overrides table is ALWAYS embedded when the auras category is in
+    -- the export — even when empty. Import uses replace semantics
     -- (matching the aura blacklist), so an exporter on stock presets must
     -- carry an explicit {} for the importer to clear its local preset tweaks;
     -- omitting the key would keep them and render the rows differently than
     -- on the exporter's screen.
-    exportData.filterPresetOverrides = DF:DeepCopy(DF.db.filterPresetOverrides or {})
+    if includeOverrides then
+        exportData.filterPresetOverrides = DF:DeepCopy(DF.db.filterPresetOverrides or {})
+    end
     local refs = {}
+    local function collectSel(sel)
+        if type(sel) == "table" and type(sel.customs) == "table" then
+            for cfId in pairs(sel.customs) do refs[cfId] = true end
+        end
+    end
     local function collectRefs(mode)
         if type(mode) ~= "table" then return end
-        for _, selKey in ipairs({ "buffFilterSelection", "defensiveFilterSelection" }) do
-            local sel = mode[selKey]
-            if sel and sel.customs then
-                for cfId in pairs(sel.customs) do refs[cfId] = true end
-            end
-        end
+        collectSel(mode.buffFilterSelection)
+        collectSel(mode.defensiveFilterSelection)
     end
     collectRefs(exportData.party)
     collectRefs(exportData.raid)
+    -- Aura Designer filter groups link custom filters via
+    -- group.filterSelection.customs. layoutGroups is spec-keyed post-V2
+    -- ({ [specKey] = {groups} }) but old preset data may still carry the
+    -- legacy flat array — walk both shapes (same dispatch as the
+    -- FilterRegistry delete scrub).
+    local function collectGroupArray(groups)
+        for _, g in ipairs(groups) do
+            if type(g) == "table" then collectSel(g.filterSelection) end
+        end
+    end
+    if type(exportData.auraDesignerPresets) == "table" then
+        for _, preset in pairs(exportData.auraDesignerPresets) do
+            local lg = type(preset) == "table" and preset.layoutGroups
+            if type(lg) == "table" then
+                if lg[1] ~= nil then collectGroupArray(lg) end
+                for k, v in pairs(lg) do
+                    if type(k) == "string" and type(v) == "table" then
+                        collectGroupArray(v)
+                    end
+                end
+            end
+        end
+    end
     if next(refs) and DF.FilterRegistry then
         local store = DF.FilterRegistry:GetStore()
         for cfId in pairs(refs) do
@@ -576,8 +606,6 @@ function DF:ExportProfile(categories, frameTypes, profileName)
         if DF.db.auraBlacklist then
             exportData.auraBlacklist = DF:DeepCopy(DF.db.auraBlacklist)
         end
-        -- Include filter preset overrides + referenced custom filters
-        EmbedCustomFilterData(exportData)
         -- Include the designer preset LIBRARIES (profile-root). Post-migration
         -- the mode tables only carry preset NAME strings — without the
         -- libraries the receiver's refs dangle and all AD/TD content is lost.
@@ -587,6 +615,9 @@ function DF:ExportProfile(categories, frameTypes, profileName)
         if DF.db.textDesignerPresets then
             exportData.textDesignerPresets = StripInternalKeys(DF:DeepCopy(DF.db.textDesignerPresets))
         end
+        -- Include filter preset overrides + referenced custom filters. AFTER
+        -- the preset libraries so AD filter-group links are collected too.
+        EmbedCustomFilterData(exportData, true)
         -- Party/raid section-sync flags (profile-root, page-keyed)
         if DF.db.linkedSections and next(DF.db.linkedSections) then
             exportData.linkedSections = DF:DeepCopy(DF.db.linkedSections)
@@ -611,12 +642,6 @@ function DF:ExportProfile(categories, frameTypes, profileName)
         if categorySet.auras and DF.db.auraBlacklist then
             exportData.auraBlacklist = DF:DeepCopy(DF.db.auraBlacklist)
         end
-        -- Filter preset overrides + referenced custom filters: top-level
-        -- keys, travel with the auras category (the selection tables that
-        -- reference them are in the auras key list)
-        if categorySet.auras then
-            EmbedCustomFilterData(exportData)
-        end
         -- Designer preset libraries: travel with their own categories (the
         -- mode tables only carry preset NAME refs). autoLayout AND pinnedFrames
         -- also pull both in — their overrides/sets reference presets by name.
@@ -625,6 +650,15 @@ function DF:ExportProfile(categories, frameTypes, profileName)
         end
         if (categorySet.textDesigner or categorySet.text or categorySet.autoLayout or categorySet.pinnedFrames) and DF.db.textDesignerPresets then
             exportData.textDesignerPresets = StripInternalKeys(DF:DeepCopy(DF.db.textDesignerPresets))
+        end
+        -- Filter preset overrides + referenced custom filters: top-level keys.
+        -- Overrides travel with the auras category only (the selection tables
+        -- that reference them are in the auras key list); custom-filter
+        -- snapshots also travel whenever the AD preset library rode the export
+        -- — its filter groups can link customs regardless of the auras
+        -- category. AFTER the preset attach above so those links are seen.
+        if categorySet.auras or exportData.auraDesignerPresets then
+            EmbedCustomFilterData(exportData, categorySet.auras)
         end
         -- Party/raid section-sync flags: behaviour preference, travels with Other
         if categorySet.other and DF.db.linkedSections and next(DF.db.linkedSections) then
@@ -920,6 +954,20 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
             end
         end
     end
+    -- AD preset libraries import under their own gates (mirror
+    -- ImportDesignerPresets' importAura: auraDesigner/autoLayout/pinnedFrames).
+    -- Their filter groups can link custom filters, so the embedded filter
+    -- snapshot must import (and the payload remap must run) for these
+    -- categories too — otherwise the imported groups' refs dangle.
+    local adPresetsImported = importInfo.isFullExport and not selectedCategories
+    if not adPresetsImported then
+        for _, cat in ipairs(selectedCategories or importInfo.detectedCategories or {}) do
+            if cat == "auraDesigner" or cat == "autoLayout" or cat == "pinnedFrames" then
+                adPresetsImported = true
+                break
+            end
+        end
+    end
     if aurasImported then
         -- Replace semantics (aura blacklist precedent): the embedded overrides
         -- table fully replaces the local one — INCLUDING an embedded empty
@@ -930,23 +978,53 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
         if importData.filterPresetOverrides then
             DF.db.filterPresetOverrides = DF:DeepCopy(importData.filterPresetOverrides)
         end
-        if importData.customAuraFilters and DF.FilterRegistry then
-            local remap = DF.FilterRegistry:ImportCustomFilters(importData.customAuraFilters)
-            local function remapSel(mode)
-                if type(mode) ~= "table" then return end
-                for _, selKey in ipairs({ "buffFilterSelection", "defensiveFilterSelection" }) do
-                    local sel = mode[selKey]
-                    if sel and sel.customs then
-                        local fixed = {}
-                        for cfId in pairs(sel.customs) do
-                            fixed[remap[cfId] or cfId] = true
+    end
+    -- The AD gate only counts when the payload actually carries preset
+    -- libraries — otherwise an autoLayout-only import of an auras-category
+    -- string would add filters nothing references.
+    if adPresetsImported and not importData.auraDesignerPresets then
+        adPresetsImported = false
+    end
+    if (aurasImported or adPresetsImported) and importData.customAuraFilters and DF.FilterRegistry then
+        local remap = DF.FilterRegistry:ImportCustomFilters(importData.customAuraFilters)
+        local function remapCustoms(sel)
+            if type(sel) == "table" and type(sel.customs) == "table" then
+                local fixed = {}
+                for cfId in pairs(sel.customs) do
+                    fixed[remap[cfId] or cfId] = true
+                end
+                sel.customs = fixed
+            end
+        end
+        local function remapSel(mode)
+            if type(mode) ~= "table" then return end
+            remapCustoms(mode.buffFilterSelection)
+            remapCustoms(mode.defensiveFilterSelection)
+        end
+        remapSel(importData.party)
+        remapSel(importData.raid)
+        -- AD filter-group links in the payload's preset libraries: remap
+        -- payload-side, BEFORE ImportDesignerPresets applies them (same
+        -- rationale as the mode selections above — never touch DF.db refs
+        -- the import doesn't carry). layoutGroups is spec-keyed post-V2 but
+        -- old exports may carry the legacy flat array — walk both shapes.
+        local function remapGroupArray(groups)
+            for _, g in ipairs(groups) do
+                if type(g) == "table" then remapCustoms(g.filterSelection) end
+            end
+        end
+        if type(importData.auraDesignerPresets) == "table" then
+            for _, preset in pairs(importData.auraDesignerPresets) do
+                local lg = type(preset) == "table" and preset.layoutGroups
+                if type(lg) == "table" then
+                    if lg[1] ~= nil then remapGroupArray(lg) end
+                    for k, v in pairs(lg) do
+                        if type(k) == "string" and type(v) == "table" then
+                            remapGroupArray(v)
                         end
-                        sel.customs = fixed
                     end
                 end
             end
-            remapSel(importData.party)
-            remapSel(importData.raid)
         end
     end
 

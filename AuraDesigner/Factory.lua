@@ -148,6 +148,8 @@ end
 -- double resolve). Profile/spec switches swap the group TABLES themselves, so
 -- identity keying self-invalidates even without a version bump.
 local fgroupResCache = setmetatable({}, { __mode = "k" })
+-- NOTE: the returned res (and res.map) is the CACHED table, shared across
+-- frames and consumers within a version — treat it as immutable.
 local function resolveFilterGroup(R, group)
     local ver = DF.auraLayoutVersion or 0
     local c = fgroupResCache[group]
@@ -1138,9 +1140,12 @@ local function buildFilterGroupConfig(unit, map, group)
     }
 end
 
--- Exclude-kind guard warned once per group id (per session) — the sync runs per
+-- Exclude-kind guard warned once per group (per session) — the sync runs per
 -- frame per aura event, so an unconditional DebugWarn would spam the console.
-local fgroupExcludeWarned = {}
+-- Keyed by the group TABLE, not group.id: ids are only unique within one
+-- preset's config, so id keys could collide across profiles/presets. Weak
+-- keys let deleted/swapped-out group tables GC.
+local fgroupExcludeWarned = setmetatable({}, { __mode = "k" })
 
 -- COSMETIC signature: the layout fields hot-apply via ApplyStyle(style, layout).
 -- Identity (selection signature) + max slot count are structural (declared at
@@ -2085,8 +2090,8 @@ function Factory:SyncFrame(frame)
                         -- group picker) — guard anyway: an exclude map on a group would
                         -- render "everything except", never what a filter group means.
                         -- Warn once per group id (this sync runs per aura event).
-                        if not fgroupExcludeWarned[group.id] then
-                            fgroupExcludeWarned[group.id] = true
+                        if not fgroupExcludeWarned[group] then
+                            fgroupExcludeWarned[group] = true
                             DF:DebugWarn(DBG, "Filter group %s resolved to an exclude selection; skipping",
                                 tostring(group.id))
                         end
