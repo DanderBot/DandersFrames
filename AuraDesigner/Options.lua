@@ -2429,6 +2429,14 @@ local function WirePreviewIndicator(slot, capturedAura, capturedID, spec)
             if not GetIndicatorLayoutGroup(capturedAura, capturedID) then
                 RemoveIndicatorInstance(capturedAura, capturedID)
                 DF:AuraDesigner_RefreshPage()
+                -- Structural change: same full refresh as the effect-card ✕ —
+                -- the container must rebuild and the buff-row dedup union
+                -- shrinks (deleted = no longer tracked).
+                DF:InvalidateAuraLayout()
+                DF:UpdateAllFrames()
+                if DF.AuraDesigner.Engine and DF.AuraDesigner.Engine.ForceRefreshAllFrames then
+                    DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+                end
             end
         elseif button == "LeftButton" then
             -- Collapse all cards and expand only the clicked one
@@ -6594,6 +6602,13 @@ BuildLayoutGroupsTab = function()
                             SwitchTab("layout")
                             RefreshPlacedIndicators()
                             RefreshPreviewEffects()
+                            -- Structural change: same full refresh as the
+                            -- effect-card ✕ / group delete (indicator removed).
+                            DF:InvalidateAuraLayout()
+                            DF:UpdateAllFrames()
+                            if DF.AuraDesigner.Engine and DF.AuraDesigner.Engine.ForceRefreshAllFrames then
+                                DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+                            end
                         end)
 
                         -- Customise button (navigates to Effects tab for this indicator)
