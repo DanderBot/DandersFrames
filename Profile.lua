@@ -36,6 +36,25 @@ function DF:ResetProfile(mode)
     print("|cff00ff00DandersFrames:|r " .. format(L["%s settings reset to defaults."], modeLabel))
 end
 
+-- Full profile reset: both modes PLUS the profile-level designer preset
+-- libraries. DF:ResetProfile only replaces DF.db[mode]; the Aura/Text Designer
+-- store their configs in the shared, profile-level auraDesignerPresets/
+-- textDesignerPresets libraries, which those per-mode resets never touch — so
+-- without this, edited AD/TD presets survive a "Reset Profile to Defaults".
+-- Used by the GUI "Reset Profile to Defaults" button and /df reset.
+function DF:ResetFullProfile()
+    self:ResetProfile("party")
+    self:ResetProfile("raid")
+    if self.ResetDesignerPresets then self:ResetDesignerPresets() end
+    -- FullProfileRefresh re-applies the Aura Designer engine to live frames
+    -- (Core.lua), so the reset AD presets take effect immediately. It does NOT
+    -- touch the Text Designer, so nudge that separately below.
+    self:FullProfileRefresh()
+    if DF.TextDesigner and DF.TextDesigner.Preview and DF.TextDesigner.Preview.RefreshAll then
+        DF.TextDesigner.Preview:RefreshAll()
+    end
+end
+
 -- Copies Party->Raid or Raid->Party within CURRENT profile
 function DF:CopyProfile(srcMode, destMode)
     local L = DF.L
@@ -265,7 +284,7 @@ function DF:SetProfile(name)
     local p = DandersFramesDB_v2.profiles[name]
     if p.partyEnabled        == nil then p.partyEnabled        = true end
     if p.raidEnabled         == nil then p.raidEnabled         = true end
-    if p.settingsFont        == nil then p.settingsFont        = "Friz Quadrata TT" end
+    if p.settingsFont        == nil then p.settingsFont        = "DF Roboto SemiBold" end
     if p.settingsFontOutline == nil or p.settingsFontOutline == "" then p.settingsFontOutline = "NONE" end
 
     -- Switch to the profile (update both account-wide and per-character)

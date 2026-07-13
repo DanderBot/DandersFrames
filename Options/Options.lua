@@ -8719,8 +8719,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 button1 = L["Yes"],
                 button2 = L["No"],
                 OnAccept = function()
-                    DF:ResetProfile("party")
-                    DF:ResetProfile("raid")
+                    DF:ResetFullProfile()
                     if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
                 end,
                 timeout = 0,

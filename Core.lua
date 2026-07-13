@@ -3291,8 +3291,9 @@ DF._MainEventDispatcher = function(self, event, arg1)
         if DF.db.partyEnabled == nil then DF.db.partyEnabled = true end
         if DF.db.raidEnabled == nil then DF.db.raidEnabled = true end
 
-        -- Ensure settings-panel font defaults exist
-        if DF.db.settingsFont        == nil then DF.db.settingsFont        = "Friz Quadrata TT" end
+        -- Ensure settings-panel font defaults exist (default DF Roboto SemiBold;
+        -- the old-default flip for existing profiles runs in the per-profile loop below)
+        if DF.db.settingsFont        == nil then DF.db.settingsFont        = "DF Roboto SemiBold" end
         -- Outline "None" is stored canonically as "NONE" everywhere; normalise the
         -- legacy empty-string the old hand-rolled settings dropdown wrote.
         if DF.db.settingsFontOutline == nil or DF.db.settingsFontOutline == "" then DF.db.settingsFontOutline = "NONE" end
@@ -3351,7 +3352,18 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 if profile.raidEnabled == nil then profile.raidEnabled = true end
 
                 -- Ensure settings-panel font defaults exist on every profile
-                if profile.settingsFont        == nil then profile.settingsFont        = "Friz Quadrata TT" end
+                if profile.settingsFont        == nil then profile.settingsFont        = "DF Roboto SemiBold" end
+                -- One-time: the settings-panel font default changed from the WoW
+                -- default (Friz Quadrata) to DF Roboto SemiBold. Flip profiles that
+                -- still carry the old auto-written default — nobody picks Friz over
+                -- DF Roboto deliberately — but only ONCE, so a later explicit Friz
+                -- choice sticks.
+                if not profile._settingsFontRobotoDefaultV1 then
+                    if profile.settingsFont == "Friz Quadrata TT" then
+                        profile.settingsFont = "DF Roboto SemiBold"
+                    end
+                    profile._settingsFontRobotoDefaultV1 = true
+                end
                 if profile.settingsFontOutline == nil or profile.settingsFontOutline == "" then profile.settingsFontOutline = "NONE" end
 
                 -- Backfill missing auraDesigner.defaults keys.
@@ -4457,8 +4469,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
             elseif msg == "raidlock" or msg == "lockraid" then
                 if DF.LockRaidFrames then DF:LockRaidFrames() end
             elseif msg == "reset" then
-                DF:ResetProfile("party")
-                DF:ResetProfile("raid")
+                DF:ResetFullProfile()
             elseif msg == "resetgui" then
                 -- Reset GUI scale, size, and position to defaults
                 if DF.db and DF.db.party then
