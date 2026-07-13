@@ -5691,31 +5691,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         debuffGroup:AddWidget(dfKeepImportantRow, 30)
         Add(debuffGroup, nil, 1)
 
-        -- ===== AURA BLACKLIST (Column 2, under Buff Filters) =====
-        -- Pointer section directing users to the dedicated Aura Blacklist tab.
-        -- Aura Filters (this tab) controls what types of auras are shown;
-        -- the Aura Blacklist tab is where specific spells are excluded.
-        do
-            local blacklistGroup = GUI:CreateSettingsGroup(self.child, 280)
-            blacklistGroup:AddWidget(GUI:CreateHeader(self.child, L["Aura Blacklist"]), 40)
-
-            local blacklistBanner = GUI:CreateInfoBanner(self.child, {tone = "info"})
-            blacklistBanner:SetHTML(
-                L["To blacklist specific auras, see the Aura Blacklist tab."] .. " " ..
-                "|cffffffff|HopenBlacklist|h" .. L["Open Aura Blacklist"] .. "|h|r",
-                function()
-                    if GUI.SelectTab then GUI.SelectTab("auras_blacklist") end
-                end)
-            blacklistGroup:AddWidget(blacklistBanner, 64)
-
-            Add(blacklistGroup, nil, 2)
-        end
-
         -- ===== SEE ALSO =====
+        -- (The Aura Blacklist pointer section that lived here was removed with the
+        -- blacklist's retirement; the See Also entry points at its replacement.)
         Add(GUI:CreateSeeAlso(self.child, {
             {pageId = "auras_buffs", label = L["Buff Icons"]},
             {pageId = "auras_debuffs", label = L["Debuff Icons"]},
-            {pageId = "auras_blacklist", label = L["Aura Blacklist"]},
+            {pageId = "auras_filterdesigner", label = L["Filter Designer"]},
             {pageId = "auras_auradesigner", label = L["Aura Designer"]},
         }), 30, "both")
     end)
