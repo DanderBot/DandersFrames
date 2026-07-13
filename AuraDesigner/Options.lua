@@ -1602,10 +1602,15 @@ local function GetAuraIcon(specKey, auraName)
     end
     -- Fallback to dynamic API for any aura not in the static table
     local spellIDs = DF.AuraDesigner.SpellIDs
-    if not spellIDs or not specKey then return nil end
-    local specIDs = spellIDs[specKey]
-    if not specIDs then return nil end
-    local spellID = specIDs[auraName]
+    local specIDs = spellIDs and specKey and spellIDs[specKey]
+    local spellID = specIDs and specIDs[auraName]
+    if not spellID or spellID == 0 then
+        -- SpellDB fallback (all-spec support): auras with no curated Config
+        -- entry resolve by name through the FilterRegistry SpellDB
+        local R = DF.FilterRegistry
+        local rec = R and R.GetSpellByName and R:GetSpellByName(auraName)
+        spellID = rec and rec.id
+    end
     if not spellID or spellID == 0 then return nil end
     if C_Spell and C_Spell.GetSpellTexture then
         return C_Spell.GetSpellTexture(spellID)
@@ -2313,6 +2318,12 @@ local function RenderPreviewIndicator(mockFrame, spec, auraName, info, indicator
     local specIDs = DF.AuraDesigner.SpellIDs and DF.AuraDesigner.SpellIDs[spec]
     local spellID = specIDs and specIDs[auraName]
     if type(spellID) == "table" then spellID = spellID[1] end
+    if not spellID then
+        -- SpellDB fallback (all-spec support) — mirror BuildADIdentityFilters
+        local R = DF.FilterRegistry
+        local rec = R and R.GetSpellByName and R:GetSpellByName(auraName)
+        spellID = rec and rec.id
+    end
     local cfg, sig = Factory:BuildPreviewConfig(mockFrame, effectiveConfig, indicator.type or "icon", spellID)
     if not (cfg.testEntries and cfg.testEntries[1]) then
         -- No resolvable spell ID: synthesize an entry from the configured art so
@@ -4484,9 +4495,20 @@ local function CreateEnableBanner(parent)
     -- colour — the shared opener isn't per-value colourable.)
     local SPEC_ORDER = {
         "auto",
-        "PreservationEvoker", "AugmentationEvoker", "RestorationDruid",
-        "DisciplinePriest", "HolyPriest", "MistweaverMonk",
-        "RestorationShaman", "HolyPaladin",
+        -- Grouped by class (class order), specs in spec-index order
+        "ArmsWarrior", "FuryWarrior", "ProtectionWarrior",
+        "HolyPaladin", "ProtectionPaladin", "RetributionPaladin",
+        "BeastMasteryHunter", "MarksmanshipHunter", "SurvivalHunter",
+        "AssassinationRogue", "OutlawRogue", "SubtletyRogue",
+        "DisciplinePriest", "HolyPriest", "ShadowPriest",
+        "BloodDeathKnight", "FrostDeathKnight", "UnholyDeathKnight",
+        "ElementalShaman", "EnhancementShaman", "RestorationShaman",
+        "ArcaneMage", "FireMage", "FrostMage",
+        "AfflictionWarlock", "DemonologyWarlock", "DestructionWarlock",
+        "BrewmasterMonk", "MistweaverMonk", "WindwalkerMonk",
+        "BalanceDruid", "FeralDruid", "GuardianDruid", "RestorationDruid",
+        "HavocDemonHunter", "VengeanceDemonHunter", "DevourerDemonHunter",
+        "DevastationEvoker", "PreservationEvoker", "AugmentationEvoker",
     }
     local function SpecOptionText(specKey)
         if specKey == "auto" then
@@ -5103,6 +5125,7 @@ local function CreateSpellCard(grid, auraInfo, spec, x, y, CARD_SIZE, isSecret)
     local spellIDs = DF.AuraDesigner.SpellIDs
     local spellID = tooltipOverrides and tooltipOverrides[auraInfo.name]
         or spellIDs and spellIDs[spec] and spellIDs[spec][auraInfo.name]
+        or auraInfo.spellID  -- SpellDB pool entries carry their canonical id
 
     if alreadyUsed then
         -- Used cards still get tooltips but no highlight/click
@@ -5192,7 +5215,7 @@ PopulateSpellGrid = function()
             label:SetWidth(grid:GetWidth() - 32)
             label:SetJustifyH("CENTER")
             label:SetTextColor(0.55, 0.55, 0.55, 1)
-            label:SetText(L["Aura Designer supports healer specs and Augmentation Evoker.\n\nYou can manually select a spec using the dropdown above to configure indicators in advance."])
+            label:SetText(L["No trackable spells found for this spec.\n\nYou can select a different spec using the dropdown above."])
             grid.unsupportedLabel = label
         end
         grid.unsupportedLabel:Show()
@@ -6017,7 +6040,7 @@ BuildEffectsTab = function()
         local spec = ResolveSpec()
         local specAuras = spec and Adapter:GetTrackableAuras(spec)
         if not spec or not specAuras or #specAuras == 0 then
-            empty:SetText(L["Aura Designer supports healer specs and Augmentation Evoker.\n\nYou can manually select a spec using the dropdown above to configure indicators in advance."])
+            empty:SetText(L["No trackable spells found for this spec.\n\nYou can select a different spec using the dropdown above."])
         elseif activeFilter == "all" then
             empty:SetText(L["No effects configured yet.\nClick '+ Add Indicator' to get started."])
         else

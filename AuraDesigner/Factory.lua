@@ -83,8 +83,24 @@ function DF:BuildADIdentityFilters(spec, auraName)
             end
         end
     end
-    if not map then return nil end
-    return { includeSpellIDs = map }
+    if map then return { includeSpellIDs = map } end
+    -- SpellDB fallback (all-spec support): a name the curated per-spec Config
+    -- tables don't know resolves through the FilterRegistry SpellDB by display
+    -- name (shipped English `rec.n` or the localized runtime name), unioning
+    -- the canonical ID + every alt. The Config tables are ALWAYS consulted
+    -- first, so every pre-existing indicator keeps byte-identical identity.
+    local R = DF.FilterRegistry
+    local rec = R and R.GetSpellByName and R:GetSpellByName(auraName)
+    if rec then
+        map = { [rec.id] = true }
+        if rec.alts then
+            for _, altID in ipairs(rec.alts) do
+                map[altID] = true
+            end
+        end
+        return { includeSpellIDs = map }
+    end
+    return nil
 end
 
 -- ============================================================
@@ -1008,6 +1024,12 @@ local function primaryADSpellID(spec, auraName)
     local specIDs = DF.AuraDesigner.SpellIDs and DF.AuraDesigner.SpellIDs[spec]
     local p = specIDs and specIDs[auraName]
     if type(p) == "table" then p = p[1] end
+    if not p then
+        -- SpellDB fallback (all-spec support) — mirror BuildADIdentityFilters
+        local R = DF.FilterRegistry
+        local rec = R and R.GetSpellByName and R:GetSpellByName(auraName)
+        p = rec and rec.id
+    end
     return p
 end
 

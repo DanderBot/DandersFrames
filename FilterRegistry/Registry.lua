@@ -200,6 +200,31 @@ function R:GetSpellDisplay(rec)
 end
 
 -- ------------------------------------------------------------
+-- NAME LOOKUP (lazy)
+-- name -> record, indexing BOTH the shipped English `n` and the
+-- runtime localized C_Spell name of every record. Built once on
+-- first use (GUI-time callers, so C_Spell names are available).
+-- Used by the Aura Designer's SpellDB identity fallback and the
+-- all-spec trackable-aura pool. First record wins on collisions
+-- (deterministic: R.Spells array order).
+-- ------------------------------------------------------------
+local byName
+function R:GetSpellByName(name)
+    if type(name) ~= "string" or name == "" then return nil end
+    if not byName then
+        byName = {}
+        for _, rec in ipairs(R.Spells) do
+            if byName[rec.n] == nil then byName[rec.n] = rec end
+            local loc = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(rec.id)
+            if type(loc) == "string" and loc ~= "" and byName[loc] == nil then
+                byName[loc] = rec
+            end
+        end
+    end
+    return byName[name]
+end
+
+-- ------------------------------------------------------------
 -- RESOLVER
 -- Selection -> exactly one candidateFilters spell-ID map.
 -- include: union of all variant IDs of every effectively-enabled
