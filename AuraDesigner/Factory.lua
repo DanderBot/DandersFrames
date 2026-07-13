@@ -174,15 +174,38 @@ function DF:GetADTrackedSpellIDs(frame, db)
     if not spec then return nil end
 
     local specAuras = adDB.auras and adDB.auras[spec]
-    if not specAuras then return nil end
 
     local union
-    for auraName, auraCfg in pairs(specAuras) do
-        if auraHasTrackedIndicator(auraCfg) then
-            local f = DF:BuildADIdentityFilters(spec, auraName)
-            if f and f.includeSpellIDs then
-                union = union or {}
-                for id in pairs(f.includeSpellIDs) do union[id] = true end
+    if specAuras then
+        for auraName, auraCfg in pairs(specAuras) do
+            if auraHasTrackedIndicator(auraCfg) then
+                local f = DF:BuildADIdentityFilters(spec, auraName)
+                if f and f.includeSpellIDs then
+                    union = union or {}
+                    for id in pairs(f.includeSpellIDs) do union[id] = true end
+                end
+            end
+        end
+    end
+
+    -- FILTER GROUPS (A5): a filter group renders every spell of its linked registry
+    -- filters on the frame, so its resolved include map joins the dedup union (the
+    -- buff row hides what the group shows). Eye-hidden groups (`enabled == false`)
+    -- render nothing and contribute nothing — their buff-row icons come back. Only
+    -- kind "include" maps count ("all" = empty selection renders nothing; "exclude"
+    -- is unreachable from the group UI and skipped by the render path too).
+    local R = DF.FilterRegistry
+    local groups = R and adDB.layoutGroups and adDB.layoutGroups[spec]
+    if groups then
+        for _, group in ipairs(groups) do
+            if type(group) == "table" and group.kind == "filter" and group.enabled ~= false then
+                local res = R:ResolveSelection(group.filterSelection, false)
+                if res.kind == "include" and res.map then
+                    for id in pairs(res.map) do
+                        union = union or {}   -- only allocate when the map has entries
+                        union[id] = true
+                    end
+                end
             end
         end
     end
@@ -1007,6 +1030,108 @@ local function barCoSig(frame, indicator, borderOn, alpha)
 end
 
 -- ============================================================
+-- FILTER GROUPS  — A5
+-- A filter group is a container-backed, self-managing row linked to 1+ registry
+-- filters (DF.FilterRegistry): Blizzard creates/anchors the buttons, the group's
+-- identity is the union of its linked filters resolved at build time
+-- (R:ResolveSelection -> includeSpellIDs; post-overrides, all variant IDs), and
+-- styling is uniform per group (icon size / grow / spacing / per-row / max /
+-- anchor+offset). No per-spell members, no per-spell styling — member groups
+-- (the position-arranger model) are untouched. Live-link semantics: the group
+-- stores filter REFERENCES (preset keys + custom ids), so filter edits and
+-- shipped preset updates propagate via R:SelectionSignature in the structural
+-- sig. One handle per group per frame, keyed "fgroup:<id>" in store.fgroups.
+-- ============================================================
+
+local LEGACY_GROW = { RIGHT = "RIGHT_DOWN", LEFT = "LEFT_DOWN", UP = "UP_RIGHT", DOWN = "DOWN_RIGHT" }
+local function groupGrowth(group)
+    local g = group.growDirection
+    if type(g) ~= "string" then return "RIGHT_DOWN" end
+    if not g:find("_") then return LEGACY_GROW[g] or "RIGHT_DOWN" end
+    return g
+end
+
+-- Test-preview entries for a filter group: up to 3 spells from the resolved map
+-- (sorted for determinism), icon/name resolved from the static spell ID.
+local function filterGroupTestEntries(map)
+    local ids = {}
+    for id in pairs(map) do ids[#ids + 1] = id end
+    tsort(ids)
+    local entries
+    for i = 1, math.min(3, #ids) do
+        entries = entries or {}
+        local e = testEntryForMap({ [ids[i]] = true })
+        if e then entries[#entries + 1] = e[1] end
+    end
+    return entries
+end
+
+local function buildFilterGroupLayout(group)
+    return {
+        size     = math.max(8, tonumber(group.iconSize) or 24),
+        spacingX = tonumber(group.spacing) or 2,
+        spacingY = tonumber(group.spacing) or 2,
+        anchor   = (type(group.anchor) == "string" and group.anchor) or "TOPLEFT",
+        growth   = groupGrowth(group),
+        wrap     = math.max(1, tonumber(group.iconsPerRow) or 8),
+        offsetX  = tonumber(group.offsetX) or 0,
+        offsetY  = tonumber(group.offsetY) or 0,
+    }
+end
+
+-- Uniform per-group style: native spell icon + cooldown swipe, default duration
+-- text (bare NUMBER formatter — the same default the buff row / placed icons use)
+-- and native stacks (>1, no formatter — secret trap). All static config; the
+-- region set never varies per group, so only identity + max are structural.
+local function buildFilterGroupStyle()
+    return {
+        icon     = { show = true, zoom = true, inset = 0 },
+        cooldown = { show = true, swipe = true, numbers = false },
+        duration = {
+            show = true, size = 10, outline = "OUTLINE", anchor = "CENTER",
+            offsetX = 0, offsetY = 0,
+            formatter = DF.GetFactoryDurationFormatter
+                and DF:GetFactoryDurationFormatter("NUMBER") or nil,
+        },
+        stacks = { show = true, size = 10, outline = "OUTLINE", anchor = "BOTTOMRIGHT",
+                   offsetX = 2, offsetY = -1 },
+    }
+end
+
+-- Full row config for one filter group. Same frame-level band as the placed
+-- indicators (40) so group icons read on top of the frame content.
+local function buildFilterGroupConfig(unit, map, group)
+    return {
+        unit = unit,
+        mode = "row",
+        max = math.max(1, tonumber(group.maxIcons) or 8),
+        filter = "HELPFUL",
+        candidateFilters = { includeSpellIDs = map },
+        testEntries = filterGroupTestEntries(map),
+        enabled = true,
+        tooltips = false,
+        frameLevelOffset = 40,
+        layout = buildFilterGroupLayout(group),
+        style = buildFilterGroupStyle(),
+    }
+end
+
+-- COSMETIC signature: the layout fields hot-apply via ApplyStyle(style, layout).
+-- Identity (selection signature) + max slot count are structural (declared at
+-- AddAuraGroup / container build) and folded into structSig at the call site.
+local function filterGroupCoSig(group)
+    return tconcat({
+        "sz=" .. tostring(math.max(8, tonumber(group.iconSize) or 24)),
+        "an=" .. tostring(group.anchor or "TOPLEFT"),
+        "ox=" .. tostring(tonumber(group.offsetX) or 0),
+        "oy=" .. tostring(tonumber(group.offsetY) or 0),
+        "gr=" .. groupGrowth(group),
+        "wr=" .. tostring(math.max(1, tonumber(group.iconsPerRow) or 8)),
+        "sp=" .. tostring(tonumber(group.spacing) or 2),
+    }, "|")
+end
+
+-- ============================================================
 -- SHOW-WHEN-MISSING  — P4.5
 -- An indicator/effect with showWhenMissing set INVERTS its trigger: it renders while the
 -- tracked aura is ABSENT (a "you're missing this" reminder) instead of on presence. Driven
@@ -1408,7 +1533,7 @@ function Factory:SyncFrame(frame)
     do
         local u = frame.unit
         for _, storeKey in ipairs({ "healthbar", "background", "border", "placed",
-                                    "nametext", "healthtext" }) do
+                                    "nametext", "healthtext", "fgroups" }) do
             local t = store[storeKey]
             if t then
                 for _, entry in pairs(t) do
@@ -1889,6 +2014,67 @@ function Factory:SyncFrame(frame)
         end
     end
 
+    -- ---- FILTER GROUPS (container-backed, registry-linked rows) — A5 -----------------
+    -- One handle per filter group, keyed "fgroup:<id>". Structural sig = the registry
+    -- selection signature (live link: filter edits / preset updates move it) + max slot
+    -- count; the layout fields hot-apply via ApplyStyle. Eye-hidden groups
+    -- (`enabled == false`; nil/true = shown) are not marked live -> the sweep destroys
+    -- their handle. Same for deleted groups and spec switches (different id set).
+    do
+        local fg = store.fgroups
+        if not fg then fg = {}; store.fgroups = fg end
+        local live = {}
+
+        local R = DF.FilterRegistry
+        local groups = R and adDB.layoutGroups and adDB.layoutGroups[spec]
+        if groups then
+            for _, group in ipairs(groups) do
+                if type(group) == "table" and group.kind == "filter" and group.enabled ~= false then
+                    local res = R:ResolveSelection(group.filterSelection, false)
+                    if res.kind == "include" and res.map and next(res.map) then
+                        local key = "fgroup:" .. tostring(group.id)
+                        live[key] = true
+                        local structSig = R:SelectionSignature(group.filterSelection, false)
+                            .. "|max=" .. tostring(math.max(1, tonumber(group.maxIcons) or 8))
+                        local coSig = filterGroupCoSig(group)
+
+                        local entry = fg[key]
+                        if not entry then
+                            local handle = DF.AuraContainer:Create(frame,
+                                buildFilterGroupConfig(frame.unit, res.map, group))
+                            if handle then
+                                fg[key] = { handle = handle, structSig = structSig, coSig = coSig }
+                            end
+                        elseif entry.structSig ~= structSig then
+                            entry.structSig, entry.coSig = structSig, coSig
+                            entry.handle:Rebuild(buildFilterGroupConfig(frame.unit, res.map, group))
+                        elseif entry.coSig ~= coSig then
+                            entry.coSig = coSig
+                            entry.handle:ApplyStyle(buildFilterGroupStyle(), buildFilterGroupLayout(group))
+                        end
+                    elseif res.kind == "exclude" then
+                        -- Unreachable from the group UI (no Uncategorised option in the
+                        -- group picker) — guard anyway: an exclude map on a group would
+                        -- render "everything except", never what a filter group means.
+                        DF:DebugWarn(DBG, "Filter group %s resolved to an exclude selection; skipping",
+                            tostring(group.id))
+                    end
+                    -- res.kind == "all" (empty/no selection): render nothing — the group
+                    -- stays dormant until a filter is linked (an unfiltered include-all
+                    -- row is never the intent). Not marked live -> sweep tears down.
+                end
+            end
+        end
+
+        -- Tear down groups gone / hidden / emptied / off-spec.
+        for key, entry in pairs(fg) do
+            if not live[key] then
+                if entry.handle then entry.handle:Destroy() end
+                fg[key] = nil
+            end
+        end
+    end
+
     -- ---- SOUND (native on-apply registrations) --------------------------------------
     -- Reconcile C_UnitAuras.AddAuraAppliedSound registrations to the sound-indicator config
     -- (combat-deferred inside SyncSound). NOT a container — its own OOC/regen discipline.
@@ -1913,6 +2099,7 @@ function Factory:ClearFrame(frame)
     teardownExcept(store.background or {}, nil)
     teardownExcept(store.border or {}, nil)
     teardownExcept(store.placed or {}, nil)   -- per-indicator icon/square/bar containers
+    teardownExcept(store.fgroups or {}, nil)  -- filter-group containers (A5)
     teardownExcept(store.nametext or {}, nil)
     teardownExcept(store.healthtext or {}, nil)
     -- Release the Text Designer mirror covers owned by the two text containers above.

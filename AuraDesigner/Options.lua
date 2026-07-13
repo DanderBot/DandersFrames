@@ -1788,8 +1788,11 @@ local function GetUngroupedIndicators()
     return result
 end
 
--- Create a new layout group
-local function CreateLayoutGroup(name)
+-- Create a new layout group. kind: nil/"members" = classic member arranger
+-- (legacy records carry no kind); "filter" = a container-backed group linked to
+-- registry filters (stable preset keys / custom ids in filterSelection) with
+-- uniform per-group styling (iconSize / maxIcons on top of the shared layout).
+local function CreateLayoutGroup(name, kind)
     local adDB = GetAuraDesignerDB()
     if not adDB then return nil end
     local groups = GetSpecLayoutGroups()
@@ -1798,15 +1801,22 @@ local function CreateLayoutGroup(name)
     adDB.nextLayoutGroupID = id + 1
     local group = {
         id = id,
-        name = name or ("Group " .. id),
+        name = name or ((kind == "filter") and ("Filter Group " .. id) or ("Group " .. id)),
         anchor = "TOPLEFT",
         offsetX = 0,
         offsetY = 0,
         growDirection = "RIGHT_DOWN",
         iconsPerRow = 8,
         spacing = 2,
-        members = {},
     }
+    if kind == "filter" then
+        group.kind = "filter"
+        group.filterSelection = { presets = {}, customs = {} }
+        group.iconSize = 24
+        group.maxIcons = 8
+    else
+        group.members = {}
+    end
     tinsert(groups, group)
     return group
 end
@@ -2545,6 +2555,61 @@ local function RefreshPlacedIndicators()
                 end
             end
         end
+
+    -- FILTER GROUP PLACEHOLDERS: a filter group's contents are Blizzard-filled at
+    -- runtime (secret visibility, registry-driven), so the editor canvas can't
+    -- preview real icons. Draw a labeled outline block at the group's anchor/offset
+    -- sized to its footprint (iconSize × min(maxIcons, iconsPerRow) columns, wrapped
+    -- rows) instead. Pooled per group id; eye-hidden groups draw nothing.
+    do
+        local fgPool = mockFrame.dfADFilterGroupSlots
+        if not fgPool then fgPool = {}; mockFrame.dfADFilterGroupSlots = fgPool end
+        for _, group in ipairs(specGroups) do
+            if group.kind == "filter" and group.enabled ~= false then
+                local slot = fgPool[group.id]
+                if not slot then
+                    slot = CreateFrame("Frame", nil, mockFrame, "BackdropTemplate")
+                    slot.label = slot:CreateFontString(nil, "OVERLAY")
+                    GUI:SetSettingsFont(slot.label, 8, "OUTLINE")
+                    slot.label:SetPoint("CENTER", 0, 0)
+                    fgPool[group.id] = slot
+                end
+                local iconSize = max(8, tonumber(group.iconSize) or 24)
+                local maxIcons = max(1, tonumber(group.maxIcons) or 8)
+                local wrap = max(1, tonumber(group.iconsPerRow) or 8)
+                local spacing = tonumber(group.spacing) or 2
+                local cols = min(maxIcons, wrap)
+                local rows = floor((maxIcons - 1) / wrap) + 1
+                slot:SetSize(max(cols * iconSize + (cols - 1) * spacing, 10),
+                             max(rows * iconSize + (rows - 1) * spacing, 10))
+                ApplyBackdrop(slot, {r = 0.91, g = 0.66, b = 0.25, a = 0.10},
+                    {r = 0.91, g = 0.66, b = 0.25, a = 0.8})
+                slot.label:SetText(group.name)
+                slot.label:SetTextColor(0.91, 0.66, 0.25)
+                slot.label:SetWidth(slot:GetWidth() - 4)
+                slot.label:SetMaxLines(2)
+                -- Pin the block's grow-corner at the group's anchor point so it
+                -- extends in the grow direction (mirror the container's flow origin).
+                local p, s = strsplit("_", group.growDirection or "RIGHT_DOWN")
+                local vert, horiz = "TOP", "LEFT"
+                for _, d in ipairs({ p, s }) do
+                    if d == "UP" then vert = "BOTTOM"
+                    elseif d == "DOWN" then vert = "TOP"
+                    elseif d == "LEFT" then horiz = "RIGHT"
+                    elseif d == "RIGHT" then horiz = "LEFT"
+                    elseif d == "CENTER" then horiz = "" end
+                end
+                local selfPoint = (horiz == "") and vert or (vert .. horiz)
+                slot:ClearAllPoints()
+                slot:SetPoint(selfPoint, mockFrame, group.anchor or "TOPLEFT",
+                    group.offsetX or 0, group.offsetY or 0)
+                slot:SetFrameStrata(mockFrame:GetFrameStrata())
+                slot:SetFrameLevel(mockFrame:GetFrameLevel() + 8)
+                slot:Show()
+                tinsert(placedIndicators, slot)
+            end
+        end
+    end
 
     -- Iterate all configured auras, find placed indicator instances.
     -- Ad-hoc "#<id>" auras are never in the trackable pool — render them with
@@ -6307,15 +6372,30 @@ BuildLayoutGroupsTab = function()
         _order = { "RIGHT", "LEFT", "UP", "DOWN" },
     }
 
-    -- "+ Create Group" button (prominent, theme-colored)
+    -- "+ Create Group" / "+ Filter Group" buttons (prominent, theme-colored).
+    -- Left = classic member-arranger group; right = registry-linked filter group.
     local gc = { r = 0.91, g = 0.66, b = 0.25 }  -- Layout Groups tab color
     local addBtn = CreateFrame("Button", nil, parent, "BackdropTemplate")
     addBtn:SetHeight(32)
     addBtn:SetPoint("TOPLEFT", 8, yPos)
-    addBtn:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
+    addBtn:SetPoint("TOPRIGHT", parent, "TOP", -2, yPos)
     GUI:StyleButton(addBtn, { height = 32, primary = true, accent = gc, text = L["+ Create Group"], font = "DFFontHighlight" })
     addBtn:SetScript("OnClick", function()
         local group = CreateLayoutGroup()
+        if group then
+            expandedGroups[group.id] = true
+            SwitchTab("layout")
+            RefreshPlacedIndicators()
+        end
+    end)
+
+    local addFilterBtn = CreateFrame("Button", nil, parent, "BackdropTemplate")
+    addFilterBtn:SetHeight(32)
+    addFilterBtn:SetPoint("TOPLEFT", parent, "TOP", 2, yPos)
+    addFilterBtn:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -8, yPos)
+    GUI:StyleButton(addFilterBtn, { height = 32, primary = true, accent = gc, text = L["+ Filter Group"], font = "DFFontHighlight" })
+    addFilterBtn:SetScript("OnClick", function()
+        local group = CreateLayoutGroup(nil, "filter")
         if group then
             expandedGroups[group.id] = true
             SwitchTab("layout")
@@ -6388,8 +6468,19 @@ BuildLayoutGroupsTab = function()
             nameText:SetPoint("LEFT", chevron, "RIGHT", 6, 0)
             nameText:SetPoint("RIGHT", header, "RIGHT", -60, 0)
             nameText:SetMaxLines(1)
-            local memberCount = group.members and #group.members or 0
-            nameText:SetText(group.name .. "  -  " .. memberCount .. (memberCount ~= 1 and L[" indicators"] or L[" indicator"]))
+            local isFilterGroup = (group.kind == "filter")
+            if isFilterGroup then
+                local linkCount = 0
+                local fsel = group.filterSelection
+                if fsel then
+                    for _ in pairs(fsel.presets or {}) do linkCount = linkCount + 1 end
+                    for _ in pairs(fsel.customs or {}) do linkCount = linkCount + 1 end
+                end
+                nameText:SetText(group.name .. "  -  " .. linkCount .. (linkCount ~= 1 and L[" filters"] or L[" filter"]))
+            else
+                local memberCount = group.members and #group.members or 0
+                nameText:SetText(group.name .. "  -  " .. memberCount .. (memberCount ~= 1 and L[" indicators"] or L[" indicator"]))
+            end
             nameText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
 
             -- Delete button
@@ -6411,6 +6502,48 @@ BuildLayoutGroupsTab = function()
             })
             delBtn:SetPoint("RIGHT", -4, 0)
             delBtn:SetFrameLevel(header:GetFrameLevel() + 2)
+
+            -- Eye icon (visibility toggle) — filter groups only; same asset + toggle
+            -- idiom as the effect-card eye (A3). enabled == false is hidden; nil/true
+            -- = shown. Toggling is STRUCTURAL: the factory tears down / stands up the
+            -- group container and the buff-row dedup union changes.
+            if isFilterGroup then
+                local mediaPath = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
+                local eyeBtn = CreateFrame("Button", nil, header)
+                eyeBtn:SetSize(18, 18)
+                eyeBtn:SetPoint("RIGHT", delBtn, "LEFT", -4, 0)
+                local eyeIcon = eyeBtn:CreateTexture(nil, "OVERLAY")
+                eyeIcon:SetAllPoints()
+                local function shown() return group.enabled ~= false end
+                local function updateEyeIcon()
+                    if shown() then
+                        eyeIcon:SetTexture(mediaPath .. "visibility")
+                        eyeIcon:SetVertexColor(0.95, 0.95, 0.95)
+                    else
+                        eyeIcon:SetTexture(mediaPath .. "visibility_off")
+                        eyeIcon:SetVertexColor(0.45, 0.45, 0.45)
+                    end
+                end
+                updateEyeIcon()
+                eyeBtn:SetScript("OnEnter", function() if shown() then eyeIcon:SetVertexColor(1, 1, 1) end end)
+                eyeBtn:SetScript("OnLeave", function() updateEyeIcon() end)
+                eyeBtn:RegisterForClicks("LeftButtonUp")
+                eyeBtn:SetFrameLevel(header:GetFrameLevel() + 2)
+                eyeBtn:SetScript("OnClick", function()
+                    group.enabled = (group.enabled == false) and true or false
+                    updateEyeIcon()
+                    SwitchTab("layout")
+                    RefreshPlacedIndicators()
+                    DF:InvalidateAuraLayout()
+                    DF:UpdateAllFrames()
+                    if DF.AuraDesigner.Engine and DF.AuraDesigner.Engine.ForceRefreshAllFrames then
+                        DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+                    end
+                end)
+                if not shown() then
+                    nameText:SetAlpha(0.5)
+                end
+            end
 
             -- Header click → toggle expansion
             header:SetScript("OnClick", function()
@@ -6468,6 +6601,277 @@ BuildLayoutGroupsTab = function()
                 end)
                 by = by - 32
 
+                if isFilterGroup then
+                -- ── LINKED FILTERS SECTION (filter groups) ──
+                -- One collapsed chip per linked registry filter: localized preset name
+                -- (or custom filter name) + live spell count, remove ✕. Links are stable
+                -- REFERENCES (preset keys / custom ids) — never copies — so filter edits
+                -- propagate live. Link/unlink is structural (container rebuild + the
+                -- buff-row dedup union moves), so run the full refresh path.
+                local R = DF.FilterRegistry
+                local fsel = group.filterSelection
+                if not fsel then fsel = {}; group.filterSelection = fsel end
+                fsel.presets = fsel.presets or {}
+                fsel.customs = fsel.customs or {}
+
+                local function StructuralFilterRefresh()
+                    SwitchTab("layout")
+                    RefreshPlacedIndicators()
+                    DF:InvalidateAuraLayout()
+                    DF:UpdateAllFrames()
+                    if DF.AuraDesigner.Engine and DF.AuraDesigner.Engine.ForceRefreshAllFrames then
+                        DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+                    end
+                end
+
+                local lfLabel = body:CreateFontString(nil, "OVERLAY")
+                GUI:SetSettingsFont(lfLabel, 8, "")
+                lfLabel:SetPoint("TOPLEFT", 8, by)
+                lfLabel:SetText(L["LINKED FILTERS"])
+                lfLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+                by = by - 18
+
+                -- Custom-filter spell count (curated spells + raw IDs)
+                local function CustomFilterCount(cf)
+                    local n = 0
+                    if cf then
+                        for _ in pairs(cf.spells or {}) do n = n + 1 end
+                        for _ in pairs(cf.rawIDs or {}) do n = n + 1 end
+                    end
+                    return n
+                end
+
+                -- Linked list: presets in R.Categories order, then customs name-sorted.
+                local linked = {}
+                for _, cat in ipairs(R.Categories) do
+                    if fsel.presets[cat.key] then
+                        local enabled, total = R:PresetCounts(cat.key)
+                        tinsert(linked, { kind = "preset", key = cat.key,
+                            label = format("%s |cff888888(%d/%d)|r", L[cat.name], enabled, total) })
+                    end
+                end
+                local linkedCustoms = {}
+                for cfId in pairs(fsel.customs) do tinsert(linkedCustoms, cfId) end
+                sort(linkedCustoms, function(a, b)
+                    local fa, fb = R:GetCustomFilter(a), R:GetCustomFilter(b)
+                    local na, nb = (fa and fa.name or ""), (fb and fb.name or "")
+                    if na ~= nb then return na < nb end
+                    return a < b
+                end)
+                for _, cfId in ipairs(linkedCustoms) do
+                    local cf = R:GetCustomFilter(cfId)
+                    tinsert(linked, { kind = "custom", key = cfId,
+                        label = format("%s |cff888888(%d)|r", (cf and cf.name) or cfId, CustomFilterCount(cf)) })
+                end
+
+                if #linked > 0 then
+                    for _, link in ipairs(linked) do
+                        local chipRow = CreateFrame("Frame", nil, body, "BackdropTemplate")
+                        chipRow:SetHeight(24)
+                        chipRow:SetPoint("TOPLEFT", 8, by)
+                        chipRow:SetPoint("RIGHT", body, "RIGHT", -8, 0)
+                        ApplyBackdrop(chipRow,
+                            {r = 0.11, g = 0.11, b = 0.11, a = 1},
+                            {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.3})
+
+                        -- Remove ✕ (mirror the member-row remove idiom)
+                        local remBtn = CreateFrame("Button", nil, chipRow)
+                        remBtn:SetSize(18, 18)
+                        remBtn:SetPoint("RIGHT", -4, 0)
+                        local remIcon = remBtn:CreateTexture(nil, "OVERLAY")
+                        remIcon:SetSize(12, 12)
+                        remIcon:SetPoint("CENTER", 0, 0)
+                        remIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close")
+                        remIcon:SetVertexColor(0.55, 0.30, 0.30, 1)
+                        remBtn:SetScript("OnEnter", function() remIcon:SetVertexColor(1, 0.40, 0.40, 1) end)
+                        remBtn:SetScript("OnLeave", function() remIcon:SetVertexColor(0.55, 0.30, 0.30, 1) end)
+                        local capturedLink = link
+                        remBtn:SetScript("OnClick", function()
+                            if capturedLink.kind == "preset" then
+                                fsel.presets[capturedLink.key] = nil
+                            else
+                                fsel.customs[capturedLink.key] = nil
+                            end
+                            StructuralFilterRefresh()
+                        end)
+
+                        local chipText = chipRow:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+                        chipText:SetPoint("LEFT", 8, 0)
+                        chipText:SetPoint("RIGHT", remBtn, "LEFT", -4, 0)
+                        chipText:SetMaxLines(1)
+                        chipText:SetJustifyH("LEFT")
+                        chipText:SetText(link.label)
+                        chipText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+
+                        by = by - 28
+                    end
+                else
+                    local noLinks = body:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+                    noLinks:SetPoint("TOPLEFT", 12, by)
+                    noLinks:SetText(L["No filters linked yet"])
+                    noLinks:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.6)
+                    by = by - 20
+                end
+
+                -- "+ Add Filter" button → mini-picker of unlinked presets + customs
+                by = by - 6
+                local addFilterLinkBtn = CreateFrame("Button", nil, body, "BackdropTemplate")
+                addFilterLinkBtn:SetHeight(22)
+                addFilterLinkBtn:SetPoint("TOPLEFT", 8, by)
+                addFilterLinkBtn:SetPoint("RIGHT", body, "RIGHT", -8, 0)
+                GUI:StyleButton(addFilterLinkBtn, { height = 22, primary = true, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add", size = 11 }, text = L["Add Filter"] })
+                GUI:SetSettingsFont(addFilterLinkBtn.Text, 9, "")
+                addFilterLinkBtn:SetScript("OnClick", function()
+                    -- Build the unlinked candidate list: presets (Categories order,
+                    -- live counts), then customs (name-sorted). No Uncategorised
+                    -- option by design — a group must resolve to an include map.
+                    local candidates = {}
+                    for _, cat in ipairs(R.Categories) do
+                        if not fsel.presets[cat.key] then
+                            local enabled, total = R:PresetCounts(cat.key)
+                            tinsert(candidates, { kind = "preset", key = cat.key,
+                                label = format("%s |cff888888(%d/%d)|r", L[cat.name], enabled, total) })
+                        end
+                    end
+                    local freeCustoms = {}
+                    for cfId in pairs(R:GetStore().customFilters) do
+                        if not fsel.customs[cfId] then tinsert(freeCustoms, cfId) end
+                    end
+                    sort(freeCustoms, function(a, b)
+                        local fa, fb = R:GetCustomFilter(a), R:GetCustomFilter(b)
+                        local na, nb = (fa and fa.name or ""), (fb and fb.name or "")
+                        if na ~= nb then return na < nb end
+                        return a < b
+                    end)
+                    for _, cfId in ipairs(freeCustoms) do
+                        local cf = R:GetCustomFilter(cfId)
+                        tinsert(candidates, { kind = "custom", key = cfId,
+                            label = format("%s |c%s(%s)|r", (cf and cf.name) or cfId, GUI:ToneHex("info"), L["Custom"]) })
+                    end
+
+                    -- Create/reuse the picker dropdown (same overlay/ESC/scroll idiom
+                    -- as the member picker above)
+                    local dropName = "DFADFilterGroupPicker"
+                    local drop = _G[dropName]
+                    if not drop then
+                        drop = CreateFrame("Frame", dropName, UIParent, "BackdropTemplate")
+                        drop:SetFrameStrata("FULLSCREEN_DIALOG")
+                        drop:SetClampedToScreen(true)
+                        local overlay = CreateFrame("Button", nil, UIParent)
+                        overlay:SetAllPoints(UIParent)
+                        overlay:SetFrameStrata("FULLSCREEN")
+                        overlay:Hide()
+                        overlay:SetScript("OnClick", function()
+                            drop:Hide()
+                            overlay:Hide()
+                        end)
+                        drop._overlay = overlay
+                        drop:EnableKeyboard(true)
+                        drop:SetPropagateKeyboardInput(true)
+                        drop:SetScript("OnKeyDown", function(self, key)
+                            if key == "ESCAPE" then
+                                self:SetPropagateKeyboardInput(false)
+                                self:Hide()
+                            else
+                                self:SetPropagateKeyboardInput(true)
+                            end
+                        end)
+                        drop:SetScript("OnHide", function(self)
+                            self._ownerBtn = nil
+                            if self._overlay then self._overlay:Hide() end
+                        end)
+                    end
+                    if drop:IsShown() and drop._ownerBtn == addFilterLinkBtn then
+                        drop:Hide()
+                        return
+                    end
+                    drop._ownerBtn = addFilterLinkBtn
+
+                    local DROP_W = 240
+                    local MAX_H = 300
+                    drop:SetWidth(DROP_W)
+                    ApplyBackdrop(drop, C_BACKGROUND, C_BORDER)
+
+                    if not drop._scrollFrame then
+                        local sf = CreateFrame("ScrollFrame", nil, drop)
+                        sf:SetPoint("TOPLEFT", 0, 0)
+                        sf:SetPoint("BOTTOMRIGHT", 0, 0)
+                        drop._scrollFrame = sf
+                        local sc = CreateFrame("Frame", nil, sf)
+                        sc:SetWidth(DROP_W)
+                        sf:SetScrollChild(sc)
+                        drop._scrollChild = sc
+                        sf:SetScript("OnMouseWheel", function(self2, delta2)
+                            local cur = self2:GetVerticalScroll()
+                            local maxS = max(0, self2:GetVerticalScrollRange())
+                            self2:SetVerticalScroll(max(0, min(maxS, cur - (delta2 * 24))))
+                        end)
+                    end
+                    local scrollChild = drop._scrollChild
+                    local scrollFrame = drop._scrollFrame
+                    scrollChild:SetWidth(DROP_W)
+                    for _, child in ipairs({scrollChild:GetChildren()}) do child:Hide(); child:SetParent(nil) end
+                    for _, rgn in ipairs({scrollChild:GetRegions()}) do
+                        if rgn:GetObjectType() == "FontString" or rgn:GetObjectType() == "Texture" then rgn:Hide() end
+                    end
+                    scrollFrame:Show()
+                    scrollChild:EnableMouseWheel(true)
+                    scrollChild:SetScript("OnMouseWheel", function(_, delta2)
+                        scrollFrame:GetScript("OnMouseWheel")(scrollFrame, delta2)
+                    end)
+
+                    local dy2 = -4
+                    if #candidates == 0 then
+                        local none = scrollChild:CreateFontString(nil, "OVERLAY")
+                        GUI:SetSettingsFont(none, 9, "")
+                        none:SetPoint("TOPLEFT", 8, dy2 - 4)
+                        none:SetText(L["No filters available"])
+                        none:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.7)
+                        dy2 = dy2 - 24
+                    end
+                    for _, cand in ipairs(candidates) do
+                        local ROW_H = 24
+                        local row = CreateFrame("Button", nil, scrollChild)
+                        row:SetHeight(ROW_H)
+                        row:SetPoint("TOPLEFT", 4, dy2)
+                        row:SetPoint("RIGHT", scrollChild, "RIGHT", -4, 0)
+
+                        local rName = row:CreateFontString(nil, "OVERLAY")
+                        GUI:SetSettingsFont(rName, 9, "")
+                        rName:SetPoint("LEFT", 8, 0)
+                        rName:SetText(cand.label)
+                        rName:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+
+                        local hl = row:CreateTexture(nil, "BACKGROUND")
+                        hl:SetAllPoints()
+                        hl:SetColorTexture(1, 1, 1, 0)
+                        row:SetScript("OnEnter", function() hl:SetColorTexture(1, 1, 1, 0.03) end)
+                        row:SetScript("OnLeave", function() hl:SetColorTexture(1, 1, 1, 0) end)
+
+                        local capturedCand = cand
+                        row:SetScript("OnClick", function()
+                            if capturedCand.kind == "preset" then
+                                fsel.presets[capturedCand.key] = true
+                            else
+                                fsel.customs[capturedCand.key] = true
+                            end
+                            drop:Hide()
+                            StructuralFilterRefresh()
+                        end)
+                        dy2 = dy2 - ROW_H
+                    end
+                    local totalH = -dy2 + 4
+                    scrollChild:SetHeight(totalH)
+                    drop:SetHeight(math.min(totalH, MAX_H))
+
+                    drop:ClearAllPoints()
+                    drop:SetPoint("TOPLEFT", addFilterLinkBtn, "BOTTOMLEFT", 0, -2)
+                    drop:Show()
+                    if drop._overlay then drop._overlay:Show() end
+                end)
+                by = by - 28
+
+                else
                 -- ── MEMBERS SECTION ──
                 local memLabel = body:CreateFontString(nil, "OVERLAY")
                 GUI:SetSettingsFont(memLabel, 8, "")
@@ -6843,6 +7247,7 @@ BuildLayoutGroupsTab = function()
                     if drop._overlay then drop._overlay:Show() end
                 end)
                 by = by - 28
+                end -- isFilterGroup / members branch
 
                 -- ── PLACEMENT SECTION ──
                 by = by - 10
@@ -6925,6 +7330,32 @@ BuildLayoutGroupsTab = function()
                 spacingSlider:SetPoint("TOPLEFT", body, "TOPLEFT", 5, -(-by))
                 if spacingSlider.SetWidth then spacingSlider:SetWidth(bodyWidth - 10) end
                 by = by - 54
+
+                if isFilterGroup then
+                    -- Uniform per-group styling: one icon size + slot cap for every
+                    -- spell the linked filters match (no per-spell styling by design).
+                    local sizeSlider = GUI:CreateSlider(body, L["Icon Size"], 8, 64, 1, group, "iconSize", function()
+                        RefreshPlacedIndicators()
+                        DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+                    end, function()
+                        RefreshPlacedIndicators()
+                    end)
+                    sizeSlider:SetPoint("TOPLEFT", body, "TOPLEFT", 5, -(-by))
+                    if sizeSlider.SetWidth then sizeSlider:SetWidth(bodyWidth - 10) end
+                    by = by - 54
+
+                    -- Max Icons is STRUCTURAL (slot count is declared at container
+                    -- build) — the factory Rebuild path handles it (OOC-deferred).
+                    local maxSlider = GUI:CreateSlider(body, L["Max Icons"], 1, 20, 1, group, "maxIcons", function()
+                        RefreshPlacedIndicators()
+                        DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+                    end, function()
+                        RefreshPlacedIndicators()
+                    end)
+                    maxSlider:SetPoint("TOPLEFT", body, "TOPLEFT", 5, -(-by))
+                    if maxSlider.SetWidth then maxSlider:SetWidth(bodyWidth - 10) end
+                    by = by - 54
+                end
 
                 local bodyH = -by + 12
                 body:SetHeight(bodyH)

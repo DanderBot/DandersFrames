@@ -83,13 +83,44 @@ local function ConfirmDeleteFilter(displayName, onAccept)
 end
 
 -- Deleting a custom filter must also unhook it from every profile's
--- per-mode selections (both the buff and defensive rows), or stale ids
--- linger in SavedVariables forever. Nil-safe against profiles that
--- predate the selection tables or are missing a mode entirely.
+-- per-mode selections (both the buff and defensive rows) AND from every
+-- Aura Designer filter group's filterSelection (A5 — the AD preset
+-- libraries plus legacy inline auraDesigner tables), or stale ids linger
+-- in SavedVariables forever. Nil-safe against profiles that predate the
+-- selection tables, are missing a mode entirely, or carry the pre-V2
+-- flat (non-spec-keyed) layoutGroups shape.
 local function ScrubDeletedFilter(cfId)
     local sv = DandersFramesDB_v2
     local profiles = sv and sv.profiles
     if type(profiles) ~= "table" then return end
+
+    -- One array of layout-group records: nil the deleted id from every
+    -- filter group's customs selection. Member groups carry no selection.
+    local function scrubGroupArray(groups)
+        for _, g in ipairs(groups) do
+            if type(g) == "table" then
+                local sel = g.filterSelection
+                if type(sel) == "table" and type(sel.customs) == "table" then
+                    sel.customs[cfId] = nil
+                end
+            end
+        end
+    end
+    -- layoutGroups is spec-keyed post-V2 ({ [specKey] = {groups} }) but may
+    -- still be the legacy flat array on unmigrated configs — walk both shapes.
+    local function scrubLayoutGroups(lg)
+        if type(lg) ~= "table" then return end
+        if lg[1] ~= nil then scrubGroupArray(lg) end
+        for k, v in pairs(lg) do
+            if type(k) == "string" and type(v) == "table" then
+                scrubGroupArray(v)
+            end
+        end
+    end
+    local function scrubADConfig(cfg)
+        if type(cfg) == "table" then scrubLayoutGroups(cfg.layoutGroups) end
+    end
+
     for _, profile in pairs(profiles) do
         if type(profile) == "table" then
             for i = 1, 2 do
@@ -99,6 +130,14 @@ local function ScrubDeletedFilter(cfId)
                     if sel and sel.customs then sel.customs[cfId] = nil end
                     sel = mode.defensiveFilterSelection
                     if sel and sel.customs then sel.customs[cfId] = nil end
+                    -- Legacy inline AD config (pre-preset-library profiles)
+                    scrubADConfig(mode.auraDesigner)
+                end
+            end
+            -- AD preset library (post-migration home of every AD config)
+            if type(profile.auraDesignerPresets) == "table" then
+                for _, preset in pairs(profile.auraDesignerPresets) do
+                    scrubADConfig(preset)
                 end
             end
         end

@@ -1366,6 +1366,15 @@ local function driveFactoryRowsNow(frame)
     if DF.UseFactoryForDispelOverlay and DF:UseFactoryForDispelOverlay(frame, db) then
         DF:DriveDispelOverlayFactory(frame, db)
     end
+    -- Aura Designer factory sync: AD otherwise re-syncs on the next aura event only,
+    -- so a Filter Designer edit (which bumps auraLayoutVersion) would leave filter-
+    -- group containers one event stale. The sync is cheap when nothing changed
+    -- (sig-compare walk) — same gating as UpdateAuras_Enhanced.
+    if DF.IsAuraDesignerEnabled and DF:IsAuraDesignerEnabled(frame)
+        and DF.AuraDesigner and DF.AuraDesigner.Factory
+        and DF.UseFactoryForAD and DF:UseFactoryForAD(frame, db) then
+        DF.AuraDesigner.Factory:SyncFrame(frame)
+    end
 end
 
 -- DEBOUNCED to one pass per frame-render: GUI callbacks often bump the version
