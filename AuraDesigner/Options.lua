@@ -1606,6 +1606,33 @@ local function AdHocSpellID(auraName)
     return id and tonumber(id) or nil
 end
 
+-- Configured ad-hoc "#<id>" auras are never in the trackable pool, so pool-driven
+-- pickers (layout-group "Add aura", frame-effect "Add Trigger") can't offer them.
+-- Returns a NEW list = the given trackable list plus one aura-info-shaped entry per
+-- configured ad-hoc aura (live-resolved display name, pool-grey accent), sorted by
+-- spell ID for a stable order. Never mutates `list` — GetTrackableAuras caches it.
+local AD_HOC_COLOR = { 0.62, 0.62, 0.62 }
+local function WithConfiguredAdHocAuras(list, spec)
+    local out = {}
+    for i, info in ipairs(list) do out[i] = info end
+    local adHoc = {}
+    for auraName in pairs(GetSpecAuras(spec)) do
+        local id = AdHocSpellID(auraName)
+        if id then tinsert(adHoc, { name = auraName, id = id }) end
+    end
+    sort(adHoc, function(a, b) return a.id < b.id end)
+    for _, e in ipairs(adHoc) do
+        local display = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(e.id)
+        tinsert(out, {
+            name = e.name,
+            display = display or e.name,
+            color = AD_HOC_COLOR,
+            spellID = e.id,
+        })
+    end
+    return out
+end
+
 -- Get spell icon texture for an aura
 -- Uses static texture IDs to avoid C_Spell.GetSpellTexture returning
 -- the wrong icon when talent choice nodes replace a spell.
@@ -5778,9 +5805,11 @@ CreateEffectCard = function(parent, yPos, effect)
             -- Trigger picker dropdown
             addTrigBtn:SetScript("OnClick", function()
                 -- Build dropdown with trackable auras not already in triggers
+                -- (plus configured ad-hoc "#<id>" auras — never in the pool)
                 local spec2 = ResolveSpec()
                 local auraList = spec2 and Adapter and Adapter:GetTrackableAuras(spec2)
                 if not auraList then return end
+                auraList = WithConfiguredAdHocAuras(auraList, spec2)
 
                 local currentTriggers = GetFrameEffectTriggers(effect.auraName, effect.typeKey)
                 local trigLookup = {}
@@ -6605,10 +6634,13 @@ BuildLayoutGroupsTab = function()
                 GUI:StyleButton(addMemBtn, { height = 22, primary = true, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add", size = 11 }, text = L["Add aura"] })
                 GUI:SetSettingsFont(addMemBtn.Text, 9, "")
                 addMemBtn:SetScript("OnClick", function()
-                    -- Show ALL trackable auras with type buttons (Icon/Square/Bar)
+                    -- Show ALL trackable auras with type buttons (Icon/Square/Bar),
+                    -- plus configured ad-hoc "#<id>" auras (never in the pool)
                     local spec = ResolveSpec()
                     local auras = spec and Adapter and Adapter:GetTrackableAuras(spec)
-                    if not auras or #auras == 0 then return end
+                    if not auras then return end
+                    auras = WithConfiguredAdHocAuras(auras, spec)
+                    if #auras == 0 then return end
 
                     -- Build set of auras already in this group (by auraName)
                     local grp = GetLayoutGroupByID(capturedGroupID)
@@ -7343,6 +7375,15 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
             Echo(L["Enter a valid spell ID."])
             return
         end
+        -- Normalize + cap: strip leading zeros ("#007" and "#7" must be the same
+        -- key), and reject oversized digit strings — real spell IDs are well under
+        -- 10 digits, and past ~15 tonumber() loses integer precision, which would
+        -- mint broken keys like "#1e+21".
+        text = text:match("^0*(%d+)$") or text
+        if #text > 10 then
+            Echo(L["Enter a valid spell ID."])
+            return
+        end
         local idNum = tonumber(text)
         local spec = ResolveSpec()
         if not spec then return end
@@ -7373,7 +7414,9 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
         end
 
         local isAdHoc = not auraName
-        if isAdHoc then auraName = "#" .. idNum end
+        -- Key from the validated TEXT, not tonumber output — number formatting
+        -- must never leak into config keys (AdHocSpellID parses "^#(%d+)$").
+        if isAdHoc then auraName = "#" .. text end
 
         local alreadyUsed
         if spellPickerMode == "placed" then
