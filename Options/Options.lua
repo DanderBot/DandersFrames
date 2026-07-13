@@ -1241,6 +1241,23 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             })
         end
 
+        -- The Blizzard-frame disable is applied ONCE at load (a hard, ElvUI-style
+        -- UnregisterAllEvents + reparent of the CompactRaidFrameManager that can't
+        -- be cleanly undone live), so changing any of these toggles needs a UI
+        -- reload to take full effect. The setter still hides/shows the frames
+        -- immediately for feedback; this prompt handles the permanent part.
+        local function PromptReloadBlizzard()
+            if not DF.ShowPopupAlert then return end
+            DF:ShowPopupAlert({
+                title = L["Reload Required"],
+                message = L["Disabling or enabling the Blizzard frames requires a UI reload to take full effect.\n\nReload now?"],
+                buttons = {
+                    { label = L["Reload Now"], onClick = function() ReloadUI() end },
+                    { label = L["Reload Later"] },
+                },
+            })
+        end
+
         -- ===== INFO BANNER (global settings notice) =====
         do
             local banner = GUI:CreateInfoBanner(self.child, {
@@ -1269,7 +1286,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local disablePartyCheck = blizzardGroup:AddWidget(GUI:CreateCheckbox(
             self.child, L["Disable Blizzard Party Frames"],
             DF.db.party, "hideBlizzardPartyFrames",
-            function() DF:UpdateBlizzardFrameVisibility() end,
+            function() PromptReloadBlizzard() end,
             makeBlizGet("hideBlizzardPartyFrames"),
             makeBlizSet("hideBlizzardPartyFrames", function() DF:UpdateBlizzardFrameVisibility() end)
         ), 30)
@@ -1278,7 +1295,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local disableRaidCheck = blizzardGroup:AddWidget(GUI:CreateCheckbox(
             self.child, L["Disable Blizzard Raid Frames"],
             DF.db.party, "hideBlizzardRaidFrames",
-            function() DF:UpdateBlizzardFrameVisibility() end,
+            function() PromptReloadBlizzard() end,
             makeBlizGet("hideBlizzardRaidFrames"),
             makeBlizSet("hideBlizzardRaidFrames", function() DF:UpdateBlizzardFrameVisibility() end)
         ), 30)
@@ -1308,7 +1325,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local sideMenuCheck = blizzardGroup:AddWidget(GUI:CreateCheckbox(
             self.child, L["Show Party/Raid Side Menu"],
             DF.db.party, "showBlizzardSideMenu",
-            function() DF:UpdateBlizzardFrameVisibility() end,
+            function() PromptReloadBlizzard() end,
             makeBlizGet("showBlizzardSideMenu"),
             makeBlizSet("showBlizzardSideMenu", function() DF:UpdateBlizzardFrameVisibility() end)
         ), 30)
@@ -4067,7 +4084,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     -- General > Integrations
     local pageIntegrations = CreateSubTab("general", "general_integrations", L["Integrations"])
     BuildPage(pageIntegrations, function(self, db, Add, AddSpace, AddSyncPoint)
-        Add(CreateCopyButton(self.child, {"colorPicker", "masque", "buffDisableMouse", "debuffDisableMouse", "defensiveIconDisableMouse", "targetedSpellDisableMouse"}, L["Integrations"], "general_integrations"), 25, 2)
+        Add(CreateCopyButton(self.child, {"colorPicker", "masque"}, L["Integrations"], "general_integrations"), 25, 2)
         -- ===== COLOR PICKER GROUP (Column 1) =====
         local colorPickerGroup = GUI:CreateSettingsGroup(self.child, 280)
         colorPickerGroup:AddWidget(GUI:CreateHeader(self.child, L["Color Picker"]), 40)
@@ -4120,39 +4137,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         
         Add(masqueGroup, nil, 2)
         
-        -- ===== CLICK-THROUGH GROUP (Column 1) =====
-        local clickThroughGroup = GUI:CreateSettingsGroup(self.child, 280)
-        clickThroughGroup:AddWidget(GUI:CreateHeader(self.child, L["Click-Through Icons"]), 40)
-        clickThroughGroup:AddWidget(GUI:CreateLabel(self.child, L["Make icons click-through for external click-casting addons. Not needed for DF built-in click-casting."], 250), 45)
-        
-        local buffDisableMouse = clickThroughGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Buff Icons Click-Through"], db, "buffDisableMouse", function()
-            if DF.UpdateAuraClickThrough then DF:UpdateAuraClickThrough() end
-        end), 30)
-        buffDisableMouse.disableOn = function(d) return not d.showBuffs end
-        
-        local debuffDisableMouse = clickThroughGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Debuff Icons Click-Through"], db, "debuffDisableMouse", function()
-            if DF.UpdateAuraClickThrough then DF:UpdateAuraClickThrough() end
-        end), 30)
-        debuffDisableMouse.disableOn = function(d) return not d.showDebuffs end
-        GUI:BlockControl12_1(debuffDisableMouse, "roadmap", { id = "integrations:debuffclickthrough", page = L["Integrations"],
-            when = function(d) return GUI:IsAuraFactoryActive() and not DF:FactoryOwnsDebuffRow(d) end })
-        
-        local defensiveDisableMouse = clickThroughGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Defensive Icon Click-Through"], db, "defensiveIconDisableMouse", function()
-            if DF.UpdateAuraClickThrough then DF:UpdateAuraClickThrough() end
-        end), 30)
-        defensiveDisableMouse.disableOn = function(d) return not d.defensiveIconEnabled end
-        GUI:BlockControl12_1(defensiveDisableMouse, "roadmap", { id = "integrations:defensiveclickthrough", page = L["Integrations"],
-            when = function(d) return GUI:IsAuraFactoryActive() and not DF:FactoryOwnsDefensiveRow(d) end })
-        
-        local tsDisableMouse = clickThroughGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Targeted Spell Click-Through"], db, "targetedSpellDisableMouse", function()
-            if DF.UpdateAuraClickThrough then DF:UpdateAuraClickThrough() end
-        end), 30)
-        tsDisableMouse.disableOn = function(d) return not d.targetedSpellEnabled end
-        
-        clickThroughGroup:AddWidget(GUI:CreateNote(self.child, L["Click-through icons will not show tooltips."], {tone = "caution", prefix = "Note", width = 250}), 25)
-        
-        Add(clickThroughGroup, nil, 1)
-        
+        -- (Click-Through Icons group removed on 12.1: the container aura buttons
+        -- are always click-through by design — Blizzard's AlwaysPropagateInput +
+        -- the factory's unconditional SetMouseClickEnabled(false) — so the toggle
+        -- had no effect. Tooltips are governed by the Tooltips page instead.)
+
         -- See Also links
         AddSpace(20, "both")
         Add(GUI:CreateSeeAlso(self.child, {

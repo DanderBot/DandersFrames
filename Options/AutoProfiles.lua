@@ -168,10 +168,6 @@ local function RefreshOverrideTabMap()
     {"colorPickerOverride", "general_integrations", L["Integrations"]},
     {"colorPickerGlobalOverride", "general_integrations", L["Integrations"]},
     {"masqueBorderControl", "general_integrations", L["Integrations"]},
-    {"buffDisableMouse",    "general_integrations", L["Integrations"]},
-    {"debuffDisableMouse",  "general_integrations", L["Integrations"]},
-    {"defensiveIconDisableMouse", "general_integrations", L["Integrations"]},
-    {"targetedSpellDisableMouse", "general_integrations", L["Integrations"]},
     -- Bars (specific text keys before generic "health" prefix).
     -- healthTexture MUST precede healthText: it's the health BAR texture, but
     -- a bare prefix match classifies it as health TEXT (and the legacy-text

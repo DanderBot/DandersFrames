@@ -598,10 +598,11 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
                 or nil,
         enabled  = true,
         candidateFilters = candidateFilters,
-        -- Native hover tooltips: gated on BOTH the Integrations click-through toggle
-        -- and the Tooltips page's per-row Enable (legacy honoured both; in the sig).
-        tooltips = (not g("DisableMouse"))
-            and db["tooltip" .. (prefix == "debuff" and "Debuff" or "Buff") .. "Enabled"] ~= false,
+        -- Native hover tooltips: governed by the Tooltips page's per-row Enable.
+        -- (The old Integrations "click-through" toggle also suppressed them, but
+        -- that's gone on 12.1 — the container icons are always click-through by
+        -- design — so tooltips key off the Tooltips page alone now.)
+        tooltips = db["tooltip" .. (prefix == "debuff" and "Debuff" or "Buff") .. "Enabled"] ~= false,
         layout = {
             size     = g("Size") or 20,
             scale    = g("Scale") or 1,
@@ -873,7 +874,7 @@ function DF:BuildDefensiveRowConfig(db, unit)
         -- P5 preview: HELPFUL category alone would page the buff pool — show
         -- curated defensives instead (TestMode drives testMax per role).
         testPool = "defensives",
-        tooltips = (not db.defensiveIconDisableMouse) and db.tooltipDefensiveEnabled ~= false,
+        tooltips = db.tooltipDefensiveEnabled ~= false,
         -- Z-order: match the legacy defensive level — contentOverlay+26 = frame+51 when auto
         -- (defensiveIconFrameLevel 0), else the user's own offset. Applied to the container's
         -- anchor frame in AuraContainer:Create + on each layout-version re-apply.
@@ -1787,6 +1788,69 @@ function DF:UpdateBlizzardFrameVisibility()
     end
 end
 
+-- One-shot HARD disable of Blizzard's compact raid/party system (mirrors ElvUI's
+-- UF:DisableBlizzard). UpdateBlizzardFrameVisibility above only alpha-hides the
+-- frames and strips per-frame events reactively — the CompactRaidFrameManager
+-- (Raid Utility) keeps running its roster/layout work and the container keeps its
+-- own events. This kills all of that once, at load, out of combat:
+--   * UIParent's GROUP_ROSTER_UPDATE (drives UpdateRaidAndPartyFrames)
+--   * CompactRaidFrameContainer / CompactPartyFrame event registration
+--   * the CompactRaidFrameManager itself (unregister + reparent to a hidden frame
+--     + tell Blizzard's own setting it should not show)
+-- It is IRREVERSIBLE without a /reload, which is why the toggles now prompt for
+-- one. Skipped entirely when the user keeps the Blizzard side menu (Raid Utility),
+-- since that IS the manager — that case keeps the lighter alpha-hide behaviour.
+-- Runs once (DF.blizzardHardDisabled); combat defers it to the next call (the
+-- event handler below fires it again on PLAYER_REGEN_ENABLED).
+function DF:HardDisableBlizzardFrames()
+    if DF.blizzardHardDisabled then return true end
+    if InCombatLockdown() then return false end
+
+    local partyDb = DF.GetDB and DF:GetDB()
+    local raidDb  = DF.GetRaidDB and DF:GetRaidDB()
+    if not (partyDb and raidDb) then return false end
+
+    local hideParty = partyDb.hideBlizzardPartyFrames
+    local hideRaid  = raidDb.hideBlizzardRaidFrames
+    -- Nothing to disable, or the user wants the Blizzard side menu (the manager) —
+    -- either way, don't hard-disable. Mark done so we stop re-checking.
+    if not (hideParty or hideRaid)
+        or raidDb.showBlizzardSideMenu or partyDb.showBlizzardSideMenu then
+        DF.blizzardHardDisabled = true
+        return true
+    end
+
+    pcall(function()
+        -- Stops Blizzard's UIParent from running UpdateRaidAndPartyFrames. That
+        -- handler drives BOTH the party and raid default frames, so only drop it
+        -- when both are disabled — otherwise a party-only disable would break the
+        -- Blizzard raid frames the user still wants (and vice versa).
+        if hideParty and hideRaid then
+            UIParent:UnregisterEvent("GROUP_ROSTER_UPDATE")
+        end
+
+        if hideRaid then
+            if CompactRaidFrameContainer then
+                CompactRaidFrameContainer:UnregisterAllEvents()
+            end
+            if CompactRaidFrameManager then
+                CompactRaidFrameManager:UnregisterAllEvents()
+                CompactRaidFrameManager:SetParent(blizzardHiddenParent)
+            end
+            if CompactRaidFrameManager_SetSetting then
+                CompactRaidFrameManager_SetSetting("IsShown", "0")
+            end
+        end
+
+        if hideParty and CompactPartyFrame then
+            CompactPartyFrame:UnregisterAllEvents()
+        end
+    end)
+
+    DF.blizzardHardDisabled = true
+    return true
+end
+
 -- Apply visibility on load and when group changes
 local blizzFrameEventHandler = CreateFrame("Frame")
 blizzFrameEventHandler:RegisterEvent("PLAYER_ENTERING_WORLD")
@@ -1802,6 +1866,11 @@ blizzFrameEventHandler:RegisterEvent("PARTY_MEMBER_DISABLE")
 local blizzVisibilityPending = false
 
 blizzFrameEventHandler:SetScript("OnEvent", function(self, event)
+    -- One-shot hard disable of the Blizzard compact system (self-guarded; a no-op
+    -- once done). Deferred by combat, so PLAYER_REGEN_ENABLED retries it here. The
+    -- reactive visibility pass below still runs to hide the actual frames.
+    if DF.HardDisableBlizzardFrames then DF:HardDisableBlizzardFrames() end
+
     if event == "GROUP_ROSTER_UPDATE" then
         if DF.RosterDebugEvent then DF:RosterDebugEvent("Auras.lua(visibility):GROUP_ROSTER_UPDATE") end
     end
