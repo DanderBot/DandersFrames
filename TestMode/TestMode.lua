@@ -1159,18 +1159,6 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     -- when the toggle is off, not just the legacy icon).
     DF:UpdateTestDefensiveBar(frame, testData)
     
-    -- Update class power pips for test mode
-    if db.classPowerEnabled and db.testShowClassPower ~= false then
-        if DF.UpdateTestClassPower then
-            testData.index = index
-            DF:UpdateTestClassPower(frame, testData)
-        end
-    else
-        if DF.HideTestClassPower then
-            DF:HideTestClassPower(frame)
-        end
-    end
-
     -- Update Aura Designer test indicators through the factory containers — the
     -- SAME path as the bulk DF:UpdateAllTestAuraDesigner, so the per-frame and
     -- bulk previews can't drift (the legacy Engine:UpdateTestFrame is gone).
@@ -2094,11 +2082,6 @@ function DF:ShowTestFrames(silent)
         end)
     end
     
-    -- Refresh class power (show/hide based on testShowClassPower)
-    if DF.RefreshClassPower then
-        DF:RefreshClassPower()
-    end
-    
     if not silent then
         print("|cff00ff00DandersFrames:|r " .. L["Test mode enabled."])
     end
@@ -2350,9 +2333,6 @@ function DF:HideTestFrames(silent)
             if DF.HideAllTargetedSpells then
                 DF:HideAllTargetedSpells(frame)
             end
-            if DF.HideTestClassPower then
-                DF:HideTestClassPower(frame)
-            end
         end
     end
 
@@ -2382,9 +2362,6 @@ function DF:HideTestFrames(silent)
     if not InCombatLockdown() then
         if DF.UpdateHeaderVisibility then
             DF:UpdateHeaderVisibility()
-        end
-        if DF.RefreshClassPower then
-            DF:RefreshClassPower()
         end
     end
     
@@ -2603,9 +2580,6 @@ function DF:HideRaidTestFrames()
             if frame.absorbOverflowBar then frame.absorbOverflowBar:Hide() end
             if DF.HideAllTargetedSpells then
                 DF:HideAllTargetedSpells(frame)
-            end
-            if DF.HideTestClassPower then
-                DF:HideTestClassPower(frame)
             end
         end
     end
@@ -4596,13 +4570,6 @@ function DF:CreateTestPanel()
     local secBars = CreateSection(panel, L["Bars & Overlays"], "bars")
     panel.showAbsorbsCheck = secBars:AddCheckbox(L["Absorbs"], "testShowAbsorbs", nil, "bars_absorb")
     panel.showHealPredictCheck = secBars:AddCheckbox(L["Heal Prediction"], "testShowHealPrediction", nil, "bars_healpred")
-    panel.showClassPowerCheck = secBars:AddCheckbox(L["Class Power"], "testShowClassPower", function(enabled)
-        if enabled then
-            if DF.UpdateAllTestClassPower then DF:UpdateAllTestClassPower() end
-        else
-            if DF.CleanupTestClassPower then DF:CleanupTestClassPower() end
-        end
-    end, "bars_classpower")
     panel.showOutOfRangeCheck = secBars:AddCheckbox(L["Out of Range"], "testShowOutOfRange", nil, "display_fading")
     panel.showReducedMaxCheck = secBars:AddCheckbox(L["Reduced Max Health"], "testShowReducedMaxHealth", nil, "bars_health")
     -- Text Designer is alpha-gated; only offer the toggle when the module loaded.
@@ -4916,7 +4883,6 @@ function DF:CreateTestPanel()
         self.showPetsCheck:SetChecked(db.testShowPets ~= false)
         self.showAbsorbsCheck:SetChecked(db.testShowAbsorbs)
         self.showHealPredictCheck:SetChecked(db.testShowHealPrediction ~= false)
-        self.showClassPowerCheck:SetChecked(db.testShowClassPower ~= false)
         self.showOutOfRangeCheck:SetChecked(db.testShowOutOfRange)
         self.showReducedMaxCheck:SetChecked(db.testShowReducedMaxHealth ~= false)
         if self.showTextDesignerCheck then

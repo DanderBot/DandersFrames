@@ -4721,103 +4721,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         Add(colorGroup, nil, 2)
     end)
     
-    -- Bars > Class Power (Holy Power, Chi, Combo Points, etc. - player frame only)
-    local pageClassPower = CreateSubTab("bars", "bars_classpower", L["Class Power"])
-    BuildPage(pageClassPower, function(self, db, Add, AddSpace, AddSyncPoint)
-        Add(CreateCopyButton(self.child, {"classPower"}, L["Class Power"]), 25, 2)
-        Add(GUI:CreateHeader(self.child, L["Class Power Pips"]), 40, "both")
-        Add(GUI:CreateLabel(self.child, L["Displays class-specific resources (Holy Power, Chi, Combo Points, Soul Shards, Arcane Charges, Essence) as colored pips on your player frame."], 560), 50, "both")
-        AddSpace(10, "both")
-        
-        Add(GUI:CreateCheckbox(self.child, L["Enable Class Power Pips"], db, "classPowerEnabled", function()
-            self:RefreshStates()
-            if DF.RefreshClassPower then DF.RefreshClassPower() end
-        end), 25, 1)
-        
-        -- Dependent controls GREY OUT (disabled-in-place) while the feature is
-        -- off rather than vanishing. This is a flat page (no settings group),
-        -- so each control carries disableOn; headers/spacers stay visible.
-        local function DisableClassPower(d)
-            return not d.classPowerEnabled
-        end
-
-        AddSpace(10, 1)
-        Add(GUI:CreateHeader(self.child, L["Size"]), 40, 1)
-
-        local cpHeight = Add(GUI:CreateSlider(self.child, L["Pip Height"], 1, 12, 1, db, "classPowerHeight", nil, function() if DF.RefreshClassPower then DF.RefreshClassPower() end end, true), 55, 1)
-        cpHeight.disableOn = DisableClassPower
-
-        local cpGap = Add(GUI:CreateSlider(self.child, L["Gap Between Pips"], 0, 5, 1, db, "classPowerGap", nil, function() if DF.RefreshClassPower then DF.RefreshClassPower() end end, true), 55, 1)
-        cpGap.disableOn = DisableClassPower
-
-        local cpIgnoreFade = Add(GUI:CreateCheckbox(self.child, L["Ignore Full Health Fade"], db, "classPowerIgnoreFade", function()
-            if DF.UpdateClassPowerAlpha then DF.UpdateClassPowerAlpha() end
-        end), 25, 1)
-        cpIgnoreFade.disableOn = DisableClassPower
-
-        AddSpace(10, 1)
-        Add(GUI:CreateHeader(self.child, L["Colors"]), 40, 1)
-
-        local cpUseCustomColor = Add(GUI:CreateCheckbox(self.child, L["Use Custom Pip Color"], db, "classPowerUseCustomColor", function()
-            self:RefreshStates()
-            if DF.RefreshClassPower then DF.RefreshClassPower() end
-        end), 25, 1)
-        cpUseCustomColor.disableOn = DisableClassPower
-        cpUseCustomColor.tooltip = L["When enabled, all pips use a single custom color instead of the class-specific default."]
-
-        local cpColor = Add(GUI:CreateColorPicker(self.child, L["Pip Color"], db, "classPowerColor", false, function()
-            if DF.RefreshClassPower then DF.RefreshClassPower() end
-        end, function()
-            if DF.RefreshClassPower then DF.RefreshClassPower() end
-        end, true), 35, 1)
-        cpColor.disableOn = function(d) return not d.classPowerEnabled or not d.classPowerUseCustomColor end
-
-        local cpBgColor = Add(GUI:CreateColorPicker(self.child, L["Background Color"], db, "classPowerBgColor", true, function()
-            if DF.RefreshClassPower then DF.RefreshClassPower() end
-        end, function()
-            if DF.RefreshClassPower then DF.RefreshClassPower() end
-        end, true), 35, 1)
-        cpBgColor.disableOn = DisableClassPower
-        cpBgColor.tooltip = L["Color and opacity of the empty/inactive pips."]
-
-        Add(GUI:CreateHeader(self.child, L["Position"]), 40, 2)
-        local anchorOptions = {
-            INSIDE_BOTTOM = L["Inside (Bottom)"],
-            INSIDE_TOP = L["Inside (Top)"],
-            BOTTOM = L["Below Health Bar"],
-            TOP = L["Above Health Bar"],
-            LEFT = L["Left of Health Bar"],
-            RIGHT = L["Right of Health Bar"],
-        }
-        local cpAnchor = Add(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "classPowerAnchor", function() if DF.RefreshClassPower then DF.RefreshClassPower() end end), 55, 2)
-        cpAnchor.disableOn = DisableClassPower
-        cpAnchor.tooltip = L["Horizontal anchors lay pips left-to-right. Left/Right anchors stack pips vertically along the frame side."]
-
-        local cpX = Add(GUI:CreateSlider(self.child, L["Offset X"], -30, 30, 1, db, "classPowerX", nil, function() if DF.RefreshClassPower then DF.RefreshClassPower() end end, true), 55, 2)
-        cpX.disableOn = DisableClassPower
-
-        local cpY = Add(GUI:CreateSlider(self.child, L["Offset Y"], -20, 20, 1, db, "classPowerY", nil, function() if DF.RefreshClassPower then DF.RefreshClassPower() end end, true), 55, 2)
-        cpY.disableOn = DisableClassPower
-
-        AddSpace(10, 2)
-        Add(GUI:CreateHeader(self.child, L["Show for Roles"]), 40, 2)
-
-        local cpShowTank = Add(GUI:CreateCheckbox(self.child, L["Tank"], db, "classPowerShowTank", function()
-            if DF.RefreshClassPower then DF.RefreshClassPower() end
-        end), 25, 2)
-        cpShowTank.disableOn = DisableClassPower
-
-        local cpShowHealer = Add(GUI:CreateCheckbox(self.child, L["Healer"], db, "classPowerShowHealer", function()
-            if DF.RefreshClassPower then DF.RefreshClassPower() end
-        end), 25, 2)
-        cpShowHealer.disableOn = DisableClassPower
-
-        local cpShowDamager = Add(GUI:CreateCheckbox(self.child, L["Damage"], db, "classPowerShowDamager", function()
-            if DF.RefreshClassPower then DF.RefreshClassPower() end
-        end), 25, 2)
-        cpShowDamager.disableOn = DisableClassPower
-    end)
-    
     -- Bars > Absorbs (combined Absorb Shield + Heal Absorb with collapsible sections)
     local pageAbsorb = CreateSubTab("bars", "bars_absorb", L["Absorbs"])
     BuildPage(pageAbsorb, function(self, db, Add, AddSpace)
@@ -5655,9 +5558,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         dedupGroup:AddWidget(GUI:CreateHeader(self.child, L["Deduplication"]), 40)
         -- 12.1: dedup semantics changed (Aura Designer auras only; the Defensive Bar's
         -- contents aren't enumerable read-free, and multi-filter duplicates remain a game
-        -- limitation) — show a red behaviour-change note instead of the legacy description.
+        -- limitation) — surface it as a high-alert (danger) info banner, not a plain note.
         if DF.AuraContainer and DF.AuraContainer.IsSupported and DF.AuraContainer.IsSupported() then
-            dedupGroup:AddWidget(GUI:CreateLabel(self.child, L["Changed in WoW 12.1: hides auras shown by the Aura Designer from the buff bar. It can no longer hide Defensive Bar duplicates, and a buff matching several buff filters may still show more than once."], 250, GUI.Colors.warning), 60)
+            local dedupBanner = GUI:CreateInfoBanner(self.child, {
+                tone = "danger",
+                text = L["Changed in WoW 12.1: hides auras shown by the Aura Designer from the buff bar. It can no longer hide Defensive Bar duplicates, and a buff matching several buff filters may still show more than once."],
+            })
+            dedupGroup:AddWidget(dedupBanner, dedupBanner.layoutHeight or 44)
         else
             dedupGroup:AddWidget(GUI:CreateLabel(self.child, L["Hide buffs from the buff bar when they are already displayed by the Defensive Bar or Aura Designer."], 250), 45)
         end
@@ -5779,11 +5686,14 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Full border toolkit via the unified helper (Stage 5.5 Phase 2).  No
         -- class/role colour (aura indicators aren't unit-class).  Hidden when
         -- buffs are off or Masque controls the borders.
-        local buffBorderW = GUI:CreateBorderControls(borderGroup, db, "buff", {
+        -- Border Animation is intentionally NOT offered on the buff/debuff rows:
+        -- these containers can hold many icons and animating each border is a
+        -- per-frame FPS cost, so DF exposes border animations only on the
+        -- low-count elements (Defensive / Missing Buff) and the Aura Designer.
+        GUI:CreateBorderControls(borderGroup, db, "buff", {
             parent        = self.child,
             include       = { inset = true, offset = true, blendMode = true,
-                              gradient = true, shadow = true, alpha = true,
-                              animate = true },
+                              gradient = true, shadow = true, alpha = true },
             sizeMin = 0, sizeMax = 8, sizeStep = 1,
             fullUpdate    = function() if DF.UpdateAllFrames then DF:UpdateAllFrames() end end,
             lightUpdate   = function() DF:LightweightUpdateAuraBorder("buff") end,
@@ -5791,13 +5701,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             refreshStates = function() self:RefreshStates() end,
             hideWhen      = function(d) return not d.showBuffs or MasqueControlsBorders(d) end,
         })
-        -- Buff/debuff rows can hold many icons; animating each is a perf hit, so
-        -- row-mode containers strip spec.animation (SAFE_OVERLAY_ANIM only recovers
-        -- it in overlay / AD mode). Frost the control to match — DF border
-        -- animations are offered on the low-count elements (Defensive / Missing)
-        -- and the Aura Designer instead.
-        GUI:BlockControl12_1(buffBorderW.animationType, "limitation",
-            { id = "buffs:borderanimation", page = L["Buffs"], when = function(d) return DF:FactoryOwnsBuffRow(d) end })
         AddToSection(borderGroup, nil, 1)
         
         -- Stack Count Group (col2) — the shared TextStyle control block (font/scale/
@@ -6012,13 +5915,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         debuffMasqueNote.hideOn = function(d) return not MasqueControlsBorders(d) end
         -- Full border toolkit via the unified helper (Stage 5.5 Phase 2).  When
         -- "Color by Dispel Type" (below) is ON, the border is forced SOLID and
-        -- recoloured per dispel type, so Style/Colour/Gradient/Animation here
-        -- only take effect when it's OFF (Size/Inset always apply).
-        local debuffBorderW = GUI:CreateBorderControls(borderGroup, db, "debuff", {
+        -- recoloured per dispel type, so Style/Colour/Gradient here only take
+        -- effect when it's OFF (Size/Inset always apply).  Border Animation is
+        -- intentionally omitted (same FPS rationale as the buff row).
+        GUI:CreateBorderControls(borderGroup, db, "debuff", {
             parent        = self.child,
             include       = { inset = true, offset = true, blendMode = true,
-                              gradient = true, shadow = true, alpha = true,
-                              animate = true },
+                              gradient = true, shadow = true, alpha = true },
             sizeMin = 0, sizeMax = 8, sizeStep = 1,
             fullUpdate    = function() if DF.UpdateAllFrames then DF:UpdateAllFrames() end end,
             lightUpdate   = function() DF:LightweightUpdateAuraBorder("debuff") end,
@@ -6026,10 +5929,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             refreshStates = function() self:RefreshStates() end,
             hideWhen      = function(d) return not d.showDebuffs or MasqueControlsBorders(d) end,
         })
-        -- Animations can't run on the 12.1 container buttons (see the buff page);
-        -- the factory strips spec.animation on render. Deletion candidate post-port.
-        GUI:BlockControl12_1(debuffBorderW.animationType, "limitation",
-            { id = "debuffs:borderanimation", page = L["Debuffs"], when = function(d) return DF:FactoryOwnsDebuffRow(d) end })
         local colorByType = borderGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Color by Dispel Type"], db, "debuffBorderColorByType", InvalidateAndUpdate), 30)
         colorByType.disableOn = function(d) return not d.debuffShowBorder or MasqueControlsBorders(d) end
         colorByType.hideOn = function(d) return MasqueControlsBorders(d) end
