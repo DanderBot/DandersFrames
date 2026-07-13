@@ -522,7 +522,8 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     -- ========== ADD-FROM-DATABASE PICKER ==========
     -- In-page overlay covering both columns (the spell DB is far too large
     -- for a StaticPopup): its own search box + pooled list of every DB spell,
-    -- flat-sorted by name. Clicking a row adds the spell to the target custom
+    -- class-grouped like the main spell list (name-sorted within each group,
+    -- "ALL" last). Clicking a row adds the spell to the target custom
     -- filter; rows already in the filter render dimmed with a check instead
     -- of being clickable. Esc or the close button dismisses.
     local picker = CreateFrame("Frame", nil, parent, "BackdropTemplate")
@@ -590,22 +591,50 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     pickerEmpty:SetText(L["No results found"])
     pickerEmpty:Hide()
 
-    -- Flat name-sorted index over the whole DB, built once on first open
+    -- Class-grouped index over the whole DB, built once on first open
     -- (names cached for the sort + search; icons fetched fresh at bind).
+    -- Keyed by class token; records without a valid class token collapse
+    -- into "ALL", same as the main list. Name-sorted within each group.
     local pickerIndex
     local function GetPickerIndex()
         if not pickerIndex then
             pickerIndex = {}
             for _, rec in ipairs(R.Spells) do
+                local token = rec.class or "ALL"
+                if token ~= "ALL" and not (RAID_CLASS_COLORS and RAID_CLASS_COLORS[token]) then
+                    token = "ALL"
+                end
+                local g = pickerIndex[token]
+                if not g then
+                    g = {}
+                    pickerIndex[token] = g
+                end
                 local name = R:GetSpellDisplay(rec)
-                pickerIndex[#pickerIndex + 1] = { rec = rec, name = name, lower = name:lower() }
+                g[#g + 1] = { rec = rec, name = name, lower = name:lower() }
             end
-            tsort(pickerIndex, function(a, b)
-                if a.name ~= b.name then return a.name < b.name end
-                return a.rec.id < b.rec.id
-            end)
+            for _, g in pairs(pickerIndex) do
+                tsort(g, function(a, b)
+                    if a.name ~= b.name then return a.name < b.name end
+                    return a.rec.id < b.rec.id
+                end)
+            end
         end
         return pickerIndex
+    end
+
+    -- Picker class-header pool (same pooled-fontstring idiom as the main
+    -- spell list's class headers)
+    local pickerHeaders = {}
+    local function AcquirePickerHeader(i)
+        local fs = pickerHeaders[i]
+        if fs then
+            fs:Show()
+            return fs
+        end
+        fs = pickerContent:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
+        fs:SetJustifyH("LEFT")
+        pickerHeaders[i] = fs
+        return fs
     end
 
     -- Picker row pool (same pooled-row idiom as the main spell list)
@@ -691,20 +720,54 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         local tc = GUI.GetThemeColor()
         pickerTitle:SetTextColor(tc.r, tc.g, tc.b)
 
+        -- Render groups in class order, ALL last. Headers are placed lazily
+        -- on a group's first matching row, so a group with zero search
+        -- matches never shows its header.
+        local index = GetPickerIndex()
         local y = 4
-        local used = 0
-        for _, entry in ipairs(GetPickerIndex()) do
-            if pickerSearch == "" or entry.lower:find(pickerSearch, 1, true) then
-                used = used + 1
-                local row = AcquirePickerRow(used)
-                BindPickerRow(row, y, entry, f.spells[entry.rec.id] ~= nil)
-                y = y + SPELL_ROW_H
+        local usedHeaders, usedRows = 0, 0
+        local function RenderGroup(token)
+            local g = index[token]
+            if not g then return end
+            local headerPlaced = false
+            for _, entry in ipairs(g) do
+                if pickerSearch == "" or entry.lower:find(pickerSearch, 1, true) then
+                    if not headerPlaced then
+                        headerPlaced = true
+                        usedHeaders = usedHeaders + 1
+                        local hdr = AcquirePickerHeader(usedHeaders)
+                        hdr:ClearAllPoints()
+                        hdr:SetPoint("TOPLEFT", 6, -(y + 6))
+                        hdr:SetText(ClassDisplayName(token))
+                        local cc = token ~= "ALL" and RAID_CLASS_COLORS and RAID_CLASS_COLORS[token]
+                        if cc then
+                            hdr:SetTextColor(cc.r, cc.g, cc.b)
+                        else
+                            hdr:SetTextColor(0.65, 0.65, 0.65)
+                        end
+                        y = y + CLASS_HEADER_H
+                    end
+                    usedRows = usedRows + 1
+                    local row = AcquirePickerRow(usedRows)
+                    BindPickerRow(row, y, entry, f.spells[entry.rec.id] ~= nil)
+                    y = y + SPELL_ROW_H
+                end
             end
+            if headerPlaced then y = y + 4 end
         end
-        for j = used + 1, #pickerRows do
+        for _, token in ipairs(CLASS_ORDER) do
+            RenderGroup(token)
+        end
+        RenderGroup("ALL")
+
+        -- Hide pooled widgets beyond this refresh's needs
+        for j = usedHeaders + 1, #pickerHeaders do
+            pickerHeaders[j]:Hide()
+        end
+        for j = usedRows + 1, #pickerRows do
             pickerRows[j]:Hide()
         end
-        pickerEmpty:SetShown(used == 0)
+        pickerEmpty:SetShown(usedRows == 0)
         pickerContent:SetHeight(mmax(1, y + 4))
     end
 
