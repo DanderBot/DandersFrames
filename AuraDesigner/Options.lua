@@ -1275,12 +1275,14 @@ local function GetIndicatorByID(auraName, indicatorID)
 end
 
 -- Remove an indicator instance by its stable ID
+local CleanupAdHocAura  -- forward decl: defined after FRAME_LEVEL_TYPE_KEYS
 local function RemoveIndicatorInstance(auraName, indicatorID)
     local auraCfg = GetSpecAuras()[auraName]
     if not auraCfg or not auraCfg.indicators then return end
     for i, inst in ipairs(auraCfg.indicators) do
         if inst.id == indicatorID then
             table.remove(auraCfg.indicators, i)
+            if CleanupAdHocAura then CleanupAdHocAura(auraName) end
             return
         end
     end
@@ -1939,6 +1941,25 @@ local effectCardPool = {}   -- Reusable card frames
 -- ============================================================
 
 local FRAME_LEVEL_TYPE_KEYS = { "border", "healthbar", "background", "nametext", "healthtext", "framealpha", "sound" }
+
+-- Remove an ad-hoc "#<id>" aura's config entry once it holds no effects at
+-- all (empty/absent indicators array AND no frame-level type keys). Ad-hoc
+-- auras exist ONLY through their effects — they are never in the trackable
+-- pool — so an emptied config would linger in the profile forever as a
+-- phantom entry (group/trigger pickers, SavedVariables growth). Curated
+-- auras deliberately keep today's linger behavior. Forward-declared above
+-- RemoveIndicatorInstance, which calls it after every removal.
+CleanupAdHocAura = function(auraName)
+    if not AdHocSpellID(auraName) then return end
+    local auras = GetSpecAuras()
+    local auraCfg = auras and auras[auraName]
+    if type(auraCfg) ~= "table" then return end
+    if auraCfg.indicators and #auraCfg.indicators > 0 then return end
+    for _, typeKey in ipairs(FRAME_LEVEL_TYPE_KEYS) do
+        if auraCfg[typeKey] ~= nil then return end
+    end
+    auras[auraName] = nil
+end
 
 -- Effect-type display labels. Same file-scope-vs-overlay timing issue as the
 -- option tables near the top of this file: build them in a registered refresh
@@ -5215,10 +5236,89 @@ local function AddPickedSpell(auraName, typeKey)
     end
 end
 
--- ── CREATE SPELL CARD ──
--- Helper to create a single spell card in the picker grid.
--- Extracted to avoid duplication between whitelisted and secret sections.
-local function CreateSpellCard(grid, auraInfo, spec, x, y, CARD_SIZE, isSecret)
+-- ── SPELL CARD POOL ──
+-- The grid repopulates per search keystroke and per add-by-ID, and WoW
+-- frames are never GC'd — so cards are POOLED (index-keyed on the grid,
+-- FilterRegistry picker-row idiom): acquire-or-create with static handlers
+-- reading per-bind fields, rebind content, hide surplus after populate.
+local function AcquireSpellCard(grid, i)
+    local pool = grid.cardPool
+    if not pool then pool = {}; grid.cardPool = pool end
+    local card = pool[i]
+    if card then
+        card:Show()
+        return card
+    end
+
+    card = CreateFrame("Button", nil, grid, "BackdropTemplate")
+
+    card.icon = card:CreateTexture(nil, "ARTWORK")
+    card.icon:SetSize(42, 42)
+    card.icon:SetPoint("TOP", 0, -6)
+
+    -- Letter fallback (shown only when the bind has no icon texture)
+    card.letter = card:CreateFontString(nil, "OVERLAY", "DFFontNormal")
+    card.letter:SetPoint("CENTER", card.icon, "CENTER", 0, 0)
+
+    card.nameText = card:CreateFontString(nil, "OVERLAY")
+    GUI:SetSettingsFont(card.nameText, 8, "OUTLINE")
+    card.nameText:SetPoint("BOTTOM", 0, 4)
+    card.nameText:SetMaxLines(2)
+    card.nameText:SetWordWrap(true)
+    card.nameText:SetJustifyH("CENTER")
+
+    -- "Placed" / "Active" overlay (shown only on used binds)
+    card.usedLabel = card:CreateFontString(nil, "OVERLAY")
+    GUI:SetSettingsFont(card.usedLabel, 9, "OUTLINE")
+    card.usedLabel:SetPoint("CENTER", card.icon, "CENTER", 0, 0)
+    card.usedLabel:SetTextColor(0.6, 0.6, 0.6)
+
+    -- Static handlers: all bind-varying state lives in card._* fields, so
+    -- rebinding never stacks closures.
+    card:SetScript("OnEnter", function(self)
+        if not self._used then
+            local tc = GetThemeColor()
+            self:SetBackdropBorderColor(tc.r, tc.g, tc.b, 1)
+        end
+        if self._spellID and self._spellID > 0 then
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetSpellByID(self._spellID)
+            GameTooltip:Show()
+        end
+    end)
+    card:SetScript("OnLeave", function(self)
+        if not self._used then
+            self:SetBackdropBorderColor(0.28, 0.28, 0.28, 1)
+        end
+        GameTooltip:Hide()
+    end)
+    card:SetScript("OnClick", function(self)
+        if self._used or not self._auraInfo then return end
+        AddPickedSpell(self._auraInfo.name, self._type)
+        HideSpellPicker()
+        SwitchTab("effects")
+        RefreshPlacedIndicators()
+        RefreshPreviewEffects()
+    end)
+    -- Placed indicators also support drag-and-drop onto the frame preview
+    card:RegisterForDrag("LeftButton")
+    card:SetScript("OnDragStart", function(self)
+        if self._used or not self._auraInfo or spellPickerMode ~= "placed" then return end
+        local spec = ResolveSpec()
+        local auraInfo, typeKey = self._auraInfo, self._type
+        HideSpellPicker()
+        SwitchTab("effects")
+        StartDrag(auraInfo.name, auraInfo, spec, typeKey)
+    end)
+
+    pool[i] = card
+    return card
+end
+
+-- ── BIND SPELL CARD ──
+-- Rebinds one pooled card to an aura entry: position, used-state styling,
+-- icon/letter, name, warning badge, tooltip spell id, click/drag payload.
+local function BindSpellCard(card, auraInfo, spec, x, y, CARD_SIZE)
     local alreadyUsed
     if spellPickerMode == "placed" then
         alreadyUsed = IsAuraTypePlaced(auraInfo.name, spellPickerType)
@@ -5226,8 +5326,8 @@ local function CreateSpellCard(grid, auraInfo, spec, x, y, CARD_SIZE, isSecret)
         alreadyUsed = HasFrameEffect(auraInfo.name, spellPickerType)
     end
 
-    local card = CreateFrame("Button", nil, grid, "BackdropTemplate")
     card:SetSize(CARD_SIZE, CARD_SIZE)
+    card:ClearAllPoints()
     card:SetPoint("TOPLEFT", x, y)
 
     if alreadyUsed then
@@ -5236,122 +5336,73 @@ local function CreateSpellCard(grid, auraInfo, spec, x, y, CARD_SIZE, isSecret)
         ApplyBackdrop(card, {r = 0.14, g = 0.14, b = 0.14, a = 1}, {r = 0.28, g = 0.28, b = 0.28, a = 1})
     end
 
-    -- Spell icon
+    -- Spell icon (color swatch + letter when no texture resolves)
     local iconTex = GetAuraIcon(spec, auraInfo.name)
-    local icon = card:CreateTexture(nil, "ARTWORK")
-    icon:SetSize(42, 42)
-    icon:SetPoint("TOP", 0, -6)
     if iconTex then
-        icon:SetTexture(iconTex)
-        icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        card.icon:SetTexture(iconTex)
+        card.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        card.letter:Hide()
     else
-        icon:SetColorTexture(auraInfo.color[1] * 0.4, auraInfo.color[2] * 0.4, auraInfo.color[3] * 0.4, 1)
+        card.icon:SetColorTexture(auraInfo.color[1] * 0.4, auraInfo.color[2] * 0.4, auraInfo.color[3] * 0.4, 1)
+        card.letter:SetText(auraInfo.display:sub(1, 1))
+        card.letter:SetTextColor(auraInfo.color[1], auraInfo.color[2], auraInfo.color[3])
+        card.letter:SetAlpha(alreadyUsed and 0.35 or 1)
+        card.letter:Show()
     end
-    if alreadyUsed then icon:SetAlpha(0.35) end
+    card.icon:SetAlpha(alreadyUsed and 0.35 or 1)
 
     -- Warning badge for auras with API-level tracking limitations
+    -- (rebind-safe: reuses card.dfWarningBadge, hides on nil warningKey)
     AttachWarningBadge(card, auraInfo.warningKey, {
-        relativeTo = icon,
+        relativeTo = card.icon,
         size = 18,
     })
 
-    -- Letter fallback
-    if not iconTex then
-        local letter = card:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-        letter:SetPoint("CENTER", icon, "CENTER", 0, 0)
-        letter:SetText(auraInfo.display:sub(1, 1))
-        letter:SetTextColor(auraInfo.color[1], auraInfo.color[2], auraInfo.color[3])
-        if alreadyUsed then letter:SetAlpha(0.35) end
-    end
+    card.nameText:SetWidth(CARD_SIZE - 6)
+    card.nameText:SetText(auraInfo.display)
+    card.nameText:SetTextColor(1, 1, 1)
+    card.nameText:SetAlpha(alreadyUsed and 0.35 or 1)
 
-    -- Spell name
-    local name = card:CreateFontString(nil, "OVERLAY")
-    GUI:SetSettingsFont(name, 8, "OUTLINE")
-    name:SetPoint("BOTTOM", 0, 4)
-    name:SetWidth(CARD_SIZE - 6)
-    name:SetMaxLines(2)
-    name:SetWordWrap(true)
-    name:SetText(auraInfo.display)
-    name:SetTextColor(1, 1, 1)
-    name:SetJustifyH("CENTER")
-    if alreadyUsed then name:SetAlpha(0.35) end
+    card.usedLabel:SetText(spellPickerMode == "placed" and L["Placed"] or L["Active"])
+    card.usedLabel:SetShown(alreadyUsed)
 
-    -- "Placed" / "Active" overlay
-    if alreadyUsed then
-        local usedLabel = card:CreateFontString(nil, "OVERLAY")
-        GUI:SetSettingsFont(usedLabel, 9, "OUTLINE")
-        usedLabel:SetPoint("CENTER", icon, "CENTER", 0, 0)
-        usedLabel:SetText(spellPickerMode == "placed" and L["Placed"] or L["Active"])
-        usedLabel:SetTextColor(0.6, 0.6, 0.6)
-    end
-
-    -- Spell tooltip on hover (use tooltip override if available)
+    -- Tooltip spell id (override table, else the spec whitelist, else the
+    -- SpellDB pool entry's canonical id)
     local tooltipOverrides = DF.AuraDesigner.TooltipSpellIDs
     local spellIDs = DF.AuraDesigner.SpellIDs
-    local spellID = tooltipOverrides and tooltipOverrides[auraInfo.name]
+    card._spellID = tooltipOverrides and tooltipOverrides[auraInfo.name]
         or spellIDs and spellIDs[spec] and spellIDs[spec][auraInfo.name]
-        or auraInfo.spellID  -- SpellDB pool entries carry their canonical id
+        or auraInfo.spellID
 
+    card._auraInfo = auraInfo
+    card._type = spellPickerType
+    card._used = alreadyUsed
+
+    -- Re-assert the border color RAW: the hover handler tints it directly,
+    -- so ApplyBackdrop's change-cache can hold a stale value for a card that
+    -- was hovered when the grid repopulated. (Values match the cache, so the
+    -- cache stays consistent.)
     if alreadyUsed then
-        -- Used cards still get tooltips but no highlight/click
-        if spellID and spellID > 0 then
-            card:SetScript("OnEnter", function(self)
-                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:SetSpellByID(spellID)
-                GameTooltip:Show()
-            end)
-            card:SetScript("OnLeave", function(self)
-                GameTooltip:Hide()
-            end)
-        end
+        card:SetBackdropBorderColor(0.20, 0.20, 0.20, 0.5)
+    else
+        card:SetBackdropBorderColor(0.28, 0.28, 0.28, 1)
     end
+end
 
-    if not alreadyUsed then
-        local borderR, borderG, borderB = 0.28, 0.28, 0.28
-        card:SetScript("OnEnter", function(self)
-            local tc = GetThemeColor()
-            self:SetBackdropBorderColor(tc.r, tc.g, tc.b, 1)
-            if spellID and spellID > 0 then
-                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:SetSpellByID(spellID)
-                GameTooltip:Show()
-            end
-        end)
-        card:SetScript("OnLeave", function(self)
-            self:SetBackdropBorderColor(borderR, borderG, borderB, 1)
-            GameTooltip:Hide()
-        end)
-
-        if spellPickerMode == "placed" then
-            -- Placed indicators: drag-and-drop onto the frame preview
-            local capturedAuraInfo = auraInfo
-            local capturedType = spellPickerType
-            card:RegisterForDrag("LeftButton")
-            card:SetScript("OnDragStart", function()
-                local spec = ResolveSpec()
-                HideSpellPicker()
-                SwitchTab("effects")
-                StartDrag(capturedAuraInfo.name, capturedAuraInfo, spec, capturedType)
-            end)
-            -- Click also works — place at default anchor (CENTER)
-            card:SetScript("OnClick", function()
-                AddPickedSpell(capturedAuraInfo.name, capturedType)
-                HideSpellPicker()
-                SwitchTab("effects")
-                RefreshPlacedIndicators()
-                RefreshPreviewEffects()
-            end)
-        else
-            -- Frame-level effects: click to add directly
-            card:SetScript("OnClick", function()
-                AddPickedSpell(auraInfo.name, spellPickerType)
-                HideSpellPicker()
-                SwitchTab("effects")
-                RefreshPlacedIndicators()
-                RefreshPreviewEffects()
-            end)
-        end
+-- ── SECTION HEADER POOL ──
+-- Same index-keyed pooled-fontstring idiom as the card pool.
+local function AcquireSectionHeader(grid, i)
+    local pool = grid.headerPool
+    if not pool then pool = {}; grid.headerPool = pool end
+    local fs = pool[i]
+    if fs then
+        fs:Show()
+        return fs
     end
+    fs = grid:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    fs:SetJustifyH("LEFT")
+    pool[i] = fs
+    return fs
 end
 
 -- ── POPULATE SPELL GRID ──
@@ -5359,14 +5410,24 @@ PopulateSpellGrid = function()
     if not spellPickerView or not spellPickerView.gridFrame then return end
     local grid = spellPickerView.gridFrame
 
-    local children = { grid:GetChildren() }
-    for _, child in ipairs(children) do child:Hide() end
-    local regions = { grid:GetRegions() }
-    for _, region in ipairs(regions) do region:Hide() end
+    -- Pooled widgets: track how many this pass uses, hide the surplus at the
+    -- end (no per-populate frame creation past the pools' high-water mark).
+    local usedCards, usedHeaders = 0, 0
+    local function HideSurplus()
+        if grid.cardPool then
+            for j = usedCards + 1, #grid.cardPool do grid.cardPool[j]:Hide() end
+        end
+        if grid.headerPool then
+            for j = usedHeaders + 1, #grid.headerPool do grid.headerPool[j]:Hide() end
+        end
+    end
+
+    if grid.noResultsLabel then grid.noResultsLabel:Hide() end
 
     local spec = ResolveSpec()
     local auras = spec and Adapter:GetTrackableAuras(spec)
     if not spec or not auras or #auras == 0 then
+        HideSurplus()  -- nothing used: hides every pooled card/header
         -- Show unsupported spec message
         if not grid.unsupportedLabel then
             local label = grid:CreateFontString(nil, "OVERLAY", "DFFontNormal")
@@ -5412,7 +5473,9 @@ PopulateSpellGrid = function()
     local yOffset = 6  -- top pad
 
     local function RenderHeader(text, color)
-        local header = grid:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+        usedHeaders = usedHeaders + 1
+        local header = AcquireSectionHeader(grid, usedHeaders)
+        header:ClearAllPoints()
         header:SetPoint("TOPLEFT", PADDING, -yOffset)
         header:SetText(text)
         local c = color or C_TEXT
@@ -5427,7 +5490,8 @@ PopulateSpellGrid = function()
             local col = cardIndex % cols
             local x = PADDING + col * (CARD_SIZE + CARD_GAP)
             local y = -(yOffset + row * (CARD_SIZE + CARD_GAP))
-            CreateSpellCard(grid, auraInfo, spec, x, y, CARD_SIZE, false)
+            usedCards = usedCards + 1
+            BindSpellCard(AcquireSpellCard(grid, usedCards), auraInfo, spec, x, y, CARD_SIZE)
             cardIndex = cardIndex + 1
         end
         yOffset = yOffset + math.ceil(cardIndex / cols) * (CARD_SIZE + CARD_GAP)
@@ -5462,6 +5526,7 @@ PopulateSpellGrid = function()
         yOffset = yOffset + 60
     end
 
+    HideSurplus()
     grid:SetHeight(yOffset + PADDING)
 end
 
@@ -5607,6 +5672,7 @@ CreateEffectCard = function(parent, yPos, effect)
                 else
                     local auraCfg = GetSpecAuras()[effect.auraName]
                     if auraCfg then auraCfg[effect.typeKey] = nil end
+                    CleanupAdHocAura(effect.auraName)  -- drop emptied ad-hoc "#<id>" entries
                 end
                 expandedCards[cardKey] = nil
                 SwitchTab("effects")
