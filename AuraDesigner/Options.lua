@@ -1894,18 +1894,12 @@ local mainFrame           -- The root frame for the entire page
 local leftPanel           -- Left content area (frame preview)
 local rightPanel          -- Right settings panel (tabbed)
 local enableBanner        -- Enable toggle banner
-local coexistBanner       -- "Buffs are also visible" info strip
 local framePreview        -- Mock unit frame preview
 local dragHintText        -- Dynamic hint text below frame preview
 
--- Layout anchors — stored during build so RefreshPage can shift content
--- when the coexistence banner is shown/hidden
-local COEXIST_BANNER_H = 24
-local COEXIST_GAP       = 4
-local contentBaseY          -- yPos where content starts (below enable banner)
+-- Layout anchors — stored during build
 local contentRightInset     -- Right inset for left-side panels
 local origY_framePreview    -- original yPos of framePreview
-local currentBannerShift = 0 -- tracks current coexist banner offset
 
 -- (The DF_AURA_DESIGNER_RESET_GLOBAL popup was retired with the editing-banner
 -- "Reset to Global" button — the preset dropdown's "Inherit (Global)" entry now
@@ -4292,6 +4286,35 @@ local function BuildGlobalView(parent)
         g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Icon (Text Only)"], defaults, "hideIcon"), 24)
     end)
 
+    -- ── SOUND ALERTS ──
+    -- Set-once settings, relocated here from the enable banner (§11.6 redesign).
+    -- Storage keys unchanged: soundEnabled (nil/true = on, false = muted) and
+    -- soundChannel (Master default: alerts should stay audible when the player
+    -- mutes Sound Effects/Music to cut combat noise).
+    AddGroup(L["Sound Alerts"], function(g)
+        local SOUND_CHANNELS = {
+            Master   = L["Master"],
+            SFX      = L["Sound Effects"],
+            Music    = L["Music"],
+            Ambience = L["Ambience"],
+            Dialog   = L["Dialog"],
+            _order   = { "Master", "SFX", "Music", "Ambience", "Dialog" },
+        }
+        g:AddWidget(GUI:CreateCheckbox(parent, L["Enabled"], nil, nil, nil,
+            function() return GetAuraDesignerDB().soundEnabled ~= false end,   -- customGet
+            function(v)                                                        -- customSet
+                local adDB = GetAuraDesignerDB()
+                adDB.soundEnabled = v and true or false
+                if not adDB.soundEnabled and DF.AuraDesigner.SoundEngine then
+                    DF.AuraDesigner.SoundEngine:StopAll()
+                end
+            end), 24)
+        g:AddWidget(GUI:CreateDropdown(parent, L["Channel"], SOUND_CHANNELS,
+            nil, nil, nil,
+            function() return (GetAuraDesignerDB().soundChannel) or "Master" end,  -- customGet
+            function(key) GetAuraDesignerDB().soundChannel = key end), 50)         -- customSet
+    end)
+
     -- ── DURATION TEXT ──
     AddGroup(L["Duration Text"], function(g)
         g:AddWidget(GUI:CreateFontDropdown(parent, L["Font"], defaults, "durationFont"), 50)
@@ -4395,6 +4418,33 @@ local function BuildGlobalView(parent)
         g:AddWidget(importBtn, 32)
     end)
 
+    -- ── STANDARD BUFFS ──
+    -- Replaces the old coexistence banner's "Disable Buffs" shortcut: standard
+    -- buff visibility is Aura Filters' job now, so this just links there.
+    AddGroup(L["Standard Buffs"], function(g)
+        local descFrame = CreateFrame("Frame", nil, parent)
+        descFrame:SetHeight(24)
+        local descText = descFrame:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+        descText:SetPoint("TOPLEFT", 0, 0)
+        descText:SetPoint("RIGHT", descFrame, "RIGHT", 0, 0)
+        descText:SetJustifyH("LEFT")
+        descText:SetWordWrap(true)
+        descText:SetText(L["Standard buff visibility is managed on the Aura Filters page."])
+        descText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+        g:AddWidget(descFrame, 24)
+
+        local filtersBtn = GUI:CreateButton(parent, L["Aura Filters"], 140, 22, function()
+            if GUI.SelectTab and GUI.Pages and GUI.Pages["auras_filters"] then
+                GUI.SelectTab("auras_filters")
+            end
+        end)
+        if not (GUI.Pages and GUI.Pages["auras_filters"]) then
+            filtersBtn:Disable()
+            filtersBtn.Text:SetTextColor(0.4, 0.4, 0.4)
+        end
+        g:AddWidget(filtersBtn, 28)
+    end)
+
     -- ── ACTIONS ──
     AddGroup(L["Actions"], function(g)
         -- Copy Settings to Other Mode button
@@ -4477,8 +4527,10 @@ local function RefreshRightPanel() end
 
 local function CreateEnableBanner(parent)
     local banner = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    -- Two-row layout: row 1 (36px) has Enable toggle (left) + Sync/Copy buttons (right);
-    -- row 2 (32px) has Sound Alerts (left) + Spec dropdown (right).
+    -- Two-row layout: row 1 (36px) has Enable toggle (left) + Sync/Copy buttons
+    -- (right); row 2 (32px) has the preset bar (left; anchored into the banner
+    -- by the page build) + Spec dropdown (right). Sound Alerts live on the
+    -- Global tab (set-once settings).
     banner:SetHeight(68)
     banner:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, 0)
     banner:SetPoint("TOPRIGHT", parent, "TOPRIGHT", 0, 0)
@@ -4496,14 +4548,11 @@ local function CreateEnableBanner(parent)
     -- Offset from banner centre to row 1 centre = +16.
     local cb = CreateFrame("CheckButton", nil, banner, "BackdropTemplate")
     cb:SetPoint("LEFT", banner, "LEFT", 10, 16)
-    local tc = GetThemeColor()
     DF.GUI:StyleCheckButton(cb)
 
     local adDB = GetAuraDesignerDB()
     cb:SetChecked(adDB and adDB.enabled)
 
-    -- Forward declaration — UpdateMuteEnabled is defined after muteCb/muteLabel are created.
-    local UpdateMuteEnabled
     cb:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
         if checked then
@@ -4511,7 +4560,6 @@ local function CreateEnableBanner(parent)
             ShowBuffCoexistPopup(function(keepBuffs)
                 GetAuraDesignerDB().enabled = true
                 db.showBuffs = keepBuffs
-                if UpdateMuteEnabled then UpdateMuteEnabled(true) end
                 DF:AuraDesigner_RefreshPage()
                 DF:InvalidateAuraLayout()
                 DF:UpdateAllFrames()
@@ -4524,7 +4572,6 @@ local function CreateEnableBanner(parent)
             end)
         else
             GetAuraDesignerDB().enabled = false
-            if UpdateMuteEnabled then UpdateMuteEnabled(false) end
             DF:AuraDesigner_RefreshPage()
             DF:InvalidateAuraLayout()
             DF:UpdateAllFrames()
@@ -4537,14 +4584,9 @@ local function CreateEnableBanner(parent)
     end)
 
     local cbLabel = banner:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    cbLabel:SetPoint("LEFT", cb, "RIGHT", 8, 2)
+    cbLabel:SetPoint("LEFT", cb, "RIGHT", 8, 0)
     cbLabel:SetText(L["Enable Aura Designer"])
     cbLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-
-    local cbSubLabel = banner:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    cbSubLabel:SetPoint("TOPLEFT", cbLabel, "BOTTOMLEFT", 0, -1)
-    cbSubLabel:SetText(L["Custom buff and frame effect indicators"])
-    cbSubLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
     -- Row 2 centre = 52px from top = 18px below banner centre → y offset -18.
     local specLabel = banner:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
@@ -4594,14 +4636,41 @@ local function CreateEnableBanner(parent)
         if cc then return { r = cc.r, g = cc.g, b = cc.b } end
         return nil
     end
+    -- All-spec menu: "Auto (<detected>)" pinned first, then every spec grouped
+    -- under a class-coloured header row, with the shared dropdown's inline
+    -- search (opts.searchable) so 41 entries stay navigable.
     local function BuildSpecOptions()
-        local options = { _order = SPEC_ORDER }
+        local order = {}
+        local options = { _order = order }
+        tinsert(order, "auto")
+        options.auto = {
+            value = "auto",
+            text = SpecOptionText("auto"),
+            color = SpecOptionColor("auto"),
+        }
+        local lastClass
         for _, specKey in ipairs(SPEC_ORDER) do
-            options[specKey] = {
-                value = specKey,
-                text = SpecOptionText(specKey),
-                color = SpecOptionColor(specKey),
-            }
+            if specKey ~= "auto" then
+                local info = DF.AuraDesigner.SpecInfo and DF.AuraDesigner.SpecInfo[specKey]
+                local classToken = info and info.class
+                if classToken and classToken ~= lastClass then
+                    lastClass = classToken
+                    local hdrKey = "__hdr_" .. classToken
+                    local cc = RAID_CLASS_COLORS[classToken]
+                    tinsert(order, hdrKey)
+                    options[hdrKey] = {
+                        header = true,
+                        text = (LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[classToken]) or classToken,
+                        color = cc and { r = cc.r, g = cc.g, b = cc.b } or nil,
+                    }
+                end
+                tinsert(order, specKey)
+                options[specKey] = {
+                    value = specKey,
+                    text = SpecOptionText(specKey),
+                    color = SpecOptionColor(specKey),
+                }
+            end
         end
         return options
     end
@@ -4616,7 +4685,7 @@ local function CreateEnableBanner(parent)
             wipe(expandedCards)
             DF:AuraDesigner_RefreshPage()
         end,
-        { inline = true, optionsFunc = BuildSpecOptions }
+        { inline = true, optionsFunc = BuildSpecOptions, searchable = true }
     )
     specDrop:SetSize(130, 22)
     specDrop:SetPoint("LEFT", specLabel, "RIGHT", 4, 0)
@@ -4631,86 +4700,10 @@ local function CreateEnableBanner(parent)
         if specDrop.UpdateText then specDrop:UpdateText() end
     end
 
-    -- Mute Sound Alerts checkbox — row 2 left side, same size as Enable checkbox.
-    local muteCb = CreateFrame("CheckButton", nil, banner, "BackdropTemplate")
-    muteCb:SetPoint("LEFT", banner, "LEFT", 10, -18)
-    DF.GUI:StyleCheckButton(muteCb)
-
-    -- soundEnabled = true/nil means NOT muted, so checked = not muted.
-    -- nil (older profiles without this field) is treated as enabled by default.
-    muteCb:SetChecked(adDB and adDB.soundEnabled ~= false)
-    muteCb:SetScript("OnClick", function(self)
-        local adDB = GetAuraDesignerDB()
-        adDB.soundEnabled = self:GetChecked() and true or false
-        if not adDB.soundEnabled and DF.AuraDesigner.SoundEngine then
-            DF.AuraDesigner.SoundEngine:StopAll()
-        end
-    end)
-
-    local muteLabel = banner:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    -- 8px gap = same as cbLabel after the Enable checkbox, so "Sound Alerts"
-    -- lines up with "Enable Aura Designer" above it.
-    muteLabel:SetPoint("LEFT", muteCb, "RIGHT", 8, 0)
-    muteLabel:SetText(L["Sound Alerts"])
-    muteLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-
-    -- Sound output channel dropdown (Master default: alerts should stay
-    -- audible when the player mutes Sound Effects/Music to cut combat noise).
-    local SOUND_CHANNELS = {
-        Master   = L["Master"],
-        SFX      = L["Sound Effects"],
-        Music    = L["Music"],
-        Ambience = L["Ambience"],
-        Dialog   = L["Dialog"],
-        _order   = { "Master", "SFX", "Music", "Ambience", "Dialog" },
-    }
-
-    local channelLabel = banner:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    channelLabel:SetPoint("LEFT", muteLabel, "RIGHT", 12, 0)
-    channelLabel:SetText(L["Channel:"])
-    channelLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-
-    -- Sound channel selector. Ported to the shared GUI:CreateDropdown (inline
-    -- mode + customGet/customSet so the read/write always hit the live AD DB,
-    -- defaulting to Master). NOTE: the bespoke hover tooltip the old opener had
-    -- ("Which audio channel alert sounds play on...") is dropped — the shared
-    -- dropdown owns the opener button's OnEnter/OnLeave and isn't exposed.
-    local channelBtn = GUI:CreateDropdown(
-        banner, "", SOUND_CHANNELS,
-        nil, nil, nil,
-        function() return (GetAuraDesignerDB().soundChannel) or "Master" end,  -- customGet
-        function(key) GetAuraDesignerDB().soundChannel = key end,              -- customSet
-        { inline = true }
-    )
-    channelBtn:SetSize(110, 22)
-    channelBtn:SetPoint("LEFT", channelLabel, "RIGHT", 4, 0)
-
-    -- Grey out Sound Alerts when Aura Designer is disabled.
-    UpdateMuteEnabled = function(enabled)
-        if enabled then
-            muteCb:SetEnabled(true)
-            muteCb:SetAlpha(1)
-            muteLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-            channelLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-            channelBtn:SetEnabled(true)
-            channelBtn:SetAlpha(1)
-        else
-            muteCb:SetEnabled(false)
-            muteCb:SetAlpha(0.35)
-            muteLabel:SetTextColor(C_TEXT_DIM.r * 0.4, C_TEXT_DIM.g * 0.4, C_TEXT_DIM.b * 0.4)
-            channelLabel:SetTextColor(C_TEXT_DIM.r * 0.4, C_TEXT_DIM.g * 0.4, C_TEXT_DIM.b * 0.4)
-            channelBtn:SetEnabled(false)
-            channelBtn:SetAlpha(0.35)
-        end
-    end
-    UpdateMuteEnabled(adDB and adDB.enabled or false)
-
     banner.UpdateSpecText = UpdateSpecText
-    banner.UpdateMuteEnabled = UpdateMuteEnabled
     banner.checkbox = cb
     banner.specLabel = specLabel
     banner.specBtn = specBtn
-    banner.muteCheckbox = muteCb
     return banner
 end
 
@@ -7061,14 +7054,15 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
         enableBanner.specLabel:SetPoint("RIGHT", enableBanner.specBtn, "LEFT", -4, 0)
     end
 
-    yPos = yPos - (BANNER_H + 4)
-
     -- ========================================
     -- PRESET BAR (which named preset this mode uses + library management)
+    -- Rides row 2 of the enable banner (left side; the spec dropdown holds the
+    -- right side). Compact icon buttons keep the row within the page width.
     -- ========================================
     if GUI.CreateDesignerPresetBar then
-        local presetBar = GUI:CreateDesignerPresetBar(mainFrame, {
+        local presetBar = GUI:CreateDesignerPresetBar(enableBanner, {
             kind = "aura",
+            iconButtons = true,
             getMode = function() return (GUI and GUI.SelectedMode) or "party" end,
             onChange = function()
                 -- Re-invoke the build NEXT frame: the dfBuiltPreset guard then
@@ -7086,48 +7080,12 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
                 end
             end,
         })
-        presetBar:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 0, yPos)
-        presetBar:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", 0, yPos)
+        presetBar:SetPoint("LEFT", enableBanner, "LEFT", 10, -18)
+        presetBar:SetPoint("RIGHT", enableBanner.specLabel, "LEFT", -10, 0)
         enableBanner.presetBar = presetBar
-        yPos = yPos - (24 + SECTION_GAP)
     end
 
-    -- ========================================
-    -- COEXISTENCE INFO BANNER
-    -- ========================================
-    -- contentBaseY marks where dynamic content starts (below the enable banner).
-    -- The coexist banner is positioned dynamically in RefreshPage based on
-    -- visibility, shifting the split container down as needed.
-    contentBaseY = yPos
-    coexistBanner = CreateFrame("Frame", nil, mainFrame, "BackdropTemplate")
-    coexistBanner:SetHeight(COEXIST_BANNER_H)
-    coexistBanner:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 0, yPos)
-    coexistBanner:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", 0, yPos)
-    GUI:CreatePanelBackdrop(coexistBanner, {borderColor = {r = 0.30, g = 0.30, b = 0.30, a = 0.5}})
-
-    local coexistText = coexistBanner:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    coexistText:SetPoint("LEFT", 10, 0)
-    coexistText:SetText(L["Standard Buffs are also visible on frames."])
-    coexistText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-
-    -- Quiet inline text-link action: ghost style (accent label + faint hover
-    -- wash, no resting fill/border).
-    local disableBuffsBtn = CreateFrame("Button", nil, coexistBanner, "BackdropTemplate")
-    disableBuffsBtn:SetPoint("LEFT", coexistText, "RIGHT", 8, 0)
-    GUI:StyleButton(disableBuffsBtn, {
-        width = 90, height = 18,
-        text = L["Disable Buffs"],
-        ghost = true,
-    })
-    disableBuffsBtn:SetScript("OnClick", function()
-        db.showBuffs = false
-        DF:AuraDesigner_RefreshPage()
-        DF:InvalidateAuraLayout()
-        DF:UpdateAllFrames()
-        local buffsPage = GUI and GUI.Pages and GUI.Pages["auras_buffs"]
-        if buffsPage and buffsPage.RefreshStates then buffsPage:RefreshStates() end
-    end)
-    coexistBanner:Hide()
+    yPos = yPos - (BANNER_H + SECTION_GAP)
 
     -- ========================================
     -- 50/50 SPLIT: LEFT PANEL + RIGHT PANEL
@@ -7560,34 +7518,6 @@ function DF:AuraDesigner_RefreshPage()
     if enableBanner then
         enableBanner.checkbox:SetChecked(GetAuraDesignerDB().enabled)
         enableBanner.UpdateSpecText()
-    end
-
-    -- Show/hide coexistence banner and reposition content panels
-    if coexistBanner and contentBaseY then
-        local adEnabled = GetAuraDesignerDB().enabled
-        local showBuffs = db and db.showBuffs
-        local bannerVisible = adEnabled and showBuffs
-        if bannerVisible then
-            coexistBanner:Show()
-        else
-            coexistBanner:Hide()
-        end
-
-        coexistBanner:ClearAllPoints()
-        coexistBanner:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 0, contentBaseY)
-        coexistBanner:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", 0, contentBaseY)
-
-        -- Shift the split container below the coexist banner when visible
-        local totalShift = 0
-        if bannerVisible then
-            totalShift = totalShift + COEXIST_BANNER_H + COEXIST_GAP
-        end
-        currentBannerShift = totalShift
-        if mainFrame.splitContainer then
-            mainFrame.splitContainer:ClearAllPoints()
-            mainFrame.splitContainer:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 0, contentBaseY - totalShift)
-            mainFrame.splitContainer:SetPoint("BOTTOMRIGHT", mainFrame, "BOTTOMRIGHT", 0, 0)
-        end
     end
 
     -- Show/hide disabled overlay on the split container

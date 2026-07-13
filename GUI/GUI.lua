@@ -2429,8 +2429,34 @@ function GUI:CreateDesignerPresetBar(parent, opts)
         return nil
     end
 
-    -- Action buttons
-    local newBtn = GUI:CreateButton(bar, L["New"], 48, 22, function()
+    -- Action buttons. opts.iconButtons = true swaps the labeled buttons for
+    -- compact tooltipped icon-only buttons (22x22) — used where the bar shares
+    -- a row with other controls (Aura Designer header). Default stays labeled
+    -- (Text Designer) so existing callers are untouched.
+    local function CreateAction(labelText, iconName, width, onClick)
+        if opts.iconButtons then
+            local b = CreateFrame("Button", nil, bar, "BackdropTemplate")
+            GUI:StyleButton(b, {
+                width = 22, height = 22,
+                icon = {
+                    texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. iconName,
+                    size = 14, color = C_TEXT,
+                },
+            })
+            b:SetScript("OnClick", function(self)
+                onClick(self)
+                PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+            end)
+            b:HookScript("OnEnter", function(self)
+                GUI:ShowTooltip(self, { title = labelText, anchor = "ANCHOR_TOP" })
+            end)
+            b:HookScript("OnLeave", function() GUI:HideTooltip() end)
+            return b
+        end
+        return GUI:CreateButton(bar, labelText, width, 22, onClick)
+    end
+
+    local newBtn = CreateAction(L["New"], "add", 48, function()
         PromptPresetName(L["Name the new preset:"], EditingLayoutName() or "", function(text)
             local n = DF:CreateDesignerPreset(kind, text)
             if n then
@@ -2441,7 +2467,7 @@ function GUI:CreateDesignerPresetBar(parent, opts)
     end)
     newBtn:SetPoint("LEFT", ddBtn, "RIGHT", 6, 0)
 
-    local dupBtn = GUI:CreateButton(bar, L["Duplicate"], 72, 22, function()
+    local dupBtn = CreateAction(L["Duplicate"], "content_copy", 72, function()
         local cur = CurrentName()
         -- Duplicate defaults to "<source> copy" (New uses the layout name, but a
         -- duplicate is of a specific preset, so name it after the source).
@@ -2455,7 +2481,7 @@ function GUI:CreateDesignerPresetBar(parent, opts)
     end)
     dupBtn:SetPoint("LEFT", newBtn, "RIGHT", 4, 0)
 
-    local renameBtn = GUI:CreateButton(bar, L["Rename"], 62, 22, function()
+    local renameBtn = CreateAction(L["Rename"], "edit", 62, function()
         local cur = CurrentName()
         if cur == DF.DEFAULT_PRESET then return end
         PromptPresetName(L["Rename preset:"], cur, function(text)
@@ -2465,7 +2491,7 @@ function GUI:CreateDesignerPresetBar(parent, opts)
     end)
     renameBtn:SetPoint("LEFT", dupBtn, "RIGHT", 4, 0)
 
-    local delBtn = GUI:CreateButton(bar, L["Delete"], 56, 22, function()
+    local delBtn = CreateAction(L["Delete"], "delete", 56, function()
         local cur = CurrentName()
         if cur == DF.DEFAULT_PRESET then return end
         ConfirmDeletePreset(kind, cur, function() bar:Refresh(); onChange() end)
@@ -2475,10 +2501,13 @@ function GUI:CreateDesignerPresetBar(parent, opts)
     local function SetActionEnabled(btn, on)
         if on then
             btn:Enable()
-            btn.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+            if btn.Text then btn.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b) end
+            if btn.Icon then btn.Icon:SetVertexColor(C_TEXT.r, C_TEXT.g, C_TEXT.b) end
         else
             btn:Disable()
-            btn.Text:SetTextColor(0.4, 0.4, 0.4)   -- greyed: Default can't be renamed/deleted
+            -- greyed: Default can't be renamed/deleted
+            if btn.Text then btn.Text:SetTextColor(0.4, 0.4, 0.4) end
+            if btn.Icon then btn.Icon:SetVertexColor(0.4, 0.4, 0.4) end
         end
     end
 
@@ -4501,122 +4530,245 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
     menuFrame:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.98)
     menuFrame:Hide()
     
+    -- Searchable menus (opts.searchable): a search box pinned above a scrollable
+    -- item list, mirroring the font/sound dropdowns. Option sets may also carry
+    -- non-clickable group-header rows — `_order` entries whose option value is
+    -- { header = true, text = ..., color = ... } (e.g. class-coloured spec
+    -- groups). While filtering, a header only stays visible if at least one of
+    -- its options matches.
+    local searchable = opts.searchable
+    local ITEM_HEIGHT = 22
+    local SEARCH_HEIGHT = 26
+    local MAX_VISIBLE = opts.maxVisible or 12
+    local searchBox, scrollFrame, scrollChild, searchPlaceholder
+    if searchable then
+        searchBox = CreateFrame("EditBox", nil, menuFrame, "BackdropTemplate")
+        searchBox:SetPoint("TOPLEFT", 4, -4)
+        searchBox:SetPoint("TOPRIGHT", -4, -4)
+        searchBox:SetHeight(22)
+        searchBox:SetAutoFocus(false)
+        searchBox:SetFontObject(DFFontHighlightSmall)
+        searchBox:SetTextInsets(24, 8, 0, 0)
+        CreateElementBackdrop(searchBox)
+        searchBox:SetBackdropColor(0.1, 0.1, 0.1, 1)
+
+        local searchIcon = searchBox:CreateTexture(nil, "OVERLAY")
+        searchIcon:SetPoint("LEFT", 6, 0)
+        searchIcon:SetSize(12, 12)
+        searchIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\search")
+        searchIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+
+        searchPlaceholder = searchBox:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+        searchPlaceholder:SetPoint("LEFT", 24, 0)
+        searchPlaceholder:SetText(L["Search..."])
+        searchPlaceholder:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.6)
+
+        searchBox:SetScript("OnEditFocusGained", function() searchPlaceholder:Hide() end)
+        searchBox:SetScript("OnEditFocusLost", function()
+            if searchBox:GetText() == "" then searchPlaceholder:Show() end
+        end)
+        searchBox:SetScript("OnEscapePressed", function() menuFrame:Hide() end)
+
+        scrollFrame = CreateFrame("ScrollFrame", nil, menuFrame, "ScrollFrameTemplate")
+        scrollFrame:SetPoint("TOPLEFT", 2, -(SEARCH_HEIGHT + 4))
+        scrollFrame:SetPoint("BOTTOMRIGHT", -20, 2)
+        scrollChild = CreateFrame("Frame", nil, scrollFrame)
+        scrollChild:SetWidth(200)  -- resized to the menu width on each rebuild
+        scrollFrame:SetScrollChild(scrollChild)
+        StyleScrollBar(scrollFrame)
+    end
+
     -- Clear tracking when hidden
     menuFrame:SetScript("OnHide", function()
         if currentOpenDropdown == menuFrame then
             currentOpenDropdown = nil
         end
+        if searchBox then
+            searchBox:SetText("")
+            searchBox:ClearFocus()
+            searchPlaceholder:Show()
+        end
     end)
-    
+
     local menuButtons = {}
     local menuHeight = 0
     local sortedOptions = {}
 
     -- Build (or rebuild) the menu buttons from the current `options` upvalue.
-    -- Hide + drop any previously-built buttons first so dynamic dropdowns can
-    -- regenerate their list. Static callers call this exactly once below.
+    -- Rows are POOLED (frames can't be garbage-collected) — rebuilds reuse
+    -- existing buttons and hide the surplus, so dynamic/searchable dropdowns
+    -- don't leak a row set per rebuild. Static callers build exactly once below.
     local menuContentW = 0   -- widest item text; sizes the menu to fit long options
-    local function BuildMenuButtons()
+    local function BuildMenuButtons(filterText)
         for _, b in ipairs(menuButtons) do b:Hide() end
-        wipe(menuButtons)
         wipe(sortedOptions)
         menuHeight = 0
 
+        -- Collect the ordered option list (header rows ride along)
+        local ordered = {}
         -- Check for custom order array
         if options._order then
             -- Use specified order
             for _, k in ipairs(options._order) do
                 local v = options[k]
                 if v then
-                    -- Handle both formats: KEY = "text" or KEY = {value=, text=, color=}
-                    local displayValue = type(v) == "table" and (v.text or v.label or tostring(k)) or v
-                    local optColor = type(v) == "table" and v.color or nil
-                    table.insert(sortedOptions, {key = k, value = displayValue, color = optColor})
+                    -- Handle both formats: KEY = "text" or KEY = {value=, text=, color=, header=}
+                    local isTable = type(v) == "table"
+                    table.insert(ordered, {
+                        key = k,
+                        value = isTable and (v.text or v.label or tostring(k)) or v,
+                        color = isTable and v.color or nil,
+                        header = isTable and v.header or nil,
+                    })
                 end
             end
         else
             -- Default: sort alphabetically by display value
             for k, v in pairs(options) do
-                -- Handle both formats: KEY = "text" or KEY = {value = X, text = "text", color =}
-                local displayValue = type(v) == "table" and (v.text or v.label or tostring(k)) or v
-                local optColor = type(v) == "table" and v.color or nil
-                table.insert(sortedOptions, {key = k, value = displayValue, color = optColor})
+                local isTable = type(v) == "table"
+                table.insert(ordered, {
+                    key = k,
+                    value = isTable and (v.text or v.label or tostring(k)) or v,
+                    color = isTable and v.color or nil,
+                    header = isTable and v.header or nil,
+                })
             end
-            table.sort(sortedOptions, function(a, b)
+            table.sort(ordered, function(a, b)
                 local aVal = type(a.value) == "string" and a.value or tostring(a.key)
                 local bVal = type(b.value) == "string" and b.value or tostring(b.key)
                 return aVal < bVal
             end)
         end
 
-        for i, opt in ipairs(sortedOptions) do
-            local menuBtn = CreateFrame("Button", nil, menuFrame)
-            menuBtn:SetPoint("TOPLEFT", 2, -2 - (i - 1) * 22)
-            menuBtn:SetPoint("TOPRIGHT", -2, -2 - (i - 1) * 22)
-            menuBtn:SetHeight(22)
-
-            menuBtn.Text = menuBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-            menuBtn.Text:SetPoint("LEFT", 8, 0)
-            menuBtn.Text:SetText(opt.value)
-            if opt.color then
-                menuBtn.Text:SetTextColor(opt.color.r, opt.color.g, opt.color.b)
-            else
-                menuBtn.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+        -- Apply the search filter (searchable menus): match option display text;
+        -- keep a group header only when one of its options survives.
+        local filter = filterText and filterText ~= "" and filterText:lower() or nil
+        if filter then
+            local pendingHeader
+            for _, opt in ipairs(ordered) do
+                if opt.header then
+                    pendingHeader = opt
+                else
+                    local txt = type(opt.value) == "string" and opt.value:lower() or tostring(opt.key):lower()
+                    if txt:find(filter, 1, true) then
+                        if pendingHeader then
+                            table.insert(sortedOptions, pendingHeader)
+                            pendingHeader = nil
+                        end
+                        table.insert(sortedOptions, opt)
+                    end
+                end
             end
+        else
+            for _, opt in ipairs(ordered) do
+                table.insert(sortedOptions, opt)
+            end
+        end
 
-            menuBtn.Highlight = menuBtn:CreateTexture(nil, "HIGHLIGHT")
-            menuBtn.Highlight:SetAllPoints()
-            local c = accentColor or GetThemeColor()
-            menuBtn.Highlight:SetColorTexture(c.r, c.g, c.b, 0.3)
+        local itemParent = scrollChild or menuFrame
+        local currentVal = customGet and customGet() or (dbTable and dbKey and dbTable[dbKey])
+        local selColor = accentColor or GetThemeColor()
 
-            menuBtn:SetScript("OnClick", function()
-                -- Runtime override protection: redirect to baseline, skip refresh
-                if GUI.SelectedMode == "raid" and DF.AutoProfilesUI
-                   and DF.AutoProfilesUI:HandleRuntimeWrite(dbKey, opt.key) then
+        for i, opt in ipairs(sortedOptions) do
+            local menuBtn = menuButtons[i]
+            if not menuBtn then
+                menuBtn = CreateFrame("Button", nil, itemParent)
+                menuBtn:SetPoint("TOPLEFT", 2, -2 - (i - 1) * ITEM_HEIGHT)
+                menuBtn:SetPoint("TOPRIGHT", -2, -2 - (i - 1) * ITEM_HEIGHT)
+                menuBtn:SetHeight(ITEM_HEIGHT)
+
+                menuBtn.Text = menuBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+                menuBtn.Text:SetPoint("LEFT", 8, 0)
+
+                menuBtn.Highlight = menuBtn:CreateTexture(nil, "HIGHLIGHT")
+                menuBtn.Highlight:SetAllPoints()
+
+                menuBtn:SetScript("OnClick", function(self)
+                    local optKey = self.optKey
+                    -- Runtime override protection: redirect to baseline, skip refresh
+                    if GUI.SelectedMode == "raid" and DF.AutoProfilesUI
+                       and DF.AutoProfilesUI:HandleRuntimeWrite(dbKey, optKey) then
+                        UpdateText()
+                        menuFrame:Hide()
+                        if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators(optKey) end
+                        return
+                    end
+
+                    if customSet then
+                        customSet(optKey)
+                    else
+                        dbTable[dbKey] = optKey
+                    end
+
+                    -- If editing a profile, also set the override
+                    if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() and dbKey then
+                        DF.AutoProfilesUI:SetProfileSetting(dbKey, customGet and customGet() or optKey)
+                    end
+
                     UpdateText()
                     menuFrame:Hide()
-                    if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators(opt.key) end
-                    return
-                end
+                    DF:UpdateAll()
+                    if callback then callback() end
+                    if parent.RefreshStates then parent:RefreshStates() end
+                end)
 
-                if customSet then
-                    customSet(opt.key)
+                menuButtons[i] = menuBtn
+            end
+
+            menuBtn.optKey = opt.key
+            menuBtn.Text:SetText(opt.value)
+            menuBtn.Highlight:SetColorTexture(selColor.r, selColor.g, selColor.b, 0.3)
+            if opt.header then
+                -- Non-clickable group label (no mouse ⇒ no hover highlight)
+                menuBtn:EnableMouse(false)
+                local hc = opt.color or C_TEXT_DIM
+                menuBtn.Text:SetTextColor(hc.r, hc.g, hc.b)
+            else
+                menuBtn:EnableMouse(true)
+                if opt.color then
+                    -- per-option colour (e.g. class-coloured spec list) always wins
+                    menuBtn.Text:SetTextColor(opt.color.r, opt.color.g, opt.color.b)
+                elseif currentVal == opt.key then
+                    menuBtn.Text:SetTextColor(selColor.r, selColor.g, selColor.b)
                 else
-                    dbTable[dbKey] = opt.key
+                    menuBtn.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
                 end
-
-                -- If editing a profile, also set the override
-                if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() and dbKey then
-                    DF.AutoProfilesUI:SetProfileSetting(dbKey, customGet and customGet() or opt.key)
-                end
-
-                UpdateText()
-                menuFrame:Hide()
-                DF:UpdateAll()
-                if callback then callback() end
-                if parent.RefreshStates then parent:RefreshStates() end
-            end)
-
-            table.insert(menuButtons, menuBtn)
-            menuHeight = menuHeight + 22
+            end
+            menuBtn:Show()
+            menuHeight = menuHeight + ITEM_HEIGHT
         end
 
         -- Width fits the widest item so long options aren't clipped by a narrow
         -- opener (refined to max(opener, content) on open, once btn is sized).
         menuContentW = 0
-        for _, mb in ipairs(menuButtons) do
-            menuContentW = math.max(menuContentW, mb.Text:GetStringWidth() or 0)
+        for i = 1, #sortedOptions do
+            menuContentW = math.max(menuContentW, menuButtons[i].Text:GetStringWidth() or 0)
         end
-        menuFrame:SetWidth(menuContentW + 24)
-        menuFrame:SetHeight(menuHeight + 4)
+        if searchable then
+            local visible = math.min(#sortedOptions, MAX_VISIBLE)
+            menuFrame:SetWidth(math.max(btn:GetWidth() or 0, menuContentW + 44))
+            menuFrame:SetHeight(visible * ITEM_HEIGHT + SEARCH_HEIGHT + 8)
+            scrollChild:SetWidth(menuFrame:GetWidth() - 24)
+            scrollChild:SetHeight(menuHeight + 4)
+            scrollFrame:SetVerticalScroll(0)
+        else
+            menuFrame:SetWidth(menuContentW + 24)
+            menuFrame:SetHeight(menuHeight + 4)
+        end
     end
 
     BuildMenuButtons()
 
+    if searchBox then
+        searchBox:SetScript("OnTextChanged", function(self)
+            if menuFrame:IsShown() then BuildMenuButtons(self:GetText()) end
+        end)
+    end
+
     -- Allow dynamic dropdowns to swap their option set and regenerate buttons.
     container.RebuildOptions = function(_, newOptions)
         if newOptions then options = newOptions end
-        BuildMenuButtons()
+        BuildMenuButtons(searchBox and searchBox:GetText() or nil)
         UpdateText()
     end
 
@@ -4635,23 +4787,38 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
             -- Close any other open dropdown first
             CloseOpenDropdown()
             -- Dynamic dropdowns regenerate their option list each open.
-            if optionsFunc then container:RebuildOptions(optionsFunc()) end
-            local currentVal = customGet and customGet() or dbTable[dbKey]
-            local selColor = accentColor or GetThemeColor()
-            for i, menuBtn in ipairs(menuButtons) do
-                local opt = sortedOptions[i]
-                if opt.color then
-                    -- per-option colour (e.g. class-coloured spec list) always wins
-                    menuBtn.Text:SetTextColor(opt.color.r, opt.color.g, opt.color.b)
-                elseif currentVal == opt.key then
-                    menuBtn.Text:SetTextColor(selColor.r, selColor.g, selColor.b)
-                else
-                    menuBtn.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+            if optionsFunc then
+                container:RebuildOptions(optionsFunc())
+            elseif searchable then
+                -- Searchable menus reopen unfiltered (search cleared on hide)
+                BuildMenuButtons()
+            else
+                -- Static menus: refresh selected-value colouring on the pooled rows
+                local currentVal = customGet and customGet() or (dbTable and dbKey and dbTable[dbKey])
+                local selColor = accentColor or GetThemeColor()
+                for i, opt in ipairs(sortedOptions) do
+                    local menuBtn = menuButtons[i]
+                    if menuBtn and not opt.header then
+                        if opt.color then
+                            -- per-option colour (e.g. class-coloured spec list) always wins
+                            menuBtn.Text:SetTextColor(opt.color.r, opt.color.g, opt.color.b)
+                        elseif currentVal == opt.key then
+                            menuBtn.Text:SetTextColor(selColor.r, selColor.g, selColor.b)
+                        else
+                            menuBtn.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+                        end
+                    end
                 end
             end
-            menuFrame:SetWidth(math.max(btn:GetWidth() or 0, menuContentW + 24))
+            if searchable then
+                menuFrame:SetWidth(math.max(btn:GetWidth() or 0, menuContentW + 44))
+                scrollChild:SetWidth(menuFrame:GetWidth() - 24)
+            else
+                menuFrame:SetWidth(math.max(btn:GetWidth() or 0, menuContentW + 24))
+            end
             menuFrame:Show()
             currentOpenDropdown = menuFrame
+            if searchBox then searchBox:SetFocus() end
         end
     end)
     
