@@ -1291,11 +1291,13 @@ local function ChangeInstanceType(auraName, indicatorID, newType)
     local inst = GetIndicatorByID(auraName, indicatorID)
     if not inst then return end
 
-    -- Preserve placement
+    -- Preserve placement (and the eye toggle's hidden state — it's a state,
+    -- not an appearance setting, so a type change shouldn't un-hide)
     local savedID = inst.id
     local savedAnchor = inst.anchor
     local savedOffX = inst.offsetX
     local savedOffY = inst.offsetY
+    local savedEnabled = inst.enabled
 
     -- Wipe everything, keep minimal: id + type + placement
     -- All other settings fall through to global defaults → TYPE_DEFAULTS via proxy
@@ -1305,10 +1307,12 @@ local function ChangeInstanceType(auraName, indicatorID, newType)
     inst.anchor = savedAnchor or (TYPE_DEFAULTS[newType] and TYPE_DEFAULTS[newType].anchor) or "TOPLEFT"
     inst.offsetX = savedOffX or 0
     inst.offsetY = savedOffY or 0
+    inst.enabled = savedEnabled
 end
 
--- Keys to skip when copying appearance between indicators (identity + placement)
-local COPY_SKIP_KEYS = { id = true, type = true, anchor = true, offsetX = true, offsetY = true }
+-- Keys to skip when copying appearance between indicators (identity + placement +
+-- the eye toggle's hidden state — copying appearance must not hide the destination)
+local COPY_SKIP_KEYS = { id = true, type = true, anchor = true, offsetX = true, offsetY = true, enabled = true }
 
 -- Deep-copy a value (handles nested tables like color = {r,g,b,a})
 local function DeepCopyValue(val)
@@ -2516,10 +2520,12 @@ local function RefreshPlacedIndicators()
     -- Iterate all configured auras, find placed indicator instances.
     -- Ad-hoc "#<id>" auras are never in the trackable pool — render them with
     -- info=nil (RenderPreviewIndicator resolves their id/icon by pattern).
+    -- Hidden indicators (eye toggle, enabled == false) don't render — same as live.
     for auraName, auraCfg in pairs(GetSpecAuras(spec)) do
         local info = infoLookup[auraName]
         if type(auraCfg) == "table" and (info or AdHocSpellID(auraName)) and auraCfg.indicators then
             for _, indicator in ipairs(auraCfg.indicators) do
+              if indicator.enabled ~= false then
                 local instanceKey = auraName .. "#" .. indicator.id
                 local capturedAura = auraName
                 local capturedID = indicator.id
@@ -2540,6 +2546,7 @@ local function RefreshPlacedIndicators()
                     WirePreviewIndicator(slot, capturedAura, capturedID, spec)
                     tinsert(placedIndicators, slot)
                 end
+              end
             end
         end
     end
@@ -2625,7 +2632,8 @@ local function RefreshPreviewEffects()
     -- Border effect (Stage 5.4: rendered via DF.Border, mirroring the runtime).
     -- Shared borders use a single overlay (first/highest-priority claim wins);
     -- custom borders get independent per-aura overlays so multiple can stack.
-    if auraCfg.border and auraCfg.border.ShowBorder ~= false then
+    -- Every type skips hidden blocks (eye toggle, enabled == false) — same as pickWinner.
+    if auraCfg.border and auraCfg.border.enabled ~= false and auraCfg.border.ShowBorder ~= false then
         local spec = DF.Border:BuildSpec(auraCfg.border, "")
         if not spec.color then spec.color = { r = 1, g = 1, b = 1, a = 1 } end
         spec.enabled = true
@@ -2638,7 +2646,7 @@ local function RefreshPreviewEffects()
     end
 
     -- Health bar color (first claim wins)
-    if not claimed.healthbar and auraCfg.healthbar and framePreview.healthFill then
+    if not claimed.healthbar and auraCfg.healthbar and auraCfg.healthbar.enabled ~= false and framePreview.healthFill then
         claimed.healthbar = true
         local clr = auraCfg.healthbar.color or {r = 1, g = 1, b = 1, a = 1}
         local blend = auraCfg.healthbar.blend or 0.5
@@ -2663,7 +2671,7 @@ local function RefreshPreviewEffects()
 
     -- Background color (first claim wins). Recolours the frame background — shows
     -- through the missing-health area, like the runtime overlay behind the bars.
-    if not claimed.background and auraCfg.background and framePreview.healthBg then
+    if not claimed.background and auraCfg.background and auraCfg.background.enabled ~= false and framePreview.healthBg then
         claimed.background = true
         local clr = auraCfg.background.color or {r = 1, g = 1, b = 1, a = 1}
         if auraCfg.background.mode == "Replace" then
@@ -2677,21 +2685,21 @@ local function RefreshPreviewEffects()
     end
 
     -- Name text color (first claim wins)
-    if not claimed.nametext and auraCfg.nametext and framePreview.nameText then
+    if not claimed.nametext and auraCfg.nametext and auraCfg.nametext.enabled ~= false and framePreview.nameText then
         claimed.nametext = true
         local clr = auraCfg.nametext.color or {r = 1, g = 1, b = 1, a = 1}
         framePreview.nameText:SetTextColor(clr.r, clr.g, clr.b, clr.a or 1)
     end
 
     -- Health text color (first claim wins)
-    if not claimed.healthtext and auraCfg.healthtext and framePreview.hpText then
+    if not claimed.healthtext and auraCfg.healthtext and auraCfg.healthtext.enabled ~= false and framePreview.hpText then
         claimed.healthtext = true
         local clr = auraCfg.healthtext.color or {r = 1, g = 1, b = 1, a = 1}
         framePreview.hpText:SetTextColor(clr.r, clr.g, clr.b, clr.a or 1)
     end
 
     -- Frame alpha (first claim wins)
-    if not claimed.framealpha and auraCfg.framealpha then
+    if not claimed.framealpha and auraCfg.framealpha and auraCfg.framealpha.enabled ~= false then
         claimed.framealpha = true
         mockFrame:SetAlpha(auraCfg.framealpha.alpha or 0.5)
     end
@@ -2775,9 +2783,11 @@ RefreshPreviewLightweight = function()
     end
 
     -- Re-apply placed indicator instances using current settings
+    -- (hidden indicators skipped — RenderPreviewIndicator would resurrect their slot)
     for auraName, auraCfg in pairs(GetSpecAuras()) do
         if type(auraCfg) == "table" and auraCfg.indicators then
             for _, indicator in ipairs(auraCfg.indicators) do
+              if indicator.enabled ~= false then
                 local instanceKey = auraName .. "#" .. indicator.id
 
                 -- Apply layout group position override if applicable
@@ -2801,6 +2811,7 @@ RefreshPreviewLightweight = function()
                 if slot then
                     WirePreviewIndicator(slot, auraName, indicator.id, spec)
                 end
+              end
             end
         end
     end
@@ -5481,7 +5492,8 @@ CreateEffectCard = function(parent, yPos, effect)
     else
         infoText:SetPoint("LEFT", badgeBg, "RIGHT", 6, 0)
     end
-    infoText:SetPoint("RIGHT", header, "RIGHT", indicatorGroup and -8 or -30, 0)
+    -- Right inset clears the action icons: eye only (grouped) or eye + ✕.
+    infoText:SetPoint("RIGHT", header, "RIGHT", indicatorGroup and -30 or -52, 0)
     infoText:SetMaxLines(1)
     infoText:SetText(infoStr)
     if indicatorGroup then
@@ -5492,8 +5504,9 @@ CreateEffectCard = function(parent, yPos, effect)
     end
 
     -- Delete button — hidden for grouped indicators (managed by layout group)
+    local delBtn
     if not indicatorGroup then
-        local delBtn = GUI:CreateCloseButton(header, {
+        delBtn = GUI:CreateCloseButton(header, {
             size = 22,
             onClick = function()
                 if isPlaced then
@@ -5510,6 +5523,69 @@ CreateEffectCard = function(parent, yPos, effect)
         })
         delBtn:SetPoint("RIGHT", -4, 0)
         delBtn:SetFrameLevel(header:GetFrameLevel() + 2)
+    end
+
+    -- Eye icon (visibility toggle) — left of the ✕; grouped indicators keep it
+    -- even though their ✕ is hidden. Asset + toggle idiom mirror Text Designer's
+    -- eye (TextDesigner/Options.lua): visibility / visibility_off from
+    -- Media/Icons, bright when shown, dim when hidden, hover brighten.
+    -- State lives on the raw config table: enabled == false is hidden;
+    -- nil/true (legacy records) is shown.
+    do
+        local cfgTable = effect.config
+        local mediaPath = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
+        local eyeBtn = CreateFrame("Button", nil, header)
+        eyeBtn:SetSize(18, 18)
+        if delBtn then
+            eyeBtn:SetPoint("RIGHT", delBtn, "LEFT", -4, 0)
+        else
+            eyeBtn:SetPoint("RIGHT", header, "RIGHT", -6, 0)
+        end
+        local eyeIcon = eyeBtn:CreateTexture(nil, "OVERLAY")
+        eyeIcon:SetAllPoints()
+        local function shown() return not cfgTable or cfgTable.enabled ~= false end
+        local function updateEyeIcon()
+            if shown() then
+                eyeIcon:SetTexture(mediaPath .. "visibility")
+                eyeIcon:SetVertexColor(0.95, 0.95, 0.95)
+            else
+                eyeIcon:SetTexture(mediaPath .. "visibility_off")
+                eyeIcon:SetVertexColor(0.45, 0.45, 0.45)
+            end
+        end
+        updateEyeIcon()
+        eyeBtn:SetScript("OnEnter", function() if shown() then eyeIcon:SetVertexColor(1, 1, 1) end end)
+        eyeBtn:SetScript("OnLeave", function() updateEyeIcon() end)
+        eyeBtn:RegisterForClicks("LeftButtonUp")
+        eyeBtn:SetFrameLevel(header:GetFrameLevel() + 2)
+        eyeBtn:SetScript("OnClick", function()
+            if not cfgTable then return end
+            cfgTable.enabled = (cfgTable.enabled == false) and true or false
+            updateEyeIcon()
+            -- Sound rides the same flag as its "Enable Sound Alert" checkbox —
+            -- stop a playing alert immediately when hidden (mirror that checkbox).
+            if effect.typeKey == "sound" and cfgTable.enabled == false
+                and DF.AuraDesigner.SoundEngine then
+                DF.AuraDesigner.SoundEngine:StopAura(effect.auraName)
+            end
+            -- Structural change: the factory must tear down / stand up the
+            -- container and the buff-row dedup union changes (hidden = not
+            -- tracked), so run the full refresh path (mirror the enable toggle).
+            SwitchTab("effects")
+            RefreshPlacedIndicators()
+            RefreshPreviewEffects()
+            DF:InvalidateAuraLayout()
+            DF:UpdateAllFrames()
+            if DF.AuraDesigner.Engine and DF.AuraDesigner.Engine.ForceRefreshAllFrames then
+                DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+            end
+        end)
+
+        -- Hidden rows dim (name/icon), like Text Designer's disabled elements
+        if not shown() then
+            spellIcon:SetAlpha(0.4)
+            infoText:SetAlpha(0.5)
+        end
     end
 
     -- Header click → toggle expansion

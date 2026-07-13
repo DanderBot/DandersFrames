@@ -130,6 +130,9 @@ end
 --   * SHOW-WHEN-MISSING indicators — a missing-mode indicator shows NOTHING while the aura is
 --     present (it only appears on ABSENCE), so the buff-bar icon is the aura's only present-time
 --     visual and must not be hidden. A missing-ONLY aura therefore contributes nothing to dedup.
+--   * HIDDEN indicators (eye toggle, `enabled == false`; nil/true = shown for legacy records) —
+--     a hidden indicator renders nothing, so it must not count as tracked (its buff-row icon
+--     comes back). Same gate the render paths use (SyncFrame placed loop + pickWinner).
 -- Returns nil when AD is disabled, off-spec, empty, or the factory doesn't own AD for this db
 -- (caller then contributes nothing). BUFF (HELPFUL) only: every AD entry is a helpful aura, and
 -- a harmful map is inert on friendly frames.
@@ -140,18 +143,18 @@ local function auraHasTrackedIndicator(auraCfg)
         for _, ind in ipairs(inds) do
             -- Bars ignore missing mode entirely (no duration data when absent — legacy
             -- Engine.lua:510), so a bar always renders present and always dedups.
-            if ind.type == "bar" or not ind.showWhenMissing then return true end
+            if ind.enabled ~= false and (ind.type == "bar" or not ind.showWhenMissing) then return true end
         end
     end
     local hb, bg, bd = auraCfg.healthbar, auraCfg.background, auraCfg.border
-    if hb and not hb.showWhenMissing then return true end
-    if bg and not bg.showWhenMissing then return true end
-    if bd and not bd.showWhenMissing then return true end
+    if hb and hb.enabled ~= false and not hb.showWhenMissing then return true end
+    if bg and bg.enabled ~= false and not bg.showWhenMissing then return true end
+    if bd and bd.enabled ~= false and not bd.showWhenMissing then return true end
     -- Text colour-by-cover (recovered): a present-mode name/health text indicator is a
     -- rendering visual, so it dedups. SWM-flagged text renders nothing (unsupported).
     local nt, ht = auraCfg.nametext, auraCfg.healthtext
-    if nt and nt.color and not nt.showWhenMissing then return true end
-    if ht and ht.color and not ht.showWhenMissing then return true end
+    if nt and nt.enabled ~= false and nt.color and not nt.showWhenMissing then return true end
+    if ht and ht.enabled ~= false and ht.color and not ht.showWhenMissing then return true end
     return false
 end
 
@@ -402,12 +405,14 @@ end
 -- health bar. priority is static config (Engine.lua:502, default 5); ties broken by aura
 -- name for a deterministic, non-flapping winner. `validate(typeCfg)` gates which blocks
 -- count (e.g. healthbar/background need .color, border must be enabled). Read-free.
+-- Hidden blocks (eye toggle, `enabled == false`; nil/true = shown for legacy records) never
+-- compete — the pick falls to the next candidate, or nothing.
 local function pickWinner(spec, specAuras, typeKey, validate)
     if not specAuras then return nil end
     local bestName, bestCfg, bestMap, bestPrio
     for auraName, auraCfg in pairs(specAuras) do
         local typeCfg = (type(auraCfg) == "table") and auraCfg[typeKey]
-        if typeCfg and (not validate or validate(typeCfg)) then
+        if typeCfg and typeCfg.enabled ~= false and (not validate or validate(typeCfg)) then
             local map = unionIdentity(spec, auraName, typeCfg)
             if map then
                 local prio = auraCfg.priority or 5
@@ -1733,7 +1738,11 @@ function Factory:SyncFrame(frame)
                     for _, indicator in ipairs(indicators) do
                         local isSquare = indicator.type == "square"
                         local isBar = indicator.type == "bar"
-                        if isBar then
+                        if indicator.enabled == false then
+                            -- Hidden (eye toggle; nil/true = shown for legacy records):
+                            -- render nothing. Not marking the key `live` lets the
+                            -- end-of-pass sweep destroy any existing handle.
+                        elseif isBar then
                             local ids = DF:BuildADIdentityFilters(spec, auraName)
                             local map = ids and ids.includeSpellIDs
                             if map then
