@@ -55,8 +55,10 @@ local POOL_COLOR = { 0.62, 0.62, 0.62 }
 -- spec's CLASS plus class="ALL" records, deduped against the curated list by
 -- spell ID (canonical + alts) and by name. Pool entries are adapted to the
 -- curated aura-info shape the picker consumers read:
---   { name, display, color } plus `spellID` (canonical id, for tooltips)
---   and `icon` (via R:GetSpellDisplay).
+--   { name, display, color } plus `spellID` (canonical id, for tooltips),
+--   `icon` (via R:GetSpellDisplay) and `class` (the record's class token or
+--   "ALL" — drives the picker's "Your Class" / "All Classes" grouping;
+--   curated entries carry no class field and always group under the class).
 -- `name` is the stable config key: the shipped English rec.n, never the
 -- localized display (localized keys would go stale on language switch).
 -- Cached per spec; wiped by InvalidateSpecCache.
@@ -108,6 +110,7 @@ function AuraAdapter:GetTrackableAuras(specKey)
                             color = POOL_COLOR,
                             icon = icon,
                             spellID = rec.id,
+                            class = rec.class,
                         }
                         usedNames[rec.n] = true
                         usedNames[display] = true

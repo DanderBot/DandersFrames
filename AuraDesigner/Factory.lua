@@ -84,6 +84,14 @@ function DF:BuildADIdentityFilters(spec, auraName)
         end
     end
     if map then return { includeSpellIDs = map } end
+    -- Ad-hoc add-by-ID auras (picker "Add" with an ID the SpellDB doesn't
+    -- know) are stored under the key "#<id>" — the name IS the identity, so
+    -- resolving the embedded id here makes the record survive reload and
+    -- profile export with no side table.
+    local adHocID = type(auraName) == "string" and auraName:match("^#(%d+)$")
+    if adHocID then
+        return { includeSpellIDs = { [tonumber(adHocID)] = true } }
+    end
     -- SpellDB fallback (all-spec support): a name the curated per-spec Config
     -- tables don't know resolves through the FilterRegistry SpellDB by display
     -- name (shipped English `rec.n` or the localized runtime name), unioning
@@ -1025,6 +1033,9 @@ local function primaryADSpellID(spec, auraName)
     local p = specIDs and specIDs[auraName]
     if type(p) == "table" then p = p[1] end
     if not p then
+        -- Ad-hoc "#<id>" keys resolve directly — mirror BuildADIdentityFilters
+        local adHocID = type(auraName) == "string" and auraName:match("^#(%d+)$")
+        if adHocID then return tonumber(adHocID) end
         -- SpellDB fallback (all-spec support) — mirror BuildADIdentityFilters
         local R = DF.FilterRegistry
         local rec = R and R.GetSpellByName and R:GetSpellByName(auraName)

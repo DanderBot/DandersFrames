@@ -421,6 +421,7 @@ L["All players in a unified grid. Sorting applies raid-wide."] = true
 L["Alpha"] = true
 L["Alphabetical"] = true
 L["Alphabetical (within class/role)"] = true
+L["Already added."] = true
 L["Already in this filter."] = true
 L["Always First"] = true
 L["Always Green"] = true
@@ -1654,6 +1655,7 @@ L["X Mark"] = true
 L["X Size"] = true
 L["Yellow=high, Orange=highest, Red=tanking."] = true
 L["Yes"] = true
+L["Your Class — %s"] = true
 L["Your UI Scale is already pixel-perfect for this resolution."] = true
 L["Z to A"] = true
 L["Zoom Icon"] = true
