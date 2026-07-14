@@ -2642,7 +2642,25 @@ end
 local placedIndicators = {}
 
 local function ClearPlacedIndicators()
+    -- Preview border ANIMATIONS must be stopped explicitly on every frame this
+    -- pass hides: the drivers are external (Border.lua's shared UIParent-hosted
+    -- driver ticks secretRect borders EVEN WHILE HIDDEN), so hiding without
+    -- StopAnimation leaves orphaned ticks — the same mandatory teardown the
+    -- live container runs (_teardownContainer). Group placeholder slots carry
+    -- their sample-frame children's borders too.
+    local B = DF.Border
+    local function stopAnims(f)
+        if not B then return end
+        if f.dfBorder then B:StopAnimation(f.dfBorder) end
+        local samples = f.sampleFrames
+        if samples then
+            for i = 1, #samples do
+                if samples[i].dfBorder then B:StopAnimation(samples[i].dfBorder) end
+            end
+        end
+    end
     for _, ind in ipairs(placedIndicators) do
+        stopAnims(ind)
         ind:Hide()
     end
     wipe(placedIndicators)
@@ -2651,7 +2669,10 @@ local function ClearPlacedIndicators()
     if framePreview and framePreview.mockFrame then
         local mock = framePreview.mockFrame
         if mock.dfADPreviewSlots then
-            for _, rec in pairs(mock.dfADPreviewSlots) do rec.slot:Hide() end
+            for _, rec in pairs(mock.dfADPreviewSlots) do
+                stopAnims(rec.slot)
+                rec.slot:Hide()
+            end
         end
         mock.dfAD = nil
     end
@@ -2704,6 +2725,9 @@ local function RenderPreviewIndicator(mockFrame, spec, auraName, info, indicator
     if not store then store = {}; mockFrame.dfADPreviewSlots = store end
     local rec = store[instanceKey]
     if rec and rec.sig ~= sig then
+        -- Abandoned slot: stop its border animation — the external shared
+        -- driver ticks secretRect borders even while hidden (Border.lua).
+        if rec.slot.dfBorder and DF.Border then DF.Border:StopAnimation(rec.slot.dfBorder) end
         rec.slot:Hide()
         rec = nil
     end
@@ -2936,7 +2960,14 @@ local function DrawGroupPlaceholderSlot(mockFrame, pool, group, wrapDefault, max
     if framePool and slot.sampleSig ~= sig then
         -- Structural style change: abandon the old frames (hidden — the
         -- RenderPreviewIndicator idiom; regions can't be removed in place).
-        for i = 1, #framePool do framePool[i]:Hide() end
+        -- Stop their border animations first: the external shared driver
+        -- ticks secretRect borders even while hidden (Border.lua), so an
+        -- abandoned animated sample would tick forever.
+        for i = 1, #framePool do
+            local f = framePool[i]
+            if f.dfBorder and DF.Border then DF.Border:StopAnimation(f.dfBorder) end
+            f:Hide()
+        end
         framePool = nil
         slot.sampleFrames = nil
     end
@@ -2981,7 +3012,13 @@ local function DrawGroupPlaceholderSlot(mockFrame, pool, group, wrapDefault, max
         if f.dfIcon then f.dfIcon:SetDesaturated(true) end -- example affordance
         f:Show()
     end
-    for i = count + 1, #framePool do framePool[i]:Hide() end
+    for i = count + 1, #framePool do
+        local f = framePool[i]
+        -- Same external-driver rule as above; a re-shown extra restyles via
+        -- StylePreviewSlot → Border:Apply, which restarts its animation.
+        if f.dfBorder and DF.Border then DF.Border:StopAnimation(f.dfBorder) end
+        f:Hide()
+    end
 
     slot:Show()
     return slot

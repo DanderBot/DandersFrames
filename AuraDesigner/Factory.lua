@@ -1323,12 +1323,21 @@ end
 function Factory:BuildGroupPreviewConfig(frame, group)
     local borderSpec = buildGroupBorderSpec(frame, group)
     local cfg = {
+        -- filter is inert here (also for debuff groups): the editor always
+        -- supplies its own testEntries, so _paintTestSlot's category-pool
+        -- fallback — the only preview reader of this string — never runs.
         mode = "row", max = 1, filter = "HELPFUL",
         adBorderAnim = borderSpec and true or nil,
         layout = { size = math.max(8, tonumber(group.iconSize) or 24) },
         style = buildFilterGroupStyle(group, borderSpec),
     }
-    return cfg, "gslot" .. groupStyleStructSig(group)
+    -- PREVIEW sig only (live groupStyleStructSig untouched): strip the
+    -- hide-above THRESHOLD VALUE. Live slots bake it into a bind-once native
+    -- formatter (value change = Rebuild), but the preview paint re-reads the
+    -- formatter from this fresh config every pass — so a threshold drag can
+    -- restyle in place instead of recreating the sample pool per slider tick.
+    local sig = ("gslot" .. groupStyleStructSig(group)):gsub(":H[%d%.]+", ":H")
+    return cfg, sig
 end
 
 -- Full row config for one filter group. Same frame-level band as the placed
