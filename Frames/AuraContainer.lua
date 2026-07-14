@@ -464,22 +464,22 @@ local function styleButton_regions(slot, config)
                     -- configured slot size so the dashes size from it, not the secret rect.
                     if spec then spec.knownWidth, spec.knownHeight = sx, sy end
                 end
-                -- ANIMATION FILTER (single chokepoint for BOTH row and overlay).
-                -- The LCG glows re-SetParent pooled glow frames onto the host, which
-                -- taints on a native AuraButton (lab-proven), so they stay forbidden.
-                -- But the DF-owned animations in SAFE_OVERLAY_ANIM (edge-alpha ticks,
-                -- DF_DASH marching ants, Wipe/Ripple/etc overlays) run off our OWN border
-                -- textures via the external UIParent driver (secretRect path), so they're
-                -- taint-safe. OVERLAY-mode (frame-level AD) borders always recover them; a
-                -- ROW-mode container opts in with config.adBorderAnim (the Aura Designer
-                -- PLACED icon/square/bar borders) — the #205 buff/debuff rows do NOT set
-                -- the flag, so they still strip in row mode. Any type outside the set is
-                -- stripped regardless of mode.
-                if spec and spec.animation and not
-                   ((config.mode == "overlay" or config.adBorderAnim) and SAFE_OVERLAY_ANIM[spec.animation.type]) then
+                -- ANIMATION FILTER (single chokepoint for every container border).
+                -- 12.1 PTR-5 made AuraButtons blanket-forbidden while auras are secret
+                -- (combat / M+ / encounters / PvP): once forbidden, ANY API call on the
+                -- button OR its children errors from our tainted code — including the
+                -- render setters our OnUpdate border driver uses (SetVertexColor / Hide /
+                -- SetPoint). Every animated border here lives on a container-button child,
+                -- so any animation spams a per-frame forbidden error in exactly the content
+                -- these indicators are for. Animation is therefore stripped on ALL
+                -- container borders unconditionally (the recovery that once let AD placed /
+                -- overlay borders animate via config.adBorderAnim is gone). DF-owned frames
+                -- OFF the container — unit-frame border, missing-buff badge, targeted-spell
+                -- highlight — are not forbidden and keep animating through their own paths.
+                if spec then
                     spec.animation = nil
+                    DF.Border:Apply(slot.dfBorder, spec)
                 end
-                if spec then DF.Border:Apply(slot.dfBorder, spec) end
             end)
             if not ok and not warnedBorder then
                 warnedBorder = true
