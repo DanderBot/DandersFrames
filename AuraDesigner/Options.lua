@@ -2864,7 +2864,12 @@ local function DrawGroupPlaceholderSlot(mockFrame, pool, group, wrapDefault, max
     local slot = pool[group.id]
     if not slot then
         slot = CreateFrame("Frame", nil, mockFrame, "BackdropTemplate")
-        slot.label = slot:CreateFontString(nil, "OVERLAY")
+        -- The group-name label rides its own high-level child so it stays
+        -- legible above the sample FRAMES below (a parent's own regions
+        -- would draw underneath child frames regardless of layer).
+        slot.labelHost = CreateFrame("Frame", nil, slot)
+        slot.labelHost:SetAllPoints(slot)
+        slot.label = slot.labelHost:CreateFontString(nil, "OVERLAY")
         GUI:SetSettingsFont(slot.label, 8, "OUTLINE")
         slot.label:SetPoint("CENTER", 0, 0)
         pool[group.id] = slot
@@ -2900,47 +2905,83 @@ local function DrawGroupPlaceholderSlot(mockFrame, pool, group, wrapDefault, max
         group.offsetX or 0, group.offsetY or 0)
     slot:SetFrameStrata(mockFrame:GetFrameStrata())
     slot:SetFrameLevel(mockFrame:GetFrameLevel() + 8)
+    -- Above the sample frames' text holders (slot+1 base + duration/stack
+    -- holder offsets) and border art, so the group name always reads.
+    slot.labelHost:SetFrameLevel(slot:GetFrameLevel() + 15)
 
     -- EXAMPLE ICONS inside the block geometry (nil icons = outline only).
-    -- Textures are pooled on the slot and fully rebound both directions: a
-    -- group whose samples empty out (filters unlinked, categories deselected)
-    -- returns to the bare outline (extras hidden), and vice versa. Icons fill
-    -- the block's grid from its pinned grow-corner (centered rows when the
-    -- primary direction is CENTER), so grow/wrap edits read directionally.
-    -- Desaturation is the "example, not live" affordance; the group-name
-    -- label stays legible on top (OVERLAY vs ARTWORK).
-    local texPool = slot.icons
-    if not texPool then texPool = {}; slot.icons = texPool end
-    local count = icons and min(#icons, maxIcons) or 0
+    -- Each sample is a pooled child FRAME styled + painted by the factory's
+    -- own preview pipeline (Factory:BuildGroupPreviewConfig from group.style →
+    -- AuraContainer.StylePreviewSlot/PaintPreviewSlot — the exact path the
+    -- placed indicators' canvas preview uses), so the group's Appearance
+    -- settings (border incl. animation, cooldown swipe, duration text with
+    -- colour-by-time/hide-above, stack count) render on the samples. Regions
+    -- are create-only (the live Rebuild rule): when the structural sig moves
+    -- (duration/stacks/border on-off, format key), drop the pool and
+    -- re-create — same recreate-on-sig idiom as RenderPreviewIndicator.
+    -- Fully rebound both directions: a group whose samples empty out
+    -- (filters unlinked, categories deselected) returns to the bare outline
+    -- (extras hidden), and vice versa. Icons fill the block's grid from its
+    -- pinned grow-corner (centered rows when the primary direction is
+    -- CENTER), so grow/wrap edits read directionally. Desaturation is the
+    -- "example, not live" affordance; style-less groups render through the
+    -- same pipeline with the default style (= today's live rendering).
+    local Factory = DF.AuraDesigner and DF.AuraDesigner.Factory
+    local AC = DF.AuraContainer
+    local cfg, sig
+    if icons and Factory and Factory.BuildGroupPreviewConfig and AC and AC.StylePreviewSlot then
+        cfg, sig = Factory:BuildGroupPreviewConfig(mockFrame, group)
+    end
+    local framePool = slot.sampleFrames
+    if framePool and slot.sampleSig ~= sig then
+        -- Structural style change: abandon the old frames (hidden — the
+        -- RenderPreviewIndicator idiom; regions can't be removed in place).
+        for i = 1, #framePool do framePool[i]:Hide() end
+        framePool = nil
+        slot.sampleFrames = nil
+    end
+    slot.sampleSig = sig
+    if not framePool then framePool = {}; slot.sampleFrames = framePool end
+    local count = (cfg and icons) and min(#icons, maxIcons) or 0
+    if count > 0 then
+        -- Curated per-slot entries: the sample's art plus a static duration/
+        -- stack sample (the paint staggers the countdown per index and runs
+        -- it through the group's own formatter — colour-by-time buckets and
+        -- the hide-above blank band mirror live).
+        local entries = {}
+        for i = 1, count do
+            entries[i] = { icon = icons[i], duration = 15, stacks = 3 }
+        end
+        cfg.testEntries = entries
+    end
     local step = iconSize + spacing
     local xSign = (horiz == "RIGHT") and -1 or 1
     local ySign = (vert == "TOP") and -1 or 1
     for i = 1, count do
-        local tex = texPool[i]
-        if not tex then
-            tex = slot:CreateTexture(nil, "ARTWORK")
-            tex:SetTexCoord(0.08, 0.92, 0.08, 0.92) -- house-style icon crop
-            tex:SetDesaturated(true)                -- example affordance
-            texPool[i] = tex
+        local f = framePool[i]
+        if not f then
+            f = CreateFrame("Frame", nil, slot)
+            framePool[i] = f
         end
-        tex:SetTexture(icons[i])
-        tex:SetSize(iconSize, iconSize)
-        tex:ClearAllPoints()
+        AC.StylePreviewSlot(f, cfg)   -- sizes the frame from cfg.layout.size (= iconSize)
+        f:ClearAllPoints()
         local col = (i - 1) % wrap
         local row = floor((i - 1) / wrap)
         if horiz == "" then
             -- CENTER primary: rows centered on the block's vert edge
             local lastRow = floor((count - 1) / wrap)
             local iconsInRow = (row == lastRow) and (((count - 1) % wrap) + 1) or wrap
-            tex:SetPoint(vert, slot, vert,
+            f:SetPoint(vert, slot, vert,
                 (col - (iconsInRow - 1) / 2) * step, ySign * row * step)
         else
             local corner = vert .. horiz
-            tex:SetPoint(corner, slot, corner, xSign * col * step, ySign * row * step)
+            f:SetPoint(corner, slot, corner, xSign * col * step, ySign * row * step)
         end
-        tex:Show()
+        AC.PaintPreviewSlot(f, cfg, i)
+        if f.dfIcon then f.dfIcon:SetDesaturated(true) end -- example affordance
+        f:Show()
     end
-    for i = count + 1, #texPool do texPool[i]:Hide() end
+    for i = count + 1, #framePool do framePool[i]:Hide() end
 
     slot:Show()
     return slot
@@ -7360,90 +7401,116 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
         end,
         __newindex = function(_, k, v)
             s[k] = v
+            RefreshPlacedIndicators()
             RefreshLiveFramesThrottled()
         end,
     })
 
     -- Cosmetic edits hot-apply (coSig -> ApplyStyle); structural toggles move the
-    -- struct sig -> Rebuild. Both ride the same throttled factory re-sync.
-    local function refresh() RefreshLiveFramesThrottled() end
+    -- struct sig -> Rebuild. Both ride the same throttled factory re-sync. The
+    -- canvas placeholder's sample icons render the group style too, so every
+    -- appearance edit re-draws them (RefreshPlacedIndicators — the same direct
+    -- call the card's layout sliders run per edit/drag).
+    local function refresh()
+        RefreshPlacedIndicators()
+        RefreshLiveFramesThrottled()
+    end
     -- Visibility changes inside the section (border style dropdown swapping its
     -- widget set) re-measure heights, so rebuild the tab — the same full-rebuild
     -- the effect cards' dropdown callbacks run (AuraDesigner_RefreshPage).
     local function rebuildTab() SwitchTab("layout") end
 
-    local g = GUI:CreateSettingsGroup(body, bodyWidth - 10, {
-        collapsible = true,
-        collapseKey = "adGroupStyle:" .. tostring(cardKey),
-    })
-    g.padding = 6
-    g:AddWidget(GUI:CreateHeader(body, L["Appearance"]), 25)
+    -- One collapsible box PER CATEGORY — the expanded effect card's section
+    -- structure (Appearance / Border / Duration Text / Stack Count, same names
+    -- and order as the icon card's AddGroup boxes; group-inapplicable sections
+    -- — Position, Show When Missing, Expiring — have no group-level analogue).
+    -- Collapse persists per card per section ("adGroupStyle:<cardKey>:<section>"),
+    -- so each section toggles independently; the toggle rides the widget's
+    -- built-in AuraDesigner_RefreshPage rebuild like the effect cards'.
+    local function AddSection(header, sectionKey, buildFn)
+        local g = GUI:CreateSettingsGroup(body, bodyWidth - 10, {
+            collapsible = true,
+            collapseKey = "adGroupStyle:" .. tostring(cardKey) .. ":" .. sectionKey,
+        })
+        g.padding = 6
+        g:AddWidget(GUI:CreateHeader(body, header), 25)
+        buildFn(g)
+        local h = g:LayoutChildren()   -- includes the group's own bottom margin
+        g:SetPoint("TOPLEFT", body, "TOPLEFT", 5, by)
+        by = by - h
+    end
 
-    g:AddWidget(GUI:CreateCheckbox(body, L["Hide Cooldown Swipe"], proxy, "hideSwipe", refresh), 28)
+    -- ── APPEARANCE ── (the effect card's Appearance box; of its controls only
+    -- the swipe applies at group level — size/scale live in the card's layout
+    -- sliders, alpha/level/strata/text-only are per-indicator concepts)
+    AddSection(L["Appearance"], "appearance", function(g)
+        g:AddWidget(GUI:CreateCheckbox(body, L["Hide Cooldown Swipe"], proxy, "hideSwipe", refresh), 28)
+    end)
 
     -- ── BORDER ── (the placed icon's control set; gradient degrades to solid on
     -- container slots — same known casualty as placed indicators; LCG glow types
     -- are excluded from the animation dropdown, mirror the placed border)
-    g:AddWidget(GUI:CreateExpiringSubheader(body, L["Border"]), 18)
-    GUI:CreateBorderControls(g, proxy, "", {
-        parent  = body,
-        include = {
-            inset = true, offset = true, blendMode = true,
-            gradient = true, shadow = true, alpha = true,
-            animate = true,
-        },
-        animExcludeTypes = { PULSATE = true, CHASE = true, FLASH = true, PROC = true },
-        fullUpdate    = refresh,
-        lightUpdate   = refresh,
-        lightColors   = refresh,
-        refreshStates = rebuildTab,
-        sizeMin = 1, sizeMax = 5, sizeStep = 1,
-    })
+    AddSection(L["Border"], "border", function(g)
+        GUI:CreateBorderControls(g, proxy, "", {
+            parent  = body,
+            include = {
+                inset = true, offset = true, blendMode = true,
+                gradient = true, shadow = true, alpha = true,
+                animate = true,
+            },
+            animExcludeTypes = { PULSATE = true, CHASE = true, FLASH = true, PROC = true },
+            fullUpdate    = refresh,
+            lightUpdate   = refresh,
+            lightColors   = refresh,
+            refreshStates = rebuildTab,
+            sizeMin = 1, sizeMax = 5, sizeStep = 1,
+        })
+    end)
 
     -- ── DURATION TEXT ── (shared text controls; keys mirror the placed cards')
-    g:AddWidget(GUI:CreateExpiringSubheader(body, L["Duration Text"]), 18)
-    g:AddWidget(GUI:CreateCheckbox(body, L["Show Duration"], proxy, "showDuration", refresh), 28)
-    GUI:CreateTextControls(g, proxy, "duration", {
-        parent = body,
-        include = { color = true },
-        colorLabel = L["Duration Text Color"],
-        colorDisableOn = function() return proxy.durationColorByTime and true or false end,
-        onChange = refresh, onDrag = refresh,
-    })
-    g:AddWidget(GUI:CreateCheckbox(body, L["Color by Time Remaining"], proxy, "durationColorByTime", refresh), 28)
-    local hideAboveSlider
-    local function UpdateHideAboveState()
-        if not hideAboveSlider then return end
-        if proxy.durationHideAboveEnabled then
-            hideAboveSlider:SetAlpha(1)
-            hideAboveSlider:EnableMouse(true)
-        else
-            hideAboveSlider:SetAlpha(0.4)
-            hideAboveSlider:EnableMouse(false)
+    AddSection(L["Duration Text"], "duration", function(g)
+        g:AddWidget(GUI:CreateCheckbox(body, L["Show Duration"], proxy, "showDuration", refresh), 28)
+        GUI:CreateTextControls(g, proxy, "duration", {
+            parent = body,
+            include = { color = true },
+            colorLabel = L["Duration Text Color"],
+            colorDisableOn = function() return proxy.durationColorByTime and true or false end,
+            onChange = refresh, onDrag = refresh,
+        })
+        g:AddWidget(GUI:CreateCheckbox(body, L["Color by Time Remaining"], proxy, "durationColorByTime", refresh), 28)
+        local hideAboveSlider
+        local function UpdateHideAboveState()
+            if not hideAboveSlider then return end
+            if proxy.durationHideAboveEnabled then
+                hideAboveSlider:SetAlpha(1)
+                hideAboveSlider:EnableMouse(true)
+            else
+                hideAboveSlider:SetAlpha(0.4)
+                hideAboveSlider:EnableMouse(false)
+            end
         end
-    end
-    g:AddWidget(GUI:CreateCheckbox(body, L["Hide Duration Above Threshold"], proxy, "durationHideAboveEnabled", function()
+        g:AddWidget(GUI:CreateCheckbox(body, L["Hide Duration Above Threshold"], proxy, "durationHideAboveEnabled", function()
+            UpdateHideAboveState()
+            refresh()
+        end), 28)
+        hideAboveSlider = GUI:CreateSlider(body, L["Hide Above (seconds)"], 1, 60, 1, proxy, "durationHideAboveThreshold", refresh, refresh, true)
+        g:AddWidget(hideAboveSlider, 54)
         UpdateHideAboveState()
-        refresh()
-    end), 28)
-    hideAboveSlider = GUI:CreateSlider(body, L["Hide Above (seconds)"], 1, 60, 1, proxy, "durationHideAboveThreshold", refresh, refresh, true)
-    g:AddWidget(hideAboveSlider, 54)
-    UpdateHideAboveState()
+    end)
 
     -- ── STACK COUNT ── (no Min Stacks — not expressible on the native no-formatter
     -- stack path, see Features/Auras.lua's stacks-formatter warning)
-    g:AddWidget(GUI:CreateExpiringSubheader(body, L["Stack Count"]), 18)
-    g:AddWidget(GUI:CreateCheckbox(body, L["Show Stacks"], proxy, "showStacks", refresh), 28)
-    GUI:CreateTextControls(g, proxy, "stack", {
-        parent = body,
-        include = { color = true },
-        colorLabel = L["Stack Text Color"],
-        onChange = refresh, onDrag = refresh,
-    })
+    AddSection(L["Stack Count"], "stacks", function(g)
+        g:AddWidget(GUI:CreateCheckbox(body, L["Show Stacks"], proxy, "showStacks", refresh), 28)
+        GUI:CreateTextControls(g, proxy, "stack", {
+            parent = body,
+            include = { color = true },
+            colorLabel = L["Stack Text Color"],
+            onChange = refresh, onDrag = refresh,
+        })
+    end)
 
-    local h = g:LayoutChildren()
-    g:SetPoint("TOPLEFT", body, "TOPLEFT", 5, by)
-    return by - h
+    return by
 end
 
 BuildLayoutGroupsTab = function()

@@ -1312,6 +1312,25 @@ local function groupStyleStructSig(group)
         .. "|df=" .. durationFmtKey(s, true)
 end
 
+-- EDITOR PREVIEW CONFIG for one SAMPLE slot of a filter/debuff group: the same
+-- style the live group container renders (buildFilterGroupStyle + the group
+-- border spec) sized to a single slot — the editor styles/paints its pooled
+-- sample frames with it (AuraContainer.StylePreviewSlot/PaintPreviewSlot),
+-- so group Appearance edits preview through the factory's own rendering,
+-- exactly like the placed indicators' canvas preview. Returns (config,
+-- structSig): the editor recreates its sample frames when the sig changes
+-- (regions are create-only, mirror the live Rebuild rule).
+function Factory:BuildGroupPreviewConfig(frame, group)
+    local borderSpec = buildGroupBorderSpec(frame, group)
+    local cfg = {
+        mode = "row", max = 1, filter = "HELPFUL",
+        adBorderAnim = borderSpec and true or nil,
+        layout = { size = math.max(8, tonumber(group.iconSize) or 24) },
+        style = buildFilterGroupStyle(group, borderSpec),
+    }
+    return cfg, "gslot" .. groupStyleStructSig(group)
+end
+
 -- Full row config for one filter group. Same frame-level band as the placed
 -- indicators (40) so group icons read on top of the frame content.
 -- othersOnly rides poolFilter (group-level "HELPFUL|!PLAYER" — the B1 slot
