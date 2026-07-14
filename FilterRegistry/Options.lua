@@ -118,7 +118,14 @@ local function ScrubDeletedFilter(cfId)
         end
     end
     local function scrubADConfig(cfg)
-        if type(cfg) == "table" then scrubLayoutGroups(cfg.layoutGroups) end
+        if type(cfg) == "table" then
+            scrubLayoutGroups(cfg.layoutGroups)
+            -- Other Buffs layout groups: a flat array only (new store, never
+            -- spec-keyed — no dual-shape dispatch needed).
+            if type(cfg.otherLayoutGroups) == "table" then
+                scrubGroupArray(cfg.otherLayoutGroups)
+            end
+        end
     end
 
     for _, profile in pairs(profiles) do

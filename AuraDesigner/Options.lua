@@ -874,6 +874,49 @@ local function DebuffGroupsRead()
     return EMPTY_POOL
 end
 
+-- Other Buffs LAYOUT GROUPS: a flat, spec-INDEPENDENT array of group records
+-- over the other pool (sibling of otherAuras/debuffGroups — never a pseudo-spec
+-- inside adDB.layoutGroups, so no migration can ever touch it). Records are
+-- shape-identical to the spec-keyed layoutGroups entries (member kind with
+-- {auraName, indicatorID} members referencing OTHER-pool placed indicators,
+-- and filter kind with filterSelection). Own id counter
+-- (adDB.nextOtherLayoutGroupID — ids can collide with the spec counter's, so
+-- every derived key carries a pool marker). One accessor for both access
+-- modes (the file-scope 200-locals ceiling forbids the two-function
+-- GetDebuffGroups/DebuffGroupsRead split): `create` follows the lazy-write
+-- rule — read access returns EMPTY_POOL while the store doesn't exist
+-- (visiting the tab must never create it; the first "+ Create/Filter Group"
+-- add passes create=true).
+local function GetOtherLayoutGroups(create)
+    local adDB = GetAuraDesignerDB()
+    if not adDB then return EMPTY_POOL end
+    if not adDB.otherLayoutGroups then
+        if not create then return EMPTY_POOL end
+        adDB.otherLayoutGroups = {}
+    end
+    local groups = adDB.otherLayoutGroups
+    -- One-time cleanup, same table-identity registry as GetDebuffGroups.
+    if not sanitizedSpecAuras[groups] then
+        for i = #groups, 1, -1 do
+            if type(groups[i]) ~= "table" then
+                tremove(groups, i)
+                DF:DebugWarn("AD", "Removed corrupted other layout group entry at index %d", i)
+            end
+        end
+        sanitizedSpecAuras[groups] = true
+    end
+    return groups
+end
+
+-- Active tab's layout groups (READ — never creates the other store): the
+-- flat other store on Other Buffs, the spec-keyed array on My Buffs.
+-- (Debuffs never reaches these — its Layout Groups tab builds debuff
+-- category groups instead.)
+local function CurrentLayoutGroups()
+    if activeBuffTab == "other" then return GetOtherLayoutGroups(false) end
+    return GetSpecLayoutGroups()
+end
+
 -- Display name for an OTHER-pool aura key: ad-hoc "#<id>" resolves live,
 -- SpellDB names resolve through GetSpellDisplay (localized), else the raw key.
 local function OtherPoolDisplayName(auraName)
@@ -1862,7 +1905,9 @@ local function WithConfiguredAdHocAuras(list, spec)
     local out = {}
     for i, info in ipairs(list) do out[i] = info end
     local adHoc = {}
-    for auraName in pairs(GetSpecAuras(spec)) do
+    -- Pool-routed: the Other tab's group picker offers the OTHER pool's
+    -- configured ad-hoc auras (never creates it — read accessor).
+    for auraName in pairs(CurrentAuraPool(spec)) do
         local id = AdHocSpellID(auraName)
         if id then tinsert(adHoc, { name = auraName, id = id }) end
     end
@@ -1913,23 +1958,8 @@ local function GetAuraIcon(specKey, auraName)
     return nil
 end
 
--- Count active effects for an aura (instances + frame-level types)
-local function CountActiveEffects(auraName)
-    local auraCfg = GetSpecAuras()[auraName]
-    if not auraCfg then return 0 end
-    local count = 0
-    -- Count placed indicator instances
-    if auraCfg.indicators then
-        count = count + #auraCfg.indicators
-    end
-    -- Count frame-level types
-    for _, typeDef in ipairs(INDICATOR_TYPES) do
-        if not typeDef.placed and auraCfg[typeDef.key] then
-            count = count + 1
-        end
-    end
-    return count
-end
+-- (CountActiveEffects removed — uncalled since the v4 flat-card redesign;
+-- reclaimed for the file-scope 200-locals ceiling.)
 
 -- ============================================================
 -- MULTI-TRIGGER HELPERS
@@ -1990,13 +2020,21 @@ end
 -- State for expanded layout group cards
 local expandedGroups = {}
 
--- Find which layout group (if any) an indicator belongs to.
--- Layout groups are My Buffs-only (Phase B): other-pool indicators are never
--- grouped, and a same-named spec-pool member with a matching indicatorID
--- must not false-match, so bail out on the Other tab.
+-- expandedGroups key for a layout group id on the ACTIVE tab: raw numeric id
+-- on My Buffs (legacy keys, kept as-is), "othergroup:<id>" on Other Buffs.
+-- The two id counters overlap, so the string prefix keeps expansion state
+-- per-pool ("dgroup:<id>" is the Debuffs form in the same table).
+local function GroupExpandKey(groupID)
+    if IsOtherTab() then return "othergroup:" .. groupID end
+    return groupID
+end
+
+-- Find which layout group (if any) an indicator belongs to — searched in the
+-- ACTIVE tab's group store, so an other-pool indicator only matches other-pool
+-- groups (a same-named spec-pool member with a matching indicatorID can never
+-- false-match across pools).
 local function GetIndicatorLayoutGroup(auraName, indicatorID)
-    if IsOtherTab() then return nil end
-    local groups = GetSpecLayoutGroups()
+    local groups = CurrentLayoutGroups()
     for _, group in ipairs(groups) do
         if group.members then
             for _, member in ipairs(group.members) do
@@ -2009,45 +2047,8 @@ local function GetIndicatorLayoutGroup(auraName, indicatorID)
     return nil
 end
 
--- Get all placed indicators NOT in any layout group
-local function GetUngroupedIndicators()
-    -- Build set of grouped indicators
-    local grouped = {}
-    local groups = GetSpecLayoutGroups()
-    for _, group in ipairs(groups) do
-        if group.members then
-            for _, member in ipairs(group.members) do
-                grouped[member.auraName .. "#" .. member.indicatorID] = true
-            end
-        end
-    end
-    -- Collect ungrouped
-    local result = {}
-    local spec = ResolveSpec()
-    local trackable = spec and Adapter and Adapter:GetTrackableAuras(spec)
-    local displayNames = {}
-    if trackable then
-        for _, info in ipairs(trackable) do
-            displayNames[info.name] = info.display
-        end
-    end
-    for auraName, auraCfg in pairs(GetSpecAuras(spec)) do
-        if type(auraCfg) == "table" and auraCfg.indicators then
-            for _, ind in ipairs(auraCfg.indicators) do
-                local key = auraName .. "#" .. ind.id
-                if not grouped[key] then
-                    tinsert(result, {
-                        auraName = auraName,
-                        displayName = displayNames[auraName] or auraName,
-                        indicatorID = ind.id,
-                        typeKey = ind.type,
-                    })
-                end
-            end
-        end
-    end
-    return result
-end
+-- (GetUngroupedIndicators removed — uncalled since the group picker moved to
+-- the full spell-picker "group" mode; reclaimed for the 200-locals ceiling.)
 
 -- Create a new layout group. kind: nil/"members" = classic member arranger
 -- (legacy records carry no kind); "filter" = a container-backed group linked to
@@ -2056,10 +2057,20 @@ end
 local function CreateLayoutGroup(name, kind)
     local adDB = GetAuraDesignerDB()
     if not adDB then return nil end
-    local groups = GetSpecLayoutGroups()
-    if not adDB.nextLayoutGroupID then adDB.nextLayoutGroupID = 1 end
-    local id = adDB.nextLayoutGroupID
-    adDB.nextLayoutGroupID = id + 1
+    -- Pool-routed: the Other Buffs tab creates into the flat spec-independent
+    -- store (born lazily HERE — the first add) with its own id counter.
+    local groups, id
+    if IsOtherTab() then
+        groups = GetOtherLayoutGroups(true)  -- the first add creates the store
+        if not adDB.nextOtherLayoutGroupID then adDB.nextOtherLayoutGroupID = 1 end
+        id = adDB.nextOtherLayoutGroupID
+        adDB.nextOtherLayoutGroupID = id + 1
+    else
+        groups = GetSpecLayoutGroups()
+        if not adDB.nextLayoutGroupID then adDB.nextLayoutGroupID = 1 end
+        id = adDB.nextLayoutGroupID
+        adDB.nextLayoutGroupID = id + 1
+    end
     local group = {
         id = id,
         name = name or ((kind == "filter") and ("Filter Group " .. id) or ("Group " .. id)),
@@ -2085,9 +2096,11 @@ local function CreateLayoutGroup(name, kind)
     return group
 end
 
--- Delete a layout group by ID
+-- Delete a layout group by ID (from the ACTIVE tab's store; the member-
+-- indicator cascade removes from the active pool via RemoveIndicatorInstance's
+-- CurrentAuraPool routing — members always live in their group's pool)
 local function DeleteLayoutGroup(groupID)
-    local groups = GetSpecLayoutGroups()
+    local groups = CurrentLayoutGroups()
     for i, group in ipairs(groups) do
         if group.id == groupID then
             -- Delete all member indicators when deleting the group
@@ -2100,7 +2113,7 @@ local function DeleteLayoutGroup(groupID)
             break
         end
     end
-    expandedGroups[groupID] = nil
+    expandedGroups[GroupExpandKey(groupID)] = nil
 end
 
 -- Delete a debuff category group by ID (C2). No member indicators to cascade
@@ -2118,9 +2131,9 @@ local function DeleteDebuffGroup(groupID)
     expandedGroups["dgroup:" .. groupID] = nil
 end
 
--- Find a layout group by ID
+-- Find a layout group by ID (active tab's store)
 local function GetLayoutGroupByID(groupID)
-    local groups = GetSpecLayoutGroups()
+    local groups = CurrentLayoutGroups()
     for _, group in ipairs(groups) do
         if group.id == groupID then return group end
     end
@@ -2862,18 +2875,22 @@ local function RefreshPlacedIndicators()
 
     -- Build layout group position lookup for preview
     -- In preview all indicators are visible, so compute positions for all members.
-    -- Layout groups (member + filter) are My Buffs-only: the preview renders the
-    -- ACTIVE tab's pool only, so the Other tab skips both group passes entirely.
-    local groupPositions = {}  -- "auraName#indicatorID" → { anchor, offsetX, offsetY }
-    local specGroups = (isOther or isDebuffs) and EMPTY_POOL or GetSpecLayoutGroups()
+    -- The preview renders the ACTIVE tab's pool, so the group pass reads the
+    -- active tab's group store (spec-keyed on My Buffs, the flat other store on
+    -- Other Buffs — read-only, never creates it); Debuffs has neither. Keys carry
+    -- the B1 pool prefix so they line up with the instanceKeys built below.
+    local keyPrefix = PoolKeyPrefix()
+    local groupPositions = {}  -- "<prefix>auraName#indicatorID" → { anchor, offsetX, offsetY }
+    local specGroups = isDebuffs and EMPTY_POOL or CurrentLayoutGroups()
     for _, group in ipairs(specGroups) do
         if group.members then
             for memberIdx, member in ipairs(group.members) do
-                local key = member.auraName .. "#" .. member.indicatorID
+                local key = keyPrefix .. member.auraName .. "#" .. member.indicatorID
                 -- Compute position based on group settings
                 local activeIdx = memberIdx - 1  -- 0-based
-                -- Need to find the indicator's size to compute step
-                local memberCfg = GetSpecAuras()[member.auraName]
+                -- Need to find the indicator's size to compute step (members
+                -- live in the same pool as their group — the active pool)
+                local memberCfg = CurrentAuraPool(spec)[member.auraName]
                     local indCfg = nil
                     if memberCfg and memberCfg.indicators then
                         for _, ind in ipairs(memberCfg.indicators) do
@@ -2932,12 +2949,15 @@ local function RefreshPlacedIndicators()
             end
         end
 
-    -- FILTER GROUP PLACEHOLDERS (My Buffs): labeled outline blocks via the
-    -- shared helper above. Pooled per group id; eye-hidden groups draw
-    -- nothing. Wrap/max defaults 8 match the classic member-group layout.
+    -- FILTER GROUP PLACEHOLDERS (My Buffs / Other Buffs): labeled outline
+    -- blocks via the shared helper above. Pooled per group id — SEPARATE pool
+    -- table per tab (the two id counters can collide, mirror the dgroup pool);
+    -- eye-hidden groups draw nothing. Wrap/max defaults 8 match the classic
+    -- member-group layout.
     do
-        local fgPool = mockFrame.dfADFilterGroupSlots
-        if not fgPool then fgPool = {}; mockFrame.dfADFilterGroupSlots = fgPool end
+        local fgPoolKey = isOther and "dfADOtherFilterGroupSlots" or "dfADFilterGroupSlots"
+        local fgPool = mockFrame[fgPoolKey]
+        if not fgPool then fgPool = {}; mockFrame[fgPoolKey] = fgPool end
         for _, group in ipairs(specGroups) do
             if group.kind == "filter" and group.enabled ~= false then
                 tinsert(placedIndicators,
@@ -2970,8 +2990,8 @@ local function RefreshPlacedIndicators()
     -- ad-hoc resolution, mirroring the factory). Slot keys carry the B1
     -- "other:" prefix so the two pools' slots can't collide in the store.
     -- Hidden indicators (eye toggle, enabled == false) don't render — same as live.
+    -- (keyPrefix hoisted above the group-position pass — same value.)
     local idSpec = isOther and nil or spec
-    local keyPrefix = PoolKeyPrefix()
     for auraName, auraCfg in pairs(CurrentAuraPool(spec)) do
         local info = infoLookup[auraName]
         if type(auraCfg) == "table" and (isOther or info or AdHocSpellID(auraName)) and auraCfg.indicators then
@@ -3175,16 +3195,18 @@ RefreshPreviewLightweight = function()
     local spec = ResolveSpec()
     if not spec and not (isOther or isDebuffs) then return end
 
-    -- Build layout group position lookup (same as RefreshPlacedIndicators;
-    -- layout groups are My Buffs-only, so the Other/Debuffs tabs skip the pass)
+    -- Build layout group position lookup (same as RefreshPlacedIndicators:
+    -- active tab's group store over the active pool, pool-prefixed keys;
+    -- Debuffs has no member groups so the pass reads empty there)
+    local keyPrefix = PoolKeyPrefix()
     local groupPositions = {}
-    local specGroups2 = (isOther or isDebuffs) and EMPTY_POOL or GetSpecLayoutGroups()
+    local specGroups2 = isDebuffs and EMPTY_POOL or CurrentLayoutGroups()
     for _, group in ipairs(specGroups2) do
         if group.members then
             for memberIdx, member in ipairs(group.members) do
-                local key = member.auraName .. "#" .. member.indicatorID
+                local key = keyPrefix .. member.auraName .. "#" .. member.indicatorID
                 local activeIdx = memberIdx - 1
-                local memberCfg = GetSpecAuras()[member.auraName]
+                local memberCfg = CurrentAuraPool(spec)[member.auraName]
                 local indCfg = nil
                 if memberCfg and memberCfg.indicators then
                     for _, ind in ipairs(memberCfg.indicators) do
@@ -3237,9 +3259,9 @@ RefreshPreviewLightweight = function()
     end
 
     -- Re-apply placed indicator instances using current settings
-    -- (hidden indicators skipped — RenderPreviewIndicator would resurrect their slot)
+    -- (hidden indicators skipped — RenderPreviewIndicator would resurrect their
+    -- slot; keyPrefix hoisted above the group-position pass — same value)
     local idSpec = isOther and nil or spec
-    local keyPrefix = PoolKeyPrefix()
     for auraName, auraCfg in pairs(CurrentAuraPool(spec)) do
         if type(auraCfg) == "table" and auraCfg.indicators then
             for _, indicator in ipairs(auraCfg.indicators) do
@@ -4976,10 +4998,7 @@ end
 
 -- BuildPerAuraView + RefreshRightPanel removed in v4 redesign
 -- Per-aura configuration is now done via flat effect cards in the Effects tab
-
--- Dummy stubs — needed to avoid nil reference if anything accidentally calls them
-local function BuildPerAuraView() end
-local function RefreshRightPanel() end
+-- (their dummy stubs were unreferenced — reclaimed for the 200-locals ceiling)
 
 -- ============================================================
 -- ENABLE BANNER
@@ -5602,13 +5621,9 @@ end
 
 -- ── SWITCH TAB ──
 SwitchTab = function(tabKey)
-    -- Layout Groups are My Buffs-only (Phase B) — coerce to Effects on the
-    -- Other tab (belt-and-braces; the sub-tab button is also frosted).
-    if tabKey == "layout" and IsOtherTab() then
-        tabKey = "effects"
-    end
     -- Effects is frosted on the Debuffs tab (C2: category groups have no
-    -- placed indicators) — coerce to Layout Groups, same belt-and-braces.
+    -- placed indicators) — coerce to Layout Groups (belt-and-braces; the
+    -- sub-tab button is also frosted).
     if tabKey == "effects" and IsDebuffTab() then
         tabKey = "layout"
     end
@@ -5634,7 +5649,8 @@ SwitchTab = function(tabKey)
         BuildEffectsTab()
     elseif tabKey == "layout" then
         -- The Debuffs tab's Layout Groups list shows ONLY debuff category
-        -- groups; My Buffs' member/filter groups stay on My Buffs.
+        -- groups; My Buffs / Other Buffs each build their OWN pool's
+        -- member+filter groups (BuildLayoutGroupsTab is pool-routed).
         if IsDebuffTab() then
             BuildDebuffGroupsTab()
         else
@@ -5658,14 +5674,14 @@ end
 -- ── MAIN POOL TAB SWITCH (B2/C2: My Buffs / Debuffs / Other Buffs) ──
 
 -- Grey/restore the sub-tabs: frosted (SetDisabled — stays mouse-enabled so
--- the tooltip can explain why; OnClick early-outs on dfDisabled). Layout
--- Groups frosts on the Other tab (My Buffs-only groups); Effects frosts on
--- the Debuffs tab (category groups have no placed indicators). Mirrors the
--- prototype's subtab.dis treatment.
+-- the tooltip can explain why; OnClick early-outs on dfDisabled). Effects
+-- frosts on the Debuffs tab (category groups have no placed indicators).
+-- Layout Groups is live on BOTH buff tabs (the Other tab hosts the flat
+-- other-pool group store) — it never frosts anymore.
 local function UpdateLayoutTabState()
     local layoutBtn = tabButtons and tabButtons.layout
     if layoutBtn and layoutBtn.SetDisabled then
-        layoutBtn:SetDisabled(IsOtherTab())
+        layoutBtn:SetDisabled(false)
     end
     local effectsBtn = tabButtons and tabButtons.effects
     if effectsBtn and effectsBtn.SetDisabled then
@@ -5708,11 +5724,9 @@ local function SetMainTab(tabKey)
     end
     UpdateSpecDropdownState()
     UpdateLayoutTabState()
-    if activeBuffTab == "other" and activeTab == "layout" then
-        activeTab = "effects"
-    end
-    -- Mirror image on the Debuffs tab: Effects is frosted there, so land on
-    -- Layout Groups (the tab's primary surface).
+    -- Effects is frosted on the Debuffs tab, so land on Layout Groups (the
+    -- tab's primary surface). Layout Groups is live on both buff tabs — no
+    -- coercion needed when arriving there.
     if activeBuffTab == "debuffs" and activeTab == "effects" then
         activeTab = "layout"
     end
@@ -7191,7 +7205,7 @@ BuildLayoutGroupsTab = function()
     addBtn:SetScript("OnClick", function()
         local group = CreateLayoutGroup()
         if group then
-            expandedGroups[group.id] = true
+            expandedGroups[GroupExpandKey(group.id)] = true
             SwitchTab("layout")
             RefreshPlacedIndicators()
         end
@@ -7205,7 +7219,7 @@ BuildLayoutGroupsTab = function()
     addFilterBtn:SetScript("OnClick", function()
         local group = CreateLayoutGroup(nil, "filter")
         if group then
-            expandedGroups[group.id] = true
+            expandedGroups[GroupExpandKey(group.id)] = true
             SwitchTab("layout")
             RefreshPlacedIndicators()
         end
@@ -7221,17 +7235,25 @@ BuildLayoutGroupsTab = function()
     groupsHeader:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     yPos = yPos - 16
 
-    -- Get groups for current spec
-    local groups = GetSpecLayoutGroups()
+    -- Active tab's groups: the spec-keyed array on My Buffs, the flat
+    -- spec-independent store on Other Buffs (read-only — visiting the tab
+    -- never creates adDB.otherLayoutGroups; the add buttons do).
+    local isOtherGroups = IsOtherTab()
+    local groups = CurrentLayoutGroups()
 
-    -- Display name lookup
+    -- Display name lookup (My Buffs: the spec's trackable pool; Other Buffs:
+    -- ad-hoc/SpellDB resolution — other-pool names aren't in a spec pool)
     local spec = ResolveSpec()
-    local trackable = spec and Adapter and Adapter:GetTrackableAuras(spec)
+    local trackable = not isOtherGroups and spec and Adapter and Adapter:GetTrackableAuras(spec)
     local displayNames = {}
     if trackable then
         for _, info in ipairs(trackable) do
             displayNames[info.name] = info.display
         end
+    end
+    local function MemberDisplayName(auraName)
+        if isOtherGroups then return OtherPoolDisplayName(auraName) end
+        return displayNames[auraName] or auraName
     end
 
     if #groups == 0 then
@@ -7243,10 +7265,11 @@ BuildLayoutGroupsTab = function()
         empty:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.7)
         empty:SetJustifyH("CENTER")
     else
-        -- Render group cards
+        -- Render group cards (expansion keys are pool-scoped — raw id on My
+        -- Buffs, "othergroup:<id>" on Other; the id counters overlap)
         for _, group in ipairs(groups) do
-            local isExpanded = expandedGroups[group.id] or false
-            local groupCardKey = "group:" .. group.id
+            local expandKey = GroupExpandKey(group.id)
+            local isExpanded = expandedGroups[expandKey] or false
 
             -- Card container
             local card = CreateFrame("Frame", nil, parent, "BackdropTemplate")
@@ -7355,7 +7378,7 @@ BuildLayoutGroupsTab = function()
 
             -- Header click → toggle expansion
             header:SetScript("OnClick", function()
-                expandedGroups[group.id] = not expandedGroups[group.id]
+                expandedGroups[expandKey] = not expandedGroups[expandKey]
                 SwitchTab("layout")
             end)
             header:SetScript("OnEnter", function(self)
@@ -7766,8 +7789,9 @@ BuildLayoutGroupsTab = function()
                             downBtn:SetScript("OnLeave", function() downIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b) end)
                         end
 
-                        -- Spell icon
-                        local memberSpec = ResolveSpec()
+                        -- Spell icon (Other: nil spec — GetAuraIcon degrades to
+                        -- ad-hoc "#<id>" / SpellDB-by-name resolution)
+                        local memberSpec = not isOtherGroups and ResolveSpec() or nil
                         local memberIconTex = GetAuraIcon(memberSpec, member.auraName)
                         local mSpellIcon = memberRow:CreateTexture(nil, "ARTWORK")
                         mSpellIcon:SetSize(22, 22)
@@ -7791,9 +7815,10 @@ BuildLayoutGroupsTab = function()
                             end
                         end
 
-                        -- Type badge
+                        -- Type badge (members live in the group's pool = the
+                        -- active tab's pool)
                         local memberType = nil
-                        local memberAuraCfg = GetSpecAuras()[member.auraName]
+                        local memberAuraCfg = CurrentAuraPool()[member.auraName]
                         if memberAuraCfg and memberAuraCfg.indicators then
                             for _, ind in ipairs(memberAuraCfg.indicators) do
                                 if ind.id == member.indicatorID then
@@ -7864,7 +7889,9 @@ BuildLayoutGroupsTab = function()
                         local capturedAuraName = member.auraName
                         local capturedIndID = member.indicatorID
                         custBtn:SetScript("OnClick", function()
-                            local cardKey = "placed:" .. capturedAuraName .. "#" .. capturedIndID
+                            -- Card keys embed the B1 pool prefix in the name
+                            -- segment ("placed:other:<name>#<id>" on Other)
+                            local cardKey = "placed:" .. PoolKeyPrefix() .. capturedAuraName .. "#" .. capturedIndID
                             wipe(expandedCards)
                             expandedCards[cardKey] = true
                             activeTab = "effects"
@@ -7876,7 +7903,7 @@ BuildLayoutGroupsTab = function()
                         mName:SetPoint("LEFT", mBadge, "RIGHT", 6, 0)
                         mName:SetPoint("RIGHT", custBtn, "LEFT", -4, 0)
                         mName:SetMaxLines(1)
-                        mName:SetText(displayNames[member.auraName] or member.auraName)
+                        mName:SetText(MemberDisplayName(member.auraName))
                         mName:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
 
                         by = by - 38
@@ -9041,23 +9068,9 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
 
         btn.tabKey = def.key
         btn:SetScript("OnClick", function(self)
-            if self.dfDisabled then return end  -- frosted on the Other tab
+            if self.dfDisabled then return end  -- frosted (Effects on Debuffs)
             SwitchTab(self.tabKey)
         end)
-
-        -- Layout Groups is My Buffs-only (Phase B): frosted on the Other tab
-        -- via SetDisabled (stays mouse-enabled so this tooltip can explain).
-        if def.key == "layout" then
-            btn:HookScript("OnEnter", function(self)
-                if self.dfDisabled then
-                    GUI:ShowTooltip(self, {
-                        title = L["Layout Groups"],
-                        lines = { L["Not available for Other Buffs."] },
-                    })
-                end
-            end)
-            btn:HookScript("OnLeave", function() GUI:HideTooltip() end)
-        end
 
         -- Effects is buff-pool-only (C2): frosted on the Debuffs tab —
         -- category groups have no per-spell placed indicators.

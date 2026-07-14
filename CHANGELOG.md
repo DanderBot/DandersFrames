@@ -67,6 +67,7 @@ DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally chan
 * (Aura Designer) **New: Other Buffs tab.** Track any buff on your frames no matter who cast it — for example, see Power Infusion on anyone in your group. It's a new tab at the top of the Aura Designer with the same indicators, frame effects and sound alerts you already use; tracking for your own class's spells now lives under the "My Buffs" tab.
 * (Aura Designer) New "Others Only" option on Other Buffs effects: only show the effect when someone else cast the buff. Your own casts still show on the regular buff bar.
 * (Aura Designer) A spell can be tracked in one tab at a time — the spell picker shows which tab a spell already belongs to, so the same buff never renders twice.
+* (Aura Designer) Layout groups and filter groups are now available on the Other Buffs tab too — arrange other players' buffs in a grid or place a whole filter as its own row, exactly like on My Buffs. Other Buffs groups are shared across all your specs.
 * (Aura Designer) **New: Debuffs tab.** Give debuff categories their own icon rows on the frame — for example, crowd control in its own spot with its own icon size. Create a group under the new Debuffs tab, tick the categories it should show (the same choices as the Aura Filters page), and set its position, icon size, growth direction and icon cap. Each group has its own dispellable mode and "Hide Long Debuffs" option, and categories you move into a group leave the main debuff bar automatically.
 
 ### Known Issues (12.1 alpha)

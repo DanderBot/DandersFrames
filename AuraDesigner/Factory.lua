@@ -274,16 +274,25 @@ function DF:GetADTrackedSpellIDs(frame, db)
     -- render nothing and contribute nothing — their buff-row icons come back. Only
     -- kind "include" maps count ("all" = empty selection renders nothing; "exclude"
     -- is unreachable from the group UI and skipped by the render path too).
+    -- Both group stores contribute: the spec-keyed groups AND the flat
+    -- spec-independent otherLayoutGroups (Other Buffs tab) — a filter group
+    -- renders the same spells whichever tab owns it, so the row hides them
+    -- identically. Same eye gate, same version-keyed resolve cache.
     local R = DF.FilterRegistry
-    local groups = R and adDB.layoutGroups and adDB.layoutGroups[spec]
-    if groups then
-        for _, group in ipairs(groups) do
-            if type(group) == "table" and group.kind == "filter" and group.enabled ~= false then
-                local res = resolveFilterGroup(R, group)   -- version-cached, no re-resolve
-                if res.kind == "include" and res.map then
-                    for id in pairs(res.map) do
-                        union = union or {}   -- only allocate when the map has entries
-                        union[id] = true
+    if R then
+        local specGroups = adDB.layoutGroups and adDB.layoutGroups[spec]
+        for g = 1, 2 do
+            local groups = (g == 1) and specGroups or adDB.otherLayoutGroups
+            if groups then
+                for _, group in ipairs(groups) do
+                    if type(group) == "table" and group.kind == "filter" and group.enabled ~= false then
+                        local res = resolveFilterGroup(R, group)   -- version-cached, no re-resolve
+                        if res.kind == "include" and res.map then
+                            for id in pairs(res.map) do
+                                union = union or {}   -- only allocate when the map has entries
+                                union[id] = true
+                            end
+                        end
                     end
                 end
             end
@@ -1408,14 +1417,14 @@ local function memberGrowthOffset(d, s)
     return 0, 0
 end
 
--- Compute this pass's arranged positions for every member of every member group
--- on the spec. Returns true when at least one member was arranged. The math is
--- a verbatim mirror of the editor preview (Options.lua RefreshPlacedIndicators
--- group-position block) so preview and live can never disagree.
-local function arrangeMemberGroups(adDB, spec, specAuras)
-    local groups = adDB.layoutGroups and adDB.layoutGroups[spec]
-    if not groups then return false end
-    mgPass = mgPass + 1
+-- Arrange one group array's members over ONE aura pool (no pass bump — the
+-- caller stamps the pass once for both pools). keyPrefix mirrors placedKey's:
+-- "" for the spec pool, OTHER_PREFIX for the other pool, so scratch keys line
+-- up with the instanceKeys syncPlacedPool feeds memberEffective. Returns true
+-- when at least one member was arranged. The math is a verbatim mirror of the
+-- editor preview (Options.lua RefreshPlacedIndicators group-position block)
+-- so preview and live can never disagree.
+local function arrangeGroupList(groups, auras, adDB, keyPrefix)
     local any = false
     for _, group in ipairs(groups) do
         local members = type(group) == "table" and group.kind ~= "filter" and group.members
@@ -1432,7 +1441,7 @@ local function arrangeMemberGroups(adDB, spec, specAuras)
             local gox, goy = tonumber(group.offsetX) or 0, tonumber(group.offsetY) or 0
             for memberIdx, member in ipairs(members) do
                 -- Find the member's indicator record (size/scale feed the grid step).
-                local auraCfg = specAuras and specAuras[member.auraName]
+                local auraCfg = auras and auras[member.auraName]
                 local indCfg
                 if type(auraCfg) == "table" and auraCfg.indicators then
                     for _, ind in ipairs(auraCfg.indicators) do
@@ -1467,7 +1476,7 @@ local function arrangeMemberGroups(adDB, spec, specAuras)
                         oX = gox + (col * pX) + (row * sX)
                         oY = goy + (col * pY) + (row * sY)
                     end
-                    local key = member.auraName .. "#" .. tostring(member.indicatorID)
+                    local key = keyPrefix .. member.auraName .. "#" .. tostring(member.indicatorID)
                     local e = mgScratch[key]
                     if not e or e.base ~= indCfg then
                         e = { base = indCfg, wrapper = setmetatable({}, { __index = indCfg }) }
@@ -1482,6 +1491,27 @@ local function arrangeMemberGroups(adDB, spec, specAuras)
         end
     end
     return any
+end
+
+-- Compute this pass's arranged positions for BOTH pools' member groups: the
+-- spec-keyed groups over the spec pool (unprefixed keys) and the flat
+-- spec-independent adDB.otherLayoutGroups over the other pool (OTHER_PREFIX'd
+-- keys — placedKey's scheme, collision-proof by B1's construction). One pass
+-- stamp covers both, so a shared same-named key can never cross-match (the
+-- prefix disambiguates; the base identity check guards the rest). Returns
+-- hasMG (spec pool), hasOtherMG (other pool).
+local function arrangeMemberGroups(adDB, spec, specAuras, otherAuras)
+    mgPass = mgPass + 1
+    local hasMG, hasOtherMG = false, false
+    local specGroups = specAuras and adDB.layoutGroups and adDB.layoutGroups[spec]
+    if specGroups then
+        hasMG = arrangeGroupList(specGroups, specAuras, adDB, "")
+    end
+    local otherGroups = otherAuras and adDB.otherLayoutGroups
+    if otherGroups then
+        hasOtherMG = arrangeGroupList(otherGroups, otherAuras, adDB, OTHER_PREFIX)
+    end
+    return hasMG, hasOtherMG
 end
 
 -- Effective placed record: the group wrapper (arranged anchor/offset shadowing
@@ -2044,6 +2074,63 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
 end
 
 -- ============================================================
+-- FILTER-GROUP SYNC  (shared by the spec-keyed groups and otherLayoutGroups)
+-- One pass over ONE group array's filter-kind groups, creating / rebuilding /
+-- restyling into the SHARED `fg` store and marking `live` keys — the caller
+-- runs the single end-of-pass sweep (mirror of syncPlacedPool's contract).
+-- keyPrefix — "" (spec-keyed groups) or OTHER_PREFIX (the flat other store);
+-- prefixed into the "fgroup:<prefix><id>" key so the two id counters can
+-- never collide in the store. Module-level (not a SyncFrame closure) to keep
+-- the per-aura-event hot path allocation-free; body otherwise identical to
+-- the pre-split A5 loop.
+-- ============================================================
+local function syncFilterGroupList(frame, fg, live, R, groups, keyPrefix)
+    if not groups then return end
+    for _, group in ipairs(groups) do
+        if type(group) == "table" and group.kind == "filter" and group.enabled ~= false then
+            -- Version-cached: within one auraLayoutVersion this is a table
+            -- lookup; the resolve + full-map sort run once per version.
+            local res, selSig = resolveFilterGroup(R, group)
+            if res.kind == "include" and res.map and next(res.map) then
+                local key = "fgroup:" .. keyPrefix .. tostring(group.id)
+                live[key] = true
+                local structSig = selSig
+                    .. "|max=" .. tostring(math.max(1, tonumber(group.maxIcons) or 8))
+                local coSig = filterGroupCoSig(group)
+
+                local entry = fg[key]
+                if not entry then
+                    local handle = DF.AuraContainer:Create(frame,
+                        buildFilterGroupConfig(frame.unit, res.map, group))
+                    if handle then
+                        fg[key] = { handle = handle, structSig = structSig, coSig = coSig }
+                    end
+                elseif entry.structSig ~= structSig then
+                    entry.structSig, entry.coSig = structSig, coSig
+                    entry.handle:Rebuild(buildFilterGroupConfig(frame.unit, res.map, group))
+                elseif entry.coSig ~= coSig then
+                    entry.coSig = coSig
+                    entry.handle:ApplyStyle(buildFilterGroupStyle(), buildFilterGroupLayout(group))
+                end
+            elseif res.kind == "exclude" then
+                -- Unreachable from the group UI (no Uncategorised option in the
+                -- group picker) — guard anyway: an exclude map on a group would
+                -- render "everything except", never what a filter group means.
+                -- Warn once per group id (this sync runs per aura event).
+                if not fgroupExcludeWarned[group] then
+                    fgroupExcludeWarned[group] = true
+                    DF:DebugWarn(DBG, "Filter group %s resolved to an exclude selection; skipping",
+                        tostring(group.id))
+                end
+            end
+            -- res.kind == "all" (empty/no selection): render nothing — the group
+            -- stays dormant until a filter is linked (an unfiltered include-all
+            -- row is never the intent). Not marked live -> sweep tears down.
+        end
+    end
+end
+
+-- ============================================================
 -- PER-FRAME SYNC  (P4.1 health-bar + P4.2 frame-level family)
 -- Reads the CONFIGURED indicators in adDB.auras[spec] (never a live aura list). Each
 -- frame-level effect targets ONE region, so per type we pick the SINGLE highest-priority
@@ -2425,18 +2512,20 @@ function Factory:SyncFrame(frame)
 
         -- Member layout groups arrange their members' positions (grid computed from
         -- the group's anchor/offset/grow/wrap/spacing — see the arranger section).
-        -- Compute this pass's positions once; each member indicator below reads its
-        -- position through the wrapper (position override only, all else raw record).
-        local hasMG = specAuras and arrangeMemberGroups(adDB, spec, specAuras) or false
+        -- Compute this pass's positions once for BOTH pools (spec-keyed groups over
+        -- the spec pool, flat otherLayoutGroups over the other pool); each member
+        -- indicator below reads its position through the wrapper (position override
+        -- only, all else raw record).
+        local hasMG, hasOtherMG = arrangeMemberGroups(adDB, spec, specAuras, otherAuras)
 
         if specAuras then
             syncPlacedPool(frame, placed, live, hasMG, specAuras, "", spec)
         end
-        -- OTHER BUFFS pool: same store, same live/sweep — keys carry OTHER_PREFIX so the
-        -- pools can't collide. No member groups (layout groups are spec-scoped -> hasMG
-        -- false skips the wrapper lookups) and NIL idSpec (spec-independent identity).
+        -- OTHER BUFFS pool: same store, same live/sweep — keys carry OTHER_PREFIX so
+        -- the pools can't collide (the arranger's scratch keys carry it too) and NIL
+        -- idSpec (spec-independent identity).
         if otherAuras then
-            syncPlacedPool(frame, placed, live, false, otherAuras, OTHER_PREFIX, nil)
+            syncPlacedPool(frame, placed, live, hasOtherMG, otherAuras, OTHER_PREFIX, nil)
         end
 
         -- Tear down any placed container whose indicator is gone / de-configured.
@@ -2449,61 +2538,25 @@ function Factory:SyncFrame(frame)
     end
 
     -- ---- FILTER GROUPS (container-backed, registry-linked rows) — A5 -----------------
-    -- One handle per filter group, keyed "fgroup:<id>". Structural sig = the registry
-    -- selection signature (live link: filter edits / preset updates move it) + max slot
-    -- count; the layout fields hot-apply via ApplyStyle. Eye-hidden groups
-    -- (`enabled == false`; nil/true = shown) are not marked live -> the sweep destroys
-    -- their handle. Same for deleted groups and spec switches (different id set).
+    -- One handle per filter group, keyed "fgroup:<keyPrefix><id>" — "" for the
+    -- spec-keyed groups, OTHER_PREFIX for the flat spec-independent
+    -- adDB.otherLayoutGroups store (the two id counters overlap, the prefix keeps
+    -- the keys disjoint). Structural sig = the registry selection signature (live
+    -- link: filter edits / preset updates move it) + max slot count; the layout
+    -- fields hot-apply via ApplyStyle. Eye-hidden groups (`enabled == false`;
+    -- nil/true = shown) are not marked live -> the sweep destroys their handle.
+    -- Same for deleted groups and spec switches (different id set; other-pool
+    -- groups are spec-independent, so they persist across spec switches like
+    -- the other pool's placed indicators do).
     do
         local fg = store.fgroups
         if not fg then fg = {}; store.fgroups = fg end
         local live = {}
 
         local R = DF.FilterRegistry
-        local groups = R and adDB.layoutGroups and adDB.layoutGroups[spec]
-        if groups then
-            for _, group in ipairs(groups) do
-                if type(group) == "table" and group.kind == "filter" and group.enabled ~= false then
-                    -- Version-cached: within one auraLayoutVersion this is a table
-                    -- lookup; the resolve + full-map sort run once per version.
-                    local res, selSig = resolveFilterGroup(R, group)
-                    if res.kind == "include" and res.map and next(res.map) then
-                        local key = "fgroup:" .. tostring(group.id)
-                        live[key] = true
-                        local structSig = selSig
-                            .. "|max=" .. tostring(math.max(1, tonumber(group.maxIcons) or 8))
-                        local coSig = filterGroupCoSig(group)
-
-                        local entry = fg[key]
-                        if not entry then
-                            local handle = DF.AuraContainer:Create(frame,
-                                buildFilterGroupConfig(frame.unit, res.map, group))
-                            if handle then
-                                fg[key] = { handle = handle, structSig = structSig, coSig = coSig }
-                            end
-                        elseif entry.structSig ~= structSig then
-                            entry.structSig, entry.coSig = structSig, coSig
-                            entry.handle:Rebuild(buildFilterGroupConfig(frame.unit, res.map, group))
-                        elseif entry.coSig ~= coSig then
-                            entry.coSig = coSig
-                            entry.handle:ApplyStyle(buildFilterGroupStyle(), buildFilterGroupLayout(group))
-                        end
-                    elseif res.kind == "exclude" then
-                        -- Unreachable from the group UI (no Uncategorised option in the
-                        -- group picker) — guard anyway: an exclude map on a group would
-                        -- render "everything except", never what a filter group means.
-                        -- Warn once per group id (this sync runs per aura event).
-                        if not fgroupExcludeWarned[group] then
-                            fgroupExcludeWarned[group] = true
-                            DF:DebugWarn(DBG, "Filter group %s resolved to an exclude selection; skipping",
-                                tostring(group.id))
-                        end
-                    end
-                    -- res.kind == "all" (empty/no selection): render nothing — the group
-                    -- stays dormant until a filter is linked (an unfiltered include-all
-                    -- row is never the intent). Not marked live -> sweep tears down.
-                end
-            end
+        if R then
+            syncFilterGroupList(frame, fg, live, R, adDB.layoutGroups and adDB.layoutGroups[spec], "")
+            syncFilterGroupList(frame, fg, live, R, adDB.otherLayoutGroups, OTHER_PREFIX)
         end
 
         -- Tear down groups gone / hidden / emptied / off-spec.

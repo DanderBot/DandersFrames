@@ -1166,7 +1166,6 @@ L["settings disabled by the 12.1 aura system"] = true
 -- 12.1 blocked-overlay wording (GUI:BlockedWording) — shared across every dead-setting page
 L["Blizzard limitation"] = true
 L["Not available for Debuffs. Use Layout Groups instead."] = true
-L["Not available for Other Buffs."] = true
 L["Not available on 12.1"] = true
 L["Not available with the 12.1 aura system"] = true
 L["Not available yet with the 12.1 aura system"] = true

@@ -534,6 +534,10 @@ local function EmbedCustomFilterData(exportData, includeOverrides)
                     end
                 end
             end
+            -- Other Buffs layout groups: flat array only (spec-independent
+            -- store — no dual-shape dispatch needed).
+            local olg = type(preset) == "table" and preset.otherLayoutGroups
+            if type(olg) == "table" then collectGroupArray(olg) end
         end
     end
     if next(refs) and DF.FilterRegistry then
@@ -1024,6 +1028,10 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
                         end
                     end
                 end
+                -- Other Buffs layout groups: flat array only (spec-independent
+                -- store — no dual-shape dispatch needed).
+                local olg = type(preset) == "table" and preset.otherLayoutGroups
+                if type(olg) == "table" then remapGroupArray(olg) end
             end
         end
     end
