@@ -47,6 +47,21 @@ local DBG = "AD"
 -- SpellDB/curated spell names or ad-hoc "#<id>" keys — neither can start with "other:".
 local OTHER_PREFIX = "other:"
 
+-- One-shot (per session, per name) tripwire for OTHER-pool names that resolve to NO
+-- identity map. The pool's naming contract is SpellDB names (rec.n / localized) or
+-- ad-hoc "#<id>" keys — an unresolvable name here means a bad record (e.g. a curated
+-- INTERNAL key like "PowerWordShield", which only resolves through a spec). The render/
+-- dedup/sound paths silently skip such records; this names the culprit once instead of
+-- spamming per frame per aura event. Guards B2's picker contract.
+local otherIdentWarned = {}
+local function warnOtherUnresolved(auraName)
+    if not otherIdentWarned[auraName] then
+        otherIdentWarned[auraName] = true
+        DF:DebugWarn(DBG, "Other Buffs aura %s has no resolvable spell identity (expected a SpellDB spell name or a #<id> key); skipping",
+            tostring(auraName))
+    end
+end
+
 -- ============================================================
 -- GATES  (mirror Features/Auras.lua UseFactoryForBuffs / FactoryOwnsBuffRow)
 -- ============================================================
@@ -146,6 +161,14 @@ end
 --   * HIDDEN indicators (eye toggle, `enabled == false`; nil/true = shown for legacy records) —
 --     a hidden indicator renders nothing, so it must not count as tracked (its buff-row icon
 --     comes back). Same gate the render paths use (SyncFrame placed loop + pickWinner).
+--   * OTHERS-ONLY indicators (`othersOnly == true`, B1) — they render only OTHERS' casts
+--     ("HELPFUL|!PLAYER"), so deduping would leave the player's OWN cast with no visual
+--     anywhere. A spell counts as tracked only via its non-othersOnly blocks: a mixed record
+--     (one othersOnly + one normal indicator) still dedups (the normal one shows the self-
+--     cast), an all-othersOnly spell keeps its buff-row icon. Visible duplication of others'
+--     casts is the lesser evil vs silent self-invisibility — and with the buff row's Only
+--     Mine filter the two are perfectly disjoint (row = your cast, AD = others'). Gated
+--     identically for BOTH pools (spec-pool records could carry the flag someday).
 -- Returns nil when AD is disabled, off-spec, empty, or the factory doesn't own AD for this db
 -- (caller then contributes nothing). BUFF (HELPFUL) only: every AD entry is a helpful aura, and
 -- a harmful map is inert on friendly frames.
@@ -180,18 +203,19 @@ local function auraHasTrackedIndicator(auraCfg)
         for _, ind in ipairs(inds) do
             -- Bars ignore missing mode entirely (no duration data when absent — legacy
             -- Engine.lua:510), so a bar always renders present and always dedups.
-            if ind.enabled ~= false and (ind.type == "bar" or not ind.showWhenMissing) then return true end
+            if ind.enabled ~= false and not ind.othersOnly
+                and (ind.type == "bar" or not ind.showWhenMissing) then return true end
         end
     end
     local hb, bg, bd = auraCfg.healthbar, auraCfg.background, auraCfg.border
-    if hb and hb.enabled ~= false and not hb.showWhenMissing then return true end
-    if bg and bg.enabled ~= false and not bg.showWhenMissing then return true end
-    if bd and bd.enabled ~= false and not bd.showWhenMissing then return true end
+    if hb and hb.enabled ~= false and not hb.othersOnly and not hb.showWhenMissing then return true end
+    if bg and bg.enabled ~= false and not bg.othersOnly and not bg.showWhenMissing then return true end
+    if bd and bd.enabled ~= false and not bd.othersOnly and not bd.showWhenMissing then return true end
     -- Text colour-by-cover (recovered): a present-mode name/health text indicator is a
     -- rendering visual, so it dedups. SWM-flagged text renders nothing (unsupported).
     local nt, ht = auraCfg.nametext, auraCfg.healthtext
-    if nt and nt.enabled ~= false and nt.color and not nt.showWhenMissing then return true end
-    if ht and ht.enabled ~= false and ht.color and not ht.showWhenMissing then return true end
+    if nt and nt.enabled ~= false and not nt.othersOnly and nt.color and not nt.showWhenMissing then return true end
+    if ht and ht.enabled ~= false and not ht.othersOnly and ht.color and not ht.showWhenMissing then return true end
     return false
 end
 
@@ -237,6 +261,8 @@ function DF:GetADTrackedSpellIDs(frame, db)
                 if f and f.includeSpellIDs then
                     union = union or {}
                     for id in pairs(f.includeSpellIDs) do union[id] = true end
+                else
+                    warnOtherUnresolved(auraName)
                 end
             end
         end
@@ -515,6 +541,7 @@ local function pickWinner(spec, specAuras, otherAuras, typeKey, validate)
                 local typeCfg = (type(auraCfg) == "table") and auraCfg[typeKey]
                 if typeCfg and typeCfg.enabled ~= false and (not validate or validate(typeCfg)) then
                     local map = unionIdentity(idSpec, auraName, typeCfg)
+                    if not map and pool == 2 then warnOtherUnresolved(auraName) end
                     if map then
                         local prio = auraCfg.priority or 5
                         if (not bestName)
@@ -1612,6 +1639,7 @@ local function collectDesiredSounds(desired, unit, auras, keyPrefix, idSpec, cha
             local ids = DF:BuildADIdentityFilters(idSpec, auraName)
             local map = ids and ids.includeSpellIDs
             local argKey, argVal = resolveSoundArg(sc)
+            if not map and keyPrefix ~= "" then warnOtherUnresolved(auraName) end
             if map and argKey then
                 desired = desired or {}
                 desired[keyPrefix .. auraName] = {
@@ -1746,6 +1774,7 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                 elseif isBar then
                     local ids = DF:BuildADIdentityFilters(idSpec, auraName)
                     local map = ids and ids.includeSpellIDs
+                    if not map and keyPrefix ~= "" then warnOtherUnresolved(auraName) end
                     if map then
                         local key = placedKey(keyPrefix, auraName, indicator)
                         live[key] = true
@@ -1782,6 +1811,7 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                 elseif isSquare or indicator.type == "icon" then
                     local ids = DF:BuildADIdentityFilters(idSpec, auraName)
                     local map = ids and ids.includeSpellIDs
+                    if not map and keyPrefix ~= "" then warnOtherUnresolved(auraName) end
                     if map then
                         local key = placedKey(keyPrefix, auraName, indicator)
                         live[key] = true
