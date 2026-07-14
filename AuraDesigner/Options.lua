@@ -8428,6 +8428,318 @@ BuildDebuffGroupsTab = function()
 end
 
 -- ============================================================
+-- SPELL PICKER VIEW BUILD
+-- Extracted from BuildAuraDesignerPage: Lua 5.1 caps every function at
+-- 60 upvalues (the page builder was at 65 and failed to load), and this
+-- block -- including the DoAddByID closure -- carried ~20 captures used
+-- nowhere else in the page build. As a file-scope helper its captures
+-- no longer count against the page builder's upvalue budget.
+-- ============================================================
+
+local function BuildSpellPickerView()
+    -- ── SPELL PICKER VIEW (hidden by default, overlays tabs when active) ──
+    spellPickerView = CreateFrame("Frame", nil, rightPanel, "BackdropTemplate")
+    spellPickerView:SetPoint("TOPLEFT", 0, 0)
+    spellPickerView:SetPoint("BOTTOMRIGHT", 0, 0)
+    GUI:CreatePanelBackdrop(spellPickerView, {borderColor = {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5}})
+    spellPickerView:Hide()
+
+    -- Spell picker header
+    local pickerHeader = CreateFrame("Frame", nil, spellPickerView, "BackdropTemplate")
+    pickerHeader:SetHeight(28)
+    pickerHeader:SetPoint("TOPLEFT", 0, 0)
+    pickerHeader:SetPoint("TOPRIGHT", 0, 0)
+    GUI:CreatePanelBackdrop(pickerHeader, {borderColor = {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5}})
+
+    -- Icon-only back chevron. Shared styler supplies the backdrop + accent-wash
+    -- hover; the chevron_right glyph is rotated 180° to point left (StyleButton
+    -- has no rotation knob, so re-apply it after styling).
+    local backBtn = CreateFrame("Button", nil, pickerHeader, "BackdropTemplate")
+    backBtn:SetPoint("LEFT", 4, 0)
+    GUI:StyleButton(backBtn, {
+        width = 24, height = 24,
+        icon = {
+            texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right",
+            size = 14,
+            color = C_TEXT_DIM,
+        },
+    })
+    backBtn.Icon:SetRotation(math.rad(180))  -- flip to point left
+    backBtn:SetScript("OnClick", function()
+        HideSpellPicker()
+        -- Add-by-ID lands while the picker stays open, so the effects tab
+        -- behind it is stale — rebuild it on the way out (card clicks do the
+        -- equivalent SwitchTab("effects") themselves).
+        if spellPickerDirty then
+            spellPickerDirty = false
+            SwitchTab(activeTab or "effects")
+        end
+    end)
+
+    spellPickerView.title = pickerHeader:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    spellPickerView.title:SetPoint("LEFT", backBtn, "RIGHT", 4, 0)
+    spellPickerView.title:SetText(L["Select a spell"])
+    spellPickerView.title:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+
+    spellPickerView.typeBadge = pickerHeader:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    spellPickerView.typeBadge:SetPoint("LEFT", spellPickerView.title, "RIGHT", 6, 0)
+
+    -- ── PICKER TOOLBAR (row 2): name search + add-by-ID ──
+    -- Same idiom as the FilterRegistry Options header: stretchy search box,
+    -- ^%d+$-validated Spell ID box + Add button, transient echo line.
+    -- CreateEditBox reserves 15px for its (empty) label, so the widget frames
+    -- anchor 15px high (y = 9) to land the box bodies at -6..-30 below the
+    -- header, with the 22px Add button centered on the same row (top = -7).
+    local addBtnW, addBoxW = 50, 70
+    local addBtn  -- created after DoAddByID below
+    local addBox = GUI:CreateEditBox(spellPickerView, "", nil, nil, nil, addBoxW, L["Spell ID"])
+    addBox:SetPoint("TOPRIGHT", pickerHeader, "BOTTOMRIGHT", -(10 + addBtnW + 6), 9)
+    spellPickerView.addBox = addBox
+
+    local searchBox = GUI:CreateEditBox(spellPickerView, "", nil, nil, nil, 150, L["Search..."])
+    searchBox:SetPoint("TOPLEFT", pickerHeader, "BOTTOMLEFT", 10, 9)
+    searchBox:SetPoint("TOPRIGHT", addBox, "TOPLEFT", -8, 0)
+    spellPickerView.searchBox = searchBox
+
+    -- Live name filter: case-insensitive plain find on the display name.
+    searchBox.EditBox:HookScript("OnTextChanged", function(eb)
+        local q = (eb:GetText() or ""):match("^%s*(.-)%s*$"):lower()
+        if q == spellPickerSearch then return end
+        spellPickerSearch = q
+        PopulateSpellGrid()
+    end)
+
+    -- Spell picker hint (echo borrows its line: hint hides while echo shows)
+    local pickerHint = spellPickerView:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    pickerHint:SetPoint("TOPLEFT", pickerHeader, "BOTTOMLEFT", 12, -36)
+    pickerHint:SetText(L["Click or drag a spell onto the frame to place it"])
+    pickerHint:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    spellPickerView.hint = pickerHint  -- ShowSpellPicker swaps the text per mode
+
+    -- Echo line: transient add-by-ID feedback, auto-hides after ~4s
+    -- (generation counter so a re-add restarts the window — FilterRegistry idiom)
+    local echoText = spellPickerView:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
+    echoText:SetPoint("TOPLEFT", pickerHeader, "BOTTOMLEFT", 12, -36)
+    echoText:SetPoint("TOPRIGHT", pickerHeader, "BOTTOMRIGHT", -10, -36)
+    echoText:SetJustifyH("LEFT")
+    echoText:SetWordWrap(false)
+    echoText:SetTextColor(0.6, 0.6, 0.6)
+    echoText:Hide()
+
+    local echoGen = 0
+    local function HideEcho()
+        echoGen = echoGen + 1
+        echoText:Hide()
+        pickerHint:Show()
+    end
+    spellPickerView.HideEcho = HideEcho
+    local function Echo(msg)
+        echoGen = echoGen + 1
+        local gen = echoGen
+        echoText:SetText(msg)
+        pickerHint:Hide()
+        echoText:Show()
+        C_Timer.After(4, function()
+            if echoGen == gen then HideEcho() end
+        end)
+    end
+    spellPickerView.Echo = Echo  -- AddSpellToGroup confirms group adds through it
+
+    -- Add-by-ID: snap known ids to their pool/curated record (then behave
+    -- exactly like clicking that spell's card — same AddPickedSpell path);
+    -- unknown ids become an ad-hoc "#<id>" aura whose key IS its identity.
+    -- The picker stays open (echo confirms), so several ids can be added in
+    -- a row; spellPickerDirty makes the back button rebuild the effects tab.
+    -- In "group" mode the toolbar's Icon/Square buttons pass typeKeyArg and
+    -- the add routes through AddSpellToGroup (Enter defaults to Icon).
+    local function DoAddByID(typeKeyArg)
+        local text = (addBox.EditBox:GetText() or ""):match("^%s*(.-)%s*$")
+        if text == "" then return end
+        -- Integers only: tonumber() also accepts floats/hex, which are never
+        -- valid spell ids
+        if not text:match("^%d+$") then
+            Echo(L["Enter a valid spell ID."])
+            return
+        end
+        -- Normalize + cap: strip leading zeros ("#007" and "#7" must be the same
+        -- key), and reject oversized digit strings — real spell IDs are well under
+        -- 10 digits, and past ~15 tonumber() loses integer precision, which would
+        -- mint broken keys like "#1e+21".
+        text = text:match("^0*(%d+)$") or text
+        if #text > 10 then
+            Echo(L["Enter a valid spell ID."])
+            return
+        end
+        local idNum = tonumber(text)
+        local isOther = IsOtherTab()
+        local spec = ResolveSpec()
+        -- The Other Buffs pool is spec-independent — no spec required there.
+        if not spec and not isOther then return end
+
+        -- Snap. My Buffs: the spec's curated tables first (alt ids included),
+        -- then the SpellDB (R.ByID indexes canonical + alt ids), else ad-hoc.
+        -- Other Buffs: SpellDB ONLY — the B1 naming contract (other-pool keys
+        -- are SpellDB rec.n or ad-hoc "#<id>"; curated internal names don't
+        -- resolve with a nil spec).
+        local auraName
+        if not isOther then
+            local alts = DF.AuraDesigner.AlternateSpellIDs and DF.AuraDesigner.AlternateSpellIDs[spec]
+            if alts and alts[idNum] then auraName = alts[idNum] end
+            if not auraName then
+                local specIDs = DF.AuraDesigner.SpellIDs and DF.AuraDesigner.SpellIDs[spec]
+                if specIDs then
+                    for name, id in pairs(specIDs) do
+                        if id == idNum then auraName = name; break end
+                        if type(id) == "table" then  -- rare multi-id entries
+                            for _, sub in ipairs(id) do
+                                if sub == idNum then auraName = name; break end
+                            end
+                            if auraName then break end
+                        end
+                    end
+                end
+            end
+        end
+        if not auraName then
+            local R = DF.FilterRegistry
+            local rec = R and R.ByID and R.ByID[idNum]
+            if rec then auraName = rec.n end
+        end
+
+        local isAdHoc = not auraName
+        -- Key from the validated TEXT, not tonumber output — number formatting
+        -- must never leak into config keys (AdHocSpellID parses "^#(%d+)$").
+        if isAdHoc then auraName = "#" .. text end
+
+        -- Cross-tab block (B2): the spell — snapped name's FULL identity set,
+        -- or the raw id for ad-hoc — is already tracked by the OPPOSITE pool.
+        -- Checked before the group branch so group adds are blocked too.
+        local crossBlocked = false
+        if spellPickerBlockedIDs and next(spellPickerBlockedIDs) then
+            if spellPickerBlockedIDs[idNum] then
+                crossBlocked = true
+            elseif not isAdHoc then
+                crossBlocked = IsCandidateCrossBlocked(auraName, spec)
+            end
+        end
+        if crossBlocked then
+            Echo(isOther and L["Already tracked in My Buffs."] or L["Already tracked in Other Buffs."])
+            return
+        end
+
+        -- Display name: the trackable pool entry when it has one (curated
+        -- display or localized SpellDB name), else the raw key.
+        local display = auraName
+        if not isAdHoc then
+            if isOther then
+                display = OtherPoolDisplayName(auraName)
+            else
+                local trackable = Adapter and Adapter:GetTrackableAuras(spec)
+                if trackable then
+                    for _, info in ipairs(trackable) do
+                        if info.name == auraName then display = info.display or auraName; break end
+                    end
+                end
+            end
+        end
+
+        -- Group mode: no already-used gate (a spell can hold several
+        -- indicators in one group). AddSpellToGroup echoes and refreshes.
+        if spellPickerMode == "group" then
+            AddSpellToGroup(auraName, display, typeKeyArg or "icon", isAdHoc)
+            addBox.EditBox:SetText("")
+            if isAdHoc then
+                Echo(format(L["Added #%d as an unknown spell ID — name and icon will show if the ID is valid."], idNum))
+                PopulateSpellGrid()  -- the new ad-hoc aura gets a card of its own
+            end
+            return
+        end
+
+        local alreadyUsed
+        if spellPickerMode == "placed" then
+            alreadyUsed = IsAuraTypePlaced(auraName, spellPickerType)
+        else
+            alreadyUsed = HasFrameEffect(auraName, spellPickerType)
+        end
+        if alreadyUsed then
+            Echo(L["Already added."])
+            return
+        end
+
+        AddPickedSpell(auraName, spellPickerType)
+        spellPickerDirty = true
+        addBox.EditBox:SetText("")
+        if isAdHoc then
+            Echo(format(L["Added #%d as an unknown spell ID — name and icon will show if the ID is valid."], idNum))
+        else
+            Echo(format(L["Added %s."], display))
+        end
+        PopulateSpellGrid()          -- card flips to its Placed/Active state
+        RefreshPlacedIndicators()    -- live preview updates behind the picker
+        RefreshPreviewEffects()
+    end
+
+    addBtn = GUI:CreateButton(spellPickerView, L["Add"], addBtnW, 22, function()
+        DoAddByID()
+    end)
+    addBtn:SetPoint("TOPRIGHT", pickerHeader, "BOTTOMRIGHT", -10, -7)
+    -- Enter in the box adds too (the helper's own OnEnterPressed only saves
+    -- db-backed values — this box has no db binding). Wrapped: the hook passes
+    -- the EditBox as arg 1, which must not reach DoAddByID's typeKeyArg.
+    addBox.EditBox:HookScript("OnEnterPressed", function() DoAddByID() end)
+
+    -- Group-mode add-by-ID buttons: [Icon] [Square] replace the single Add
+    -- button, so the typed ID lands with an explicit indicator type (Enter in
+    -- the box defaults to Icon). Hidden outside group mode by SetGroupToolbar.
+    local typeBtnW = 44
+    local addIconBtn = GUI:CreateButton(spellPickerView, L["Icon"], typeBtnW, 22, function()
+        DoAddByID("icon")
+    end)
+    addIconBtn:SetPoint("TOPRIGHT", pickerHeader, "BOTTOMRIGHT", -(10 + typeBtnW + 4), -7)
+    addIconBtn.Text:SetTextColor(BADGE_COLORS.icon.r, BADGE_COLORS.icon.g, BADGE_COLORS.icon.b)
+    addIconBtn:Hide()
+    local addSquareBtn = GUI:CreateButton(spellPickerView, L["Square"], typeBtnW, 22, function()
+        DoAddByID("square")
+    end)
+    addSquareBtn:SetPoint("TOPRIGHT", pickerHeader, "BOTTOMRIGHT", -10, -7)
+    addSquareBtn.Text:SetTextColor(BADGE_COLORS.square.r, BADGE_COLORS.square.g, BADGE_COLORS.square.b)
+    addSquareBtn:Hide()
+
+    -- Swap the toolbar between the modes; the ID box slides left to clear
+    -- whichever button set is showing (the search box is anchored to it and
+    -- follows). Called by ShowSpellPicker on every open.
+    spellPickerView.SetGroupToolbar = function(isGroup)
+        addBtn:SetShown(not isGroup)
+        addIconBtn:SetShown(isGroup)
+        addSquareBtn:SetShown(isGroup)
+        addBox:ClearAllPoints()
+        if isGroup then
+            addBox:SetPoint("TOPRIGHT", pickerHeader, "BOTTOMRIGHT", -(10 + typeBtnW * 2 + 4 + 6), 9)
+        else
+            addBox:SetPoint("TOPRIGHT", pickerHeader, "BOTTOMRIGHT", -(10 + addBtnW + 6), 9)
+        end
+    end
+
+    -- Spell picker scroll frame for the grid (below toolbar + hint rows)
+    local pickerScroll = CreateFrame("ScrollFrame", nil, spellPickerView, "ScrollFrameTemplate")
+    pickerScroll:SetPoint("TOPLEFT", pickerHeader, "BOTTOMLEFT", 0, -52)
+    pickerScroll:SetPoint("BOTTOMRIGHT", -22, 0)
+
+    spellPickerView.gridFrame = CreateFrame("Frame", nil, pickerScroll)
+    spellPickerView.gridFrame:SetWidth(1)
+    spellPickerView.gridFrame:SetHeight(400)
+    pickerScroll:SetScrollChild(spellPickerView.gridFrame)
+
+    pickerScroll:SetScript("OnSizeChanged", function(self, w, h)
+        spellPickerView.gridFrame:SetWidth(w)
+    end)
+
+    DF.GUI.StyleScrollBar(pickerScroll)
+
+    spellPickerView.scrollFrame = pickerScroll
+end
+
+-- ============================================================
 -- MAIN PAGE BUILD
 -- ============================================================
 
@@ -8811,306 +9123,7 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
         end
     end)
 
-    -- ── SPELL PICKER VIEW (hidden by default, overlays tabs when active) ──
-    spellPickerView = CreateFrame("Frame", nil, rightPanel, "BackdropTemplate")
-    spellPickerView:SetPoint("TOPLEFT", 0, 0)
-    spellPickerView:SetPoint("BOTTOMRIGHT", 0, 0)
-    GUI:CreatePanelBackdrop(spellPickerView, {borderColor = {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5}})
-    spellPickerView:Hide()
-
-    -- Spell picker header
-    local pickerHeader = CreateFrame("Frame", nil, spellPickerView, "BackdropTemplate")
-    pickerHeader:SetHeight(28)
-    pickerHeader:SetPoint("TOPLEFT", 0, 0)
-    pickerHeader:SetPoint("TOPRIGHT", 0, 0)
-    GUI:CreatePanelBackdrop(pickerHeader, {borderColor = {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5}})
-
-    -- Icon-only back chevron. Shared styler supplies the backdrop + accent-wash
-    -- hover; the chevron_right glyph is rotated 180° to point left (StyleButton
-    -- has no rotation knob, so re-apply it after styling).
-    local backBtn = CreateFrame("Button", nil, pickerHeader, "BackdropTemplate")
-    backBtn:SetPoint("LEFT", 4, 0)
-    GUI:StyleButton(backBtn, {
-        width = 24, height = 24,
-        icon = {
-            texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right",
-            size = 14,
-            color = C_TEXT_DIM,
-        },
-    })
-    backBtn.Icon:SetRotation(math.rad(180))  -- flip to point left
-    backBtn:SetScript("OnClick", function()
-        HideSpellPicker()
-        -- Add-by-ID lands while the picker stays open, so the effects tab
-        -- behind it is stale — rebuild it on the way out (card clicks do the
-        -- equivalent SwitchTab("effects") themselves).
-        if spellPickerDirty then
-            spellPickerDirty = false
-            SwitchTab(activeTab or "effects")
-        end
-    end)
-
-    spellPickerView.title = pickerHeader:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    spellPickerView.title:SetPoint("LEFT", backBtn, "RIGHT", 4, 0)
-    spellPickerView.title:SetText(L["Select a spell"])
-    spellPickerView.title:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-
-    spellPickerView.typeBadge = pickerHeader:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    spellPickerView.typeBadge:SetPoint("LEFT", spellPickerView.title, "RIGHT", 6, 0)
-
-    -- ── PICKER TOOLBAR (row 2): name search + add-by-ID ──
-    -- Same idiom as the FilterRegistry Options header: stretchy search box,
-    -- ^%d+$-validated Spell ID box + Add button, transient echo line.
-    -- CreateEditBox reserves 15px for its (empty) label, so the widget frames
-    -- anchor 15px high (y = 9) to land the box bodies at -6..-30 below the
-    -- header, with the 22px Add button centered on the same row (top = -7).
-    local addBtnW, addBoxW = 50, 70
-    local addBtn  -- created after DoAddByID below
-    local addBox = GUI:CreateEditBox(spellPickerView, "", nil, nil, nil, addBoxW, L["Spell ID"])
-    addBox:SetPoint("TOPRIGHT", pickerHeader, "BOTTOMRIGHT", -(10 + addBtnW + 6), 9)
-    spellPickerView.addBox = addBox
-
-    local searchBox = GUI:CreateEditBox(spellPickerView, "", nil, nil, nil, 150, L["Search..."])
-    searchBox:SetPoint("TOPLEFT", pickerHeader, "BOTTOMLEFT", 10, 9)
-    searchBox:SetPoint("TOPRIGHT", addBox, "TOPLEFT", -8, 0)
-    spellPickerView.searchBox = searchBox
-
-    -- Live name filter: case-insensitive plain find on the display name.
-    searchBox.EditBox:HookScript("OnTextChanged", function(eb)
-        local q = (eb:GetText() or ""):match("^%s*(.-)%s*$"):lower()
-        if q == spellPickerSearch then return end
-        spellPickerSearch = q
-        PopulateSpellGrid()
-    end)
-
-    -- Spell picker hint (echo borrows its line: hint hides while echo shows)
-    local pickerHint = spellPickerView:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    pickerHint:SetPoint("TOPLEFT", pickerHeader, "BOTTOMLEFT", 12, -36)
-    pickerHint:SetText(L["Click or drag a spell onto the frame to place it"])
-    pickerHint:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    spellPickerView.hint = pickerHint  -- ShowSpellPicker swaps the text per mode
-
-    -- Echo line: transient add-by-ID feedback, auto-hides after ~4s
-    -- (generation counter so a re-add restarts the window — FilterRegistry idiom)
-    local echoText = spellPickerView:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
-    echoText:SetPoint("TOPLEFT", pickerHeader, "BOTTOMLEFT", 12, -36)
-    echoText:SetPoint("TOPRIGHT", pickerHeader, "BOTTOMRIGHT", -10, -36)
-    echoText:SetJustifyH("LEFT")
-    echoText:SetWordWrap(false)
-    echoText:SetTextColor(0.6, 0.6, 0.6)
-    echoText:Hide()
-
-    local echoGen = 0
-    local function HideEcho()
-        echoGen = echoGen + 1
-        echoText:Hide()
-        pickerHint:Show()
-    end
-    spellPickerView.HideEcho = HideEcho
-    local function Echo(msg)
-        echoGen = echoGen + 1
-        local gen = echoGen
-        echoText:SetText(msg)
-        pickerHint:Hide()
-        echoText:Show()
-        C_Timer.After(4, function()
-            if echoGen == gen then HideEcho() end
-        end)
-    end
-    spellPickerView.Echo = Echo  -- AddSpellToGroup confirms group adds through it
-
-    -- Add-by-ID: snap known ids to their pool/curated record (then behave
-    -- exactly like clicking that spell's card — same AddPickedSpell path);
-    -- unknown ids become an ad-hoc "#<id>" aura whose key IS its identity.
-    -- The picker stays open (echo confirms), so several ids can be added in
-    -- a row; spellPickerDirty makes the back button rebuild the effects tab.
-    -- In "group" mode the toolbar's Icon/Square buttons pass typeKeyArg and
-    -- the add routes through AddSpellToGroup (Enter defaults to Icon).
-    local function DoAddByID(typeKeyArg)
-        local text = (addBox.EditBox:GetText() or ""):match("^%s*(.-)%s*$")
-        if text == "" then return end
-        -- Integers only: tonumber() also accepts floats/hex, which are never
-        -- valid spell ids
-        if not text:match("^%d+$") then
-            Echo(L["Enter a valid spell ID."])
-            return
-        end
-        -- Normalize + cap: strip leading zeros ("#007" and "#7" must be the same
-        -- key), and reject oversized digit strings — real spell IDs are well under
-        -- 10 digits, and past ~15 tonumber() loses integer precision, which would
-        -- mint broken keys like "#1e+21".
-        text = text:match("^0*(%d+)$") or text
-        if #text > 10 then
-            Echo(L["Enter a valid spell ID."])
-            return
-        end
-        local idNum = tonumber(text)
-        local isOther = IsOtherTab()
-        local spec = ResolveSpec()
-        -- The Other Buffs pool is spec-independent — no spec required there.
-        if not spec and not isOther then return end
-
-        -- Snap. My Buffs: the spec's curated tables first (alt ids included),
-        -- then the SpellDB (R.ByID indexes canonical + alt ids), else ad-hoc.
-        -- Other Buffs: SpellDB ONLY — the B1 naming contract (other-pool keys
-        -- are SpellDB rec.n or ad-hoc "#<id>"; curated internal names don't
-        -- resolve with a nil spec).
-        local auraName
-        if not isOther then
-            local alts = DF.AuraDesigner.AlternateSpellIDs and DF.AuraDesigner.AlternateSpellIDs[spec]
-            if alts and alts[idNum] then auraName = alts[idNum] end
-            if not auraName then
-                local specIDs = DF.AuraDesigner.SpellIDs and DF.AuraDesigner.SpellIDs[spec]
-                if specIDs then
-                    for name, id in pairs(specIDs) do
-                        if id == idNum then auraName = name; break end
-                        if type(id) == "table" then  -- rare multi-id entries
-                            for _, sub in ipairs(id) do
-                                if sub == idNum then auraName = name; break end
-                            end
-                            if auraName then break end
-                        end
-                    end
-                end
-            end
-        end
-        if not auraName then
-            local R = DF.FilterRegistry
-            local rec = R and R.ByID and R.ByID[idNum]
-            if rec then auraName = rec.n end
-        end
-
-        local isAdHoc = not auraName
-        -- Key from the validated TEXT, not tonumber output — number formatting
-        -- must never leak into config keys (AdHocSpellID parses "^#(%d+)$").
-        if isAdHoc then auraName = "#" .. text end
-
-        -- Cross-tab block (B2): the spell — snapped name's FULL identity set,
-        -- or the raw id for ad-hoc — is already tracked by the OPPOSITE pool.
-        -- Checked before the group branch so group adds are blocked too.
-        local crossBlocked = false
-        if spellPickerBlockedIDs and next(spellPickerBlockedIDs) then
-            if spellPickerBlockedIDs[idNum] then
-                crossBlocked = true
-            elseif not isAdHoc then
-                crossBlocked = IsCandidateCrossBlocked(auraName, spec)
-            end
-        end
-        if crossBlocked then
-            Echo(isOther and L["Already tracked in My Buffs."] or L["Already tracked in Other Buffs."])
-            return
-        end
-
-        -- Display name: the trackable pool entry when it has one (curated
-        -- display or localized SpellDB name), else the raw key.
-        local display = auraName
-        if not isAdHoc then
-            if isOther then
-                display = OtherPoolDisplayName(auraName)
-            else
-                local trackable = Adapter and Adapter:GetTrackableAuras(spec)
-                if trackable then
-                    for _, info in ipairs(trackable) do
-                        if info.name == auraName then display = info.display or auraName; break end
-                    end
-                end
-            end
-        end
-
-        -- Group mode: no already-used gate (a spell can hold several
-        -- indicators in one group). AddSpellToGroup echoes and refreshes.
-        if spellPickerMode == "group" then
-            AddSpellToGroup(auraName, display, typeKeyArg or "icon", isAdHoc)
-            addBox.EditBox:SetText("")
-            if isAdHoc then
-                Echo(format(L["Added #%d as an unknown spell ID — name and icon will show if the ID is valid."], idNum))
-                PopulateSpellGrid()  -- the new ad-hoc aura gets a card of its own
-            end
-            return
-        end
-
-        local alreadyUsed
-        if spellPickerMode == "placed" then
-            alreadyUsed = IsAuraTypePlaced(auraName, spellPickerType)
-        else
-            alreadyUsed = HasFrameEffect(auraName, spellPickerType)
-        end
-        if alreadyUsed then
-            Echo(L["Already added."])
-            return
-        end
-
-        AddPickedSpell(auraName, spellPickerType)
-        spellPickerDirty = true
-        addBox.EditBox:SetText("")
-        if isAdHoc then
-            Echo(format(L["Added #%d as an unknown spell ID — name and icon will show if the ID is valid."], idNum))
-        else
-            Echo(format(L["Added %s."], display))
-        end
-        PopulateSpellGrid()          -- card flips to its Placed/Active state
-        RefreshPlacedIndicators()    -- live preview updates behind the picker
-        RefreshPreviewEffects()
-    end
-
-    addBtn = GUI:CreateButton(spellPickerView, L["Add"], addBtnW, 22, function()
-        DoAddByID()
-    end)
-    addBtn:SetPoint("TOPRIGHT", pickerHeader, "BOTTOMRIGHT", -10, -7)
-    -- Enter in the box adds too (the helper's own OnEnterPressed only saves
-    -- db-backed values — this box has no db binding). Wrapped: the hook passes
-    -- the EditBox as arg 1, which must not reach DoAddByID's typeKeyArg.
-    addBox.EditBox:HookScript("OnEnterPressed", function() DoAddByID() end)
-
-    -- Group-mode add-by-ID buttons: [Icon] [Square] replace the single Add
-    -- button, so the typed ID lands with an explicit indicator type (Enter in
-    -- the box defaults to Icon). Hidden outside group mode by SetGroupToolbar.
-    local typeBtnW = 44
-    local addIconBtn = GUI:CreateButton(spellPickerView, L["Icon"], typeBtnW, 22, function()
-        DoAddByID("icon")
-    end)
-    addIconBtn:SetPoint("TOPRIGHT", pickerHeader, "BOTTOMRIGHT", -(10 + typeBtnW + 4), -7)
-    addIconBtn.Text:SetTextColor(BADGE_COLORS.icon.r, BADGE_COLORS.icon.g, BADGE_COLORS.icon.b)
-    addIconBtn:Hide()
-    local addSquareBtn = GUI:CreateButton(spellPickerView, L["Square"], typeBtnW, 22, function()
-        DoAddByID("square")
-    end)
-    addSquareBtn:SetPoint("TOPRIGHT", pickerHeader, "BOTTOMRIGHT", -10, -7)
-    addSquareBtn.Text:SetTextColor(BADGE_COLORS.square.r, BADGE_COLORS.square.g, BADGE_COLORS.square.b)
-    addSquareBtn:Hide()
-
-    -- Swap the toolbar between the modes; the ID box slides left to clear
-    -- whichever button set is showing (the search box is anchored to it and
-    -- follows). Called by ShowSpellPicker on every open.
-    spellPickerView.SetGroupToolbar = function(isGroup)
-        addBtn:SetShown(not isGroup)
-        addIconBtn:SetShown(isGroup)
-        addSquareBtn:SetShown(isGroup)
-        addBox:ClearAllPoints()
-        if isGroup then
-            addBox:SetPoint("TOPRIGHT", pickerHeader, "BOTTOMRIGHT", -(10 + typeBtnW * 2 + 4 + 6), 9)
-        else
-            addBox:SetPoint("TOPRIGHT", pickerHeader, "BOTTOMRIGHT", -(10 + addBtnW + 6), 9)
-        end
-    end
-
-    -- Spell picker scroll frame for the grid (below toolbar + hint rows)
-    local pickerScroll = CreateFrame("ScrollFrame", nil, spellPickerView, "ScrollFrameTemplate")
-    pickerScroll:SetPoint("TOPLEFT", pickerHeader, "BOTTOMLEFT", 0, -52)
-    pickerScroll:SetPoint("BOTTOMRIGHT", -22, 0)
-
-    spellPickerView.gridFrame = CreateFrame("Frame", nil, pickerScroll)
-    spellPickerView.gridFrame:SetWidth(1)
-    spellPickerView.gridFrame:SetHeight(400)
-    pickerScroll:SetScrollChild(spellPickerView.gridFrame)
-
-    pickerScroll:SetScript("OnSizeChanged", function(self, w, h)
-        spellPickerView.gridFrame:SetWidth(w)
-    end)
-
-    DF.GUI.StyleScrollBar(pickerScroll)
-
-    spellPickerView.scrollFrame = pickerScroll
+    BuildSpellPickerView()  -- spell picker overlay (hidden by default, replaces tabs when active)
 
     -- ========================================
     -- POPULATE (new UI)
