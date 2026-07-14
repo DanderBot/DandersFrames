@@ -1,13 +1,105 @@
 local addonName, DF = ...
-DF.BUILD_DATE = "2026-07-05T14:24:41Z"
+DF.BUILD_DATE = "2026-07-14T20:19:04Z"
 DF.RELEASE_CHANNEL = "alpha"
 DF.CHANGELOG_TEXT = [===[
 # DandersFrames Changelog
 
-## [Unreleased]
+## [5.0.0]
+
+### WoW 12.1 (Midnight) Rework
+
+*The 12.1 rework is a big team effort — brought to you by Danders, Krathe and Maelareth. A single change below often includes work from more than one of us, so entries aren't credited individually.*
+
+DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally changed how the game handles auras. This build runs on 12.1 only — 12.0.x stays on 4.7. Every aura row — buffs, debuffs, defensives and missing buffs — now renders through the game's new protected aura engine.
+
+* (Aura Designer) **The Aura Designer now works for every spec** — previously healers and Augmentation only. The spec dropdown is grouped by class and searchable.
+* (Aura Designer) **New: Filter Groups.** Place an entire filter on the frame as its own icon row — link built-in or custom filters, and every matching buff appears in a self-arranging row with its own position, icon size, growth and icon cap. Filter Designer changes apply to linked groups immediately, and buffs shown by a group leave the buff bar while "Hide Duplicate Buffs" is on.
+* (Aura Designer) The spell picker now uses the addon's full spell database — grouped by class, searchable, and any spell can be added by ID.
+* (Aura Designer) Every indicator has a show/hide eye — turn one off without deleting it.
+* (Aura Designer) The editor header is condensed to a single row; Sound Alerts moved to the Global tab.
+* (Profiles) Custom filters and your category tweaks travel with profile exports — including filters linked in the Aura Designer.
+* (Auras) **The Aura Blacklist has been retired**, replaced by the new filter system. Previously blacklisted buffs will show again — hide them via the Filter Designer instead. Individual debuffs can't be hidden on this version of the game.
+* (Auras) **New: Debuff Filters.** The debuff bar is now filtered by categories on the Aura Filters page — Boss, Role, Priority, Crowd Control, Raid and Dispellable (by you or by anyone). "Show All Debuffs" keeps the old behaviour.
+* (Auras) The "All Dispellable" debuff filter mode now actually filters — it previously showed every debuff.
+* (Auras) New "Hide Long Debuffs" filter: hides debuffs over a duration threshold, with an option to keep boss, role and priority debuffs visible.
+* (Auras) Buff and debuff filter preferences have been reset to new defaults as part of this rework.
+* (Profiles) A settings page's Copy, Sync and Reset buttons no longer touch settings owned by a different page.
+* (Auras) **New: Buff Filters.** The buff and defensive bars are now filtered by curated spell categories — healing, raid buffs, defensives, movement and more. Pick the buff bar's categories on the Aura Filters page and the defensive bar's on the Defensive Icon page.
+* (Interface) **New: Filter Designer.** A new settings page (Auras → Filter Designer) shows every spell in each category, lets you disable individual spells, and builds your own custom filters — including adding any spell by ID.
+* (Auras) Filter presets start with passive "noise" auras unticked — mastery procs and auto-applied side effects. Everything stays listed in the Filter Designer, one click to enable.
+* (Tooltips) Aura tooltip Enable toggles now apply immediately. Anchor/Offset and Disable in Combat can't apply to 12.1 aura icons (game limitation) and are marked in place — they still work for Frame and Binding tooltips.
+* (Aura Designer) The editor's preview canvas renders through the real 12.1 engine — what you see while styling is exactly what ships to the frames, including out-of-range fading.
+* (Aura Designer) Test mode previews the Aura Designer through the real engine — every placed indicator renders with its configured spell, styling and animations, exactly as live.
+* (Interface) **Border animations are now entirely DF's own.** Four new effects — DF Chase, DF Flash, DF Pixel and DF Proc — join DF Pulsate, DF Dash and Blink; the old library-backed effects are retired.
+* (Auras) **Animated borders are back on the Defensive and Missing-Buff icons**, with the full DF animation set. The animation driver is now shared, so animated borders are lighter across the board.
+* (Auras) Out-of-range and dead-unit fading works on the 12.1 aura displays again — live and in test mode.
+* (Aura Designer) The spell picker shows one unified grid — the separate "Inferred Tracking" section is gone; every tracked aura now works the same way.
+* (Aura Designer) Filter and debuff group boxes in the editor preview show greyed example icons, sized and arranged to your layout settings.
+* (Aura Designer) Filter and debuff groups can be styled like placed indicators — Appearance, Border, Duration Text and Stack Count sections — and the preview's example icons wear your styling live.
+* (Interface) The deprecated My Buff Indicators feature has been fully removed — the missing-buff display and the Aura Designer cover its use cases.
+* (Internal) **The pre-12.1 aura pipeline is fully removed** — every aura surface now runs exclusively on the 12.1 engine. If any aura display behaves differently than before, please report it.
+* (Dispel) Fixed the Top/Bottom/Left/Right Edge gradient styles rendering as health-shaped fragments after "On Current Health Only" had been active.
+* (Auras) Fixed a doubled gap between filter blocks when more than one filter is enabled — rows are uniformly spaced.
+* (Auras) **Centered growth works again** — rows set to grow from the center stay centered as icons appear and disappear, in combat too. The dropdown is now labelled **Grow**, with a **From Center** option.
+* (Test Mode) **Test mode previews buffs, debuffs, defensives and missing buffs through the real 12.1 engine** — actual container rows with live-true layout, borders, fonts, animations and tooltips. While test mode is open, the game's own aura displays temporarily show sample data; everything restores when it closes.
+* (Auras) The debuff "Color by Dispel Type" ring is now a flat square line matching your border's style and thickness, instead of the game's rounded ring art.
+* (Borders) Fixed switching a border from Gradient back to Solid sometimes leaving the gradient stuck until a /reload on aura icon borders.
+* (Profiles) Fixed profile resets not sticking for the Aura Filters — filters no longer flip back to an old preset after the next /reload.
+* (Profiles) Fixed "Reset Profile to Defaults" leaving the Aura Designer and Text Designer untouched — a reset now rebuilds both designer libraries to their defaults.
+* (Text Designer) Fixed the Text Designer going blank until a /reload after a profile reset. The default health text stays current/max.
+* (Text Designer) The Texts and Text Groups tabs now show a live count of their enabled elements.
+* (Interface) The settings window now defaults to **DF Roboto SemiBold**. Profiles still on the old default switch once — pick Friz Quadrata again to keep it. In-game frame text is unchanged.
+* (Integrations) Removed the Click-Through Icons options — 12.1 aura icons are always click-through, so the toggles no longer did anything.
+* (Class Power) Removed the Class Power Pips display and its settings page, along with its Test Mode toggle.
+* (Performance) Disabling the Blizzard party/raid frames now fully shuts them down instead of just hiding them, stopping their background work. Toggling this (or Show Side Menu) now prompts for a UI reload.
+* (Dispel) **The Dispel Overlay is now one unified system driven by the game's aura engine — and it covers boss debuffs (private auras) natively.** The old source selector is a single Enable toggle (existing settings migrate), colours come from the game's dispel palette, and everything else — border, glow, gradient, blend, darken, icons, pulse — stays yours to style, live and in combat. Also fixed a Lua error when opening Edit Mode with the overlay active.
+* (Auras) Opening WoW's Edit Mode no longer floods the aura rows with random sample icons — rows hide during Edit Mode and restore when it closes.
+* (Profiles) Refreshed the default profile's look — new installs and profile resets only. Tighter frames, buff borders on, Missing Buffs on by default, a cleaner pet style, and the Big/External Defensive filters no longer default on.
+* (Profiles) Fixed several border settings (Hide Intro Flash, border Colour Source) silently reverting on profile export/import and party↔raid copies.
+* (Test Mode) **Rebuilt the Quick Presets** (Static / Combat / Healer / Full). Each preset now sets every toggle, so they're reproducible — "Full" is genuinely everything — and applying one repaints the preview immediately.
+* (Test Mode) Fixed the party-only Targeted List and Personal Targeted settings leaking into the raid preview.
+* (Test Mode) The Targeted Spells and Targeted List toggles are greyed out in raid test mode — both are party-only features.
+* (Boss Debuffs) **Boss debuffs are now part of the regular debuff row** — including private auras, with duration, stacks and dispel colouring. The separate Boss Debuffs display and its settings page are retired.
+* (Missing Buffs) **Missing Buffs now work on 12.1 — including in combat and Mythic+.** The feature is display-only and driven by the game engine, so no combat delay and no Mythic+ blackout. In manual multi-buff mode every missing buff shows its own icon, and missing buffs now show for NPC party members too.
+* (Defensives) Fixed a defensive appearing twice when it counts as both personal and external (e.g. Guardian Spirit) — externals someone cast on you sort first. Also removed a duplicated pair of Duration Offset sliders.
+* (Auras) Debuff settings caught up with the buff row: Duration Format, Duration and Stack colours, filters and Sort Order all drive the new rows; settings the rows can't provide are marked in place.
+* (Click-Casting) Fixed right-click target/menu erroring with click-casting enabled — a 12.1 game bug; the workaround retires automatically once the game fixes it.
+* (Auras) **Debuffs now render through the 12.1 aura engine** — the last row on the legacy path, which could show nothing in combat. Layout, borders, text and sort work like the buff row, and a new "Dispel Border Inset" slider positions the dispel ring.
+* (Auras) Buff "Sort Order" works again — Time Remaining and Alphabetical apply natively, in combat too.
+* (Auras) New "Hide Long Buffs" filter: hides buffs whose total duration exceeds a threshold — e.g. hour-long food buffs. Permanent buffs are also hidden while this is on.
+* (Interface) Buff Border settings no longer hide when Masque's "Let Masque control borders" is on — Masque can't skin the 12.1 aura buttons, so DF's own border applies.
+* (Auras) Texture-style aura borders no longer scatter, lose their colour or vanish until a /reload — and fine border detail stays crisp at small icon sizes.
+* (Auras) "Color by Time Remaining" works again on duration text, ticking in combat — fixed time steps (red under 5s, orange under 15s, yellow under a minute).
+* (Auras) Buff and defensive icon text share one styling system, adding Duration and Stack colour options. The "Short" format no longer shows a stray space.
+* (Auras) Fixed Icons Per Row wrapping one icon early.
+* (Auras) Aura rows honor your layout settings again — anchor, direction, wrap, offsets, spacing, size and scale were previously ignored.
+* (Auras) Aura settings apply in real time again — sliders re-flow the row live during the drag.
+* (Interface) Settings the 12.1 rows can't provide are marked in place: "Min Stacks to Show", "Icons Per Row" on vertical rows, and "Border Animation" on buff icons.
+* (Auras) Fixed an in-combat error that permanently froze a frame's aura updates until reload. Stack counts now use the built-in display (shown at 2 or more).
+* (Auras) New buff duration format option (Number / Short / Full).
+* (Aura Designer) **The Aura Designer is fully rebuilt on the 12.1 aura system.** Every indicator type works again — and keeps working in combat — including animated borders, sound alerts and "Show When Missing". The few effects 12.1 can't support stay marked "Blizzard limitation" in the panel.
+* (Aura Designer) Fixed layout groups stacking all their spells on one spot — grouped indicators arrange into their grid again, and a missing buff leaves its slot empty.
+* (Aura Designer) Adding spells to a layout group now uses the full searchable spell picker — click Icon or Square to drop a spell in, and the picker stays open for adding several.
+* (Aura Designer) **New: Other Buffs tab.** Track any buff on your frames no matter who cast it — for example, Power Infusion on anyone in your group — with the same indicators, effects and sound alerts. Your own class's spells now live under the "My Buffs" tab.
+* (Aura Designer) New "Others Only" option on Other Buffs effects and filter groups: only show the effect when someone else cast the buff — your own casts still show on the regular buff bar.
+* (Aura Designer) A spell can be tracked in one tab at a time — the picker shows where a spell already lives, so the same buff never renders twice.
+* (Aura Designer) Layout groups and filter groups are available on the Other Buffs tab too, shared across all your specs.
+* (Aura Designer) **New: Debuffs tab.** Give debuff categories their own icon rows on the frame — for example, crowd control in its own spot with its own icon size. Tick a group's categories, set its layout, and those categories leave the main debuff bar automatically. Each group has its own dispellable mode and "Hide Long Debuffs" option.
+
+### Known Issues (12.1 alpha)
+
+* The 12.1 aura displays are rebuilt on Blizzard's new container system and are under active testing — please report any case where buff, debuff, defensive or missing-buff displays stop updating, **especially in combat**.
+* A debuff that counts as both a Priority debuff and a Boss/Role debuff can show one icon per matching filter when both are enabled — the only duplicate case the new filter system can't remove. "Show All Debuffs" avoids it.
+* Aura tooltips on 12.1 are drawn by the game beside the icon — tooltip Anchor/Offset and Disable in Combat can't apply to the new aura rows (game limitation).
+* Dispel Overlay: "Color Name Text" is not yet wired to the new overlay (marked in place). A unit with dispellable debuffs of two different types can show both type icons overlapped (rare).
+* Aura Designer text colouring is drawn as a cover over the text: it ignores the out-of-range text fade, and group parts with their own inline colours keep them.
+* Dragging certain aura sliders can briefly stutter.
+
+## [4.7.0]
 
 ### Bug Fixes
 
+* (Text Designer) **Restored health text lost when upgrading to 4.6.0** — the legacy-to-Text-Designer conversion keyed "did this profile use health text?" off an internal flag that never actually controlled the old display, so upgrading dropped the health text element for most converting profiles (and its cleanup pass could remove a working health element from profiles converted by earlier versions). The conversion now keys off the real setting — the health text Format, where only NONE means off — and profiles that already lost their health text get it rebuilt from their legacy settings on login. If you had deliberately deleted the auto-created health element, it may reappear once — delete it again and it will stay gone. The stray "%" cleanup now targets only profiles that genuinely had health text disabled. (by Krathe)
 * (Profiles) **Selective export/import no longer silently drops settings** — the category lists had drifted behind the addon's settings, so a selective export was missing the entire Targeted List page, the buff/debuff border style and animation families, permanent movers, My Buff Indicators, out-of-range alpha values and several more (~180 settings). All now travel with their categories, and an internal audit keeps the lists complete going forward. Full-profile export was never affected. (by Krathe)
 * (Profiles) **Export categories now match the addon's features** — the old "Icons" checkbox silently bundled five whole features (Targeted Spells, Targeted List, Missing Buffs, Defensives and the status icons); Text hid the Text Designer; Auras hid Boss Debuffs. The export/import picker now offers each feature as its own category — Dispel, Boss Debuffs, Missing Buffs, Defensives, My Buff Indicators, Targeted Spells, Targeted List, Text Designer and Status Icons included — so you can share exactly one feature's setup (or exclude one) honestly. Existing export strings keep working unchanged. (by Krathe)
 * (Text Designer) **Imported profiles keep their Text Designer configuration** — importing any modern profile with the Text category selected silently wiped the imported Text Designer elements and rebuilt them from the legacy text settings (the legacy-import converter misidentified every modern export as a legacy one). Modern imports now leave the imported Text Designer intact; genuinely old exports still convert as before. (by Krathe)
