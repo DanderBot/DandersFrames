@@ -207,8 +207,12 @@ end
 -- resolve the ACTIVE mode's DB (raid while in a raid, else party). Without this the
 -- whole personal path read DF:GetDB() (party) and ignored the raid toggle/size/pos.
 -- The group-frame and Targeted List paths stay party-resolved by design.
+-- raidTestMode counts as raid: a raid PREVIEW is not a real raid, so IsInRaid() is
+-- false there and the preview would otherwise resolve the PARTY profile and render
+-- with its enable/size/position/style — exactly the bug this resolver exists to
+-- prevent, just in test mode instead of live.
 local function GetPersonalDB()
-    return IsInRaid() and DF:GetRaidDB() or DF:GetDB()
+    return (IsInRaid() or DF.raidTestMode) and DF:GetRaidDB() or DF:GetDB()
 end
 
 -- Check if a unit is valid for targeted spell tracking

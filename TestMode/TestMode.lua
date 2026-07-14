@@ -3898,7 +3898,14 @@ function DF:UpdateAllTestTargetedList()
     local db = DF:GetDB()
     -- Gate the test display on the feature's master Enable too — a disabled
     -- targeted list must not show in test mode even if "show in test" is ticked.
-    if db and db.testShowTargetedList and db.targetedListEnabled and DF.ShowTestTargetedList then
+    --
+    -- Also PARTY-ONLY. The live path bails on IsInRaid(), but a raid PREVIEW is not a
+    -- real raid, so that gate never fires here: without this check the demo list showed
+    -- during raid test mode whenever the PARTY profile had it enabled. (Reading the party
+    -- db is deliberate — the Targeted List is party-resolved by design; see GetPersonalDB
+    -- in Features/TargetedSpells.lua.)
+    if not DF.raidTestMode
+        and db and db.testShowTargetedList and db.targetedListEnabled and DF.ShowTestTargetedList then
         DF:ShowTestTargetedList()
     elseif DF.HideTestTargetedList then
         DF:HideTestTargetedList()
@@ -3972,8 +3979,11 @@ function DF:UpdateAllTestTargetedSpell()
             end
         end
 
-        -- Also show personal targeted spells in raid test mode
-        local db = DF:GetDB()
+        -- Also show personal targeted spells in raid test mode. Personal Targeted is a
+        -- player-screen overlay with PER-MODE settings, so the raid preview must gate on
+        -- the RAID profile — this read DF:GetDB() (party), so the raid panel's toggle was
+        -- ignored and the party value decided it instead.
+        local db = raidDb
         if db.personalTargetedSpellEnabled and db.testShowPersonalTargeted ~= false and DF.ShowTestPersonalTargetedSpells then
             DF:ShowTestPersonalTargetedSpells()
         elseif DF.HideTestPersonalTargetedSpells then
