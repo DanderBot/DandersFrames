@@ -3558,11 +3558,13 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
     -- end of BuildTypeContent can frost the effect-settings groups the factory
     -- can't (yet) drive, WITHOUT touching the trigger tags above (built into
     -- `parent` before this function runs — the working "which aura" layer).
-    -- expiringGroup / swmCheck / borderCtl are captured for the surgical blocks
-    -- (Expiring, Show When Missing, gradient border style). See block pass below.
+    -- expiringGroup / swmCheck / borderCtl / stackMinCtl are captured for the surgical
+    -- blocks (Expiring, Show When Missing, gradient border style, min stacks). See block
+    -- pass below.
     local builtGroups = {}
     local expiringGroup, swmCheck, borderCtl, wholeBarCheck, swmGroup, durColorByTimeCtl
     local missingTriggerGroup, expireAlertGroup   -- sound casualties (P4.5 limitation blocks)
+    local stackMinCtl   -- Min Stacks slider (inert on 12.1 containers — limitation block)
 
     local function AddWidget(widget, height)
         widget:SetPoint("TOPLEFT", parent, "TOPLEFT", 5, -totalHeight)
@@ -3964,7 +3966,8 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- Stack Count
         AddGroup(L["Stack Count"], function(g)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Show Stacks"], proxy, "showStacks"), 28)
-            g:AddWidget(GUI:CreateSlider(parent, L["Min Stacks to Show"], 1, 10, 1, proxy, "stackMinimum"), 54)
+            stackMinCtl = GUI:CreateSlider(parent, L["Min Stacks to Show"], 1, 10, 1, proxy, "stackMinimum")
+            g:AddWidget(stackMinCtl, 54)
             g:AddWidget(GUI:CreateFontDropdown(parent, L["Stack Font"], proxy, "stackFont"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Stack Scale"], 0.5, 2.0, 0.1, proxy, "stackScale"), 54)
             g:AddWidget(GUI:CreateOutlineDropdown(parent, L["Stack Outline"], proxy, "stackOutline"), 54)
@@ -4075,7 +4078,8 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- Stack Count
         AddGroup(L["Stack Count"], function(g)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Show Stacks"], proxy, "showStacks"), 28)
-            g:AddWidget(GUI:CreateSlider(parent, L["Min Stacks to Show"], 1, 10, 1, proxy, "stackMinimum"), 54)
+            stackMinCtl = GUI:CreateSlider(parent, L["Min Stacks to Show"], 1, 10, 1, proxy, "stackMinimum")
+            g:AddWidget(stackMinCtl, 54)
             g:AddWidget(GUI:CreateFontDropdown(parent, L["Stack Font"], proxy, "stackFont"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Stack Scale"], 0.5, 2.0, 0.1, proxy, "stackScale"), 54)
             g:AddWidget(GUI:CreateOutlineDropdown(parent, L["Stack Outline"], proxy, "stackOutline"), 54)
@@ -4690,14 +4694,23 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- P4.3/P4.5 SHIPPED: icon/square render on the container engine (native icon / solid
         -- fill + cooldown + stacks + border + position), AND Show When Missing now renders via
         -- the read-free missing-mode container (static spell icon / colour square while absent).
-        -- The whole-type roadmap and the Show-When-Missing roadmap overlays are gone. One
-        -- surgical block remains:
+        -- The whole-type roadmap and the Show-When-Missing roadmap overlays are gone. Two
+        -- surgical blocks remain:
         --   * Expiring — permanent limitation. The whole group (Expiring Colour Override /
         --     colour-swap, pulse / bounce / whole-alpha-pulse, threshold, duration priority)
         --     is remaining-time-driven, which is unreadable on the container path.
         if expiringGroup then
             GUI:BlockControl12_1(expiringGroup, "limitation",
                 { id = "ad:" .. typeKey .. ":expiring", page = L["Aura Designer"], when = ADgate })
+        end
+        --   * Min Stacks to Show — permanent limitation. Stack counts render on the native
+        --     no-formatter path (a formatter would receive the SECRET application count and
+        --     trap — see Features/Auras.lua's stacks-formatter warning), so a custom minimum
+        --     other than the native "shown at >1" is not expressible. Frosted rather than
+        --     removed: the stored stackMinimum key stays, in case a future API allows it.
+        if stackMinCtl then
+            GUI:BlockControl12_1(stackMinCtl, "limitation",
+                { id = "ad:" .. typeKey .. ":stackmin", page = L["Aura Designer"], when = ADgate })
         end
         --   * Duration "Colour by Time" — P4.4 SHIPPED: the duration text now colours by
         --     time via the native bucket formatter (C-side |c escapes), so the roadmap
@@ -7301,9 +7314,11 @@ end
 -- concepts), Expiring / Show When Missing (remaining-time / presence reads).
 -- Structural fields (show toggles, colour-by-time, hide-above, border
 -- on/off) move the group struct sig -> the factory Rebuilds; everything
--- else hot-applies via the cosmetic sig. Collapse state persists under one
--- shared "adGroupStyle" key (disjoint from the effect cards' header keys).
-local function AddGroupAppearanceSection(body, group, bodyWidth, by)
+-- else hot-applies via the cosmetic sig. Collapse state persists PER CARD
+-- under "adGroupStyle:<cardKey>" — cardKey is the caller's expand-key form
+-- (raw id / "othergroup:<id>" / "dgroup:<id>"), so the three stores' keys
+-- stay disjoint from each other and from the effect cards' header keys.
+local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
     local s = group.style
     if type(s) ~= "table" then s = {}; group.style = s end
 
@@ -7359,7 +7374,7 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by)
 
     local g = GUI:CreateSettingsGroup(body, bodyWidth - 10, {
         collapsible = true,
-        collapseKey = "adGroupStyle",
+        collapseKey = "adGroupStyle:" .. tostring(cardKey),
     })
     g.padding = 6
     g:AddWidget(GUI:CreateHeader(body, L["Appearance"]), 25)
@@ -8319,7 +8334,7 @@ BuildLayoutGroupsTab = function()
 
                     -- ── APPEARANCE (collapsible — the effect-card section idiom) ──
                     by = by - 10
-                    by = AddGroupAppearanceSection(body, group, bodyWidth, by)
+                    by = AddGroupAppearanceSection(body, group, bodyWidth, by, expandKey)
                 end
 
                 local bodyH = -by + 12
@@ -8723,7 +8738,7 @@ BuildDebuffGroupsTab = function()
 
                 -- ── APPEARANCE (collapsible — the effect-card section idiom) ──
                 by = by - 10
-                by = AddGroupAppearanceSection(body, group, bodyWidth, by)
+                by = AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
 
                 local bodyH = -by + 12
                 body:SetHeight(bodyH)
