@@ -7484,7 +7484,7 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
                 gradient = true, shadow = true, alpha = true,
                 animate = true,
             },
-            animExcludeTypes = { PULSATE = true, CHASE = true, FLASH = true, PROC = true },
+            animExcludeTypes = { DF_FLASH = true, DF_PROC = true },
             fullUpdate    = refresh,
             lightUpdate   = refresh,
             lightColors   = refresh,

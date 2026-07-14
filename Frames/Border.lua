@@ -28,6 +28,10 @@ local ipairs = ipairs
 -- Midnight-safe: test a colour channel for secretness before feeding it to
 -- CreateColor()/SetGradient (which reject secret values).
 local issecretvalue = issecretvalue or function() return false end
+-- Hot-path anim tick math (procTick/flashTick and the flipbook stepper they
+-- call run every OnUpdate per active border) — cache off the math table.
+local floor = math.floor
+local min = math.min
 
 DF.Border = DF.Border or {}
 local Border = DF.Border
@@ -1000,9 +1004,9 @@ local PROC_LOOP_SPILL     = 0.2      -- loop glow spills this fraction of the ic
 -- SetTexCoord (both proc atlases share the grid).
 local function stepProcFlipbook(t, info, phase)
     if not info then return end
-    local f   = math.floor(phase * PROC_FRAMES) % PROC_FRAMES
+    local f   = floor(phase * PROC_FRAMES) % PROC_FRAMES
     local col = f % PROC_COLS
-    local row = math.floor(f / PROC_COLS)
+    local row = floor(f / PROC_COLS)
     local fw = (info.rightTexCoord - info.leftTexCoord) / PROC_COLS
     local fh = (info.bottomTexCoord - info.topTexCoord) / PROC_ROWS
     local l  = info.leftTexCoord + col * fw
@@ -1078,7 +1082,7 @@ local function procTick(border, anim, dt)
     if w and border._knownW then w = w - 2 * (anim.inset or 0) end
     if host and w and w > 0 and border._procGeomW ~= w then
         border._procGeomW = w
-        local off = math.floor(w * PROC_LOOP_SPILL + 0.5)
+        local off = floor(w * PROC_LOOP_SPILL + 0.5)
         t:ClearAllPoints()
         t:SetPoint("TOPLEFT",     host, "TOPLEFT",     -off,  off)
         t:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT",  off, -off)
@@ -1220,9 +1224,9 @@ local function flashTick(border, anim, dt)
     local period = border._flashPeriod or 0.5
     border._flashTimer = (border._flashTimer + dt / period) % 1
     if ants then
-        local f   = math.floor(border._flashTimer * FLASH_ANTS_FRAMES) % FLASH_ANTS_FRAMES
+        local f   = floor(border._flashTimer * FLASH_ANTS_FRAMES) % FLASH_ANTS_FRAMES
         local col = f % FLASH_ANTS_COLS
-        local row = math.floor(f / FLASH_ANTS_COLS)
+        local row = floor(f / FLASH_ANTS_COLS)
         local l   = col * FLASH_ANTS_FW
         local tp  = row * FLASH_ANTS_FW
         ants:SetTexCoord(l, l + FLASH_ANTS_FW, tp, tp + FLASH_ANTS_FW)
@@ -1238,7 +1242,7 @@ local function flashTick(border, anim, dt)
         -- Glows (0 → 60%): the outer collapses 2F→F at full alpha — it lands on
         -- its steady rect and never moves again; the inner expands F/2→F, its
         -- bright "over" pass fading as they land.
-        local kg = math.min(k / 0.6, 1)
+        local kg = min(k / 0.6, 1)
         local outerS = F * (2 - kg)
         outer:SetSize(outerS, outerS)
         outer:SetAlpha(maxA)

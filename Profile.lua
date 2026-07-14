@@ -46,6 +46,10 @@ function DF:ResetFullProfile()
     self:ResetProfile("party")
     self:ResetProfile("raid")
     if self.ResetDesignerPresets then self:ResetDesignerPresets() end
+    -- Filter Designer per-spell preset overrides live at profile root
+    -- (DF.db.filterPresetOverrides), like the AD/TD preset libraries above —
+    -- neither per-mode ResetProfile nor ResetDesignerPresets touches them.
+    DF.db.filterPresetOverrides = nil
     -- FullProfileRefresh re-applies the Aura Designer engine to live frames
     -- (Core.lua), so the reset AD presets take effect immediately. It does NOT
     -- touch the Text Designer, so nudge that separately below.
