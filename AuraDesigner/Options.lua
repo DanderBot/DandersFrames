@@ -32,7 +32,7 @@ local selectedSpec = nil         -- Current spec key being viewed
 -- lockstep. GUI.lua loads before this file (see .toc), so DF.GUI.Colors is
 -- populated at parse time.
 local C_BACKGROUND = DF.GUI.Colors.background
-local C_PANEL      = DF.GUI.Colors.panel
+-- (C_PANEL removed — unreferenced; reclaimed for the 200-locals ceiling.)
 local C_ELEMENT    = DF.GUI.Colors.element
 local C_BORDER     = DF.GUI.Colors.border
 local C_HOVER      = DF.GUI.Colors.hover
@@ -45,16 +45,12 @@ local C_TEXT_DIM   = DF.GUI.Colors.textDim
 -- them in a registered refresh fn so Core rebuilds them after the overlay —
 -- otherwise these dropdowns stay English. Value-keys (CENTER, RIGHT, …) and
 -- the _order arrays are raw identifiers and must NOT be localized.
-local INDICATOR_TYPES = {}
-local ANCHOR_OPTIONS = {}
-local GROWTH_OPTIONS = {}
-local FRAME_STRATA_OPTIONS = {}
-local BORDER_STYLE_OPTIONS = {}
-local HEALTHBAR_MODE_OPTIONS = {}
-local BAR_ORIENT_OPTIONS = {}
+-- One namespace table instead of one local per option table (the main chunk
+-- rides the Lua 5.1 200-locals ceiling; seven locals reclaimed to one).
+local OPTS = {}
 
 local function RefreshLocaleStrings()
-    INDICATOR_TYPES = {
+    OPTS.INDICATOR_TYPES = {
         { key = "icon",       label = L["Icon"],             placed = true  },
         { key = "square",     label = L["Square"],           placed = true  },
         { key = "bar",        label = L["Bar"],              placed = true  },
@@ -67,34 +63,34 @@ local function RefreshLocaleStrings()
         { key = "sound",      label = L["Sound Alert"],      placed = false },
     }
 
-    ANCHOR_OPTIONS = {
+    OPTS.ANCHOR_OPTIONS = {
         CENTER = L["Center"], TOP = L["Top"], BOTTOM = L["Bottom"], LEFT = L["Left"], RIGHT = L["Right"],
         TOPLEFT = L["Top Left"], TOPRIGHT = L["Top Right"], BOTTOMLEFT = L["Bottom Left"], BOTTOMRIGHT = L["Bottom Right"],
         _order = {"TOPLEFT", "TOP", "TOPRIGHT", "LEFT", "CENTER", "RIGHT", "BOTTOMLEFT", "BOTTOM", "BOTTOMRIGHT"},
     }
 
-    GROWTH_OPTIONS = {
+    OPTS.GROWTH_OPTIONS = {
         RIGHT = L["Right"], LEFT = L["Left"], UP = L["Up"], DOWN = L["Down"],
         _order = {"RIGHT", "LEFT", "UP", "DOWN"},
     }
 
-    FRAME_STRATA_OPTIONS = {
+    OPTS.FRAME_STRATA_OPTIONS = {
         INHERIT = L["Inherit (Frame)"], BACKGROUND = L["Background"], LOW = L["Low"], MEDIUM = L["Medium"], HIGH = L["High"],
         _order = {"INHERIT", "BACKGROUND", "LOW", "MEDIUM", "HIGH"},
     }
 
-    BORDER_STYLE_OPTIONS = {
+    OPTS.BORDER_STYLE_OPTIONS = {
         SOLID = L["Solid Border"], ANIMATED = L["Animated Border"], DASHED = L["Dashed Border"],
         GLOW = L["Glow"], CORNERS = L["Corners Only"],
         _order = {"SOLID", "ANIMATED", "DASHED", "GLOW", "CORNERS"},
     }
 
-    HEALTHBAR_MODE_OPTIONS = {
+    OPTS.HEALTHBAR_MODE_OPTIONS = {
         Replace = L["Replace"], Tint = L["Tint"],
         _order = {"Replace", "Tint"},
     }
 
-    BAR_ORIENT_OPTIONS = {
+    OPTS.BAR_ORIENT_OPTIONS = {
         HORIZONTAL = L["Horizontal"], VERTICAL = L["Vertical"],
         _order = {"HORIZONTAL", "VERTICAL"},
     }
@@ -1564,29 +1560,8 @@ local function RemoveIndicatorInstance(auraName, indicatorID)
     end
 end
 
--- Change an instance's type (icon/square/bar), keeping anchor/offset
-local function ChangeInstanceType(auraName, indicatorID, newType)
-    local inst = GetIndicatorByID(auraName, indicatorID)
-    if not inst then return end
-
-    -- Preserve placement (and the eye toggle's hidden state — it's a state,
-    -- not an appearance setting, so a type change shouldn't un-hide)
-    local savedID = inst.id
-    local savedAnchor = inst.anchor
-    local savedOffX = inst.offsetX
-    local savedOffY = inst.offsetY
-    local savedEnabled = inst.enabled
-
-    -- Wipe everything, keep minimal: id + type + placement
-    -- All other settings fall through to global defaults → TYPE_DEFAULTS via proxy
-    wipe(inst)
-    inst.id = savedID
-    inst.type = newType
-    inst.anchor = savedAnchor or (TYPE_DEFAULTS[newType] and TYPE_DEFAULTS[newType].anchor) or "TOPLEFT"
-    inst.offsetX = savedOffX or 0
-    inst.offsetY = savedOffY or 0
-    inst.enabled = savedEnabled
-end
+-- (ChangeInstanceType removed — uncalled since the tile-strip type switcher
+-- left the v4 redesign; reclaimed for the 200-locals ceiling.)
 
 -- Keys to skip when copying appearance between indicators (identity + placement +
 -- the eye toggle's hidden state — copying appearance must not hide the destination)
@@ -2794,15 +2769,98 @@ local function WirePreviewIndicator(slot, capturedAura, capturedID, spec)
     end)
 end
 
+-- Representative preview icons per debuff category. Category membership is
+-- Blizzard-secret at runtime, so the editor shows iconic stand-ins instead of
+-- real members. Entry encoding: NEGATIVE numbers are spell IDs (icon resolved
+-- live via C_Spell.GetSpellTexture — all evergreen player abilities, so they
+-- stay valid across patches); positive numbers would be literal texture
+-- FileDataIDs; strings are texture paths. Never shown as live auras — the
+-- placeholder desaturates them (example affordance).
+local DEBUFF_CATEGORY_SAMPLES = {
+    boss         = { "Interface\\TargetingFrame\\UI-RaidTargetingIcon_8", -348 },   -- skull marker, Immolate
+    role         = { -6343, -113746 },        -- Thunder Clap, Mystic Touch
+    priority     = { -980, -34914 },          -- Agony, Vampiric Touch
+    crowdControl = { -118, -6770, -5782 },    -- Polymorph, Sap, Fear
+    raid         = { -589, -1943 },           -- Shadow Word: Pain, Rupture
+    dispellable  = { -339, -51514 },          -- Entangling Roots, Hex
+    _order = { "boss", "role", "priority", "crowdControl", "raid", "dispellable" },
+}
+
+-- Example icons for a container-backed group's placeholder block, or nil when
+-- the group has nothing to sample (caller falls back to the outline-only
+-- style). maxDefault mirrors the DrawGroupPlaceholderSlot default so both
+-- compute the same slot count.
+-- * Filter groups: sample REAL spells from the linked filters — resolve the
+--   selection (same R:ResolveSelection the factory uses; preview-path only,
+--   so no cache needed) and take the first N canonical ids in sorted order
+--   (deterministic — the preview is stable across refreshes). An empty or
+--   dangling selection resolves to kind "all" / an empty map → nil.
+-- * Debuff groups (records carry .selection): cycle the selected categories'
+--   representative samples across all N slots in _order.
+local function GroupSampleIcons(group, maxDefault)
+    local n = max(1, tonumber(group.maxIcons) or maxDefault)
+    local icons = {}
+    if group.selection then
+        -- Debuff category group: round-robin the selected categories
+        local cats = {}
+        for _, key in ipairs(DEBUFF_CATEGORY_SAMPLES._order) do
+            if group.selection[key] then tinsert(cats, DEBUFF_CATEGORY_SAMPLES[key]) end
+        end
+        if #cats == 0 then return nil end
+        for i = 1, n do
+            local samples = cats[(i - 1) % #cats + 1]
+            local entry = samples[(floor((i - 1) / #cats) % #samples) + 1]
+            if type(entry) == "number" and entry < 0 then
+                entry = (C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(-entry)) or 134400
+            end
+            icons[i] = entry
+        end
+        return icons
+    end
+    if group.kind ~= "filter" then return nil end
+    local R = DF.FilterRegistry
+    if not R then return nil end
+    local res = R:ResolveSelection(group.filterSelection, false)
+    if res.kind == "all" then return nil end -- empty/dangling selection
+    -- Canonical ids: variant/alt ids collapse onto their record's id; raw ids
+    -- from custom filters (no registry record) sample as themselves.
+    local ids, seen = {}, {}
+    if res.kind == "include" then
+        for id in pairs(res.map) do
+            local rec = R.ByID and R.ByID[id]
+            local cid = rec and rec.id or id
+            if not seen[cid] then seen[cid] = true; tinsert(ids, cid) end
+        end
+    else -- "exclude" (Uncategorised): complement of the known registry
+        for _, rec in ipairs(R.Spells) do
+            if not res.map[rec.id] then tinsert(ids, rec.id) end
+        end
+    end
+    if #ids == 0 then return nil end
+    sort(ids)
+    for i = 1, min(n, #ids) do
+        local rec = R.ByID and R.ByID[ids[i]]
+        if rec then
+            local _, icon = R:GetSpellDisplay(rec)
+            icons[i] = icon
+        else
+            icons[i] = (C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(ids[i])) or 134400
+        end
+    end
+    return icons
+end
+
 -- Shared labeled-outline placeholder for container-backed groups (filter
 -- groups on My Buffs, debuff category groups on Debuffs): their contents are
 -- Blizzard-filled at runtime (secret visibility, registry/category-driven),
--- so the editor canvas can't preview real icons. Draw an outline block at the
--- group's anchor/offset sized to its footprint (iconSize × min(maxIcons,
--- iconsPerRow) columns, wrapped rows) instead. Pooled per group id in the
+-- so the editor canvas can't preview real member icons. Draw an outline block
+-- at the group's anchor/offset sized to its footprint (iconSize ×
+-- min(maxIcons, iconsPerRow) columns, wrapped rows), filled with EXAMPLE
+-- icons (`icons` array from GroupSampleIcons; nil/empty = outline only) so
+-- size/spacing/grow/per-row edits are visible. Pooled per group id in the
 -- caller's pool table (separate pools — the two id counters can collide);
 -- returns the slot for the placedIndicators list.
-local function DrawGroupPlaceholderSlot(mockFrame, pool, group, wrapDefault, maxDefault)
+local function DrawGroupPlaceholderSlot(mockFrame, pool, group, wrapDefault, maxDefault, icons)
     local slot = pool[group.id]
     if not slot then
         slot = CreateFrame("Frame", nil, mockFrame, "BackdropTemplate")
@@ -2842,6 +2900,48 @@ local function DrawGroupPlaceholderSlot(mockFrame, pool, group, wrapDefault, max
         group.offsetX or 0, group.offsetY or 0)
     slot:SetFrameStrata(mockFrame:GetFrameStrata())
     slot:SetFrameLevel(mockFrame:GetFrameLevel() + 8)
+
+    -- EXAMPLE ICONS inside the block geometry (nil icons = outline only).
+    -- Textures are pooled on the slot and fully rebound both directions: a
+    -- group whose samples empty out (filters unlinked, categories deselected)
+    -- returns to the bare outline (extras hidden), and vice versa. Icons fill
+    -- the block's grid from its pinned grow-corner (centered rows when the
+    -- primary direction is CENTER), so grow/wrap edits read directionally.
+    -- Desaturation is the "example, not live" affordance; the group-name
+    -- label stays legible on top (OVERLAY vs ARTWORK).
+    local texPool = slot.icons
+    if not texPool then texPool = {}; slot.icons = texPool end
+    local count = icons and min(#icons, maxIcons) or 0
+    local step = iconSize + spacing
+    local xSign = (horiz == "RIGHT") and -1 or 1
+    local ySign = (vert == "TOP") and -1 or 1
+    for i = 1, count do
+        local tex = texPool[i]
+        if not tex then
+            tex = slot:CreateTexture(nil, "ARTWORK")
+            tex:SetTexCoord(0.08, 0.92, 0.08, 0.92) -- house-style icon crop
+            tex:SetDesaturated(true)                -- example affordance
+            texPool[i] = tex
+        end
+        tex:SetTexture(icons[i])
+        tex:SetSize(iconSize, iconSize)
+        tex:ClearAllPoints()
+        local col = (i - 1) % wrap
+        local row = floor((i - 1) / wrap)
+        if horiz == "" then
+            -- CENTER primary: rows centered on the block's vert edge
+            local lastRow = floor((count - 1) / wrap)
+            local iconsInRow = (row == lastRow) and (((count - 1) % wrap) + 1) or wrap
+            tex:SetPoint(vert, slot, vert,
+                (col - (iconsInRow - 1) / 2) * step, ySign * row * step)
+        else
+            local corner = vert .. horiz
+            tex:SetPoint(corner, slot, corner, xSign * col * step, ySign * row * step)
+        end
+        tex:Show()
+    end
+    for i = count + 1, #texPool do texPool[i]:Hide() end
+
     slot:Show()
     return slot
 end
@@ -2961,7 +3061,8 @@ local function RefreshPlacedIndicators()
         for _, group in ipairs(specGroups) do
             if group.kind == "filter" and group.enabled ~= false then
                 tinsert(placedIndicators,
-                    DrawGroupPlaceholderSlot(mockFrame, fgPool, group, 8, 8))
+                    DrawGroupPlaceholderSlot(mockFrame, fgPool, group, 8, 8,
+                        GroupSampleIcons(group, 8)))
             end
         end
     end
@@ -2978,7 +3079,8 @@ local function RefreshPlacedIndicators()
         for _, group in ipairs(DebuffGroupsRead()) do
             if group.enabled ~= false then
                 tinsert(placedIndicators,
-                    DrawGroupPlaceholderSlot(mockFrame, dgPool, group, 4, 4))
+                    DrawGroupPlaceholderSlot(mockFrame, dgPool, group, 4, 4,
+                        GroupSampleIcons(group, 4)))
             end
         end
     end
@@ -3714,7 +3816,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 groupNote:SetText(format(L["Position managed by: %s"], layoutGroup.name or L["Layout Group"]))
                 g:AddWidget(groupNote, 18)
             else
-                g:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], ANCHOR_OPTIONS, proxy, "anchor", function() DF:AuraDesigner_RefreshPage() end), 54)
+                g:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], OPTS.ANCHOR_OPTIONS, proxy, "anchor", function() DF:AuraDesigner_RefreshPage() end), 54)
                 g:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 1, proxy, "offsetX"), 54)
                 g:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, proxy, "offsetY"), 54)
             end
@@ -3725,7 +3827,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateSlider(parent, L["Scale"], 0.5, 3.0, 0.05, proxy, "scale"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Alpha"], 0, 1, 0.05, proxy, "alpha"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Frame Level"], -10, 30, 1, proxy, "frameLevel"), 54)
-            g:AddWidget(GUI:CreateDropdown(parent, L["Frame Strata"], FRAME_STRATA_OPTIONS, proxy, "frameStrata"), 54)
+            g:AddWidget(GUI:CreateDropdown(parent, L["Frame Strata"], OPTS.FRAME_STRATA_OPTIONS, proxy, "frameStrata"), 54)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Cooldown Swipe"], proxy, "hideSwipe"), 28)
             -- Text-only mode: the icon TEXTURE is hidden, so a border (static OR
             -- expiring) would frame nothing. Rebuild the page on toggle so the
@@ -3837,7 +3939,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateSlider(parent, L["Duration Scale"], 0.5, 2.0, 0.1, proxy, "durationScale"), 54)
             g:AddWidget(GUI:CreateOutlineDropdown(parent, L["Outline"], proxy, "durationOutline"), 54)
             g:AddWidget(GUI:CreateShadowCheckbox(parent, L["Shadow"], proxy, "durationOutline"), 28)
-            g:AddWidget(GUI:CreateDropdown(parent, L["Duration Anchor"], ANCHOR_OPTIONS, proxy, "durationAnchor"), 54)
+            g:AddWidget(GUI:CreateDropdown(parent, L["Duration Anchor"], OPTS.ANCHOR_OPTIONS, proxy, "durationAnchor"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 1, proxy, "durationX"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, proxy, "durationY"), 54)
             durColorByTimeCtl = GUI:CreateCheckbox(parent, L["Color by Time Remaining"], proxy, "durationColorByTime")
@@ -3867,7 +3969,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateSlider(parent, L["Stack Scale"], 0.5, 2.0, 0.1, proxy, "stackScale"), 54)
             g:AddWidget(GUI:CreateOutlineDropdown(parent, L["Stack Outline"], proxy, "stackOutline"), 54)
             g:AddWidget(GUI:CreateShadowCheckbox(parent, L["Shadow"], proxy, "stackOutline"), 28)
-            g:AddWidget(GUI:CreateDropdown(parent, L["Stack Anchor"], ANCHOR_OPTIONS, proxy, "stackAnchor"), 54)
+            g:AddWidget(GUI:CreateDropdown(parent, L["Stack Anchor"], OPTS.ANCHOR_OPTIONS, proxy, "stackAnchor"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 1, proxy, "stackX"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, proxy, "stackY"), 54)
             g:AddWidget(GUI:CreateColorPicker(parent, L["Stack Text Color"], proxy, "stackColor", true, RPL, RPL, true), 28)
@@ -3882,7 +3984,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 groupNote:SetText(format(L["Position managed by: %s"], layoutGroup.name or L["Layout Group"]))
                 g:AddWidget(groupNote, 18)
             else
-                g:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], ANCHOR_OPTIONS, proxy, "anchor", function() DF:AuraDesigner_RefreshPage() end), 54)
+                g:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], OPTS.ANCHOR_OPTIONS, proxy, "anchor", function() DF:AuraDesigner_RefreshPage() end), 54)
                 g:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 1, proxy, "offsetX"), 54)
                 g:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, proxy, "offsetY"), 54)
             end
@@ -3894,7 +3996,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateColorPicker(parent, L["Color"], proxy, "color", true, RPL, RPL, true), 28)
             g:AddWidget(GUI:CreateSlider(parent, L["Alpha"], 0, 1, 0.05, proxy, "alpha"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Frame Level"], -10, 30, 1, proxy, "frameLevel"), 54)
-            g:AddWidget(GUI:CreateDropdown(parent, L["Frame Strata"], FRAME_STRATA_OPTIONS, proxy, "frameStrata"), 54)
+            g:AddWidget(GUI:CreateDropdown(parent, L["Frame Strata"], OPTS.FRAME_STRATA_OPTIONS, proxy, "frameStrata"), 54)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Cooldown Swipe"], proxy, "hideSwipe"), 28)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Icon (Text Only)"], proxy, "hideIcon"), 28)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Show When Missing"], proxy, "showWhenMissing", function()
@@ -3948,7 +4050,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateSlider(parent, L["Duration Scale"], 0.5, 2.0, 0.1, proxy, "durationScale"), 54)
             g:AddWidget(GUI:CreateOutlineDropdown(parent, L["Outline"], proxy, "durationOutline"), 54)
             g:AddWidget(GUI:CreateShadowCheckbox(parent, L["Shadow"], proxy, "durationOutline"), 28)
-            g:AddWidget(GUI:CreateDropdown(parent, L["Duration Anchor"], ANCHOR_OPTIONS, proxy, "durationAnchor"), 54)
+            g:AddWidget(GUI:CreateDropdown(parent, L["Duration Anchor"], OPTS.ANCHOR_OPTIONS, proxy, "durationAnchor"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 1, proxy, "durationX"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, proxy, "durationY"), 54)
             durColorByTimeCtl = GUI:CreateCheckbox(parent, L["Color by Time Remaining"], proxy, "durationColorByTime")
@@ -3978,7 +4080,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateSlider(parent, L["Stack Scale"], 0.5, 2.0, 0.1, proxy, "stackScale"), 54)
             g:AddWidget(GUI:CreateOutlineDropdown(parent, L["Stack Outline"], proxy, "stackOutline"), 54)
             g:AddWidget(GUI:CreateShadowCheckbox(parent, L["Shadow"], proxy, "stackOutline"), 28)
-            g:AddWidget(GUI:CreateDropdown(parent, L["Stack Anchor"], ANCHOR_OPTIONS, proxy, "stackAnchor"), 54)
+            g:AddWidget(GUI:CreateDropdown(parent, L["Stack Anchor"], OPTS.ANCHOR_OPTIONS, proxy, "stackAnchor"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 1, proxy, "stackX"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, proxy, "stackY"), 54)
             g:AddWidget(GUI:CreateColorPicker(parent, L["Stack Text Color"], proxy, "stackColor", true, RPL, RPL, true), 28)
@@ -3993,14 +4095,14 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 groupNote:SetText(format(L["Position managed by: %s"], layoutGroup.name or L["Layout Group"]))
                 g:AddWidget(groupNote, 18)
             else
-                g:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], ANCHOR_OPTIONS, proxy, "anchor", function() DF:AuraDesigner_RefreshPage() end), 54)
+                g:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], OPTS.ANCHOR_OPTIONS, proxy, "anchor", function() DF:AuraDesigner_RefreshPage() end), 54)
                 g:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 1, proxy, "offsetX"), 54)
                 g:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, proxy, "offsetY"), 54)
             end
         end)
         -- Size & Orientation
         AddGroup(L["Size & Orientation"], function(g)
-            g:AddWidget(GUI:CreateDropdown(parent, L["Orientation"], BAR_ORIENT_OPTIONS, proxy, "orientation", function()
+            g:AddWidget(GUI:CreateDropdown(parent, L["Orientation"], OPTS.BAR_ORIENT_OPTIONS, proxy, "orientation", function()
                 local w = proxy.width
                 local h = proxy.height
                 proxy.width = h
@@ -4023,7 +4125,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateColorPicker(parent, L["Background Color"], proxy, "bgColor", true, RPL, RPL, true), 28)
             g:AddWidget(GUI:CreateSlider(parent, L["Alpha"], 0, 1, 0.05, proxy, "alpha"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Frame Level"], -10, 30, 1, proxy, "frameLevel"), 54)
-            g:AddWidget(GUI:CreateDropdown(parent, L["Frame Strata"], FRAME_STRATA_OPTIONS, proxy, "frameStrata"), 54)
+            g:AddWidget(GUI:CreateDropdown(parent, L["Frame Strata"], OPTS.FRAME_STRATA_OPTIONS, proxy, "frameStrata"), 54)
         end)
         -- Border (Stage 5.3 — unified controls via CreateBorderControls).
         -- Full toolkit (Style / Texture / Colour / Gradient / Shadow / Blend /
@@ -4091,7 +4193,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateSlider(parent, L["Duration Scale"], 0.5, 2.0, 0.1, proxy, "durationScale"), 54)
             g:AddWidget(GUI:CreateOutlineDropdown(parent, L["Outline"], proxy, "durationOutline"), 54)
             g:AddWidget(GUI:CreateShadowCheckbox(parent, L["Shadow"], proxy, "durationOutline"), 28)
-            g:AddWidget(GUI:CreateDropdown(parent, L["Duration Anchor"], ANCHOR_OPTIONS, proxy, "durationAnchor"), 54)
+            g:AddWidget(GUI:CreateDropdown(parent, L["Duration Anchor"], OPTS.ANCHOR_OPTIONS, proxy, "durationAnchor"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 1, proxy, "durationX"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, proxy, "durationY"), 54)
             durColorByTimeCtl = GUI:CreateCheckbox(parent, L["Color by Time Remaining"], proxy, "durationColorByTime")
@@ -4169,7 +4271,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
     elseif typeKey == "healthbar" then
         -- Appearance
         AddGroup(L["Appearance"], function(g)
-            g:AddWidget(GUI:CreateDropdown(parent, L["Mode"], HEALTHBAR_MODE_OPTIONS, proxy, "mode", function()
+            g:AddWidget(GUI:CreateDropdown(parent, L["Mode"], OPTS.HEALTHBAR_MODE_OPTIONS, proxy, "mode", function()
                 -- Rebuild so the Blend % slider's hideOn re-evaluates and the
                 -- group's height recomputes for the new visible-widget set.
                 DF:AuraDesigner_RefreshPage()
@@ -4218,7 +4320,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- background (visible in the missing-health area). Replace = opaque cover;
         -- Tint = blend × colour alpha so the normal background shows through.
         AddGroup(L["Appearance"], function(g)
-            g:AddWidget(GUI:CreateDropdown(parent, L["Mode"], HEALTHBAR_MODE_OPTIONS, proxy, "mode", function()
+            g:AddWidget(GUI:CreateDropdown(parent, L["Mode"], OPTS.HEALTHBAR_MODE_OPTIONS, proxy, "mode", function()
                 DF:AuraDesigner_RefreshPage()
             end), 54)
             g:AddWidget(GUI:CreateColorPicker(parent, L["Color"], proxy, "color", true, RPL, RPL, true), 28)
@@ -4757,7 +4859,7 @@ local function BuildGlobalView(parent)
         g:AddWidget(GUI:CreateSlider(parent, L["Default Icon Size"], 8, 64, 1, defaults, "iconSize"), 50)
         g:AddWidget(GUI:CreateSlider(parent, L["Default Scale"], 0.5, 3.0, 0.05, defaults, "iconScale"), 50)
         g:AddWidget(GUI:CreateSlider(parent, L["Default Frame Level"], -10, 30, 1, defaults, "indicatorFrameLevel"), 50)
-        g:AddWidget(GUI:CreateDropdown(parent, L["Default Frame Strata"], FRAME_STRATA_OPTIONS, defaults, "indicatorFrameStrata"), 50)
+        g:AddWidget(GUI:CreateDropdown(parent, L["Default Frame Strata"], OPTS.FRAME_STRATA_OPTIONS, defaults, "indicatorFrameStrata"), 50)
         g:AddWidget(GUI:CreateCheckbox(parent, L["Show Duration"], defaults, "showDuration"), 24)
         g:AddWidget(GUI:CreateCheckbox(parent, L["Show Stacks"], defaults, "showStacks"), 24)
         g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Cooldown Swipe"], defaults, "hideSwipe"), 24)
@@ -4799,7 +4901,7 @@ local function BuildGlobalView(parent)
         g:AddWidget(GUI:CreateSlider(parent, L["Scale"], 0.5, 2.0, 0.1, defaults, "durationScale"), 50)
         g:AddWidget(GUI:CreateOutlineDropdown(parent, L["Outline"], defaults, "durationOutline"), 54)
         g:AddWidget(GUI:CreateShadowCheckbox(parent, L["Shadow"], defaults, "durationOutline"), 28)
-        g:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], ANCHOR_OPTIONS, defaults, "durationAnchor"), 54)
+        g:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], OPTS.ANCHOR_OPTIONS, defaults, "durationAnchor"), 54)
         g:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 1, defaults, "durationX"), 50)
         g:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, defaults, "durationY"), 50)
         g:AddWidget(GUI:CreateCheckbox(parent, L["Color by Time Remaining"], defaults, "durationColorByTime"), 24)
@@ -4827,7 +4929,7 @@ local function BuildGlobalView(parent)
         g:AddWidget(GUI:CreateSlider(parent, L["Scale"], 0.5, 2.0, 0.1, defaults, "stackScale"), 50)
         g:AddWidget(GUI:CreateOutlineDropdown(parent, L["Outline"], defaults, "stackOutline"), 54)
         g:AddWidget(GUI:CreateShadowCheckbox(parent, L["Shadow"], defaults, "stackOutline"), 28)
-        g:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], ANCHOR_OPTIONS, defaults, "stackAnchor"), 54)
+        g:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], OPTS.ANCHOR_OPTIONS, defaults, "stackAnchor"), 54)
         g:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 1, defaults, "stackX"), 50)
         g:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, defaults, "stackY"), 50)
         g:AddWidget(GUI:CreateColorPicker(parent, L["Stack Text Color"], defaults, "stackColor", true, RPL, RPL, true), 32)
@@ -6300,7 +6402,7 @@ CreateEffectCard = function(parent, yPos, effect)
         if indicatorGroup then
             infoStr = infoStr .. "  -  " .. indicatorGroup.name
         elseif effect.anchor then
-            infoStr = infoStr .. "  -  " .. (ANCHOR_OPTIONS[effect.anchor] or effect.anchor)
+            infoStr = infoStr .. "  -  " .. (OPTS.ANCHOR_OPTIONS[effect.anchor] or effect.anchor)
         end
     else
         -- Show trigger count for frame-level effects
@@ -7944,7 +8046,7 @@ BuildLayoutGroupsTab = function()
                 by = by - 18
 
                 -- Use GUI widgets with the group table as the proxy
-                local anchorDrop = GUI:CreateDropdown(body, L["Anchor"], ANCHOR_OPTIONS, group, "anchor", function()
+                local anchorDrop = GUI:CreateDropdown(body, L["Anchor"], OPTS.ANCHOR_OPTIONS, group, "anchor", function()
                     RefreshPlacedIndicators()
                     DF.AuraDesigner.Engine:ForceRefreshAllFrames()
                 end)
@@ -8382,7 +8484,7 @@ BuildDebuffGroupsTab = function()
                 placeLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
                 by = by - 18
 
-                local anchorDrop = GUI:CreateDropdown(body, L["Anchor"], ANCHOR_OPTIONS, group, "anchor", LayoutDebuffGroupRefresh)
+                local anchorDrop = GUI:CreateDropdown(body, L["Anchor"], OPTS.ANCHOR_OPTIONS, group, "anchor", LayoutDebuffGroupRefresh)
                 anchorDrop:SetPoint("TOPLEFT", body, "TOPLEFT", 5, by)
                 if anchorDrop.SetWidth then anchorDrop:SetWidth(bodyWidth - 10) end
                 by = by - 54
