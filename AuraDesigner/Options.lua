@@ -743,8 +743,8 @@ end
 -- { id, name, enabled, anchor, offsetX, offsetY, growDirection, iconsPerRow,
 --   spacing, iconSize, maxIcons, selection = { boss, role, priority, crowdControl,
 --   raid, dispellable, dispellableMode, hideLong, hideLongMinutes, keepImportant } }.
--- The factory reads adDB.debuffGroups directly (as it reads otherAuras); this
--- accessor is staged for C2's group editor UI (uncalled in C1).
+-- The factory reads adDB.debuffGroups directly (as it reads otherAuras); the
+-- C2 group editor reaches it via CreateDebuffGroup / DebuffGroupsRead.
 local function GetDebuffGroups()
     local adDB = GetAuraDesignerDB()
     if not adDB then return {} end
@@ -816,10 +816,17 @@ end
 -- groups, migrations, the spec dropdown itself) deliberately do not.
 -- ============================================================
 
-local activeBuffTab = "my"   -- "my" | "other"
+local activeBuffTab = "my"   -- "my" | "debuffs" | "other"
 
 local function IsOtherTab()
     return activeBuffTab == "other"
+end
+
+-- C2: the Debuffs tab hosts debuff CATEGORY groups (spec-independent, no
+-- spell pool, no placed indicators). Its Effects sub-tab frosts, the spec
+-- dropdown greys, and CurrentAuraPool reads empty.
+local function IsDebuffTab()
+    return activeBuffTab == "debuffs"
 end
 
 -- Read-only placeholder returned while the other pool doesn't exist yet.
@@ -835,6 +842,10 @@ local function CurrentAuraPool(spec)
         if adDB and adDB.otherAuras then return GetOtherAuras() end
         return EMPTY_POOL
     end
+    -- The Debuffs tab has no aura pool: no placed indicators and no
+    -- frame-level effects, so every pool-routed surface (preview passes,
+    -- effect list) reads empty. Category groups live in adDB.debuffGroups.
+    if activeBuffTab == "debuffs" then return EMPTY_POOL end
     return GetSpecAuras(spec)
 end
 
@@ -851,6 +862,16 @@ end
 -- preview slot keys). The auraName itself never carries the prefix.
 local function PoolKeyPrefix()
     return (activeBuffTab == "other") and "other:" or ""
+end
+
+-- READ access to the debuff category groups array (C2). Never creates
+-- adDB.debuffGroups — merely visiting the Debuffs tab must not write
+-- (the EMPTY_POOL rule above); the first "+ Debuff Group" add creates it
+-- via CreateDebuffGroup → GetDebuffGroups.
+local function DebuffGroupsRead()
+    local adDB = GetAuraDesignerDB()
+    if adDB and adDB.debuffGroups then return GetDebuffGroups() end
+    return EMPTY_POOL
 end
 
 -- Display name for an OTHER-pool aura key: ad-hoc "#<id>" resolves live,
@@ -2082,6 +2103,21 @@ local function DeleteLayoutGroup(groupID)
     expandedGroups[groupID] = nil
 end
 
+-- Delete a debuff category group by ID (C2). No member indicators to cascade
+-- (category groups own no placed indicators). The caller runs the FULL
+-- structural chain afterwards — the group's claimed categories return to the
+-- main debuff bar. Card keys are "dgroup:<id>" (see BuildDebuffGroupsTab).
+local function DeleteDebuffGroup(groupID)
+    local groups = DebuffGroupsRead()
+    for i, group in ipairs(groups) do
+        if group.id == groupID then
+            tremove(groups, i)
+            break
+        end
+    end
+    expandedGroups["dgroup:" .. groupID] = nil
+end
+
 -- Find a layout group by ID
 local function GetLayoutGroupByID(groupID)
     local groups = GetSpecLayoutGroups()
@@ -2745,6 +2781,58 @@ local function WirePreviewIndicator(slot, capturedAura, capturedID, spec)
     end)
 end
 
+-- Shared labeled-outline placeholder for container-backed groups (filter
+-- groups on My Buffs, debuff category groups on Debuffs): their contents are
+-- Blizzard-filled at runtime (secret visibility, registry/category-driven),
+-- so the editor canvas can't preview real icons. Draw an outline block at the
+-- group's anchor/offset sized to its footprint (iconSize × min(maxIcons,
+-- iconsPerRow) columns, wrapped rows) instead. Pooled per group id in the
+-- caller's pool table (separate pools — the two id counters can collide);
+-- returns the slot for the placedIndicators list.
+local function DrawGroupPlaceholderSlot(mockFrame, pool, group, wrapDefault, maxDefault)
+    local slot = pool[group.id]
+    if not slot then
+        slot = CreateFrame("Frame", nil, mockFrame, "BackdropTemplate")
+        slot.label = slot:CreateFontString(nil, "OVERLAY")
+        GUI:SetSettingsFont(slot.label, 8, "OUTLINE")
+        slot.label:SetPoint("CENTER", 0, 0)
+        pool[group.id] = slot
+    end
+    local iconSize = max(8, tonumber(group.iconSize) or 24)
+    local maxIcons = max(1, tonumber(group.maxIcons) or maxDefault)
+    local wrap = max(1, tonumber(group.iconsPerRow) or wrapDefault)
+    local spacing = tonumber(group.spacing) or 2
+    local cols = min(maxIcons, wrap)
+    local rows = floor((maxIcons - 1) / wrap) + 1
+    slot:SetSize(max(cols * iconSize + (cols - 1) * spacing, 10),
+                 max(rows * iconSize + (rows - 1) * spacing, 10))
+    ApplyBackdrop(slot, {r = 0.91, g = 0.66, b = 0.25, a = 0.10},
+        {r = 0.91, g = 0.66, b = 0.25, a = 0.8})
+    slot.label:SetText(group.name)
+    slot.label:SetTextColor(0.91, 0.66, 0.25)
+    slot.label:SetWidth(slot:GetWidth() - 4)
+    slot.label:SetMaxLines(2)
+    -- Pin the block's grow-corner at the group's anchor point so it
+    -- extends in the grow direction (mirror the container's flow origin).
+    local p, s = strsplit("_", group.growDirection or "RIGHT_DOWN")
+    local vert, horiz = "TOP", "LEFT"
+    for _, d in ipairs({ p, s }) do
+        if d == "UP" then vert = "BOTTOM"
+        elseif d == "DOWN" then vert = "TOP"
+        elseif d == "LEFT" then horiz = "RIGHT"
+        elseif d == "RIGHT" then horiz = "LEFT"
+        elseif d == "CENTER" then horiz = "" end
+    end
+    local selfPoint = (horiz == "") and vert or (vert .. horiz)
+    slot:ClearAllPoints()
+    slot:SetPoint(selfPoint, mockFrame, group.anchor or "TOPLEFT",
+        group.offsetX or 0, group.offsetY or 0)
+    slot:SetFrameStrata(mockFrame:GetFrameStrata())
+    slot:SetFrameLevel(mockFrame:GetFrameLevel() + 8)
+    slot:Show()
+    return slot
+end
+
 local function RefreshPlacedIndicators()
     ClearPlacedIndicators()
     if not framePreview then return end
@@ -2754,12 +2842,14 @@ local function RefreshPlacedIndicators()
 
     local adDB = GetAuraDesignerDB()
     local isOther = IsOtherTab()
+    local isDebuffs = IsDebuffTab()
     local spec = ResolveSpec()
-    -- Other Buffs is spec-independent: render even with no resolvable spec.
-    if not spec and not isOther then return end
+    -- Other Buffs and the Debuffs tab are spec-independent: render even with
+    -- no resolvable spec.
+    if not spec and not (isOther or isDebuffs) then return end
 
-    local auraList = (not isOther) and spec and Adapter and Adapter:GetTrackableAuras(spec) or nil
-    if not auraList and not isOther then return end
+    local auraList = (not isOther and not isDebuffs) and spec and Adapter and Adapter:GetTrackableAuras(spec) or nil
+    if not auraList and not (isOther or isDebuffs) then return end
 
     -- Build lookup
     local infoLookup = {}
@@ -2775,7 +2865,7 @@ local function RefreshPlacedIndicators()
     -- Layout groups (member + filter) are My Buffs-only: the preview renders the
     -- ACTIVE tab's pool only, so the Other tab skips both group passes entirely.
     local groupPositions = {}  -- "auraName#indicatorID" → { anchor, offsetX, offsetY }
-    local specGroups = isOther and EMPTY_POOL or GetSpecLayoutGroups()
+    local specGroups = (isOther or isDebuffs) and EMPTY_POOL or GetSpecLayoutGroups()
     for _, group in ipairs(specGroups) do
         if group.members then
             for memberIdx, member in ipairs(group.members) do
@@ -2842,57 +2932,33 @@ local function RefreshPlacedIndicators()
             end
         end
 
-    -- FILTER GROUP PLACEHOLDERS: a filter group's contents are Blizzard-filled at
-    -- runtime (secret visibility, registry-driven), so the editor canvas can't
-    -- preview real icons. Draw a labeled outline block at the group's anchor/offset
-    -- sized to its footprint (iconSize × min(maxIcons, iconsPerRow) columns, wrapped
-    -- rows) instead. Pooled per group id; eye-hidden groups draw nothing.
+    -- FILTER GROUP PLACEHOLDERS (My Buffs): labeled outline blocks via the
+    -- shared helper above. Pooled per group id; eye-hidden groups draw
+    -- nothing. Wrap/max defaults 8 match the classic member-group layout.
     do
         local fgPool = mockFrame.dfADFilterGroupSlots
         if not fgPool then fgPool = {}; mockFrame.dfADFilterGroupSlots = fgPool end
         for _, group in ipairs(specGroups) do
             if group.kind == "filter" and group.enabled ~= false then
-                local slot = fgPool[group.id]
-                if not slot then
-                    slot = CreateFrame("Frame", nil, mockFrame, "BackdropTemplate")
-                    slot.label = slot:CreateFontString(nil, "OVERLAY")
-                    GUI:SetSettingsFont(slot.label, 8, "OUTLINE")
-                    slot.label:SetPoint("CENTER", 0, 0)
-                    fgPool[group.id] = slot
-                end
-                local iconSize = max(8, tonumber(group.iconSize) or 24)
-                local maxIcons = max(1, tonumber(group.maxIcons) or 8)
-                local wrap = max(1, tonumber(group.iconsPerRow) or 8)
-                local spacing = tonumber(group.spacing) or 2
-                local cols = min(maxIcons, wrap)
-                local rows = floor((maxIcons - 1) / wrap) + 1
-                slot:SetSize(max(cols * iconSize + (cols - 1) * spacing, 10),
-                             max(rows * iconSize + (rows - 1) * spacing, 10))
-                ApplyBackdrop(slot, {r = 0.91, g = 0.66, b = 0.25, a = 0.10},
-                    {r = 0.91, g = 0.66, b = 0.25, a = 0.8})
-                slot.label:SetText(group.name)
-                slot.label:SetTextColor(0.91, 0.66, 0.25)
-                slot.label:SetWidth(slot:GetWidth() - 4)
-                slot.label:SetMaxLines(2)
-                -- Pin the block's grow-corner at the group's anchor point so it
-                -- extends in the grow direction (mirror the container's flow origin).
-                local p, s = strsplit("_", group.growDirection or "RIGHT_DOWN")
-                local vert, horiz = "TOP", "LEFT"
-                for _, d in ipairs({ p, s }) do
-                    if d == "UP" then vert = "BOTTOM"
-                    elseif d == "DOWN" then vert = "TOP"
-                    elseif d == "LEFT" then horiz = "RIGHT"
-                    elseif d == "RIGHT" then horiz = "LEFT"
-                    elseif d == "CENTER" then horiz = "" end
-                end
-                local selfPoint = (horiz == "") and vert or (vert .. horiz)
-                slot:ClearAllPoints()
-                slot:SetPoint(selfPoint, mockFrame, group.anchor or "TOPLEFT",
-                    group.offsetX or 0, group.offsetY or 0)
-                slot:SetFrameStrata(mockFrame:GetFrameStrata())
-                slot:SetFrameLevel(mockFrame:GetFrameLevel() + 8)
-                slot:Show()
-                tinsert(placedIndicators, slot)
+                tinsert(placedIndicators,
+                    DrawGroupPlaceholderSlot(mockFrame, fgPool, group, 8, 8))
+            end
+        end
+    end
+
+    -- DEBUFF GROUP PLACEHOLDERS (C2): Debuffs tab only — the preview renders
+    -- the ACTIVE tab's surfaces, so these blocks never mix with the buff
+    -- pools' indicators. Separate pool table (dgroup ids come from their own
+    -- counter and could collide with filter-group ids). Wrap/max defaults 4
+    -- mirror CreateDebuffGroup and the factory's buildFilterGroupLayout(_, 4).
+    -- Read-only: visiting the tab must not create adDB.debuffGroups.
+    if isDebuffs then
+        local dgPool = mockFrame.dfADDebuffGroupSlots
+        if not dgPool then dgPool = {}; mockFrame.dfADDebuffGroupSlots = dgPool end
+        for _, group in ipairs(DebuffGroupsRead()) do
+            if group.enabled ~= false then
+                tinsert(placedIndicators,
+                    DrawGroupPlaceholderSlot(mockFrame, dgPool, group, 4, 4))
             end
         end
     end
@@ -5400,7 +5466,7 @@ end
 
 -- Forward declarations (mutually referencing functions)
 local SwitchTab, ShowSpellPicker, HideSpellPicker
-local BuildEffectsTab, BuildGlobalTab, BuildLayoutGroupsTab
+local BuildEffectsTab, BuildGlobalTab, BuildLayoutGroupsTab, BuildDebuffGroupsTab
 local PopulateSpellGrid, CreateEffectCard
 
 local spellPickerMode = "placed"   -- "placed" | "frame" | "group"
@@ -5540,6 +5606,11 @@ SwitchTab = function(tabKey)
     if tabKey == "layout" and IsOtherTab() then
         tabKey = "effects"
     end
+    -- Effects is frosted on the Debuffs tab (C2: category groups have no
+    -- placed indicators) — coerce to Layout Groups, same belt-and-braces.
+    if tabKey == "effects" and IsDebuffTab() then
+        tabKey = "layout"
+    end
     -- Preserve scroll position when refreshing the same tab
     local prevTab = activeTab
     local savedScroll = 0
@@ -5561,7 +5632,13 @@ SwitchTab = function(tabKey)
     if tabKey == "effects" then
         BuildEffectsTab()
     elseif tabKey == "layout" then
-        BuildLayoutGroupsTab()
+        -- The Debuffs tab's Layout Groups list shows ONLY debuff category
+        -- groups; My Buffs' member/filter groups stay on My Buffs.
+        if IsDebuffTab() then
+            BuildDebuffGroupsTab()
+        else
+            BuildLayoutGroupsTab()
+        end
     elseif tabKey == "global" then
         BuildGlobalTab()
     end
@@ -5577,24 +5654,30 @@ SwitchTab = function(tabKey)
     end
 end
 
--- ── MAIN POOL TAB SWITCH (B2: My Buffs / Other Buffs) ──
+-- ── MAIN POOL TAB SWITCH (B2/C2: My Buffs / Debuffs / Other Buffs) ──
 
--- Grey/restore the Layout Groups sub-tab: frosted (SetDisabled — stays
--- mouse-enabled so the tooltip can explain why; OnClick early-outs on
--- dfDisabled) while the Other tab is active. Mirrors the prototype's
--- subtab.dis treatment.
+-- Grey/restore the sub-tabs: frosted (SetDisabled — stays mouse-enabled so
+-- the tooltip can explain why; OnClick early-outs on dfDisabled). Layout
+-- Groups frosts on the Other tab (My Buffs-only groups); Effects frosts on
+-- the Debuffs tab (category groups have no placed indicators). Mirrors the
+-- prototype's subtab.dis treatment.
 local function UpdateLayoutTabState()
-    local btn = tabButtons and tabButtons.layout
-    if btn and btn.SetDisabled then
-        btn:SetDisabled(IsOtherTab())
+    local layoutBtn = tabButtons and tabButtons.layout
+    if layoutBtn and layoutBtn.SetDisabled then
+        layoutBtn:SetDisabled(IsOtherTab())
+    end
+    local effectsBtn = tabButtons and tabButtons.effects
+    if effectsBtn and effectsBtn.SetDisabled then
+        effectsBtn:SetDisabled(IsDebuffTab())
     end
 end
 
--- Grey the spec dropdown + swap its opener text on the Other tab (the pool
--- is shared across specs); restore the live spec text on My Buffs.
+-- Grey the spec dropdown + swap its opener text on the Other and Debuffs
+-- tabs (both pools are shared across specs); restore the live spec text on
+-- My Buffs.
 local function UpdateSpecDropdownState()
     if not specDropdown then return end
-    if IsOtherTab() then
+    if IsOtherTab() or IsDebuffTab() then
         if specDropdown.SetDisplayOverride then
             specDropdown:SetDisplayOverride(L["— (shared across specs)"])
         end
@@ -5626,6 +5709,11 @@ local function SetMainTab(tabKey)
     UpdateLayoutTabState()
     if activeBuffTab == "other" and activeTab == "layout" then
         activeTab = "effects"
+    end
+    -- Mirror image on the Debuffs tab: Effects is frosted there, so land on
+    -- Layout Groups (the tab's primary surface).
+    if activeBuffTab == "debuffs" and activeTab == "effects" then
+        activeTab = "layout"
     end
     -- One entry point swaps every surface: RefreshPage → SwitchTab(activeTab)
     -- (list, chips, add menu) + RefreshPlacedIndicators/RefreshPreviewEffects
@@ -7940,6 +8028,405 @@ BuildLayoutGroupsTab = function()
 end
 
 -- ============================================================
+-- DEBUFFS TAB — DEBUFF CATEGORY GROUPS (C2)
+-- Each card owns a SELECTION of the native 12.1 debuff categories (checkbox
+-- picker reusing the Aura Filters debuff column's controls) plus the shared
+-- filter-group layout controls. Groups are spec-independent
+-- (adDB.debuffGroups; lazily created on the first add — visiting the tab
+-- writes nothing). Categories claimed by an enabled group are dropped from
+-- the main debuff bar (C1 row-claim dedup), so EVERY selection / eye /
+-- delete / add edit runs the FULL structural chain: InvalidateAuraLayout
+-- bumps the version the row's claim fold AND the factory's dgroup record
+-- cache re-resolve on; UpdateAllFrames + ForceRefreshAllFrames re-drive the
+-- live frames and AD containers. Card keys are "dgroup:<id>" in
+-- expandedGroups — layout-group cards key by raw numeric id, so the string
+-- prefix can never collide with them (the two id counters overlap).
+-- ============================================================
+
+BuildDebuffGroupsTab = function()
+    if not tabContentFrame then return end
+    local parent = tabContentFrame
+    local yPos = -10
+    local gc = { r = 0.91, g = 0.66, b = 0.25 }  -- Layout Groups tab accent
+
+    -- Category picker rows: the Aura Filters debuff column's exact L keys +
+    -- tooltips, mapped onto group.selection's keys. Built per tab build so a
+    -- runtime locale overlay is picked up (file-scope L tables freeze enUS).
+    local CATEGORY_DEFS = {
+        { key = "boss",         label = L["Boss Debuffs"],        tooltip = L["Debuffs applied by dungeon and raid bosses."] },
+        { key = "role",         label = L["Role Debuffs"],        tooltip = L["Debuffs Blizzard flags as important for your role."] },
+        { key = "priority",     label = L["Priority Debuffs"],    tooltip = L["Debuffs Blizzard flags as high priority."] },
+        { key = "crowdControl", label = L["Crowd Control"],       tooltip = L["CC effects like stuns, roots, and incapacitates."] },
+        { key = "raid",         label = L["Raid Debuffs"],        tooltip = L["Other debuffs Blizzard flags for raid frames."] },
+        { key = "dispellable",  label = L["Dispellable Debuffs"], tooltip = L["Debuffs that can be dispelled. Use the toggle below to choose which dispels count."] },
+    }
+
+    -- FULL structural refresh incl. tab rebuild — discrete edits (category
+    -- checkboxes, dispel mode, hide-long controls, eye, delete, add): the
+    -- claims union moves AND the card summary / grey states must rebuild.
+    local function StructuralDebuffGroupRefresh()
+        SwitchTab("layout")
+        RefreshPlacedIndicators()
+        DF:InvalidateAuraLayout()
+        DF:UpdateAllFrames()
+        if DF.AuraDesigner.Engine and DF.AuraDesigner.Engine.ForceRefreshAllFrames then
+            DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+        end
+    end
+
+    -- Same structural chain WITHOUT the tab rebuild — slider/dropdown-safe
+    -- (a SwitchTab from inside a slider callback destroys the widget
+    -- mid-interaction). Layout edits don't move the claims union, but the
+    -- version bump keeps the factory's version-keyed dgroup record cache
+    -- honest and costs one sig-gated re-resolve (offsets → ApplyStyle,
+    -- maxIcons → Rebuild).
+    local function LayoutDebuffGroupRefresh()
+        RefreshPlacedIndicators()
+        DF:InvalidateAuraLayout()
+        DF:UpdateAllFrames()
+        if DF.AuraDesigner.Engine and DF.AuraDesigner.Engine.ForceRefreshAllFrames then
+            DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+        end
+    end
+
+    -- "+ Debuff Group" (prominent, tab accent — mirrors "+ Create Group").
+    -- The debuffGroups array is born lazily on this first add.
+    local addBtn = CreateFrame("Button", nil, parent, "BackdropTemplate")
+    addBtn:SetHeight(32)
+    addBtn:SetPoint("TOPLEFT", 8, yPos)
+    addBtn:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -8, yPos)
+    GUI:StyleButton(addBtn, { height = 32, primary = true, accent = gc, text = L["+ Debuff Group"], font = "DFFontHighlight" })
+    addBtn:SetScript("OnClick", function()
+        local group = CreateDebuffGroup()
+        if group then
+            expandedGroups["dgroup:" .. group.id] = true
+            -- A new group claims Boss + Role by default, so the main debuff
+            -- bar drops them immediately: full structural chain, not just a
+            -- tab rebuild.
+            StructuralDebuffGroupRefresh()
+        end
+    end)
+    yPos = yPos - 42
+
+    -- Dedup explainer (§11.1 mock): how the row-claim handoff behaves.
+    local dedupHint = parent:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    dedupHint:SetPoint("TOPLEFT", 8, yPos)
+    dedupHint:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
+    dedupHint:SetJustifyH("LEFT")
+    dedupHint:SetWordWrap(true)
+    dedupHint:SetText(L["Categories shown here are hidden from the main debuff bar automatically."])
+    dedupHint:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    yPos = yPos - 30
+
+    -- ── DEBUFF GROUPS heading — mirrors the Layout Groups tab's caption. ──
+    local groupsHeader = parent:CreateFontString(nil, "OVERLAY")
+    GUI:SetSettingsFont(groupsHeader, 9, "")
+    groupsHeader:SetPoint("TOPLEFT", 8, yPos)
+    groupsHeader:SetText(L["DEBUFF GROUPS"])
+    groupsHeader:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    yPos = yPos - 16
+
+    -- READ path: visiting the tab never creates adDB.debuffGroups.
+    local groups = DebuffGroupsRead()
+
+    if #groups == 0 then
+        -- Empty state
+        local empty = parent:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+        empty:SetPoint("TOP", parent, "TOP", 0, yPos - 30)
+        empty:SetWidth(220)
+        empty:SetText(L["No debuff groups created yet.\nClick '+ Debuff Group' to get started."])
+        empty:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.7)
+        empty:SetJustifyH("CENTER")
+    else
+        for _, group in ipairs(groups) do
+            local cardKey = "dgroup:" .. group.id
+            local isExpanded = expandedGroups[cardKey] or false
+            local capturedGroupID = group.id
+
+            -- Card container
+            local card = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+            card:SetPoint("TOPLEFT", 8, yPos)
+            card:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
+
+            -- ── HEADER ──
+            local header = CreateFrame("Button", nil, card, "BackdropTemplate")
+            header:SetHeight(30)
+            header:SetPoint("TOPLEFT", 0, 0)
+            header:SetPoint("TOPRIGHT", 0, 0)
+            ApplyBackdrop(header, C_ELEMENT, {r = gc.r * 0.35, g = gc.g * 0.35, b = gc.b * 0.35, a = 0.5})
+
+            -- Chevron
+            local chevron = header:CreateTexture(nil, "OVERLAY")
+            chevron:SetSize(12, 12)
+            chevron:SetPoint("LEFT", 8, 0)
+            if isExpanded then
+                chevron:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
+            else
+                chevron:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
+            end
+            chevron:SetVertexColor(gc.r, gc.g, gc.b)
+
+            -- Group name + collapsed summary: the selected category names
+            -- (the A5 collapsed treatment, categories instead of link count).
+            local nameText = header:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+            nameText:SetPoint("LEFT", chevron, "RIGHT", 6, 0)
+            nameText:SetPoint("RIGHT", header, "RIGHT", -60, 0)
+            nameText:SetMaxLines(1)
+            local selectedNames = {}
+            local selRead = group.selection
+            if selRead then
+                for _, def in ipairs(CATEGORY_DEFS) do
+                    if selRead[def.key] then tinsert(selectedNames, def.label) end
+                end
+            end
+            local summary = (#selectedNames > 0) and table.concat(selectedNames, ", ")
+                or L["No categories selected"]
+            nameText:SetText(group.name .. "  -  " .. summary)
+            nameText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+
+            -- Delete button — full structural chain: the group's claimed
+            -- categories return to the main debuff bar.
+            local delBtn = GUI:CreateCloseButton(header, {
+                size = 22,
+                onClick = function()
+                    DeleteDebuffGroup(capturedGroupID)
+                    StructuralDebuffGroupRefresh()
+                end,
+            })
+            delBtn:SetPoint("RIGHT", -4, 0)
+            delBtn:SetFrameLevel(header:GetFrameLevel() + 2)
+
+            -- Eye icon (visibility toggle) — same asset + idiom as the filter
+            -- group eye (A3/A5). Toggling is STRUCTURAL: the factory tears
+            -- down / stands up the container and the claims union moves.
+            local mediaPath = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
+            local eyeBtn = CreateFrame("Button", nil, header)
+            eyeBtn:SetSize(18, 18)
+            eyeBtn:SetPoint("RIGHT", delBtn, "LEFT", -4, 0)
+            local eyeIcon = eyeBtn:CreateTexture(nil, "OVERLAY")
+            eyeIcon:SetAllPoints()
+            local function shown() return group.enabled ~= false end
+            local function updateEyeIcon()
+                if shown() then
+                    eyeIcon:SetTexture(mediaPath .. "visibility")
+                    eyeIcon:SetVertexColor(0.95, 0.95, 0.95)
+                else
+                    eyeIcon:SetTexture(mediaPath .. "visibility_off")
+                    eyeIcon:SetVertexColor(0.45, 0.45, 0.45)
+                end
+            end
+            updateEyeIcon()
+            eyeBtn:SetScript("OnEnter", function() if shown() then eyeIcon:SetVertexColor(1, 1, 1) end end)
+            eyeBtn:SetScript("OnLeave", function() updateEyeIcon() end)
+            eyeBtn:RegisterForClicks("LeftButtonUp")
+            eyeBtn:SetFrameLevel(header:GetFrameLevel() + 2)
+            eyeBtn:SetScript("OnClick", function()
+                group.enabled = (group.enabled == false) and true or false
+                updateEyeIcon()
+                StructuralDebuffGroupRefresh()
+            end)
+            if not shown() then
+                nameText:SetAlpha(0.5)
+            end
+
+            -- Header click → toggle expansion
+            header:SetScript("OnClick", function()
+                expandedGroups[cardKey] = not expandedGroups[cardKey]
+                SwitchTab("layout")
+            end)
+            header:SetScript("OnEnter", function(self)
+                self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
+            end)
+            header:SetScript("OnLeave", function(self)
+                self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
+            end)
+
+            local totalCardH = 30
+
+            -- ── BODY (when expanded) ──
+            if isExpanded then
+                local body = CreateFrame("Frame", nil, card, "BackdropTemplate")
+                body:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, 0)
+                body:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT", 0, 0)
+                ApplyBackdrop(body, {r = 0.09, g = 0.09, b = 0.09, a = 1},
+                    {r = gc.r * 0.20, g = gc.g * 0.20, b = gc.b * 0.20, a = 0.3})
+
+                local by = -10
+                local bodyWidth = (tabContentFrame and tabContentFrame:GetWidth() or 260) - 24
+                if bodyWidth < 100 then bodyWidth = 240 end
+
+                -- Repair a missing selection table (hand-edited data). All
+                -- categories start FALSE so an unconfigured group renders —
+                -- and claims — nothing until the user picks; modifier
+                -- defaults mirror CreateDebuffGroup.
+                local sel = group.selection
+                if not sel then
+                    sel = { dispellableMode = "PLAYER", hideLongMinutes = 5, keepImportant = true }
+                    group.selection = sel
+                end
+
+                -- Group Name (editable)
+                local nameLabel = body:CreateFontString(nil, "OVERLAY")
+                GUI:SetSettingsFont(nameLabel, 8, "")
+                nameLabel:SetPoint("TOPLEFT", 8, by)
+                nameLabel:SetText(L["GROUP NAME"])
+                nameLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+                by = by - 16
+
+                local nameEdit = CreateFrame("EditBox", nil, body, "BackdropTemplate")
+                nameEdit:SetHeight(22)
+                nameEdit:SetPoint("TOPLEFT", 8, by)
+                nameEdit:SetPoint("RIGHT", body, "RIGHT", -8, 0)
+                nameEdit:SetAutoFocus(false)
+                nameEdit:SetText(group.name)
+                nameEdit:SetMaxLetters(30)
+                GUI:StyleEditBox(nameEdit, {})
+                nameEdit:SetScript("OnEnterPressed", function(self)
+                    local val = self:GetText()
+                    if val and val ~= "" then
+                        group.name = val
+                    end
+                    self:ClearFocus()
+                    -- Name feeds no sig — cosmetic only (header + canvas label).
+                    SwitchTab("layout")
+                    RefreshPlacedIndicators()
+                end)
+                nameEdit:SetScript("OnEscapePressed", function(self)
+                    self:SetText(group.name)
+                    self:ClearFocus()
+                end)
+                by = by - 32
+
+                -- ── CATEGORIES SECTION ──
+                -- Checkbox list writing group.selection.* — every toggle is
+                -- structural (records move AND the claims union moves).
+                local catLabel = body:CreateFontString(nil, "OVERLAY")
+                GUI:SetSettingsFont(catLabel, 8, "")
+                catLabel:SetPoint("TOPLEFT", 8, by)
+                catLabel:SetText(L["CATEGORIES"])
+                catLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+                by = by - 18
+
+                for _, def in ipairs(CATEGORY_DEFS) do
+                    local cb = GUI:CreateCheckbox(body, def.label, sel, def.key, StructuralDebuffGroupRefresh)
+                    cb:SetPoint("TOPLEFT", 8, by)
+                    cb.tooltip = def.tooltip
+                    by = by - 26
+
+                    if def.key == "dispellable" then
+                        -- Mode toggle, indented under Dispellable Debuffs
+                        -- (the Aura Filters column's control, group-scoped).
+                        local modeToggle = GUI:CreateToggleSwitch(body, L["Dispellable By Me"], L["All Dispellable"],
+                            sel, "dispellableMode", "PLAYER", "ALL", StructuralDebuffGroupRefresh)
+                        modeToggle:SetPoint("TOPLEFT", 24, by)
+                        modeToggle.tooltip = L["Dispellable By Me: only debuffs you can dispel. All Dispellable: any debuff that can be dispelled."]
+                        modeToggle:SetEnabled(not not sel.dispellable)
+                        by = by - 28
+                    end
+                end
+
+                by = by - 4
+                local hideLongCb = GUI:CreateCheckbox(body, L["Hide Long Debuffs"], sel, "hideLong", StructuralDebuffGroupRefresh)
+                hideLongCb:SetPoint("TOPLEFT", 8, by)
+                hideLongCb.tooltip = L["Hide debuffs whose total duration is longer than the threshold. Debuffs with no duration (permanent auras) are also hidden while this is on."]
+                by = by - 26
+
+                local minSlider = GUI:CreateSlider(body, L["Hide Longer Than (minutes)"], 1, 30, 1,
+                    sel, "hideLongMinutes", LayoutDebuffGroupRefresh)
+                minSlider:SetPoint("TOPLEFT", body, "TOPLEFT", 8, by)
+                if minSlider.SetWidth then minSlider:SetWidth(bodyWidth - 10) end
+                minSlider:SetEnabled(not not sel.hideLong)
+                by = by - 54
+
+                -- Keep-important, indented under Hide Long (Aura Filters idiom)
+                local keepCb = GUI:CreateCheckbox(body, L["Keep important debuffs"], sel, "keepImportant", StructuralDebuffGroupRefresh)
+                keepCb:SetPoint("TOPLEFT", 24, by)
+                keepCb.tooltip = L["Boss, Role, and Priority debuffs stay visible even when their duration is over the threshold."]
+                keepCb:SetEnabled(not not sel.hideLong)
+                by = by - 30
+
+                -- ── PLACEMENT SECTION ── (the shared filter-group layout controls)
+                by = by - 10
+                local placeLabel = body:CreateFontString(nil, "OVERLAY")
+                GUI:SetSettingsFont(placeLabel, 8, "")
+                placeLabel:SetPoint("TOPLEFT", 8, by)
+                placeLabel:SetText(L["PLACEMENT"])
+                placeLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+                by = by - 18
+
+                local anchorDrop = GUI:CreateDropdown(body, L["Anchor"], ANCHOR_OPTIONS, group, "anchor", LayoutDebuffGroupRefresh)
+                anchorDrop:SetPoint("TOPLEFT", body, "TOPLEFT", 5, by)
+                if anchorDrop.SetWidth then anchorDrop:SetWidth(bodyWidth - 10) end
+                by = by - 54
+
+                local oxSlider = GUI:CreateSlider(body, L["Offset X"], -150, 150, 1, group, "offsetX",
+                    LayoutDebuffGroupRefresh, RefreshPlacedIndicators)
+                oxSlider:SetPoint("TOPLEFT", body, "TOPLEFT", 5, by)
+                if oxSlider.SetWidth then oxSlider:SetWidth(bodyWidth - 10) end
+                by = by - 54
+
+                local oySlider = GUI:CreateSlider(body, L["Offset Y"], -150, 150, 1, group, "offsetY",
+                    LayoutDebuffGroupRefresh, RefreshPlacedIndicators)
+                oySlider:SetPoint("TOPLEFT", body, "TOPLEFT", 5, by)
+                if oySlider.SetWidth then oySlider:SetWidth(bodyWidth - 10) end
+                by = by - 54
+
+                -- ── GROWTH SECTION ──
+                by = by - 10
+                local growLabel = body:CreateFontString(nil, "OVERLAY")
+                GUI:SetSettingsFont(growLabel, 8, "")
+                growLabel:SetPoint("TOPLEFT", 8, by)
+                growLabel:SetText(L["GROWTH"])
+                growLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+                by = by - 18
+
+                local growthControl = GUI:CreateGrowthControl(body, group, "growDirection", LayoutDebuffGroupRefresh)
+                growthControl:SetPoint("TOPLEFT", body, "TOPLEFT", 5, by)
+                if growthControl.SetWidth then growthControl:SetWidth(bodyWidth - 10) end
+                by = by - 158
+
+                local iprSlider = GUI:CreateSlider(body, L["Icons Per Row"], 1, 20, 1, group, "iconsPerRow",
+                    LayoutDebuffGroupRefresh, RefreshPlacedIndicators)
+                iprSlider:SetPoint("TOPLEFT", body, "TOPLEFT", 5, by)
+                if iprSlider.SetWidth then iprSlider:SetWidth(bodyWidth - 10) end
+                by = by - 54
+
+                local spacingSlider = GUI:CreateSlider(body, L["Spacing"], -5, 20, 1, group, "spacing",
+                    LayoutDebuffGroupRefresh, RefreshPlacedIndicators)
+                spacingSlider:SetPoint("TOPLEFT", body, "TOPLEFT", 5, by)
+                if spacingSlider.SetWidth then spacingSlider:SetWidth(bodyWidth - 10) end
+                by = by - 54
+
+                -- Uniform per-group styling (filter-group idiom: one icon
+                -- size + slot cap for everything the categories match).
+                local sizeSlider = GUI:CreateSlider(body, L["Icon Size"], 8, 64, 1, group, "iconSize",
+                    LayoutDebuffGroupRefresh, RefreshPlacedIndicators)
+                sizeSlider:SetPoint("TOPLEFT", body, "TOPLEFT", 5, by)
+                if sizeSlider.SetWidth then sizeSlider:SetWidth(bodyWidth - 10) end
+                by = by - 54
+
+                -- Max Icons is STRUCTURAL (slot count is declared at container
+                -- build) — the factory Rebuild path handles it (OOC-deferred).
+                local maxSlider = GUI:CreateSlider(body, L["Max Icons"], 1, 20, 1, group, "maxIcons",
+                    LayoutDebuffGroupRefresh, RefreshPlacedIndicators)
+                maxSlider:SetPoint("TOPLEFT", body, "TOPLEFT", 5, by)
+                if maxSlider.SetWidth then maxSlider:SetWidth(bodyWidth - 10) end
+                by = by - 54
+
+                local bodyH = -by + 12
+                body:SetHeight(bodyH)
+                totalCardH = totalCardH + bodyH
+            end
+
+            card:SetHeight(totalCardH)
+            yPos = yPos - totalCardH - 5
+        end
+    end
+
+    parent:SetHeight(max(-yPos + 20, 200))
+end
+
+-- ============================================================
 -- MAIN PAGE BUILD
 -- ============================================================
 
@@ -8119,7 +8606,7 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     yPos = yPos - (BANNER_H + SECTION_GAP)
 
     -- ========================================
-    -- MAIN POOL TAB STRIP (B2): My Buffs / Other Buffs, between the header
+    -- MAIN POOL TAB STRIP (B2/C2): My Buffs / Debuffs / Other Buffs, between the header
     -- banner and the workspace. Visually distinct from the right panel's
     -- underline sub-tabs: filled StyleButton pills, slightly larger, with the
     -- relocated spec dropdown on the strip's right end (per the prototype —
@@ -8131,8 +8618,9 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     buffTabBar:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", 0, yPos)
 
     local MAIN_TAB_DEFS = {
-        { key = "my",    label = L["My Buffs"]    },
-        { key = "other", label = L["Other Buffs"] },
+        { key = "my",      label = L["My Buffs"]    },
+        { key = "debuffs", label = L["Debuffs"]     },
+        { key = "other",   label = L["Other Buffs"] },
     }
     wipe(mainTabButtons)
     local prevMainBtn
@@ -8252,6 +8740,20 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
                     GUI:ShowTooltip(self, {
                         title = L["Layout Groups"],
                         lines = { L["Not available for Other Buffs."] },
+                    })
+                end
+            end)
+            btn:HookScript("OnLeave", function() GUI:HideTooltip() end)
+        end
+
+        -- Effects is buff-pool-only (C2): frosted on the Debuffs tab —
+        -- category groups have no per-spell placed indicators.
+        if def.key == "effects" then
+            btn:HookScript("OnEnter", function(self)
+                if self.dfDisabled then
+                    GUI:ShowTooltip(self, {
+                        title = L["Effects"],
+                        lines = { L["Not available for Debuffs. Use Layout Groups instead."] },
                     })
                 end
             end)

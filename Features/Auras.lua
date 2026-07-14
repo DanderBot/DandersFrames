@@ -89,6 +89,8 @@ local DISPEL_TYPES = { Magic = true, Curse = true, Disease = true, Poison = true
 -- dispellable in either mode drops the row's dispel record whatever the row's
 -- own mode is — simplest rule). Boss/role narrow independently: claiming only
 -- boss while the row shows boss+role narrows the record to isRoleAura.
+-- (A narrowed record keeps the accepted Priority×Boss/Role bool overlap above —
+-- narrowing only shrinks the record's own flag, it never adds new negations.)
 -- Show All short-circuits BEFORE claims — an ALL-mode row never consults them.
 -- When claims empty a NON-empty selection the return is an EMPTY array (render
 -- nothing) — distinct from nil (show all); normalizeFilters would map {} back
