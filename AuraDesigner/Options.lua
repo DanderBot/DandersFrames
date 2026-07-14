@@ -1630,6 +1630,7 @@ local function WithConfiguredAdHocAuras(list, spec)
             display = display or e.name,
             color = AD_HOC_COLOR,
             spellID = e.id,
+            class = "ALL",  -- picker grid sections by class; ad-hoc ids aren't class spells
         })
     end
     return out
@@ -5110,7 +5111,8 @@ local SwitchTab, ShowSpellPicker, HideSpellPicker
 local BuildEffectsTab, BuildGlobalTab, BuildLayoutGroupsTab
 local PopulateSpellGrid, CreateEffectCard
 
-local spellPickerMode = "placed"   -- "placed" | "frame"
+local spellPickerMode = "placed"   -- "placed" | "frame" | "group"
+local spellPickerGroupID = nil     -- target layout group id ("group" mode only)
 local spellPickerSearch = ""       -- lowercased name-search query (picker toolbar)
 local spellPickerDirty = false     -- add-by-ID landed while the picker stayed open
                                    -- (effects tab behind it is stale; rebuilt on close)
@@ -5140,34 +5142,57 @@ HideSpellPicker = function()
     if not spellPickerView then return end
     spellPickerActive = false
     spellPickerType = nil
+    spellPickerGroupID = nil
     spellPickerView:Hide()
     if tabBar then tabBar:Show() end
     if tabScrollFrame then tabScrollFrame:Show() end
 end
 
 -- ── SHOW SPELL PICKER ──
--- typeKey: "icon"|"square"|"bar" (placed) or "border"|"healthbar"|etc. (frame)
--- mode: "placed" (default) or "frame"
-ShowSpellPicker = function(typeKey, mode)
+-- typeKey: "icon"|"square"|"bar" (placed) or "border"|"healthbar"|etc. (frame);
+--          nil in "group" mode (each card carries its own Icon/Square buttons)
+-- mode: "placed" (default), "frame", or "group" (add members to a layout group)
+-- groupID: target layout group id ("group" mode only)
+ShowSpellPicker = function(typeKey, mode, groupID)
     if not spellPickerView then return end
     spellPickerActive = true
     spellPickerType = typeKey
     spellPickerMode = mode or "placed"
+    spellPickerGroupID = groupID
 
     if tabBar then tabBar:Hide() end
     if tabScrollFrame then tabScrollFrame:Hide() end
 
-    if spellPickerMode == "placed" then
-        spellPickerView.title:SetText(L["Select a spell"])
-    else
+    if spellPickerMode == "frame" then
         local effectLabel = FRAME_LEVEL_LABELS[typeKey] or typeKey
         spellPickerView.title:SetText(format(L["Select trigger for %s"], effectLabel))
+    else -- "placed" and "group" share the generic title
+        spellPickerView.title:SetText(L["Select a spell"])
     end
 
-    local badgeColor = BADGE_COLORS[typeKey] or BADGE_COLORS.icon
-    local typeLabel = PLACED_TYPE_LABELS[typeKey] or FRAME_LEVEL_LABELS[typeKey] or typeKey
-    spellPickerView.typeBadge:SetText(typeLabel)
-    spellPickerView.typeBadge:SetTextColor(badgeColor.r, badgeColor.g, badgeColor.b)
+    if spellPickerMode == "group" then
+        -- Badge shows the target group's name in the theme accent
+        local grp = groupID and GetLayoutGroupByID(groupID)
+        local tc = GetThemeColor()
+        spellPickerView.typeBadge:SetText(grp and grp.name or "")
+        spellPickerView.typeBadge:SetTextColor(tc.r, tc.g, tc.b)
+    else
+        local badgeColor = BADGE_COLORS[typeKey] or BADGE_COLORS.icon
+        local typeLabel = PLACED_TYPE_LABELS[typeKey] or FRAME_LEVEL_LABELS[typeKey] or typeKey
+        spellPickerView.typeBadge:SetText(typeLabel)
+        spellPickerView.typeBadge:SetTextColor(badgeColor.r, badgeColor.g, badgeColor.b)
+    end
+
+    -- Mode-specific toolbar (group: Icon/Square buttons replace the Add button)
+    -- and hint line (group cards add via their buttons, not click/drag)
+    if spellPickerView.SetGroupToolbar then
+        spellPickerView.SetGroupToolbar(spellPickerMode == "group")
+    end
+    if spellPickerView.hint then
+        spellPickerView.hint:SetText(spellPickerMode == "group"
+            and L["Click Icon or Square to add the spell to this group"]
+            or L["Click or drag a spell onto the frame to place it"])
+    end
 
     -- Fresh toolbar state per open: clear search/ID inputs and any echo.
     -- spellPickerSearch is reset BEFORE SetText so the OnTextChanged guard
@@ -5242,6 +5267,34 @@ local function AddPickedSpell(auraName, typeKey)
     end
 end
 
+-- ── ADD TO LAYOUT GROUP ("group" picker mode) ──
+-- One click on a card's Icon/Square button (or the toolbar's, for add-by-ID):
+-- create a NEW placed indicator of that type and enrol it in the target group.
+-- The picker stays open for multi-add, and the same spell can be added again —
+-- every add mints a fresh indicator id, so AddGroupMember's (auraName,
+-- indicatorID) dedup never blocks it. skipEcho lets add-by-ID substitute its
+-- own unknown-ID echo. Refresh chain mirrors the group card's member ✕.
+local function AddSpellToGroup(auraName, display, typeKey, skipEcho)
+    if not spellPickerGroupID then return end
+    local instance = CreateIndicatorInstance(auraName, typeKey)
+    if not instance then return end
+    AddGroupMember(spellPickerGroupID, auraName, instance.id)
+    spellPickerDirty = true  -- layout tab behind the picker is stale; rebuilt on back
+    if not skipEcho and spellPickerView and spellPickerView.Echo then
+        local typeLabel = PLACED_TYPE_LABELS[typeKey] or typeKey
+        spellPickerView.Echo(format(L["Added %s."],
+            format("%s (%s)", display or auraName, typeLabel)))
+    end
+    RefreshPlacedIndicators()
+    -- Structural change: same full refresh as the member ✕
+    -- (new indicator container + group positions + buff-row dedup).
+    DF:InvalidateAuraLayout()
+    DF:UpdateAllFrames()
+    if DF.AuraDesigner.Engine and DF.AuraDesigner.Engine.ForceRefreshAllFrames then
+        DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+    end
+end
+
 -- ── SPELL CARD POOL ──
 -- The grid repopulates per search keystroke and per add-by-ID, and WoW
 -- frames are never GC'd — so cards are POOLED (index-keyed on the grid,
@@ -5299,6 +5352,7 @@ local function AcquireSpellCard(grid, i)
         GameTooltip:Hide()
     end)
     card:SetScript("OnClick", function(self)
+        if spellPickerMode == "group" then return end  -- group adds go through the type buttons
         if self._used or not self._auraInfo then return end
         AddPickedSpell(self._auraInfo.name, self._type)
         HideSpellPicker()
@@ -5317,6 +5371,44 @@ local function AcquireSpellCard(grid, i)
         StartDrag(auraInfo.name, auraInfo, spec, typeKey)
     end)
 
+    -- Group-mode action buttons (Icon / Square) at the card's bottom edge —
+    -- shown only in "group" mode (BindSpellCard toggles them). Static
+    -- handlers: the aura payload lives on the parent card, the type on the
+    -- button. Same mini type-button look as the group card's member badges.
+    local function MakeTypeButton(typeKey)
+        local bc = BADGE_COLORS[typeKey] or BADGE_COLORS.icon
+        local btn = CreateFrame("Button", nil, card, "BackdropTemplate")
+        btn:SetSize(34, 16)
+        ApplyBackdrop(btn,
+            {r = bc.r * 0.15, g = bc.g * 0.15, b = bc.b * 0.15, a = 1},
+            {r = bc.r * 0.4, g = bc.g * 0.4, b = bc.b * 0.4, a = 0.6})
+        local lbl = btn:CreateFontString(nil, "OVERLAY")
+        GUI:SetSettingsFont(lbl, 7.5, "OUTLINE")
+        lbl:SetPoint("CENTER", 0, 0)
+        lbl:SetTextColor(bc.r, bc.g, bc.b)
+        btn.label = lbl
+        btn._typeKey = typeKey
+        btn:SetScript("OnEnter", function(self)
+            self:SetBackdropBorderColor(bc.r, bc.g, bc.b, 1)
+            lbl:SetTextColor(1, 1, 1)
+        end)
+        btn:SetScript("OnLeave", function(self)
+            self:SetBackdropBorderColor(bc.r * 0.4, bc.g * 0.4, bc.b * 0.4, 0.6)
+            lbl:SetTextColor(bc.r, bc.g, bc.b)
+        end)
+        btn:SetScript("OnClick", function(self)
+            local c = self:GetParent()
+            if not c._auraInfo then return end
+            AddSpellToGroup(c._auraInfo.name, c._auraInfo.display, self._typeKey)
+        end)
+        btn:Hide()
+        return btn
+    end
+    card.groupIconBtn = MakeTypeButton("icon")
+    card.groupIconBtn:SetPoint("BOTTOMRIGHT", card, "BOTTOM", -2, 5)
+    card.groupSquareBtn = MakeTypeButton("square")
+    card.groupSquareBtn:SetPoint("BOTTOMLEFT", card, "BOTTOM", 2, 5)
+
     pool[i] = card
     return card
 end
@@ -5324,17 +5416,34 @@ end
 -- ── BIND SPELL CARD ──
 -- Rebinds one pooled card to an aura entry: position, used-state styling,
 -- icon/letter, name, warning badge, tooltip spell id, click/drag payload.
-local function BindSpellCard(card, auraInfo, spec, x, y, CARD_SIZE)
+local function BindSpellCard(card, auraInfo, spec, x, y, CARD_SIZE, cardH)
+    local isGroup = (spellPickerMode == "group")
     local alreadyUsed
-    if spellPickerMode == "placed" then
+    if isGroup then
+        -- Duplicates are allowed (each add is its own indicator instance),
+        -- so group-mode cards never dim to a used state.
+        alreadyUsed = false
+    elseif spellPickerMode == "placed" then
         alreadyUsed = IsAuraTypePlaced(auraInfo.name, spellPickerType)
     else
         alreadyUsed = HasFrameEffect(auraInfo.name, spellPickerType)
     end
 
-    card:SetSize(CARD_SIZE, CARD_SIZE)
+    card:SetSize(CARD_SIZE, cardH or CARD_SIZE)
     card:ClearAllPoints()
     card:SetPoint("TOPLEFT", x, y)
+
+    -- Group mode: taller card with an Icon/Square button row at the bottom;
+    -- the name shifts up to sit above the buttons.
+    card.groupIconBtn:SetShown(isGroup)
+    card.groupSquareBtn:SetShown(isGroup)
+    if isGroup then
+        -- Labels re-set per bind so a locale refresh can't strand stale text
+        card.groupIconBtn.label:SetText(PLACED_TYPE_LABELS.icon or "Icon")
+        card.groupSquareBtn.label:SetText(PLACED_TYPE_LABELS.square or "Square")
+    end
+    card.nameText:ClearAllPoints()
+    card.nameText:SetPoint("BOTTOM", 0, isGroup and 24 or 4)
 
     if alreadyUsed then
         ApplyBackdrop(card, {r = 0.10, g = 0.10, b = 0.10, a = 0.5}, {r = 0.20, g = 0.20, b = 0.20, a = 0.5})
@@ -5450,7 +5559,15 @@ PopulateSpellGrid = function()
     -- Hide unsupported message if it was previously shown
     if grid.unsupportedLabel then grid.unsupportedLabel:Hide() end
 
+    -- Group mode also offers configured ad-hoc "#<id>" auras (never in the
+    -- trackable pool) — the dropdown this mode replaced did the same.
+    if spellPickerMode == "group" then
+        auras = WithConfiguredAdHocAuras(auras, spec)
+    end
+
     local CARD_SIZE = 78
+    -- Group-mode cards grow to fit the Icon/Square button row
+    local CARD_H = (spellPickerMode == "group") and (CARD_SIZE + 20) or CARD_SIZE
     local CARD_GAP = 6
     local PADDING = 8
     local gridWidth = grid:GetWidth()
@@ -5495,12 +5612,12 @@ PopulateSpellGrid = function()
             local row = math.floor(cardIndex / cols)
             local col = cardIndex % cols
             local x = PADDING + col * (CARD_SIZE + CARD_GAP)
-            local y = -(yOffset + row * (CARD_SIZE + CARD_GAP))
+            local y = -(yOffset + row * (CARD_H + CARD_GAP))
             usedCards = usedCards + 1
-            BindSpellCard(AcquireSpellCard(grid, usedCards), auraInfo, spec, x, y, CARD_SIZE)
+            BindSpellCard(AcquireSpellCard(grid, usedCards), auraInfo, spec, x, y, CARD_SIZE, CARD_H)
             cardIndex = cardIndex + 1
         end
-        yOffset = yOffset + math.ceil(cardIndex / cols) * (CARD_SIZE + CARD_GAP)
+        yOffset = yOffset + math.ceil(cardIndex / cols) * (CARD_H + CARD_GAP)
     end
 
     if #classAuras > 0 then
@@ -7162,195 +7279,11 @@ BuildLayoutGroupsTab = function()
                 GUI:StyleButton(addMemBtn, { height = 22, primary = true, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add", size = 11 }, text = L["Add aura"] })
                 GUI:SetSettingsFont(addMemBtn.Text, 9, "")
                 addMemBtn:SetScript("OnClick", function()
-                    -- Show ALL trackable auras with type buttons (Icon/Square/Bar),
-                    -- plus configured ad-hoc "#<id>" auras (never in the pool)
-                    local spec = ResolveSpec()
-                    local auras = spec and Adapter and Adapter:GetTrackableAuras(spec)
-                    if not auras then return end
-                    auras = WithConfiguredAdHocAuras(auras, spec)
-                    if #auras == 0 then return end
-
-                    -- Build set of auras already in this group (by auraName)
-                    local grp = GetLayoutGroupByID(capturedGroupID)
-                    local alreadyInGroup = {}
-                    if grp and grp.members then
-                        for _, m in ipairs(grp.members) do
-                            alreadyInGroup[m.auraName] = true
-                        end
-                    end
-
-                    -- Create/reuse dropdown
-                    local dropName = "DFADGroupMemberPicker"
-                    local drop = _G[dropName]
-                    if not drop then
-                        drop = CreateFrame("Frame", dropName, UIParent, "BackdropTemplate")
-                        drop:SetFrameStrata("FULLSCREEN_DIALOG")
-                        drop:SetClampedToScreen(true)
-                        -- Click-outside overlay to close dropdown (#444)
-                        local overlay = CreateFrame("Button", nil, UIParent)
-                        overlay:SetAllPoints(UIParent)
-                        overlay:SetFrameStrata("FULLSCREEN")
-                        overlay:Hide()
-                        overlay:SetScript("OnClick", function()
-                            drop:Hide()
-                            overlay:Hide()
-                        end)
-                        drop._overlay = overlay
-                        -- ESC closes dropdown (#444)
-                        drop:EnableKeyboard(true)
-                        drop:SetPropagateKeyboardInput(true)
-                        drop:SetScript("OnKeyDown", function(self, key)
-                            if key == "ESCAPE" then
-                                self:SetPropagateKeyboardInput(false)
-                                self:Hide()
-                            else
-                                self:SetPropagateKeyboardInput(true)
-                            end
-                        end)
-                        drop:SetScript("OnHide", function(self)
-                            self._ownerBtn = nil
-                            if self._overlay then self._overlay:Hide() end
-                        end)
-                    end
-                    if drop:IsShown() and drop._ownerBtn == addMemBtn then
-                        drop:Hide()
-                        return
-                    end
-                    drop._ownerBtn = addMemBtn
-
-                    local DROP_W = 240
-                    local MAX_H = 300
-                    drop:SetWidth(DROP_W)
-                    ApplyBackdrop(drop, C_BACKGROUND, C_BORDER)
-
-                    -- Inner scroll frame for long lists
-                    if not drop._scrollFrame then
-                        local sf = CreateFrame("ScrollFrame", nil, drop)
-                        sf:SetPoint("TOPLEFT", 0, 0)
-                        sf:SetPoint("BOTTOMRIGHT", 0, 0)
-                        drop._scrollFrame = sf
-                        local sc = CreateFrame("Frame", nil, sf)
-                        sc:SetWidth(DROP_W)
-                        sf:SetScrollChild(sc)
-                        drop._scrollChild = sc
-                        sf:SetScript("OnMouseWheel", function(self2, delta2)
-                            local cur = self2:GetVerticalScroll()
-                            local maxS = max(0, self2:GetVerticalScrollRange())
-                            self2:SetVerticalScroll(max(0, min(maxS, cur - (delta2 * 24))))
-                        end)
-                    end
-                    local scrollChild = drop._scrollChild
-                    local scrollFrame = drop._scrollFrame
-                    scrollChild:SetWidth(DROP_W)
-                    -- Clear old children
-                    for _, child in ipairs({scrollChild:GetChildren()}) do child:Hide(); child:SetParent(nil) end
-                    for _, rgn in ipairs({scrollChild:GetRegions()}) do
-                        if rgn:GetObjectType() == "FontString" or rgn:GetObjectType() == "Texture" then rgn:Hide() end
-                    end
-                    scrollFrame:Show()
-                    -- Forward mouse wheel from scroll child to scroll frame
-                    scrollChild:EnableMouseWheel(true)
-                    scrollChild:SetScript("OnMouseWheel", function(_, delta2)
-                        scrollFrame:GetScript("OnMouseWheel")(scrollFrame, delta2)
-                    end)
-
-                    local dy2 = -4
-                    for _, auraInfo in ipairs(auras) do
-                        local isExisting = alreadyInGroup[auraInfo.name]
-                        local ROW_H = 24
-                        local row = CreateFrame("Frame", nil, scrollChild)
-                        row:SetHeight(ROW_H)
-                        row:SetPoint("TOPLEFT", 4, dy2)
-                        row:SetPoint("RIGHT", scrollChild, "RIGHT", -4, 0)
-
-                        -- Color dot
-                        local dot = row:CreateTexture(nil, "ARTWORK")
-                        dot:SetSize(6, 6)
-                        dot:SetPoint("LEFT", 4, 0)
-                        dot:SetColorTexture(auraInfo.color[1], auraInfo.color[2], auraInfo.color[3], 1)
-
-                        -- Aura name
-                        local rName = row:CreateFontString(nil, "OVERLAY")
-                        GUI:SetSettingsFont(rName, 9, "")
-                        rName:SetPoint("LEFT", dot, "RIGHT", 6, 0)
-                        rName:SetText(auraInfo.display)
-
-                        if isExisting then
-                            rName:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.5)
-                            dot:SetAlpha(0.4)
-                        else
-                            rName:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-
-                            -- Type buttons (Icon / Square only — bars not supported in layout groups)
-                            local PLACED_TYPES = { "icon", "square" }
-                            local btnX = -4
-                            for ti = #PLACED_TYPES, 1, -1 do
-                                local typeKey = PLACED_TYPES[ti]
-                                local bc = BADGE_COLORS[typeKey] or BADGE_COLORS.icon
-                                local typeLbl = PLACED_TYPE_LABELS[typeKey] or typeKey
-
-                                local typeBtn = CreateFrame("Button", nil, row, "BackdropTemplate")
-                                typeBtn:SetSize(36, 16)
-                                typeBtn:SetPoint("RIGHT", row, "RIGHT", btnX, 0)
-                                ApplyBackdrop(typeBtn,
-                                    {r = bc.r * 0.15, g = bc.g * 0.15, b = bc.b * 0.15, a = 1},
-                                    {r = bc.r * 0.4, g = bc.g * 0.4, b = bc.b * 0.4, a = 0.6})
-
-                                local tLbl = typeBtn:CreateFontString(nil, "OVERLAY")
-                                GUI:SetSettingsFont(tLbl, 7.5, "OUTLINE")
-                                tLbl:SetPoint("CENTER", 0, 0)
-                                tLbl:SetText(typeLbl)
-                                tLbl:SetTextColor(bc.r, bc.g, bc.b)
-
-                                typeBtn:SetScript("OnEnter", function(self)
-                                    self:SetBackdropBorderColor(bc.r, bc.g, bc.b, 1)
-                                    tLbl:SetTextColor(1, 1, 1)
-                                end)
-                                typeBtn:SetScript("OnLeave", function(self)
-                                    self:SetBackdropBorderColor(bc.r * 0.4, bc.g * 0.4, bc.b * 0.4, 0.6)
-                                    tLbl:SetTextColor(bc.r, bc.g, bc.b)
-                                end)
-
-                                local capturedAuraName = auraInfo.name
-                                local capturedTypeKey = typeKey
-                                typeBtn:SetScript("OnClick", function()
-                                    -- Create placed indicator for this aura+type if needed
-                                    local instance = CreateIndicatorInstance(capturedAuraName, capturedTypeKey)
-                                    if instance then
-                                        AddGroupMember(capturedGroupID, capturedAuraName, instance.id)
-                                    end
-                                    drop:Hide()
-                                    SwitchTab("layout")
-                                    RefreshPlacedIndicators()
-                                    -- Structural change: same full refresh as the member ✕
-                                    -- (new indicator container + group positions + buff-row dedup).
-                                    DF:InvalidateAuraLayout()
-                                    DF:UpdateAllFrames()
-                                    if DF.AuraDesigner.Engine and DF.AuraDesigner.Engine.ForceRefreshAllFrames then
-                                        DF.AuraDesigner.Engine:ForceRefreshAllFrames()
-                                    end
-                                end)
-
-                                btnX = btnX - 40
-                            end
-
-                            -- Row highlight
-                            local hl = row:CreateTexture(nil, "BACKGROUND")
-                            hl:SetAllPoints()
-                            hl:SetColorTexture(1, 1, 1, 0)
-                            row:SetScript("OnEnter", function() hl:SetColorTexture(1, 1, 1, 0.03) end)
-                            row:SetScript("OnLeave", function() hl:SetColorTexture(1, 1, 1, 0) end)
-                        end
-                        dy2 = dy2 - ROW_H
-                    end
-                    local totalH = -dy2 + 4
-                    scrollChild:SetHeight(totalH)
-                    drop:SetHeight(math.min(totalH, MAX_H))
-
-                    drop:ClearAllPoints()
-                    drop:SetPoint("TOPLEFT", addMemBtn, "BOTTOMLEFT", 0, -2)
-                    drop:Show()
-                    if drop._overlay then drop._overlay:Show() end
+                    -- Full spell picker in "group" mode: searchable class-grouped
+                    -- grid + add-by-ID, each card carrying Icon/Square buttons
+                    -- that create the indicator and enrol it in this group in
+                    -- one click (replaces the old ad-hoc dropdown).
+                    ShowSpellPicker(nil, "group", capturedGroupID)
                 end)
                 by = by - 28
                 end -- isFilterGroup / members branch
@@ -7535,6 +7468,7 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     activeFilter = "all"
     spellPickerActive = false
     spellPickerType = nil
+    spellPickerGroupID = nil
 
     -- Layout constants
     local BANNER_H = 68
@@ -7859,6 +7793,7 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     pickerHint:SetPoint("TOPLEFT", pickerHeader, "BOTTOMLEFT", 12, -36)
     pickerHint:SetText(L["Click or drag a spell onto the frame to place it"])
     pickerHint:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    spellPickerView.hint = pickerHint  -- ShowSpellPicker swaps the text per mode
 
     -- Echo line: transient add-by-ID feedback, auto-hides after ~4s
     -- (generation counter so a re-add restarts the window — FilterRegistry idiom)
@@ -7887,13 +7822,16 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
             if echoGen == gen then HideEcho() end
         end)
     end
+    spellPickerView.Echo = Echo  -- AddSpellToGroup confirms group adds through it
 
     -- Add-by-ID: snap known ids to their pool/curated record (then behave
     -- exactly like clicking that spell's card — same AddPickedSpell path);
     -- unknown ids become an ad-hoc "#<id>" aura whose key IS its identity.
     -- The picker stays open (echo confirms), so several ids can be added in
     -- a row; spellPickerDirty makes the back button rebuild the effects tab.
-    local function DoAddByID()
+    -- In "group" mode the toolbar's Icon/Square buttons pass typeKeyArg and
+    -- the add routes through AddSpellToGroup (Enter defaults to Icon).
+    local function DoAddByID(typeKeyArg)
         local text = (addBox.EditBox:GetText() or ""):match("^%s*(.-)%s*$")
         if text == "" then return end
         -- Integers only: tonumber() also accepts floats/hex, which are never
@@ -7945,6 +7883,30 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
         -- must never leak into config keys (AdHocSpellID parses "^#(%d+)$").
         if isAdHoc then auraName = "#" .. text end
 
+        -- Display name: the trackable pool entry when it has one (curated
+        -- display or localized SpellDB name), else the raw key.
+        local display = auraName
+        if not isAdHoc then
+            local trackable = Adapter and Adapter:GetTrackableAuras(spec)
+            if trackable then
+                for _, info in ipairs(trackable) do
+                    if info.name == auraName then display = info.display or auraName; break end
+                end
+            end
+        end
+
+        -- Group mode: no already-used gate (a spell can hold several
+        -- indicators in one group). AddSpellToGroup echoes and refreshes.
+        if spellPickerMode == "group" then
+            AddSpellToGroup(auraName, display, typeKeyArg or "icon", isAdHoc)
+            addBox.EditBox:SetText("")
+            if isAdHoc then
+                Echo(format(L["Added #%d as an unknown spell ID — name and icon will show if the ID is valid."], idNum))
+                PopulateSpellGrid()  -- the new ad-hoc aura gets a card of its own
+            end
+            return
+        end
+
         local alreadyUsed
         if spellPickerMode == "placed" then
             alreadyUsed = IsAuraTypePlaced(auraName, spellPickerType)
@@ -7962,15 +7924,6 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
         if isAdHoc then
             Echo(format(L["Added #%d as an unknown spell ID — name and icon will show if the ID is valid."], idNum))
         else
-            -- Display name: the trackable pool entry when it has one (curated
-            -- display or localized SpellDB name), else the raw key.
-            local display = auraName
-            local trackable = Adapter and Adapter:GetTrackableAuras(spec)
-            if trackable then
-                for _, info in ipairs(trackable) do
-                    if info.name == auraName then display = info.display or auraName; break end
-                end
-            end
             Echo(format(L["Added %s."], display))
         end
         PopulateSpellGrid()          -- card flips to its Placed/Active state
@@ -7983,8 +7936,41 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     end)
     addBtn:SetPoint("TOPRIGHT", pickerHeader, "BOTTOMRIGHT", -10, -7)
     -- Enter in the box adds too (the helper's own OnEnterPressed only saves
-    -- db-backed values — this box has no db binding)
-    addBox.EditBox:HookScript("OnEnterPressed", DoAddByID)
+    -- db-backed values — this box has no db binding). Wrapped: the hook passes
+    -- the EditBox as arg 1, which must not reach DoAddByID's typeKeyArg.
+    addBox.EditBox:HookScript("OnEnterPressed", function() DoAddByID() end)
+
+    -- Group-mode add-by-ID buttons: [Icon] [Square] replace the single Add
+    -- button, so the typed ID lands with an explicit indicator type (Enter in
+    -- the box defaults to Icon). Hidden outside group mode by SetGroupToolbar.
+    local typeBtnW = 44
+    local addIconBtn = GUI:CreateButton(spellPickerView, L["Icon"], typeBtnW, 22, function()
+        DoAddByID("icon")
+    end)
+    addIconBtn:SetPoint("TOPRIGHT", pickerHeader, "BOTTOMRIGHT", -(10 + typeBtnW + 4), -7)
+    addIconBtn.Text:SetTextColor(BADGE_COLORS.icon.r, BADGE_COLORS.icon.g, BADGE_COLORS.icon.b)
+    addIconBtn:Hide()
+    local addSquareBtn = GUI:CreateButton(spellPickerView, L["Square"], typeBtnW, 22, function()
+        DoAddByID("square")
+    end)
+    addSquareBtn:SetPoint("TOPRIGHT", pickerHeader, "BOTTOMRIGHT", -10, -7)
+    addSquareBtn.Text:SetTextColor(BADGE_COLORS.square.r, BADGE_COLORS.square.g, BADGE_COLORS.square.b)
+    addSquareBtn:Hide()
+
+    -- Swap the toolbar between the modes; the ID box slides left to clear
+    -- whichever button set is showing (the search box is anchored to it and
+    -- follows). Called by ShowSpellPicker on every open.
+    spellPickerView.SetGroupToolbar = function(isGroup)
+        addBtn:SetShown(not isGroup)
+        addIconBtn:SetShown(isGroup)
+        addSquareBtn:SetShown(isGroup)
+        addBox:ClearAllPoints()
+        if isGroup then
+            addBox:SetPoint("TOPRIGHT", pickerHeader, "BOTTOMRIGHT", -(10 + typeBtnW * 2 + 4 + 6), 9)
+        else
+            addBox:SetPoint("TOPRIGHT", pickerHeader, "BOTTOMRIGHT", -(10 + addBtnW + 6), 9)
+        end
+    end
 
     -- Spell picker scroll frame for the grid (below toolbar + hint rows)
     local pickerScroll = CreateFrame("ScrollFrame", nil, spellPickerView, "ScrollFrameTemplate")
