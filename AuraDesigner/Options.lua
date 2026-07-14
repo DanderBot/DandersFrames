@@ -9248,6 +9248,15 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     mainFrame.dfBuiltLayout = _adLayout
     mainFrame.dfBuiltPreset = _adPreset
     mainFrame.dfBuiltEditing = _adEditing
+    -- Closing the settings window (or leaving this page) hides mainFrame with
+    -- no refresh pass, which would leave the rendered preview pool's border
+    -- animations ticking on the external driver (it ticks hidden secretRect
+    -- borders — see ClearPlacedIndicators). OnHide fires on effective-visibility
+    -- loss, so an ancestor hide (window close, page switch) reaches it too; the
+    -- reuse path re-renders via AuraDesigner_RefreshPage → RefreshPlacedIndicators
+    -- on return. mainFrame is created fresh per full build (the old one is hidden
+    -- and unparented above), so this hook lands exactly once per frame.
+    mainFrame:HookScript("OnHide", ClearPlacedIndicators)
 
     -- Override RefreshStates: Aura Designer uses its own layout system.
     --
