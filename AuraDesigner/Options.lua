@@ -3171,13 +3171,14 @@ RefreshPreviewLightweight = function()
 
     local adDB = GetAuraDesignerDB()
     local isOther = IsOtherTab()
+    local isDebuffs = IsDebuffTab()
     local spec = ResolveSpec()
-    if not spec and not isOther then return end
+    if not spec and not (isOther or isDebuffs) then return end
 
     -- Build layout group position lookup (same as RefreshPlacedIndicators;
-    -- layout groups are My Buffs-only, so the Other tab skips the pass)
+    -- layout groups are My Buffs-only, so the Other/Debuffs tabs skip the pass)
     local groupPositions = {}
-    local specGroups2 = isOther and EMPTY_POOL or GetSpecLayoutGroups()
+    local specGroups2 = (isOther or isDebuffs) and EMPTY_POOL or GetSpecLayoutGroups()
     for _, group in ipairs(specGroups2) do
         if group.members then
             for memberIdx, member in ipairs(group.members) do
