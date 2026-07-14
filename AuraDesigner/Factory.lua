@@ -678,7 +678,9 @@ end
 -- glows stay stripped and are removed from the GUI dropdown (animExcludeTypes). knownWidth/
 -- knownHeight are fed so DF_DASH lays its dash count out from the configured icon size instead
 -- of the secret slot rect (mirror the frame-level border's frameWidth/Height feed).
-local function buildPlacedBorderSpec(frame, indicator, hideIcon)
+-- knownSize (optional) overrides the fed DF_DASH geometry for callers whose slot size
+-- doesn't live in indicator.size (filter/debuff groups feed group.iconSize).
+local function buildPlacedBorderSpec(frame, indicator, hideIcon, knownSize)
     if not DF.Border then return nil end
     local borderEnabled = indicator.ShowBorder
     if borderEnabled == nil then borderEnabled = indicator.borderEnabled end
@@ -697,7 +699,7 @@ local function buildPlacedBorderSpec(frame, indicator, hideIcon)
     spec.pixelPerfect = fdb.pixelPerfect
     -- Fed geometry for DF_DASH: the icon/square slot is square at the configured size (floored
     -- at 8, matching buildPlacedLayout), whose live rect is secret on 12.1.
-    local sz = math.max(8, tonumber(indicator.size) or 24)
+    local sz = knownSize or math.max(8, tonumber(indicator.size) or 24)
     spec.knownWidth  = sz
     spec.knownHeight = sz
     return spec
@@ -758,8 +760,10 @@ end
 
 -- Native stack-count TextStyle spec from the AD stack config keys (font/scale/outline/
 -- anchor/offset/colour). Read-free — the COUNT itself is filled secure-side by Blizzard's
--- SetApplicationCount (no formatter — secret trap), shown at >1.
-local function buildStackSpec(indicator)
+-- SetApplicationCount (no formatter — secret trap), shown at >1. defOX/defOY parameterize
+-- the unset-offset defaults: placed indicators default 0/0, filter/debuff groups keep
+-- their historical 2/-1 (buildFilterGroupStyle's pre-style hardcoded values).
+local function buildStackSpec(indicator, defOX, defOY)
     local outline = indicator.stackOutline or "OUTLINE"
     if outline == "NONE" then outline = "" end
     return {
@@ -768,8 +772,8 @@ local function buildStackSpec(indicator)
         size    = 10 * (tonumber(indicator.stackScale) or 1),
         outline = outline,
         anchor  = indicator.stackAnchor or "BOTTOMRIGHT",
-        offsetX = tonumber(indicator.stackX) or 0,
-        offsetY = tonumber(indicator.stackY) or 0,
+        offsetX = tonumber(indicator.stackX) or defOX or 0,
+        offsetY = tonumber(indicator.stackY) or defOY or 0,
         color   = indicator.stackColor,
     }
 end
@@ -1255,23 +1259,57 @@ local function buildFilterGroupLayout(group, wrapDefault)
     }
 end
 
+-- Per-group APPEARANCE config (group.style): a curated sub-table of the placed
+-- indicators' style keys — duration text (show / font / scale / outline / anchor /
+-- offsets / colour-by-time / colour / hide-above), stack text (show + styling),
+-- cooldown swipe, and the canonical Border* keys — shared by filter groups (both
+-- stores) and debuff groups. Absent or empty = the pre-style uniform defaults, so
+-- existing groups render (and serialize their configs) byte-identically.
+local EMPTY_STYLE = {}
+local function groupStyle(group)
+    local s = group.style
+    return type(s) == "table" and s or EMPTY_STYLE
+end
+
+-- Group border spec: reuses the placed builder (canonical Border* keys, BuildSpec,
+-- animations via config.adBorderAnim) with the group's icon size fed to DF_DASH.
+-- Unlike placed indicators (default ON), a group border is OFF unless the user
+-- enabled it — ShowBorder must be exactly true (style-less groups have no ring today).
+local function buildGroupBorderSpec(frame, group)
+    local s = groupStyle(group)
+    if s.ShowBorder ~= true then return nil end
+    return buildPlacedBorderSpec(frame, s, false, math.max(8, tonumber(group.iconSize) or 24))
+end
+
 -- Uniform per-group style: native spell icon + cooldown swipe, default duration
 -- text (bare NUMBER formatter — the same default the buff row / placed icons use)
--- and native stacks (>1, no formatter — secret trap). All static config; the
--- region set never varies per group, so only identity + max are structural.
-local function buildFilterGroupStyle()
-    return {
-        icon     = { show = true, zoom = true, inset = 0 },
-        cooldown = { show = true, swipe = true, numbers = false },
-        duration = {
-            show = true, size = 10, outline = "OUTLINE", anchor = "CENTER",
-            offsetX = 0, offsetY = 0,
-            formatter = DF.GetFactoryDurationFormatter
-                and DF:GetFactoryDurationFormatter("NUMBER") or nil,
-        },
-        stacks = { show = true, size = 10, outline = "OUTLINE", anchor = "BOTTOMRIGHT",
-                   offsetX = 2, offsetY = -1 },
+-- and native stacks (>1, no formatter — secret trap). All static config.
+-- group.style customises it through the SAME spec builders the placed indicators
+-- use (buildDurationTextSpec / buildStackSpec / the border spec passed in); with
+-- no style the output is byte-identical to the pre-style hardcoded table.
+local function buildFilterGroupStyle(group, borderSpec)
+    local s = groupStyle(group)
+    local style = {
+        -- Art insets by the border thickness so the ring frames it (placed-icon parity).
+        icon     = { show = true, zoom = true, inset = borderSpec and (s.BorderSize or 1) or 0 },
+        cooldown = { show = true, swipe = not s.hideSwipe, numbers = false },
+        duration = buildDurationTextSpec(s, true),
+        stacks   = (s.showStacks ~= false) and buildStackSpec(s, 2, -1) or nil,
     }
+    if borderSpec then style.border = { spec = borderSpec } end
+    return style
+end
+
+-- STRUCTURAL style signature for filter/debuff groups — which regions exist
+-- (duration / stacks / border on-off) + the duration-text FORMAT KEY (SetDurationText
+-- binds its formatter once per slot). Mirrors placedStructSig's treatment; appended
+-- to each group's struct sig at the sync call sites. "" fields for style-less groups.
+local function groupStyleStructSig(group)
+    local s = groupStyle(group)
+    return "|" .. ((s.showStacks ~= false) and "st" or "")
+        .. "|" .. ((s.showDuration ~= false) and "du" or "")
+        .. "|" .. (s.ShowBorder == true and "bd" or "")
+        .. "|df=" .. durationFmtKey(s, true)
 end
 
 -- Full row config for one filter group. Same frame-level band as the placed
@@ -1279,9 +1317,13 @@ end
 -- othersOnly rides poolFilter (group-level "HELPFUL|!PLAYER" — the B1 slot
 -- mechanism); only the flat-store UI offers the flag, but the read is
 -- pool-agnostic (spec-store parity, mirror auraHasTrackedIndicator).
-local function buildFilterGroupConfig(unit, map, group)
+-- Takes the FRAME (not unit): the border spec needs the frame db (pixelPerfect).
+-- adBorderAnim (the placed containers' DF-owned border-animation opt-in) is set
+-- only when a border exists, keeping style-less configs byte-identical.
+local function buildFilterGroupConfig(frame, map, group)
+    local borderSpec = buildGroupBorderSpec(frame, group)
     return {
-        unit = unit,
+        unit = frame.unit,
         mode = "row",
         max = math.max(1, tonumber(group.maxIcons) or 8),
         filter = poolFilter(group),
@@ -1289,9 +1331,10 @@ local function buildFilterGroupConfig(unit, map, group)
         testEntries = filterGroupTestEntries(map),
         enabled = true,
         tooltips = false,
+        adBorderAnim = borderSpec and true or nil,
         frameLevelOffset = 40,
         layout = buildFilterGroupLayout(group),
-        style = buildFilterGroupStyle(),
+        style = buildFilterGroupStyle(group, borderSpec),
     }
 end
 
@@ -1302,10 +1345,12 @@ end
 -- keys let deleted/swapped-out group tables GC.
 local fgroupExcludeWarned = setmetatable({}, { __mode = "k" })
 
--- COSMETIC signature: the layout fields hot-apply via ApplyStyle(style, layout).
--- Identity (selection signature) + max slot count are structural (declared at
--- AddAuraGroup / container build) and folded into structSig at the call site.
+-- COSMETIC signature: the layout fields + group.style's cosmetic fields (swipe,
+-- duration/stack styling, the raw-config border sig) hot-apply via
+-- ApplyStyle(style, layout). Identity (selection signature) + max slot count +
+-- the region set (groupStyleStructSig) are structural, folded at the call site.
 local function filterGroupCoSig(group, wrapDefault)
+    local s = groupStyle(group)
     return tconcat({
         "sz=" .. tostring(math.max(8, tonumber(group.iconSize) or 24)),
         "an=" .. tostring(group.anchor or "TOPLEFT"),
@@ -1314,6 +1359,20 @@ local function filterGroupCoSig(group, wrapDefault)
         "gr=" .. groupGrowth(group),
         "wr=" .. tostring(math.max(1, tonumber(group.iconsPerRow) or wrapDefault or 8)),
         "sp=" .. tostring(tonumber(group.spacing) or 2),
+        "sw=" .. tostring(s.hideSwipe and 1 or 0),
+        "du=" .. tconcat({
+            tostring(s.durationFont), tostring(s.durationScale),
+            tostring(s.durationOutline), tostring(s.durationAnchor),
+            tostring(s.durationX), tostring(s.durationY),
+            colSig(s.durationColor),
+        }, ","),
+        "stk=" .. tconcat({
+            tostring(s.stackFont), tostring(s.stackScale),
+            tostring(s.stackOutline), tostring(s.stackAnchor),
+            tostring(s.stackX), tostring(s.stackY),
+            colSig(s.stackColor),
+        }, ","),
+        "bd=" .. placedBorderRawSig(s, s.ShowBorder == true),
     }, "|")
 end
 
@@ -1380,18 +1439,20 @@ end
 -- in BuildAuraRowConfig, so groups sort identically. No testEntries: the test
 -- paint's HARMFUL fallback pool (TestData.debuffs) previews these rows, same as
 -- the main debuff row's preview data.
-local function buildDebuffGroupConfig(unit, records, group)
+local function buildDebuffGroupConfig(frame, records, group)
+    local borderSpec = buildGroupBorderSpec(frame, group)
     return {
-        unit = unit,
+        unit = frame.unit,
         mode = "row",
         max = math.max(1, tonumber(group.maxIcons) or 4),
         filter = records,
         sort = { method = "ExpirationOnly" },
         enabled = true,
         tooltips = false,
+        adBorderAnim = borderSpec and true or nil,
         frameLevelOffset = 40,
         layout = buildFilterGroupLayout(group, 4),
-        style = buildFilterGroupStyle(),
+        style = buildFilterGroupStyle(group, borderSpec),
     }
 end
 
@@ -2105,21 +2166,24 @@ local function syncFilterGroupList(frame, fg, live, R, groups, keyPrefix)
                 local structSig = selSig
                     .. "|max=" .. tostring(math.max(1, tonumber(group.maxIcons) or 8))
                     .. "|f=" .. poolFilter(group)   -- filter string binds at build (othersOnly toggle -> Rebuild)
+                    .. groupStyleStructSig(group)   -- region set + duration format key (group.style)
                 local coSig = filterGroupCoSig(group)
 
                 local entry = fg[key]
                 if not entry then
                     local handle = DF.AuraContainer:Create(frame,
-                        buildFilterGroupConfig(frame.unit, res.map, group))
+                        buildFilterGroupConfig(frame, res.map, group))
                     if handle then
                         fg[key] = { handle = handle, structSig = structSig, coSig = coSig }
                     end
                 elseif entry.structSig ~= structSig then
                     entry.structSig, entry.coSig = structSig, coSig
-                    entry.handle:Rebuild(buildFilterGroupConfig(frame.unit, res.map, group))
+                    entry.handle:Rebuild(buildFilterGroupConfig(frame, res.map, group))
                 elseif entry.coSig ~= coSig then
                     entry.coSig = coSig
-                    entry.handle:ApplyStyle(buildFilterGroupStyle(), buildFilterGroupLayout(group))
+                    entry.handle:ApplyStyle(
+                        buildFilterGroupStyle(group, buildGroupBorderSpec(frame, group)),
+                        buildFilterGroupLayout(group))
                 end
             elseif res.kind == "exclude" then
                 -- Unreachable from the group UI (no Uncategorised option in the
@@ -2551,8 +2615,9 @@ function Factory:SyncFrame(frame)
     -- spec-keyed groups, OTHER_PREFIX for the flat spec-independent
     -- adDB.otherLayoutGroups store (the two id counters overlap, the prefix keeps
     -- the keys disjoint). Structural sig = the registry selection signature (live
-    -- link: filter edits / preset updates move it) + max slot count; the layout
-    -- fields hot-apply via ApplyStyle. Eye-hidden groups (`enabled == false`;
+    -- link: filter edits / preset updates move it) + max slot count + the
+    -- group.style region set (groupStyleStructSig); the layout fields and
+    -- cosmetic style fields hot-apply via ApplyStyle. Eye-hidden groups (`enabled == false`;
     -- nil/true = shown) are not marked live -> the sweep destroys their handle.
     -- Same for deleted groups and spec switches (different id set; other-pool
     -- groups are spec-independent, so they persist across spec switches like
@@ -2580,7 +2645,8 @@ function Factory:SyncFrame(frame)
     -- ---- DEBUFF CATEGORY GROUPS (container-backed category rows) — C1 -----------------
     -- One handle per enabled group, keyed "dgroup:<id>". Structural sig = the group's
     -- resolved filter records (serialized by the row's own filterListSig — a selection
-    -- edit moves the records, the sig follows) + max slot count; the layout fields
+    -- edit moves the records, the sig follows) + max slot count + the group.style
+    -- region set (groupStyleStructSig); the layout fields and cosmetic style fields
     -- hot-apply via ApplyStyle. Eye-hidden groups (`enabled == false`), empty selections
     -- (no records) and deleted groups are not marked live -> the sweep destroys their
     -- handle. adDB.debuffGroups is preset-level and spec-INDEPENDENT (mirror otherAuras),
@@ -2602,21 +2668,24 @@ function Factory:SyncFrame(frame)
                         live[key] = true
                         local structSig = recSig
                             .. "|max=" .. tostring(math.max(1, tonumber(group.maxIcons) or 4))
+                            .. groupStyleStructSig(group)   -- region set + duration format key (group.style)
                         local coSig = filterGroupCoSig(group, 4)
 
                         local entry = dg[key]
                         if not entry then
                             local handle = DF.AuraContainer:Create(frame,
-                                buildDebuffGroupConfig(frame.unit, records, group))
+                                buildDebuffGroupConfig(frame, records, group))
                             if handle then
                                 dg[key] = { handle = handle, structSig = structSig, coSig = coSig }
                             end
                         elseif entry.structSig ~= structSig then
                             entry.structSig, entry.coSig = structSig, coSig
-                            entry.handle:Rebuild(buildDebuffGroupConfig(frame.unit, records, group))
+                            entry.handle:Rebuild(buildDebuffGroupConfig(frame, records, group))
                         elseif entry.coSig ~= coSig then
                             entry.coSig = coSig
-                            entry.handle:ApplyStyle(buildFilterGroupStyle(), buildFilterGroupLayout(group, 4))
+                            entry.handle:ApplyStyle(
+                                buildFilterGroupStyle(group, buildGroupBorderSpec(frame, group)),
+                                buildFilterGroupLayout(group, 4))
                         end
                     end
                 end

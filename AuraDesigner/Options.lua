@@ -7284,6 +7284,153 @@ BuildGlobalTab = function()
 end
 
 -- ── BUILD LAYOUT GROUPS TAB ──
+-- ============================================================
+-- GROUP APPEARANCE SECTION (filter-group + debuff-group cards)
+-- Collapsible "Appearance" SettingsGroup (the effect-card section idiom)
+-- holding the per-group icon styling the container genuinely supports:
+-- cooldown swipe, border (full CreateBorderControls set incl. the DF-owned
+-- animations), duration text (show / font / scale / outline / anchor /
+-- offsets / colour-by-time / colour / hide-above) and stack count (show +
+-- text styling). Controls bind to group.style via a defaults proxy
+-- (CreateInstanceProxy's idiom): nil keys read the pre-style defaults, so
+-- an untouched section changes nothing — the factory renders a style-less
+-- (or all-default) group byte-identically to before. Omitted vs the placed
+-- effect card, by capability: Min Stacks (no formatter on the native stack
+-- path — secret trap), Hide Icon / size / scale / alpha / frame level
+-- (group-level layout already owns size; the rest are per-indicator
+-- concepts), Expiring / Show When Missing (remaining-time / presence reads).
+-- Structural fields (show toggles, colour-by-time, hide-above, border
+-- on/off) move the group struct sig -> the factory Rebuilds; everything
+-- else hot-applies via the cosmetic sig. Collapse state persists under one
+-- shared "adGroupStyle" key (disjoint from the effect cards' header keys).
+local function AddGroupAppearanceSection(body, group, bodyWidth, by)
+    local s = group.style
+    if type(s) ~= "table" then s = {}; group.style = s end
+
+    -- Defaults = today's uniform group rendering (Factory buildFilterGroupStyle's
+    -- pre-style values) + the icon indicator's Border* seeds so CreateBorderControls
+    -- reads sensible values on first open (ShowBorder overridden OFF — a group has
+    -- no ring until the user enables one).
+    local defaults = {
+        hideSwipe = false, showDuration = true, showStacks = true,
+        durationFont = "Friz Quadrata TT", durationScale = 1.0, durationOutline = "OUTLINE",
+        durationAnchor = "CENTER", durationX = 0, durationY = 0,
+        durationColorByTime = false, durationColor = { r = 1, g = 1, b = 1, a = 1 },
+        durationHideAboveEnabled = false, durationHideAboveThreshold = 10,
+        stackFont = "Friz Quadrata TT", stackScale = 1.0, stackOutline = "OUTLINE",
+        stackAnchor = "BOTTOMRIGHT", stackX = 2, stackY = -1,
+        stackColor = { r = 1, g = 1, b = 1, a = 1 },
+        ShowBorder = false,
+    }
+    for k, v in pairs(TYPE_DEFAULTS.icon) do
+        if k:find("^Border") and defaults[k] == nil then defaults[k] = v end
+    end
+
+    -- Defaults proxy (CreateInstanceProxy's idiom, group.style-backed): reads fall
+    -- through to the defaults (table fallbacks copy-on-read so colour sub-key edits
+    -- persist); writes land in group.style and refresh the live frames. The factory
+    -- reads the RAW style table with the same defaults, so UI and render agree.
+    local proxy = setmetatable({ _skipOverrideIndicators = true, __dfDefaults = defaults }, {
+        __index = function(_, k)
+            local val = s[k]
+            if val ~= nil then return val end
+            local fallback = defaults[k]
+            if type(fallback) == "table" then
+                local copy = {}
+                for fk, fv in pairs(fallback) do copy[fk] = fv end
+                s[k] = copy
+                return copy
+            end
+            return fallback
+        end,
+        __newindex = function(_, k, v)
+            s[k] = v
+            RefreshLiveFramesThrottled()
+        end,
+    })
+
+    -- Cosmetic edits hot-apply (coSig -> ApplyStyle); structural toggles move the
+    -- struct sig -> Rebuild. Both ride the same throttled factory re-sync.
+    local function refresh() RefreshLiveFramesThrottled() end
+    -- Visibility changes inside the section (border style dropdown swapping its
+    -- widget set) re-measure heights, so rebuild the tab — the same full-rebuild
+    -- the effect cards' dropdown callbacks run (AuraDesigner_RefreshPage).
+    local function rebuildTab() SwitchTab("layout") end
+
+    local g = GUI:CreateSettingsGroup(body, bodyWidth - 10, {
+        collapsible = true,
+        collapseKey = "adGroupStyle",
+    })
+    g.padding = 6
+    g:AddWidget(GUI:CreateHeader(body, L["Appearance"]), 25)
+
+    g:AddWidget(GUI:CreateCheckbox(body, L["Hide Cooldown Swipe"], proxy, "hideSwipe", refresh), 28)
+
+    -- ── BORDER ── (the placed icon's control set; gradient degrades to solid on
+    -- container slots — same known casualty as placed indicators; LCG glow types
+    -- are excluded from the animation dropdown, mirror the placed border)
+    g:AddWidget(GUI:CreateExpiringSubheader(body, L["Border"]), 18)
+    GUI:CreateBorderControls(g, proxy, "", {
+        parent  = body,
+        include = {
+            inset = true, offset = true, blendMode = true,
+            gradient = true, shadow = true, alpha = true,
+            animate = true,
+        },
+        animExcludeTypes = { PULSATE = true, CHASE = true, FLASH = true, PROC = true },
+        fullUpdate    = refresh,
+        lightUpdate   = refresh,
+        lightColors   = refresh,
+        refreshStates = rebuildTab,
+        sizeMin = 1, sizeMax = 5, sizeStep = 1,
+    })
+
+    -- ── DURATION TEXT ── (shared text controls; keys mirror the placed cards')
+    g:AddWidget(GUI:CreateExpiringSubheader(body, L["Duration Text"]), 18)
+    g:AddWidget(GUI:CreateCheckbox(body, L["Show Duration"], proxy, "showDuration", refresh), 28)
+    GUI:CreateTextControls(g, proxy, "duration", {
+        parent = body,
+        include = { color = true },
+        colorLabel = L["Duration Text Color"],
+        colorDisableOn = function() return proxy.durationColorByTime and true or false end,
+        onChange = refresh, onDrag = refresh,
+    })
+    g:AddWidget(GUI:CreateCheckbox(body, L["Color by Time Remaining"], proxy, "durationColorByTime", refresh), 28)
+    local hideAboveSlider
+    local function UpdateHideAboveState()
+        if not hideAboveSlider then return end
+        if proxy.durationHideAboveEnabled then
+            hideAboveSlider:SetAlpha(1)
+            hideAboveSlider:EnableMouse(true)
+        else
+            hideAboveSlider:SetAlpha(0.4)
+            hideAboveSlider:EnableMouse(false)
+        end
+    end
+    g:AddWidget(GUI:CreateCheckbox(body, L["Hide Duration Above Threshold"], proxy, "durationHideAboveEnabled", function()
+        UpdateHideAboveState()
+        refresh()
+    end), 28)
+    hideAboveSlider = GUI:CreateSlider(body, L["Hide Above (seconds)"], 1, 60, 1, proxy, "durationHideAboveThreshold", refresh, refresh, true)
+    g:AddWidget(hideAboveSlider, 54)
+    UpdateHideAboveState()
+
+    -- ── STACK COUNT ── (no Min Stacks — not expressible on the native no-formatter
+    -- stack path, see Features/Auras.lua's stacks-formatter warning)
+    g:AddWidget(GUI:CreateExpiringSubheader(body, L["Stack Count"]), 18)
+    g:AddWidget(GUI:CreateCheckbox(body, L["Show Stacks"], proxy, "showStacks", refresh), 28)
+    GUI:CreateTextControls(g, proxy, "stack", {
+        parent = body,
+        include = { color = true },
+        colorLabel = L["Stack Text Color"],
+        onChange = refresh, onDrag = refresh,
+    })
+
+    local h = g:LayoutChildren()
+    g:SetPoint("TOPLEFT", body, "TOPLEFT", 5, by)
+    return by - h
+end
+
 BuildLayoutGroupsTab = function()
     if not tabContentFrame then return end
     local parent = tabContentFrame
@@ -8169,6 +8316,10 @@ BuildLayoutGroupsTab = function()
                         ooCb.tooltip = L["Only show other players' casts of these buffs."]
                         by = by - 34
                     end
+
+                    -- ── APPEARANCE (collapsible — the effect-card section idiom) ──
+                    by = by - 10
+                    by = AddGroupAppearanceSection(body, group, bodyWidth, by)
                 end
 
                 local bodyH = -by + 12
@@ -8569,6 +8720,10 @@ BuildDebuffGroupsTab = function()
                 maxSlider:SetPoint("TOPLEFT", body, "TOPLEFT", 5, by)
                 if maxSlider.SetWidth then maxSlider:SetWidth(bodyWidth - 10) end
                 by = by - 54
+
+                -- ── APPEARANCE (collapsible — the effect-card section idiom) ──
+                by = by - 10
+                by = AddGroupAppearanceSection(body, group, bodyWidth, by)
 
                 local bodyH = -by + 12
                 body:SetHeight(bodyH)
