@@ -699,6 +699,42 @@ local function GetSpecAuras(spec)
     return specAuras
 end
 
+-- Returns the spec-INDEPENDENT "Other Buffs" pool (B1): a flat map auraName -> auraCfg
+-- with the EXACT record shape of adDB.auras[spec] entries (indicators array, frame-level
+-- sub-tables, sound, priority, nextIndicatorID), created + sanitized like GetSpecAuras.
+-- Deliberately a SIBLING key of adDB.auras (never a pseudo-spec inside it) so every
+-- adDB.auras consumer stays spec-scoped; a future per-spec expansion of this pool would
+-- land under its own sibling key, so this flat map never needs a migration. Aura names
+-- here must be SpellDB names (rec.n / localized) or ad-hoc "#<id>" keys — identity
+-- resolves spec-independently via DF:BuildADIdentityFilters(nil, name).
+-- (B2 wires the Other Buffs tab/editor to this accessor; the factory reads
+-- adDB.otherAuras directly, mirroring how it reads adDB.auras[spec].)
+local function GetOtherAuras()
+    local adDB = GetAuraDesignerDB()
+    if not adDB then return {} end
+    if not adDB.otherAuras then adDB.otherAuras = {} end
+    local otherAuras = adDB.otherAuras
+    -- One-time cleanup, same as GetSpecAuras (registry is keyed by table identity, so
+    -- profile/preset switches re-sanitize the new table naturally).
+    if not sanitizedSpecAuras[otherAuras] then
+        local toRemove
+        for k, v in pairs(otherAuras) do
+            if type(v) ~= "table" then
+                if not toRemove then toRemove = {} end
+                toRemove[#toRemove + 1] = k
+            end
+        end
+        if toRemove then
+            for _, k in ipairs(toRemove) do
+                otherAuras[k] = nil
+            end
+            DF:DebugWarn("AD", "Cleaned %d corrupted entries from other auras table", #toRemove)
+        end
+        sanitizedSpecAuras[otherAuras] = true
+    end
+    return otherAuras
+end
+
 -- Returns the spec-scoped layout groups array, creating it if needed
 local function GetSpecLayoutGroups(spec)
     local adDB = GetAuraDesignerDB()
