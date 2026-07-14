@@ -81,7 +81,7 @@ CreateDFFontObjects()
 function DF.GUI:ApplySettingsFont()
     if not DF.db then return end
 
-    local fontName = DF.db.settingsFont or "Friz Quadrata TT"
+    local fontName = DF.db.settingsFont or "DF Roboto SemiBold"
     local outline  = DF.db.settingsFontOutline or ""
     if outline == "NONE" then outline = "" end
 
@@ -142,7 +142,7 @@ function DF.GUI:SetSettingsFont(fontString, size, outline)
     size = size or DEFAULT_FONT_SIZE
     local explicitOutline = outline  -- nil means "follow user"
 
-    local fontName = (DF.db and DF.db.settingsFont) or "Friz Quadrata TT"
+    local fontName = (DF.db and DF.db.settingsFont) or "DF Roboto SemiBold"
     local userOutline = (DF.db and DF.db.settingsFontOutline) or ""
     if userOutline == "NONE" then userOutline = "" end
 

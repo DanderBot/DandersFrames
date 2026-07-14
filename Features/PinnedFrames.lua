@@ -3742,6 +3742,47 @@ function PinnedFrames:EnterTestMode()
     end
 end
 
+-- Re-render the pinned test frames when settings change WHILE Test Mode is
+-- already active. EnterTestMode stands the pools/containers up on entry; this is
+-- the lighter in-place refresh the settings paths call so pinned previews track
+-- edits live instead of only updating on /reload. Mirrors the party/raid split
+-- in DF:RefreshTestFrames / DF:RefreshTestFramesWithLayout: withLayout re-applies
+-- geometry (ApplyPlayerTestLayout) before the per-frame render; the data-only
+-- path just re-renders. No container/pool setup and no real-frame hiding here —
+-- those are entry-only concerns.
+function PinnedFrames:RefreshTestMode(withLayout)
+    if not self.testModeActive then return end
+    if InCombatLockdown() then return end
+
+    local isRaidMode
+    if DF.raidTestMode then
+        isRaidMode = true
+    elseif DF.testMode then
+        isRaidMode = false
+    else
+        return
+    end
+
+    for setIndex = 1, PinnedFrames.MAX_SETS do
+        local set = GetSetDBForMode(setIndex, isRaidMode)
+        local pool = set and set.enabled and self.testFrames[setIndex]
+        if pool then
+            if withLayout then
+                self:ApplyPlayerTestLayout(setIndex, set, isRaidMode)
+            end
+            local n = set.testCount or 3
+            local cap = IsBossSet(set) and 8 or (isRaidMode and 40 or 5)
+            if n < 1 then n = 1 end
+            if n > cap then n = cap end
+            for i = 1, n do
+                if pool[i] and DF.UpdateTestFrame then
+                    DF:UpdateTestFrame(pool[i], i, withLayout and true or false)
+                end
+            end
+        end
+    end
+end
+
 -- Called when Test Mode is toggled OFF. Hide all pinned test frames and
 -- their containers, and show the real player-mode header again (whose
 -- visibility is driven by actual group membership). No secure frame

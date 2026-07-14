@@ -1487,6 +1487,7 @@ local function CreateTextElementCard(GUI, parent, yPos, elem, tdDB, state, page)
         elem.enabled = not elem.enabled
         updateEyeIcon()
         DF:Debug("TD", "Element %d enabled=%s", elem.id, tostring(elem.enabled))
+        if state.UpdateTabCounts then state.UpdateTabCounts(tdDB) end
         if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end
     end)
 
@@ -1684,6 +1685,9 @@ local function FullRebuildCards(GUI, page, tdDB, state)
     if state.groupListChild and DF.TextDesigner.RenderGroupCardList then
         DF.TextDesigner.RenderGroupCardList(GUI, page, tdDB, state)
     end
+    if state.UpdateTabCounts then
+        state.UpdateTabCounts(tdDB)
+    end
     if DF.TextDesigner.Preview then
         DF.TextDesigner.Preview:RefreshAll()
     end
@@ -1779,6 +1783,36 @@ local function BuildTabStrip(GUI, parent, state, tdDB, page)
         strip[def.id] = btn
         tabButtons[i] = btn
     end
+
+    -- Show a live count of enabled elements in the Texts / Text Groups tab
+    -- labels, so it's obvious which tab holds content — in particular that the
+    -- default current/max health lives under Text Groups, not Texts. Global has
+    -- no element list, so it keeps its plain label. SetActive only recolours the
+    -- label (never re-sets its text), so the count survives tab switches. Takes
+    -- an optional db so FullRebuildCards can pass the current mode's table rather
+    -- than rely on the one captured at build time.
+    local function UpdateTabCounts(countDB)
+        countDB = countDB or tdDB
+        local counts = { texts = 0, groups = 0 }
+        local elems = countDB and countDB.elements
+        if type(elems) == "table" then
+            for _, e in ipairs(elems) do
+                if type(e) == "table" and e.enabled ~= false then
+                    local bucket = (e.contentType == "group") and "groups" or "texts"
+                    counts[bucket] = counts[bucket] + 1
+                end
+            end
+        end
+        for _, def in ipairs(tabDefs) do
+            local c = counts[def.id]
+            local btn = strip[def.id]
+            if c and btn and btn.Text then
+                btn.Text:SetText(("%s (%d)"):format(def.label, c))
+            end
+        end
+    end
+    state.UpdateTabCounts = UpdateTabCounts
+    UpdateTabCounts()
 
     -- Resize tabs equally when the strip is resized (e.g. mode swap,
     -- first paint). Mirrors AD:6051-6057.
@@ -2137,6 +2171,7 @@ local function CreateGroupCard(GUI, parent, yPos, elem, tdDB, state, page)
         elem.enabled = not elem.enabled
         updateEyeIcon()
         DF:Debug("TD", "Group %d enabled=%s", elem.id, tostring(elem.enabled))
+        if state.UpdateTabCounts then state.UpdateTabCounts(tdDB) end
         if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end
     end)
     card.eyeBtn = eyeBtn

@@ -523,10 +523,10 @@ local function buildBorderSpec(frame, borderCfg)
     if not spec.color then spec.color = { r = 0, g = 0, b = 0, a = 1 } end
     local fdb = DF:GetFrameDB(frame) or {}
     spec.pixelPerfect = fdb.pixelPerfect
-    -- Fed geometry for DF_DASH: the AD border wraps the WHOLE frame (the overlay slot
-    -- does slot:SetAllPoints(handle.frame)), whose live rect is secret on 12.1. Feed the
-    -- frame's own configured width/height so drawDashes lays out from a plain config
-    -- number instead of measuring the secret slot. Ignored by every non-dash path.
+    -- Fed geometry for the DF particle effects (DF Dash / DF Orbit): the AD border wraps
+    -- the WHOLE frame (the overlay slot does slot:SetAllPoints(handle.frame)), whose live
+    -- rect is secret on 12.1. Feed the frame's own configured width/height so they lay out
+    -- from a plain config number instead of measuring the secret slot. Ignored otherwise.
     spec.knownWidth  = fdb.frameWidth
     spec.knownHeight = fdb.frameHeight
     -- KNOWN DEGRADATION (GRADIENT → solid): the AuraContainer overlay-border builder creates

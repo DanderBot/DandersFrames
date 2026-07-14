@@ -3961,11 +3961,6 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                     gradient = true, shadow = true, alpha = true,
                     animate = true,
                 },
-                -- LCG glows taint on native aura buttons and get stripped by the container's
-                -- SAFE_OVERLAY_ANIM allowlist; drop them from the dropdown so a factory-owned
-                -- placed indicator can't offer a type that silently won't animate (mirror the
-                -- frame-level AD border).
-                animExcludeTypes = { PULSATE = true, CHASE = true, FLASH = true, PROC = true },
                 -- IMPORTANT: AD's per-aura proxy only triggers
                 -- RefreshLiveFramesThrottled + RefreshPreviewLightweight
                 -- on direct key assignment (proxy.X = v) via __newindex.
@@ -4097,9 +4092,6 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                     gradient = true, shadow = true, alpha = true,
                     animate = true,
                 },
-                -- LCG glows taint on native aura buttons and get stripped by the container's
-                -- SAFE_OVERLAY_ANIM allowlist; drop them from the dropdown (mirror frame-level AD).
-                animExcludeTypes = { PULSATE = true, CHASE = true, FLASH = true, PROC = true },
                 fullUpdate    = RPL,
                 lightUpdate   = RPL,
                 lightColors   = RPL,
@@ -4222,9 +4214,6 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                     inset = true, blendMode = true, gradient = true,
                     shadow = true, alpha = true, animate = true,
                 },
-                -- LCG glows taint on native aura buttons and get stripped by the container's
-                -- SAFE_OVERLAY_ANIM allowlist; drop them from the dropdown (mirror frame-level AD).
-                animExcludeTypes = { PULSATE = true, CHASE = true, FLASH = true, PROC = true },
                 fullUpdate    = RPL,
                 lightUpdate   = RPL,
                 lightColors   = RPL,
@@ -4312,11 +4301,11 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                     gradient = true, shadow = true, alpha = true,
                     animate = true,
                 },
-                -- The AD border runs on the AuraContainer overlay path, which only
-                -- recovers the taint-safe DF-owned animations (SAFE_OVERLAY_ANIM in
-                -- AuraContainer.lua). Drop the LCG glows from the dropdown so users
-                -- can't pick a type that gets silently stripped.
-                animExcludeTypes = { PULSATE = true, CHASE = true, FLASH = true, PROC = true },
+                -- DF Flash / DF Proc are centre-anchored proc-glow flares sized to
+                -- the icon; this border wraps the WHOLE frame, so they'd bloom to an
+                -- absurd size. Exclude them here (they stay available on the icon /
+                -- square / bar indicators, whose borders are icon-sized).
+                animExcludeTypes = { DF_FLASH = 1, DF_PROC = 1 },
                 fullUpdate    = RPL,
                 lightUpdate   = RPL,
                 lightColors   = RPL,

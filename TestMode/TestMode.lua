@@ -12,7 +12,7 @@ local L = DF.L
 
 DF.TestData = {
     units = {
-        {name = "Tankerino", class = "WARRIOR", role = "TANK", specID = 73, health = 1.0, maxHealth = 100000, absorb = 0.20, healAbsorb = 0, healPrediction = 0.15, status = nil, outOfRange = false, isLeader = true, raidTarget = 8, dispelType = nil, centerStatus = nil, isMainTank = true, isAFK = false, isPhased = false, inVehicle = false, isBGCarrier = true, isInCombat = true, hasMyBuff = true, reducedMaxPct = 0.20},  -- Skull marker, leader, main tank, has HoT, carrying objective
+        {name = "Tankerino", class = "WARRIOR", role = "TANK", specID = 73, health = 1.0, maxHealth = 100000, absorb = 0.20, healAbsorb = 0, healPrediction = 0.15, status = nil, outOfRange = false, isLeader = true, raidTarget = 8, dispelType = nil, centerStatus = nil, isMainTank = true, isAFK = false, isPhased = false, inVehicle = false, isBGCarrier = false, isInCombat = true, hasMyBuff = true, reducedMaxPct = 0.20},  -- Skull marker, leader, main tank, has HoT, in combat (BG carrier kept to raid test to avoid overlapping the leader's ready-check icon)
         {name = "Healsworth", class = "PRIEST", role = "HEALER", specID = 257, health = 0.95, maxHealth = 85000, absorb = 0.10, healAbsorb = 0, healPrediction = 0.05, status = nil, outOfRange = false, isAssist = true, raidTarget = nil, dispelType = "Magic", centerStatus = "summon", isMainAssist = true, isAFK = false, isPhased = false, inVehicle = false, hasMyBuff = false, reducedMaxPct = 0},  -- Assistant, main assist, summon pending
         {name = "Мишок", class = "MAGE", role = "DAMAGER", specID = 63, health = 0.60, maxHealth = 75000, absorb = 0, healAbsorb = 0.15, healPrediction = 0.15, status = nil, outOfRange = true, raidTarget = 1, dispelType = "Curse", centerStatus = nil, isAFK = true, isPhased = false, inVehicle = false, hasMyBuff = true, reducedMaxPct = 0},  -- Star marker, AFK, has HoT
         {name = "Alexandrosthegreat", class = "PALADIN", role = "DAMAGER", specID = 70, health = 0, maxHealth = 90000, absorb = 0, healAbsorb = 0, healPrediction = 0, status = "Dead", outOfRange = false, raidTarget = nil, dispelType = nil, centerStatus = "resurrect", isAFK = false, isPhased = false, inVehicle = false, hasMyBuff = false, reducedMaxPct = 0},  -- Dead unit, being resurrected
@@ -1159,18 +1159,6 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     -- when the toggle is off, not just the legacy icon).
     DF:UpdateTestDefensiveBar(frame, testData)
     
-    -- Update class power pips for test mode
-    if db.classPowerEnabled and db.testShowClassPower ~= false then
-        if DF.UpdateTestClassPower then
-            testData.index = index
-            DF:UpdateTestClassPower(frame, testData)
-        end
-    else
-        if DF.HideTestClassPower then
-            DF:HideTestClassPower(frame)
-        end
-    end
-
     -- Update Aura Designer test indicators through the factory containers — the
     -- SAME path as the bulk DF:UpdateAllTestAuraDesigner, so the per-frame and
     -- bulk previews can't drift (the legacy Engine:UpdateTestFrame is gone).
@@ -2094,11 +2082,6 @@ function DF:ShowTestFrames(silent)
         end)
     end
     
-    -- Refresh class power (show/hide based on testShowClassPower)
-    if DF.RefreshClassPower then
-        DF:RefreshClassPower()
-    end
-    
     if not silent then
         print("|cff00ff00DandersFrames:|r " .. L["Test mode enabled."])
     end
@@ -2143,6 +2126,12 @@ function DF:RefreshTestFrames()
                 DF:UpdateTestFrame(frame, i)
             end
         end
+    end
+
+    -- Pinned test frames follow the same settings changes (data/style refresh,
+    -- no re-layout) — otherwise they only updated on Test Mode entry / reload.
+    if DF.PinnedFrames and DF.PinnedFrames.RefreshTestMode then
+        DF.PinnedFrames:RefreshTestMode(false)
     end
 end
 
@@ -2291,6 +2280,12 @@ function DF:RefreshTestFramesWithLayout()
         end
     end
 
+    -- Pinned test frames follow the same layout changes (re-apply geometry, then
+    -- render) — otherwise they only updated on Test Mode entry / reload.
+    if DF.PinnedFrames and DF.PinnedFrames.RefreshTestMode then
+        DF.PinnedFrames:RefreshTestMode(true)
+    end
+
     -- Update highlights
     if DF.testMode or DF.raidTestMode then
         DF:UpdateAllTestHighlights()
@@ -2338,9 +2333,6 @@ function DF:HideTestFrames(silent)
             if DF.HideAllTargetedSpells then
                 DF:HideAllTargetedSpells(frame)
             end
-            if DF.HideTestClassPower then
-                DF:HideTestClassPower(frame)
-            end
         end
     end
 
@@ -2370,9 +2362,6 @@ function DF:HideTestFrames(silent)
     if not InCombatLockdown() then
         if DF.UpdateHeaderVisibility then
             DF:UpdateHeaderVisibility()
-        end
-        if DF.RefreshClassPower then
-            DF:RefreshClassPower()
         end
     end
     
@@ -2591,9 +2580,6 @@ function DF:HideRaidTestFrames()
             if frame.absorbOverflowBar then frame.absorbOverflowBar:Hide() end
             if DF.HideAllTargetedSpells then
                 DF:HideAllTargetedSpells(frame)
-            end
-            if DF.HideTestClassPower then
-                DF:HideTestClassPower(frame)
             end
         end
     end
@@ -3228,72 +3214,162 @@ function DF:ThrottledUpdateRaidTestFrames()
     end
 end
 
+-- ============================================================
+-- TEST PRESETS
+-- ============================================================
+-- Presets are DECLARATIVE and EXHAUSTIVE: each lists only the toggles it turns
+-- ON, and applying it forces every other key in TEST_TOGGLE_KEYS OFF. So a new
+-- test toggle is OFF in every preset until it's explicitly listed here — and
+-- automatically ON in Full, which is built from the key list.
+--
+-- The old hand-written branches only covered 11 of the 19 panel toggles, so the
+-- other 8 (pets, heal prediction, reduced max, Text Designer, Aura Designer,
+-- animate targeted list, selection, aggro) kept whatever value they happened to
+-- have. "Full" wasn't full, and "Static" wasn't a reproducible baseline.
+--
+-- Sliders (frame / buff / debuff counts) are deliberately NOT touched: they're a
+-- working preference, not part of a preset's visual identity.
+-- ============================================================
+
+local TEST_TOGGLE_KEYS = {
+    -- General
+    "testShowPets", "testAnimateHealth",
+    -- Bars & Overlays
+    "testShowAbsorbs", "testShowHealPrediction", "testShowOutOfRange",
+    "testShowReducedMaxHealth", "testShowTextDesigner",
+    -- Auras
+    "testShowAuras", "testShowDispelGlow", "testShowMissingBuff", "testShowAuraDesigner",
+    -- Indicators & Icons
+    "testShowExternalDef", "testShowTargetedList", "testAnimateTargetedList",
+    "testShowTargetedSpell", "testShowPersonalTargeted", "testShowStatusIcons",
+    -- Highlights
+    "testShowSelection", "testShowAggro",
+}
+
+-- Toggles for PARTY-ONLY features — a raid preset must not touch them.
+--   Targeted List: party-only outright (its keys are stripped from RaidDefaults
+--     by PARTY_ONLY_KEYS in Config.lua, so writing them here would create keys
+--     that are meant not to exist in the raid db).
+--   Targeted Spells: the group cast detection is fingerprint-based and "Raid is
+--     intentionally unsupported (collisions are near-total)" — the key does live
+--     in the raid db, but the feature never renders there, so a raid preset has
+--     no business flipping it. The panel greys all three in raid to match.
+-- Personal Targeted has no raid gate and is NOT listed here.
+local TEST_PARTY_ONLY_KEYS = {
+    testShowTargetedList    = true,
+    testAnimateTargetedList = true,
+    testShowTargetedSpell   = true,
+}
+
+local TEST_PRESETS = {
+    -- At rest: everything the frame draws when nothing is happening. No health
+    -- motion and no conditional bar states (absorbs / heal prediction / range).
+    STATIC = {
+        testShowPets             = true,
+        testShowTextDesigner     = true,
+        testShowAuras            = true,
+        testShowDispelGlow       = true,
+        testShowAuraDesigner     = true,
+        testShowTargetedList     = true,
+        testAnimateTargetedList  = true,
+        testShowTargetedSpell    = true,
+        testShowPersonalTargeted = true,
+        testShowStatusIcons      = true,
+    },
+    -- Static plus what a pull adds: health movement and threat.
+    COMBAT = {
+        testShowPets             = true,
+        testAnimateHealth        = true,
+        testShowTextDesigner     = true,
+        testShowAuras            = true,
+        testShowDispelGlow       = true,
+        testShowAuraDesigner     = true,
+        testShowTargetedList     = true,
+        testAnimateTargetedList  = true,
+        testShowTargetedSpell    = true,
+        testShowPersonalTargeted = true,
+        testShowStatusIcons      = true,
+        testShowAggro            = true,
+    },
+    -- The healing-decision layers (absorbs, incoming heals, reduced max health,
+    -- defensives) on a still frame, so the bars stay readable.
+    HEALER = {
+        testShowPets             = true,
+        testShowAbsorbs          = true,
+        testShowHealPrediction   = true,
+        testShowReducedMaxHealth = true,
+        testShowTextDesigner     = true,
+        testShowAuras            = true,
+        testShowDispelGlow       = true,
+        testShowAuraDesigner     = true,
+        testShowExternalDef      = true,
+        testShowTargetedList     = true,
+        testAnimateTargetedList  = true,
+        testShowTargetedSpell    = true,
+        testShowPersonalTargeted = true,
+        testShowStatusIcons      = true,
+    },
+}
+
+-- Full = every toggle on. Built from the key list so a newly added toggle is
+-- picked up automatically instead of quietly staying off.
+TEST_PRESETS.FULL = {}
+for _, k in ipairs(TEST_TOGGLE_KEYS) do TEST_PRESETS.FULL[k] = true end
+
+-- Repaint every test surface. The panel's per-checkbox callbacks each poke their
+-- own painter, so a preset — which can flip any of them at once — has to run the
+-- lot or a toggle only lands once the box is clicked by hand.
+local function RefreshAllTestSurfaces()
+    if not (DF.testMode or DF.raidTestMode) then return end
+    if DF.UpdateAllTestDispelGlow    then DF:UpdateAllTestDispelGlow() end
+    if DF.UpdateAllTestMissingBuff   then DF:UpdateAllTestMissingBuff() end
+    if DF.UpdateAllTestAuraDesigner  then DF:UpdateAllTestAuraDesigner() end
+    if DF.UpdateAllTestDefensiveBar  then DF:UpdateAllTestDefensiveBar() end
+    if DF.UpdateAllTestTargetedList  then DF:UpdateAllTestTargetedList() end
+    if DF.UpdateAllTestTargetedSpell then DF:UpdateAllTestTargetedSpell() end
+    if DF.UpdateAllTestHighlights    then DF:UpdateAllTestHighlights() end
+    if DF.UpdateTextDesigner then
+        for i = 0, 4 do
+            local f = DF.testPartyFrames and DF.testPartyFrames[i]
+            if f then DF:UpdateTextDesigner(f, "all") end
+        end
+        for i = 1, 40 do
+            local f = DF.testRaidFrames and DF.testRaidFrames[i]
+            if f then DF:UpdateTextDesigner(f, "all") end
+        end
+    end
+end
+
 -- Apply test preset
 function DF:ApplyTestPreset(preset)
+    local set = TEST_PRESETS[preset]
+    if not set then return end
+
     local isRaidMode = DF.GUI and DF.GUI.SelectedMode == "raid"
     local db = isRaidMode and DF:GetRaidDB() or DF:GetDB()
-    
-    if preset == "STATIC" then
-        db.testAnimateHealth = false
-        db.testShowAuras = false
-        db.testShowAbsorbs = false
-        db.testShowOutOfRange = false
-        db.testShowDispelGlow = false
-        db.testShowMissingBuff = false
-        db.testShowExternalDef = false
-        db.testShowTargetedList = false
-        db.testShowTargetedSpell = false
-        db.testShowPersonalTargeted = false
-        db.testShowStatusIcons = true
-    elseif preset == "COMBAT" then
-        db.testAnimateHealth = true
-        db.testShowAuras = true
-        db.testShowAbsorbs = true
-        db.testShowOutOfRange = false
-        db.testShowDispelGlow = true
-        db.testShowMissingBuff = false
-        db.testShowExternalDef = false
-        db.testShowTargetedList = false
-        db.testShowTargetedSpell = false
-        db.testShowPersonalTargeted = false
-        db.testShowStatusIcons = true
-    elseif preset == "HEALER" then
-        db.testAnimateHealth = true
-        db.testShowAuras = true
-        db.testShowAbsorbs = true
-        db.testShowOutOfRange = false
-        db.testShowDispelGlow = true
-        db.testShowMissingBuff = true
-        db.testShowExternalDef = true
-        db.testShowTargetedList = true
-        db.testShowTargetedSpell = true
-        db.testShowPersonalTargeted = true
-        db.testShowStatusIcons = true
-    elseif preset == "FULL" then
-        db.testAnimateHealth = true
-        db.testShowAuras = true
-        db.testShowAbsorbs = true
-        db.testShowOutOfRange = true
-        db.testShowDispelGlow = true
-        db.testShowMissingBuff = true
-        db.testShowExternalDef = true
-        db.testShowTargetedList = true
-        db.testShowTargetedSpell = true
-        db.testShowPersonalTargeted = true
-        db.testShowStatusIcons = true
+    if not db then return end
+
+    for _, key in ipairs(TEST_TOGGLE_KEYS) do
+        if not (isRaidMode and TEST_PARTY_ONLY_KEYS[key]) then
+            db[key] = set[key] == true
+        end
     end
-    
+
     db.testPreset = preset
-    
+
     -- Update appropriate frames
     if isRaidMode and DF.raidTestMode then
         DF:UpdateRaidTestFrames()
+        if DF.UpdateAllRaidPetFrames then DF:UpdateAllRaidPetFrames(true) end
+        RefreshAllTestSurfaces()
     elseif not isRaidMode and DF.testMode then
         DF:StopTestAnimation()
         if db.testAnimateHealth then
             DF:StartTestAnimation()
         end
         DF:UpdateAllFrames()
+        if DF.UpdateAllPetFrames then DF:UpdateAllPetFrames(true) end
+        RefreshAllTestSurfaces()
     end
 end
 
@@ -3822,7 +3898,14 @@ function DF:UpdateAllTestTargetedList()
     local db = DF:GetDB()
     -- Gate the test display on the feature's master Enable too — a disabled
     -- targeted list must not show in test mode even if "show in test" is ticked.
-    if db and db.testShowTargetedList and db.targetedListEnabled and DF.ShowTestTargetedList then
+    --
+    -- Also PARTY-ONLY. The live path bails on IsInRaid(), but a raid PREVIEW is not a
+    -- real raid, so that gate never fires here: without this check the demo list showed
+    -- during raid test mode whenever the PARTY profile had it enabled. (Reading the party
+    -- db is deliberate — the Targeted List is party-resolved by design; see GetPersonalDB
+    -- in Features/TargetedSpells.lua.)
+    if not DF.raidTestMode
+        and db and db.testShowTargetedList and db.targetedListEnabled and DF.ShowTestTargetedList then
         DF:ShowTestTargetedList()
     elseif DF.HideTestTargetedList then
         DF:HideTestTargetedList()
@@ -3830,13 +3913,17 @@ function DF:UpdateAllTestTargetedList()
 end
 
 function DF:UpdateAllTestTargetedSpell()
-    local function UpdateFrame(frame, testData)
+    local function UpdateFrame(frame, testData, isRaid)
         if not frame then return end
         local db = DF:GetFrameDB(frame)
 
-        -- Show the preview when the feature is enabled AND the test-panel
-        -- Targeted Spells toggle is on; raid frames keep it force-disabled.
-        if db.targetedSpellEnabled and db.testShowTargetedSpell ~= false then
+        -- Group Targeted Spells are PARTY-ONLY: the cast->target match is
+        -- fingerprint-based and "Raid is intentionally unsupported (collisions are
+        -- near-total)" (Features/TargetedSpells.lua). So the raid preview must never
+        -- draw them, whatever the raid profile's toggles say. This guard was claimed
+        -- in the old comment but never actually implemented, so raid test frames kept
+        -- painting icons for a feature that does nothing live.
+        if not isRaid and db.targetedSpellEnabled and db.testShowTargetedSpell ~= false then
             DF:UpdateTestTargetedSpell(frame, testData)
         else
             -- Hide all icons and their highlights (new multi-icon system)
@@ -3888,12 +3975,15 @@ function DF:UpdateAllTestTargetedSpell()
             local frame = DF.testRaidFrames[i]
             if frame then
                 local testData = DF:GetTestUnitData(i, true)
-                UpdateFrame(frame, testData)
+                UpdateFrame(frame, testData, true)   -- isRaid: group targeted spells forced off
             end
         end
-        
-        -- Also show personal targeted spells in raid test mode
-        local db = DF:GetDB()
+
+        -- Also show personal targeted spells in raid test mode. Personal Targeted is a
+        -- player-screen overlay with PER-MODE settings, so the raid preview must gate on
+        -- the RAID profile — this read DF:GetDB() (party), so the raid panel's toggle was
+        -- ignored and the party value decided it instead.
+        local db = raidDb
         if db.personalTargetedSpellEnabled and db.testShowPersonalTargeted ~= false and DF.ShowTestPersonalTargetedSpells then
             DF:ShowTestPersonalTargetedSpells()
         elseif DF.HideTestPersonalTargetedSpells then
@@ -3940,6 +4030,20 @@ function DF:UpdateAllTestAuraDesigner()
         for i = 1, testFrameCount do
             local frame = DF.testRaidFrames and DF.testRaidFrames[i]
             if frame then UpdateFrame(frame) end
+        end
+    end
+
+    -- Pinned test frames carry their OWN AD/TD preset overrides, so refresh their
+    -- indicators too (same UpdateFrame path; IsShown-guarded, so hidden pool slots
+    -- no-op). Without this an AD change reflects on the main test frames but not
+    -- the pinned preview.
+    if DF.PinnedFrames and DF.PinnedFrames.IsTestModeActive
+        and DF.PinnedFrames:IsTestModeActive() then
+        for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
+            local pool = DF.PinnedFrames.testFrames and DF.PinnedFrames.testFrames[setIndex]
+            if pool then
+                for _, f in ipairs(pool) do UpdateFrame(f) end
+            end
         end
     end
 end
@@ -4126,13 +4230,26 @@ function DF:CreateTestPanel()
         container.SetEnabled = function(self, enabled)
             self.dfDisabled = not enabled
             self.box:EnableMouse(enabled)
-            self:EnableMouse(enabled)
+            -- The CONTAINER keeps its mouse even when greyed, so a disabled row can
+            -- still surface a "why is this greyed?" tooltip on hover. Safe: its
+            -- OnMouseDown only forwards to the box's OnClick, which bails on
+            -- dfDisabled, so the row still can't be toggled.
+            self:EnableMouse(true)
+            -- The page-link label is its OWN Button with OnEnter/OnLeave that
+            -- recolour the text. Leaving it live meant hovering a GREYED toggle lit
+            -- it up, and its OnLeave then restored the FULL-brightness colour —
+            -- silently undoing the grey. Kill its mouse too, and re-assert both
+            -- colours here so a disable landing mid-hover can't leave it stuck lit.
+            if self.labelBtn then self.labelBtn:EnableMouse(enabled) end
             if self.labelText then
                 if enabled then
                     self.labelText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
                 else
                     self.labelText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
                 end
+            end
+            if self.arrow then
+                self.arrow:SetTextColor(0.4, 0.4, 0.4, enabled and 0.6 or 0.25)
             end
         end
 
@@ -4150,22 +4267,34 @@ function DF:CreateTestPanel()
             arrow:SetText("›")
             arrow:SetTextColor(0.4, 0.4, 0.4, 0.6)
             labelBtn:SetWidth(labelText:GetStringWidth() + 14)
+            -- Every handler bails when the toggle is greyed: EnableMouse(false)
+            -- should already stop them, but a disable applied while the cursor is
+            -- inside would otherwise never fire OnLeave and leave the label lit.
             labelBtn:SetScript("OnEnter", function(self)
+                if container.dfDisabled then return end
                 labelText:SetTextColor(1, 0.82, 0)
                 arrow:SetTextColor(1, 0.82, 0)
                 DF.GUI:ShowTooltip(self, { title = L["Click to open settings"] })
             end)
             labelBtn:SetScript("OnLeave", function(self)
+                DF.GUI:HideTooltip()
+                if container.dfDisabled then
+                    labelText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+                    arrow:SetTextColor(0.4, 0.4, 0.4, 0.25)
+                    return
+                end
                 labelText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
                 arrow:SetTextColor(0.4, 0.4, 0.4, 0.6)
-                DF.GUI:HideTooltip()
             end)
             labelBtn:SetScript("OnClick", function()
+                if container.dfDisabled then return end
                 if DF.GUI and DF.GUI.SelectTab then
                     if DF.GUIFrame and not DF.GUIFrame:IsShown() then DF.GUIFrame:Show() end
                     DF.GUI.SelectTab(pageId)
                 end
             end)
+            container.labelBtn = labelBtn
+            container.arrow = arrow
             container.labelText = labelText
         else
             local labelText = container:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
@@ -4199,6 +4328,27 @@ function DF:CreateTestPanel()
         container:EnableMouse(true)
         container:SetScript("OnMouseDown", function()
             box:GetScript("OnClick")(box)
+        end)
+
+        -- A greyed toggle explains itself: set a disabled tooltip and hovering the
+        -- row says WHY it's unavailable (e.g. party-only features in raid). Routed
+        -- through the shared GUI tooltip helper like every other tooltip in the addon.
+        -- Enabled rows fall through: the box's hover wash and the label's page-link
+        -- tooltip stay the only hover effects.
+        container.SetDisabledTooltip = function(self, title, lines)
+            self.dfDisabledTip = title and { title = title, lines = lines } or nil
+        end
+        container:SetScript("OnEnter", function(self)
+            if not self.dfDisabled then return end
+            local tip = self.dfDisabledTip
+            if not tip then return end
+            -- No tone: an untoned title renders white (ShowTooltip's default), which
+            -- is what we want here — the grey-out already carries the "unavailable"
+            -- signal, so a coloured title would over-egg it.
+            DF.GUI:ShowTooltip(self, { title = tip.title, lines = tip.lines })
+        end)
+        container:SetScript("OnLeave", function()
+            DF.GUI:HideTooltip()
         end)
         -- No row-level border hover: the box's own highlight wash (from the shared
         -- styler) is the sole hover effect, matching every other checkbox. A row-
@@ -4416,7 +4566,10 @@ function DF:CreateTestPanel()
         section.UpdateBadge = function(self)
             local count = 0
             for _, cb in ipairs(self.checkboxes) do
-                if cb.checked then count = count + 1 end
+                -- Skip greyed-out toggles: they're unavailable in this mode and
+                -- render nothing, so counting them would advertise a feature that
+                -- isn't actually on (e.g. Targeted Spells / List in raid).
+                if cb.checked and not cb.dfDisabled then count = count + 1 end
             end
             if count > 0 then
                 local c = GetThemeColor()
@@ -4570,13 +4723,6 @@ function DF:CreateTestPanel()
     local secBars = CreateSection(panel, L["Bars & Overlays"], "bars")
     panel.showAbsorbsCheck = secBars:AddCheckbox(L["Absorbs"], "testShowAbsorbs", nil, "bars_absorb")
     panel.showHealPredictCheck = secBars:AddCheckbox(L["Heal Prediction"], "testShowHealPrediction", nil, "bars_healpred")
-    panel.showClassPowerCheck = secBars:AddCheckbox(L["Class Power"], "testShowClassPower", function(enabled)
-        if enabled then
-            if DF.UpdateAllTestClassPower then DF:UpdateAllTestClassPower() end
-        else
-            if DF.CleanupTestClassPower then DF:CleanupTestClassPower() end
-        end
-    end, "bars_classpower")
     panel.showOutOfRangeCheck = secBars:AddCheckbox(L["Out of Range"], "testShowOutOfRange", nil, "display_fading")
     panel.showReducedMaxCheck = secBars:AddCheckbox(L["Reduced Max Health"], "testShowReducedMaxHealth", nil, "bars_health")
     -- Text Designer is alpha-gated; only offer the toggle when the module loaded.
@@ -4737,6 +4883,18 @@ function DF:CreateTestPanel()
         if panel.debuffSliderLabel then panel.debuffSliderLabel:SetTextColor(lr, lg, lb) end
         if panel.buffValueText then panel.buffValueText:SetTextColor(lr, lg, lb) end
         if panel.debuffValueText then panel.debuffValueText:SetTextColor(lr, lg, lb) end
+
+        -- Group Targeted Spells and the Targeted List are PARTY-ONLY features:
+        -- the group cast detection is fingerprint-based and "Raid is intentionally
+        -- unsupported (collisions are near-total)", and the Targeted List bails on
+        -- IsInRaid() outright (Features/TargetedSpells.lua). Their test toggles
+        -- therefore do nothing in raid mode, so grey them in place instead of
+        -- letting them read as available. Personal Targeted has no raid gate and
+        -- stays enabled.
+        local groupTargetingAvailable = not isRaidMode
+        if panel.showTargetedSpellCheck then panel.showTargetedSpellCheck:SetEnabled(groupTargetingAvailable) end
+        if panel.showTargetedListCheck  then panel.showTargetedListCheck:SetEnabled(groupTargetingAvailable) end
+        if panel.animTargetedListCheck  then panel.animTargetedListCheck:SetEnabled(groupTargetingAvailable) end
     end
 
     secAuras:AddWidget(auraSliderRow, 22)
@@ -4763,6 +4921,16 @@ function DF:CreateTestPanel()
     panel.showPersonalTargetedCheck = secIndicators:AddCheckbox(L["Personal Targeted"], "testShowPersonalTargeted", function()
         if DF.testMode or DF.raidTestMode then DF:UpdateAllTestTargetedSpell() end
     end, "indicators_personal_targeted")
+
+    -- These three are greyed in raid (see RefreshDependentEnabled) — say why on hover
+    -- instead of leaving a dead-looking control. Personal Targeted is NOT listed: it
+    -- has no raid gate and works fine there.
+    do
+        local tipLines = { L["Group casts are matched to their target by fingerprint, which cannot be done reliably in a raid, so these do nothing in raid mode."] }
+        if panel.showTargetedSpellCheck then panel.showTargetedSpellCheck:SetDisabledTooltip(L["Party-only feature"], tipLines) end
+        if panel.showTargetedListCheck  then panel.showTargetedListCheck:SetDisabledTooltip(L["Party-only feature"], tipLines) end
+        if panel.animTargetedListCheck  then panel.animTargetedListCheck:SetDisabledTooltip(L["Party-only feature"], tipLines) end
+    end
     -- One unified "Icons" toggle for the whole status/role/leader icon set in test
     -- mode (was split into "Status / Ready" + "Role / Leader"). Keyed on
     -- testShowStatusIcons; the role/leader render gate reads the same key.
@@ -4890,7 +5058,6 @@ function DF:CreateTestPanel()
         self.showPetsCheck:SetChecked(db.testShowPets ~= false)
         self.showAbsorbsCheck:SetChecked(db.testShowAbsorbs)
         self.showHealPredictCheck:SetChecked(db.testShowHealPrediction ~= false)
-        self.showClassPowerCheck:SetChecked(db.testShowClassPower ~= false)
         self.showOutOfRangeCheck:SetChecked(db.testShowOutOfRange)
         self.showReducedMaxCheck:SetChecked(db.testShowReducedMaxHealth ~= false)
         if self.showTextDesignerCheck then
@@ -4901,9 +5068,14 @@ function DF:CreateTestPanel()
         self.showMissingBuffCheck:SetChecked(db.testShowMissingBuff)
         self.showADCheck:SetChecked(db.testShowAuraDesigner)
         self.showExternalDefCheck:SetChecked(db.testShowExternalDef)
-        self.showTargetedListCheck:SetChecked(db.testShowTargetedList)
-        self.animTargetedListCheck:SetChecked(db.testAnimateTargetedList)
-        self.showTargetedSpellCheck:SetChecked(db.testShowTargetedSpell ~= false)
+        -- Group Targeted Spells / Targeted List are party-only features, so they can
+        -- never be "on" in raid — show them unchecked there regardless of what the
+        -- raid profile stores. (testShowTargetedSpell defaults to true in the raid db,
+        -- and an older build's preset wrote testShowTargetedList into it too, so both
+        -- would otherwise read as checked-but-greyed.)
+        self.showTargetedListCheck:SetChecked(not isRaidMode and db.testShowTargetedList)
+        self.animTargetedListCheck:SetChecked(not isRaidMode and db.testAnimateTargetedList)
+        self.showTargetedSpellCheck:SetChecked(not isRaidMode and db.testShowTargetedSpell ~= false)
         self.showPersonalTargetedCheck:SetChecked(db.testShowPersonalTargeted ~= false)
         self.showStatusIconsCheck:SetChecked(db.testShowStatusIcons ~= false)
         self.showSelectionCheck:SetChecked(db.testShowSelection)

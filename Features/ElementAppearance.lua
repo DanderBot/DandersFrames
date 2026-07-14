@@ -1249,10 +1249,6 @@ function DF:UpdateAllElementAppearances(frame)
     DF:UpdateHealPredictionBarAppearance(frame)
     DF:UpdateDefensiveIconAppearance(frame)
     DF:UpdateTargetedSpellAppearance(frame)
-    -- Class power pips (player frame only): reparent/alpha for health fade (party or raid player frame)
-    if DF.UpdateClassPowerAlpha and (frame == DF.playerFrame or (frame.unit and frame.isRaidFrame and UnitIsUnit(frame.unit, "player"))) then
-        DF.UpdateClassPowerAlpha()
-    end
 end
 
 -- ============================================================

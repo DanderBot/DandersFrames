@@ -3000,7 +3000,7 @@ end
 -- highlights. Per-profile guarded. Style maps onto a DF.Border animation type.
 function DF:MigrateTargetedSpellImportantBorder()
     if not DandersFramesDB_v2 or not DandersFramesDB_v2.profiles then return end
-    local styleToAnim = { glow = "PROC", marchingAnts = "DF_DASH", pulse = "DF_PULSATE",
+    local styleToAnim = { glow = "DF_PROC", marchingAnts = "DF_DASH", pulse = "DF_PULSATE",
                           solidBorder = "NONE", none = "NONE" }
     -- Copy a feature's old <prefix>Highlight* keys into its new
     -- <prefix>ImportantBorder* set. Gated ONLY by the per-profile _…V1 flag in the
@@ -3027,7 +3027,7 @@ function DF:MigrateTargetedSpellImportantBorder()
             m[p.."ImportantBorderInset"] = m[p.."HighlightInset"]
         end
         if m[p.."HighlightStyle"] ~= nil then
-            m[p.."ImportantBorderAnimationType"] = styleToAnim[m[p.."HighlightStyle"]] or "PROC"
+            m[p.."ImportantBorderAnimationType"] = styleToAnim[m[p.."HighlightStyle"]] or "DF_PROC"
         end
     end
     for _, profile in pairs(DandersFramesDB_v2.profiles) do
@@ -3291,8 +3291,9 @@ DF._MainEventDispatcher = function(self, event, arg1)
         if DF.db.partyEnabled == nil then DF.db.partyEnabled = true end
         if DF.db.raidEnabled == nil then DF.db.raidEnabled = true end
 
-        -- Ensure settings-panel font defaults exist
-        if DF.db.settingsFont        == nil then DF.db.settingsFont        = "Friz Quadrata TT" end
+        -- Ensure settings-panel font defaults exist (default DF Roboto SemiBold;
+        -- the old-default flip for existing profiles runs in the per-profile loop below)
+        if DF.db.settingsFont        == nil then DF.db.settingsFont        = "DF Roboto SemiBold" end
         -- Outline "None" is stored canonically as "NONE" everywhere; normalise the
         -- legacy empty-string the old hand-rolled settings dropdown wrote.
         if DF.db.settingsFontOutline == nil or DF.db.settingsFontOutline == "" then DF.db.settingsFontOutline = "NONE" end
@@ -3351,7 +3352,18 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 if profile.raidEnabled == nil then profile.raidEnabled = true end
 
                 -- Ensure settings-panel font defaults exist on every profile
-                if profile.settingsFont        == nil then profile.settingsFont        = "Friz Quadrata TT" end
+                if profile.settingsFont        == nil then profile.settingsFont        = "DF Roboto SemiBold" end
+                -- One-time: the settings-panel font default changed from the WoW
+                -- default (Friz Quadrata) to DF Roboto SemiBold. Flip profiles that
+                -- still carry the old auto-written default — nobody picks Friz over
+                -- DF Roboto deliberately — but only ONCE, so a later explicit Friz
+                -- choice sticks.
+                if not profile._settingsFontRobotoDefaultV1 then
+                    if profile.settingsFont == "Friz Quadrata TT" then
+                        profile.settingsFont = "DF Roboto SemiBold"
+                    end
+                    profile._settingsFontRobotoDefaultV1 = true
+                end
                 if profile.settingsFontOutline == nil or profile.settingsFontOutline == "" then profile.settingsFontOutline = "NONE" end
 
                 -- Backfill missing auraDesigner.defaults keys.
@@ -4122,6 +4134,40 @@ DF._MainEventDispatcher = function(self, event, arg1)
             end
         end
 
+        -- v5.0 (12.1): remap any retired border-animation-type value to a live one.
+        --   * The LibCustomGlow-backed glows (Pulsate / Chase / Flash / Proc) were
+        --     replaced by DF-owned equivalents (the library was removed), so map
+        --     each to its DF counterpart to keep an existing selection animating.
+        --   * Comet, Sides Only, Wipe, Ripple and Segment Reveal were removed
+        --     outright, so map them to NONE. (Corners Only is kept in the engine —
+        --     just hidden from the picker — so it is deliberately NOT remapped.)
+        -- Recursive so it catches mode tables, pinned sets, AD indicators and the
+        -- expiring-border keys alike. Idempotent (a live value is left untouched).
+        local RETIRED_ANIM_REMAP = { PULSATE = "DF_PIXEL", CHASE = "DF_ORBIT",
+                                     FLASH = "DF_FLASH", PROC = "DF_PROC",
+                                     COMET = "NONE", SIDES_ONLY = "NONE",
+                                     WIPE = "NONE", RIPPLE = "NONE",
+                                     SEGMENT_REVEAL = "NONE" }
+        local function remapRetiredAnims(t, seen)
+            if type(t) ~= "table" or seen[t] then return end
+            seen[t] = true
+            for k, v in pairs(t) do
+                if type(v) == "string" then
+                    if type(k) == "string" and k:sub(-13) == "AnimationType" and RETIRED_ANIM_REMAP[v] then
+                        t[k] = RETIRED_ANIM_REMAP[v]
+                    end
+                elseif type(v) == "table" then
+                    remapRetiredAnims(v, seen)
+                end
+            end
+        end
+        remapRetiredAnims(DF.db, {})
+        if DandersFramesDB_v2 and DandersFramesDB_v2.profiles then
+            for _, profile in pairs(DandersFramesDB_v2.profiles) do
+                remapRetiredAnims(profile, {})
+            end
+        end
+
         -- v5.0 (12.1): the dispel overlay's Custom Colors mode was removed during
         -- the alpha (never in any distributed build — belt-and-braces for alpha
         -- profiles only): drop the mode selector, the per-type pickers and the
@@ -4423,8 +4469,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
             elseif msg == "raidlock" or msg == "lockraid" then
                 if DF.LockRaidFrames then DF:LockRaidFrames() end
             elseif msg == "reset" then
-                DF:ResetProfile("party")
-                DF:ResetProfile("raid")
+                DF:ResetFullProfile()
             elseif msg == "resetgui" then
                 -- Reset GUI scale, size, and position to defaults
                 if DF.db and DF.db.party then

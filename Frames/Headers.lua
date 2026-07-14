@@ -4925,11 +4925,6 @@ function DF:UpdateHeaderVisibility(skipRaidReposition)
         end
     end
 
-    -- Class Power pips attach to party or raid player frame; refresh so they re-attach to the now-visible layout
-    if DF.RefreshClassPower then
-        DF:RefreshClassPower()
-    end
-
     -- Sync permanent mover visibility with the active frame set
     -- Without this, both party and raid movers stay visible after a party<->raid transition
     if DF.UpdatePermanentMoverVisibility then

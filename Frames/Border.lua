@@ -19,8 +19,8 @@ local addonName, DF = ...
 -- :SetBorderColor alias) so existing callers are unaffected.
 --
 -- FUTURE (later phases) — the spec is intentionally open for: inset, shadow,
--- gradient, and glow (LibCustomGlow). Only the current frame-border feature set
--- (enabled / style / texture / size / colour) is implemented here for now.
+-- gradient, and DF-owned border animations. Only the current frame-border feature
+-- set (enabled / style / texture / size / colour) is implemented here for now.
 -- ============================================================
 
 local CreateFrame = CreateFrame
@@ -255,11 +255,10 @@ function Border:BuildSpec(dbTable, prefix, ctx)
             offsetY  = dbTable[k("BorderShadowOffsetY")] or 0,
         }
     end
-    -- Animation (Stage 3): LCG-backed glow effects. spec.animation is set only
-    -- when the consumer picked a non-NONE type — Apply uses presence to drive
-    -- StartAnimation, absence to drive StopAnimation. Tunables map 1:1 to
-    -- LCG.PixelGlow_Start / AutoCastGlow_Start / ButtonGlow_Start args, with
-    -- sensible defaults applied at Start time.
+    -- Animation: spec.animation is set only when the consumer picked a non-NONE
+    -- type — Apply uses presence to drive StartAnimation, absence to drive
+    -- StopAnimation. Tunables (type / color / frequency / particles / length /
+    -- thickness / scale / inset / offset) are read straight from the dbTable.
     local animType = dbTable[k("BorderAnimationType")]
     if animType and animType ~= "NONE" then
         spec.animation = {
@@ -446,27 +445,21 @@ end
 -- scale, cornerLength, sidesAxis }. `type` is the only required field;
 -- the rest fall back to per-effect defaults.
 --
--- Effects split into three implementation families:
+-- Every effect is DF-owned (no external glow library) and runs on our own
+-- textures via the shared UIParent driver, so all are taint-safe on 12.1 aura
+-- container buttons. Effects split into three implementation families:
 --
--- 1. LCG-driven glows — target border.anchorTo (the unit frame) so the
---    glow reads as "this unit is highlighted" rather than "this thin 1px
---    strip is highlighted".
---      "PULSATE"   → LCG.PixelGlow_Start    pixel-art ring of N particles
---      "CHASE"     → LCG.AutoCastGlow_Start rotating particle ring
---      "FLASH"     → LCG.ButtonGlow_Start   Blizzard button-glow pulse
---      "PROC"      → LCG.ProcGlow_Start     Blizzard proc start+loop flash
+-- 1. DF particle / flipbook effects — DF_ORBIT (orbiting sparkles), DF_PIXEL
+--    (chasing bars), DF_PROC (proc flipbook), DF_FLASH (glow flash). Own
+--    textures parented to the animRect, positioned/stepped each frame.
 --
--- 2. Custom OnUpdate animators — operate directly on the 4 edge textures
---    by modulating SetAlpha each frame. No LCG involved. Tick functions
---    live in `customTicks` below; the shared driver frame is created
---    lazily via the shared anim driver (registerAnimTick).
---      "WIPE"           sweep a bright highlight clockwise around perimeter
---      "RIPPLE"         all edges pulse alpha with per-edge phase offsets
---      "SEGMENT_REVEAL" edges fade in sequentially top→right→bottom→left
+-- 2. Custom OnUpdate animators — modulate dedicated overlay textures each frame.
+--    Tick functions live in `customTicks` below; the shared driver frame is
+--    created lazily via registerAnimTick.
+--      "BLINK"          hard on/off strobe on all four overlays together
 --
--- 3. Static shape modes — no animation, just a different render layout
+-- 3. Static shape mode — no animation, just a different render layout
 --    held for as long as the type is active.
---      "SIDES_ONLY"   hide one perpendicular edge pair (axis option)
 --      "CORNERS_ONLY" show only short pieces at each of the 4 corners
 --                     (lazy-creates 4 extra textures so each corner has
 --                     a horizontal + a vertical short piece)
@@ -476,12 +469,9 @@ end
 -- Stop semantics: Apply ALWAYS calls StopAnimation first to clear any prior
 -- effect before starting a new one (avoids leaving a stale Pulsate running
 -- under a freshly-started Chase, or stale CORNERS_ONLY textures visible
--- under a freshly-started WIPE). Idempotent for the no-active-anim case.
+-- under a freshly-started Blink). Idempotent for the no-active-anim case.
 -- ============================================================
 
-local function getLCG()
-    return LibStub and LibStub("LibCustomGlow-1.0", true)
-end
 
 -- Lazy-create the shared OnUpdate driver for custom animations.
 --
@@ -490,11 +480,11 @@ end
 -- secretRect borders (AD / aura-container slot children) live inside a
 -- CustomAuraButton subtree whose intrinsic onUpdateMode="disabled" suppresses
 -- OnUpdate through EVERY descendant -- a driver parented under `border` there
--- would install its OnUpdate but never fire (WIPE/RIPPLE/SEGMENT/DF_PULSATE and
--- marching DF_DASH all looked frozen). Host those drivers on UIParent so their
+-- would install its OnUpdate but never fire (Blink / DF_PULSATE and the DF
+-- particle effects all looked frozen). Host those drivers on UIParent so their
 -- OnUpdate actually dispatches; the tick closures capture `border` by reference
 -- and keep driving the border's own child textures (render-side SetAlpha /
--- drawDashes on OUR textures -- no secret read, no secure op). Visibility still
+-- SetPoint on OUR textures -- no secret read, no secure op). Visibility still
 -- rides the slot's secret show/hide (the textures are slot children); only the
 -- MOTION now comes from the external driver.
 --
@@ -545,9 +535,9 @@ local function unregisterAnimTick(border)
 end
 
 -- Reset all four edges to fully opaque. Called from StopAnimation so the
--- next Apply pass renders normally; custom animators set non-1 alpha values
--- that would otherwise persist on the edges (relevant for SIDES_ONLY, which
--- modulates edge alpha directly rather than via overlays).
+-- next Apply pass renders normally, in case any past or future animator left a
+-- non-1 alpha on the border's own edges (current effects paint overlays, but
+-- this stays as cheap insurance).
 local function resetEdgeAlphas(border)
     local edges = { border.top, border.bottom, border.left, border.right }
     for _, e in ipairs(edges) do
@@ -556,14 +546,13 @@ local function resetEdgeAlphas(border)
 end
 
 -- ===== ANIMATION OVERLAYS =====
--- For the OnUpdate-driven custom effects (WIPE / RIPPLE / SEGMENT_REVEAL) we
--- render 4 dedicated overlay textures that sit immediately OUTSIDE the
--- border's outer edge — top overlay above the border's top, bottom below,
--- left to the left of the border's left, right to the right. The overlays
--- have their own thickness (anim.thickness) and colour (anim.color), so the
--- effect's visibility is INDEPENDENT of the border's own thickness. This
--- matches user expectation that picking "Wipe" at borderSize 1 still
--- produces an obvious sweeping highlight.
+-- For the OnUpdate-driven custom effects (Blink) we render 4 dedicated overlay
+-- textures that sit immediately OUTSIDE the border's outer edge — top overlay
+-- above the border's top, bottom below, left to the left of the border's left,
+-- right to the right. The overlays have their own thickness (anim.thickness) and
+-- colour (anim.color), so the effect's visibility is INDEPENDENT of the border's
+-- own thickness. This matches user expectation that picking "Blink" at borderSize
+-- 1 still produces an obvious strobe.
 --
 -- Overlays live on the OVERLAY draw layer so they render above the border
 -- itself (BORDER layer in :New) and any shadow. Width is extended by
@@ -655,13 +644,153 @@ local function hideCornerOverlays(border)
     for _, e in pairs(border.cornerOverlays) do e:Hide() end
 end
 
+-- Shared positioning rectangle for animation effects: anchored to the
+-- border itself (so animations follow the border's own offset/inset) and
+-- adjusted by anim.inset / anim.offsetX / anim.offsetY for animation-
+-- specific positioning. Both families route through this:
+--   - Driver effects (DF Proc / DF Flash / DF Chase / DF Pixel / …) parent
+--     their art to animRect, so they render at this rectangle's geometry.
+--   - Overlays (Wipe / Ripple / Segment Reveal / Sides Only / Corners Only)
+--     anchor to animRect instead of border directly.
+-- This makes Inset / Offset X / Offset Y consistent with the border's own
+-- equivalent controls — same mental model, same sign conventions.
+--
+-- Inset sign: positive = INWARD (smaller rect, animation closer to centre);
+-- negative = OUTWARD (larger rect, animation further from centre).
+-- Matches Border Inset semantics. The previous "Extent" parameter was an
+-- outward-only inset (Inset = -Extent).
+-- (forward-declared above with `local ensureAnimRect` so callers earlier in
+-- the file resolve through the local binding.)
+function ensureAnimRect(border, inset, offsetX, offsetY)
+    inset    = inset    or 0
+    offsetX  = offsetX  or 0
+    offsetY  = offsetY  or 0
+    if not border.animRect then
+        border.animRect = CreateFrame("Frame", nil, border)
+    end
+    local f = border.animRect
+    f:ClearAllPoints()
+    f:SetPoint("TOPLEFT",     border, "TOPLEFT",      inset + offsetX, -inset + offsetY)
+    f:SetPoint("BOTTOMRIGHT", border, "BOTTOMRIGHT", -inset + offsetX,  inset + offsetY)
+    f:Show()
+    return f
+end
+
+-- ===== DF_ORBIT (orbiting sparkles — DF-owned AutoCastGlow stand-in) =====
+-- A faithful reimplementation of LibCustomGlow's AutoCastGlow: N*4 shine
+-- sparkles in four size layers orbit the border perimeter at four staggered
+-- speeds, producing the shimmering "autocast" trail. It uses the SAME Blizzard
+-- shine texture LCG does (a plain game asset, not a library-owned one), so the
+-- look matches — but it runs on OUR shared OnUpdate driver off our own
+-- textures parented to the animRect, so unlike the LCG glow it is taint-safe on
+-- 12.1 aura container buttons (it never SetParents onto the native button, and
+-- reads _knownW/_knownH so it never measures a secret rect).
+local ORBIT_SHINE_TEX   = [[Interface\Artifacts\Artifacts]]
+local ORBIT_SHINE_COORD = { 0.8115234375, 0.9169921875, 0.8798828125, 0.9853515625 }
+local ORBIT_LAYER_SIZES = { 7, 6, 5, 4 }   -- four layers, outer→inner (LCG parity)
+-- Seconds for one full orbit at Frequency 1 (the effect's natural resting pace).
+-- Frequency scales this: freq 2 = twice as fast, freq 0.5 = half. The motion is
+-- size-independent (advances in perimeter fractions), so this reads the same on a
+-- small aura icon and a large AD border.
+local ORBIT_BASE_PERIOD = 8
+
+local function hideOrbitParticles(border)
+    if not border.orbitTex then return end
+    for _, t in ipairs(border.orbitTex) do t:Hide() end
+end
+
+local function setupOrbitParticles(border, anim)
+    local host = ensureAnimRect(border, anim.inset, anim.offsetX, anim.offsetY)
+    border._orbitHost = host
+    local N = anim.particles
+    if not N or N < 1 then N = 4 end
+    if N > 16 then N = 16 end
+    local total = N * 4
+    local scale = anim.scale or 1
+    local r, g, b, a = readColor(anim.color or { r = 0.95, g = 0.95, b = 0.32, a = 1 })
+    border.orbitTex = border.orbitTex or {}
+    local tex = border.orbitTex
+    for i = 1, total do
+        local t = tex[i]
+        if not t then
+            t = host:CreateTexture(nil, "OVERLAY")
+            t:SetTexture(ORBIT_SHINE_TEX)
+            t:SetTexCoord(ORBIT_SHINE_COORD[1], ORBIT_SHINE_COORD[2], ORBIT_SHINE_COORD[3], ORBIT_SHINE_COORD[4])
+            t:SetDesaturated(true)
+            t:SetBlendMode("ADD")
+            tex[i] = t
+        end
+        t:SetParent(host)
+        t:SetVertexColor(r, g, b, a)
+        t:Show()
+    end
+    -- Layer k (1=outermost) holds N sparkles at ORBIT_LAYER_SIZES[k] * scale.
+    for k = 1, 4 do
+        local sz = ORBIT_LAYER_SIZES[k] * scale
+        for i = 1, N do
+            local t = tex[i + N * (k - 1)]
+            if t then t:SetSize(sz, sz) end
+        end
+    end
+    -- Park any surplus textures left over from a previous higher-N config.
+    for i = total + 1, #tex do tex[i]:Hide() end
+    border._orbitN = N
+    border._orbitTimers = border._orbitTimers or { 0, 0, 0, 0 }
+    -- Frequency is a MULTIPLIER on ORBIT_BASE_PERIOD, not a raw 1/freq: freq 1 =
+    -- the calm designed pace, freq 2 = twice as fast. (The old 1/freq made freq 1
+    -- a frantic 1-orbit-per-second — far past "normal".)
+    local freq = (anim.frequency and anim.frequency > 0) and anim.frequency or 1
+    border._orbitPeriod = ORBIT_BASE_PERIOD / freq
+end
+
+-- Position every sparkle around the perimeter; four layers advance at staggered
+-- speeds (period*k) for the shimmer. Mirrors LCG acUpdate. Reads _knownW/_knownH
+-- first so it never measures (and taints) a secret container-button rect.
+local function orbitTick(border, anim, dt)
+    local host = border._orbitHost; if not host then return end
+    local tex = border.orbitTex;   if not tex then return end
+    local w = border._knownW or host:GetWidth()
+    local h = border._knownH or host:GetHeight()
+    if not w or not h or w <= 0 or h <= 0 then return end
+    local perimeter = 2 * (w + h)
+    local bottomlim = h * 2 + w
+    local rightlim  = h + w
+    local N = border._orbitN or 4
+    local space = perimeter / N
+    local period = border._orbitPeriod or 8
+    local timers = border._orbitTimers
+    local idx = 0
+    for k = 1, 4 do
+        timers[k] = (timers[k] + dt / (period * k)) % 1
+        local base = perimeter * timers[k]
+        for i = 1, N do
+            idx = idx + 1
+            local t = tex[idx]
+            if t then
+                local pos = (space * i + base) % perimeter
+                t:ClearAllPoints()
+                if pos > bottomlim then
+                    t:SetPoint("CENTER", host, "BOTTOMRIGHT", -pos + bottomlim, 0)
+                elseif pos > rightlim then
+                    t:SetPoint("CENTER", host, "TOPRIGHT", 0, -pos + rightlim)
+                elseif pos > h then
+                    t:SetPoint("CENTER", host, "TOPLEFT", pos - h, 0)
+                else
+                    t:SetPoint("CENTER", host, "BOTTOMLEFT", 0, pos)
+                end
+            end
+        end
+    end
+end
+
 -- ===== DF_DASH (dashed / marching-ants border) =====
--- Ported from the unit-frame highlight system (Features/Highlights.lua) so
--- DF.Border can render a dashed border — static OR marching.  One effect: the
--- Animation Frequency is the march SPEED (0 = static "dashed", >0 = animated).
--- Draws a pool of dash textures per edge on the OVERLAY layer; the dashes use
--- the animation's own colour / thickness / inset, so a dashes-ONLY look is the
--- base Border Thickness 0 plus this effect.
+-- A dashed border, static OR marching. One effect — the Animation Frequency is
+-- the march SPEED (0 = static "dashed", >0 = animated). Draws a pool of dash
+-- textures per edge on the OVERLAY layer, each clipped to its edge so the pattern
+-- flows around the corners; the dashes use the animation's own colour / thickness
+-- / inset (fixed dash length + gap — no particle/length knobs). Reads
+-- _knownW/_knownH so it never measures a secret container rect; runs on the shared
+-- driver off our own textures (taint-safe on aura buttons).
 local DF_DASH_LEN     = 6
 local DF_DASH_GAP     = 6
 local DF_DASH_PATTERN = DF_DASH_LEN + DF_DASH_GAP
@@ -758,36 +887,402 @@ local function drawDashes(border, offset, th, inset, r, g, b, a)
     drawDashEdgeV(border, pool.right,  true,  2 * width + height - offset, height, th, inset, r, g, b, a)
 end
 
--- Shared positioning rectangle for animation effects: anchored to the
--- border itself (so animations follow the border's own offset/inset) and
--- adjusted by anim.inset / anim.offsetX / anim.offsetY for animation-
--- specific positioning. All three families route through this:
---   - LCG glows (Pulsate / Chase / Flash) use animRect as their LCG target,
---     so the glow renders at this rectangle's geometry.
---   - Overlays (Wipe / Ripple / Segment Reveal / Sides Only / Corners Only)
---     anchor to animRect instead of border directly.
--- This makes Inset / Offset X / Offset Y consistent with the border's own
--- equivalent controls — same mental model, same sign conventions.
---
--- Inset sign: positive = INWARD (smaller rect, animation closer to centre);
--- negative = OUTWARD (larger rect, animation further from centre).
--- Matches Border Inset semantics. The previous "Extent" parameter was an
--- outward-only inset (Inset = -Extent).
--- (forward-declared above with `local ensureAnimRect` so callers earlier in
--- the file resolve through the local binding.)
-function ensureAnimRect(border, inset, offsetX, offsetY)
-    inset    = inset    or 0
-    offsetX  = offsetX  or 0
-    offsetY  = offsetY  or 0
-    if not border.animRect then
-        border.animRect = CreateFrame("Frame", nil, border)
+-- ===== DF_PIXEL (chasing pixels — discrete bars) =====
+-- N plain rectangles chase around the perimeter with even gaps, each oriented
+-- along the edge it's on (a horizontal bar on top/bottom, a vertical bar on
+-- left/right). Center-anchored, so it does NOT wrap the corners — that discrete
+-- look is the point (DF Dash is the corner-wrapping marching variant). Shares the
+-- taint-safe perimeter walk + _knownW/_knownH of DF Orbit.
+local PIXEL_TEX = [[Interface\BUTTONS\WHITE8X8]]
+-- Seconds for one full lap at Frequency 1 (the effect's natural resting pace).
+-- Frequency scales this the same way DF Chase does; the walk advances in
+-- perimeter fractions, so the pace is size-independent.
+local PIXEL_BASE_PERIOD = 4
+
+local function hidePixelParticles(border)
+    if not border.pixelTex then return end
+    for _, t in ipairs(border.pixelTex) do t:Hide() end
+end
+
+local function setupPixelParticles(border, anim)
+    local host = ensureAnimRect(border, anim.inset, anim.offsetX, anim.offsetY)
+    border._pixelHost = host
+    local N = anim.particles
+    if not N or N < 1 then N = 8 end
+    if N > 16 then N = 16 end
+    local th = anim.thickness or 2; if th < 1 then th = 1 end
+    local len = anim.length or 6;   if len < 1 then len = 1 end
+    local r, g, b, a = readColor(anim.color or { r = 0.95, g = 0.95, b = 0.32, a = 1 })
+    border.pixelTex = border.pixelTex or {}
+    local tex = border.pixelTex
+    for i = 1, N do
+        local t = tex[i]
+        if not t then
+            t = host:CreateTexture(nil, "OVERLAY")
+            t:SetTexture(PIXEL_TEX)
+            tex[i] = t
+        end
+        t:SetParent(host)
+        t:SetVertexColor(r, g, b, a)
+        t:Show()
     end
-    local f = border.animRect
-    f:ClearAllPoints()
-    f:SetPoint("TOPLEFT",     border, "TOPLEFT",      inset + offsetX, -inset + offsetY)
-    f:SetPoint("BOTTOMRIGHT", border, "BOTTOMRIGHT", -inset + offsetX,  inset + offsetY)
-    f:Show()
-    return f
+    for i = N + 1, #tex do tex[i]:Hide() end
+    border._pixelN = N
+    border._pixelLen = len
+    border._pixelTh = th
+    border._pixelTimer = border._pixelTimer or 0
+    -- Frequency multiplies PIXEL_BASE_PERIOD (freq 1 = calm, freq 2 = 2× faster),
+    -- matching DF Chase — see ORBIT_BASE_PERIOD for the rationale.
+    local freq = (anim.frequency and anim.frequency > 0) and anim.frequency or 1
+    border._pixelPeriod = PIXEL_BASE_PERIOD / freq
+end
+
+local function pixelTick(border, anim, dt)
+    local host = border._pixelHost; if not host then return end
+    local tex = border.pixelTex;   if not tex then return end
+    local w = border._knownW or host:GetWidth()
+    local h = border._knownH or host:GetHeight()
+    if not w or not h or w <= 0 or h <= 0 then return end
+    local perimeter = 2 * (w + h)
+    local bottomlim = h * 2 + w
+    local rightlim  = h + w
+    local N   = border._pixelN or 8
+    local len = border._pixelLen or 6
+    local th  = border._pixelTh or 2
+    local space  = perimeter / N
+    local period = border._pixelPeriod or 4
+    border._pixelTimer = (border._pixelTimer + dt / period) % 1
+    local base = perimeter * border._pixelTimer
+    for i = 1, N do
+        local t = tex[i]
+        if t then
+            local pos = (space * i + base) % perimeter
+            t:ClearAllPoints()
+            if pos > bottomlim then          -- bottom edge (horizontal bar)
+                t:SetSize(len, th)
+                t:SetPoint("CENTER", host, "BOTTOMRIGHT", -pos + bottomlim, 0)
+            elseif pos > rightlim then       -- right edge (vertical bar)
+                t:SetSize(th, len)
+                t:SetPoint("CENTER", host, "TOPRIGHT", 0, -pos + rightlim)
+            elseif pos > h then              -- top edge (horizontal bar)
+                t:SetSize(len, th)
+                t:SetPoint("CENTER", host, "TOPLEFT", pos - h, 0)
+            else                             -- left edge (vertical bar)
+                t:SetSize(th, len)
+                t:SetPoint("CENTER", host, "BOTTOMLEFT", 0, pos)
+            end
+        end
+    end
+end
+
+-- ===== DF_PROC (proc flare — DF-owned ProcGlow stand-in) =====
+-- Steps Blizzard's proc-loop flipbook atlas BY HAND on the shared driver: the
+-- native FlipBook AnimationGroup won't tick inside a container-button subtree
+-- (same reason the particle effects use the external driver), so we advance the
+-- 6×5 = 30-frame grid ourselves via SetTexCoord. Renders the golden proc glow
+-- taint-safe on aura buttons. Parented to the animRect (never the native button).
+local PROC_ATLAS          = "UI-HUD-ActionBar-Proc-Loop-Flipbook"
+local PROC_START_ATLAS    = "UI-HUD-ActionBar-Proc-Start-Flipbook"
+local PROC_ROWS           = 6
+local PROC_COLS           = 5
+local PROC_FRAMES         = 30
+local PROC_START_DURATION = 1.2      -- one-shot intro flash length. Blizzard's flipbook runs
+                                     -- 0.7s on a 45px action button; on ~24px aura icons the
+                                     -- same motion covers less screen and reads too fast, so
+                                     -- we play it slower
+local PROC_BURST_SCALE    = 150 / 42 -- intro burst size ×icon, centered — Blizzard anchors the
+                                     -- 150px start art on a 42px button; its final frames
+                                     -- contract exactly onto the 1.4× loop ring
+local PROC_LOOP_SPILL     = 0.2      -- loop glow spills this fraction of the icon beyond each
+                                     -- edge (button+20%) — a border glow, not icon-fill
+
+-- Advance a 6×5 = 30-frame flipbook atlas to the frame for `phase` in [0,1) via
+-- SetTexCoord (both proc atlases share the grid).
+local function stepProcFlipbook(t, info, phase)
+    if not info then return end
+    local f   = math.floor(phase * PROC_FRAMES) % PROC_FRAMES
+    local col = f % PROC_COLS
+    local row = math.floor(f / PROC_COLS)
+    local fw = (info.rightTexCoord - info.leftTexCoord) / PROC_COLS
+    local fh = (info.bottomTexCoord - info.topTexCoord) / PROC_ROWS
+    local l  = info.leftTexCoord + col * fw
+    local tp = info.topTexCoord  + row * fh
+    t:SetTexCoord(l, l + fw, tp, tp + fh)
+end
+
+local function hideProcGlow(border)
+    if border.procTex then border.procTex:Hide() end
+    if border.procStartTex then border.procStartTex:Hide() end
+end
+
+local function setupProcGlow(border, anim)
+    local host = ensureAnimRect(border, anim.inset, anim.offsetX, anim.offsetY)
+    border._procHost = host
+    local getInfo = C_Texture and C_Texture.GetAtlasInfo
+    border._procAtlas      = getInfo and getInfo(PROC_ATLAS)
+    border._procStartAtlas = getInfo and getInfo(PROC_START_ATLAS)
+    -- Colour handling: white keeps the atlas's native golden gradient; any other
+    -- colour DESATURATES the art first so the tint reads clean (multiplying a
+    -- strong colour over gold goes muddy).
+    local r, g, b, a = readColor(anim.color or { r = 1, g = 1, b = 1, a = 1 })
+    local desat = not (r > 0.985 and g > 0.985 and b > 0.985)
+    -- LCG-style hand-off: the LOOP fills the icon, while the intro BURST is a
+    -- larger, CENTERED texture whose flipbook art contracts down onto the loop by
+    -- its final frame — so playing the burst fully then swapping to the loop reads
+    -- as one smooth motion (no cross-fade). Alpha-only visibility (never IsShown —
+    -- a secret boolean on container buttons).
+    local t = border.procTex
+    if not t then
+        t = host:CreateTexture(nil, "OVERLAY")
+        t:SetBlendMode("ADD")
+        border.procTex = t
+    end
+    t:SetParent(host); t:ClearAllPoints(); t:SetAllPoints(host)
+    if border._procAtlas then t:SetTexture(border._procAtlas.file) end
+    t:SetDesaturated(desat); t:SetVertexColor(r, g, b, a)
+    local s = border.procStartTex
+    if not s then
+        s = host:CreateTexture(nil, "OVERLAY")
+        s:SetBlendMode("ADD")
+        border.procStartTex = s
+    end
+    s:SetParent(host); s:ClearAllPoints()
+    s:SetPoint("CENTER", host, "CENTER", 0, 0)   -- size set in the tick (needs the rect)
+    if border._procStartAtlas then s:SetTexture(border._procStartAtlas.file) end
+    s:SetDesaturated(desat); s:SetVertexColor(r, g, b, a)
+    -- anim.procStart = the "Hide Intro Flash" toggle (default nil/false plays it).
+    local showIntro = not anim.procStart
+    border._procStartElapsed = showIntro and 0 or PROC_START_DURATION
+    border._procGeomW = nil   -- tick re-applies loop spill + burst size
+    s:Show(); t:Show()
+    s:SetAlpha(showIntro and 1 or 0)
+    t:SetAlpha(showIntro and 0 or 1)
+    border._procTimer = border._procTimer or 0
+    local freq = (anim.frequency and anim.frequency > 0) and anim.frequency or nil
+    border._procPeriod = freq and (1 / freq) or 1   -- loop period (seconds)
+end
+
+local function procTick(border, anim, dt)
+    local t = border.procTex; if not t then return end
+    local s = border.procStartTex
+    local host = border._procHost
+    -- Apply LCG geometry once w is known: the loop spills PROC_LOOP_SPILL beyond the
+    -- icon (a border glow, not icon-fill), and the burst is PROC_BURST_SCALE× centered
+    -- so its art contracts onto the loop. _knownW first — never read the secret rect.
+    local w = border._knownW or (host and host:GetWidth())
+    -- _knownW is the BORDER's fed width; the anim rect (host) additionally carries
+    -- the animation inset (positive = inward/smaller). Fold it in so the burst
+    -- contracts exactly onto the loop's inset-adjusted rect — otherwise the intro
+    -- lands where the loop WOULD be at inset 0 and visibly jumps. (The non-secret
+    -- fallback host:GetWidth() is already inset-adjusted.)
+    if w and border._knownW then w = w - 2 * (anim.inset or 0) end
+    if host and w and w > 0 and border._procGeomW ~= w then
+        border._procGeomW = w
+        local off = math.floor(w * PROC_LOOP_SPILL + 0.5)
+        t:ClearAllPoints()
+        t:SetPoint("TOPLEFT",     host, "TOPLEFT",     -off,  off)
+        t:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT",  off, -off)
+        if s then s:SetSize(w * PROC_BURST_SCALE, w * PROC_BURST_SCALE) end
+    end
+    local period = border._procPeriod or 1
+    border._procTimer = (border._procTimer + dt / period) % 1
+    if border._procAtlas then stepProcFlipbook(t, border._procAtlas, border._procTimer) end
+    local se = (border._procStartElapsed or PROC_START_DURATION) + dt
+    if se < PROC_START_DURATION and s and border._procStartAtlas then
+        border._procStartElapsed = se
+        stepProcFlipbook(s, border._procStartAtlas, se / PROC_START_DURATION)
+        s:SetAlpha(1); t:SetAlpha(0)
+        return
+    end
+    border._procStartElapsed = PROC_START_DURATION
+    if s then s:SetAlpha(0) end
+    t:SetAlpha(1)
+end
+
+-- ===== DF_FLASH (button-glow flash — DF-owned ButtonGlow stand-in) =====
+-- The classic action-button glow METHOD, reimplemented on our shared driver
+-- (native Animations don't tick in container-button subtrees): a 0.5s intro where
+-- an outer glow collapses (2F→F) while an inner glow expands (F/2→F) under a
+-- bright spark flare, then the inner glow fades out as Blizzard's crawling "ants"
+-- fade in — the outer glow lands at F and STAYS as the steady state, so nothing
+-- jumps at the hand-off. F = icon + 40% (the classic glow-frame factor). Own code
+-- + Blizzard-default textures (the SpellActivationOverlay sheets); alpha-only
+-- visibility (IsShown is a secret boolean on container buttons).
+local FLASH_SHEET       = [[Interface\SpellActivationOverlay\IconAlert]]
+local FLASH_ANTS_TEX    = [[Interface\SpellActivationOverlay\IconAlertAnts]]
+local FLASH_ANTS_FRAMES = 22
+local FLASH_ANTS_COLS   = 5           -- 256/48 = 5 columns in the ants sheet
+local FLASH_ANTS_FW     = 48 / 256    -- one frame's size in UV units
+local FLASH_INTRO_DUR   = 0.8         -- full intro length (the classic glow runs 0.5s on a
+                                      -- 45px action button; slower reads right on small aura
+                                      -- icons). Glows land at 60%, hand-off fills the rest.
+local FLASH_FRAME_SCALE = 1.4         -- F: glow frame = icon + 20% each side
+-- Crop rectangles inside the IconAlert sheet (facts of the asset's layout):
+local FLASH_UV_SPARK    = { 0.00781250, 0.61718750, 0.00390625, 0.26953125 }
+local FLASH_UV_GLOW     = { 0.00781250, 0.50781250, 0.27734375, 0.52734375 }
+local FLASH_UV_GLOWOVER = { 0.00781250, 0.50781250, 0.53515625, 0.78515625 }
+
+local function hideFlashGlow(border)
+    if border.flashSpark     then border.flashSpark:Hide()     end
+    if border.flashInner     then border.flashInner:Hide()     end
+    if border.flashInnerOver then border.flashInnerOver:Hide() end
+    if border.flashOuter     then border.flashOuter:Hide()     end
+    if border.flashOuterOver then border.flashOuterOver:Hide() end
+    if border.flashAnts      then border.flashAnts:Hide()      end
+    if border.flashTex       then border.flashTex:Hide()       end   -- legacy, earlier builds
+    if border.flashBurst     then border.flashBurst:Hide()     end   -- legacy, earlier builds
+    if border.flashStartTex  then border.flashStartTex:Hide()  end   -- legacy, earlier builds
+end
+
+-- One centered crop of the IconAlert sheet (default blend — the art carries its
+-- own alpha; sizes are driven by the tick).
+local function flashSheetTexture(border, key, layer, sub, uv)
+    local host = border._flashHost
+    local t = border[key]
+    if not t then
+        t = host:CreateTexture(nil, layer, nil, sub)
+        border[key] = t
+    end
+    t:SetParent(host); t:ClearAllPoints()
+    t:SetPoint("CENTER", host, "CENTER", 0, 0)
+    t:SetTexture(FLASH_SHEET)
+    t:SetTexCoord(uv[1], uv[2], uv[3], uv[4])
+    return t
+end
+
+local function setupFlashGlow(border, anim)
+    local host = ensureAnimRect(border, anim.inset, anim.offsetX, anim.offsetY)
+    border._flashHost = host
+    -- Colour handling mirrors DF Proc: white keeps the native golden art; any
+    -- other colour desaturates first so the tint reads clean.
+    local r, g, b, a = readColor(anim.color or { r = 1, g = 1, b = 1, a = 1 })
+    local desat = not (r > 0.985 and g > 0.985 and b > 0.985)
+    local spark     = flashSheetTexture(border, "flashSpark",     "BACKGROUND", 0, FLASH_UV_SPARK)
+    local inner     = flashSheetTexture(border, "flashInner",     "ARTWORK",    0, FLASH_UV_GLOW)
+    local innerOver = flashSheetTexture(border, "flashInnerOver", "ARTWORK",    1, FLASH_UV_GLOWOVER)
+    local outer     = flashSheetTexture(border, "flashOuter",     "ARTWORK",    2, FLASH_UV_GLOW)
+    local outerOver = flashSheetTexture(border, "flashOuterOver", "ARTWORK",    3, FLASH_UV_GLOWOVER)
+    -- The bright "over" passes ride their base glow's rect (they fade during the
+    -- intro to sell the flash).
+    innerOver:ClearAllPoints(); innerOver:SetAllPoints(inner)
+    outerOver:ClearAllPoints(); outerOver:SetAllPoints(outer)
+    local ants = border.flashAnts
+    if not ants then
+        ants = host:CreateTexture(nil, "OVERLAY")
+        border.flashAnts = ants
+    end
+    ants:SetParent(host); ants:ClearAllPoints()
+    ants:SetPoint("CENTER", host, "CENTER", 0, 0)   -- size set in the tick (0.85 × F)
+    ants:SetTexture(FLASH_ANTS_TEX)
+    for _, t in next, { spark, inner, innerOver, outer, outerOver, ants } do
+        t:SetDesaturated(desat); t:SetVertexColor(r, g, b, 1); t:Show()
+    end
+    border._flashMaxA = a   -- the colour's alpha caps every layer
+    -- anim.procStart = the "Hide Intro Flash" toggle (default nil/false plays it).
+    local showIntro = not anim.procStart
+    border._flashIntroElapsed = showIntro and 0 or FLASH_INTRO_DUR
+    border._flashGeomW = nil     -- tick sizes everything once the width is known
+    border._flashSettled = nil
+    spark:SetAlpha(0); inner:SetAlpha(0); innerOver:SetAlpha(0)
+    outer:SetAlpha(showIntro and 0 or a); outerOver:SetAlpha(0)
+    ants:SetAlpha(showIntro and 0 or a)
+    border._flashTimer = border._flashTimer or 0
+    local freq = (anim.frequency and anim.frequency > 0) and anim.frequency or nil
+    border._flashPeriod = freq and (1 / freq) or 0.5   -- ants march speed (classic = brisk)
+end
+
+local function flashTick(border, anim, dt)
+    local outer = border.flashOuter; if not outer then return end
+    local host = border._flashHost
+    local spark, inner = border.flashSpark, border.flashInner
+    local innerOver, outerOver = border.flashInnerOver, border.flashOuterOver
+    local ants = border.flashAnts
+    local maxA = border._flashMaxA or 1
+    -- Size everything off the icon width once it's known (F = icon + 40%).
+    -- _knownW first — never read the secret rect on container buttons.
+    local w = border._knownW or (host and host:GetWidth())
+    -- _knownW is the BORDER's fed width; the anim rect (host) additionally carries
+    -- the animation inset (positive = inward/smaller). Fold it in — every flash
+    -- layer is centre-anchored and sized off F, so without this the effect ignores
+    -- Inset entirely on container icons. (The non-secret fallback host:GetWidth()
+    -- is already inset-adjusted.)
+    if w and border._knownW then w = w - 2 * (anim.inset or 0) end
+    local F = border._flashF
+    if host and w and w > 0 and border._flashGeomW ~= w then
+        border._flashGeomW = w
+        F = w * FLASH_FRAME_SCALE
+        border._flashF = F
+        border._flashSettled = nil   -- re-park the steady glow at the new F
+        if ants then ants:SetSize(F * 0.85, F * 0.85) end
+    end
+    if not F then return end   -- no width yet — nothing to draw against
+    -- March the ants every frame (mid-crawl when they fade in).
+    local period = border._flashPeriod or 0.5
+    border._flashTimer = (border._flashTimer + dt / period) % 1
+    if ants then
+        local f   = math.floor(border._flashTimer * FLASH_ANTS_FRAMES) % FLASH_ANTS_FRAMES
+        local col = f % FLASH_ANTS_COLS
+        local row = math.floor(f / FLASH_ANTS_COLS)
+        local l   = col * FLASH_ANTS_FW
+        local tp  = row * FLASH_ANTS_FW
+        ants:SetTexCoord(l, l + FLASH_ANTS_FW, tp, tp + FLASH_ANTS_FW)
+    end
+    local ie = (border._flashIntroElapsed or FLASH_INTRO_DUR) + dt
+    if ie < FLASH_INTRO_DUR then
+        border._flashIntroElapsed = ie
+        border._flashSettled = nil
+        -- The whole timeline runs on normalized progress k so FLASH_INTRO_DUR
+        -- stretches the entire choreography. Classic proportions: glows land at
+        -- 60%, spark peaks at 40% and is gone by 80%, hand-off fills 60→100%.
+        local k = ie / FLASH_INTRO_DUR
+        -- Glows (0 → 60%): the outer collapses 2F→F at full alpha — it lands on
+        -- its steady rect and never moves again; the inner expands F/2→F, its
+        -- bright "over" pass fading as they land.
+        local kg = math.min(k / 0.6, 1)
+        local outerS = F * (2 - kg)
+        outer:SetSize(outerS, outerS)
+        outer:SetAlpha(maxA)
+        if outerOver then outerOver:SetAlpha(maxA * (1 - kg)) end
+        if inner then
+            local innerS = F * (0.5 + 0.5 * kg)
+            inner:SetSize(innerS, innerS)
+            -- holds full until the glows land, then hands off over the last 40%
+            local ia = k < 0.6 and 1 or (1 - (k - 0.6) / 0.4)
+            inner:SetAlpha(maxA * ia)
+        end
+        if innerOver then innerOver:SetAlpha(maxA * (1 - kg)) end
+        -- Spark flare over the top: grows F→1.5F while brightening, shrinks back
+        -- fading — gone by 80%.
+        if spark then
+            local sS, sA
+            if k < 0.4 then
+                local ks = k / 0.4
+                sS, sA = F * (1 + 0.5 * ks), ks
+            elseif k < 0.8 then
+                local ks = (k - 0.4) / 0.4
+                sS, sA = F * (1.5 - 0.5 * ks), 1 - ks
+            else
+                sS, sA = F, 0
+            end
+            spark:SetSize(sS, sS)
+            spark:SetAlpha(maxA * sA)
+        end
+        -- Ants crawl in during the last 40%, taking over from the inner glow.
+        if ants then ants:SetAlpha(k < 0.6 and 0 or maxA * ((k - 0.6) / 0.4)) end
+        return
+    end
+    -- Steady: outer glow parked at F under the marching ants (set once).
+    border._flashIntroElapsed = FLASH_INTRO_DUR
+    if not border._flashSettled then
+        border._flashSettled = true
+        outer:SetSize(F, F)
+        outer:SetAlpha(maxA)
+        if outerOver then outerOver:SetAlpha(0) end
+        if spark then spark:SetAlpha(0) end
+        if inner then inner:SetAlpha(0) end
+        if innerOver then innerOver:SetAlpha(0) end
+        if ants then ants:SetAlpha(maxA) end
+    end
 end
 
 -- ===== CUSTOM ONUPDATE TICKS =====
@@ -801,97 +1296,12 @@ local function tickPeriod(anim, default)
     return 1 / f
 end
 
--- All three OnUpdate-driven custom effects modulate the OVERLAY textures
--- created by setupAnimOverlay (separate from the border's own edges), so
--- their visibility is independent of borderSize. The border underneath
--- stays unchanged while the animation plays on top of / outside it.
+-- The OnUpdate-driven custom effects modulate the OVERLAY textures created by
+-- setupAnimOverlay (separate from the border's own edges), so their visibility
+-- is independent of borderSize. The border underneath stays unchanged while the
+-- animation plays on top of / outside it.
 
 local customTicks = {}
-
--- WIPE: a bright "highlight" peak travels around the perimeter clockwise.
--- Each overlay has a centre-phase (0 / 0.25 / 0.5 / 0.75); its alpha is a
--- base level plus a triangular pulse that peaks when the cycle phase t
--- matches the overlay's centre. Wraps cleanly via circular distance.
-customTicks.WIPE = function(border, anim, elapsed)
-    local o = border.animOverlay; if not o then return end
-    local period = tickPeriod(anim, 2)
-    local t = (elapsed % period) / period
-    local base, peak = 0.0, 1.0
-    local function pulse(c)
-        local d = math.abs(t - c)
-        if d > 0.5 then d = 1 - d end
-        local p = math.max(0, 1 - d * 4)
-        return base + (peak - base) * p
-    end
-    if o.top    then o.top:SetAlpha(pulse(0))    end
-    if o.right  then o.right:SetAlpha(pulse(0.25)) end
-    if o.bottom then o.bottom:SetAlpha(pulse(0.5)) end
-    if o.left   then o.left:SetAlpha(pulse(0.75))  end
-end
-
--- RIPPLE: all overlays pulse alpha sinusoidally with phase offsets so the
--- ripple appears to spread outward from the top in both rotational
--- directions. WIPE has a sharp travelling peak; RIPPLE has a smoother
--- "breathing" pattern across all four overlays.
-customTicks.RIPPLE = function(border, anim, elapsed)
-    local o = border.animOverlay; if not o then return end
-    local period = tickPeriod(anim, 1.5)
-    local t = (elapsed % period) / period
-    local base, amp = 0.2, 0.8
-    local twoPi = 2 * math.pi
-    local function wave(phase) return base + amp * (0.5 + 0.5 * math.sin(twoPi * (t + phase))) end
-    if o.top    then o.top:SetAlpha(wave(0))      end
-    if o.right  then o.right:SetAlpha(wave(0.25)) end
-    if o.bottom then o.bottom:SetAlpha(wave(0.5)) end
-    if o.left   then o.left:SetAlpha(wave(0.25))  end  -- mirrors right
-end
-
--- SEGMENT_REVEAL: overlays fade in one at a time (top → right → bottom →
--- left) over the period, then all fade out together in the last 15% of
--- the cycle before looping.
-customTicks.SEGMENT_REVEAL = function(border, anim, elapsed)
-    local o = border.animOverlay; if not o then return end
-    local period = tickPeriod(anim, 2.5)
-    local t = (elapsed % period) / period
-    local order = { o.top, o.right, o.bottom, o.left }
-    local revealSegment = 0.8
-    local fadeStart = 0.85
-    local perEdge = revealSegment / 4
-    for i, e in ipairs(order) do
-        if e then
-            local segStart = (i - 1) * perEdge
-            if t < segStart then
-                e:SetAlpha(0)
-            elseif t >= fadeStart then
-                local fade = (t - fadeStart) / (1 - fadeStart)
-                e:SetAlpha(math.max(0, 1 - fade))
-            else
-                local local_t = (t - segStart) / perEdge
-                e:SetAlpha(math.min(1, local_t))
-            end
-        end
-    end
-end
-
--- COMET: a bright head travels the perimeter clockwise with a fading tail
--- trailing behind it. Like WIPE but asymmetric — the edge the head just left
--- dims gradually instead of symmetrically, reading as a comet / "chase". A
--- DF-owned stand-in for the LCG AutocastGlow that can't run on aura buttons.
-customTicks.COMET = function(border, anim, elapsed)
-    local o = border.animOverlay; if not o then return end
-    local period = tickPeriod(anim, 2)
-    local t = (elapsed % period) / period
-    local tail = 0.45   -- trail length as a fraction of the loop
-    local function comet(c)
-        local d = (t - c) % 1          -- how far the head has passed this edge
-        if d <= tail then return 1 - d / tail end
-        return 0
-    end
-    if o.top    then o.top:SetAlpha(comet(0))     end
-    if o.right  then o.right:SetAlpha(comet(0.25)) end
-    if o.bottom then o.bottom:SetAlpha(comet(0.5)) end
-    if o.left   then o.left:SetAlpha(comet(0.75))  end
-end
 
 -- BLINK: a hard on/off strobe on all four edges together — a crisp "alert"
 -- pulse, distinct from DF_PULSATE's smooth fade. Frequency is blinks/second.
@@ -906,24 +1316,6 @@ customTicks.BLINK = function(border, anim, elapsed)
 end
 
 -- ===== STATIC SHAPE MODES =====
-
--- SIDES_ONLY: reveal the overlay textures (anim.thickness, anim.color) on
--- one perpendicular pair only. The underlying border edges stay at full
--- alpha so the user's border is still visible underneath. Earlier rev
--- modulated SetAlpha on the edges themselves, but at borderSize 1 the
--- visible result was nearly nothing; using overlays makes the effect
--- visible regardless of border thickness.
-local function applySidesOnly(border, anim)
-    local o = setupAnimOverlay(border, anim)
-    local axis = anim.sidesAxis or "HORIZONTAL"
-    if axis == "HORIZONTAL" then
-        o.top:SetAlpha(1);    o.bottom:SetAlpha(1)
-        o.left:SetAlpha(0);   o.right:SetAlpha(0)
-    else
-        o.top:SetAlpha(0);    o.bottom:SetAlpha(0)
-        o.left:SetAlpha(1);   o.right:SetAlpha(1)
-    end
-end
 
 -- CORNERS_ONLY: 8 overlay pieces — 2 per corner (one horizontal extending
 -- inward from the corner along the top/bottom edge, one vertical
@@ -990,43 +1382,6 @@ end
 -- present; the driver Hide is a no-op when no driver exists.
 function Border:StopAnimation(border)
     if not border then return end
-    -- Cancel any pending deferred LCG glow start (see StartAnimation) so a glow
-    -- scheduled but not yet shown never fires after a stop.
-    border._lcgStartToken = nil
-    local LCG = getLCG()
-    if LCG then
-        local key = "DFBorder"
-        -- Stop on BOTH the raw anchor AND the animRect wrapper since either
-        -- could have been the last LCG target. Each Stop is a cheap no-op
-        -- when its glow frame isn't present. (`glowExtent` is the legacy
-        -- field from the pre-rename revision and is checked for users
-        -- mid-upgrade who might still have a glow running on the old frame.)
-        local anchor = border.anchorTo or border
-        local function stopAll(t)
-            -- Reset a reused ProcGlow frame's textures BEFORE releasing it.
-            -- LCG's pool resetter only hides the frame + clears the reference;
-            -- it leaves the ProcStart (big start-flash) / ProcLoop (small loop)
-            -- texture visibility intact. So a frame re-acquired from the pool
-            -- could come back with BOTH textures showing — the double glow
-            -- (one inset, one further out) seen on alternate re-applies. Stop
-            -- the animation groups and clear both textures so the next Acquire
-            -- (and its OnShow) starts from a clean state.
-            local pg = t and t["_ProcGlow" .. key]
-            if pg then
-                if pg.ProcStartAnim then pg.ProcStartAnim:Stop() end
-                if pg.ProcLoopAnim  then pg.ProcLoopAnim:Stop()  end
-                if pg.ProcStart then pg.ProcStart:SetAlpha(0); pg.ProcStart:Hide() end
-                if pg.ProcLoop  then pg.ProcLoop:SetAlpha(0);  pg.ProcLoop:Hide()  end
-            end
-            if LCG.PixelGlow_Stop    then LCG.PixelGlow_Stop(t, key)    end
-            if LCG.AutoCastGlow_Stop then LCG.AutoCastGlow_Stop(t, key) end
-            if LCG.ButtonGlow_Stop   then LCG.ButtonGlow_Stop(t)        end
-            if LCG.ProcGlow_Stop     then LCG.ProcGlow_Stop(t, key)     end
-        end
-        stopAll(anchor)
-        if border.animRect    then stopAll(border.animRect)    end
-        if border.glowExtent  then stopAll(border.glowExtent)  end
-    end
     unregisterAnimTick(border)
     -- Hide all overlay sets from prior animation passes. The cornerExtras
     -- field is from a previous-rev CORNERS_ONLY implementation; we keep
@@ -1034,7 +1389,11 @@ function Border:StopAnimation(border)
     -- already populated, then mark it nil so it's not referenced again.
     hideAnimOverlay(border)
     hideCornerOverlays(border)
+    hideOrbitParticles(border)
     hideDashPool(border)
+    hidePixelParticles(border)
+    hideProcGlow(border)
+    hideFlashGlow(border)
     if border.cornerExtras then
         for _, e in ipairs(border.cornerExtras) do e:Hide() end
         border.cornerExtras = nil
@@ -1094,7 +1453,7 @@ end
 -- OnUpdate-driver effects: those whose motion is driven by the shared anim
 -- driver's OnUpdate (as opposed to LCG glows or the static shape modes). The dedupe in
 -- StartAnimation verifies the driver is actually live for these before no-opping.
-local DRIVER_ANIMS = { DF_DASH = true, WIPE = true, RIPPLE = true, SEGMENT_REVEAL = true, DF_PULSATE = true, COMET = true, BLINK = true }
+local DRIVER_ANIMS = { DF_DASH = true, DF_PULSATE = true, BLINK = true, DF_ORBIT = true, DF_PROC = true, DF_FLASH = true, DF_PIXEL = true }
 
 function Border:StartAnimation(border, spec)
     if not border or not spec or not spec.animation then
@@ -1144,85 +1503,9 @@ function Border:StartAnimation(border, spec)
     -- header above.  StopAnimation NILs border._animHash, so the hash MUST be
     -- stamped AFTER it — otherwise every full start leaves the hash nil and the
     -- next Apply (AD re-applies ~3×/sec via the expiring ticker) mismatches and
-    -- restarts the effect, making LCG glows (PROC etc.) flash over and over.
+    -- restarts the effect, making it flicker on every re-apply.
     self:StopAnimation(border)
     border._animHash = newHash
-
-    -- LCG-driven effects (PULSATE / CHASE / FLASH). Glow target is the
-    -- shared animRect (positioned by anim.inset / anim.offsetX/Y), so glow
-    -- inset/offset works the same way as overlay inset/offset. Pulsate's
-    -- `mask` (the dark backing card) is OFF by default now — earlier rev
-    -- passed `true` unconditionally, which produced a visible dark square
-    -- behind the particle ring that users didn't want.
-    local LCG = getLCG()
-    if LCG and (anim.type == "PULSATE" or anim.type == "CHASE" or anim.type == "FLASH" or anim.type == "PROC") then
-        ensureAnimRect(border, anim.inset, anim.offsetX, anim.offsetY)
-        local key = "DFBorder"
-        local color
-        if anim.color then
-            local r, g, b, a = readColor(anim.color)
-            color = { r, g, b, a }
-        end
-        -- The Animation Frequency slider can now reach 0 (so DF_DASH can be
-        -- static).  LCG glows treat 0 as invalid, so pass nil → LCG uses its
-        -- own default rate for these effects.
-        local freq = (anim.frequency and anim.frequency > 0) and anim.frequency or nil
-
-        -- The LCG glow reads its target's width/height at Start. On the very
-        -- first attach the animRect was only just created, so the layout engine
-        -- hasn't sized it yet (GetWidth() == 0) — the glow then renders huge /
-        -- detached for one frame (the "full-screen flash"). Start it only once
-        -- the target has a real size; if it isn't laid out yet, defer to the next
-        -- frame (after the layout pass). A per-start token — replaced by a newer
-        -- Start and cleared by StopAnimation — guarantees a deferred start that
-        -- was superseded or stopped in the meantime never fires.
-        local token = {}
-        border._lcgStartToken = token
-        local function startGlow()
-            if border._lcgStartToken ~= token then return end
-            local target = border.animRect
-            if not target then return end
-            if anim.type == "PULSATE" then
-                -- PixelGlow `border` arg: false → no outer mask. anim.mask = true
-                -- restores the backing card for users who want that look.
-                local mask = anim.mask and true or false
-                LCG.PixelGlow_Start(target, color, anim.particles, freq,
-                    anim.length, anim.thickness, 0, 0, mask, key)
-            elseif anim.type == "CHASE" then
-                LCG.AutoCastGlow_Start(target, color, anim.particles, freq,
-                    anim.scale, 0, 0, key)
-            elseif anim.type == "FLASH" then
-                LCG.ButtonGlow_Start(target, color, freq)
-            elseif anim.type == "PROC" then
-                -- ProcGlow takes an options table; map frequency → duration
-                -- (1/freq = seconds-per-cycle) so its slider behaves like the
-                -- other effects' Frequency control (cycles per second).
-                local duration = (anim.frequency and anim.frequency > 0)
-                    and (1 / anim.frequency) or 1
-                -- The one-shot "proc start" flash is OPT-IN (anim.procStart).
-                -- Default off: PROC is used here as a CONTINUOUS border animation
-                -- that re-applies often, and the flash (begins large, shrinks to
-                -- the border) re-fires on every re-apply — on rapid re-toggle the
-                -- big start texture lingers alongside the loop, rendering two
-                -- glows at two sizes. With it on, normal single-cast use plays it
-                -- cleanly; only rapid re-toggling can double it.
-                LCG.ProcGlow_Start(target, {
-                    color     = color,
-                    duration  = duration,
-                    startAnim = anim.procStart and true or false,
-                    key       = key,
-                })
-            end
-        end
-
-        if (border.animRect:GetWidth() or 0) > 0 then
-            startGlow()
-        else
-            C_Timer.After(0, startGlow)
-        end
-        border.activeAnimation = anim.type
-        return
-    end
 
     -- Custom OnUpdate effects — render their own overlay textures, so the
     -- effect's visibility doesn't depend on the border's own thickness.
@@ -1231,6 +1514,80 @@ function Border:StartAnimation(border, spec)
         setupAnimOverlay(border, anim)
         registerAnimTick(border, function(b, el)
             tick(b, anim, el)
+        end)
+        border.activeAnimation = anim.type
+        return
+    end
+
+    -- DF Orbit: DF-owned orbiting-sparkle effect (the AutoCastGlow stand-in).
+    -- Runs on the shared driver off our own shine textures parented to the
+    -- animRect, so it works on 12.1 aura container buttons where the LCG Chase
+    -- glow can't (no SetParent onto the native button; _knownW/_knownH avoid
+    -- secret-rect reads).
+    if anim.type == "DF_ORBIT" then
+        setupOrbitParticles(border, anim)
+        registerAnimTick(border, function(b, el, dt)
+            orbitTick(b, anim, dt)
+        end)
+        border.activeAnimation = anim.type
+        return
+    end
+
+    -- DF Dash: dashed border, static or marching. Frequency is the march SPEED
+    -- (0 = static "dashed"). Fixed dash length/gap; thickness / inset / colour
+    -- from the spec. Dashes clip per edge so the pattern flows around the corners.
+    if anim.type == "DF_DASH" then
+        local r, g, b, a = readColor(anim.color or { r = 0.95, g = 0.95, b = 0.32, a = 1 })
+        border._dfDashTh = math.max(1, anim.thickness or 2)
+        border._dfDashInset = anim.inset or 0
+        border._dfDashR, border._dfDashG, border._dfDashB, border._dfDashA = r, g, b, a
+        local rawFreq = anim.frequency or 0
+        local marchSpeed = (rawFreq and rawFreq > 0) and (rawFreq * DF_DASH_SPEED) or 0
+        if marchSpeed > 0 then
+            -- Marching: OnUpdate advances the offset, reading colour/size from the
+            -- fields so a live recolour is picked up next tick. elapsed persists
+            -- across restarts so a spec change doesn't snap the ants.
+            registerAnimTick(border, function(border, el)
+                border._dfDashElapsed = el
+                local offset = (el * marchSpeed) % DF_DASH_PATTERN
+                drawDashes(border, offset, border._dfDashTh, border._dfDashInset,
+                    border._dfDashR, border._dfDashG, border._dfDashB, border._dfDashA)
+            end, border._dfDashElapsed or 0)
+        else
+            drawDashes(border, 0, border._dfDashTh, border._dfDashInset, r, g, b, a)  -- static
+        end
+        border.activeAnimation = anim.type
+        return
+    end
+
+    -- DF Pixel: DF-owned discrete chasing bars (does not wrap corners — that's
+    -- DF Dash). Taint-safe perimeter walk on the shared driver.
+    if anim.type == "DF_PIXEL" then
+        setupPixelParticles(border, anim)
+        registerAnimTick(border, function(b, el, dt)
+            pixelTick(b, anim, dt)
+        end)
+        border.activeAnimation = anim.type
+        return
+    end
+
+    -- DF Proc: DF-owned golden proc flare (the ProcGlow stand-in). Hand-stepped
+    -- flipbook on the shared driver, taint-safe on aura buttons.
+    if anim.type == "DF_PROC" then
+        setupProcGlow(border, anim)
+        registerAnimTick(border, function(b, el, dt)
+            procTick(b, anim, dt)
+        end)
+        border.activeAnimation = anim.type
+        return
+    end
+
+    -- DF Flash: DF-owned glow flash (the ButtonGlow stand-in). Additive glow
+    -- halo that flashes on the shared driver, taint-safe on aura buttons.
+    if anim.type == "DF_FLASH" then
+        setupFlashGlow(border, anim)
+        registerAnimTick(border, function(b, el, dt)
+            flashTick(b, anim, dt)
         end)
         border.activeAnimation = anim.type
         return
@@ -1290,44 +1647,9 @@ function Border:StartAnimation(border, spec)
         return
     end
 
-    -- DF Dash: a dashed border, static or marching.  Animation Frequency is the
-    -- march SPEED — 0 = static ("dashed"), > 0 = marching ants ("animated").
-    -- Dashes use the animation's own colour / thickness / inset (so a
-    -- dashes-only look = base Border Thickness 0 + this effect).
-    if anim.type == "DF_DASH" then
-        -- Store the dash params as FIELDS so RecolorActive can recolour a
-        -- running DF_DASH in place (the expiring ticker recolours ~3×/sec; a
-        -- restart would tear down + redraw every dash each tick).
-        local r, g, b, a = readColor(anim.color or { r = 0.95, g = 0.95, b = 0.32, a = 1 })
-        border._dfDashTh = math.max(1, anim.thickness or 2)
-        border._dfDashInset = anim.inset or 0
-        border._dfDashR, border._dfDashG, border._dfDashB, border._dfDashA = r, g, b, a
-        local rawFreq = anim.frequency or 0
-        local marchSpeed = (rawFreq and rawFreq > 0) and (rawFreq * DF_DASH_SPEED) or 0
-        if marchSpeed > 0 then
-            -- Marching: OnUpdate advances the offset, reading colour/size from
-            -- the fields so a live recolour is picked up next tick.  elapsed
-            -- persists across restarts so a spec change doesn't snap the ants.
-            registerAnimTick(border, function(border, el)
-                border._dfDashElapsed = el
-                local offset = (el * marchSpeed) % DF_DASH_PATTERN
-                drawDashes(border, offset, border._dfDashTh, border._dfDashInset,
-                    border._dfDashR, border._dfDashG, border._dfDashB, border._dfDashA)
-            end, border._dfDashElapsed or 0)
-        else
-            -- Static: draw once, no driver (cheaper).
-            drawDashes(border, 0, border._dfDashTh, border._dfDashInset, r, g, b, a)
-        end
-        border.activeAnimation = anim.type
-        return
-    end
-
-    -- Static shape modes — also render via overlays (not the border edges
-    -- themselves) so they're visible at borderSize 1.
-    if anim.type == "SIDES_ONLY" then
-        applySidesOnly(border, anim)
-        border.activeAnimation = anim.type
-    elseif anim.type == "CORNERS_ONLY" then
+    -- Static shape mode — renders via overlays (not the border edges themselves)
+    -- so it's visible at borderSize 1.
+    if anim.type == "CORNERS_ONLY" then
         applyCornersOnly(border, anim)
         border.activeAnimation = anim.type
     end
@@ -1336,26 +1658,26 @@ end
 -- Recolour the border AND whatever animation is currently running, WITHOUT a
 -- restart.  The expiring ticker calls this ~3×/sec; routing through
 -- StartAnimation would re-hash, Stop (tearing down every dash / overlay) and
--- redraw each tick.  Recolours: base edges (via SetColor), DF_DASH dashes
--- (field + live textures), CORNERS_ONLY / SIDES_ONLY corner-overlay textures,
--- and the WIPE/RIPPLE/SEGMENT_REVEAL overlays.  LCG glows (Pulsate/Chase/
--- Flash/Proc) can't be recoloured live by LCG, so they keep their colour (the
--- expiring tint still applies to the edges underneath).
+-- redraw each tick.  Recolours: base edges (via SetColor), DF_DASH bars
+-- (the chasing-pixel textures), CORNERS_ONLY corner-overlay textures, and the
+-- Blink overlays.  The DF particle/flipbook glows (Chase/Pixel/Proc/Flash) keep
+-- their own colour (the expiring tint still applies to the edges underneath).
 function Border:RecolorActive(border, r, g, b, a)
     if not border then return end
     a = a or 1
     if border.SetColor then border:SetColor(r, g, b, a) end
     local active = border.activeAnimation
     if active == "DF_DASH" then
+        -- DF Dash: recolour the live dashes + stash for the next redraw.
         border._dfDashR, border._dfDashG, border._dfDashB, border._dfDashA = r, g, b, a
         if border.dashPool then
+            -- Recolour all pooled dashes (hidden ones stay hidden) — never read
+            -- IsShown(), which is a SECRET boolean on container-button borders.
             for _, edge in pairs(border.dashPool) do
-                for _, d in ipairs(edge) do
-                    if d:IsShown() then d:SetColorTexture(r, g, b, a) end
-                end
+                for _, d in ipairs(edge) do d:SetColorTexture(r, g, b, a) end
             end
         end
-    elseif active == "CORNERS_ONLY" or active == "SIDES_ONLY" then
+    elseif active == "CORNERS_ONLY" then
         if border.cornerOverlays then
             for _, e in pairs(border.cornerOverlays) do e:SetColorTexture(r, g, b, a) end
         end
@@ -1491,8 +1813,9 @@ function Border:Apply(border, spec)
     spec = spec or {}
     -- Optional caller-fed geometry: when the border wraps a frame whose live
     -- size can't be measured safely (e.g. an aura overlay slot whose rect is
-    -- secret on 12.1), the caller passes knownWidth/knownHeight so DF_DASH can
-    -- lay out its dashes from a plain config number instead of GetWidth/Height.
+    -- secret on 12.1), the caller passes knownWidth/knownHeight so the DF particle
+    -- effects (DF Dash / DF Orbit) can size from a plain config number instead of
+    -- GetWidth/Height.
     -- nil when the caller doesn't feed a size (measured path, unchanged).
     border._knownW = spec.knownWidth
     border._knownH = spec.knownHeight
