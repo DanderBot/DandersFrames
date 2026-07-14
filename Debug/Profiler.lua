@@ -269,11 +269,20 @@ local PROFILED_FUNCTIONS = {
     "UpdateResourceBar",
 
     -- ----------------------------------------------------------
-    -- Aura pipeline
+    -- Aura pipeline (12.1 factory: per-event cost is the sig-compare
+    -- walk in the Drive* functions; Blizzard renders the icons)
     -- ----------------------------------------------------------
-    "UpdateAuras",                  -- Entry point (alias for Enhanced)
     "UpdateAuras_Enhanced",
     "RebuildDirectFilterStrings",
+    "DriveBuffFactory",
+    "DriveDebuffFactory",
+    "DriveDefensiveFactory",
+    "DriveMissingBuffFactory",
+    "RefreshFactoryRows",
+    "BuildAuraRowConfig",
+    "BuildDebuffFilterRecords",
+    "FilterRegistry.ResolveSelection",
+    "FilterRegistry.SelectionSignature",
 
     -- ----------------------------------------------------------
     -- Dispel
@@ -333,14 +342,14 @@ local PROFILED_FUNCTIONS = {
     "UpdateDefensiveBar",
 
     -- ----------------------------------------------------------
-    -- My-Buff Indicators
-    -- ----------------------------------------------------------
-    "UpdateMyBuffGradientHealth",
-
-    -- ----------------------------------------------------------
     -- Aura Designer (per-frame)
     -- ----------------------------------------------------------
     "UpdateADTintHealth",
+    "GetADTrackedSpellIDs",
+    "GetClaimedDebuffCategories",
+    "BuildADIdentityFilters",
+    "AuraDesigner.Factory.SyncFrame",
+    "AuraDesigner.Factory.ClearFrame",
 
     -- ----------------------------------------------------------
     -- Targeted Spells
@@ -545,6 +554,8 @@ function Profiler:Start()
     self.active = true
     self.startTime = debugprofilestop()
     self.stopTime = 0
+    self:_SnapshotContainerStats()
+    self.containerDelta = nil
     wipe(self.data)
     wipe(self.tickStats)
     wipe(self.originals)
@@ -714,6 +725,7 @@ function Profiler:Stop()
     if not self.active then return end
     self.stopTime = debugprofilestop()
     self.active = false
+    self.containerDelta = self:_ContainerStatsDelta()
 
     -- Restore originals on their actual container tables (supports dotted paths)
     for _, entry in pairs(self.originals) do
@@ -760,7 +772,45 @@ function Profiler:Reset()
     end
     if self.active then
         self.startTime = debugprofilestop()
+        self:_SnapshotContainerStats()
+        self.containerDelta = nil
     end
+end
+
+-- ============================================================
+-- CONTAINER LIFECYCLE COUNTERS
+-- DF.AuraContainer.stats counts builds / teardowns / combat-deferred
+-- rebuilds for the whole session. The profiler snapshots it on Start and
+-- reports the delta: on 12.1 the per-update aura cost lives game-side, so
+-- the number that matters is how often we RECREATE containers. Nonzero
+-- builds during steady-state combat = a structural-signature bug
+-- (rebuild storm), not normal operation.
+-- ============================================================
+
+function Profiler:_SnapshotContainerStats()
+    local s = DF.AuraContainer and DF.AuraContainer.stats
+    if s then
+        self.containerStats0 = { builds = s.builds, teardowns = s.teardowns, defers = s.defers }
+    else
+        self.containerStats0 = nil
+    end
+end
+
+function Profiler:_ContainerStatsDelta()
+    local s = DF.AuraContainer and DF.AuraContainer.stats
+    local s0 = self.containerStats0
+    if not (s and s0) then return nil end
+    return {
+        builds    = s.builds - s0.builds,
+        teardowns = s.teardowns - s0.teardowns,
+        defers    = s.defers - s0.defers,
+    }
+end
+
+-- Delta for the current window: live while recording, frozen at Stop.
+function Profiler:GetContainerDelta()
+    if self.active then return self:_ContainerStatsDelta() end
+    return self.containerDelta
 end
 
 function Profiler:Toggle()
@@ -1012,6 +1062,13 @@ function Profiler:PrintResults()
     print(" ")
     print(format("|cff00ff00DF Profiler:|r [%s] %s | %s calls | %sms profiled CPU",
         self.viewMode, FormatElapsed(elapsed), CommaNumber(totalCalls), FormatMs(grandTotal)))
+    local cd = self:GetContainerDelta()
+    if cd then
+        -- Builds during steady-state combat = rebuild storm; see counter block above.
+        local warn = (cd.builds > 0) and "|cffffff88" or "|cff88ff88"
+        print(format("  %sAura containers: %d built, %d torn down, %d rebuilds deferred to combat end|r",
+            warn, cd.builds, cd.teardowns, cd.defers))
+    end
     print("|cffaaaaaa------------------------------------------------------------|r")
 
     for i, r in ipairs(results) do

@@ -69,6 +69,12 @@ local issecretvalue = issecretvalue or function() return false end
 DF.AuraContainer = DF.AuraContainer or {}
 local AuraContainer = DF.AuraContainer
 
+-- Lifetime counters read by the DF Profiler (rebuild-storm detection): a healthy
+-- session builds containers at login/settings changes only, so a climbing build
+-- count during combat profiling means a structural-signature bug. Always on —
+-- three integer increments have no measurable cost.
+AuraContainer.stats = AuraContainer.stats or { builds = 0, teardowns = 0, defers = 0 }
+
 local DBG = "AURACONTAINER"
 
 -- One-time-per-process warning latches so a guarded failure (curve bug, border
@@ -1035,6 +1041,7 @@ function NativeBackend:build()
         return
     end
     self.container = c
+    AuraContainer.stats.builds = AuraContainer.stats.builds + 1
     local isOverlay = config.mode == "overlay"
     local isMissing = config.mode == "missing"
     if isOverlay then
@@ -1299,6 +1306,7 @@ end
 function NativeBackend:teardown()
     local c = self.container
     if c then
+        AuraContainer.stats.teardowns = AuraContainer.stats.teardowns + 1
         pcall(function() c:SetEnabled(false) end)
         if type(c.RemoveAllAuraFrames) == "function" then
             pcall(function() c:RemoveAllAuraFrames() end)
@@ -1994,6 +2002,7 @@ end
 
 -- One-shot deferral of a full rebuild to combat-end.
 function Handle:_deferRebuild()
+    AuraContainer.stats.defers = AuraContainer.stats.defers + 1
     self:_queueOp("rebuild")
 end
 
