@@ -987,14 +987,19 @@ function BuildPicker(GUI, parent, tdDB, onPick, excludeKey)
     drop._overlay = overlay
 
     -- ESC closes the picker as well.
-    drop:EnableKeyboard(true)
-    drop:SetPropagateKeyboardInput(true)
+    -- SetPropagateKeyboardInput is protected in combat for insecure code:
+    -- skip the calls there (keys propagate anyway — ESC just hides the
+    -- picker), and don't trap keyboard input if built mid-combat.
+    if not InCombatLockdown() then
+        drop:EnableKeyboard(true)
+        drop:SetPropagateKeyboardInput(true)
+    end
     drop:SetScript("OnKeyDown", function(self, key)
         if key == "ESCAPE" then
-            self:SetPropagateKeyboardInput(false)
+            if not InCombatLockdown() then self:SetPropagateKeyboardInput(false) end
             drop:Hide()
         else
-            self:SetPropagateKeyboardInput(true)
+            if not InCombatLockdown() then self:SetPropagateKeyboardInput(true) end
         end
     end)
 

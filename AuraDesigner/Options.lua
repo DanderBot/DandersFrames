@@ -624,14 +624,16 @@ local function ShowBuffCoexistPopup(onConfirm, onCancel)
         f.keepBtn = MakeButton(f, L["Keep Buffs"], -95)
         f.replaceBtn = MakeButton(f, L["Replace Buffs"], 95)
 
-        -- Close on Escape
+        -- Close on Escape. SetPropagateKeyboardInput is protected in combat
+        -- for insecure code: skip it there (keys propagate anyway — ESC just
+        -- hides the popup).
         f:SetScript("OnKeyDown", function(self, key)
             if key == "ESCAPE" then
-                self:SetPropagateKeyboardInput(false)
+                if not InCombatLockdown() then self:SetPropagateKeyboardInput(false) end
                 self:Hide()
                 if self._onCancel then self._onCancel() end
             else
-                self:SetPropagateKeyboardInput(true)
+                if not InCombatLockdown() then self:SetPropagateKeyboardInput(true) end
             end
         end)
 
@@ -6854,14 +6856,20 @@ CreateEffectCard = function(parent, yPos, effect)
                         drop:Hide()
                     end)
                     drop._overlay = overlay
-                    drop:EnableKeyboard(true)
-                    drop:SetPropagateKeyboardInput(true)
+                    -- SetPropagateKeyboardInput is protected in combat for
+                    -- insecure code: skip the calls there (keys propagate
+                    -- anyway — ESC just hides the dropdown), and don't trap
+                    -- keyboard input if built mid-combat.
+                    if not InCombatLockdown() then
+                        drop:EnableKeyboard(true)
+                        drop:SetPropagateKeyboardInput(true)
+                    end
                     drop:SetScript("OnKeyDown", function(self, key)
                         if key == "ESCAPE" then
-                            self:SetPropagateKeyboardInput(false)
+                            if not InCombatLockdown() then self:SetPropagateKeyboardInput(false) end
                             self:Hide()
                         else
-                            self:SetPropagateKeyboardInput(true)
+                            if not InCombatLockdown() then self:SetPropagateKeyboardInput(true) end
                         end
                     end)
                     drop:SetScript("OnHide", function(self)
@@ -7959,14 +7967,20 @@ BuildLayoutGroupsTab = function()
                             overlay:Hide()
                         end)
                         drop._overlay = overlay
-                        drop:EnableKeyboard(true)
-                        drop:SetPropagateKeyboardInput(true)
+                        -- SetPropagateKeyboardInput is protected in combat for
+                        -- insecure code: skip the calls there (keys propagate
+                        -- anyway — ESC just hides the dropdown), and don't trap
+                        -- keyboard input if built mid-combat.
+                        if not InCombatLockdown() then
+                            drop:EnableKeyboard(true)
+                            drop:SetPropagateKeyboardInput(true)
+                        end
                         drop:SetScript("OnKeyDown", function(self, key)
                             if key == "ESCAPE" then
-                                self:SetPropagateKeyboardInput(false)
+                                if not InCombatLockdown() then self:SetPropagateKeyboardInput(false) end
                                 self:Hide()
                             else
-                                self:SetPropagateKeyboardInput(true)
+                                if not InCombatLockdown() then self:SetPropagateKeyboardInput(true) end
                             end
                         end)
                         drop:SetScript("OnHide", function(self)

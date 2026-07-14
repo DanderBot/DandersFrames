@@ -587,15 +587,20 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     local pickerSearch = "" -- lowercased query
     local RefreshPicker
 
-    -- Close on Escape (same idiom as the Aura Designer popups)
-    picker:EnableKeyboard(true)
-    picker:SetPropagateKeyboardInput(true)
+    -- Close on Escape (same idiom as the Aura Designer popups).
+    -- SetPropagateKeyboardInput is protected in combat for insecure code:
+    -- skip the calls there (keys propagate anyway — ESC just hides the
+    -- panel), and don't trap keyboard input if built mid-combat.
+    if not InCombatLockdown() then
+        picker:EnableKeyboard(true)
+        picker:SetPropagateKeyboardInput(true)
+    end
     picker:SetScript("OnKeyDown", function(self, key)
         if key == "ESCAPE" then
-            self:SetPropagateKeyboardInput(false)
+            if not InCombatLockdown() then self:SetPropagateKeyboardInput(false) end
             self:Hide()
         else
-            self:SetPropagateKeyboardInput(true)
+            if not InCombatLockdown() then self:SetPropagateKeyboardInput(true) end
         end
     end)
 
