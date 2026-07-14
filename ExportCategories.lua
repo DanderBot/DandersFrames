@@ -1231,7 +1231,6 @@ DF.ExportCategories = {
         "testShowDispelGlow",
         "testShowExternalDef",
         "testShowHealPrediction",
-        "testShowIcons",
         "testShowMissingBuff",
         "testShowOutOfRange",
         "testShowPersonalTargeted",

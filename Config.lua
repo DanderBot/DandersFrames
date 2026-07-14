@@ -2228,7 +2228,6 @@ DF.PartyDefaults = {
     testShowDispelGlow = false,
     testShowExternalDef = false,
     testShowHealPrediction = false,
-    testShowIcons = true,
     testShowMissingBuff = false,
     testShowOutOfRange = false,
     testShowPets = true,
