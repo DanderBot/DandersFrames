@@ -983,8 +983,7 @@ end
 -- container's flow layout (SetAuraLayout* translation lands in P1); overlay slots are
 -- addon-anchored via the button AddAuraSlot returns.
 --
--- Each backend owns its OWN plain container (Krathe's proven ContainerOverlay pattern —
--- reference ContainerOverlay.lua buildOverlay): insecure CreateFrame is combat-legal for the
+-- Each backend owns its OWN plain container: insecure CreateFrame is combat-legal for the
 -- aura pipeline (taint.log-proven; the earlier freeze was unrelated secret-value compares,
 -- since fixed). One container per consumer = one flow layout per row (independent
 -- positioning) and a trivial recreate-on-structural-change teardown. The container is
@@ -1005,7 +1004,7 @@ end
 
 function NativeBackend:isNativeSlots() return true end
 
--- Order (Krathe's ContainerOverlay.lua buildOverlay, proven live in combat on 68569):
+-- Build order (proven live in combat on 68569 — do not reorder):
 -- CreateFrame("AuraContainer", nil, ours, "CustomAuraContainerTemplate") -> SetAllPoints ->
 -- SetUnit -> AddAuraGroup/AddAuraSlot(each filter, initializeFrame) -> SetEnabled LAST.
 -- SetEnabled gates aura-event registration (IsVisible() and IsEnabled()); without the LAST
@@ -1017,14 +1016,14 @@ function NativeBackend:build()
     local config = handle.config
 
     -- Never stand up a container in combat: in-lockdown create/enable is a hard client
-    -- error pcall can't catch (ContainerOverlay gotcha 1). Every caller already gates this
+    -- error pcall can't catch. Every caller already gates this
     -- (Create / _rebuild / the regen handler); a stray path defers instead of dying.
     if InCombatLockdown() then handle:_deferRebuild(); return end
 
     -- OUR OWN plain per-consumer container, parented to the handle's anchor frame. Insecure
     -- creation is fine — taint.log proved the old combat freeze was unrelated secret-value
     -- compares (Config.lua SafeSetFont / Auras.lua legacy scan), both fixed — and this exact
-    -- plain-create pattern runs live in combat in the AD ContainerOverlay PoC.
+    -- plain-create pattern is confirmed to run live in combat.
     local ok, c = pcall(CreateFrame, "AuraContainer", nil, handle.frame, "CustomAuraContainerTemplate")
     if not ok or not c then
         if not warnedCreate then
@@ -1179,8 +1178,8 @@ function NativeBackend:build()
         end
     end
 
-    -- SetEnabled LAST — after the groups/slots + filters are declared (ContainerOverlay.lua
-    -- gotcha 2). This is what arms the parse + UNIT_AURA registration.
+    -- SetEnabled LAST — after the groups/slots + filters are declared. This is what arms
+    -- the parse + UNIT_AURA registration.
     -- TEST MODE: stay DISABLED until the provider bounce lands (the bounce enables
     -- us) — an enabled container parses the player's REAL auras for a tick first,
     -- creating buttons whose creation order no longer matches the sample set's
@@ -1292,8 +1291,8 @@ function NativeBackend:refresh()
     end
 end
 
--- The container is OURS (per-consumer): teardown mirrors ContainerOverlay's teardownEntry —
--- disable, drop its buttons, hide, release the ref. The next build creates a fresh container
+-- The container is OURS (per-consumer): teardown is disable, drop its buttons, hide, release
+-- the ref. The next build creates a fresh container
 -- (topology is add-only — no RemoveAuraGroup/Slot — so recreate IS the sanctioned removal).
 -- Callers gate teardown out of combat (Destroy/_rebuild defer to regen in lockdown).
 function NativeBackend:teardown()
@@ -2127,7 +2126,7 @@ function AuraContainer:Create(parent, config)
     AuraContainer._handles[h] = true   -- weak-keyed registry so a dropped handle GCs (else rebuild-forever on test toggle)
     ensureProviderWatch()              -- edit-mode guard (see above); one shared frame
     -- h.frame is the plain anchor frame DF positions; the backend parents its OWN
-    -- CustomAuraContainer to it (per-consumer container — Krathe's ContainerOverlay pattern).
+    -- CustomAuraContainer to it (one container per consumer).
     h.frame = CreateFrame("Frame", nil, parent)
     if cfg.mode == "missing" then
         -- MISSING mode (probe 32, live-confirmed 2026-07-10): h.frame is a CLIP WINDOW
