@@ -7004,6 +7004,8 @@ BuildLayoutGroupsTab = function()
                                 SwapGroupMembers(capturedGroupID, capturedMi, capturedMi - 1)
                                 SwitchTab("layout")
                                 RefreshPlacedIndicators()
+                                -- Positions moved (member index feeds the grid) — re-arrange live frames.
+                                DF.AuraDesigner.Engine:ForceRefreshAllFrames()
                             end)
                             upBtn:SetScript("OnEnter", function() upIcon:SetVertexColor(1, 1, 1) end)
                             upBtn:SetScript("OnLeave", function() upIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b) end)
@@ -7021,6 +7023,8 @@ BuildLayoutGroupsTab = function()
                                 SwapGroupMembers(capturedGroupID, capturedMi, capturedMi + 1)
                                 SwitchTab("layout")
                                 RefreshPlacedIndicators()
+                                -- Positions moved (member index feeds the grid) — re-arrange live frames.
+                                DF.AuraDesigner.Engine:ForceRefreshAllFrames()
                             end)
                             downBtn:SetScript("OnEnter", function() downIcon:SetVertexColor(1, 1, 1) end)
                             downBtn:SetScript("OnLeave", function() downIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b) end)
@@ -7318,6 +7322,13 @@ BuildLayoutGroupsTab = function()
                                     drop:Hide()
                                     SwitchTab("layout")
                                     RefreshPlacedIndicators()
+                                    -- Structural change: same full refresh as the member ✕
+                                    -- (new indicator container + group positions + buff-row dedup).
+                                    DF:InvalidateAuraLayout()
+                                    DF:UpdateAllFrames()
+                                    if DF.AuraDesigner.Engine and DF.AuraDesigner.Engine.ForceRefreshAllFrames then
+                                        DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+                                    end
                                 end)
 
                                 btnX = btnX - 40

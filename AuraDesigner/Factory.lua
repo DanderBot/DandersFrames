@@ -1163,6 +1163,124 @@ local function filterGroupCoSig(group)
 end
 
 -- ============================================================
+-- MEMBER LAYOUT GROUPS — position arranger (12.1 port)
+-- A member ("classic") layout group arranges its members' PLACED indicators in
+-- a grid computed from the group's settings (anchor / offset / grow direction /
+-- icons per row / spacing). Legacy applied this at render time over the ACTIVE
+-- members only (Engine.lua ComputeGroupOffset — icons compacted as auras came
+-- and went); on 12.1 aura presence is SECRET, so slots are STATIC: each member
+-- owns the grid cell of its member index, exactly matching the editor preview
+-- (Options.lua RefreshPlacedIndicators). An absent (or eye-hidden) member
+-- leaves its cell empty — no compaction, by design (read-free).
+--
+-- Mechanics: positions are recomputed per SyncFrame pass from the LIVE group
+-- tables (cheap arithmetic — group edits apply immediately, no version cache to
+-- go stale) into pass-stamped scratch. Each member gets a persistent WRAPPER
+-- table (__index = its indicator record) whose anchor/offsetX/offsetY are the
+-- arranged values; the placed sync below reads position through the wrapper, so
+-- the arranged position flows into the container layout AND the cosmetic sig
+-- (group edits hot-apply via ApplyStyle). Zero steady-state allocation: wrapper
+-- + entry alloc once per instanceKey, mutated in place thereafter.
+-- ============================================================
+
+local mgScratch = {}   -- instanceKey -> { pass, base = indicator record, wrapper }
+local mgPass = 0
+
+local function memberGrowthOffset(d, s)
+    if d == "LEFT" then return -s, 0 elseif d == "RIGHT" then return s, 0
+    elseif d == "UP" then return 0, s elseif d == "DOWN" then return 0, -s end
+    return 0, 0
+end
+
+-- Compute this pass's arranged positions for every member of every member group
+-- on the spec. Returns true when at least one member was arranged. The math is
+-- a verbatim mirror of the editor preview (Options.lua RefreshPlacedIndicators
+-- group-position block) so preview and live can never disagree.
+local function arrangeMemberGroups(adDB, spec, specAuras)
+    local groups = adDB.layoutGroups and adDB.layoutGroups[spec]
+    if not groups then return false end
+    mgPass = mgPass + 1
+    local any = false
+    for _, group in ipairs(groups) do
+        local members = type(group) == "table" and group.kind ~= "filter" and group.members
+        if members and #members > 0 then
+            local totalCount = #members
+            local gAnchor = (type(group.anchor) == "string" and group.anchor) or "TOPLEFT"
+            local spacing = tonumber(group.spacing) or 2
+            local wrap = tonumber(group.iconsPerRow) or 8
+            if wrap <= 0 then wrap = 1 end
+            local primary, secondary = strsplit("_", group.growDirection or "RIGHT")
+            if not secondary then
+                secondary = (primary == "RIGHT" or primary == "LEFT") and "DOWN" or "RIGHT"
+            end
+            local gox, goy = tonumber(group.offsetX) or 0, tonumber(group.offsetY) or 0
+            for memberIdx, member in ipairs(members) do
+                -- Find the member's indicator record (size/scale feed the grid step).
+                local auraCfg = specAuras and specAuras[member.auraName]
+                local indCfg
+                if type(auraCfg) == "table" and auraCfg.indicators then
+                    for _, ind in ipairs(auraCfg.indicators) do
+                        if ind.id == member.indicatorID then indCfg = ind; break end
+                    end
+                end
+                if indCfg then
+                    local size = tonumber(indCfg.size) or (adDB.defaults and adDB.defaults.iconSize) or 24
+                    local scale = tonumber(indCfg.scale) or (adDB.defaults and adDB.defaults.iconScale) or 1.0
+                    local step = (size * scale) + spacing
+                    local activeIdx = memberIdx - 1
+                    local col = activeIdx % wrap
+                    local row = math.floor(activeIdx / wrap)
+                    local sX, sY = memberGrowthOffset(secondary, step)
+                    local oX, oY
+                    if primary == "CENTER" then
+                        local iconsInRow = wrap
+                        local lastRow = math.floor((totalCount - 1) / wrap)
+                        if row == lastRow then
+                            iconsInRow = ((totalCount - 1) % wrap) + 1
+                        end
+                        local centerOff = -((iconsInRow - 1) * step) / 2
+                        if sX ~= 0 then
+                            oX = gox + (row * sX)
+                            oY = goy + centerOff + (col * step)
+                        else
+                            oX = gox + centerOff + (col * step)
+                            oY = goy + (row * sY)
+                        end
+                    else
+                        local pX, pY = memberGrowthOffset(primary, step)
+                        oX = gox + (col * pX) + (row * sX)
+                        oY = goy + (col * pY) + (row * sY)
+                    end
+                    local key = member.auraName .. "#" .. tostring(member.indicatorID)
+                    local e = mgScratch[key]
+                    if not e or e.base ~= indCfg then
+                        e = { base = indCfg, wrapper = setmetatable({}, { __index = indCfg }) }
+                        mgScratch[key] = e
+                    end
+                    e.pass = mgPass
+                    local w = e.wrapper
+                    w.anchor, w.offsetX, w.offsetY = gAnchor, oX, oY
+                    any = true
+                end
+            end
+        end
+    end
+    return any
+end
+
+-- Effective placed record: the group wrapper (arranged anchor/offset shadowing
+-- the record's own) when this indicator is a member arranged THIS pass, else
+-- the raw record. base identity check guards records swapped under a reused key
+-- (profile/spec switch) and cross-adDB key collisions.
+local function memberEffective(hasMG, key, indicator)
+    if hasMG then
+        local e = mgScratch[key]
+        if e and e.pass == mgPass and e.base == indicator then return e.wrapper end
+    end
+    return indicator
+end
+
+-- ============================================================
 -- SHOW-WHEN-MISSING  — P4.5
 -- An indicator/effect with showWhenMissing set INVERTS its trigger: it renders while the
 -- tracked aura is ABSENT (a "you're missing this" reminder) instead of on presence. Driven
@@ -1887,6 +2005,12 @@ function Factory:SyncFrame(frame)
         if not placed then placed = {}; store.placed = placed end
         local live = {}
 
+        -- Member layout groups arrange their members' positions (grid computed from
+        -- the group's anchor/offset/grow/wrap/spacing — see the arranger section).
+        -- Compute this pass's positions once; each member indicator below reads its
+        -- position through the wrapper (position override only, all else raw record).
+        local hasMG = specAuras and arrangeMemberGroups(adDB, spec, specAuras) or false
+
         if specAuras then
             for auraName, auraCfg in pairs(specAuras) do
                 local indicators = (type(auraCfg) == "table") and auraCfg.indicators
@@ -1904,16 +2028,18 @@ function Factory:SyncFrame(frame)
                             if map then
                                 local key = placedKey(auraName, indicator)
                                 live[key] = true
+                                -- eff = position through the member-group wrapper when grouped
+                                local eff = memberEffective(hasMG, key, indicator)
                                 local borderOn = placedBorderOn(indicator, false)
                                 local alpha = tonumber(indicator.alpha) or 1
                                 local structSig = barStructSig(map, indicator, borderOn)
-                                local coSig = barCoSig(frame, indicator, borderOn, alpha)
+                                local coSig = barCoSig(frame, eff, borderOn, alpha)
 
                                 local entry = placed[key]
                                 if not entry then
                                     local borderSpec = borderOn and buildBarBorderSpec(frame, indicator) or nil
                                     local handle = DF.AuraContainer:Create(frame,
-                                        buildBarConfig(frame, frame.unit, map, indicator, borderSpec))
+                                        buildBarConfig(frame, frame.unit, map, eff, borderSpec))
                                     if handle then
                                         applyPlacedAlpha(handle, alpha)
                                         placed[key] = { handle = handle, structSig = structSig, coSig = coSig }
@@ -1921,14 +2047,14 @@ function Factory:SyncFrame(frame)
                                 elseif entry.structSig ~= structSig then
                                     local borderSpec = borderOn and buildBarBorderSpec(frame, indicator) or nil
                                     entry.structSig, entry.coSig = structSig, coSig
-                                    entry.handle:Rebuild(buildBarConfig(frame, frame.unit, map, indicator, borderSpec))
+                                    entry.handle:Rebuild(buildBarConfig(frame, frame.unit, map, eff, borderSpec))
                                     applyPlacedAlpha(entry.handle, alpha)
                                 elseif entry.coSig ~= coSig then
                                     local borderSpec = borderOn and buildBarBorderSpec(frame, indicator) or nil
                                     entry.coSig = coSig
                                     entry.handle:ApplyStyle(
                                         buildBarStyle(indicator, borderSpec),
-                                        buildBarLayout(frame, indicator))
+                                        buildBarLayout(frame, eff))
                                     applyPlacedAlpha(entry.handle, alpha)
                                 end
                             end
@@ -1938,6 +2064,8 @@ function Factory:SyncFrame(frame)
                             if map then
                                 local key = placedKey(auraName, indicator)
                                 live[key] = true
+                                -- eff = position through the member-group wrapper when grouped
+                                local eff = memberEffective(hasMG, key, indicator)
                                 local hideIcon = indicator.hideIcon and true or false
                                 local wantMissingP = indicator.showWhenMissing and true or false
                                 local existingP = placed[key]
@@ -1951,8 +2079,8 @@ function Factory:SyncFrame(frame)
                                 -- animation is stripped on the badge (orphan-ticker hazard).
                                 local size = math.max(8, tonumber(indicator.size) or 24)
                                 local borderOnM = placedBorderOn(indicator, hideIcon)
-                                local anchorM = (type(indicator.anchor) == "string" and indicator.anchor) or "TOPLEFT"
-                                local oxM, oyM = tonumber(indicator.offsetX) or 0, tonumber(indicator.offsetY) or 0
+                                local anchorM = (type(eff.anchor) == "string" and eff.anchor) or "TOPLEFT"
+                                local oxM, oyM = tonumber(eff.offsetX) or 0, tonumber(eff.offsetY) or 0
                                 local scaleM = tonumber(indicator.scale) or 1
                                 local structSig = includeSig(map) .. "|" .. (isSquare and "sq" or "ic")
                                     .. "|miss|fl=" .. tostring(tonumber(indicator.frameLevel) or 0)
@@ -2004,13 +2132,13 @@ function Factory:SyncFrame(frame)
                                 -- create/rebuild/restyle branch below, never per pass.
                                 local structSig = placedStructSig(map, isSquare, hideIcon, showStacks,
                                     showDuration, borderOn, indicator)
-                                local coSig = placedCoSig(indicator, isSquare, borderOn, alpha)
+                                local coSig = placedCoSig(eff, isSquare, borderOn, alpha)
 
                                 local entry = placed[key]
                                 if not entry then
                                     local borderSpec = borderOn and buildPlacedBorderSpec(frame, indicator, hideIcon) or nil
                                     local handle = DF.AuraContainer:Create(frame,
-                                        buildPlacedConfig(frame.unit, map, indicator, isSquare, borderSpec))
+                                        buildPlacedConfig(frame.unit, map, eff, isSquare, borderSpec))
                                     if handle then
                                         applyPlacedAlpha(handle, alpha)
                                         placed[key] = { handle = handle, structSig = structSig, coSig = coSig }
@@ -2018,14 +2146,14 @@ function Factory:SyncFrame(frame)
                                 elseif entry.structSig ~= structSig then
                                     local borderSpec = borderOn and buildPlacedBorderSpec(frame, indicator, hideIcon) or nil
                                     entry.structSig, entry.coSig = structSig, coSig
-                                    entry.handle:Rebuild(buildPlacedConfig(frame.unit, map, indicator, isSquare, borderSpec))
+                                    entry.handle:Rebuild(buildPlacedConfig(frame.unit, map, eff, isSquare, borderSpec))
                                     applyPlacedAlpha(entry.handle, alpha)
                                 elseif entry.coSig ~= coSig then
                                     local borderSpec = borderOn and buildPlacedBorderSpec(frame, indicator, hideIcon) or nil
                                     entry.coSig = coSig
                                     entry.handle:ApplyStyle(
                                         buildPlacedStyle(indicator, isSquare, borderSpec),
-                                        buildPlacedLayout(indicator))
+                                        buildPlacedLayout(eff))
                                     applyPlacedAlpha(entry.handle, alpha)
                                 end
                               end
