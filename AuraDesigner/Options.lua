@@ -735,6 +735,67 @@ local function GetOtherAuras()
     return otherAuras
 end
 
+-- Returns the preset's DEBUFF CATEGORY GROUPS array (C1): a flat, spec-INDEPENDENT
+-- array of group records (mirror of the otherAuras siblings-not-pseudo-spec rule —
+-- a future per-spec expansion would land under its own key, so this array never
+-- needs a migration). Lazily created on first WRITE access only — merely opening
+-- the editor must not create adDB.debuffGroups (mirror GetOtherAuras). Each record:
+-- { id, name, enabled, anchor, offsetX, offsetY, growDirection, iconsPerRow,
+--   spacing, iconSize, maxIcons, selection = { boss, role, priority, crowdControl,
+--   raid, dispellable, dispellableMode, hideLong, hideLongMinutes, keepImportant } }.
+-- The factory reads adDB.debuffGroups directly (as it reads otherAuras); this
+-- accessor is staged for C2's group editor UI (uncalled in C1).
+local function GetDebuffGroups()
+    local adDB = GetAuraDesignerDB()
+    if not adDB then return {} end
+    if not adDB.debuffGroups then adDB.debuffGroups = {} end
+    local groups = adDB.debuffGroups
+    -- One-time cleanup, same table-identity registry as GetSpecAuras/GetOtherAuras
+    -- (profile/preset switches swap the table and re-sanitize naturally).
+    if not sanitizedSpecAuras[groups] then
+        for i = #groups, 1, -1 do
+            if type(groups[i]) ~= "table" then
+                tremove(groups, i)
+                DF:DebugWarn("AD", "Removed corrupted debuff group entry at index %d", i)
+            end
+        end
+        sanitizedSpecAuras[groups] = true
+    end
+    return groups
+end
+
+-- Create a new debuff category group (C1 data model; C2 wires the UI). Defaults:
+-- Boss + Role selected (the classic "important debuffs" baseline), everything
+-- else off, Hide Long staged at 5 minutes with Keep Important on. Layout mirrors
+-- the filter-group creation defaults (compact 4x4).
+local function CreateDebuffGroup(name)
+    local adDB = GetAuraDesignerDB()
+    if not adDB then return nil end
+    local groups = GetDebuffGroups()
+    if not adDB.nextDebuffGroupID then adDB.nextDebuffGroupID = 1 end
+    local id = adDB.nextDebuffGroupID
+    adDB.nextDebuffGroupID = id + 1
+    local group = {
+        id = id,
+        name = name or ("Debuff Group " .. id),
+        anchor = "TOPLEFT",
+        offsetX = 0,
+        offsetY = 0,
+        growDirection = "RIGHT_DOWN",
+        iconsPerRow = 4,
+        spacing = 2,
+        iconSize = 24,
+        maxIcons = 4,
+        selection = {
+            boss = true, role = true, priority = false, crowdControl = false,
+            raid = false, dispellable = false, dispellableMode = "PLAYER",
+            hideLong = false, hideLongMinutes = 5, keepImportant = true,
+        },
+    }
+    tinsert(groups, group)
+    return group
+end
+
 -- Returns the spec-scoped layout groups array, creating it if needed
 local function GetSpecLayoutGroups(spec)
     local adDB = GetAuraDesignerDB()

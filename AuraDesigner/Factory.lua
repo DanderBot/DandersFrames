@@ -293,6 +293,53 @@ function DF:GetADTrackedSpellIDs(frame, db)
 end
 
 -- ============================================================
+-- DEBUFF-ROW CLAIM SET  (C1 — the row-skip half of debuff-group dedup)
+-- The union of every ENABLED debuff group's selected categories for the frame's
+-- ACTIVE preset — keys boss / role / priority / crowdControl / raid /
+-- dispellable. The debuff ROW (DriveDebuffFactory) passes this into
+-- BuildDirectDebuffFilters so a category an AD debuff group displays is dropped
+-- from the row (no double render). Gate chain mirrors GetADTrackedSpellIDs
+-- exactly: AD enabled for the frame, factory owns AD for this db, preset
+-- enabled, spec resolvable (SyncFrame tears every AD container down without a
+-- spec, so nothing renders and nothing may be claimed). Eye-hidden groups
+-- (`enabled == false`) render nothing and claim nothing. Dispellable claims are
+-- mode-AGNOSTIC by design (a group claiming dispellable claims the category
+-- whatever mode either side runs — simplest rule). NO CYCLE by construction:
+-- this reads group.selection tables only — it never calls the record resolver,
+-- and the AD facade path (buildDebuffGroupRecords below) never consults claims.
+local CLAIMABLE_CATEGORIES = { "boss", "role", "priority", "crowdControl", "raid", "dispellable" }
+function DF:GetClaimedDebuffCategories(frame, db)
+    if not frame then return nil end
+    if not (DF.IsAuraDesignerEnabled and DF:IsAuraDesignerEnabled(frame)) then return nil end
+    if not (DF.FactoryOwnsAD and DF:FactoryOwnsAD(db)) then return nil end
+
+    local adDB = DF.ResolveAuraDesigner and DF:ResolveAuraDesigner(frame)
+    if not adDB or not adDB.enabled then return nil end
+
+    local Engine = DF.AuraDesigner and DF.AuraDesigner.Engine
+    local spec = Engine and Engine.ResolveSpec and Engine:ResolveSpec(adDB)
+    if not spec then return nil end
+
+    local groups = adDB.debuffGroups
+    if not groups then return nil end
+
+    local claimed
+    for _, group in ipairs(groups) do
+        if type(group) == "table" and group.enabled ~= false and type(group.selection) == "table" then
+            local sel = group.selection
+            for i = 1, #CLAIMABLE_CATEGORIES do
+                local k = CLAIMABLE_CATEGORIES[i]
+                if sel[k] then
+                    claimed = claimed or {}
+                    claimed[k] = true
+                end
+            end
+        end
+    end
+    return claimed   -- nil when no group claims anything -> row builds untouched
+end
+
+-- ============================================================
 -- HELPERS
 -- ============================================================
 
@@ -1179,14 +1226,16 @@ local function filterGroupTestEntries(map)
     return entries
 end
 
-local function buildFilterGroupLayout(group)
+-- Shared by filter groups (wrap default 8) and debuff groups (wrap default 4 —
+-- their creation default; pass wrapDefault to match).
+local function buildFilterGroupLayout(group, wrapDefault)
     return {
         size     = math.max(8, tonumber(group.iconSize) or 24),
         spacingX = tonumber(group.spacing) or 2,
         spacingY = tonumber(group.spacing) or 2,
         anchor   = (type(group.anchor) == "string" and group.anchor) or "TOPLEFT",
         growth   = groupGrowth(group),
-        wrap     = math.max(1, tonumber(group.iconsPerRow) or 8),
+        wrap     = math.max(1, tonumber(group.iconsPerRow) or wrapDefault or 8),
         offsetX  = tonumber(group.offsetX) or 0,
         offsetY  = tonumber(group.offsetY) or 0,
     }
@@ -1239,16 +1288,94 @@ local fgroupExcludeWarned = setmetatable({}, { __mode = "k" })
 -- COSMETIC signature: the layout fields hot-apply via ApplyStyle(style, layout).
 -- Identity (selection signature) + max slot count are structural (declared at
 -- AddAuraGroup / container build) and folded into structSig at the call site.
-local function filterGroupCoSig(group)
+local function filterGroupCoSig(group, wrapDefault)
     return tconcat({
         "sz=" .. tostring(math.max(8, tonumber(group.iconSize) or 24)),
         "an=" .. tostring(group.anchor or "TOPLEFT"),
         "ox=" .. tostring(tonumber(group.offsetX) or 0),
         "oy=" .. tostring(tonumber(group.offsetY) or 0),
         "gr=" .. groupGrowth(group),
-        "wr=" .. tostring(math.max(1, tonumber(group.iconsPerRow) or 8)),
+        "wr=" .. tostring(math.max(1, tonumber(group.iconsPerRow) or wrapDefault or 8)),
         "sp=" .. tostring(tonumber(group.spacing) or 2),
     }, "|")
+end
+
+-- ============================================================
+-- DEBUFF CATEGORY GROUPS — C1
+-- A debuff group is a container-backed row driven by the SAME native category
+-- records the main debuff row uses: its `selection` table maps onto the row's
+-- flat filter keys (a facade db) and feeds DF:BuildDebuffFilterRecords — the
+-- exposed form of the row's own resolver — so a group configured like the row
+-- produces byte-identical records (per-record filter strings, negation-token
+-- dedup, Hide Long / Keep Important semantics, the > 0 minutes guard). One
+-- handle per enabled group per frame, keyed "dgroup:<id>" in store.dgroups —
+-- the same live/sweep lifecycle as the A5 filter groups. Empty selection (no
+-- categories) resolves to NO records -> the group renders nothing and is swept.
+-- The facade NEVER passes a claim set (claims derive from these very groups —
+-- feeding them back would be circular; only the real row consults claims).
+-- ============================================================
+
+-- Facade scratch (module-level, wiped per build): BuildDebuffFilterRecords only
+-- READS flat scalar keys synchronously, so one shared table serves every group.
+local dgroupFacade = {}
+local function buildDebuffGroupRecords(group)
+    local sel = group.selection
+    if type(sel) ~= "table" then return nil end
+    wipe(dgroupFacade)
+    dgroupFacade.directDebuffShowAll          = false
+    dgroupFacade.debuffFilterBoss             = sel.boss and true or false
+    dgroupFacade.debuffFilterRole             = sel.role and true or false
+    dgroupFacade.debuffFilterPriority         = sel.priority and true or false
+    dgroupFacade.debuffFilterCrowdControl     = sel.crowdControl and true or false
+    dgroupFacade.debuffFilterRaid             = sel.raid and true or false
+    dgroupFacade.debuffFilterDispellable      = sel.dispellable and true or false
+    dgroupFacade.directDebuffDispellableMode  = sel.dispellableMode or "PLAYER"
+    dgroupFacade.debuffMaxDurationEnabled     = sel.hideLong and true or false
+    -- The resolver's own "> 0 minutes" guard holds through the facade: 0 or nil
+    -- minutes -> maxDur nil, exactly as on the row (no duplicate guard here).
+    dgroupFacade.debuffMaxDurationMinutes     = sel.hideLongMinutes or 5
+    dgroupFacade.debuffMaxDurationKeepImportant = sel.keepImportant ~= false
+    return DF.BuildDebuffFilterRecords and DF:BuildDebuffFilterRecords(dgroupFacade) or nil
+end
+
+-- Version-keyed record cache (mirror of fgroupResCache): building records walks
+-- the resolver and signing serializes every record — too heavy per frame per
+-- aura event. Weak GROUP-TABLE keys (deleted groups GC; profile/preset switches
+-- swap the tables and self-invalidate), entries keyed to DF.auraLayoutVersion
+-- (C2's group edits ride the structural refresh chain, which bumps it). The
+-- cached records table is SHARED across frames within a version — immutable.
+local dgroupResCache = setmetatable({}, { __mode = "k" })
+local function resolveDebuffGroup(group)
+    local ver = DF.auraLayoutVersion or 0
+    local c = dgroupResCache[group]
+    if c and c.version == ver then return c.records, c.sig end
+    local records = buildDebuffGroupRecords(group)
+    local sig = records and DF.DebuffFilterRecordsSig and DF:DebuffFilterRecordsSig(records) or ""
+    dgroupResCache[group] = { version = ver, records = records, sig = sig }
+    return records, sig
+end
+
+-- Full row config for one debuff group. Records ride as cfg.filter exactly like
+-- the main debuff row's filterList (per-record candidateFilters; no top-level
+-- map — harmful spell-ID maps are inert on friendly frames). Style is the
+-- uniform filter-group style; sort mirrors the ROW's default: the row maps
+-- directDebuffSortOrder (Config default "TIME") -> { method = "ExpirationOnly" }
+-- in BuildAuraRowConfig, so groups sort identically. No testEntries: the test
+-- paint's HARMFUL fallback pool (TestData.debuffs) previews these rows, same as
+-- the main debuff row's preview data.
+local function buildDebuffGroupConfig(unit, records, group)
+    return {
+        unit = unit,
+        mode = "row",
+        max = math.max(1, tonumber(group.maxIcons) or 4),
+        filter = records,
+        sort = { method = "ExpirationOnly" },
+        enabled = true,
+        tooltips = false,
+        frameLevelOffset = 40,
+        layout = buildFilterGroupLayout(group, 4),
+        style = buildFilterGroupStyle(),
+    }
 end
 
 -- ============================================================
@@ -1964,7 +2091,7 @@ function Factory:SyncFrame(frame)
     do
         local u = frame.unit
         for _, storeKey in ipairs({ "healthbar", "background", "border", "placed",
-                                    "nametext", "healthtext", "fgroups" }) do
+                                    "nametext", "healthtext", "fgroups", "dgroups" }) do
             local t = store[storeKey]
             if t then
                 for _, entry in pairs(t) do
@@ -2388,6 +2515,61 @@ function Factory:SyncFrame(frame)
         end
     end
 
+    -- ---- DEBUFF CATEGORY GROUPS (container-backed category rows) — C1 -----------------
+    -- One handle per enabled group, keyed "dgroup:<id>". Structural sig = the group's
+    -- resolved filter records (serialized by the row's own filterListSig — a selection
+    -- edit moves the records, the sig follows) + max slot count; the layout fields
+    -- hot-apply via ApplyStyle. Eye-hidden groups (`enabled == false`), empty selections
+    -- (no records) and deleted groups are not marked live -> the sweep destroys their
+    -- handle. adDB.debuffGroups is preset-level and spec-INDEPENDENT (mirror otherAuras),
+    -- but rides the same spec gate as the rest of SyncFrame (no spec -> ClearFrame).
+    do
+        local dg = store.dgroups
+        if not dg then dg = {}; store.dgroups = dg end
+        local live = {}
+
+        local groups = adDB.debuffGroups
+        if groups then
+            for _, group in ipairs(groups) do
+                if type(group) == "table" and group.enabled ~= false then
+                    -- Version-cached: within one auraLayoutVersion this is a table
+                    -- lookup; the resolve + record serialization run once per version.
+                    local records, recSig = resolveDebuffGroup(group)
+                    if records then
+                        local key = "dgroup:" .. tostring(group.id)
+                        live[key] = true
+                        local structSig = recSig
+                            .. "|max=" .. tostring(math.max(1, tonumber(group.maxIcons) or 4))
+                        local coSig = filterGroupCoSig(group, 4)
+
+                        local entry = dg[key]
+                        if not entry then
+                            local handle = DF.AuraContainer:Create(frame,
+                                buildDebuffGroupConfig(frame.unit, records, group))
+                            if handle then
+                                dg[key] = { handle = handle, structSig = structSig, coSig = coSig }
+                            end
+                        elseif entry.structSig ~= structSig then
+                            entry.structSig, entry.coSig = structSig, coSig
+                            entry.handle:Rebuild(buildDebuffGroupConfig(frame.unit, records, group))
+                        elseif entry.coSig ~= coSig then
+                            entry.coSig = coSig
+                            entry.handle:ApplyStyle(buildFilterGroupStyle(), buildFilterGroupLayout(group, 4))
+                        end
+                    end
+                end
+            end
+        end
+
+        -- Tear down groups gone / hidden / emptied.
+        for key, entry in pairs(dg) do
+            if not live[key] then
+                if entry.handle then entry.handle:Destroy() end
+                dg[key] = nil
+            end
+        end
+    end
+
     -- ---- SOUND (native on-apply registrations) --------------------------------------
     -- Reconcile C_UnitAuras.AddAuraAppliedSound registrations to the sound-indicator config
     -- (combat-deferred inside SyncSound). NOT a container — its own OOC/regen discipline.
@@ -2413,6 +2595,7 @@ function Factory:ClearFrame(frame)
     teardownExcept(store.border or {}, nil)
     teardownExcept(store.placed or {}, nil)   -- per-indicator icon/square/bar containers
     teardownExcept(store.fgroups or {}, nil)  -- filter-group containers (A5)
+    teardownExcept(store.dgroups or {}, nil)  -- debuff-group containers (C1)
     teardownExcept(store.nametext or {}, nil)
     teardownExcept(store.healthtext or {}, nil)
     -- Release the Text Designer mirror covers owned by the two text containers above.

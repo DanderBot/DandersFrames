@@ -78,7 +78,23 @@ local DISPEL_TYPES = { Magic = true, Curse = true, Disease = true, Poison = true
 -- (same ownership outcome: the dispel group owns the overlap). A record never
 -- negates its own token. Priority×Boss/Role overlap is accepted (bools can't
 -- be negated).
-local function BuildDirectDebuffFilters(db)
+--
+-- `claimed` (C1 row-claim dedup, ROW path only — nil on the AD facade path):
+-- the set of categories owned by enabled Aura Designer debuff groups
+-- (DF:GetClaimedDebuffCategories — keys boss/role/priority/crowdControl/raid/
+-- dispellable). A claimed category's RECORD is dropped from the row, but its
+-- negation / exclude-dispel contributions to the OTHER records are KEPT — the
+-- AD group displays those auras, so the row must keep excluding them
+-- everywhere. Dispellable claims are mode-agnostic (a group claiming
+-- dispellable in either mode drops the row's dispel record whatever the row's
+-- own mode is — simplest rule). Boss/role narrow independently: claiming only
+-- boss while the row shows boss+role narrows the record to isRoleAura.
+-- Show All short-circuits BEFORE claims — an ALL-mode row never consults them.
+-- When claims empty a NON-empty selection the return is an EMPTY array (render
+-- nothing) — distinct from nil (show all); normalizeFilters would map {} back
+-- to show-all, so DriveDebuffFactory intercepts the empty list and parks the
+-- row instead of building a container from it.
+local function BuildDirectDebuffFilters(db, claimed)
     if db.directDebuffShowAll then return nil end
     local dispelOn = db.debuffFilterDispellable
     local playerMode = dispelOn and db.directDebuffDispellableMode ~= "ALL"
@@ -111,24 +127,28 @@ local function BuildDirectDebuffFilters(db)
 
     local filters = {}
     local boss, role = db.debuffFilterBoss, db.debuffFilterRole
-    if boss or role then
-        local flag = (boss and role) and "isBossOrRoleAura" or (boss and "isBossAura" or "isRoleAura")
+    -- Claim-effective category flags (claimed nil = all pass; the negation/exclude
+    -- machinery above deliberately keeps reading the RAW enabled flags).
+    local effBoss = boss and not (claimed and claimed.boss)
+    local effRole = role and not (claimed and claimed.role)
+    if effBoss or effRole then
+        local flag = (effBoss and effRole) and "isBossOrRoleAura" or (effBoss and "isBossAura" or "isRoleAura")
         filters[#filters + 1] = { filter = "HARMFUL" .. neg(true, true, true), key = "bossrole",
                                   candidateFilters = cfFor(true, { [flag] = true }) }
     end
-    if db.debuffFilterPriority then
+    if db.debuffFilterPriority and not (claimed and claimed.priority) then
         filters[#filters + 1] = { filter = "HARMFUL" .. neg(true, true, true), key = "priority",
                                   candidateFilters = cfFor(true, { isPriorityAura = true }) }
     end
-    if ccToken then
+    if ccToken and not (claimed and claimed.crowdControl) then
         filters[#filters + 1] = { filter = "HARMFUL|" .. ccToken .. neg(true, false, false),
                                   key = "cc", candidateFilters = cfFor(false) }
     end
-    if raidOn then
+    if raidOn and not (claimed and claimed.raid) then
         filters[#filters + 1] = { filter = "HARMFUL|RAID" .. neg(true, true, false),
                                   key = "raid", candidateFilters = cfFor(false) }
     end
-    if dispelOn then
+    if dispelOn and not (claimed and claimed.dispellable) then
         if playerMode then
             filters[#filters + 1] = { filter = "HARMFUL|" .. dispelToken,
                                       key = "dispel", candidateFilters = cfFor(false) }
@@ -138,8 +158,27 @@ local function BuildDirectDebuffFilters(db)
             filters[#filters + 1] = { filter = "HARMFUL", key = "dispel", candidateFilters = cf }
         end
     end
-    if #filters == 0 then return nil end  -- nothing selected: safe fallback = show all
+    if #filters == 0 then
+        -- Claims emptied a NON-empty selection: EMPTY array = render nothing
+        -- (DriveDebuffFactory intercepts — see the header comment).
+        if claimed and (boss or role or db.debuffFilterPriority or ccToken or raidOn or dispelOn) then
+            return filters
+        end
+        return nil  -- nothing selected: safe fallback = show all
+    end
     return filters
+end
+
+-- Public facade over BuildDirectDebuffFilters for the Aura Designer's debuff
+-- category groups (C1). The AD factory builds a facade db table from a group's
+-- selection (directDebuffShowAll=false + the flat debuffFilter*/debuffMaxDuration*
+-- keys) and calls this — the records come out byte-identical to a row configured
+-- the same way. The AD path must NEVER pass `claimed` (claims derive FROM the AD
+-- groups; feeding them back would be circular — row → claims → AD groups → this
+-- facade, claim-free, is the whole chain). `claimed` exists for the ROW call
+-- sites in DriveDebuffFactory only.
+function DF:BuildDebuffFilterRecords(dbLike, claimed)
+    return BuildDirectDebuffFilters(dbLike, claimed)
 end
 
 -- Build defensive filter table (BIG_DEFENSIVE + EXTERNAL_DEFENSIVE, nil if unavailable)
@@ -720,6 +759,14 @@ local function filterListSig(f)
     return table.concat(parts, ";")
 end
 
+-- Public form of filterListSig for the AD debuff-group containers (C1): the
+-- records DF:BuildDebuffFilterRecords returns are the exact record shape the
+-- row folds into its own signature, so AD groups reuse the same serializer for
+-- their structural sigs (a selection edit moves the records, the sig follows).
+function DF:DebuffFilterRecordsSig(records)
+    return filterListSig(records)
+end
+
 -- Structural signature: a change here needs a Rebuild (new container); everything else is
 -- an in-place ApplyStyle (no frame leak — WoW never GCs frames).
 local function buffFactorySig(cfg)
@@ -834,15 +881,42 @@ end
 
 -- Drive the factory debuff row for one frame. Structure identical to DriveBuffFactory
 -- (see its comments for the build-once / combat-defer / version-gate reasoning).
+--
+-- Row-claim dedup (C1): the filter records are built with the Aura Designer's
+-- claimed-category set (DF:GetClaimedDebuffCategories — nil when AD is off /
+-- doesn't own AD / has no debuff groups), so categories an enabled AD debuff
+-- group displays are dropped from the row. Claims fold into the row signature
+-- for free — they change the RECORDS, and filterListSig serializes the records
+-- — so a claim/unclaim (which rides an auraLayoutVersion bump from the AD GUI's
+-- structural refresh) re-enters the version gate below and rebuilds.
+--
+-- EMPTY-LIST PARK: claims can empty a non-empty selection (every selected
+-- category claimed). normalizeFilters maps an EMPTY filter list back to
+-- "HELPFUL" (show all), so an emptied row must never reach the container —
+-- park instead: hide the plain anchor frame (combat-safe, no backend op) and
+-- stamp dfDebuffFactoryEmptyVer so steady-state drives return without
+-- rebuilding records. The next version bump re-evaluates the claims.
 function DF:DriveDebuffFactory(frame, db)
+    local ver = DF.auraLayoutVersion or 0
+    if frame.dfDebuffFactoryEmptyVer then
+        if frame.dfDebuffFactoryEmptyVer == ver or InCombatLockdown() then return end
+        frame.dfDebuffFactoryEmptyVer = nil   -- version moved: fall through and re-evaluate
+    end
+
     local h = frame.debuffFactory
     if not h then
+        local filterList = BuildDirectDebuffFilters(db,
+            DF.GetClaimedDebuffCategories and DF:GetClaimedDebuffCategories(frame, db))
+        if filterList and #filterList == 0 then
+            frame.dfDebuffFactoryEmptyVer = ver   -- fully claimed: no container at all
+            return
+        end
         h = DF.AuraContainer:Create(frame, DF:BuildAuraRowConfig(db, "debuff", {
             unit = frame.unit,
-            filterList = BuildDirectDebuffFilters(db),
+            filterList = filterList,
         }))
         frame.debuffFactory = h
-        frame.dfDebuffFactoryVersion = DF.auraLayoutVersion or 0
+        frame.dfDebuffFactoryVersion = ver
         if h then frame.debuffFactorySig = buffFactorySig(h.config) end
     end
 
@@ -866,12 +940,21 @@ function DF:DriveDebuffFactory(frame, db)
         h:GetFrame():SetShown(rowShown)
     end
 
-    local ver = DF.auraLayoutVersion or 0
     if frame.dfDebuffFactoryVersion ~= ver and not InCombatLockdown() then
         frame.dfDebuffFactoryVersion = ver
+        local filterList = BuildDirectDebuffFilters(db,
+            DF.GetClaimedDebuffCategories and DF:GetClaimedDebuffCategories(frame, db))
+        if filterList and #filterList == 0 then
+            -- Fully claimed while a container stands: park it hidden (plain anchor,
+            -- combat-safe) until a version bump changes the claim set.
+            h:GetFrame():Hide()
+            frame.dfDebuffFactoryShown = false
+            frame.dfDebuffFactoryEmptyVer = ver
+            return
+        end
         local cfg = DF:BuildAuraRowConfig(db, "debuff", {
             unit = frame.unit,
-            filterList = BuildDirectDebuffFilters(db),
+            filterList = filterList,
         })
         h:GetFrame():SetFrameLevel(math.max(0, frame:GetFrameLevel() + (cfg.frameLevelOffset or 40)))
         local sig = buffFactorySig(cfg)
