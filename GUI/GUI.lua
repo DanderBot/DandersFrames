@@ -4509,10 +4509,20 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
             local val = customGet and customGet() or dbTable[dbKey]
             local displayVal = options[val]
             -- Handle table format: {value = X, text = "text"} or {text = "text"}
+            local optColor
             if type(displayVal) == "table" then
+                optColor = displayVal.color
                 displayVal = displayVal.text or displayVal.label or tostring(val)
             end
             btn.Text:SetText(displayVal or tostring(val) or L["Select..."])
+            -- Selected label mirrors its option row's colour when the option
+            -- carries one (e.g. class-coloured specs); plain options reset to
+            -- the standard text colour. Skipped while disabled so the
+            -- grey-when-disabled treatment from SetEnabled stays intact.
+            if btn:IsEnabled() then
+                local tc = optColor or C_TEXT
+                btn.Text:SetTextColor(tc.r, tc.g, tc.b)
+            end
             -- Update override indicators
             if container.UpdateOverrideIndicators then
                 container:UpdateOverrideIndicators(val)
@@ -4522,8 +4532,16 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
     container.UpdateText = UpdateText  -- Expose for reset
     
     -- Menu frame
+    -- Menus hang from the opener's LEFT edge by default, so a wider-than-opener
+    -- menu spills rightward. opts.menuAlign = "RIGHT" pins the menu's TOPRIGHT
+    -- to the opener's BOTTOMRIGHT instead (surplus width grows leftward) — for
+    -- openers sitting near a right edge, e.g. the Aura Designer spec dropdown.
     local menuFrame = CreateFrame("Frame", nil, btn, "BackdropTemplate")
-    menuFrame:SetPoint("TOPLEFT", btn, "BOTTOMLEFT", 0, -2)
+    if opts.menuAlign == "RIGHT" then
+        menuFrame:SetPoint("TOPRIGHT", btn, "BOTTOMRIGHT", 0, -2)
+    else
+        menuFrame:SetPoint("TOPLEFT", btn, "BOTTOMLEFT", 0, -2)
+    end
     menuFrame:SetFrameStrata("FULLSCREEN_DIALOG")
     menuFrame:SetClampedToScreen(true)
     CreateElementBackdrop(menuFrame)
@@ -4668,6 +4686,9 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
         local itemParent = scrollChild or menuFrame
         local currentVal = customGet and customGet() or (dbTable and dbKey and dbTable[dbKey])
         local selColor = accentColor or GetThemeColor()
+        -- Once a group header has appeared, subsequent option rows indent under
+        -- it (menus without headers keep the flat 8px inset).
+        local seenHeader = false
 
         for i, opt in ipairs(sortedOptions) do
             local menuBtn = menuButtons[i]
@@ -4679,6 +4700,15 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
 
                 menuBtn.Text = menuBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
                 menuBtn.Text:SetPoint("LEFT", 8, 0)
+
+                -- Subtle separator above group-header rows (hidden on option rows
+                -- and on a header that is the first visible row)
+                menuBtn.Sep = menuBtn:CreateTexture(nil, "ARTWORK")
+                menuBtn.Sep:SetHeight(1)
+                menuBtn.Sep:SetPoint("TOPLEFT", 4, 1)
+                menuBtn.Sep:SetPoint("TOPRIGHT", -4, 1)
+                menuBtn.Sep:SetColorTexture(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.6)
+                menuBtn.Sep:Hide()
 
                 menuBtn.Highlight = menuBtn:CreateTexture(nil, "HIGHLIGHT")
                 menuBtn.Highlight:SetAllPoints()
@@ -4719,11 +4749,29 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
             menuBtn.Text:SetText(opt.value)
             menuBtn.Highlight:SetColorTexture(selColor.r, selColor.g, selColor.b, 0.3)
             if opt.header then
-                -- Non-clickable group label (no mouse ⇒ no hover highlight)
+                -- Non-clickable group label (no mouse ⇒ no hover highlight).
+                -- Heading treatment: small uppercase label in the group colour,
+                -- separator line above (except when it's the first row), and
+                -- the option rows beneath it are indented — so headers read as
+                -- section labels rather than selectable entries.
                 menuBtn:EnableMouse(false)
                 local hc = opt.color or C_TEXT_DIM
                 menuBtn.Text:SetTextColor(hc.r, hc.g, hc.b)
+                -- SetTextScale (not SetSettingsFont) so the pooled row resets
+                -- cleanly when it's reused as a regular option row.
+                menuBtn.Text:SetTextScale(0.85)
+                if type(opt.value) == "string" then
+                    menuBtn.Text:SetText(opt.value:upper())
+                end
+                menuBtn.Text:ClearAllPoints()
+                menuBtn.Text:SetPoint("LEFT", 8, 0)
+                menuBtn.Sep:SetShown(i > 1)
+                seenHeader = true
             else
+                menuBtn.Text:SetTextScale(1)
+                menuBtn.Text:ClearAllPoints()
+                menuBtn.Text:SetPoint("LEFT", seenHeader and 16 or 8, 0)
+                menuBtn.Sep:Hide()
                 menuBtn:EnableMouse(true)
                 if opt.color then
                     -- per-option colour (e.g. class-coloured spec list) always wins
@@ -4824,7 +4872,7 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
     
     btn:SetScript("OnShow", UpdateText)
     UpdateText()
-    
+
     container.SetEnabled = function(self, enabled)
         -- Dim the whole widget so its preview/value (texture swatch, font preview,
         -- selected text) greys with the label rather than staying full-bright.
@@ -4833,6 +4881,7 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
         if enabled then
             lbl:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
             btn.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+            UpdateText()  -- restore per-option colour on the selected label
         else
             lbl:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
             btn.Text:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
