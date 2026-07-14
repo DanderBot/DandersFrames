@@ -1864,9 +1864,11 @@ local function GetFrameEffectTriggers(auraName, typeKey)
     return { auraName }  -- Default: just the owning aura
 end
 
--- Add a trigger aura to a frame effect
-local function AddFrameEffectTrigger(auraName, typeKey, triggerName)
-    local typeCfg = EnsureTypeConfig(auraName, typeKey)
+-- Add a trigger aura to a frame effect. `pool` (optional) pins the target
+-- pool — the floating trigger picker captures it at OPEN time so a dropdown
+-- surviving a tab switch can't write the trigger into the wrong pool.
+local function AddFrameEffectTrigger(auraName, typeKey, triggerName, pool)
+    local typeCfg = EnsureTypeConfig(auraName, typeKey, pool)
     if not typeCfg.triggers then
         typeCfg.triggers = { auraName }  -- Initialize with owner
     end
@@ -1888,6 +1890,14 @@ local function RemoveFrameEffectTrigger(auraName, typeKey, triggerName)
             break
         end
     end
+end
+
+-- Close the floating trigger picker (parented to UIParent, so it survives
+-- card rebuilds). Called on main-tab and spec switches: its rows capture the
+-- pool/effect from open time, so a stale open dropdown must not linger.
+local function HideTriggerPicker()
+    local drop = _G["DFADTriggerPicker"]
+    if drop and drop:IsShown() then drop:Hide() end
 end
 
 -- ============================================================
@@ -5008,8 +5018,11 @@ local function CreateSpecDropdown(parent)
         function() return GetAuraDesignerDB().spec or "auto" end,   -- customGet
         function(key)                                                -- customSet
             GetAuraDesignerDB().spec = key
-            -- Clear expanded cards (auras change with spec)
+            -- Clear expanded cards (auras change with spec), and close the
+            -- floating trigger picker — its rows captured the OLD spec's
+            -- effect record at open time (same staleness as a tab switch).
             wipe(expandedCards)
+            HideTriggerPicker()
             DF:AuraDesigner_RefreshPage()
         end,
         -- menuAlign RIGHT: the opener sits near the strip's right side and the
@@ -5336,19 +5349,27 @@ local spellPickerDirty = false     -- add-by-ID landed while the picker stayed o
                                    -- (effects tab behind it is stale; rebuilt on close)
 local spellPickerBlockedIDs        -- spell ids tracked by the OPPOSITE pool (B2
                                    -- cross-tab block; rebuilt per PopulateSpellGrid)
+local spellPickerBlockCache = {}   -- auraName -> bool memo over spellPickerBlockedIDs
+                                   -- (wiped whenever the set is rebuilt) so search
+                                   -- keystrokes don't re-resolve identity per card
 
 -- Cross-tab used check for one picker candidate: any of its identity IDs
 -- (nil-spec identity on the Other tab — the naming contract's resolver —
 -- else the spec identity) already tracked by the opposite pool.
 local function IsCandidateCrossBlocked(auraName, spec)
     if not spellPickerBlockedIDs or not next(spellPickerBlockedIDs) then return false end
+    local cached = spellPickerBlockCache[auraName]
+    if cached ~= nil then return cached end
+    local blocked = false
     local f = DF:BuildADIdentityFilters(IsOtherTab() and nil or spec, auraName)
     local map = f and f.includeSpellIDs
-    if not map then return false end
-    for id in pairs(map) do
-        if spellPickerBlockedIDs[id] then return true end
+    if map then
+        for id in pairs(map) do
+            if spellPickerBlockedIDs[id] then blocked = true; break end
+        end
     end
-    return false
+    spellPickerBlockCache[auraName] = blocked
+    return blocked
 end
 
 -- Check if a specific aura has a frame-level effect of given type
@@ -5377,6 +5398,7 @@ HideSpellPicker = function()
     spellPickerActive = false
     spellPickerType = nil
     spellPickerGroupID = nil
+    spellPickerBlockedIDs = nil  -- recomputed on next open (memo wiped with it)
     spellPickerView:Hide()
     if tabBar then tabBar:Show() end
     if tabScrollFrame then tabScrollFrame:Show() end
@@ -5427,6 +5449,11 @@ ShowSpellPicker = function(typeKey, mode, groupID)
             and L["Click Icon or Square to add the spell to this group"]
             or L["Click or drag a spell onto the frame to place it"])
     end
+
+    -- Fresh cross-tab block set per open (see PopulateSpellGrid): the memo
+    -- over it then persists across search-keystroke repopulates.
+    spellPickerBlockedIDs = CrossPoolTrackedIDs()
+    wipe(spellPickerBlockCache)
 
     -- Fresh toolbar state per open: clear search/ID inputs and any echo.
     -- spellPickerSearch is reset BEFORE SetText so the OnTextChanged guard
@@ -5528,6 +5555,9 @@ local function SetMainTab(tabKey)
     -- expanded cards (wipe, not per-tab preservation).
     wipe(expandedCards)
     if spellPickerActive then HideSpellPicker() end
+    -- The floating trigger picker captures its pool/effect at open time —
+    -- never let it survive a pool switch.
+    HideTriggerPicker()
     for key, btn in pairs(mainTabButtons) do
         btn:SetActive(key == tabKey)
     end
@@ -5846,8 +5876,15 @@ PopulateSpellGrid = function()
 
     if grid.noResultsLabel then grid.noResultsLabel:Hide() end
 
-    -- Cross-tab block set (B2): spells tracked by the OPPOSITE pool.
-    spellPickerBlockedIDs = CrossPoolTrackedIDs()
+    -- Cross-tab block set (B2): spells tracked by the OPPOSITE pool. Computed
+    -- once per picker OPEN (ShowSpellPicker) — picker edits only mutate the
+    -- ACTIVE pool, so the opposite pool can't change while it's open, and the
+    -- per-candidate memo stays valid across search-keystroke repopulates.
+    -- Lazy fallback for any populate outside the ShowSpellPicker flow.
+    if not spellPickerBlockedIDs then
+        spellPickerBlockedIDs = CrossPoolTrackedIDs()
+        wipe(spellPickerBlockCache)
+    end
 
     local spec = ResolveSpec()
     local isOtherPicker = IsOtherTab()
@@ -6448,13 +6485,43 @@ CreateEffectCard = function(parent, yPos, effect)
                 local trigLookup = {}
                 for _, t in ipairs(currentTriggers) do trigLookup[t] = true end
 
-                -- Create or reuse dropdown frame
+                -- Pin the pool at OPEN time: the dropdown is parented to
+                -- UIParent, so it can outlive a tab switch — the row OnClick
+                -- must keep writing the trigger into the pool this card's
+                -- record lives in (the record exists, so the read accessor
+                -- returns the real table, never EMPTY_POOL).
+                local capturedPool = CurrentAuraPool()
+
+                -- Create or reuse dropdown frame (click-outside overlay + ESC
+                -- close — the DFADFilterGroupPicker idiom)
                 local dropName = "DFADTriggerPicker"
                 local drop = _G[dropName]
                 if not drop then
                     drop = CreateFrame("Frame", dropName, UIParent, "BackdropTemplate")
                     drop:SetFrameStrata("FULLSCREEN_DIALOG")
                     drop:SetClampedToScreen(true)
+                    local overlay = CreateFrame("Button", nil, UIParent)
+                    overlay:SetAllPoints(UIParent)
+                    overlay:SetFrameStrata("FULLSCREEN")
+                    overlay:Hide()
+                    overlay:SetScript("OnClick", function()
+                        drop:Hide()
+                    end)
+                    drop._overlay = overlay
+                    drop:EnableKeyboard(true)
+                    drop:SetPropagateKeyboardInput(true)
+                    drop:SetScript("OnKeyDown", function(self, key)
+                        if key == "ESCAPE" then
+                            self:SetPropagateKeyboardInput(false)
+                            self:Hide()
+                        else
+                            self:SetPropagateKeyboardInput(true)
+                        end
+                    end)
+                    drop:SetScript("OnHide", function(self)
+                        self._ownerBtn = nil
+                        if self._overlay then self._overlay:Hide() end
+                    end)
                 end
                 -- Hide if already showing for this button
                 if drop:IsShown() and drop._ownerBtn == addTrigBtn then
@@ -6495,7 +6562,7 @@ CreateEffectCard = function(parent, yPos, effect)
                         hl:SetColorTexture(1, 1, 1, 0.05)
                         local capturedName = auraInfo.name
                         btn:SetScript("OnClick", function()
-                            AddFrameEffectTrigger(effect.auraName, effect.typeKey, capturedName)
+                            AddFrameEffectTrigger(effect.auraName, effect.typeKey, capturedName, capturedPool)
                             drop:Hide()
                             SwitchTab("effects")
                             RefreshPreviewEffects()
@@ -6510,9 +6577,7 @@ CreateEffectCard = function(parent, yPos, effect)
                 drop:ClearAllPoints()
                 drop:SetPoint("TOPLEFT", addTrigBtn, "BOTTOMLEFT", 0, -2)
                 drop:Show()
-
-                -- Auto-hide when clicking elsewhere
-                drop:SetScript("OnHide", function() drop._ownerBtn = nil end)
+                if drop._overlay then drop._overlay:Show() end
             end)
 
             triggersH = -(tagY) + TAG_H + 8  -- total height of trigger section
