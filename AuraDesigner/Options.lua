@@ -1815,7 +1815,10 @@ local function CreateLayoutGroup(name, kind)
         group.kind = "filter"
         group.filterSelection = { presets = {}, customs = {} }
         group.iconSize = 24
-        group.maxIcons = 8
+        -- Filter groups start compact (4×4); member groups keep the shared 8.
+        -- Creation-time values only — existing saved groups are untouched.
+        group.iconsPerRow = 4
+        group.maxIcons = 4
     else
         group.members = {}
     end
@@ -4779,7 +4782,10 @@ local function CreateEnableBanner(parent)
             wipe(expandedCards)
             DF:AuraDesigner_RefreshPage()
         end,
-        { inline = true, optionsFunc = BuildSpecOptions, searchable = true }
+        -- menuAlign RIGHT: the opener sits near the banner's right side and the
+        -- menu is wider than it, so surplus width grows leftward (menu TOPRIGHT
+        -- pinned to the opener's BOTTOMRIGHT) instead of spilling off the edge.
+        { inline = true, optionsFunc = BuildSpecOptions, searchable = true, menuAlign = "RIGHT" }
     )
     specDrop:SetSize(130, 22)
     specDrop:SetPoint("LEFT", specLabel, "RIGHT", 4, 0)
@@ -6934,6 +6940,29 @@ BuildLayoutGroupsTab = function()
                     drop:SetPoint("TOPLEFT", addFilterLinkBtn, "BOTTOMLEFT", 0, -2)
                     drop:Show()
                     if drop._overlay then drop._overlay:Show() end
+                end)
+                by = by - 26
+
+                -- "Create Filter" → jump to the Filter Designer and pulse its
+                -- New Filter button, for users who arrive here without a custom
+                -- filter to link yet.
+                local createFilterBtn = CreateFrame("Button", nil, body, "BackdropTemplate")
+                createFilterBtn:SetHeight(22)
+                createFilterBtn:SetPoint("TOPLEFT", 8, by)
+                createFilterBtn:SetPoint("RIGHT", body, "RIGHT", -8, 0)
+                GUI:StyleButton(createFilterBtn, { height = 22, text = L["Create Filter"] })
+                GUI:SetSettingsFont(createFilterBtn.Text, 9, "")
+                createFilterBtn:SetScript("OnClick", function()
+                    if GUI.SelectTab and GUI.Pages and GUI.Pages["auras_filterdesigner"] then
+                        GUI.SelectTab("auras_filterdesigner")
+                        -- Page content builds on first show (inside SelectTab), so
+                        -- the button reference exists by now.
+                        local fdPage = GUI.Pages["auras_filterdesigner"]
+                        local newFilterBtn = fdPage and fdPage._fdNewFilterBtn
+                        if newFilterBtn and DF.HighlightWidget then
+                            DF:HighlightWidget(newFilterBtn)
+                        end
+                    end
                 end)
                 by = by - 28
 

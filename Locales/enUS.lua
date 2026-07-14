@@ -640,6 +640,7 @@ L["Copy to Party"] = true
 L["Copy to Raid"] = true
 L["Corners Only"] = true
 L["Create Empty"] = true
+L["Create Filter"] = true
 L["Create Layout"] = true
 L["Create layouts below for different player ranges within each content type. Layouts only store settings that %sdiffer%s from your global settings — everything else is inherited automatically."] = true
 L["Create New Profile"] = true

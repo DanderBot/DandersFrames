@@ -392,6 +392,31 @@ function DF:ClearSettingHighlights()
     wipe(activeHighlights)
 end
 
+-- Apply a pulsing highlight overlay to one widget. Shared by
+-- DF:HighlightSettings (dbKey-matched controls) and DF:HighlightWidget.
+local function ApplyHighlightOverlay(widget)
+    local overlay = GetHighlightOverlay()
+    overlay:SetParent(widget)
+    overlay:SetFrameLevel(widget:GetFrameLevel() + 10)
+    overlay:ClearAllPoints()
+    overlay:SetPoint("TOPLEFT", widget, "TOPLEFT", -3, 3)
+    overlay:SetPoint("BOTTOMRIGHT", widget, "BOTTOMRIGHT", 3, -3)
+    overlay:SetAlpha(1)
+    overlay:Show()
+    overlay.pulseAnim:Play()
+    tinsert(activeHighlights, overlay)
+end
+
+-- Highlight one arbitrary widget (no dbKey matching) with the same pulsing
+-- overlay as HighlightSettings. Used by cross-page affordances that guide the
+-- user to a specific button (e.g. the Aura Designer's "Create Filter" button
+-- pulsing the Filter Designer's New Filter button after navigating there).
+function DF:HighlightWidget(widget)
+    DF:ClearSettingHighlights()
+    if not widget or not widget.GetFrameLevel then return end
+    ApplyHighlightOverlay(widget)
+end
+
 function DF:HighlightSettings(tabName, dbKeys)
     DF:ClearSettingHighlights()
 
@@ -416,17 +441,7 @@ function DF:HighlightSettings(tabName, dbKeys)
     -- Helper to apply highlight to a single widget
     local function ApplyHighlight(widget)
         matchCount = matchCount + 1
-        local overlay = GetHighlightOverlay()
-        overlay:SetParent(widget)
-        overlay:SetFrameLevel(widget:GetFrameLevel() + 10)
-        overlay:ClearAllPoints()
-        overlay:SetPoint("TOPLEFT", widget, "TOPLEFT", -3, 3)
-        overlay:SetPoint("BOTTOMRIGHT", widget, "BOTTOMRIGHT", 3, -3)
-        overlay:SetAlpha(1)
-        overlay:Show()
-        overlay.pulseAnim:Play()
-        tinsert(activeHighlights, overlay)
-
+        ApplyHighlightOverlay(widget)
         if not firstWidget then
             firstWidget = widget
         end

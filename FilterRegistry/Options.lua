@@ -479,6 +479,9 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         end)
     end)
     newBtn:SetPoint("BOTTOMLEFT", 6, 32)
+    -- Expose for cross-page affordances: the Aura Designer's "Create Filter"
+    -- button navigates here and pulses this button (DF:HighlightWidget).
+    pageRef._fdNewFilterBtn = newBtn
 
     local dupBtn = GUI:CreateButton(leftPanel, L["Duplicate"], LEFT_BTN_W, 22, function(self)
         if self.dfDisabled or not selKey then return end
