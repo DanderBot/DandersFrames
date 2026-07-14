@@ -966,19 +966,10 @@ DF.PartyDefaults = {
     -- convention. Existing user configs with legacy keys (`borderSize`,
     -- `showFrameBorder`, `borderClassColor`, etc.) are migrated to these via
     -- DF:MigrateFrameBorderKeys on db load.)
-    frameBorderAnimationColor = {r = 0.95, g = 0.95, b = 0.32, a = 1},
-    frameBorderAnimationCornerLength = 10,
-    frameBorderAnimationFrequency = 0.25,
-    frameBorderAnimationInset = 0,
-    frameBorderAnimationLength = 8,
-    frameBorderAnimationMask = false,
-    frameBorderAnimationOffsetX = 0,
-    frameBorderAnimationOffsetY = 0,
-    frameBorderAnimationParticles = 8,
-    frameBorderAnimationScale = 1,
-    frameBorderAnimationSidesAxis = "HORIZONTAL",
-    frameBorderAnimationThickness = 3,
-    frameBorderAnimationType = "NONE",
+    -- (No frameBorderAnimation* keys: the Frame Border is structural chrome, not an
+    -- alert surface, so it deliberately has no animation control — see the include
+    -- table in Options.lua. The keys were only ever a by-product of the shared border
+    -- key scheme; no UI could set them and BuildSpec always read "NONE".)
     frameBorderBlendMode = "BLEND",
     frameBorderColor = {r = 0, g = 0, b = 0, a = 1},
     frameBorderGradientDirection = "HORIZONTAL",
