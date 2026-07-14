@@ -1174,58 +1174,10 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
     return true
 end
 
-function DF:ImportProfile(str)
-    local L = DF.L
-    -- Use ValidateImportString which handles both compressed and legacy formats
-    local newProfile, errMsg = DF:ValidateImportString(str)
-    if not newProfile then
-        print("|cffff0000DandersFrames:|r " .. (errMsg or L["Import failed"]))
-        return false
-    end
-
-    -- Import party and raid settings
-    if newProfile.party then
-        DF.db.party = newProfile.party
-    end
-    if newProfile.raid then
-        DF.db.raid = newProfile.raid
-    end
-
-    -- Designer preset libraries + legacy inline designer tables (see
-    -- ApplyImportedProfile) — after the mode tables, before the refresh.
-    if DF.ImportDesignerPresets then
-        DF:ImportDesignerPresets(newProfile)
-    end
-
-    -- Legacy-text payloads → Text Designer (see ResetTDForLegacyImport).
-    -- Wholesale replacement, so every imported mode is a candidate.
-    if DF.MigrateTextDesignerFromLegacy then
-        if ResetTDForLegacyImport({ party = newProfile.party, raid = newProfile.raid }) then
-            DF:MigrateTextDesignerFromLegacy()
-        end
-    end
-
-    -- Fold/zero border insets on the just-imported configs (pre-rework look);
-    -- value-idempotent, so clearing the guards only re-scans the imported data.
-    if DF.MigrateBorderInsetFold then
-        if DF.db then
-            DF.db._borderInsetFoldV1 = nil
-            DF.db._buffDebuffInsetZeroV1 = nil
-        end
-        DF:MigrateBorderInsetFold()
-    end
-
-    DF:FullProfileRefresh()
-    print("|cff00ff00DandersFrames:|r " .. L["Profile imported successfully!"])
-
-    -- If the imported state changed which frame modes are enabled, prompt
-    -- the user to reload so headers can be (re)created.
-    if DF.PromptReloadIfEnableFlagsChanged then
-        DF:PromptReloadIfEnableFlagsChanged()
-    end
-
-    return true
-end
+-- DF:ImportProfile(str) used to live here — a dead wholesale-replacement
+-- import with zero callers that bypassed the custom-filter/remap machinery.
+-- The real import path is DF:ApplyImportedProfile (above), which the GUI
+-- and API.lua both use.
 
 -- ============================================================
 -- SPEC AUTO-SWITCH (per-character settings)

@@ -1467,7 +1467,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     local pageFrame = CreateSubTab("general", "general_frame", L["Frame"])
     BuildPage(pageFrame, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top
-        Add(CreateCopyButton(self.child, {"frame", "background", "missingHealth", "border", "anchor"}, L["Frame"], "general_frame"), 25, 2)
+        -- "background"/"missingHealth" belong to bars_health (which hosts all
+        -- controls for those keys) — not registered here so its Copy/Sync/Reset
+        -- solely owns them.
+        Add(CreateCopyButton(self.child, {"frame", "border", "anchor"}, L["Frame"], "general_frame"), 25, 2)
         
         -- Migration: Ensure new flat raid settings have defaults
         if db.raidFlatGrowthAnchor == nil then db.raidFlatGrowthAnchor = "START" end
