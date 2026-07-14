@@ -1193,6 +1193,7 @@ L["Only changed settings will be saved"] = true
 L["Only My Buffs"] = true
 L["Only show buffs that you cast. Applies to all buff filters."] = true
 L["Only show casts from enemies that are in combat. Filters out idle mobs casting nearby."] = true
+L["Only show other players' casts of these buffs."] = true
 L["Only show this effect for other players' casts of the buff."] = true
 L["Only Show When Tanking"] = true
 L["One overlay at a time, colored and switched by the game engine. Includes boss (private) auras."] = true

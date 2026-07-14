@@ -278,6 +278,10 @@ function DF:GetADTrackedSpellIDs(frame, db)
     -- spec-independent otherLayoutGroups (Other Buffs tab) — a filter group
     -- renders the same spells whichever tab owns it, so the row hides them
     -- identically. Same eye gate, same version-keyed resolve cache.
+    -- othersOnly groups stay OUT of the union (mirror auraHasTrackedIndicator):
+    -- their container shows only OTHERS' casts, so the player's own cast must
+    -- keep its buff-row icon. Only the flat-store UI offers the flag; the gate
+    -- reads both stores identically (spec-store parity).
     local R = DF.FilterRegistry
     if R then
         local specGroups = adDB.layoutGroups and adDB.layoutGroups[spec]
@@ -285,7 +289,8 @@ function DF:GetADTrackedSpellIDs(frame, db)
             local groups = (g == 1) and specGroups or adDB.otherLayoutGroups
             if groups then
                 for _, group in ipairs(groups) do
-                    if type(group) == "table" and group.kind == "filter" and group.enabled ~= false then
+                    if type(group) == "table" and group.kind == "filter" and group.enabled ~= false
+                        and not group.othersOnly then
                         local res = resolveFilterGroup(R, group)   -- version-cached, no re-resolve
                         if res.kind == "include" and res.map then
                             for id in pairs(res.map) do
@@ -1271,12 +1276,15 @@ end
 
 -- Full row config for one filter group. Same frame-level band as the placed
 -- indicators (40) so group icons read on top of the frame content.
+-- othersOnly rides poolFilter (group-level "HELPFUL|!PLAYER" — the B1 slot
+-- mechanism); only the flat-store UI offers the flag, but the read is
+-- pool-agnostic (spec-store parity, mirror auraHasTrackedIndicator).
 local function buildFilterGroupConfig(unit, map, group)
     return {
         unit = unit,
         mode = "row",
         max = math.max(1, tonumber(group.maxIcons) or 8),
-        filter = "HELPFUL",
+        filter = poolFilter(group),
         candidateFilters = { includeSpellIDs = map },
         testEntries = filterGroupTestEntries(map),
         enabled = true,
@@ -2096,6 +2104,7 @@ local function syncFilterGroupList(frame, fg, live, R, groups, keyPrefix)
                 live[key] = true
                 local structSig = selSig
                     .. "|max=" .. tostring(math.max(1, tonumber(group.maxIcons) or 8))
+                    .. "|f=" .. poolFilter(group)   -- filter string binds at build (othersOnly toggle -> Rebuild)
                 local coSig = filterGroupCoSig(group)
 
                 local entry = fg[key]

@@ -7409,7 +7409,12 @@ BuildLayoutGroupsTab = function()
                     for _ in pairs(fsel.presets or {}) do linkCount = linkCount + 1 end
                     for _ in pairs(fsel.customs or {}) do linkCount = linkCount + 1 end
                 end
-                nameText:SetText(group.name .. "  -  " .. linkCount .. (linkCount ~= 1 and L[" filters"] or L[" filter"]))
+                local fgInfo = group.name .. "  -  " .. linkCount .. (linkCount ~= 1 and L[" filters"] or L[" filter"])
+                -- Collapsed-state Others Only suffix — mirror the effect-card header
+                if isOtherGroups and group.othersOnly then
+                    fgInfo = fgInfo .. "  -  " .. L["Others Only"]
+                end
+                nameText:SetText(fgInfo)
             else
                 local memberCount = group.members and #group.members or 0
                 nameText:SetText(group.name .. "  -  " .. memberCount .. (memberCount ~= 1 and L[" indicators"] or L[" indicator"]))
@@ -8142,6 +8147,28 @@ BuildLayoutGroupsTab = function()
                     maxSlider:SetPoint("TOPLEFT", body, "TOPLEFT", 5, -(-by))
                     if maxSlider.SetWidth then maxSlider:SetWidth(bodyWidth - 10) end
                     by = by - 54
+
+                    -- ── OTHERS ONLY (Other Buffs tab only — flat-store groups) ──
+                    -- Same idiom as the effect-card checkbox: the group's filter
+                    -- string ("HELPFUL|!PLAYER") binds at container build, so
+                    -- toggling is STRUCTURAL (folded into the fgroup struct sig →
+                    -- the factory Rebuilds), and the buff-row dedup union moves
+                    -- (an othersOnly group's spells keep their row icon).
+                    if isOtherGroups then
+                        local ooCb = GUI:CreateCheckbox(body, L["Others Only"], group, "othersOnly", function()
+                            SwitchTab("layout")
+                            RefreshPlacedIndicators()
+                            DF:InvalidateAuraLayout()
+                            DF:UpdateAllFrames()
+                            if DF.AuraDesigner.Engine and DF.AuraDesigner.Engine.ForceRefreshAllFrames then
+                                DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+                            end
+                        end)
+                        ooCb:SetPoint("TOPLEFT", body, "TOPLEFT", 8, -(-by))
+                        ooCb:SetWidth(bodyWidth - 16)
+                        ooCb.tooltip = L["Only show other players' casts of these buffs."]
+                        by = by - 34
+                    end
                 end
 
                 local bodyH = -by + 12
