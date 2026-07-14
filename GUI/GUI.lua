@@ -4504,7 +4504,16 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
     arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
     arrow:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     
+    -- SetDisplayOverride: a fixed opener caption that wins over the selected
+    -- option's text (e.g. a disabled dropdown explaining WHY it's disabled,
+    -- like the Aura Designer spec dropdown's "shared across specs" state).
+    -- nil clears the override and restores the selected option's text.
+    local displayOverride
     local function UpdateText()
+        if displayOverride then
+            btn.Text:SetText(displayOverride)
+            return
+        end
         if customGet or (dbTable and dbKey) then
             local val = customGet and customGet() or dbTable[dbKey]
             local displayVal = options[val]
@@ -4530,6 +4539,10 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
         end
     end
     container.UpdateText = UpdateText  -- Expose for reset
+    container.SetDisplayOverride = function(self, text)
+        displayOverride = text
+        UpdateText()
+    end
     
     -- Menu frame
     -- Menus hang from the opener's LEFT edge by default, so a wider-than-opener

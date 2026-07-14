@@ -27,12 +27,17 @@ local spellIdLookup = {}  -- { [spec] = { [spellId] = auraName } }
 -- SpellDB class pool), built lazily by GetTrackableAuras.
 local trackableCache = {}  -- { [spec] = { auraInfo, ... } }
 
+-- Full-database list for the Other Buffs picker, built lazily by
+-- GetAllTrackableAuras.
+local allTrackableCache = nil
+
 -- Clear the per-spec spellId->auraName cache. Called on spec change so the
 -- new spec's spell IDs (e.g., Earth Shield for Resto Shaman) get rebuilt
 -- from DF.AuraDesigner.SpellIDs / AlternateSpellIDs on next lookup.
 function AuraAdapter:InvalidateSpecCache()
     spellIdLookup = {}
     trackableCache = {}
+    allTrackableCache = nil
 end
 
 -- ============================================================
@@ -121,6 +126,34 @@ function AuraAdapter:GetTrackableAuras(specKey)
     end
 
     trackableCache[specKey] = list
+    return list
+end
+
+-- Returns the FULL SpellDB pool — every record, every class — adapted to the
+-- same aura-info shape as GetTrackableAuras entries. Powers the Other Buffs
+-- picker (B2), which groups entries by their `class` token (or "ALL").
+-- `name` is the stable config key (the shipped English rec.n — the B1 naming
+-- contract for the spec-independent other pool: identity resolves via
+-- DF:BuildADIdentityFilters(nil, name), which the curated internal keys
+-- can't do). Cached; wiped by InvalidateSpecCache.
+function AuraAdapter:GetAllTrackableAuras()
+    if allTrackableCache then return allTrackableCache end
+    local list = {}
+    local R = DF.FilterRegistry
+    if R and R.Spells and R.GetSpellDisplay then
+        for _, rec in ipairs(R.Spells) do
+            local display, icon = R:GetSpellDisplay(rec)
+            list[#list + 1] = {
+                name = rec.n,
+                display = display,
+                color = POOL_COLOR,
+                icon = icon,
+                spellID = rec.id,
+                class = rec.class or "ALL",
+            }
+        end
+    end
+    allTrackableCache = list
     return list
 end
 

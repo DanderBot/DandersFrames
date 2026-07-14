@@ -746,20 +746,134 @@ local function GetSpecLayoutGroups(spec)
     return adDB.layoutGroups[spec]
 end
 
--- Ensure an aura config table exists, creating it with defaults if needed
-local function EnsureAuraConfig(auraName)
-    local specAuras = GetSpecAuras()
-    if not specAuras[auraName] then
-        specAuras[auraName] = {
+-- ============================================================
+-- MAIN POOL TABS (B2) — My Buffs / Other Buffs
+-- The tab strip above the workspace decides which aura pool the ENTIRE
+-- editor operates on: "my" = the spec-scoped adDB.auras[spec] pool,
+-- "other" = the spec-INDEPENDENT adDB.otherAuras pool (B1). Every editor
+-- read routes through CurrentAuraPool(); spec-only surfaces (layout
+-- groups, migrations, the spec dropdown itself) deliberately do not.
+-- ============================================================
+
+local activeBuffTab = "my"   -- "my" | "other"
+
+local function IsOtherTab()
+    return activeBuffTab == "other"
+end
+
+-- Read-only placeholder returned while the other pool doesn't exist yet.
+-- Merely VISITING the Other Buffs tab must not create adDB.otherAuras —
+-- only the first ADD does (via CurrentAuraPoolWrite). Never written.
+local EMPTY_POOL = {}
+
+-- READ access to the active tab's pool. Never creates adDB.otherAuras.
+-- `spec` is forwarded to GetSpecAuras on the My Buffs tab only.
+local function CurrentAuraPool(spec)
+    if activeBuffTab == "other" then
+        local adDB = GetAuraDesignerDB()
+        if adDB and adDB.otherAuras then return GetOtherAuras() end
+        return EMPTY_POOL
+    end
+    return GetSpecAuras(spec)
+end
+
+-- WRITE access: creates the pool table (the other pool is born lazily on
+-- the first add — drag-drop, picker click, or add-by-ID).
+local function CurrentAuraPoolWrite()
+    if activeBuffTab == "other" then return GetOtherAuras() end
+    return GetSpecAuras()
+end
+
+-- B1 key-prefix contract: wherever an editor key embeds an aura's name,
+-- the other-pool record embeds "other:" .. auraName in the name segment
+-- (expandedCards "placed:other:<name>#<id>" / "frame:<type>:other:<name>",
+-- preview slot keys). The auraName itself never carries the prefix.
+local function PoolKeyPrefix()
+    return (activeBuffTab == "other") and "other:" or ""
+end
+
+-- Display name for an OTHER-pool aura key: ad-hoc "#<id>" resolves live,
+-- SpellDB names resolve through GetSpellDisplay (localized), else the raw key.
+local function OtherPoolDisplayName(auraName)
+    local id = type(auraName) == "string" and auraName:match("^#(%d+)$")
+    if id then
+        local live = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(tonumber(id))
+        return live or auraName
+    end
+    local R = DF.FilterRegistry
+    local rec = R and R.GetSpellByName and R:GetSpellByName(auraName)
+    if rec then
+        local display = R:GetSpellDisplay(rec)
+        if display then return display end
+    end
+    return auraName
+end
+
+-- Union of every spell ID tracked by one pool of an adDB (cross-tab
+-- used-affordance). which = "my" walks ALL spec pools (the preset object is
+-- one: a spell tracked for ANY spec would double-render for that spec when
+-- also in the shared other pool); "other" walks the flat other pool with
+-- nil-spec identity. Pure (no editor state) — exposed for the SDD harness.
+local function PoolTrackedIDs(adDB, which)
+    local out = {}
+    if type(adDB) ~= "table" then return out end
+    local function addIDs(spec, auraName)
+        local f = DF:BuildADIdentityFilters(spec, auraName)
+        local map = f and f.includeSpellIDs
+        if map then
+            for id in pairs(map) do out[id] = true end
+        end
+    end
+    if which == "my" then
+        if type(adDB.auras) == "table" then
+            for specKey, specAuras in pairs(adDB.auras) do
+                if type(specAuras) == "table" then
+                    for auraName, cfg in pairs(specAuras) do
+                        if type(cfg) == "table" then addIDs(specKey, auraName) end
+                    end
+                end
+            end
+        end
+    else -- "other"
+        if type(adDB.otherAuras) == "table" then
+            for auraName, cfg in pairs(adDB.otherAuras) do
+                if type(cfg) == "table" then addIDs(nil, auraName) end
+            end
+        end
+    end
+    return out
+end
+DF.ADEditor_PoolTrackedIDs = PoolTrackedIDs
+
+-- IDs tracked by the OPPOSITE pool of the active tab (drives the picker's
+-- cross-tab blocked rows and the add-by-ID gate).
+local function CrossPoolTrackedIDs()
+    return PoolTrackedIDs(GetAuraDesignerDB(), IsOtherTab() and "my" or "other")
+end
+
+-- Class-token grouping order for the Other Buffs picker (mirrors the
+-- Filter Designer picker's CLASS_ORDER).
+local AD_CLASS_ORDER = {
+    "DEATHKNIGHT", "DEMONHUNTER", "DRUID", "EVOKER", "HUNTER", "MAGE",
+    "MONK", "PALADIN", "PRIEST", "ROGUE", "SHAMAN", "WARLOCK", "WARRIOR",
+}
+
+-- Ensure an aura config table exists, creating it with defaults if needed.
+-- `pool` (optional) pins the target pool — proxies capture their pool at
+-- creation so a stale color-picker callback can't write across tabs.
+local function EnsureAuraConfig(auraName, pool)
+    local auras = pool or CurrentAuraPoolWrite()
+    if not auras[auraName] then
+        auras[auraName] = {
             priority = 5,
         }
     end
-    return specAuras[auraName]
+    return auras[auraName]
 end
 
 -- Ensure a type sub-table exists within an aura config
-local function EnsureTypeConfig(auraName, typeKey)
-    local auraCfg = EnsureAuraConfig(auraName)
+local function EnsureTypeConfig(auraName, typeKey, pool)
+    local auraCfg = EnsureAuraConfig(auraName, pool)
     if not auraCfg[typeKey] then
         -- Read global defaults so new configs inherit user-configured values
         local adDB = GetAuraDesignerDB()
@@ -1298,9 +1412,10 @@ local function CreateIndicatorInstance(auraName, typeKey)
     return instance
 end
 
--- Find an indicator instance by its stable ID
-local function GetIndicatorByID(auraName, indicatorID)
-    local auraCfg = GetSpecAuras()[auraName]
+-- Find an indicator instance by its stable ID. `pool` (optional) pins the
+-- pool; defaults to the active tab's pool.
+local function GetIndicatorByID(auraName, indicatorID, pool)
+    local auraCfg = (pool or CurrentAuraPool())[auraName]
     if not auraCfg or not auraCfg.indicators then return nil end
     for _, inst in ipairs(auraCfg.indicators) do
         if inst.id == indicatorID then
@@ -1313,7 +1428,7 @@ end
 -- Remove an indicator instance by its stable ID
 local CleanupAdHocAura  -- forward decl: defined after FRAME_LEVEL_TYPE_KEYS
 local function RemoveIndicatorInstance(auraName, indicatorID)
-    local auraCfg = GetSpecAuras()[auraName]
+    local auraCfg = CurrentAuraPool()[auraName]
     if not auraCfg or not auraCfg.indicators then return end
     for i, inst in ipairs(auraCfg.indicators) do
         if inst.id == indicatorID then
@@ -1447,14 +1562,19 @@ local GLOBAL_DEFAULT_MAP = {
 -- Create a proxy table that maps flat key access to an indicator instance
 -- Fallback chain: instance value → global defaults → TYPE_DEFAULTS
 local function CreateInstanceProxy(auraName, indicatorID)
+    -- Pin the pool at creation (B2): proxies are minted per effect card, and
+    -- the card's tab is the record's pool — a callback firing after a tab
+    -- switch must keep reading/writing the ORIGINAL pool.
+    local otherPool = IsOtherTab()
+    local function pool() return otherPool and GetOtherAuras() or GetSpecAuras() end
     -- Resolve current type to expose TYPE_DEFAULTS to GUI:CreateColorPicker's
     -- Default button. Type changes rebuild the panel (RefreshPage) which makes
     -- a fresh proxy, so stashing at construction time is safe.
-    local _inst = GetIndicatorByID(auraName, indicatorID)
+    local _inst = GetIndicatorByID(auraName, indicatorID, pool())
     local _typeDefaults = _inst and TYPE_DEFAULTS[_inst.type] or nil
     return setmetatable({ _skipOverrideIndicators = true, __dfDefaults = _typeDefaults }, {
         __index = function(_, k)
-            local inst = GetIndicatorByID(auraName, indicatorID)
+            local inst = GetIndicatorByID(auraName, indicatorID, pool())
             if inst then
                 local val = inst[k]
                 if val ~= nil then return val end
@@ -1488,7 +1608,7 @@ local function CreateInstanceProxy(auraName, indicatorID)
             return fallback
         end,
         __newindex = function(_, k, v)
-            local inst = GetIndicatorByID(auraName, indicatorID)
+            local inst = GetIndicatorByID(auraName, indicatorID, pool())
             if not inst then return end
             inst[k] = v
             if RefreshPreviewLightweight then RefreshPreviewLightweight() end
@@ -1500,11 +1620,14 @@ end
 -- Create a proxy table that maps flat key access to nested aura config
 local function CreateProxy(auraName, typeKey)
     local defaults = TYPE_DEFAULTS[typeKey]
+    -- Pin the pool at creation (B2) — see CreateInstanceProxy.
+    local otherPool = IsOtherTab()
+    local function pool() return otherPool and GetOtherAuras() or GetSpecAuras() end
     -- Expose defaults to GUI:CreateColorPicker so its Default button can resolve
     -- AD-specific keys (color/expiringColor/etc.) that aren't in PartyDefaults.
     return setmetatable({ _skipOverrideIndicators = true, __dfDefaults = defaults }, {
         __index = function(_, k)
-            local auraCfg = GetSpecAuras()[auraName]
+            local auraCfg = pool()[auraName]
             if auraCfg and auraCfg[typeKey] then
                 local val = auraCfg[typeKey][k]
                 if val ~= nil then return val end
@@ -1514,7 +1637,7 @@ local function CreateProxy(auraName, typeKey)
             -- Copy-on-read: if fallback is a table, copy it into the config
             -- so that sub-key mutations (e.g. proxy.color.r = 1) persist
             if type(fallback) == "table" then
-                local typeCfg = EnsureTypeConfig(auraName, typeKey)
+                local typeCfg = EnsureTypeConfig(auraName, typeKey, pool())
                 local copy = {}
                 for fk, fv in pairs(fallback) do copy[fk] = fv end
                 typeCfg[k] = copy
@@ -1523,7 +1646,7 @@ local function CreateProxy(auraName, typeKey)
             return fallback
         end,
         __newindex = function(_, k, v)
-            local typeCfg = EnsureTypeConfig(auraName, typeKey)
+            local typeCfg = EnsureTypeConfig(auraName, typeKey, pool())
             typeCfg[k] = v
             if RefreshPreviewLightweight then RefreshPreviewLightweight() end
             RefreshLiveFramesThrottled()
@@ -1533,14 +1656,17 @@ end
 
 -- Create a proxy for the aura-level config (priority, expiring)
 local function CreateAuraProxy(auraName)
+    -- Pin the pool at creation (B2) — see CreateInstanceProxy.
+    local otherPool = IsOtherTab()
+    local function pool() return otherPool and GetOtherAuras() or GetSpecAuras() end
     return setmetatable({ _skipOverrideIndicators = true }, {
         __index = function(_, k)
-            local auraCfg = GetSpecAuras()[auraName]
+            local auraCfg = pool()[auraName]
             if auraCfg then return auraCfg[k] end
             return nil
         end,
         __newindex = function(_, k, v)
-            local auraCfg = EnsureAuraConfig(auraName)
+            local auraCfg = EnsureAuraConfig(auraName, pool())
             auraCfg[k] = v
             if RefreshPreviewLightweight then RefreshPreviewLightweight() end
             RefreshLiveFramesThrottled()
@@ -1730,7 +1856,7 @@ end
 
 -- Get triggers for a frame effect (returns owning aura name in a table if no explicit triggers)
 local function GetFrameEffectTriggers(auraName, typeKey)
-    local auraCfg = GetSpecAuras()[auraName]
+    local auraCfg = CurrentAuraPool()[auraName]
     local typeCfg = auraCfg and auraCfg[typeKey]
     if typeCfg and typeCfg.triggers then
         return typeCfg.triggers
@@ -1753,7 +1879,7 @@ end
 
 -- Remove a trigger aura from a frame effect (minimum 1 trigger required)
 local function RemoveFrameEffectTrigger(auraName, typeKey, triggerName)
-    local auraCfg = GetSpecAuras()[auraName]
+    local auraCfg = CurrentAuraPool()[auraName]
     local typeCfg = auraCfg and auraCfg[typeKey]
     if not typeCfg or not typeCfg.triggers or #typeCfg.triggers <= 1 then return end
     for i, t in ipairs(typeCfg.triggers) do
@@ -1772,8 +1898,12 @@ end
 -- State for expanded layout group cards
 local expandedGroups = {}
 
--- Find which layout group (if any) an indicator belongs to
+-- Find which layout group (if any) an indicator belongs to.
+-- Layout groups are My Buffs-only (Phase B): other-pool indicators are never
+-- grouped, and a same-named spec-pool member with a matching indicatorID
+-- must not false-match, so bail out on the Other tab.
 local function GetIndicatorLayoutGroup(auraName, indicatorID)
+    if IsOtherTab() then return nil end
     local groups = GetSpecLayoutGroups()
     for _, group in ipairs(groups) do
         if group.members then
@@ -1969,6 +2099,9 @@ local spellPickerType = nil        -- "icon" | "square" | "bar"
 -- Tab system frame references
 local tabBar                -- Tab bar frame (Effects | Layout Groups | Global)
 local tabButtons = {}       -- { effects = btn, layout = btn, global = btn }
+local mainTabButtons = {}   -- { my = btn, other = btn } (B2 main pool tab strip)
+local specDropdown          -- shared spec dropdown (lives on the main tab strip)
+local specDropdownUpdate    -- rebuilds the spec dropdown options + opener text
 local tabContentFrame       -- Scrollable content area below tabs
 local tabScrollFrame        -- ScrollFrame wrapping tabContentFrame
 local spellPickerView       -- Overlay view for spell picker (replaces tabs when active)
@@ -1991,7 +2124,7 @@ local FRAME_LEVEL_TYPE_KEYS = { "border", "healthbar", "background", "nametext",
 -- RemoveIndicatorInstance, which calls it after every removal.
 CleanupAdHocAura = function(auraName)
     if not AdHocSpellID(auraName) then return end
-    local auras = GetSpecAuras()
+    local auras = CurrentAuraPool()
     local auraCfg = auras and auras[auraName]
     if type(auraCfg) ~= "table" then return end
     if auraCfg.indicators and #auraCfg.indicators > 0 then return end
@@ -2056,14 +2189,22 @@ local function CollectAllEffects()
         end
     end
 
-    for auraName, auraCfg in pairs(GetSpecAuras(spec)) do
-        -- Only show effects for auras belonging to the current spec.
+    local isOther = IsOtherTab()
+    for auraName, auraCfg in pairs(CurrentAuraPool(spec)) do
+        -- My Buffs: only show effects for auras belonging to the current spec.
         -- Ad-hoc "#<id>" auras (picker add-by-ID) always belong — they are
         -- never in the trackable pool, so resolve their display name live.
+        -- Other Buffs: the pool is spec-independent — every record shows
+        -- (names are SpellDB names or ad-hoc keys; resolve display live).
         local adHocID = AdHocSpellID(auraName)
-        local displayName = displayNames[auraName]
-        if not displayName and adHocID then
-            displayName = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(adHocID) or auraName
+        local displayName
+        if isOther then
+            displayName = OtherPoolDisplayName(auraName)
+        else
+            displayName = displayNames[auraName]
+            if not displayName and adHocID then
+                displayName = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(adHocID) or auraName
+            end
         end
         if type(auraCfg) == "table" and displayName then
             -- Placed indicators
@@ -2115,7 +2256,7 @@ end
 
 -- Check if a specific aura + type combo already has a placed indicator
 local function IsAuraTypePlaced(auraName, typeKey)
-    local auraCfg = GetSpecAuras()[auraName]
+    local auraCfg = CurrentAuraPool()[auraName]
     if not auraCfg or not auraCfg.indicators then return false end
     for _, indicator in ipairs(auraCfg.indicators) do
         if indicator.type == typeKey then return true end
@@ -2259,14 +2400,19 @@ local function StartMoveDrag(auraName, indicatorID, specKey)
 
     -- Build minimal auraInfo for hints
     local adDB = GetAuraDesignerDB()
-    local auraList = Adapter and Adapter:GetTrackableAuras(ResolveSpec())
     local displayName = auraName
-    if auraList then
-        for _, info in ipairs(auraList) do
-            if info.name == auraName then
-                dragState.auraInfo = info
-                displayName = info.display or auraName
-                break
+    if IsOtherTab() then
+        -- Other-pool keys are SpellDB names / ad-hoc ids — resolve display live
+        displayName = OtherPoolDisplayName(auraName)
+    else
+        local auraList = Adapter and Adapter:GetTrackableAuras(ResolveSpec())
+        if auraList then
+            for _, info in ipairs(auraList) do
+                if info.name == auraName then
+                    dragState.auraInfo = info
+                    displayName = info.display or auraName
+                    break
+                end
             end
         end
     end
@@ -2380,11 +2526,11 @@ EndDrag = function()
             end
         end
 
-        -- Expand the new indicator card in the Effects tab
-        local auraCfg = GetSpecAuras()[auraName]
+        -- Expand the new indicator card in the Effects tab (pool-prefixed key)
+        local auraCfg = CurrentAuraPool()[auraName]
         local lastInst = auraCfg and auraCfg.indicators and auraCfg.indicators[#auraCfg.indicators]
         if lastInst then
-            local cardKey = "placed:" .. auraName .. "#" .. lastInst.id
+            local cardKey = "placed:" .. PoolKeyPrefix() .. auraName .. "#" .. lastInst.id
             expandedCards[cardKey] = true
         end
     end
@@ -2510,8 +2656,10 @@ local function WirePreviewIndicator(slot, capturedAura, capturedID, spec)
                 end
             end
         elseif button == "LeftButton" then
-            -- Collapse all cards and expand only the clicked one
-            local cardKey = "placed:" .. capturedAura .. "#" .. capturedID
+            -- Collapse all cards and expand only the clicked one. The preview
+            -- renders the ACTIVE tab's pool only, so PoolKeyPrefix() at click
+            -- time matches the slot's pool (B1 key scheme).
+            local cardKey = "placed:" .. PoolKeyPrefix() .. capturedAura .. "#" .. capturedID
             wipe(expandedCards)
             expandedCards[cardKey] = true
             activeTab = "effects"
@@ -2534,23 +2682,29 @@ local function RefreshPlacedIndicators()
     if not mockFrame then return end
 
     local adDB = GetAuraDesignerDB()
+    local isOther = IsOtherTab()
     local spec = ResolveSpec()
-    if not spec then return end
+    -- Other Buffs is spec-independent: render even with no resolvable spec.
+    if not spec and not isOther then return end
 
-    local auraList = Adapter and Adapter:GetTrackableAuras(spec)
-    if not auraList then return end
+    local auraList = (not isOther) and spec and Adapter and Adapter:GetTrackableAuras(spec) or nil
+    if not auraList and not isOther then return end
 
     -- Build lookup
     local infoLookup = {}
-    for _, info in ipairs(auraList) do
-        infoLookup[info.name] = info
+    if auraList then
+        for _, info in ipairs(auraList) do
+            infoLookup[info.name] = info
+        end
     end
 
 
     -- Build layout group position lookup for preview
-    -- In preview all indicators are visible, so compute positions for all members
+    -- In preview all indicators are visible, so compute positions for all members.
+    -- Layout groups (member + filter) are My Buffs-only: the preview renders the
+    -- ACTIVE tab's pool only, so the Other tab skips both group passes entirely.
     local groupPositions = {}  -- "auraName#indicatorID" → { anchor, offsetX, offsetY }
-    local specGroups = GetSpecLayoutGroups()
+    local specGroups = isOther and EMPTY_POOL or GetSpecLayoutGroups()
     for _, group in ipairs(specGroups) do
         if group.members then
             for memberIdx, member in ipairs(group.members) do
@@ -2675,13 +2829,18 @@ local function RefreshPlacedIndicators()
     -- Iterate all configured auras, find placed indicator instances.
     -- Ad-hoc "#<id>" auras are never in the trackable pool — render them with
     -- info=nil (RenderPreviewIndicator resolves their id/icon by pattern).
+    -- Other-pool records render with info=nil + nil identity spec (SpellDB /
+    -- ad-hoc resolution, mirroring the factory). Slot keys carry the B1
+    -- "other:" prefix so the two pools' slots can't collide in the store.
     -- Hidden indicators (eye toggle, enabled == false) don't render — same as live.
-    for auraName, auraCfg in pairs(GetSpecAuras(spec)) do
+    local idSpec = isOther and nil or spec
+    local keyPrefix = PoolKeyPrefix()
+    for auraName, auraCfg in pairs(CurrentAuraPool(spec)) do
         local info = infoLookup[auraName]
-        if type(auraCfg) == "table" and (info or AdHocSpellID(auraName)) and auraCfg.indicators then
+        if type(auraCfg) == "table" and (isOther or info or AdHocSpellID(auraName)) and auraCfg.indicators then
             for _, indicator in ipairs(auraCfg.indicators) do
               if indicator.enabled ~= false then
-                local instanceKey = auraName .. "#" .. indicator.id
+                local instanceKey = keyPrefix .. auraName .. "#" .. indicator.id
                 local capturedAura = auraName
                 local capturedID = indicator.id
 
@@ -2696,9 +2855,9 @@ local function RefreshPlacedIndicators()
                     }, { __index = indicator })
                 end
 
-                local slot = RenderPreviewIndicator(mockFrame, spec, auraName, info, indicator, effectiveConfig, instanceKey)
+                local slot = RenderPreviewIndicator(mockFrame, idSpec, auraName, info, indicator, effectiveConfig, instanceKey)
                 if slot then
-                    WirePreviewIndicator(slot, capturedAura, capturedID, spec)
+                    WirePreviewIndicator(slot, capturedAura, capturedID, idSpec)
                     tinsert(placedIndicators, slot)
                 end
               end
@@ -2770,7 +2929,7 @@ local function RefreshPreviewEffects()
     -- preview is deterministic instead of pairs()-order-dependent: iterate auras
     -- in descending-priority order (tiebreak by name) and apply first-wins per type.
     local sortedAuras = {}
-    for auraName, auraCfg in pairs(GetSpecAuras()) do
+    for auraName, auraCfg in pairs(CurrentAuraPool()) do
         if type(auraCfg) == "table" then  -- skip corrupted entries
             sortedAuras[#sortedAuras + 1] = { name = auraName, cfg = auraCfg, priority = auraCfg.priority or 5 }
         end
@@ -2874,12 +3033,14 @@ RefreshPreviewLightweight = function()
     local mockFrame = framePreview.mockFrame
 
     local adDB = GetAuraDesignerDB()
+    local isOther = IsOtherTab()
     local spec = ResolveSpec()
-    if not spec then return end
+    if not spec and not isOther then return end
 
-    -- Build layout group position lookup (same as RefreshPlacedIndicators)
+    -- Build layout group position lookup (same as RefreshPlacedIndicators;
+    -- layout groups are My Buffs-only, so the Other tab skips the pass)
     local groupPositions = {}
-    local specGroups2 = GetSpecLayoutGroups()
+    local specGroups2 = isOther and EMPTY_POOL or GetSpecLayoutGroups()
     for _, group in ipairs(specGroups2) do
         if group.members then
             for memberIdx, member in ipairs(group.members) do
@@ -2939,11 +3100,13 @@ RefreshPreviewLightweight = function()
 
     -- Re-apply placed indicator instances using current settings
     -- (hidden indicators skipped — RenderPreviewIndicator would resurrect their slot)
-    for auraName, auraCfg in pairs(GetSpecAuras()) do
+    local idSpec = isOther and nil or spec
+    local keyPrefix = PoolKeyPrefix()
+    for auraName, auraCfg in pairs(CurrentAuraPool(spec)) do
         if type(auraCfg) == "table" and auraCfg.indicators then
             for _, indicator in ipairs(auraCfg.indicators) do
               if indicator.enabled ~= false then
-                local instanceKey = auraName .. "#" .. indicator.id
+                local instanceKey = keyPrefix .. auraName .. "#" .. indicator.id
 
                 -- Apply layout group position override if applicable
                 local effectiveConfig = indicator
@@ -2957,14 +3120,14 @@ RefreshPreviewLightweight = function()
                 -- Restyle/repaint through the shared preview slot (recreated only
                 -- when the structural sig changes; cosmetic changes restyle in place).
                 local infoLW = nil
-                if Adapter and Adapter.GetTrackableAuras then
+                if not isOther and Adapter and Adapter.GetTrackableAuras then
                     for _, ti in ipairs(Adapter:GetTrackableAuras(spec)) do
                         if ti.name == auraName then infoLW = ti; break end
                     end
                 end
-                local slot = RenderPreviewIndicator(mockFrame, spec, auraName, infoLW, indicator, effectiveConfig, instanceKey)
+                local slot = RenderPreviewIndicator(mockFrame, idSpec, auraName, infoLW, indicator, effectiveConfig, instanceKey)
                 if slot then
-                    WirePreviewIndicator(slot, auraName, indicator.id, spec)
+                    WirePreviewIndicator(slot, auraName, indicator.id, idSpec)
                 end
               end
             end
@@ -3054,7 +3217,7 @@ end
 -- Duration priority toggle + secret aura warning for frame-level expiring indicators
 -- Only shown when there are 2+ triggers on the effect
 local function CreateExpiringDurationPriorityRow(parent, auraName, typeKey, width)
-    local auraCfg = GetSpecAuras()[auraName]
+    local auraCfg = CurrentAuraPool()[auraName]
     local typeCfg = auraCfg and auraCfg[typeKey]
     local triggers = typeCfg and typeCfg.triggers
     if not triggers or #triggers < 2 then return nil, 0 end
@@ -3099,7 +3262,7 @@ local function CreateExpiringDurationPriorityRow(parent, auraName, typeKey, widt
         GUI:HideTooltip()
     end)
     durBtn:SetScript("OnClick", function()
-        local cfg = GetSpecAuras()[auraName]
+        local cfg = CurrentAuraPool()[auraName]
         local tc = cfg and cfg[typeKey]
         if tc then
             if tc.triggerDurationPriority == "HIGHEST" then
@@ -3236,7 +3399,8 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         local copySources = {}
         local function BuildCopyFromOptions()
             wipe(copySources)
-            local spec = ResolveSpec()
+            local isOther = IsOtherTab()
+            local spec = (not isOther) and ResolveSpec() or nil
             local trackable = spec and Adapter and Adapter:GetTrackableAuras(spec)
             local displayNames = {}
             if trackable then
@@ -3245,8 +3409,11 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 end
             end
 
+            -- Sources come from the SAME pool as the destination card (the
+            -- active tab's) — CopyIndicatorAppearance resolves both ends
+            -- through the pool-routed GetIndicatorByID.
             local sources = {}
-            for srcAura, auraCfg in pairs(GetSpecAuras()) do
+            for srcAura, auraCfg in pairs(CurrentAuraPool(spec)) do
                 if type(auraCfg) == "table" and auraCfg.indicators then
                     for _, ind in ipairs(auraCfg.indicators) do
                         if ind.type == capturedTypeKey then
@@ -3254,7 +3421,8 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                             if not (srcAura == capturedAuraName and ind.id == capturedIndicatorID) then
                                 tinsert(sources, {
                                     auraName = srcAura,
-                                    displayName = displayNames[srcAura] or srcAura,
+                                    displayName = isOther and OtherPoolDisplayName(srcAura)
+                                        or displayNames[srcAura] or srcAura,
                                     indicatorID = ind.id,
                                 })
                             end
@@ -4018,6 +4186,22 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 g:AddWidget(spacer, 6)
             end
 
+            -- Other Buffs: the on-apply sound path has no caster filter
+            -- (AddAuraAppliedSound), so an other-pool alert also fires for the
+            -- player's OWN cast — and for a spell that My Buffs also tracked,
+            -- both pools' sounds would fire. Surface it (B1 concern 2).
+            if IsOtherTab() then
+                local obBanner = GUI:CreateInfoBanner(parent, {
+                    tone = "info",
+                    text = L["Sound alerts play when anyone gains this buff, including your own casts."],
+                })
+                obBanner:SetWidth(contentWidth - 10)
+                g:AddWidget(obBanner, obBanner.layoutHeight)
+                local obSpacer = CreateFrame("Frame", nil, parent)
+                obSpacer:SetHeight(6)
+                g:AddWidget(obSpacer, 6)
+            end
+
             local soundOn = proxy.enabled ~= false
             g:AddWidget(GUI:CreateCheckbox(parent, L["Enable Sound Alert"], proxy, "enabled", function()
                 -- Stop sound immediately when disabled
@@ -4633,6 +4817,10 @@ local function BuildGlobalView(parent)
                         label = L["Reset"],
                         onClick = function()
                             wipe(GetAuraDesignerDB().auras)
+                            -- "Reset ALL" covers the Other Buffs pool too (B2)
+                            if GetAuraDesignerDB().otherAuras then
+                                wipe(GetAuraDesignerDB().otherAuras)
+                            end
                             DF:AuraDesigner_RefreshPage()
                             RefreshLiveFramesThrottled()
                             DF:Debug("Aura Designer: Reset all aura configurations")
@@ -4662,9 +4850,9 @@ local function RefreshRightPanel() end
 local function CreateEnableBanner(parent)
     local banner = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     -- Two-row layout: row 1 (36px) has Enable toggle (left) + Sync/Copy buttons
-    -- (right); row 2 (32px) has the preset bar (left; anchored into the banner
-    -- by the page build) + Spec dropdown (right). Sound Alerts live on the
-    -- Global tab (set-once settings).
+    -- (right); row 2 (32px) is the preset bar (anchored into the banner by the
+    -- page build; the spec dropdown moved onto the B2 main tab strip). Sound
+    -- Alerts live on the Global tab (set-once settings).
     banner:SetHeight(68)
     banner:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, 0)
     banner:SetPoint("TOPRIGHT", parent, "TOPRIGHT", 0, 0)
@@ -4722,16 +4910,21 @@ local function CreateEnableBanner(parent)
     cbLabel:SetText(L["Enable Aura Designer"])
     cbLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
 
-    -- Row 2 centre = 52px from top = 18px below banner centre → y offset -18.
-    local specLabel = banner:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    specLabel:SetPoint("RIGHT", banner, "RIGHT", -145, -18)
-    specLabel:SetText(L["Spec:"])
-    specLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    banner.checkbox = cb
+    return banner
+end
 
+-- ============================================================
+-- SPEC DROPDOWN (B2: relocated from the enable banner onto the
+-- main tab strip's right end — it only applies to My Buffs; the
+-- Other Buffs tab greys it with a "shared across specs" caption)
+-- ============================================================
+
+local function CreateSpecDropdown(parent)
     -- Spec selector. Ported to the shared GUI:CreateDropdown (inline mode, so the
-    -- container is just the opener button — the "Spec:" label above is hand-placed
-    -- to match the banner row). optionsFunc rebuilds the list each open so the
-    -- "Auto (Spec Name)" text always reflects the live detected spec.
+    -- container is just the opener button — the "Spec:" label beside it is
+    -- hand-placed by the page build). optionsFunc rebuilds the list each open so
+    -- the "Auto (Spec Name)" text always reflects the live detected spec.
     -- The shared dropdown supports per-option colour (the `color` field), so the
     -- class-coloured menu entries are preserved. (The OPENER text stays standard
     -- colour — the shared opener isn't per-value colourable.)
@@ -4810,7 +5003,7 @@ local function CreateEnableBanner(parent)
     end
 
     local specDrop = GUI:CreateDropdown(
-        banner, "", BuildSpecOptions(),
+        parent, "", BuildSpecOptions(),
         nil, nil, nil,
         function() return GetAuraDesignerDB().spec or "auto" end,   -- customGet
         function(key)                                                -- customSet
@@ -4819,29 +5012,18 @@ local function CreateEnableBanner(parent)
             wipe(expandedCards)
             DF:AuraDesigner_RefreshPage()
         end,
-        -- menuAlign RIGHT: the opener sits near the banner's right side and the
+        -- menuAlign RIGHT: the opener sits near the strip's right side and the
         -- menu is wider than it, so surplus width grows leftward (menu TOPRIGHT
         -- pinned to the opener's BOTTOMRIGHT) instead of spilling off the edge.
         { inline = true, optionsFunc = BuildSpecOptions, searchable = true, menuAlign = "RIGHT" }
     )
-    specDrop:SetSize(130, 22)
-    specDrop:SetPoint("LEFT", specLabel, "RIGHT", 4, 0)
 
-    -- Back-compat shim: external code (CreateCopyButton block, UpdateSpecText
-    -- callers) used to drive the raw opener button. Keep `specBtn` pointing at
-    -- the dropdown container (a Frame, so SetSize/SetPoint still work) and map
-    -- UpdateSpecText onto the shared dropdown's text refresh.
-    local specBtn = specDrop
     local function UpdateSpecText()
         if specDrop.RebuildOptions then specDrop:RebuildOptions(BuildSpecOptions()) end
         if specDrop.UpdateText then specDrop:UpdateText() end
     end
 
-    banner.UpdateSpecText = UpdateSpecText
-    banner.checkbox = cb
-    banner.specLabel = specLabel
-    banner.specBtn = specBtn
-    return banner
+    return specDrop, UpdateSpecText
 end
 
 
@@ -5152,10 +5334,26 @@ local spellPickerGroupID = nil     -- target layout group id ("group" mode only)
 local spellPickerSearch = ""       -- lowercased name-search query (picker toolbar)
 local spellPickerDirty = false     -- add-by-ID landed while the picker stayed open
                                    -- (effects tab behind it is stale; rebuilt on close)
+local spellPickerBlockedIDs        -- spell ids tracked by the OPPOSITE pool (B2
+                                   -- cross-tab block; rebuilt per PopulateSpellGrid)
+
+-- Cross-tab used check for one picker candidate: any of its identity IDs
+-- (nil-spec identity on the Other tab — the naming contract's resolver —
+-- else the spec identity) already tracked by the opposite pool.
+local function IsCandidateCrossBlocked(auraName, spec)
+    if not spellPickerBlockedIDs or not next(spellPickerBlockedIDs) then return false end
+    local f = DF:BuildADIdentityFilters(IsOtherTab() and nil or spec, auraName)
+    local map = f and f.includeSpellIDs
+    if not map then return false end
+    for id in pairs(map) do
+        if spellPickerBlockedIDs[id] then return true end
+    end
+    return false
+end
 
 -- Check if a specific aura has a frame-level effect of given type
 local function HasFrameEffect(auraName, typeKey)
-    local auraCfg = GetSpecAuras()[auraName]
+    local auraCfg = CurrentAuraPool()[auraName]
     return auraCfg and auraCfg[typeKey] ~= nil
 end
 
@@ -5249,6 +5447,11 @@ end
 
 -- ── SWITCH TAB ──
 SwitchTab = function(tabKey)
+    -- Layout Groups are My Buffs-only (Phase B) — coerce to Effects on the
+    -- Other tab (belt-and-braces; the sub-tab button is also frosted).
+    if tabKey == "layout" and IsOtherTab() then
+        tabKey = "effects"
+    end
     -- Preserve scroll position when refreshing the same tab
     local prevTab = activeTab
     local savedScroll = 0
@@ -5286,20 +5489,75 @@ SwitchTab = function(tabKey)
     end
 end
 
+-- ── MAIN POOL TAB SWITCH (B2: My Buffs / Other Buffs) ──
+
+-- Grey/restore the Layout Groups sub-tab: frosted (SetDisabled — stays
+-- mouse-enabled so the tooltip can explain why; OnClick early-outs on
+-- dfDisabled) while the Other tab is active. Mirrors the prototype's
+-- subtab.dis treatment.
+local function UpdateLayoutTabState()
+    local btn = tabButtons and tabButtons.layout
+    if btn and btn.SetDisabled then
+        btn:SetDisabled(IsOtherTab())
+    end
+end
+
+-- Grey the spec dropdown + swap its opener text on the Other tab (the pool
+-- is shared across specs); restore the live spec text on My Buffs.
+local function UpdateSpecDropdownState()
+    if not specDropdown then return end
+    if IsOtherTab() then
+        if specDropdown.SetDisplayOverride then
+            specDropdown:SetDisplayOverride(L["— (shared across specs)"])
+        end
+        specDropdown:SetEnabled(false)
+    else
+        specDropdown:SetEnabled(true)
+        if specDropdown.SetDisplayOverride then
+            specDropdown:SetDisplayOverride(nil)
+        end
+        if specDropdownUpdate then specDropdownUpdate() end
+    end
+end
+
+local function SetMainTab(tabKey)
+    if activeBuffTab == tabKey then return end
+    activeBuffTab = tabKey
+    -- Editor keys are pool-prefixed (B1) so cards can't collide across tabs,
+    -- but mirror the spec dropdown's behavior: a pool switch collapses all
+    -- expanded cards (wipe, not per-tab preservation).
+    wipe(expandedCards)
+    if spellPickerActive then HideSpellPicker() end
+    for key, btn in pairs(mainTabButtons) do
+        btn:SetActive(key == tabKey)
+    end
+    UpdateSpecDropdownState()
+    UpdateLayoutTabState()
+    if activeBuffTab == "other" and activeTab == "layout" then
+        activeTab = "effects"
+    end
+    -- One entry point swaps every surface: RefreshPage → SwitchTab(activeTab)
+    -- (list, chips, add menu) + RefreshPlacedIndicators/RefreshPreviewEffects
+    -- (preview, drag targets) — all pool-routed through CurrentAuraPool.
+    DF:AuraDesigner_RefreshPage()
+end
+
 -- ── ADD FROM PICKER (shared path) ──
 -- What accepting a spell in the picker DOES: create the placed indicator
 -- instance (or the frame-level type config) and pre-expand its effect card.
 -- Used by both the spell-card OnClick and the add-by-ID toolbar so the two
 -- entry points can never drift apart.
 local function AddPickedSpell(auraName, typeKey)
+    -- Card keys embed the B1 pool prefix in the name segment
+    -- ("placed:other:<name>#<id>" / "frame:<type>:other:<name>").
     if spellPickerMode == "placed" then
         local instance = CreateIndicatorInstance(auraName, typeKey)
         if instance then
-            expandedCards["placed:" .. auraName .. "#" .. instance.id] = true
+            expandedCards["placed:" .. PoolKeyPrefix() .. auraName .. "#" .. instance.id] = true
         end
     else
         EnsureTypeConfig(auraName, typeKey)
-        expandedCards["frame:" .. typeKey .. ":" .. auraName] = true
+        expandedCards["frame:" .. typeKey .. ":" .. PoolKeyPrefix() .. auraName] = true
     end
 end
 
@@ -5434,7 +5692,9 @@ local function AcquireSpellCard(grid, i)
         end)
         btn:SetScript("OnClick", function(self)
             local c = self:GetParent()
-            if not c._auraInfo then return end
+            -- _used is normally false in group mode (duplicates allowed), but
+            -- the B2 cross-tab block sets it — those adds are blocked too.
+            if not c._auraInfo or c._used then return end
             AddSpellToGroup(c._auraInfo.name, c._auraInfo.display, self._typeKey)
         end)
         btn:Hide()
@@ -5464,6 +5724,13 @@ local function BindSpellCard(card, auraInfo, spec, x, y, CARD_SIZE, cardH)
     else
         alreadyUsed = HasFrameEffect(auraInfo.name, spellPickerType)
     end
+
+    -- Cross-tab block (B2): a spell tracked by the OPPOSITE pool renders
+    -- dimmed with a caption naming the other tab, and every add path is
+    -- blocked (click AND drag ride the same _used flag). Applies in group
+    -- mode too — group members are spec-pool indicators.
+    local crossBlocked = IsCandidateCrossBlocked(auraInfo.name, spec)
+    if crossBlocked then alreadyUsed = true end
 
     card:SetSize(CARD_SIZE, cardH or CARD_SIZE)
     card:ClearAllPoints()
@@ -5514,7 +5781,11 @@ local function BindSpellCard(card, auraInfo, spec, x, y, CARD_SIZE, cardH)
     card.nameText:SetTextColor(1, 1, 1)
     card.nameText:SetAlpha(alreadyUsed and 0.35 or 1)
 
-    card.usedLabel:SetText(spellPickerMode == "placed" and L["Placed"] or L["Active"])
+    if crossBlocked then
+        card.usedLabel:SetText(IsOtherTab() and L["In My Buffs"] or L["In Other Buffs"])
+    else
+        card.usedLabel:SetText(spellPickerMode == "placed" and L["Placed"] or L["Active"])
+    end
     card.usedLabel:SetShown(alreadyUsed)
 
     -- Tooltip spell id (override table, else the spec whitelist, else the
@@ -5575,9 +5846,20 @@ PopulateSpellGrid = function()
 
     if grid.noResultsLabel then grid.noResultsLabel:Hide() end
 
+    -- Cross-tab block set (B2): spells tracked by the OPPOSITE pool.
+    spellPickerBlockedIDs = CrossPoolTrackedIDs()
+
     local spec = ResolveSpec()
-    local auras = spec and Adapter:GetTrackableAuras(spec)
-    if not spec or not auras or #auras == 0 then
+    local isOtherPicker = IsOtherTab()
+    local auras
+    if isOtherPicker then
+        -- Other Buffs picker: the FULL SpellDB pool, every class (grouped by
+        -- class below, like the Filter Designer picker). Spec-independent.
+        auras = Adapter.GetAllTrackableAuras and Adapter:GetAllTrackableAuras()
+    else
+        auras = spec and Adapter:GetTrackableAuras(spec)
+    end
+    if (not isOtherPicker and not spec) or not auras or #auras == 0 then
         HideSurplus()  -- nothing used: hides every pooled card/header
         -- Show unsupported spec message
         if not grid.unsupportedLabel then
@@ -5612,16 +5894,24 @@ PopulateSpellGrid = function()
 
     -- 12.1: every tracked aura renders through the game's native spell-ID
     -- matching -- the old whitelisted / inferred-tracking split is gone.
-    -- Two sections: the spec's class spells (curated entries carry no class
-    -- field; SpellDB pool entries carry their class token), then the
-    -- class="ALL" pool (consumables / trinkets). The toolbar search filters
-    -- both; a section whose every card is filtered out drops its header too.
+    -- My Buffs: two sections — the spec's class spells (curated entries carry
+    -- no class field; SpellDB pool entries carry their class token), then the
+    -- class="ALL" pool (consumables / trinkets).
+    -- Other Buffs: one section PER CLASS (AD_CLASS_ORDER, class-coloured
+    -- headers — the Filter Designer picker idiom), then the ALL pool.
+    -- The toolbar search filters everything; a section whose every card is
+    -- filtered out drops its header too.
     local q = spellPickerSearch
     local classAuras, allAuras = {}, {}
+    local classBuckets = isOtherPicker and {} or nil
     for _, auraInfo in ipairs(auras) do
         if q == "" or (auraInfo.display or auraInfo.name):lower():find(q, 1, true) then
-            if auraInfo.class == "ALL" then
+            if auraInfo.class == "ALL" or not auraInfo.class then
                 allAuras[#allAuras + 1] = auraInfo
+            elseif isOtherPicker then
+                local bucket = classBuckets[auraInfo.class]
+                if not bucket then bucket = {}; classBuckets[auraInfo.class] = bucket end
+                bucket[#bucket + 1] = auraInfo
             else
                 classAuras[#classAuras + 1] = auraInfo
             end
@@ -5656,7 +5946,19 @@ PopulateSpellGrid = function()
         yOffset = yOffset + math.ceil(cardIndex / cols) * (CARD_H + CARD_GAP)
     end
 
-    if #classAuras > 0 then
+    local renderedAny = false
+    if isOtherPicker then
+        for _, classToken in ipairs(AD_CLASS_ORDER) do
+            local bucket = classBuckets[classToken]
+            if bucket and #bucket > 0 then
+                if renderedAny then yOffset = yOffset + 8 end  -- section gap
+                RenderHeader((LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[classToken]) or classToken,
+                    RAID_CLASS_COLORS[classToken])
+                RenderSection(bucket)
+                renderedAny = true
+            end
+        end
+    elseif #classAuras > 0 then
         local info = DF.AuraDesigner.SpecInfo[spec]
         local classToken = info and info.class
         local className = classToken
@@ -5665,15 +5967,17 @@ PopulateSpellGrid = function()
         RenderHeader(format(L["Your Class — %s"], className),
             classToken and RAID_CLASS_COLORS[classToken] or nil)
         RenderSection(classAuras)
+        renderedAny = true
     end
     if #allAuras > 0 then
-        if #classAuras > 0 then yOffset = yOffset + 8 end  -- section gap
+        if renderedAny then yOffset = yOffset + 8 end  -- section gap
         RenderHeader(L["All Classes"], nil)
         RenderSection(allAuras)
+        renderedAny = true
     end
 
     -- Active search matching nothing: say so instead of a blank panel
-    if #classAuras == 0 and #allAuras == 0 then
+    if not renderedAny then
         if not grid.noResultsLabel then
             local label = grid:CreateFontString(nil, "OVERLAY", "DFFontNormal")
             label:SetPoint("TOP", grid, "TOP", 0, -40)
@@ -5694,11 +5998,14 @@ end
 -- Returns the new yPos after the card.
 CreateEffectCard = function(parent, yPos, effect)
     local isPlaced = (effect.source == "placed")
+    -- B1 key scheme: the pool prefix rides the NAME segment, so the two
+    -- pools' expandedCards entries can never collide.
+    local keyPrefix = PoolKeyPrefix()
     local cardKey
     if isPlaced then
-        cardKey = "placed:" .. effect.auraName .. "#" .. effect.indicatorID
+        cardKey = "placed:" .. keyPrefix .. effect.auraName .. "#" .. effect.indicatorID
     else
-        cardKey = "frame:" .. effect.typeKey .. ":" .. effect.auraName
+        cardKey = "frame:" .. effect.typeKey .. ":" .. keyPrefix .. effect.auraName
     end
 
     local isExpanded = expandedCards[cardKey] or false
@@ -5726,8 +6033,9 @@ CreateEffectCard = function(parent, yPos, effect)
     end
     chevron:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
-    -- Spell icon (small, before type badge)
-    local spec = ResolveSpec()
+    -- Spell icon (small, before type badge). Other-pool records resolve
+    -- icon/identity spec-independently (nil spec → ad-hoc / SpellDB fallback).
+    local spec = IsOtherTab() and nil or ResolveSpec()
     local iconTex = GetAuraIcon(spec, effect.auraName)
     local spellIcon = header:CreateTexture(nil, "ARTWORK")
     spellIcon:SetSize(20, 20)
@@ -5797,11 +6105,16 @@ CreateEffectCard = function(parent, yPos, effect)
         -- Show trigger count for frame-level effects
         local triggers = GetFrameEffectTriggers(effect.auraName, effect.typeKey)
         if #triggers > 1 then
-            local auraCfg = GetSpecAuras()[effect.auraName]
+            local auraCfg = CurrentAuraPool()[effect.auraName]
             local typeCfg = auraCfg and auraCfg[effect.typeKey]
             local opLabel = (typeCfg and typeCfg.triggerOperator == "AND") and (" (" .. L["AND"] .. ")") or ""
             infoStr = infoStr .. "  -  " .. format(L["+%d triggers"], #triggers - 1) .. opLabel
         end
+    end
+    -- Other Buffs: surface the per-effect Others Only state on the collapsed
+    -- header (prototype's "Others only" chip, as a text suffix).
+    if IsOtherTab() and effect.config and effect.config.othersOnly then
+        infoStr = infoStr .. "  -  " .. L["Others Only"]
     end
     local infoText = header:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     if warnKey and header.dfWarningBadge and header.dfWarningBadge:IsShown() then
@@ -5829,7 +6142,7 @@ CreateEffectCard = function(parent, yPos, effect)
                 if isPlaced then
                     RemoveIndicatorInstance(effect.auraName, effect.indicatorID)
                 else
-                    local auraCfg = GetSpecAuras()[effect.auraName]
+                    local auraCfg = CurrentAuraPool()[effect.auraName]
                     if auraCfg then auraCfg[effect.typeKey] = nil end
                     CleanupAdHocAura(effect.auraName)  -- drop emptied ad-hoc "#<id>" entries
                 end
@@ -5967,7 +6280,7 @@ CreateEffectCard = function(parent, yPos, effect)
 
             -- AND/OR operator toggle (only shown with 2+ triggers)
             if #triggers > 1 then
-                local auraCfgOp = GetSpecAuras()[effect.auraName]
+                local auraCfgOp = CurrentAuraPool()[effect.auraName]
                 local typeCfgOp = auraCfgOp and auraCfgOp[effect.typeKey]
                 local isAnd = typeCfgOp and typeCfgOp.triggerOperator == "AND"
 
@@ -6026,14 +6339,21 @@ CreateEffectCard = function(parent, yPos, effect)
 
             end
 
-            -- Build display name lookup for tags
-            local spec = ResolveSpec()
+            -- Build display name lookup for tags. Other-pool trigger names are
+            -- SpellDB names / ad-hoc keys — resolved live per tag below.
+            local isOtherCard = IsOtherTab()
+            local spec = (not isOtherCard) and ResolveSpec() or nil
             local trackable = spec and Adapter and Adapter:GetTrackableAuras(spec)
             local displayNames = {}
             if trackable then
                 for _, info in ipairs(trackable) do
                     displayNames[info.name] = info.display
                 end
+            end
+            if isOtherCard then
+                setmetatable(displayNames, { __index = function(_, name)
+                    return OtherPoolDisplayName(name)
+                end })
             end
 
             -- Tag flow layout
@@ -6106,11 +6426,23 @@ CreateEffectCard = function(parent, yPos, effect)
             -- Trigger picker dropdown
             addTrigBtn:SetScript("OnClick", function()
                 -- Build dropdown with trackable auras not already in triggers
-                -- (plus configured ad-hoc "#<id>" auras — never in the pool)
-                local spec2 = ResolveSpec()
-                local auraList = spec2 and Adapter and Adapter:GetTrackableAuras(spec2)
-                if not auraList then return end
-                auraList = WithConfiguredAdHocAuras(auraList, spec2)
+                -- (plus configured ad-hoc "#<id>" auras — never in the pool).
+                -- Other Buffs (Phase B scoping): the full SpellDB would be
+                -- unusable in this plain dropdown, so triggers are picked from
+                -- the auras already CONFIGURED in the Other Buffs pool.
+                local auraList
+                if IsOtherTab() then
+                    auraList = {}
+                    for otherName in pairs(CurrentAuraPool()) do
+                        tinsert(auraList, { name = otherName, display = OtherPoolDisplayName(otherName) })
+                    end
+                    sort(auraList, function(a, b) return (a.display or a.name) < (b.display or b.name) end)
+                else
+                    local spec2 = ResolveSpec()
+                    auraList = spec2 and Adapter and Adapter:GetTrackableAuras(spec2)
+                    if not auraList then return end
+                    auraList = WithConfiguredAdHocAuras(auraList, spec2)
+                end
 
                 local currentTriggers = GetFrameEffectTriggers(effect.auraName, effect.typeKey)
                 local trigLookup = {}
@@ -6188,7 +6520,7 @@ CreateEffectCard = function(parent, yPos, effect)
 
             -- Border mode toggle (border effects only)
             if effect.typeKey == "border" then
-                local auraCfgBM = GetSpecAuras()[effect.auraName]
+                local auraCfgBM = CurrentAuraPool()[effect.auraName]
                 local typeCfgBM = auraCfgBM and auraCfgBM[effect.typeKey]
                 local isCustom = typeCfgBM and typeCfgBM.borderMode == "custom"
 
@@ -6296,6 +6628,28 @@ CreateEffectCard = function(parent, yPos, effect)
             local priNote = GUI:CreateLabel(body, L["Higher priority wins"], bodyWidth - 16)
             priNote:SetPoint("TOPLEFT", priSlider, "BOTTOMLEFT", 0, -2)
             triggersH = triggersH + 84
+        end
+
+        -- ── OTHERS ONLY (Other Buffs tab; placed AND frame-level effects) ──
+        -- Not offered for sound: the on-apply sound path has no caster filter
+        -- (the sound card carries an explanatory banner instead, see
+        -- BuildTypeContent). Writes instance.othersOnly / typeCfg.othersOnly
+        -- through the pool-pinned proxy; the filter string ("HELPFUL|!PLAYER")
+        -- binds at container build, so toggling is STRUCTURAL (B1 folds it
+        -- into every struct sig → the factory Rebuilds).
+        if IsOtherTab() and effect.typeKey ~= "sound" then
+            local ooCb = GUI:CreateCheckbox(body, L["Others Only"], proxy, "othersOnly", function()
+                DF:AuraDesigner_RefreshPage()
+                DF:InvalidateAuraLayout()
+                DF:UpdateAllFrames()
+                if DF.AuraDesigner.Engine and DF.AuraDesigner.Engine.ForceRefreshAllFrames then
+                    DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+                end
+            end)
+            ooCb:SetPoint("TOPLEFT", body, "TOPLEFT", 8, -(triggersH + 12))
+            ooCb:SetWidth(bodyWidth - 16)
+            ooCb.tooltip = L["Only show this effect for other players' casts of the buff."]
+            triggersH = triggersH + 34
         end
 
         local _, bodyH = BuildTypeContent(body, effect.typeKey, effect.auraName, bodyWidth, proxy, triggersH, indicatorGroup, effect.indicatorID)
@@ -6542,6 +6896,18 @@ BuildEffectsTab = function()
 
     yPos = yPos - (chipsFrame:GetHeight() + 10)
 
+    -- ── OTHER BUFFS HINT ──
+    if IsOtherTab() then
+        local obHint = parent:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+        obHint:SetPoint("TOPLEFT", 8, yPos)
+        obHint:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
+        obHint:SetJustifyH("LEFT")
+        obHint:SetWordWrap(true)
+        obHint:SetText(L["These indicators trigger no matter who casts the buff."])
+        obHint:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.8)
+        yPos = yPos - (max(obHint:GetStringHeight(), 12) + 10)
+    end
+
     -- ── EFFECTS LIST ──
     local effects = CollectAllEffects()
 
@@ -6559,7 +6925,9 @@ BuildEffectsTab = function()
         empty:SetWidth(220)
         local spec = ResolveSpec()
         local specAuras = spec and Adapter:GetTrackableAuras(spec)
-        if not spec or not specAuras or #specAuras == 0 then
+        -- The Other Buffs pool is spec-independent — never show the
+        -- unsupported-spec message there.
+        if not IsOtherTab() and (not spec or not specAuras or #specAuras == 0) then
             empty:SetText(L["No trackable spells found for this spec.\n\nYou can select a different spec using the dropdown above."])
         elseif activeFilter == "all" then
             empty:SetText(L["No effects configured yet.\nClick '+ Add Indicator' to get started."])
@@ -7501,6 +7869,7 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     wipe(effectCardPool)
 
     activeTab = "effects"
+    activeBuffTab = "my"
     activeFilter = "all"
     spellPickerActive = false
     spellPickerType = nil
@@ -7508,6 +7877,7 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
 
     -- Layout constants
     local BANNER_H = 68
+    local BUFFTAB_H = 30    -- main pool tab strip (My Buffs / Other Buffs)
     local SECTION_GAP = 8
 
     -- ========================================
@@ -7579,18 +7949,12 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     enableBanner = CreateEnableBanner(mainFrame)
     enableBanner:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 0, yPos)
     enableBanner:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", 0, yPos)
-    enableBanner.UpdateSpecText()
 
     if GUI.CreateCopyButton then
         local copyBtn = GUI.CreateCopyButton(enableBanner, {"auraDesigner"}, L["Aura Designer"], "auras_auradesigner", true)
         copyBtn:ClearAllPoints()
         -- Row 1 centre is 16px above banner centre, so y = +16.
         copyBtn:SetPoint("RIGHT", enableBanner, "RIGHT", -5, 16)
-        enableBanner.specBtn:SetSize(135, 22)
-        enableBanner.specBtn:ClearAllPoints()
-        enableBanner.specBtn:SetPoint("RIGHT", enableBanner, "RIGHT", -5, -18)
-        enableBanner.specLabel:ClearAllPoints()
-        enableBanner.specLabel:SetPoint("RIGHT", enableBanner.specBtn, "LEFT", -4, 0)
     end
 
     -- ========================================
@@ -7619,12 +7983,62 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
                 end
             end,
         })
+        -- Row 2 reflows (B2): the spec dropdown moved onto the tab strip, so
+        -- the preset bar takes the whole row.
         presetBar:SetPoint("LEFT", enableBanner, "LEFT", 10, -18)
-        presetBar:SetPoint("RIGHT", enableBanner.specLabel, "LEFT", -10, 0)
+        presetBar:SetPoint("RIGHT", enableBanner, "RIGHT", -10, -18)
         enableBanner.presetBar = presetBar
     end
 
     yPos = yPos - (BANNER_H + SECTION_GAP)
+
+    -- ========================================
+    -- MAIN POOL TAB STRIP (B2): My Buffs / Other Buffs, between the header
+    -- banner and the workspace. Visually distinct from the right panel's
+    -- underline sub-tabs: filled StyleButton pills, slightly larger, with the
+    -- relocated spec dropdown on the strip's right end (per the prototype —
+    -- the spec only applies to My Buffs).
+    -- ========================================
+    local buffTabBar = CreateFrame("Frame", nil, mainFrame)
+    buffTabBar:SetHeight(BUFFTAB_H)
+    buffTabBar:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 0, yPos)
+    buffTabBar:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", 0, yPos)
+
+    local MAIN_TAB_DEFS = {
+        { key = "my",    label = L["My Buffs"]    },
+        { key = "other", label = L["Other Buffs"] },
+    }
+    wipe(mainTabButtons)
+    local prevMainBtn
+    for _, def in ipairs(MAIN_TAB_DEFS) do
+        local btn = CreateFrame("Button", nil, buffTabBar, "BackdropTemplate")
+        GUI:StyleButton(btn, { height = BUFFTAB_H - 4, text = def.label, font = "DFFontHighlight" })
+        btn.Text:ClearAllPoints()
+        btn.Text:SetPoint("CENTER", 0, 0)
+        btn:SetWidth(max(btn.Text:GetStringWidth() + 28, 96))
+        if prevMainBtn then
+            btn:SetPoint("LEFT", prevMainBtn, "RIGHT", 4, 0)
+        else
+            btn:SetPoint("LEFT", buffTabBar, "LEFT", 0, 0)
+        end
+        local capturedKey = def.key
+        btn:SetScript("OnClick", function() SetMainTab(capturedKey) end)
+        btn:SetActive(activeBuffTab == def.key)
+        mainTabButtons[def.key] = btn
+        prevMainBtn = btn
+    end
+
+    -- Relocated spec dropdown (right end of the strip)
+    local stripSpecLabel = buffTabBar:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    stripSpecLabel:SetText(L["Spec:"])
+    stripSpecLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    specDropdown, specDropdownUpdate = CreateSpecDropdown(buffTabBar)
+    specDropdown:SetSize(165, 22)
+    specDropdown:SetPoint("RIGHT", buffTabBar, "RIGHT", -5, 0)
+    stripSpecLabel:SetPoint("RIGHT", specDropdown, "LEFT", -4, 0)
+    UpdateSpecDropdownState()
+
+    yPos = yPos - (BUFFTAB_H + SECTION_GAP)
 
     -- ========================================
     -- 50/50 SPLIT: LEFT PANEL + RIGHT PANEL
@@ -7700,11 +8114,27 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
 
         btn.tabKey = def.key
         btn:SetScript("OnClick", function(self)
+            if self.dfDisabled then return end  -- frosted on the Other tab
             SwitchTab(self.tabKey)
         end)
 
+        -- Layout Groups is My Buffs-only (Phase B): frosted on the Other tab
+        -- via SetDisabled (stays mouse-enabled so this tooltip can explain).
+        if def.key == "layout" then
+            btn:HookScript("OnEnter", function(self)
+                if self.dfDisabled then
+                    GUI:ShowTooltip(self, {
+                        title = L["Layout Groups"],
+                        lines = { L["Not available for Other Buffs."] },
+                    })
+                end
+            end)
+            btn:HookScript("OnLeave", function() GUI:HideTooltip() end)
+        end
+
         tabButtons[def.key] = btn
     end
+    UpdateLayoutTabState()
 
     -- Equal-width tabs (accounting for the gaps) on parent resize.
     tabBar:SetScript("OnSizeChanged", function(self, w, h)
@@ -7886,24 +8316,31 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
             return
         end
         local idNum = tonumber(text)
+        local isOther = IsOtherTab()
         local spec = ResolveSpec()
-        if not spec then return end
+        -- The Other Buffs pool is spec-independent — no spec required there.
+        if not spec and not isOther then return end
 
-        -- Snap: the spec's curated tables first (alt ids included), then the
-        -- SpellDB (R.ByID indexes canonical + alt ids), else ad-hoc.
+        -- Snap. My Buffs: the spec's curated tables first (alt ids included),
+        -- then the SpellDB (R.ByID indexes canonical + alt ids), else ad-hoc.
+        -- Other Buffs: SpellDB ONLY — the B1 naming contract (other-pool keys
+        -- are SpellDB rec.n or ad-hoc "#<id>"; curated internal names don't
+        -- resolve with a nil spec).
         local auraName
-        local alts = DF.AuraDesigner.AlternateSpellIDs and DF.AuraDesigner.AlternateSpellIDs[spec]
-        if alts and alts[idNum] then auraName = alts[idNum] end
-        if not auraName then
-            local specIDs = DF.AuraDesigner.SpellIDs and DF.AuraDesigner.SpellIDs[spec]
-            if specIDs then
-                for name, id in pairs(specIDs) do
-                    if id == idNum then auraName = name; break end
-                    if type(id) == "table" then  -- rare multi-id entries
-                        for _, sub in ipairs(id) do
-                            if sub == idNum then auraName = name; break end
+        if not isOther then
+            local alts = DF.AuraDesigner.AlternateSpellIDs and DF.AuraDesigner.AlternateSpellIDs[spec]
+            if alts and alts[idNum] then auraName = alts[idNum] end
+            if not auraName then
+                local specIDs = DF.AuraDesigner.SpellIDs and DF.AuraDesigner.SpellIDs[spec]
+                if specIDs then
+                    for name, id in pairs(specIDs) do
+                        if id == idNum then auraName = name; break end
+                        if type(id) == "table" then  -- rare multi-id entries
+                            for _, sub in ipairs(id) do
+                                if sub == idNum then auraName = name; break end
+                            end
+                            if auraName then break end
                         end
-                        if auraName then break end
                     end
                 end
             end
@@ -7919,14 +8356,34 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
         -- must never leak into config keys (AdHocSpellID parses "^#(%d+)$").
         if isAdHoc then auraName = "#" .. text end
 
+        -- Cross-tab block (B2): the spell — snapped name's FULL identity set,
+        -- or the raw id for ad-hoc — is already tracked by the OPPOSITE pool.
+        -- Checked before the group branch so group adds are blocked too.
+        local crossBlocked = false
+        if spellPickerBlockedIDs and next(spellPickerBlockedIDs) then
+            if spellPickerBlockedIDs[idNum] then
+                crossBlocked = true
+            elseif not isAdHoc then
+                crossBlocked = IsCandidateCrossBlocked(auraName, spec)
+            end
+        end
+        if crossBlocked then
+            Echo(isOther and L["Already tracked in My Buffs."] or L["Already tracked in Other Buffs."])
+            return
+        end
+
         -- Display name: the trackable pool entry when it has one (curated
         -- display or localized SpellDB name), else the raw key.
         local display = auraName
         if not isAdHoc then
-            local trackable = Adapter and Adapter:GetTrackableAuras(spec)
-            if trackable then
-                for _, info in ipairs(trackable) do
-                    if info.name == auraName then display = info.display or auraName; break end
+            if isOther then
+                display = OtherPoolDisplayName(auraName)
+            else
+                local trackable = Adapter and Adapter:GetTrackableAuras(spec)
+                if trackable then
+                    for _, info in ipairs(trackable) do
+                        if info.name == auraName then display = info.display or auraName; break end
+                    end
                 end
             end
         end
@@ -8108,8 +8565,10 @@ function DF:AuraDesigner_RefreshPage()
     -- Update enable state
     if enableBanner then
         enableBanner.checkbox:SetChecked(GetAuraDesignerDB().enabled)
-        enableBanner.UpdateSpecText()
     end
+    -- Spec dropdown lives on the main tab strip (B2): refresh its text on
+    -- My Buffs / keep the greyed "shared across specs" caption on Other Buffs.
+    UpdateSpecDropdownState()
 
     -- Show/hide disabled overlay on the split container
     if mainFrame.splitContainer then
