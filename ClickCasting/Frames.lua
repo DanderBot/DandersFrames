@@ -1333,6 +1333,7 @@ function CC:StartDiagnosticTicker(frame)
             DF:DebugError("CLICK", "BINDINGS VANISHED on %s at tick %d! wrapEnter=%d wrapLeave=%d isSecureMO=%s visible=%s mouseOver=%s combat=%s",
                 frameName, CC.diagTickCount, wrapEnterCount, wrapLeaveCount, tostring(isSecureMouseover),
                 tostring(frame:IsVisible()), tostring(frame:IsMouseOver()), tostring(InCombatLockdown()))
+            CC:RequestBindingRepair("bindings-vanished")
         end
 
         -- Detect mouseoverbutton desync: we think we're hovering this frame,
@@ -1343,6 +1344,7 @@ function CC:StartDiagnosticTicker(frame)
                 CC.diagDesyncReported = true
                 DF:DebugError("CLICK", "MOUSEOVERBUTTON DESYNC on %s at tick %d! dfIsSecureMouseover=nil wrapEnter=%d wrapLeave=%d kbActive=%s",
                     frameName, CC.diagTickCount, wrapEnterCount, wrapLeaveCount, tostring(bindingsActive))
+                CC:RequestBindingRepair("mouseover-desync")
             end
         else
             CC.diagDesyncReported = nil
@@ -1560,12 +1562,14 @@ function CC:SetupSecureHandlers(frame)
         if wrapEnterFired and postCheck ~= "ok" then
             DF:DebugError("CLICK", "POST-CHECK FAILED on %s! mouseoverbutton=%s after phase 7 — self reference lost during OnEnter",
                 frameName, postCheck)
+            CC:RequestBindingRepair("post-check-" .. postCheck)
         end
 
         -- Key diagnostic: WrapScript didn't complete all phases
         if wrapEnterFired and enterPhase < 7 and hasKeyboardBindings then
             DF:DebugError("CLICK", "WRAPSCRIPT INCOMPLETE on %s! phase=%d (expected 7) prev=%s",
                 frameName, enterPhase, prevMouseover)
+            CC:RequestBindingRepair("wrap-incomplete-phase" .. enterPhase)
         end
 
         -- Key diagnostic: hover is on but WrapScript didn't activate keyboard bindings
@@ -1573,6 +1577,7 @@ function CC:SetupSecureHandlers(frame)
             DF:DebugWarn("CLICK", "HOVER BUT NO KB BINDINGS on %s! Key presses will go to action bar (phase=%d)", frameName, enterPhase)
             if not wrapEnterFired then
                 DF:DebugWarn("CLICK", "  WrapScript OnEnter DID NOT FIRE (enterCount=%d leaveCount=%d)", wrapEnterCount, wrapLeaveCount)
+                CC:RequestBindingRepair("wrap-not-firing")
                 DF:DebugWarn("CLICK", "  frame visible=%s shown=%s mouseOver=%s combat=%s",
                     tostring(self:IsVisible()), tostring(self:IsShown()),
                     tostring(self:IsMouseOver()), tostring(InCombatLockdown()))
@@ -1588,6 +1593,17 @@ function CC:SetupSecureHandlers(frame)
             end
             DF:DebugWarn("CLICK", "  handlersSetup=%s registered=%s",
                 tostring(self.dfKeyboardHandlersSetup), tostring(self.dfClickCastRegistered))
+        end
+
+        -- Self-heal detection: this frame's snippet is empty but the profile
+        -- has keyboard binds — likely wiped by a transient refresh (bug #976).
+        -- One-shot per frame: the flag is reset when a rebuild gives the frame
+        -- a real snippet again, so legitimately-empty frames don't loop.
+        if not hasKeyboardBindings and self.dfIsDandersFrame
+            and not self.dfSnippetRepairTried and CC:ProfileHasKeyboardBindings() then
+            self.dfSnippetRepairTried = true
+            DF:DebugWarn("CLICK", "EMPTY SNIPPET on %s but profile has keyboard binds", frameName)
+            CC:RequestBindingRepair("empty-snippet")
         end
 
         -- Warn if mouse click-cast attributes are missing
@@ -1758,6 +1774,39 @@ function CC:UpdateFrameBindingAttributes(frame)
     -- Store the snippet - _onenter will run this on every hover
     local snippet = table.concat(snippetLines, "\n")
     frame:SetAttribute("dfBindingSnippet", snippet)
+
+    -- Frame has a real snippet again — allow the empty-snippet self-heal
+    -- detection to fire once more if it ever gets wiped (bug #976)
+    if snippet ~= "" then
+        frame.dfSnippetRepairTried = nil
+    end
+end
+
+-- Returns true if any enabled binding in the unified macro map needs the
+-- hover snippet path (keyboard, scroll, or meta-mouse). Used by the
+-- self-heal detection to tell "snippet legitimately empty" apart from
+-- "snippet wiped". Cached per macro-map instance so hover hooks stay cheap.
+function CC:ProfileHasKeyboardBindings()
+    if not self.unifiedMacroMap then return false end
+    if self.kbCheckMap == self.unifiedMacroMap then
+        return self.kbCheckResult
+    end
+
+    local result = false
+    for _, data in pairs(self.unifiedMacroMap) do
+        local binding = data.templateBinding
+        local bindType = binding.bindType or "mouse"
+        local isMetaMouse = (bindType == "mouse") and binding.modifiers
+            and binding.modifiers:lower():find("meta")
+        if bindType == "key" or bindType == "scroll" or isMetaMouse then
+            result = true
+            break
+        end
+    end
+
+    self.kbCheckMap = self.unifiedMacroMap
+    self.kbCheckResult = result
+    return result
 end
 
 -- Legacy alias for compatibility
@@ -1788,6 +1837,87 @@ function CC:RefreshKeyboardBindings()
     end
     
     self.pendingKeyboardRefresh = false
+end
+
+-- ============================================================
+-- SELF-HEALING BINDING REPAIR (bug #976)
+-- Keyboard hover-binds can die mid-session (stale mouseoverbutton in the
+-- restricted environment, spurious state-driver clears, wiped snippets)
+-- and previously only /reload recovered. The OnEnter/ticker diagnostics
+-- already DETECT all of these; this repair path fixes them out of combat:
+--   1. reset the restricted env's mouseoverbutton tracking
+--   2. clear stray override bindings so keys can't stay stolen
+--   3. rebuild the macro map + every frame's binding snippet
+-- All repair actions are insecure out-of-combat calls the addon already
+-- uses elsewhere — no new taint surface. In combat the repair is queued
+-- and OnCombatEnd runs it.
+-- ============================================================
+
+local REPAIR_COOLDOWN = 5  -- seconds between repair attempts
+
+-- Safe to call from anywhere, including combat and secure-hook callbacks
+function CC:RequestBindingRepair(reason)
+    if InCombatLockdown() then
+        if not self.pendingBindingRepair then
+            DF:DebugWarn("CLICK", "Binding repair queued for combat end (%s)", tostring(reason))
+        end
+        self.pendingBindingRepair = reason
+        return
+    end
+    self:RunBindingRepair(reason)
+end
+
+function CC:RunBindingRepair(reason, force)
+    if InCombatLockdown() then
+        self.pendingBindingRepair = reason
+        return
+    end
+    if not self.db or not self.db.enabled then return end
+
+    if not force then
+        if self.lastBindingRepair and (GetTime() - self.lastBindingRepair) < REPAIR_COOLDOWN then
+            return
+        end
+    end
+    self.lastBindingRepair = GetTime()
+
+    DF:DebugWarn("CLICK", "Running binding repair (%s)", tostring(reason))
+
+    -- 1. Reset restricted-env hover tracking. A stale mouseoverbutton
+    --    reference aborts every OnEnter WrapScript at the cross-frame
+    --    cleanup step, killing keyboard binds addon-wide until /reload.
+    if self.header and self.header.Execute then
+        pcall(function()
+            self.header:Execute([[ mouseoverbutton = nil ]])
+        end)
+    end
+
+    -- 2. Clear stray override bindings + hover state. After the env reset
+    --    the OnLeave wrap can no longer clear these (mouseoverbutton ~= self),
+    --    so clear them here or keys would stay stolen from the action bars.
+    local function scrub(frame)
+        if frame.GetAttribute and frame:GetAttribute("dfBindingsActive") then
+            pcall(ClearOverrideBindings, frame)
+            frame:SetAttribute("dfBindingsActive", nil)
+            frame:SetAttribute("dfIsSecureMouseover", nil)
+        end
+    end
+    if self.registeredFrames then
+        for frame in pairs(self.registeredFrames) do
+            scrub(frame)
+        end
+    end
+    if DF.unitFrames then
+        for _, frame in pairs(DF.unitFrames) do
+            scrub(frame)
+        end
+    end
+
+    -- 3. Rebuild the macro map and every frame's snippet, in case snippets
+    --    were wiped by a transient refresh. The next OnEnter re-applies
+    --    bindings from the fresh snippet.
+    self.unifiedMacroMap = self:BuildUnifiedMacroMap()
+    self:RefreshKeyboardBindings()
 end
 
 -- Legacy function - now calls RefreshKeyboardBindings

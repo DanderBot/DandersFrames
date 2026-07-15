@@ -120,6 +120,7 @@ DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally chan
 ### Bug Fixes
 
 * (Click Casting) Fixed a Lua error walking Blizzard unit frames after combat that could stop click-casting bindings from working on the default frames until reload — the frame scan now skips protected (secret) values introduced by recent client versions. (by Krathe)
+* (Click Casting) Keyboard binds that stop working mid-session now recover automatically after combat ends or a loading screen, instead of staying broken until a reload.
 
 ## [4.7.0]
 
