@@ -8,6 +8,10 @@
 * (Interface) Opening a colour picker no longer counts as a colour change — the picker fired its change handlers once during setup, which could commit settings (such as a Text Designer element's colour override) without any edit. (by Krathe)
 * (Aura Designer) Fixed expiring border animations staying stuck on after the tracked aura was refreshed (for example re-casting a HoT in its pandemic window). (by Krathe)
 
+### Bug Fixes
+
+* (Click Casting) Fixed a Lua error walking Blizzard unit frames after combat that could stop click-casting bindings from working on the default frames until reload — the frame scan now skips protected (secret) values introduced by recent client versions. (by Krathe)
+
 ## [4.7.0]
 
 ### Bug Fixes
