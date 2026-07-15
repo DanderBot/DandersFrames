@@ -1653,7 +1653,6 @@ L["X Mark"] = true
 L["X Size"] = true
 L["Yellow=high, Orange=highest, Red=tanking."] = true
 L["Yes"] = true
-L["Your Class — %s"] = true
 L["Your UI Scale is already pixel-perfect for this resolution."] = true
 L["Z to A"] = true
 L["Zoom Icon"] = true
@@ -1742,8 +1741,6 @@ L["COPY APPEARANCE FROM"] = true
 L["Categories shown here are hidden from the main debuff bar automatically."] = true
 L["Channel"] = true
 L["Click"] = true
-L["Click Icon or Square to add the spell to this group"] = true
-L["Click or drag a spell onto the frame to place it"] = true
 L["Click to toggle"] = true
 L["Combat Mode"] = true
 L["Copy Settings to %s"] = true

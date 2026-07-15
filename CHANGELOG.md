@@ -10,7 +10,7 @@ DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally chan
 
 * (Aura Designer) **The Aura Designer now works for every spec** — previously healers and Augmentation only. The spec dropdown is grouped by class and searchable.
 * (Aura Designer) **New: Filter Groups.** Place an entire filter on the frame as its own icon row — link built-in or custom filters, and every matching buff appears in a self-arranging row with its own position, icon size, growth and icon cap. Filter Designer changes apply to linked groups immediately, and buffs shown by a group leave the buff bar while "Hide Duplicate Buffs" is on.
-* (Aura Designer) The spell picker now uses the addon's full spell database — grouped by class, searchable, and any spell can be added by ID.
+* (Aura Designer) One spell picker everywhere — adding indicators, group spells and triggers all use the same spell database picker as the Filter Designer, with search, class and category filters, and add-by-ID.
 * (Aura Designer) Every indicator has a show/hide eye — turn one off without deleting it.
 * (Aura Designer) The editor header is condensed to a single row; Sound Alerts moved to the Global tab.
 * (Profiles) Custom filters and your category tweaks travel with profile exports — including filters linked in the Aura Designer.
@@ -31,7 +31,7 @@ DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally chan
 * (Auras) **Animated borders are available on the Missing-Buff icons**, with the full DF animation set. The animation driver is now shared, so animated borders are lighter across the board.
 * (Auras) Border animations aren't offered on the aura icons themselves — buff, debuff, defensive and Aura Designer indicators. On 12.1 the game hides aura data in combat and forbids addons from touching aura icons while it's hidden, so an animated border there would break; those borders are static. Frame borders, the Missing-Buff badge and targeted-spell highlights are unaffected and still animate.
 * (Auras) Out-of-range and dead-unit fading works on the 12.1 aura displays again — live and in test mode.
-* (Aura Designer) The spell picker shows one unified grid — the separate "Inferred Tracking" section is gone; every tracked aura now works the same way.
+* (Aura Designer) The spell picker shows one unified list — the separate "Inferred Tracking" section is gone; every tracked aura now works the same way.
 * (Aura Designer) Filter and debuff group boxes in the editor preview show greyed example icons, sized and arranged to your layout settings.
 * (Aura Designer) Filter and debuff groups can be styled like placed indicators — Appearance, Border, Duration Text and Stack Count sections — and the preview's example icons wear your styling live.
 * (Interface) The deprecated My Buff Indicators feature has been fully removed — the missing-buff display and the Aura Designer cover its use cases.
