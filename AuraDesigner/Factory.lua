@@ -880,7 +880,8 @@ local function buildPlacedStyle(indicator, isSquare, borderSpec)
     -- text-only mode). Native countdown numbers are OFF — duration text renders through the
     -- styleable SetDurationText fontstring below (positionable, matching the legacy icon).
     local hideSwipe = indicator.hideSwipe and true or false
-    style.cooldown = { show = true, swipe = (not hideSwipe) and (not hideIcon), numbers = false }
+    -- reverse = true: drain like Blizzard's aura frames (and DF's own rows) — see #983.
+    style.cooldown = { show = true, swipe = (not hideSwipe) and (not hideIcon), reverse = true, numbers = false }
 
     -- Duration text: a DF-owned fontstring the native SetDurationText fills secret-safe
     -- (Blizzard formats the remaining time C-side; no Lua read). Colour-by-time now routes
@@ -1292,7 +1293,7 @@ local function buildFilterGroupStyle(group, borderSpec)
     local style = {
         -- Art insets by the border thickness so the ring frames it (placed-icon parity).
         icon     = { show = true, zoom = true, inset = borderSpec and (s.BorderSize or 1) or 0 },
-        cooldown = { show = true, swipe = not s.hideSwipe, numbers = false },
+        cooldown = { show = true, swipe = not s.hideSwipe, reverse = true, numbers = false },
         duration = buildDurationTextSpec(s, true),
         stacks   = (s.showStacks ~= false) and buildStackSpec(s, 2, -1) or nil,
     }
