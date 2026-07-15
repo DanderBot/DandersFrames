@@ -292,6 +292,39 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
     GUI.CreateResetOnlyButton = CreateResetOnlyButton
 
+    -- Expiry Alert block for the row Duration groups (Buffs / Debuffs / Defensive
+    -- Icons): mode dropdown, then mode-dependent controls — custom text (TEXT),
+    -- glyph picker (GLYPH), threshold slider (both). The native formatter is
+    -- bind-frozen, so every control routes through `refresh` = the page's
+    -- STRUCTURAL refresh (same as the Duration Format dropdown). Gating follows
+    -- each page's duration-block idiom: useHide=true hides (defensive), else
+    -- greys (buff/debuff). Glyph labels embed the atlas escape as a live preview.
+    local function AddExpiryAlertRowControls(page, group, db, prefix, gate, refresh, useHide)
+        local modeKey = prefix .. "ExpiryAlertMode"
+        local function apply(w, pred)
+            if useHide then w.hideOn = pred else w.disableOn = pred end
+        end
+        local modeOptions = { OFF = L["Off"], TEXT = L["Custom Text"], GLYPH = L["Glyph"],
+                              _order = { "OFF", "TEXT", "GLYPH" } }
+        local mode = group:AddWidget(GUI:CreateDropdown(page.child, L["Expiry Alert"], modeOptions,
+            db, modeKey, function() page:RefreshStates(); refresh() end), 55)
+        apply(mode, gate)
+        local text = group:AddWidget(GUI:CreateEditBox(page.child, L["Alert Text"],
+            db, prefix .. "ExpiryAlertText", refresh), 48)
+        apply(text, function(d) return gate(d) or d[modeKey] ~= "TEXT" end)
+        local glyphOptions = { _order = {} }
+        for i, gl in ipairs(DF.ExpiryAlertGlyphs) do
+            glyphOptions[gl.key] = "|A:" .. gl.atlas .. ":16:16|a " .. L[gl.name]
+            glyphOptions._order[i] = gl.key
+        end
+        local glyph = group:AddWidget(GUI:CreateDropdown(page.child, L["Glyph"], glyphOptions,
+            db, prefix .. "ExpiryAlertGlyph", refresh), 55)
+        apply(glyph, function(d) return gate(d) or d[modeKey] ~= "GLYPH" end)
+        local thr = group:AddWidget(GUI:CreateSlider(page.child, L["Alert Below (seconds)"], 1, 60, 1,
+            db, prefix .. "ExpiryAlertThreshold", nil, refresh), 55)
+        apply(thr, function(d) return gate(d) or (d[modeKey] or "OFF") == "OFF" end)
+    end
+
     -- Define category order (updated structure)
     GUI.CategoryOrder = {"general", "clickcast", "display", "bars", "text", "auras", "indicators", "profiles", "debug"}
     
@@ -5884,6 +5917,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         durHideAbove.disableOn = function(d) return not d.buffShowDuration end
         local durHideAboveSlider = durationGroup:AddWidget(GUI:CreateSlider(self.child, L["Hide Above (seconds)"], 1, 60, 1, db, "buffDurationHideAboveThreshold", nil, function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 55)
         durHideAboveSlider.disableOn = function(d) return not d.buffShowDuration or not d.buffDurationHideAboveEnabled end
+        AddExpiryAlertRowControls(self, durationGroup, db, "buff",
+            function(d) return not d.buffShowDuration end,
+            function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end)
         -- Grey the whole group when Buffs are off (composes with the per-control
         -- buffShowDuration gates), matching Settings/Position/Grid.
         durationGroup.disableChildrenOn = function(d) return not d.showBuffs end
@@ -6144,6 +6180,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         durHideAbove.disableOn = function(d) return not d.debuffShowDuration end
         local durHideAboveSlider = durationGroup:AddWidget(GUI:CreateSlider(self.child, L["Hide Above (seconds)"], 1, 60, 1, db, "debuffDurationHideAboveThreshold", nil, function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 55)
         durHideAboveSlider.disableOn = function(d) return not d.debuffShowDuration or not d.debuffDurationHideAboveEnabled end
+        AddExpiryAlertRowControls(self, durationGroup, db, "debuff",
+            function(d) return not d.debuffShowDuration end,
+            function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end)
         -- Grey the whole group when Debuffs are off (composes with the per-control
         -- debuffShowDuration gates), matching Settings/Position/Grid.
         durationGroup.disableChildrenOn = function(d) return not d.showDebuffs end
@@ -6576,6 +6615,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
         end), 30)
         diDurColorByTime.hideOn = HideDefensiveDurationOptions
+
+        AddExpiryAlertRowControls(self, durationGroup, db, "defensiveIcon",
+            HideDefensiveDurationOptions,
+            function() if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end end,
+            true)
 
         Add(durationGroup, nil, 1)
 

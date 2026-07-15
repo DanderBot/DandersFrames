@@ -378,14 +378,69 @@ function DF:FactoryOwnsBuffRow(db)
     return (DF.AuraContainer and DF.AuraContainer.IsSupported()) or false
 end
 
+-- Curated atlas glyphs for the duration-text Expiry Alert (rows + Aura Designer).
+-- Dropdowns display L[name] and store the KEY (never the label); the formatter
+-- resolves key -> atlas at build time. Order = dropdown order; entry 1 is the
+-- default. ⚠ EVERY atlas name here is UNVERIFIED against the live client — vet
+-- each one in the atlas browser (Debug/AtlasBrowser.lua) before shipping.
+DF.ExpiryAlertGlyphs = {
+    { key = "WARNING",      atlas = "services-icon-warning",      name = "Warning Sign" },
+    { key = "PING_WARNING", atlas = "Ping_Marker_Icon_Warning",   name = "Warning Ping" },
+    { key = "PING_ATTACK",  atlas = "Ping_Marker_Icon_Attack",    name = "Attack Ping" },
+    { key = "RED_ALERT",    atlas = "UI-HUD-MicroMenu-RedAlert",  name = "Red Alert" },
+    { key = "RED_X",        atlas = "UI-LFG-DeclineMark",         name = "Red X" },
+    { key = "EXCLAMATION",  atlas = "QuestNormal",                name = "Exclamation Mark" },
+    { key = "CLOCK",        atlas = "auctionhouse-icon-clock",    name = "Clock" },
+    { key = "STAR",         atlas = "auctionhouse-icon-favorite", name = "Star" },
+}
+
+-- Stored glyph key -> atlas name; unknown/missing keys fall back to entry 1 so a
+-- stale profile value still renders SOMETHING rather than a broken escape.
+function DF:GetExpiryAlertAtlas(key)
+    local list = DF.ExpiryAlertGlyphs
+    for i = 1, #list do
+        if list[i].key == key then return list[i].atlas end
+    end
+    return list[1].atlas
+end
+
+-- Sanitize user alert text for use as a NumericRuleFormatter band format string.
+-- Rule: '%' doubles to '%%' (the band format is printf-style — a bare % corrupts
+-- it), control characters strip, '|' passes through UNTOUCHED (colour |c and
+-- texture |T / |A escapes are legitimate user input here), no length cap.
+local function SanitizeAlertText(text)
+    if type(text) ~= "string" then return "" end
+    return (text:gsub("%%", "%%%%"):gsub("[%z\1-\31\127]", ""))
+end
+
+-- Alert part of a duration formatKey. The native formatter is bind-frozen
+-- (SetDurationText binds once per slot), so EVERY alert change is STRUCTURAL and
+-- must move the row/slot signature -> Rebuild. Shared with the Aura Designer
+-- factory (its durationFmtKey appends this to the placed/group struct sigs).
+function DF:GetExpiryAlertFmtKey(mode, threshold, text, glyphKey)
+    if mode ~= "TEXT" and mode ~= "GLYPH" then return "" end
+    return ":X" .. mode .. ":" .. tostring(tonumber(threshold) or 5) .. ":"
+        .. (mode == "GLYPH" and tostring(glyphKey or "") or tostring(text or ""))
+end
+
 -- Duration-text formatters for the factory row, by format key:
 --   NUMBER -> bare seconds (45), then "2m"/"1h"   (NumericRuleFormatter)
 --   SHORT  -> "45s" / "2m" / "1h"                 (SecondsFormatter, OneLetter)
 --   FULL   -> "45 Seconds" / "2 Minutes"          (SecondsFormatter, None = full word)
 -- Blizzard's own default is SHORT-like; DF's legacy rows showed NUMBER. Built once per
 -- format and cached (Blizzard securecopies the options table, so one object per format is fine).
-local function BuildDurationFormatter(format, hideAboveT, colorByTime)
+-- Expiry Alert (alertMode "TEXT"/"GLYPH" + alertThreshold seconds + alertText/alertAtlas):
+-- extra breakpoint bands below the threshold — evaluated C-side against the SECRET
+-- remaining time like everything else here; no Lua time read, works in combat.
+local function BuildDurationFormatter(format, hideAboveT, colorByTime, alertMode, alertThreshold, alertText, alertAtlas)
     format = format or "NUMBER"
+    local alertT
+    if alertMode == "TEXT" or alertMode == "GLYPH" then
+        alertT = tonumber(alertThreshold) or 5
+        if alertT < 1 then alertT = 1 end
+    else
+        alertMode = nil
+    end
     -- Hide-above-threshold and/or COLOUR-BY-TIME buckets: both need per-band format
     -- strings, which only the NumericRuleFormatter has (SecondsFormatter carries none) —
     -- so SHORT/FULL are emulated with the matching unit suffix (the pre-existing
@@ -400,28 +455,64 @@ local function BuildDurationFormatter(format, hideAboveT, colorByTime)
     --   <5s red · 5-15s orange · 15-60s yellow · 60s+ green (fresh).
     -- (The legacy path coloured by PERCENT of total duration; a static formatter can't
     -- know the total, so absolute-seconds bands are the 12.1 equivalent.)
-    if hideAboveT or colorByTime then
+    if hideAboveT or colorByTime or alertT then
         if not (C_StringUtil and C_StringUtil.CreateNumericRuleFormatter and Enum and Enum.NumericRuleFormatRounding) then return nil end
         local secFmt = (format == "SHORT" and "%.0fs") or (format == "FULL" and "%.0f Seconds") or "%.0f"
+        -- Blank-band start: hide-above unchanged, EXCEPT the alert region [0, alertT)
+        -- always renders — an explicit alert outranks blanking, so when the user sets
+        -- the alert threshold above the hide threshold the blank starts at alertT.
+        local blankAt = hideAboveT
+        if blankAt and alertT and alertT > blankAt then blankAt = alertT end
         local ok, f = pcall(function()
             local down = Enum.NumericRuleFormatRounding.Down
             local fmt = C_StringUtil.CreateNumericRuleFormatter()
+            -- GLYPH alert: fixed 16px atlas escape prepended to every band that starts
+            -- inside the alert region. Fixed size: the formatter is CACHED + bind-frozen
+            -- while font size changes ride the LIGHTWEIGHT text update, so a font-derived
+            -- size would go stale on a scale drag.
+            local glyphPfx = (alertMode == "GLYPH") and ("|A:" .. (alertAtlas or "") .. ":16:16|a ") or nil
+            local cuts = {}    -- thresholds already holding a band
+            local bands = {}   -- buffered: emitted ASCENDING below (the resume band
+                               -- can be composed out of order; the pre-alert code
+                               -- always emitted ascending, so keep that guarantee)
             -- Highest threshold <= remaining seconds wins.
             local function add(threshold, fstr, hex, components)
-                if colorByTime then fstr = "|cff" .. hex .. fstr .. "|r" end
-                fmt:AddBreakpoint({ threshold = threshold, step = 1, rounding = down,
-                                    min = 1, format = fstr, components = components })
+                if colorByTime and hex then fstr = "|cff" .. hex .. fstr .. "|r" end
+                if glyphPfx and threshold < alertT then fstr = glyphPfx .. fstr end
+                cuts[threshold] = true
+                bands[#bands + 1] = { threshold = threshold, step = 1, rounding = down,
+                                      min = 1, format = fstr, components = components }
             end
-            add(0, secFmt, "ff0000")
+            if alertMode == "TEXT" then
+                -- The whole sub-threshold region shows the custom text (countdown
+                -- replaced). Red unless the user's own |c escape already colours it.
+                -- Empty text = literal: a blank sub-threshold band.
+                local txt = SanitizeAlertText(alertText)
+                if txt ~= "" and not txt:find("|c", 1, true) then txt = "|cffff0000" .. txt .. "|r" end
+                cuts[0] = true
+                bands[#bands + 1] = { threshold = 0, step = 1, rounding = down, min = 1, format = txt }
+            else
+                add(0, secFmt, "ff0000")
+            end
             if colorByTime then
-                -- Colour cuts go in below the hide threshold only — a cut at/above it
-                -- would shadow the blank band. (Hide slider caps at 60s, so the two
-                -- sub-minute cuts are the only ones affected.)
-                if not hideAboveT or hideAboveT > 5  then add(5,  secFmt, "ff8000") end
-                if not hideAboveT or hideAboveT > 15 then add(15, secFmt, "ffff00") end
+                -- Colour cuts go in below the blank band only — a cut at/above it would
+                -- shadow it. (Hide/alert sliders cap at 60s, so the two sub-minute cuts
+                -- are the only ones affected.) TEXT alert: never inside the constant-text
+                -- region — the custom text owns [0, alertT) outright.
+                local lowT = (alertMode == "TEXT") and alertT or 0
+                if 5  > lowT and (not blankAt or blankAt > 5)  then add(5,  secFmt, "ff8000") end
+                if 15 > lowT and (not blankAt or blankAt > 15) then add(15, secFmt, "ffff00") end
             end
-            if hideAboveT then
-                fmt:AddBreakpoint({ threshold = hideAboveT, step = 1, rounding = down, format = "" })
+            -- Resume band AT the alert threshold: above it the normal (un-alerted)
+            -- format takes over. Skipped when a cut already sits exactly there (a
+            -- colour band), when the blank band starts at/below it, or at 60 (the
+            -- minute band below IS the resume band).
+            if alertT and not cuts[alertT] and (not blankAt or alertT < blankAt) and alertT < 60 then
+                local hex = (alertT < 5 and "ff0000") or (alertT < 15 and "ff8000") or "ffff00"
+                add(alertT, secFmt, hex)
+            end
+            if blankAt then
+                bands[#bands + 1] = { threshold = blankAt, step = 1, rounding = down, format = "" }
             else
                 -- 60s+ renders minutes/hours (green = the legacy curve's fresh end).
                 add(60,   (format == "FULL") and "%.0f Minutes" or "%.0fm", "00ff00",
@@ -429,6 +520,8 @@ local function BuildDurationFormatter(format, hideAboveT, colorByTime)
                 add(3600, (format == "FULL") and "%.0f Hours"   or "%.0fh", "00ff00",
                     { { div = 3600, step = 1, rounding = down } })
             end
+            table.sort(bands, function(a, b) return a.threshold < b.threshold end)
+            for i = 1, #bands do fmt:AddBreakpoint(bands[i]) end
             return fmt
         end)
         return ok and f or nil
@@ -475,11 +568,19 @@ local function BuildDurationFormatter(format, hideAboveT, colorByTime)
 end
 
 local durationFormatterCache = {}
-local function GetDurationFormatter(format, hideAboveT, colorByTime)
+local function GetDurationFormatter(format, hideAboveT, colorByTime, alertMode, alertThreshold, alertText, alertGlyphKey)
     format = format or "NUMBER"
     local key = format .. "|" .. tostring(hideAboveT or "") .. (colorByTime and "|C" or "")
+    local alertAtlas
+    if alertMode == "TEXT" or alertMode == "GLYPH" then
+        if alertMode == "GLYPH" then alertAtlas = DF:GetExpiryAlertAtlas(alertGlyphKey) end
+        -- Distinct alert configs -> distinct cached formatters (text/atlas are part
+        -- of the band strings, so they must key the cache too).
+        key = key .. "|X" .. alertMode .. ":" .. tostring(tonumber(alertThreshold) or 5) .. ":"
+                  .. (alertAtlas or tostring(alertText or ""))
+    end
     if durationFormatterCache[key] == nil then
-        durationFormatterCache[key] = BuildDurationFormatter(format, hideAboveT, colorByTime) or false
+        durationFormatterCache[key] = BuildDurationFormatter(format, hideAboveT, colorByTime, alertMode, alertThreshold, alertText, alertAtlas) or false
     end
     return durationFormatterCache[key] or nil
 end
@@ -488,8 +589,8 @@ end
 -- reuses the EXACT same secret-safe colour-by-time BUCKET formatter as the #205 buff/debuff
 -- rows (|cRRGGBB escapes baked into the native NumericRuleFormatter bands, evaluated C-side).
 -- Cached, so repeated SyncFrame calls return the same shared formatter object.
-function DF:GetFactoryDurationFormatter(format, hideAboveT, colorByTime)
-    return GetDurationFormatter(format, hideAboveT, colorByTime)
+function DF:GetFactoryDurationFormatter(format, hideAboveT, colorByTime, alertMode, alertThreshold, alertText, alertGlyphKey)
+    return GetDurationFormatter(format, hideAboveT, colorByTime, alertMode, alertThreshold, alertText, alertGlyphKey)
 end
 
 -- ⚠ STACKS FORMATTERS ARE FORBIDDEN on container rows — do not re-add one.
@@ -566,14 +667,17 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
         dur = DF.TextStyle:BuildSpec(db, prefix .. "Duration", {
             baseSize = 10, defaultAnchor = "CENTER", boxW = iconSize, boxH = iconSize,
         })
+        local alertMode = g("ExpiryAlertMode")
         dur.show = true
-        dur.formatter = GetDurationFormatter(durFormat, hideAboveT, colorByTime)
+        dur.formatter = GetDurationFormatter(durFormat, hideAboveT, colorByTime,
+            alertMode, g("ExpiryAlertThreshold"), g("ExpiryAlertText"), g("ExpiryAlertGlyph"))
         -- colorByTime = colour BUCKETS baked into the formatter's band format strings
         -- (see BuildDurationFormatter — the smooth curve is not addon-reachable). The
         -- static colour must not stomp the escapes; formatKey keeps both flags in the
         -- rebuild signature (the formatter is creation-frozen on the native bind).
         if colorByTime then dur.color = nil end
         dur.formatKey = durFormat .. (colorByTime and ":C" or "") .. (hideAboveT and (":H" .. tostring(hideAboveT)) or "")
+            .. DF:GetExpiryAlertFmtKey(alertMode, g("ExpiryAlertThreshold"), g("ExpiryAlertText"), g("ExpiryAlertGlyph"))
     end
 
     -- Buff rows get native spell-ID exclude maps (AD-dedup + missing-buff hide below).
@@ -1024,11 +1128,15 @@ function DF:BuildDefensiveRowConfig(db, unit)
             baseSize = 10, defaultAnchor = "CENTER", boxW = iconSize, boxH = iconSize,
         })
         dur.show = true
-        dur.formatter = GetDurationFormatter("NUMBER", nil, colorByTime)
+        dur.formatter = GetDurationFormatter("NUMBER", nil, colorByTime,
+            db.defensiveIconExpiryAlertMode, db.defensiveIconExpiryAlertThreshold,
+            db.defensiveIconExpiryAlertText, db.defensiveIconExpiryAlertGlyph)
         -- colorByTime = colour buckets baked into the formatter bands (see
         -- BuildDurationFormatter). Static colour must not stomp the escapes.
         if colorByTime then dur.color = nil end
         dur.formatKey = "NUMBER" .. (colorByTime and ":C" or "")
+            .. DF:GetExpiryAlertFmtKey(db.defensiveIconExpiryAlertMode, db.defensiveIconExpiryAlertThreshold,
+                db.defensiveIconExpiryAlertText, db.defensiveIconExpiryAlertGlyph)
     end
 
     -- FILTER REGISTRY: the category selection drives the row as ONE plain HELPFUL

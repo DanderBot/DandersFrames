@@ -1217,6 +1217,8 @@ local TYPE_DEFAULTS = {
         durationColorByTime = true,
         durationColor = {r = 1, g = 1, b = 1, a = 1},
         durationHideAboveEnabled = false, durationHideAboveThreshold = 10,
+        expiryAlertMode = "OFF", expiryAlertThreshold = 5,
+        expiryAlertText = "", expiryAlertGlyph = "WARNING",
         showStacks = true, stackMinimum = 2,
         stackFont = "Friz Quadrata TT", stackScale = 1.0,
         stackOutline = "OUTLINE", stackAnchor = "BOTTOMRIGHT",
@@ -1311,6 +1313,8 @@ local TYPE_DEFAULTS = {
         durationColorByTime = true,
         durationColor = {r = 1, g = 1, b = 1, a = 1},
         durationHideAboveEnabled = false, durationHideAboveThreshold = 10,
+        expiryAlertMode = "OFF", expiryAlertThreshold = 5,
+        expiryAlertText = "", expiryAlertGlyph = "WARNING",
         showStacks = true, stackMinimum = 2,
         stackFont = "Friz Quadrata TT", stackScale = 1.0,
         stackOutline = "OUTLINE", stackAnchor = "BOTTOMRIGHT",
@@ -1395,6 +1399,8 @@ local TYPE_DEFAULTS = {
         durationAnchor = "CENTER", durationX = 0, durationY = 0,
         durationColorByTime = true,
         durationHideAboveEnabled = false, durationHideAboveThreshold = 10,
+        expiryAlertMode = "OFF", expiryAlertThreshold = 5,
+        expiryAlertText = "", expiryAlertGlyph = "WARNING",
         frameLevel = 30, frameStrata = "INHERIT",
     },
     -- Frame-level types: mirror the inline literals in EnsureTypeConfig so the
@@ -1650,6 +1656,40 @@ local GLOBAL_DEFAULT_MAP = {
         frameLevel = "indicatorFrameLevel", frameStrata = "indicatorFrameStrata",
     },
 }
+
+-- Shared Expiry Alert control block for the Duration Text sections (placed
+-- icon/square/bar cards + the group Appearance sections). Mode dropdown, then
+-- mode-dependent controls: custom text (TEXT), glyph picker (GLYPH), threshold
+-- slider (both). Writes ride the proxy's __newindex refresh; the alert keys sit
+-- in durationFmtKey's struct sig, so the factory Rebuilds the slot (formatter is
+-- bind-frozen). Mode-inapplicable controls grey via SetEnabled — the cards'
+-- static-height boxes can't hide rows without re-measuring. Glyph labels embed
+-- the atlas escape as a live preview.
+local function AddExpiryAlertControls(g, parent, proxy, extraCb)
+    local textBox, glyphDrop, slider
+    local function UpdateState()
+        local mode = proxy.expiryAlertMode or "OFF"
+        if textBox then textBox:SetEnabled(mode == "TEXT") end
+        if glyphDrop then glyphDrop:SetEnabled(mode == "GLYPH") end
+        if slider then slider:SetEnabled(mode ~= "OFF") end
+    end
+    local modeOptions = { OFF = L["Off"], TEXT = L["Custom Text"], GLYPH = L["Glyph"],
+                          _order = { "OFF", "TEXT", "GLYPH" } }
+    g:AddWidget(GUI:CreateDropdown(parent, L["Expiry Alert"], modeOptions, proxy, "expiryAlertMode",
+        function() UpdateState(); if extraCb then extraCb() end end), 54)
+    textBox = GUI:CreateEditBox(parent, L["Alert Text"], proxy, "expiryAlertText", extraCb)
+    g:AddWidget(textBox, 48)
+    local glyphOptions = { _order = {} }
+    for i, gl in ipairs(DF.ExpiryAlertGlyphs) do
+        glyphOptions[gl.key] = "|A:" .. gl.atlas .. ":16:16|a " .. L[gl.name]
+        glyphOptions._order[i] = gl.key
+    end
+    glyphDrop = GUI:CreateDropdown(parent, L["Glyph"], glyphOptions, proxy, "expiryAlertGlyph", extraCb)
+    g:AddWidget(glyphDrop, 54)
+    slider = GUI:CreateSlider(parent, L["Alert Below (seconds)"], 1, 60, 1, proxy, "expiryAlertThreshold", extraCb)
+    g:AddWidget(slider, 54)
+    UpdateState()
+end
 
 -- Create a proxy table that maps flat key access to an indicator instance
 -- Fallback chain: instance value → global defaults → TYPE_DEFAULTS
@@ -3974,6 +4014,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             hideAboveSlider = GUI:CreateSlider(parent, L["Hide Above (seconds)"], 1, 60, 1, proxy, "durationHideAboveThreshold")
             g:AddWidget(hideAboveSlider, 54)
             UpdateHideAboveState()
+            AddExpiryAlertControls(g, parent, proxy)
         end)
         -- Stack Count
         AddGroup(L["Stack Count"], function(g)
@@ -4082,6 +4123,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             hideAboveSlider = GUI:CreateSlider(parent, L["Hide Above (seconds)"], 1, 60, 1, proxy, "durationHideAboveThreshold")
             g:AddWidget(hideAboveSlider, 54)
             UpdateHideAboveState()
+            AddExpiryAlertControls(g, parent, proxy)
         end)
         -- Stack Count
         AddGroup(L["Stack Count"], function(g)
@@ -4222,6 +4264,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             hideAboveSlider = GUI:CreateSlider(parent, L["Hide Above (seconds)"], 1, 60, 1, proxy, "durationHideAboveThreshold")
             g:AddWidget(hideAboveSlider, 54)
             UpdateHideAboveState()
+            AddExpiryAlertControls(g, parent, proxy)
         end)
 
     elseif typeKey == "border" then
@@ -7074,6 +7117,8 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
         durationAnchor = "CENTER", durationX = 0, durationY = 0,
         durationColorByTime = false, durationColor = { r = 1, g = 1, b = 1, a = 1 },
         durationHideAboveEnabled = false, durationHideAboveThreshold = 10,
+        expiryAlertMode = "OFF", expiryAlertThreshold = 5,
+        expiryAlertText = "", expiryAlertGlyph = "WARNING",
         stackFont = "Friz Quadrata TT", stackScale = 1.0, stackOutline = "OUTLINE",
         stackAnchor = "BOTTOMRIGHT", stackX = 2, stackY = -1,
         stackColor = { r = 1, g = 1, b = 1, a = 1 },
@@ -7195,6 +7240,7 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
         hideAboveSlider = GUI:CreateSlider(body, L["Hide Above (seconds)"], 1, 60, 1, proxy, "durationHideAboveThreshold", refresh, refresh, true)
         g:AddWidget(hideAboveSlider, 54)
         UpdateHideAboveState()
+        AddExpiryAlertControls(g, body, proxy, refresh)
     end)
 
     -- ── STACK COUNT ── (no Min Stacks — not expressible on the native no-formatter

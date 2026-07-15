@@ -824,8 +824,12 @@ local function buildDurationTextSpec(indicator, defaultShow)
     -- buff/debuff/defensive rows use, and what the pre-12.1 icons showed (native cooldown
     -- numbers). Without it the container's own SetDurationText default renders "45s". The
     -- one formatter also carries colour-by-time buckets + hide-above blanking when set.
+    -- Expiry Alert (per-indicator/per-group-style): the shared formatter carries the
+    -- alert band too — custom TEXT is per indicator by design ("Shield dropping!").
     local formatter = DF.GetFactoryDurationFormatter
-        and DF:GetFactoryDurationFormatter("NUMBER", hideAboveT, colorByTime) or nil
+        and DF:GetFactoryDurationFormatter("NUMBER", hideAboveT, colorByTime,
+            indicator.expiryAlertMode, indicator.expiryAlertThreshold,
+            indicator.expiryAlertText, indicator.expiryAlertGlyph) or nil
     return {
         show      = true,
         font      = indicator.durationFont,
@@ -850,6 +854,8 @@ local function durationFmtKey(indicator, defaultShow)
     return "NUMBER"
         .. (indicator.durationColorByTime and ":C" or "")
         .. (hideAboveT and (":H" .. tostring(hideAboveT)) or "")
+        .. (DF.GetExpiryAlertFmtKey and DF:GetExpiryAlertFmtKey(indicator.expiryAlertMode,
+            indicator.expiryAlertThreshold, indicator.expiryAlertText, indicator.expiryAlertGlyph) or "")
 end
 
 -- Build the style table for a placed icon/square. icon = native spell texture (unless

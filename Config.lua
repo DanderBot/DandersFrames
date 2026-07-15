@@ -1045,6 +1045,12 @@ DF.PartyDefaults = {
     buffDurationScale = 1.2000000476837,
     buffDurationX = 1,
     buffDurationY = 2,
+    -- Expiry Alert on duration text (native formatter bands — secret-safe).
+    -- Mode OFF/TEXT/GLYPH; glyph stores a DF.ExpiryAlertGlyphs KEY, never an atlas.
+    buffExpiryAlertGlyph = "WARNING",
+    buffExpiryAlertMode = "OFF",
+    buffExpiryAlertText = "",
+    buffExpiryAlertThreshold = 5,
     buffExpiringBorderColor = {r = 1, g = 0.50196081399918, b = 0, a = 1},
     buffExpiringBorderColorByTime = false,
     buffExpiringBorderEnabled = true,
@@ -1217,6 +1223,11 @@ DF.PartyDefaults = {
     debuffDurationScale = 1,
     debuffDurationX = 0,
     debuffDurationY = 0,
+    -- Expiry Alert on duration text (see the buffExpiryAlert* block).
+    debuffExpiryAlertGlyph = "WARNING",
+    debuffExpiryAlertMode = "OFF",
+    debuffExpiryAlertText = "",
+    debuffExpiryAlertThreshold = 5,
     debuffExpiringBorderColor = {r = 1, g = 0.27843138575554, b = 0, a = 1},
     debuffExpiringBorderColorByTime = false,
     debuffExpiringBorderEnabled = true,
@@ -1311,6 +1322,11 @@ DF.PartyDefaults = {
     defensiveIconDurationX = 0,
     defensiveIconDurationY = 0,
     defensiveIconEnabled = true,
+    -- Expiry Alert on duration text (see the buffExpiryAlert* block).
+    defensiveIconExpiryAlertGlyph = "WARNING",
+    defensiveIconExpiryAlertMode = "OFF",
+    defensiveIconExpiryAlertText = "",
+    defensiveIconExpiryAlertThreshold = 5,
     defensiveIconFrameLevel = 0,
     defensiveIconHideSwipe = false,
     defensiveIconScale = 1,
