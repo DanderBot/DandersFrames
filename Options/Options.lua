@@ -5551,10 +5551,12 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local dfSort = debuffGroup:AddWidget(GUI:CreateDropdown(self.child, L["Sort Order"], debuffSortOptions, db, "directDebuffSortOrder", DirectFilterChanged), 55)
 
         -- Native-only: max TOTAL duration filter (12.1 candidateFilters.maxDuration).
-        -- Hidden while the legacy render owns the row, and while All Debuffs is on
-        -- (the resolver returns nil then — every category filter is ignored).
+        -- Hidden while the legacy render owns the row. Works in ALL-debuffs mode too
+        -- (single maxDuration record) — only Keep Important needs the category
+        -- filters (boolean flags can't be negated on the ALL record), so THAT
+        -- toggle alone hides while All Debuffs is on.
         local function HideDebuffMaxDurControls(d)
-            return d.directDebuffShowAll or not DF:FactoryOwnsDebuffRow(d)
+            return not DF:FactoryOwnsDebuffRow(d)
         end
         local dfMaxDur = debuffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Long Debuffs"], db, "debuffMaxDurationEnabled", function()
             DirectFilterChanged()
@@ -5578,7 +5580,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         dfKeepImportant:SetPoint("BOTTOMRIGHT", dfKeepImportantRow, "BOTTOMRIGHT", 0, 0)
         dfKeepImportant.tooltip = L["Boss, Role, and Priority debuffs stay visible even when their duration is over the threshold."]
         dfKeepImportantRow.searchEntry = dfKeepImportant.searchEntry
-        dfKeepImportantRow.hideOn = HideDebuffMaxDurControls
+        dfKeepImportantRow.hideOn = function(d)
+            return d.directDebuffShowAll or not DF:FactoryOwnsDebuffRow(d)
+        end
         dfKeepImportantRow.disableOn = function(d) return not d.debuffMaxDurationEnabled end
         dfKeepImportantRow.SetEnabled = function(_, enabled)
             if dfKeepImportant.SetEnabled then dfKeepImportant:SetEnabled(enabled) end

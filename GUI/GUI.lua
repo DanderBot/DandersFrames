@@ -2360,6 +2360,7 @@ function GUI:CreateDesignerPresetBar(parent, opts)
 
     local menu = CreateFrame("Frame", nil, ddBtn, "BackdropTemplate")
     menu:SetFrameStrata("FULLSCREEN_DIALOG")
+    GUI:RegisterMenu(menu)
     menu:SetPoint("TOPLEFT", ddBtn, "BOTTOMLEFT", 0, -1)
     menu:SetWidth(150)
     CreatePanelBackdrop(menu)
@@ -4438,6 +4439,21 @@ function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback
     return container
 end
 
+-- ============================================================
+-- OPEN-MENU REGISTRY
+-- Dropdown/preset menus anchor to their button and survive context switches
+-- that leave the button visible (e.g. the Aura Designer changing tabs).
+-- Every menu frame registers here at creation; CloseAllMenus() lets a
+-- context switch dismiss whatever is open.
+-- ============================================================
+GUI._menus = GUI._menus or {}
+function GUI:RegisterMenu(frame) self._menus[frame] = true end
+function GUI:CloseAllMenus()
+    for f in pairs(self._menus) do
+        if f:IsShown() then f:Hide() end
+    end
+end
+
 function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, customGet, customSet, opts)
     opts = opts or {}
     local accentColor = opts.accent
@@ -4556,6 +4572,7 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
         menuFrame:SetPoint("TOPLEFT", btn, "BOTTOMLEFT", 0, -2)
     end
     menuFrame:SetFrameStrata("FULLSCREEN_DIALOG")
+    GUI:RegisterMenu(menuFrame)
     menuFrame:SetClampedToScreen(true)
     CreateElementBackdrop(menuFrame)
     menuFrame:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.98)
@@ -5951,6 +5968,7 @@ function GUI:CreateGrowthControl(parent, db, dbKey, callback)
         menuFrame:SetPoint("TOPLEFT", btn, "BOTTOMLEFT", 0, -2)
         menuFrame:SetPoint("TOPRIGHT", btn, "BOTTOMRIGHT", 0, -2)
         menuFrame:SetFrameStrata("FULLSCREEN_DIALOG")
+        GUI:RegisterMenu(menuFrame)
         menuFrame:SetClampedToScreen(true)
         CreateElementBackdrop(menuFrame)
         menuFrame:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.98)
@@ -6187,6 +6205,7 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
     local menuFrame = CreateFrame("Frame", nil, btn, "BackdropTemplate")
     menuFrame:SetPoint("TOPLEFT", btn, "BOTTOMLEFT", 0, -2)
     menuFrame:SetFrameStrata("FULLSCREEN_DIALOG")
+    GUI:RegisterMenu(menuFrame)
     menuFrame:SetClampedToScreen(true)
     CreateElementBackdrop(menuFrame)
     menuFrame:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.98)
@@ -6492,6 +6511,7 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback, inherit
     local menuFrame = CreateFrame("Frame", nil, btn, "BackdropTemplate")
     menuFrame:SetPoint("TOPLEFT", btn, "BOTTOMLEFT", 0, -2)
     menuFrame:SetFrameStrata("FULLSCREEN_DIALOG")
+    GUI:RegisterMenu(menuFrame)
     menuFrame:SetClampedToScreen(true)
     CreateElementBackdrop(menuFrame)
     menuFrame:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.98)
@@ -6770,6 +6790,7 @@ function GUI:CreateSoundDropdown(parent, label, dbTable, dbKey, callback)
     local menuFrame = CreateFrame("Frame", nil, btn, "BackdropTemplate")
     menuFrame:SetPoint("TOPLEFT", btn, "BOTTOMLEFT", 0, -2)
     menuFrame:SetFrameStrata("FULLSCREEN_DIALOG")
+    GUI:RegisterMenu(menuFrame)
     menuFrame:SetClampedToScreen(true)
     CreateElementBackdrop(menuFrame)
     menuFrame:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.98)

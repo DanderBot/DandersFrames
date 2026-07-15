@@ -5763,6 +5763,7 @@ SwitchTab = function(tabKey)
     -- dirty rebuild so the tab isn't built twice.
     adPickerDirty = false
     CloseADPicker()
+    if GUI then GUI:CloseAllMenus() end   -- an open dropdown (e.g. spec) must not outlive the tab
 
     for key, btn in pairs(tabButtons) do
         btn:SetActive(key == tabKey)  -- underline + accent/dim label (tab mode)
@@ -5843,6 +5844,7 @@ local function SetMainTab(tabKey)
     -- The shared picker captures its pool/effect at open time — never let
     -- it survive a pool switch.
     CloseADPicker()
+    if GUI then GUI:CloseAllMenus() end   -- an open dropdown (e.g. spec) must not outlive the tab
     for key, btn in pairs(mainTabButtons) do
         btn:SetActive(key == tabKey)
     end

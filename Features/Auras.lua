@@ -97,7 +97,20 @@ local DISPEL_TYPES = { Magic = true, Curse = true, Disease = true, Poison = true
 -- to show-all, so DriveDebuffFactory intercepts the empty list and parks the
 -- row instead of building a container from it.
 local function BuildDirectDebuffFilters(db, claimed)
-    if db.directDebuffShowAll then return nil end
+    if db.directDebuffShowAll then
+        -- ALL mode: no category filtering, but Hide Long Debuffs still applies as
+        -- one native maxDuration record. Keep Important CANNOT be honoured here:
+        -- exempting boss/role/priority needs a second un-capped record, and the
+        -- ALL record can't negate those boolean flags — importants would render
+        -- twice. The GUI hides the toggle in ALL mode. Claims stay unconsulted
+        -- (ALL-mode rows show claimed categories too — accepted behavior).
+        local allMaxDur = db.debuffMaxDurationEnabled and (db.debuffMaxDurationMinutes or 0) > 0
+            and (db.debuffMaxDurationMinutes or 0) * 60 or nil
+        if allMaxDur then
+            return { { filter = "HARMFUL", key = "all", candidateFilters = { maxDuration = allMaxDur } } }
+        end
+        return nil
+    end
     local dispelOn = db.debuffFilterDispellable
     local playerMode = dispelOn and db.directDebuffDispellableMode ~= "ALL"
     -- CC needs its Blizzard token; skip the group entirely if unavailable
