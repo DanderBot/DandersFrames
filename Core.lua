@@ -4712,6 +4712,14 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 if DF.AuditExportCategories then
                     DF:AuditExportCategories()
                 end
+            elseif msg == "auditspells" then
+                -- Dev: flag Filter Registry spell-DB entries whose ids have
+                -- no client data or no description (review candidates).
+                if DF.FilterRegistry and DF.FilterRegistry.AuditSpellData then
+                    DF.FilterRegistry:AuditSpellData()
+                else
+                    print("|cffff0000DandersFrames:|r Filter Registry not available")
+                end
             elseif msg == "blocked" then
                 -- Dev: inventory of settings disabled by the 12.1 aura system
                 -- (the running "what we've lost / restored" audit).

@@ -225,6 +225,82 @@ function R:GetSpellByName(name)
 end
 
 -- ------------------------------------------------------------
+-- SPELL DATA AUDIT (dev diagnostic, /df auditspells)
+-- Walks every id in the shipped DB (canonical + alts) and flags:
+--   INVALID — C_Spell.GetSpellInfo returns nothing even after a
+--     load request (id unknown to this client; stale DB entry).
+--   NO-DESC — valid spell but an empty description (often a
+--     server-side scripted aura, or a cast mis-harvested as a
+--     buff). Candidates for review, not automatically wrong.
+-- Load strategy: fire C_Spell.RequestLoadSpellData for every id
+-- up front, then classify after a fixed 1.5s C_Timer.After delay.
+-- Chosen over a ContinueOnSpellLoad completion counter because the
+-- mixin never calls back for INVALID ids — the counter would stall
+-- exactly when the audit matters most; a fixed delay always runs.
+-- Developer output: plain print() by project convention.
+-- ------------------------------------------------------------
+function R:AuditSpellData()
+    local ids = {} -- array of { id, rec, isAlt }
+    for _, rec in ipairs(R.Spells) do
+        ids[#ids + 1] = { id = rec.id, rec = rec }
+        if rec.alts then
+            for _, alt in ipairs(rec.alts) do
+                ids[#ids + 1] = { id = alt, rec = rec, isAlt = true }
+            end
+        end
+    end
+
+    for _, e in ipairs(ids) do
+        -- pcall: RequestLoadSpellData errors on ids the client considers
+        -- invalid — exactly the entries this audit exists to find.
+        pcall(C_Spell.RequestLoadSpellData, e.id)
+    end
+
+    print(format("|cff00ff00DandersFrames:|r Spell data audit — %d ids (%d spells + alts), results in ~1.5s...",
+        #ids, #R.Spells))
+
+    C_Timer.After(1.5, function()
+        local function cats(rec)
+            local keys = {}
+            for k in pairs(rec.cats or {}) do keys[#keys + 1] = k end
+            table.sort(keys)
+            return table.concat(keys, ", ")
+        end
+        local function describe(e)
+            local suffix = e.isAlt and format(" (alt of %d)", e.rec.id) or ""
+            return format("  %d %s%s [%s]", e.id, e.rec.n or "?", suffix, cats(e.rec))
+        end
+
+        local invalid, nodesc = {}, {}
+        for _, e in ipairs(ids) do
+            local ok, info = pcall(C_Spell.GetSpellInfo, e.id)
+            if not ok or not info then
+                invalid[#invalid + 1] = e
+            else
+                local ok2, desc = pcall(C_Spell.GetSpellDescription, e.id)
+                if not ok2 or type(desc) ~= "string" or desc == "" then
+                    nodesc[#nodesc + 1] = e
+                end
+            end
+        end
+
+        print(format("|cff00ff00DandersFrames:|r Spell data audit: %d ids checked, %d invalid, %d without a description.",
+            #ids, #invalid, #nodesc))
+        if #invalid > 0 then
+            print(format("INVALID (no client data) — stale or wrong ids (%d):", #invalid))
+            for _, e in ipairs(invalid) do print(describe(e)) end
+        end
+        if #nodesc > 0 then
+            print(format("NO DESCRIPTION (server-side aura or suspect) — candidates for review, not automatically wrong (%d):", #nodesc))
+            for _, e in ipairs(nodesc) do print(describe(e)) end
+        end
+        if #invalid == 0 and #nodesc == 0 then
+            print("All spell DB ids have client data and descriptions.")
+        end
+    end)
+end
+
+-- ------------------------------------------------------------
 -- RESOLVER
 -- Selection -> exactly one candidateFilters spell-ID map.
 -- include: union of all variant IDs of every effectively-enabled
