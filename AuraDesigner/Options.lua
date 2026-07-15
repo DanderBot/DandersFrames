@@ -5674,6 +5674,12 @@ local function OpenADPicker(opts)
     if tabScrollFrame then tabScrollFrame:Hide() end
     opts.parent = rightPanel
     opts.onClose = ADPickerClosed
+    -- Empty record list on My Buffs = unsupported/undetected spec: keep
+    -- the old picker's guidance instead of a bare "No results found".
+    -- (Other Buffs records are the full SpellDB — never empty.)
+    if not IsOtherTab() then
+        opts.emptyText = L["No trackable spells found for this spec.\n\nYou can select a different spec using the dropdown above."]
+    end
     adPickerHandle = DF.FilterRegistry:OpenSpellPicker(opts)
 end
 
@@ -5718,6 +5724,9 @@ local function BuildADPickerRecords(includeAdHoc)
             cats = rec and rec.cats or nil,
             display = ai.display or ai.name,
             icon = GetAuraIcon(spec, ai.name),
+            -- Letter/colour-swatch fallback for auras whose icon texture
+            -- doesn't resolve (the old card fallback)
+            iconColor = type(ai.color) == "table" and ai.color or nil,
             auraName = ai.name,
         }
     end
@@ -5905,9 +5914,9 @@ end
 -- (CleanupAdHocAura drops the config again once its last effect is
 -- removed). The picker stays open (echo confirms), so several ids can be
 -- added in a row. The shared picker has already validated the digits and
--- normalized leading zeros. Returns truthy when the add landed (the picker
--- clears its ID box on that).
-local function ADAddByID(idNum, picker, mode, typeKey, groupID)
+-- normalized leading zeros; idText is that validated digit STRING. Returns
+-- truthy when the add landed (the picker clears its ID box on that).
+local function ADAddByID(idNum, idText, picker, mode, typeKey, groupID)
     local isOther = IsOtherTab()
     local spec = ResolveSpec()
     -- The Other Buffs pool is spec-independent — no spec required there.
@@ -5944,10 +5953,9 @@ local function ADAddByID(idNum, picker, mode, typeKey, groupID)
     end
 
     local isAdHoc = not auraName
-    -- %d on the picker-validated (<= 10 digit) id is exact — number
-    -- formatting can never leak into config keys (AdHocSpellID parses
-    -- "^#(%d+)$").
-    if isAdHoc then auraName = format("#%d", idNum) end
+    -- Key from the validated TEXT, not tonumber output — number formatting
+    -- must never leak into config keys (AdHocSpellID parses "^#(%d+)$").
+    if isAdHoc then auraName = "#" .. idText end
 
     -- Cross-tab block (B2): the spell — snapped name's FULL identity set,
     -- or the raw id for ad-hoc — is already tracked by the OPPOSITE pool.
@@ -6063,8 +6071,8 @@ local function OpenIndicatorPicker(typeKey, mode)
             },
         },
         allowAddByID = true,
-        onAddByID = function(idNum, _, picker)
-            return ADAddByID(idNum, picker, mode, typeKey, nil)
+        onAddByID = function(idNum, _, picker, idText)
+            return ADAddByID(idNum, idText, picker, mode, typeKey, nil)
         end,
     })
 end
@@ -6108,8 +6116,8 @@ local function OpenGroupSpellPicker(groupID)
             },
         },
         allowAddByID = true,
-        onAddByID = function(idNum, action, picker)
-            return ADAddByID(idNum, picker, "group", (action and action.typeKey) or "icon", groupID)
+        onAddByID = function(idNum, action, picker, idText)
+            return ADAddByID(idNum, idText, picker, "group", (action and action.typeKey) or "icon", groupID)
         end,
     })
 end

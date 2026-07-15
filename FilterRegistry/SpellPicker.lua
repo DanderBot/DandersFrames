@@ -11,7 +11,7 @@ local addonName, DF = ...
 -- Designer's spell list share are exported on DF.FilterRegistry.
 -- ============================================================
 
-local pairs, ipairs, type = pairs, ipairs, type
+local pairs, ipairs, type, next = pairs, ipairs, type, next
 local format = string.format
 local tinsert = table.insert
 local tsort = table.sort
@@ -155,9 +155,16 @@ R.ApplyClassNameColor = ApplyNameColor
 --                   cats    optional set of category keys (category filter)
 --                   display optional display-name override (skips C_Spell)
 --                   icon    optional icon override (skips C_Spell)
+--                   iconColor optional {r,g,b} array: rows whose icon
+--                           doesn't resolve render a colour swatch with
+--                           the name's first letter instead of the
+--                           question mark
 --                 plus any consumer fields — handlers get the record back.
 --   classLock     (optional) class token: HIDES the class dropdown and
 --                 shows only that class's records + class == "ALL".
+--   emptyText     (optional) message shown when the provider returned NO
+--                 records at all (e.g. unsupported spec); a search or
+--                 filter matching nothing still shows L["No results found"].
 --   rowActions    (required) array of actions. ONE action = the whole row
 --                 is clickable (no visible button); TWO+ = small labelled
 --                 buttons on each row. Each action:
@@ -172,12 +179,16 @@ R.ApplyClassNameColor = ApplyNameColor
 --                 (e.g. the target filter was deleted).
 --   allowAddByID  (optional) show the ad-hoc "#id" row: a Spell ID box
 --                 plus one button per rowAction (Enter = first action).
---   onAddByID     (with allowAddByID) function(id, action, picker) ->
---                 clearBox. The CONSUMER owns what an ad-hoc add means;
---                 echo/refresh through the picker handle. Return true to
---                 clear the ID box (i.e. the add landed).
+--   onAddByID     (with allowAddByID) function(id, action, picker,
+--                 idText) -> clearBox. The CONSUMER owns what an ad-hoc
+--                 add means; echo/refresh through the picker handle.
+--                 idText is the normalized digit string — mint text keys
+--                 from IT, never from the number. Return true to clear
+--                 the ID box (i.e. the add landed).
 --   onClose       (optional) function() called whenever the picker hides
---                 (close button, ESC, programmatic, ancestor hide).
+--                 (close button, ESC, programmatic, ancestor hide — the
+--                 picker latches itself hidden on ancestor hides, so it
+--                 never reappears on its own).
 --
 -- Returned handle: :Close() :Refresh() :RefreshRecords() :Echo(msg)
 -- :IsOpen(). Refresh re-renders (re-evaluates isBlocked); RefreshRecords
@@ -231,6 +242,7 @@ local function BuildIndex(inst)
         end)
     end
     inst.index = index
+    inst.hasRecords = next(index) ~= nil
 
     -- Class dropdown options: one entry per class token actually present,
     -- in the fixed class order; "ALL" (items/racials) lists last as
@@ -274,6 +286,11 @@ local function AcquireRow(inst, i)
     row.icon:SetSize(20, 20)
     row.icon:SetPoint("LEFT", 6, 0)
     row.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+    -- Letter fallback over a colour swatch (records with iconColor whose
+    -- icon texture doesn't resolve)
+    row.letter = row:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    row.letter:SetPoint("CENTER", row.icon, "CENTER", 0, 0)
 
     -- "Already added" affordance: green check instead of clickability
     row.check = row:CreateTexture(nil, "OVERLAY")
@@ -319,6 +336,9 @@ end
 
 -- Per-row action buttons (multi-action mode only): created lazily on each
 -- row, rebound per bind. actions[1] renders leftmost, the last rightmost.
+-- Create ALL buttons before anchoring any: button i anchors to button i+1,
+-- so a single create-and-anchor loop would hand SetPoint a nil relativeTo
+-- on a fresh row's first bind (clipping the layout until the next refresh).
 local function LayoutRowButtons(inst, row, actions)
     local GUI = DF.GUI
     for i = 1, #actions do
@@ -337,13 +357,16 @@ local function LayoutRowButtons(inst, row, actions)
         if action.color then
             btn.Text:SetTextColor(action.color.r, action.color.g, action.color.b)
         end
+        btn:Show()
+    end
+    for i = #actions, 1, -1 do
+        local btn = row.actionBtns[i]
         btn:ClearAllPoints()
         if i == #actions then
             btn:SetPoint("RIGHT", -6, 0)
         else
             btn:SetPoint("RIGHT", row.actionBtns[i + 1], "LEFT", -4, 0)
         end
-        btn:Show()
     end
     for j = #actions + 1, #row.actionBtns do
         row.actionBtns[j]:Hide()
@@ -356,12 +379,28 @@ local function BindRow(inst, row, y, entry)
     row:SetPoint("TOPRIGHT", 0, -y)
 
     local rec = entry.rec
+    -- Icon: the record's override, else the live C_Spell texture. When
+    -- neither resolves, records carrying an iconColor render a colour
+    -- swatch with the name's first letter (the old Aura Designer card
+    -- fallback); everything else keeps the question mark.
     local icon = rec.icon
-    if not icon then
-        local _, ic = R:GetSpellDisplay(rec)
-        icon = ic
+    if not icon and rec.id and rec.id > 0 then
+        local ic = C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(rec.id)
+        if type(ic) == "number" then icon = ic end
     end
-    row.icon:SetTexture(icon or FALLBACK_ICON)
+    if icon then
+        row.icon:SetTexture(icon)
+        row.letter:Hide()
+    elseif type(rec.iconColor) == "table" then
+        local c = rec.iconColor
+        row.icon:SetColorTexture(c[1] * 0.4, c[2] * 0.4, c[3] * 0.4, 1)
+        row.letter:SetText(entry.name:sub(1, 1))
+        row.letter:SetTextColor(c[1], c[2], c[3])
+        row.letter:Show()
+    else
+        row.icon:SetTexture(FALLBACK_ICON)
+        row.letter:Hide()
+    end
     row.name:SetText(entry.name)
     row._rec, row._name = rec, entry.name
 
@@ -397,6 +436,7 @@ local function BindRow(inst, row, y, entry)
 
     local dim = blocked and true or false
     row.icon:SetAlpha(dim and 0.4 or 1)
+    row.letter:SetAlpha(dim and 0.4 or 1)
     row.name:SetAlpha(dim and 0.4 or 1)
     ApplyNameColor(row.name, rec.class, dim)
     row:SetBackdropColor(0.08, 0.08, 0.08, 0.6) -- clear any lingering hover
@@ -471,6 +511,9 @@ local function RefreshInstance(inst)
     for j = usedRows + 1, #inst.rows do
         inst.rows[j]:Hide()
     end
+    -- Provider returned nothing at all (e.g. unsupported spec) vs. a
+    -- search/filter combination matching nothing
+    inst.empty:SetText((not inst.hasRecords and opts.emptyText) or L["No results found"])
     inst.empty:SetShown(usedRows == 0)
     inst.content:SetHeight(mmax(1, y + 4))
 end
@@ -480,7 +523,9 @@ end
 -- are the same key; reject oversized digit strings — real spell IDs are
 -- well under 10 digits, and past ~15 tonumber() loses integer precision).
 -- The consumer's onAddByID owns what the add MEANS; truthy return = the
--- add landed, so the box clears.
+-- add landed, so the box clears. The normalized digit STRING rides along
+-- as the fourth argument for consumers that mint text keys from it —
+-- number formatting must never leak into config keys.
 local function SubmitAddByID(inst, action)
     local opts = inst.opts
     if not (opts and opts.allowAddByID and opts.onAddByID) then return end
@@ -495,7 +540,7 @@ local function SubmitAddByID(inst, action)
         inst:Echo(L["Enter a valid spell ID."])
         return
     end
-    if opts.onAddByID(tonumber(text), action, inst) then
+    if opts.onAddByID(tonumber(text), action, inst, text) then
         inst.addBox.EditBox:SetText("")
     end
 end
@@ -537,9 +582,18 @@ local function BuildInstance(parent)
         end
     end)
 
-    -- Consumer close hook: fires on ANY hide (close button, ESC,
-    -- programmatic, ancestor hide).
-    picker:SetScript("OnHide", function()
+    -- Consumer close hook: fires on ANY effective hide (close button, ESC,
+    -- programmatic, ancestor hide). An ANCESTOR hide (GUI page nav) does
+    -- not clear this frame's own shown flag — without the self:Hide()
+    -- latch the picker would silently REAPPEAR when the page returns,
+    -- after onClose already tore the consumer's open-state down (e.g. the
+    -- Aura Designer's cross-tab block set), leaving it half-closed with
+    -- its guards disarmed. Latching makes every close a real close: the
+    -- picker never comes back on its own, and reopening runs the full
+    -- open path (fresh state). Hide() inside OnHide is safe — effective
+    -- visibility is already lost, so it can't re-fire the handler.
+    picker:SetScript("OnHide", function(self)
+        self:Hide()
         if inst.opts and inst.opts.onClose then inst.opts.onClose() end
     end)
 
@@ -644,6 +698,7 @@ local function BuildInstance(parent)
 
     inst.empty = listBg:CreateFontString(nil, "OVERLAY", "DFFontDisableSmall")
     inst.empty:SetPoint("CENTER", listBg, "CENTER", 0, 0)
+    inst.empty:SetJustifyH("CENTER") -- opts.emptyText messages can be multi-line
     inst.empty:SetText(L["No results found"])
     inst.empty:Hide()
 
