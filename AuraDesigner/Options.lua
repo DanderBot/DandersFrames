@@ -1219,6 +1219,8 @@ local TYPE_DEFAULTS = {
         durationHideAboveEnabled = false, durationHideAboveThreshold = 10,
         expiryAlertMode = "OFF", expiryAlertThreshold = 5,
         expiryAlertText = "", expiryAlertGlyph = "WARNING",
+        expiryAlertAnchor = "TOP", expiryAlertOffsetX = 0, expiryAlertOffsetY = 0,
+        expiryAlertSize = 14, expiryAlertAnim = "NONE",
         showStacks = true, stackMinimum = 2,
         stackFont = "Friz Quadrata TT", stackScale = 1.0,
         stackOutline = "OUTLINE", stackAnchor = "BOTTOMRIGHT",
@@ -1315,6 +1317,8 @@ local TYPE_DEFAULTS = {
         durationHideAboveEnabled = false, durationHideAboveThreshold = 10,
         expiryAlertMode = "OFF", expiryAlertThreshold = 5,
         expiryAlertText = "", expiryAlertGlyph = "WARNING",
+        expiryAlertAnchor = "TOP", expiryAlertOffsetX = 0, expiryAlertOffsetY = 0,
+        expiryAlertSize = 14, expiryAlertAnim = "NONE",
         showStacks = true, stackMinimum = 2,
         stackFont = "Friz Quadrata TT", stackScale = 1.0,
         stackOutline = "OUTLINE", stackAnchor = "BOTTOMRIGHT",
@@ -1401,6 +1405,8 @@ local TYPE_DEFAULTS = {
         durationHideAboveEnabled = false, durationHideAboveThreshold = 10,
         expiryAlertMode = "OFF", expiryAlertThreshold = 5,
         expiryAlertText = "", expiryAlertGlyph = "WARNING",
+        expiryAlertAnchor = "TOP", expiryAlertOffsetX = 0, expiryAlertOffsetY = 0,
+        expiryAlertSize = 14, expiryAlertAnim = "NONE",
         frameLevel = 30, frameStrata = "INHERIT",
     },
     -- Frame-level types: mirror the inline literals in EnsureTypeConfig so the
@@ -1657,37 +1663,55 @@ local GLOBAL_DEFAULT_MAP = {
     },
 }
 
--- Shared Expiry Alert control block for the Duration Text sections (placed
--- icon/square/bar cards + the group Appearance sections). Mode dropdown, then
--- mode-dependent controls: custom text (TEXT), glyph picker (GLYPH), threshold
--- slider (both). Writes ride the proxy's __newindex refresh; the alert keys sit
--- in durationFmtKey's struct sig, so the factory Rebuilds the slot (formatter is
--- bind-frozen). Mode-inapplicable controls grey via SetEnabled — the cards'
--- static-height boxes can't hide rows without re-measuring. Glyph labels embed
--- the atlas escape as a live preview.
-local function AddExpiryAlertControls(g, parent, proxy, extraCb)
-    local textBox, glyphDrop, slider
+-- "Expiry Warning" section for the placed icon/square/bar cards: the per-
+-- indicator EXPIRY ALERT ELEMENT — a frame-anchored FontString showing the
+-- custom text / glyph only below the threshold (natively driven; see
+-- Factory.lua's EXPIRY ALERT ELEMENT section). Mode dropdown, then the
+-- mode-dependent payload controls (custom text / glyph picker), threshold,
+-- and the element's own frame anchor / offsets / size / animation. Writes
+-- ride the proxy's __newindex refresh; every key except anchor/offset/anim
+-- sits in the placed/bar struct sigs (the formatter is bind-frozen ->
+-- Rebuild), the rest hot-apply through the cosmetic sig. Mode-inapplicable
+-- controls grey via SetEnabled — the cards' static-height boxes can't hide
+-- rows without re-measuring. Glyph labels embed the atlas escape as a live
+-- preview. The animation dropdown is EXPERIMENTAL: it exists to validate
+-- external-region animation on 12.1 (tooltip says so).
+local function AddExpiryAlertControls(g, parent, proxy)
+    local textBox, glyphDrop, dependents
     local function UpdateState()
         local mode = proxy.expiryAlertMode or "OFF"
         if textBox then textBox:SetEnabled(mode == "TEXT") end
         if glyphDrop then glyphDrop:SetEnabled(mode == "GLYPH") end
-        if slider then slider:SetEnabled(mode ~= "OFF") end
+        if dependents then
+            for _, w in ipairs(dependents) do w:SetEnabled(mode ~= "OFF") end
+        end
     end
     local modeOptions = { OFF = L["Off"], TEXT = L["Custom Text"], GLYPH = L["Glyph"],
                           _order = { "OFF", "TEXT", "GLYPH" } }
     g:AddWidget(GUI:CreateDropdown(parent, L["Expiry Alert"], modeOptions, proxy, "expiryAlertMode",
-        function() UpdateState(); if extraCb then extraCb() end end), 54)
-    textBox = GUI:CreateEditBox(parent, L["Alert Text"], proxy, "expiryAlertText", extraCb)
+        UpdateState), 54)
+    textBox = GUI:CreateEditBox(parent, L["Alert Text"], proxy, "expiryAlertText")
     g:AddWidget(textBox, 48)
     local glyphOptions = { _order = {} }
     for i, gl in ipairs(DF.ExpiryAlertGlyphs) do
         glyphOptions[gl.key] = "|A:" .. gl.atlas .. ":16:16|a " .. L[gl.name]
         glyphOptions._order[i] = gl.key
     end
-    glyphDrop = GUI:CreateDropdown(parent, L["Glyph"], glyphOptions, proxy, "expiryAlertGlyph", extraCb)
+    glyphDrop = GUI:CreateDropdown(parent, L["Glyph"], glyphOptions, proxy, "expiryAlertGlyph")
     g:AddWidget(glyphDrop, 54)
-    slider = GUI:CreateSlider(parent, L["Alert Below (seconds)"], 1, 60, 1, proxy, "expiryAlertThreshold", extraCb)
-    g:AddWidget(slider, 54)
+    dependents = {}
+    local function dep(w, h) g:AddWidget(w, h); dependents[#dependents + 1] = w; return w end
+    dep(GUI:CreateSlider(parent, L["Alert Below (seconds)"], 1, 60, 1, proxy, "expiryAlertThreshold"), 54)
+    -- Element placement: anchored to the UNIT FRAME (not the indicator).
+    dep(GUI:CreateDropdown(parent, L["Anchor"], OPTS.ANCHOR_OPTIONS, proxy, "expiryAlertAnchor"), 54)
+    dep(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 1, proxy, "expiryAlertOffsetX"), 54)
+    dep(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, proxy, "expiryAlertOffsetY"), 54)
+    dep(GUI:CreateSlider(parent, L["Size"], 6, 48, 1, proxy, "expiryAlertSize"), 54)
+    local animOptions = { NONE = L["None"], PULSE = L["Pulsate"], FLASH = L["Flash"],
+                          _order = { "NONE", "PULSE", "FLASH" } }
+    local animDrop = dep(GUI:CreateDropdown(parent, L["Animation (Experimental)"], animOptions,
+        proxy, "expiryAlertAnim"), 54)
+    animDrop.tooltip = L["Animations are being validated on 12.1 and may not run in combat."]
     UpdateState()
 end
 
@@ -2649,6 +2673,7 @@ local function ClearPlacedIndicators()
             for _, rec in pairs(mock.dfADPreviewSlots) do
                 stopAnims(rec.slot)
                 rec.slot:Hide()
+                if rec.alertHolder then rec.alertHolder:Hide() end
             end
         end
         mock.dfAD = nil
@@ -2706,6 +2731,7 @@ local function RenderPreviewIndicator(mockFrame, spec, auraName, info, indicator
         -- driver ticks secretRect borders even while hidden (Border.lua).
         if rec.slot.dfBorder and DF.Border then DF.Border:StopAnimation(rec.slot.dfBorder) end
         rec.slot:Hide()
+        if rec.alertHolder then rec.alertHolder:Hide() end
         rec = nil
     end
     if not rec then
@@ -2729,6 +2755,33 @@ local function RenderPreviewIndicator(mockFrame, spec, auraName, info, indicator
     slot:SetFrameLevel(mockFrame:GetFrameLevel() + 8)
     AC.PaintPreviewSlot(slot, cfg, 1)
     slot:Show()
+
+    -- Expiry Alert element sample (cfg.alertPreview): the static payload at the
+    -- configured frame anchor/offset/size, so positioning is WYSIWYG while
+    -- editing. The live element parents to the UNIT frame; the sample parents
+    -- to the mock frame — same anchor math. Static only (no animation on the
+    -- canvas: the anim dropdown is an in-combat/live validation knob).
+    local ap = cfg.alertPreview
+    if ap then
+        local ah = rec.alertHolder
+        if not ah then
+            ah = CreateFrame("Frame", nil, mockFrame)
+            ah:SetSize(1, 1)
+            ah.fs = ah:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            rec.alertHolder = ah
+        end
+        ah:ClearAllPoints()
+        ah:SetPoint(ap.anchor, mockFrame, ap.anchor, ap.offsetX, ap.offsetY)
+        ah:SetFrameStrata(mockFrame:GetFrameStrata())
+        ah:SetFrameLevel(mockFrame:GetFrameLevel() + 9)
+        ah.fs:ClearAllPoints()
+        ah.fs:SetPoint(ap.anchor, ah, ap.anchor, 0, 0)
+        if DF.SafeSetFont then DF:SafeSetFont(ah.fs, ap.font, ap.size, "OUTLINE") end
+        ah.fs:SetText(ap.payload)
+        ah:Show()
+    elseif rec.alertHolder then
+        rec.alertHolder:Hide()
+    end
     return slot
 end
 
@@ -4014,6 +4067,10 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             hideAboveSlider = GUI:CreateSlider(parent, L["Hide Above (seconds)"], 1, 60, 1, proxy, "durationHideAboveThreshold")
             g:AddWidget(hideAboveSlider, 54)
             UpdateHideAboveState()
+        end)
+        -- Expiry Warning: the frame-anchored Expiry Alert ELEMENT (own section —
+        -- distinct from the sound "Expire Alert" group on the sound card).
+        AddGroup(L["Expiry Warning"], function(g)
             AddExpiryAlertControls(g, parent, proxy)
         end)
         -- Stack Count
@@ -4123,6 +4180,10 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             hideAboveSlider = GUI:CreateSlider(parent, L["Hide Above (seconds)"], 1, 60, 1, proxy, "durationHideAboveThreshold")
             g:AddWidget(hideAboveSlider, 54)
             UpdateHideAboveState()
+        end)
+        -- Expiry Warning: the frame-anchored Expiry Alert ELEMENT (own section —
+        -- distinct from the sound "Expire Alert" group on the sound card).
+        AddGroup(L["Expiry Warning"], function(g)
             AddExpiryAlertControls(g, parent, proxy)
         end)
         -- Stack Count
@@ -4264,6 +4325,10 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             hideAboveSlider = GUI:CreateSlider(parent, L["Hide Above (seconds)"], 1, 60, 1, proxy, "durationHideAboveThreshold")
             g:AddWidget(hideAboveSlider, 54)
             UpdateHideAboveState()
+        end)
+        -- Expiry Warning: the frame-anchored Expiry Alert ELEMENT (own section —
+        -- distinct from the sound "Expire Alert" group on the sound card).
+        AddGroup(L["Expiry Warning"], function(g)
             AddExpiryAlertControls(g, parent, proxy)
         end)
 
@@ -7117,8 +7182,6 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
         durationAnchor = "CENTER", durationX = 0, durationY = 0,
         durationColorByTime = false, durationColor = { r = 1, g = 1, b = 1, a = 1 },
         durationHideAboveEnabled = false, durationHideAboveThreshold = 10,
-        expiryAlertMode = "OFF", expiryAlertThreshold = 5,
-        expiryAlertText = "", expiryAlertGlyph = "WARNING",
         stackFont = "Friz Quadrata TT", stackScale = 1.0, stackOutline = "OUTLINE",
         stackAnchor = "BOTTOMRIGHT", stackX = 2, stackY = -1,
         stackColor = { r = 1, g = 1, b = 1, a = 1 },
@@ -7240,7 +7303,6 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
         hideAboveSlider = GUI:CreateSlider(body, L["Hide Above (seconds)"], 1, 60, 1, proxy, "durationHideAboveThreshold", refresh, refresh, true)
         g:AddWidget(hideAboveSlider, 54)
         UpdateHideAboveState()
-        AddExpiryAlertControls(g, body, proxy, refresh)
     end)
 
     -- ── STACK COUNT ── (no Min Stacks — not expressible on the native no-formatter

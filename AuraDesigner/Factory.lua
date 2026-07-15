@@ -824,12 +824,10 @@ local function buildDurationTextSpec(indicator, defaultShow)
     -- buff/debuff/defensive rows use, and what the pre-12.1 icons showed (native cooldown
     -- numbers). Without it the container's own SetDurationText default renders "45s". The
     -- one formatter also carries colour-by-time buckets + hide-above blanking when set.
-    -- Expiry Alert (per-indicator/per-group-style): the shared formatter carries the
-    -- alert band too — custom TEXT is per indicator by design ("Shield dropping!").
+    -- (The Expiry Alert is NOT part of this formatter — it is its own frame-anchored
+    -- element with its own SetDurationText binding; see the EXPIRY ALERT ELEMENT section.)
     local formatter = DF.GetFactoryDurationFormatter
-        and DF:GetFactoryDurationFormatter("NUMBER", hideAboveT, colorByTime,
-            indicator.expiryAlertMode, indicator.expiryAlertThreshold,
-            indicator.expiryAlertText, indicator.expiryAlertGlyph) or nil
+        and DF:GetFactoryDurationFormatter("NUMBER", hideAboveT, colorByTime) or nil
     return {
         show      = true,
         font      = indicator.durationFont,
@@ -854,15 +852,161 @@ local function durationFmtKey(indicator, defaultShow)
     return "NUMBER"
         .. (indicator.durationColorByTime and ":C" or "")
         .. (hideAboveT and (":H" .. tostring(hideAboveT)) or "")
-        .. (DF.GetExpiryAlertFmtKey and DF:GetExpiryAlertFmtKey(indicator.expiryAlertMode,
+end
+
+-- ============================================================
+-- EXPIRY ALERT ELEMENT  (placed icon/square/bar indicators only)
+-- A per-indicator, FRAME-anchored FontString that shows the configured custom
+-- text / glyph only while the tracked aura's remaining time is below the
+-- threshold — natively driven: the slot carries a SECOND SetDurationText
+-- binding whose formatter renders the payload below the threshold and an EMPTY
+-- string above it (C-side band evaluation against the SECRET remaining time,
+-- zero Lua reads). The region is DF-owned and parented to the UNIT FRAME —
+-- deliberately OUTSIDE the button subtree, so (a) it positions relative to the
+-- frame like other AD elements and (b) it is not under the PTR-5 forbidden
+-- umbrella, making the alpha animations legal. Both engine assumptions are
+-- probed by the bind itself — see bindNative's EXPIRY ALERT comment in
+-- Frames/AuraContainer.lua for the A/B probe matrix and the fallback story.
+--
+-- Lifecycle: elements live in store.placedAlerts keyed by the SAME instanceKey
+-- as the placed containers; created on demand, kept across Rebuilds (the region
+-- ref is stable; new buttons re-bind it), released when the alert is switched
+-- OFF, the indicator dies, or the frame clears. Every alert config change is
+-- STRUCTURAL (the formatter is bind-frozen) except anchor/offset/animation,
+-- which hot-apply through the cosmetic sig.
+-- ============================================================
+
+-- Active alert mode or nil. Missing-mode placed indicators never carry one
+-- (nothing to count down while the buff is absent).
+local function alertElemMode(indicator)
+    local m = indicator.expiryAlertMode
+    if m == "TEXT" or m == "GLYPH" then return m end
+    return nil
+end
+
+-- STRUCTURAL alert key ("" when off): mode/threshold/payload via the shared
+-- fmt-key helper, plus size — the GLYPH |A escape bakes size into the band
+-- string, and TEXT size re-applies at (re)position time on the same Rebuild.
+local function alertElemStructKey(indicator)
+    local mode = alertElemMode(indicator)
+    if not mode then return "" end
+    return (DF.GetExpiryAlertFmtKey and DF:GetExpiryAlertFmtKey(mode,
             indicator.expiryAlertThreshold, indicator.expiryAlertText, indicator.expiryAlertGlyph) or "")
+        .. ":S" .. tostring(math.floor(tonumber(indicator.expiryAlertSize) or 14))
+end
+
+-- COSMETIC alert key ("" when off): frame anchor/offsets + animation mode —
+-- all live-applicable on the DF-owned holder (no container touch).
+local function alertElemCoKey(indicator)
+    if not alertElemMode(indicator) then return "" end
+    return tostring(indicator.expiryAlertAnchor or "TOP")
+        .. "," .. tostring(tonumber(indicator.expiryAlertOffsetX) or 0)
+        .. "," .. tostring(tonumber(indicator.expiryAlertOffsetY) or 0)
+        .. "," .. tostring(indicator.expiryAlertAnim or "NONE")
+end
+
+-- Shared animation ticks for the element holder — registered on DF.Border's
+-- UIParent-hosted driver (RegisterExternalAnimTick), NEVER a new OnUpdate. The
+-- driver skips a hidden holder (visibility rides the unit frame), and OFF-mode
+-- indicators have no element at all, so nothing ticks for them. Module-level
+-- shared functions: no per-element closures.
+--   PULSE — smooth alpha oscillation ~0.7 Hz between 0.35 and 1.
+--   FLASH — hard on/off at ~3 Hz.
+-- NOTE: these SetAlpha calls are legal ONLY because the holder lives outside
+-- the button subtree (probe A). If the region ever ends up button-parented
+-- (the probe-A-failed fallback), animations must be stripped — PTR-5 makes any
+-- call on a forbidden button's descendants error in combat.
+local ALERT_ANIM_TICKS = {
+    PULSE = function(holder, elapsed)
+        holder:SetAlpha(0.675 + 0.325 * math.sin(elapsed * 4.4))
+    end,
+    FLASH = function(holder, elapsed)
+        holder:SetAlpha(((elapsed * 3) % 1 < 0.5) and 1 or 0)
+    end,
+}
+
+-- Apply position / font / animation to a live element. Called on create and on
+-- every structural or cosmetic change (cheap: a handful of setters). Anchor
+-- semantics match the placed indicators: the element's own `anchor` point pins
+-- to the SAME point on the unit frame, plus offsets.
+local function positionAlertEl(el, frame, indicator)
+    local holder, fs = el.holder, el.fs
+    local anchor = indicator.expiryAlertAnchor or "TOP"
+    holder:ClearAllPoints()
+    holder:SetPoint(anchor, frame, anchor,
+        tonumber(indicator.expiryAlertOffsetX) or 0, tonumber(indicator.expiryAlertOffsetY) or 0)
+    holder:SetFrameLevel(math.max(0, frame:GetFrameLevel() + 45))
+    fs:ClearAllPoints()
+    fs:SetPoint(anchor, holder, anchor, 0, 0)
+    -- TEXT size comes from the FontString's font; GLYPH size rides the |A escape
+    -- (the font size is still set — harmless). Font follows the indicator's
+    -- duration font so the alert reads as part of the same indicator.
+    local size = math.floor(tonumber(indicator.expiryAlertSize) or 14)
+    if size < 1 then size = 1 end
+    if DF.SafeSetFont then DF:SafeSetFont(fs, indicator.durationFont, size, "OUTLINE") end
+    local tick = ALERT_ANIM_TICKS[indicator.expiryAlertAnim]
+    if tick and DF.Border and DF.Border.RegisterExternalAnimTick then
+        DF.Border:RegisterExternalAnimTick(holder, tick)
+    elseif DF.Border and DF.Border.UnregisterExternalAnimTick then
+        DF.Border:UnregisterExternalAnimTick(holder)
+        holder:SetAlpha(1)
+    end
+end
+
+-- Ensure the element for `key` exists (create) and return it. The holder is a
+-- 1x1 point-host parented to the UNIT FRAME (outside every container/button
+-- subtree); the FontString is the region the native binding drives. Creation
+-- is combat-safe (plain insecure frames).
+local function ensureAlertEl(alerts, key, frame)
+    local el = alerts[key]
+    if not el then
+        local holder = CreateFrame("Frame", nil, frame)
+        holder:SetSize(1, 1)
+        local fs = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        el = { holder = holder, fs = fs }
+        alerts[key] = el
+    end
+    el.holder:Show()
+    return el
+end
+
+-- Release the element for `key`: unregister its animation tick (the external
+-- driver never auto-stops — same explicit-teardown contract as slot borders),
+-- clear + hide. NOT pooled: a released FontString may still be referenced by a
+-- (deferred-teardown) container binding, so cross-indicator reuse could let a
+-- stale binding drive the wrong element. Holders are only released on alert-off
+-- or indicator delete — bounded, user-driven churn.
+local function releaseAlertEl(alerts, key)
+    local el = alerts and alerts[key]
+    if not el then return end
+    alerts[key] = nil
+    if DF.Border and DF.Border.UnregisterExternalAnimTick then
+        DF.Border:UnregisterExternalAnimTick(el.holder)
+    end
+    el.fs:SetText("")
+    el.holder:Hide()
+    el.holder:ClearAllPoints()
+end
+
+-- style.alert spec for the container config: the external region + the
+-- alert-element formatter (payload below threshold, empty above). nil when the
+-- alert is off / the formatter API is unavailable (pre-12.1 fallback inside
+-- GetExpiryAlertElementFormatter).
+local function buildAlertSpec(indicator, region)
+    local mode = alertElemMode(indicator)
+    if not (mode and region) then return nil end
+    local formatter = DF.GetExpiryAlertElementFormatter
+        and DF:GetExpiryAlertElementFormatter(mode, indicator.expiryAlertThreshold,
+            indicator.expiryAlertText, indicator.expiryAlertGlyph, indicator.expiryAlertSize)
+    if not formatter then return nil end
+    return { region = region, formatter = formatter }
 end
 
 -- Build the style table for a placed icon/square. icon = native spell texture (unless
 -- hideIcon = text-only); square = solid config colour fill (no SetIcon). Both keep the
 -- native cooldown swipe, the styleable duration-text fontstring, the native stack count,
 -- and the static border.
-local function buildPlacedStyle(indicator, isSquare, borderSpec)
+local function buildPlacedStyle(indicator, isSquare, borderSpec, alertRegion)
     local hideIcon = indicator.hideIcon and true or false
     local style = {}
 
@@ -900,6 +1044,11 @@ local function buildPlacedStyle(indicator, isSquare, borderSpec)
     if showStacks then style.stacks = buildStackSpec(indicator) end
 
     if borderSpec then style.border = { spec = borderSpec } end
+
+    -- Expiry Alert element: second SetDurationText binding onto the external
+    -- frame-anchored region (see the EXPIRY ALERT ELEMENT section). nil when off
+    -- or when no region was stood up (editor preview passes none).
+    style.alert = buildAlertSpec(indicator, alertRegion)
     return style
 end
 
@@ -925,7 +1074,7 @@ local function testEntryForMap(map)
     return { { spellID = id, name = name, icon = icon, duration = 12, stacks = 0 } }
 end
 
-local function buildPlacedConfig(unit, map, indicator, isSquare, borderSpec)
+local function buildPlacedConfig(unit, map, indicator, isSquare, borderSpec, alertRegion)
     return {
         unit = unit,
         mode = "row",
@@ -943,7 +1092,7 @@ local function buildPlacedConfig(unit, map, indicator, isSquare, borderSpec)
         adBorderAnim = true,
         frameLevelOffset = 40 + (tonumber(indicator.frameLevel) or 0),
         layout = buildPlacedLayout(indicator),
-        style = buildPlacedStyle(indicator, isSquare, borderSpec),
+        style = buildPlacedStyle(indicator, isSquare, borderSpec, alertRegion),
     }
 end
 
@@ -964,6 +1113,7 @@ local function placedStructSig(map, isSquare, hideIcon, showStacks, showDuration
         .. "|" .. (borderOn and "bd" or "")
         .. "|fl=" .. tostring(tonumber(indicator.frameLevel) or 0)
         .. "|df=" .. durationFmtKey(indicator, true)
+        .. "|xa=" .. alertElemStructKey(indicator)   -- expiry-alert element (formatter bind-frozen -> Rebuild)
         .. "|f=" .. poolFilter(indicator)   -- filter string binds at build (othersOnly toggle -> Rebuild)
 end
 
@@ -994,6 +1144,7 @@ local function placedCoSig(indicator, isSquare, borderOn, alpha)
             colSig(indicator.stackColor),
         }, ","),
         "bd=" .. placedBorderRawSig(indicator, borderOn),
+        "xac=" .. alertElemCoKey(indicator),
     }
     if isSquare then
         local r, g, b = readADColor(indicator.color)
@@ -1084,7 +1235,7 @@ end
 -- config; native SetDurationBar (bindNative) drives the value. Duration text via the shared
 -- styleable fontstring (colour-by-time buckets). Interpolation/direction are creation-frozen
 -- opts (bind-once) — Immediate + RemainingTime match the legacy bar's SetTimerDuration call.
-local function buildBarStyle(indicator, borderSpec)
+local function buildBarStyle(indicator, borderSpec, alertRegion)
     local fr, fg, fb, fa = readADColor(indicator.fillColor)
     local style = {
         icon     = { show = false },
@@ -1104,12 +1255,15 @@ local function buildBarStyle(indicator, borderSpec)
     -- Legacy bar default for Show Duration is OFF (unlike icon/square, which default ON).
     style.duration = buildDurationTextSpec(indicator, false)
     if borderSpec then style.border = { spec = borderSpec } end
+    -- Expiry Alert element (see the EXPIRY ALERT ELEMENT section); nil when off /
+    -- no region (editor preview).
+    style.alert = buildAlertSpec(indicator, alertRegion)
     return style
 end
 
 -- Full row config for one placed bar (max=1 single-slot container). Same frame-level band as
 -- the icon/square placed indicators (40 + per-indicator frameLevel).
-local function buildBarConfig(frame, unit, map, indicator, borderSpec)
+local function buildBarConfig(frame, unit, map, indicator, borderSpec, alertRegion)
     return {
         unit = unit,
         mode = "row",
@@ -1122,7 +1276,7 @@ local function buildBarConfig(frame, unit, map, indicator, borderSpec)
         adBorderAnim = true,   -- opt into DF-owned border animations (see buildPlacedConfig)
         frameLevelOffset = 40 + (tonumber(indicator.frameLevel) or 0),
         layout = buildBarLayout(frame, indicator),
-        style = buildBarStyle(indicator, borderSpec),
+        style = buildBarStyle(indicator, borderSpec, alertRegion),
     }
 end
 
@@ -1135,6 +1289,27 @@ end
 -- recreates its slot frame when the sig changes (regions are create-only,
 -- mirror the live Rebuild rule).
 -- ============================================================
+-- Editor-canvas sample for the expiry-alert element (cfg.alertPreview): the
+-- static payload at the configured anchor/offset/size, so positioning is
+-- WYSIWYG while editing. Payload composed by the SAME shared helper the live
+-- formatter uses, so preview and live can never drift. nil when the alert is
+-- off (the canvas hides its sample FontString).
+local function buildAlertPreview(indicator)
+    local mode = alertElemMode(indicator)
+    if not mode or not DF.GetExpiryAlertPayload then return nil end
+    local size = math.floor(tonumber(indicator.expiryAlertSize) or 14)
+    if size < 1 then size = 1 end
+    return {
+        payload = DF:GetExpiryAlertPayload(mode, indicator.expiryAlertText,
+            indicator.expiryAlertGlyph, size),
+        anchor  = indicator.expiryAlertAnchor or "TOP",
+        offsetX = tonumber(indicator.expiryAlertOffsetX) or 0,
+        offsetY = tonumber(indicator.expiryAlertOffsetY) or 0,
+        size    = size,
+        font    = indicator.durationFont,
+    }
+end
+
 function Factory:BuildPreviewConfig(frame, indicator, typeKey, spellID)
     local entries = spellID and testEntryForMap({ [spellID] = true }) or nil
     if typeKey == "bar" then
@@ -1146,6 +1321,7 @@ function Factory:BuildPreviewConfig(frame, indicator, typeKey, spellID)
             layout = buildBarLayout(frame, indicator),
             style = buildBarStyle(indicator, borderSpec),
             testEntries = entries,
+            alertPreview = buildAlertPreview(indicator),
         }
         local sig = "bar|" .. tostring(borderSpec ~= nil)
             .. "|" .. tostring(cfg.style.duration ~= nil)
@@ -1162,6 +1338,7 @@ function Factory:BuildPreviewConfig(frame, indicator, typeKey, spellID)
         layout = buildPlacedLayout(indicator),
         style = buildPlacedStyle(indicator, isSquare, borderSpec),
         testEntries = entries,
+        alertPreview = buildAlertPreview(indicator),
     }
     local sig = (isSquare and "square|" or "icon|") .. tostring(hideIcon)
         .. "|" .. tostring(cfg.style.stacks ~= nil)
@@ -1177,6 +1354,7 @@ local function barStructSig(map, indicator, borderOn)
     return includeSig(map)
         .. "|bar"
         .. "|df=" .. durationFmtKey(indicator, false)
+        .. "|xa=" .. alertElemStructKey(indicator)   -- expiry-alert element (formatter bind-frozen -> Rebuild)
         .. "|" .. (borderOn and "bd" or "")
         .. "|fl=" .. tostring(tonumber(indicator.frameLevel) or 0)
         .. "|f=" .. poolFilter(indicator)   -- filter string binds at build (othersOnly toggle -> Rebuild)
@@ -1211,6 +1389,7 @@ local function barCoSig(frame, indicator, borderOn, alpha)
             colSig(indicator.durationColor),
         }, ","),
         "bd=" .. placedBorderRawSig(indicator, borderOn),
+        "xac=" .. alertElemCoKey(indicator),
     }, "|")
 end
 
@@ -2021,7 +2200,10 @@ end
 -- Module-level (not a SyncFrame closure) to keep the per-aura-event hot path
 -- allocation-free. Body otherwise byte-identical to the pre-B1 placed loop.
 -- ============================================================
-local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSpec)
+-- `alerts` — the expiry-alert element store (store.placedAlerts), same instanceKeys
+-- as `placed`; elements are ensured/released alongside their containers and the
+-- caller's end-of-pass sweep releases the ones whose key died.
+local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSpec, alerts)
     for auraName, auraCfg in pairs(auras) do
         local indicators = (type(auraCfg) == "table") and auraCfg.indicators
         if indicators then
@@ -2046,27 +2228,41 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                         local structSig = barStructSig(map, indicator, borderOn)
                         local coSig = barCoSig(frame, eff, borderOn, alpha)
 
+                        -- Expiry-alert element: ensure/release BEFORE the config builds
+                        -- (the region binds at build time). Positioned only inside the
+                        -- change branches below — steady-state passes touch nothing.
+                        local alertEl
+                        if alertElemMode(indicator) then
+                            alertEl = ensureAlertEl(alerts, key, frame)
+                        else
+                            releaseAlertEl(alerts, key)
+                        end
+                        local alertRegion = alertEl and alertEl.fs
+
                         local entry = placed[key]
                         if not entry then
                             local borderSpec = borderOn and buildBarBorderSpec(frame, indicator) or nil
                             local handle = DF.AuraContainer:Create(frame,
-                                buildBarConfig(frame, frame.unit, map, eff, borderSpec))
+                                buildBarConfig(frame, frame.unit, map, eff, borderSpec, alertRegion))
                             if handle then
                                 applyPlacedAlpha(handle, alpha)
+                                if alertEl then positionAlertEl(alertEl, frame, indicator) end
                                 placed[key] = { handle = handle, structSig = structSig, coSig = coSig }
                             end
                         elseif entry.structSig ~= structSig then
                             local borderSpec = borderOn and buildBarBorderSpec(frame, indicator) or nil
                             entry.structSig, entry.coSig = structSig, coSig
-                            entry.handle:Rebuild(buildBarConfig(frame, frame.unit, map, eff, borderSpec))
+                            entry.handle:Rebuild(buildBarConfig(frame, frame.unit, map, eff, borderSpec, alertRegion))
                             applyPlacedAlpha(entry.handle, alpha)
+                            if alertEl then positionAlertEl(alertEl, frame, indicator) end
                         elseif entry.coSig ~= coSig then
                             local borderSpec = borderOn and buildBarBorderSpec(frame, indicator) or nil
                             entry.coSig = coSig
                             entry.handle:ApplyStyle(
-                                buildBarStyle(indicator, borderSpec),
+                                buildBarStyle(indicator, borderSpec, alertRegion),
                                 buildBarLayout(frame, eff))
                             applyPlacedAlpha(entry.handle, alpha)
+                            if alertEl then positionAlertEl(alertEl, frame, indicator) end
                         end
                     end
                 elseif isSquare or indicator.type == "icon" then
@@ -2087,8 +2283,10 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                       if wantMissingP then
                         -- SHOW-WHEN-MISSING placed icon/square: static spell icon (or solid
                         -- colour square) + border, shown while the buff is ABSENT. No
-                        -- cooldown / duration / stacks (nothing to count when absent). Border
+                        -- cooldown / duration / stacks (nothing to count when absent) — and
+                        -- no expiry-alert element (nothing to count down). Border
                         -- animation is stripped on the badge (orphan-ticker hazard).
+                        releaseAlertEl(alerts, key)
                         local size = math.max(8, tonumber(indicator.size) or 24)
                         local borderOnM = placedBorderOn(indicator, hideIcon)
                         local anchorM = (type(eff.anchor) == "string" and eff.anchor) or "TOPLEFT"
@@ -2147,27 +2345,41 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                             showDuration, borderOn, indicator)
                         local coSig = placedCoSig(eff, isSquare, borderOn, alpha)
 
+                        -- Expiry-alert element: ensure/release BEFORE the config builds
+                        -- (the region binds at build time). Positioned only inside the
+                        -- change branches below — steady-state passes touch nothing.
+                        local alertEl
+                        if alertElemMode(indicator) then
+                            alertEl = ensureAlertEl(alerts, key, frame)
+                        else
+                            releaseAlertEl(alerts, key)
+                        end
+                        local alertRegion = alertEl and alertEl.fs
+
                         local entry = placed[key]
                         if not entry then
                             local borderSpec = borderOn and buildPlacedBorderSpec(frame, indicator, hideIcon) or nil
                             local handle = DF.AuraContainer:Create(frame,
-                                buildPlacedConfig(frame.unit, map, eff, isSquare, borderSpec))
+                                buildPlacedConfig(frame.unit, map, eff, isSquare, borderSpec, alertRegion))
                             if handle then
                                 applyPlacedAlpha(handle, alpha)
+                                if alertEl then positionAlertEl(alertEl, frame, indicator) end
                                 placed[key] = { handle = handle, structSig = structSig, coSig = coSig }
                             end
                         elseif entry.structSig ~= structSig then
                             local borderSpec = borderOn and buildPlacedBorderSpec(frame, indicator, hideIcon) or nil
                             entry.structSig, entry.coSig = structSig, coSig
-                            entry.handle:Rebuild(buildPlacedConfig(frame.unit, map, eff, isSquare, borderSpec))
+                            entry.handle:Rebuild(buildPlacedConfig(frame.unit, map, eff, isSquare, borderSpec, alertRegion))
                             applyPlacedAlpha(entry.handle, alpha)
+                            if alertEl then positionAlertEl(alertEl, frame, indicator) end
                         elseif entry.coSig ~= coSig then
                             local borderSpec = borderOn and buildPlacedBorderSpec(frame, indicator, hideIcon) or nil
                             entry.coSig = coSig
                             entry.handle:ApplyStyle(
-                                buildPlacedStyle(indicator, isSquare, borderSpec),
+                                buildPlacedStyle(indicator, isSquare, borderSpec, alertRegion),
                                 buildPlacedLayout(eff))
                             applyPlacedAlpha(entry.handle, alpha)
+                            if alertEl then positionAlertEl(alertEl, frame, indicator) end
                         end
                       end
                     end
@@ -2626,22 +2838,32 @@ function Factory:SyncFrame(frame)
         -- only, all else raw record).
         local hasMG, hasOtherMG = arrangeMemberGroups(adDB, spec, specAuras, otherAuras)
 
+        -- Expiry-alert elements ride the same instanceKeys/live-sweep as the
+        -- containers (see the EXPIRY ALERT ELEMENT section).
+        local alerts = store.placedAlerts
+        if not alerts then alerts = {}; store.placedAlerts = alerts end
+
         if specAuras then
-            syncPlacedPool(frame, placed, live, hasMG, specAuras, "", spec)
+            syncPlacedPool(frame, placed, live, hasMG, specAuras, "", spec, alerts)
         end
         -- OTHER BUFFS pool: same store, same live/sweep — keys carry OTHER_PREFIX so
         -- the pools can't collide (the arranger's scratch keys carry it too) and NIL
         -- idSpec (spec-independent identity).
         if otherAuras then
-            syncPlacedPool(frame, placed, live, hasOtherMG, otherAuras, OTHER_PREFIX, nil)
+            syncPlacedPool(frame, placed, live, hasOtherMG, otherAuras, OTHER_PREFIX, nil, alerts)
         end
 
-        -- Tear down any placed container whose indicator is gone / de-configured.
+        -- Tear down any placed container whose indicator is gone / de-configured —
+        -- and release its expiry-alert element (the external anim driver never
+        -- auto-stops; releaseAlertEl unregisters the tick).
         for key, entry in pairs(placed) do
             if not live[key] then
                 if entry.handle then entry.handle:Destroy() end
                 placed[key] = nil
             end
+        end
+        for key in pairs(alerts) do
+            if not live[key] then releaseAlertEl(alerts, key) end
         end
     end
 
@@ -2760,6 +2982,11 @@ function Factory:ClearFrame(frame)
     teardownExcept(store.background or {}, nil)
     teardownExcept(store.border or {}, nil)
     teardownExcept(store.placed or {}, nil)   -- per-indicator icon/square/bar containers
+    -- Release every expiry-alert element (unregisters its external anim tick —
+    -- the shared driver never auto-stops on hide).
+    if store.placedAlerts then
+        for key in pairs(store.placedAlerts) do releaseAlertEl(store.placedAlerts, key) end
+    end
     teardownExcept(store.fgroups or {}, nil)  -- filter-group containers (A5)
     teardownExcept(store.dgroups or {}, nil)  -- debuff-group containers (C1)
     teardownExcept(store.nametext or {}, nil)

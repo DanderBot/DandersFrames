@@ -4918,6 +4918,19 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
         end
     end
     
+    -- Tooltip support: show container.tooltip on hover (assign after creation,
+    -- same idiom as CreateCheckbox). Hover on the BUTTON so the tooltip also
+    -- shows when the label area is covered by other widgets; HookScript keeps
+    -- the button's own handlers (menu open) intact.
+    btn:HookScript("OnEnter", function()
+        if container.tooltip then
+            GUI:ShowTooltip(container, { title = label, anchor = "ANCHOR_CURSOR", lines = { container.tooltip } })
+        end
+    end)
+    btn:HookScript("OnLeave", function()
+        if container.tooltip then GUI:HideTooltip() end
+    end)
+
     -- SEARCH: Register this setting
     if DF.Search and dbKey and type(dbKey) == "string" then
         container.searchEntry = DF.Search:RegisterDropdown(label, dbKey, options, nil, callback)

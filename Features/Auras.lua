@@ -423,6 +423,21 @@ function DF:GetExpiryAlertFmtKey(mode, threshold, text, glyphKey)
         .. (mode == "GLYPH" and tostring(glyphKey or "") or tostring(text or ""))
 end
 
+-- Display payload for one Expiry Alert band/preview: the sized |A atlas escape
+-- (GLYPH) or the sanitized custom text, red-wrapped unless the user's own |c
+-- escape already colours it (TEXT; empty text = ""). Shared by the alert-element
+-- formatter below and the AD editor's canvas preview so the two can never drift.
+function DF:GetExpiryAlertPayload(mode, text, glyphKey, size)
+    if mode == "GLYPH" then
+        local s = math.floor(tonumber(size) or 14)
+        if s < 1 then s = 1 end
+        return "|A:" .. DF:GetExpiryAlertAtlas(glyphKey) .. ":" .. s .. ":" .. s .. "|a"
+    end
+    local txt = SanitizeAlertText(text)
+    if txt ~= "" and not txt:find("|c", 1, true) then txt = "|cffff0000" .. txt .. "|r" end
+    return txt
+end
+
 -- Duration-text formatters for the factory row, by format key:
 --   NUMBER -> bare seconds (45), then "2m"/"1h"   (NumericRuleFormatter)
 --   SHORT  -> "45s" / "2m" / "1h"                 (SecondsFormatter, OneLetter)
@@ -432,7 +447,11 @@ end
 -- Expiry Alert (alertMode "TEXT"/"GLYPH" + alertThreshold seconds + alertText/alertAtlas):
 -- extra breakpoint bands below the threshold — evaluated C-side against the SECRET
 -- remaining time like everything else here; no Lua time read, works in combat.
-local function BuildDurationFormatter(format, hideAboveT, colorByTime, alertMode, alertThreshold, alertText, alertAtlas)
+-- ALERT-ELEMENT variant (alertElem = true, AD Expiry Alert element): the formatter IS
+-- the whole output — payload band below the threshold, EMPTY band above (no countdown,
+-- no colour-by-time, no hide-above; the indicator's own duration text is untouched and
+-- keeps its own formatter). format/hideAboveT/colorByTime are ignored in this variant.
+local function BuildDurationFormatter(format, hideAboveT, colorByTime, alertMode, alertThreshold, alertText, alertAtlas, alertElem, alertElemSize)
     format = format or "NUMBER"
     local alertT
     if alertMode == "TEXT" or alertMode == "GLYPH" then
@@ -440,6 +459,31 @@ local function BuildDurationFormatter(format, hideAboveT, colorByTime, alertMode
         if alertT < 1 then alertT = 1 end
     else
         alertMode = nil
+    end
+    if alertElem then
+        if not alertT then return nil end
+        if not (C_StringUtil and C_StringUtil.CreateNumericRuleFormatter and Enum and Enum.NumericRuleFormatRounding) then return nil end
+        -- Payload composed by the shared helper — GLYPH resolves through alertAtlas
+        -- (already key->atlas resolved by the caller), so feed the escape directly.
+        local payload
+        if alertMode == "GLYPH" then
+            local s = math.floor(tonumber(alertElemSize) or 14)
+            if s < 1 then s = 1 end
+            payload = "|A:" .. tostring(alertAtlas or "") .. ":" .. s .. ":" .. s .. "|a"
+        else
+            payload = DF:GetExpiryAlertPayload("TEXT", alertText)
+        end
+        local ok, f = pcall(function()
+            local down = Enum.NumericRuleFormatRounding.Down
+            local fmt = C_StringUtil.CreateNumericRuleFormatter()
+            -- Two bands, emitted ascending: [0, alertT) = the payload (constant string,
+            -- no numeric directive), [alertT, inf) = empty. Evaluated C-side against the
+            -- SECRET remaining time — zero Lua time reads, works in combat.
+            fmt:AddBreakpoint({ threshold = 0, step = 1, rounding = down, min = 1, format = payload })
+            fmt:AddBreakpoint({ threshold = alertT, step = 1, rounding = down, format = "" })
+            return fmt
+        end)
+        return ok and f or nil
     end
     -- Hide-above-threshold and/or COLOUR-BY-TIME buckets: both need per-band format
     -- strings, which only the NumericRuleFormatter has (SecondsFormatter carries none) —
@@ -591,6 +635,27 @@ end
 -- Cached, so repeated SyncFrame calls return the same shared formatter object.
 function DF:GetFactoryDurationFormatter(format, hideAboveT, colorByTime, alertMode, alertThreshold, alertText, alertGlyphKey)
     return GetDurationFormatter(format, hideAboveT, colorByTime, alertMode, alertThreshold, alertText, alertGlyphKey)
+end
+
+-- Expiry Alert ELEMENT formatter (AD placed indicators): the alert-element variant
+-- of BuildDurationFormatter — payload below the threshold, EMPTY above; no countdown,
+-- no colour-by-time (the indicator's duration text keeps its own formatter). Cached in
+-- the shared duration cache under a distinct "XEL|" key prefix (duration-text keys
+-- always start with the format name, so the two variants can never collide). `size`
+-- keys the cache too: the GLYPH |A escape bakes it into the band string, and the
+-- factory treats every alert change as STRUCTURAL (Rebuild re-binds the formatter).
+function DF:GetExpiryAlertElementFormatter(mode, threshold, text, glyphKey, size)
+    if mode ~= "TEXT" and mode ~= "GLYPH" then return nil end
+    local alertAtlas
+    if mode == "GLYPH" then alertAtlas = DF:GetExpiryAlertAtlas(glyphKey) end
+    local key = "XEL|" .. mode .. ":" .. tostring(tonumber(threshold) or 5)
+        .. ":" .. tostring(math.floor(tonumber(size) or 14))
+        .. ":" .. (alertAtlas or tostring(text or ""))
+    if durationFormatterCache[key] == nil then
+        durationFormatterCache[key] = BuildDurationFormatter(nil, nil, nil,
+            mode, threshold, text, alertAtlas, true, size) or false
+    end
+    return durationFormatterCache[key] or nil
 end
 
 -- ⚠ STACKS FORMATTERS ARE FORBIDDEN on container rows — do not re-add one.

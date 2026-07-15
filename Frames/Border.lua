@@ -1393,6 +1393,26 @@ local function applyCornersOnly(border, anim)
     paint(co.brv)
 end
 
+-- ===== EXTERNAL TICK REGISTRATION =====
+-- Generic access to the shared UIParent-hosted OnUpdate driver for DF-owned
+-- frames OUTSIDE the border system (the Aura Designer's expiry-alert element
+-- animates its FontString's alpha through this). Same registry as the border
+-- animations: ONE driver frame, one entry per registrant. `frame` is the
+-- registry key AND the visibility gate — the tick is skipped while
+-- frame:IsShown() is false (set frame._secretRect = true to always tick, the
+-- secretRect-border semantic). fn receives (frame, elapsed, dt). Teardown is
+-- EXPLICIT: callers must Unregister when the animated frame is released, or
+-- the driver keeps ticking against it (same contract as StopAnimation).
+function Border:RegisterExternalAnimTick(frame, fn, initialElapsed)
+    if not frame or type(fn) ~= "function" then return end
+    registerAnimTick(frame, fn, initialElapsed)
+end
+
+function Border:UnregisterExternalAnimTick(frame)
+    if not frame then return end
+    unregisterAnimTick(frame)
+end
+
 -- Stop every LCG glow we might have started AND tear down any custom
 -- animator state. Cheap: each Stop is a no-op when its glow frame isn't
 -- present; the driver Hide is a no-op when no driver exists.
