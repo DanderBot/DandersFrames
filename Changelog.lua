@@ -1,5 +1,5 @@
 local addonName, DF = ...
-DF.BUILD_DATE = "2026-07-14T20:19:04Z"
+DF.BUILD_DATE = "2026-07-15T12:26:57Z"
 DF.RELEASE_CHANNEL = "alpha"
 DF.CHANGELOG_TEXT = [===[
 # DandersFrames Changelog
@@ -14,7 +14,9 @@ DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally chan
 
 * (Aura Designer) **The Aura Designer now works for every spec** — previously healers and Augmentation only. The spec dropdown is grouped by class and searchable.
 * (Aura Designer) **New: Filter Groups.** Place an entire filter on the frame as its own icon row — link built-in or custom filters, and every matching buff appears in a self-arranging row with its own position, icon size, growth and icon cap. Filter Designer changes apply to linked groups immediately, and buffs shown by a group leave the buff bar while "Hide Duplicate Buffs" is on.
-* (Aura Designer) The spell picker now uses the addon's full spell database — grouped by class, searchable, and any spell can be added by ID.
+* (Aura Designer) Fix cooldown swipes on indicators and groups draining in the opposite direction from the buff and debuff bars.
+* (Interface) Fix spells with hidden tooltips (like Strength of the Black Ox) showing an empty box in the Filter Designer — they now show their name and spell ID.
+* (Aura Designer) One spell picker everywhere — adding indicators, group spells and triggers all use the same spell database picker as the Filter Designer, with search, class and category filters, and add-by-ID.
 * (Aura Designer) Every indicator has a show/hide eye — turn one off without deleting it.
 * (Aura Designer) The editor header is condensed to a single row; Sound Alerts moved to the Global tab.
 * (Profiles) Custom filters and your category tweaks travel with profile exports — including filters linked in the Aura Designer.
@@ -27,13 +29,15 @@ DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally chan
 * (Auras) **New: Buff Filters.** The buff and defensive bars are now filtered by curated spell categories — healing, raid buffs, defensives, movement and more. Pick the buff bar's categories on the Aura Filters page and the defensive bar's on the Defensive Icon page.
 * (Interface) **New: Filter Designer.** A new settings page (Auras → Filter Designer) shows every spell in each category, lets you disable individual spells, and builds your own custom filters — including adding any spell by ID.
 * (Auras) Filter presets start with passive "noise" auras unticked — mastery procs and auto-applied side effects. Everything stays listed in the Filter Designer, one click to enable.
+* (Auras) Spell database updated with the latest harvest — two new filter categories, Tier Set Auras and Racials, plus dozens of new spells and placement fixes.
 * (Tooltips) Aura tooltip Enable toggles now apply immediately. Anchor/Offset and Disable in Combat can't apply to 12.1 aura icons (game limitation) and are marked in place — they still work for Frame and Binding tooltips.
 * (Aura Designer) The editor's preview canvas renders through the real 12.1 engine — what you see while styling is exactly what ships to the frames, including out-of-range fading.
 * (Aura Designer) Test mode previews the Aura Designer through the real engine — every placed indicator renders with its configured spell, styling and animations, exactly as live.
 * (Interface) **Border animations are now entirely DF's own.** Four new effects — DF Chase, DF Flash, DF Pixel and DF Proc — join DF Pulsate, DF Dash and Blink; the old library-backed effects are retired.
-* (Auras) **Animated borders are back on the Defensive and Missing-Buff icons**, with the full DF animation set. The animation driver is now shared, so animated borders are lighter across the board.
+* (Auras) **Animated borders are available on the Missing-Buff icons**, with the full DF animation set. The animation driver is now shared, so animated borders are lighter across the board.
+* (Auras) Border animations aren't offered on the aura icons themselves — buff, debuff, defensive and Aura Designer indicators. On 12.1 the game hides aura data in combat and forbids addons from touching aura icons while it's hidden, so an animated border there would break; those borders are static. Frame borders, the Missing-Buff badge and targeted-spell highlights are unaffected and still animate.
 * (Auras) Out-of-range and dead-unit fading works on the 12.1 aura displays again — live and in test mode.
-* (Aura Designer) The spell picker shows one unified grid — the separate "Inferred Tracking" section is gone; every tracked aura now works the same way.
+* (Aura Designer) The spell picker shows one unified list — the separate "Inferred Tracking" section is gone; every tracked aura now works the same way.
 * (Aura Designer) Filter and debuff group boxes in the editor preview show greyed example icons, sized and arranged to your layout settings.
 * (Aura Designer) Filter and debuff groups can be styled like placed indicators — Appearance, Border, Duration Text and Stack Count sections — and the preview's example icons wear your styling live.
 * (Interface) The deprecated My Buff Indicators feature has been fully removed — the missing-buff display and the Aura Designer cover its use cases.
