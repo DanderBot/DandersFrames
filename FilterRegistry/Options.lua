@@ -646,6 +646,13 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
 
     local pickerTarget -- custom filter id the picker adds into
     local pickerSearch = "" -- lowercased query
+    -- Class/category filters: transient UI state (locals, reset on every
+    -- open) — deliberately not db-backed. Sentinels never collide with real
+    -- class tokens or category keys.
+    local PICKER_ALL_CLASSES = "ALLCLASSES"
+    local PICKER_ALL_CATS = "ALLCATS"
+    local pickerClassFilter = PICKER_ALL_CLASSES
+    local pickerCatFilter = PICKER_ALL_CATS
     local RefreshPicker
 
     -- Close on Escape (same idiom as the Aura Designer popups).
@@ -684,8 +691,70 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     pickerSearchBox:SetPoint("TOPLEFT", 10, -18)
     pickerSearchBox:SetPoint("TOPRIGHT", -36, -18)
 
+    -- Filter row under the search box: Class + Category dropdowns, side by
+    -- side. They combine with the search text (row shows only if it matches
+    -- all three). Inline dropdowns with customGet/customSet closing over the
+    -- transient locals (same idiom as the Nicknames page's transient
+    -- dropdowns — no db table involved).
+    local pickerClassOptions = { [PICKER_ALL_CLASSES] = L["All Classes"], _order = { PICKER_ALL_CLASSES } }
+    do
+        -- One option per class token actually present in the DB, in the
+        -- fixed class order; unknown tokens collapse into "ALL" exactly like
+        -- the list's grouping, and "ALL" (items/racials) lists last as
+        -- L["General"] so it doesn't read like the no-filter option.
+        local present = {}
+        for _, rec in ipairs(R.Spells) do
+            local token = rec.class or "ALL"
+            if token ~= "ALL" and not (RAID_CLASS_COLORS and RAID_CLASS_COLORS[token]) then
+                token = "ALL"
+            end
+            present[token] = true
+        end
+        for _, token in ipairs(CLASS_ORDER) do
+            if present[token] then
+                pickerClassOptions[token] = {
+                    text = ClassDisplayName(token),
+                    color = RAID_CLASS_COLORS and RAID_CLASS_COLORS[token] or nil,
+                }
+                tinsert(pickerClassOptions._order, token)
+            end
+        end
+        if present.ALL then
+            pickerClassOptions.ALL = L["General"]
+            tinsert(pickerClassOptions._order, "ALL")
+        end
+    end
+
+    local pickerCatOptions = { [PICKER_ALL_CATS] = L["All Categories"], _order = { PICKER_ALL_CATS } }
+    for _, cat in ipairs(R.Categories) do
+        pickerCatOptions[cat.key] = L[cat.name]
+        tinsert(pickerCatOptions._order, cat.key)
+    end
+
+    local pickerClassDrop = GUI:CreateDropdown(picker, "", pickerClassOptions, nil, nil, nil,
+        function() return pickerClassFilter end,
+        function(v)
+            pickerClassFilter = v or PICKER_ALL_CLASSES
+            if picker:IsShown() then RefreshPicker() end
+        end,
+        { inline = true })
+    pickerClassDrop:SetSize(160, 22)
+    pickerClassDrop:SetPoint("TOPLEFT", 10, -62)
+
+    local pickerCatDrop = GUI:CreateDropdown(picker, "", pickerCatOptions, nil, nil, nil,
+        function() return pickerCatFilter end,
+        function(v)
+            pickerCatFilter = v or PICKER_ALL_CATS
+            if picker:IsShown() then RefreshPicker() end
+        end,
+        { inline = true })
+    pickerCatDrop:SetSize(160, 22)
+    pickerCatDrop:SetPoint("TOPLEFT", pickerClassDrop, "TOPRIGHT", 8, 0)
+
+    -- List background: top offset clears the search row (-33..-57) plus the
+    -- filter row (-62..-84)
     local pickerListBg = CreateFrame("Frame", nil, picker, "BackdropTemplate")
-    pickerListBg:SetPoint("TOPLEFT", 10, -64)
+    pickerListBg:SetPoint("TOPLEFT", 10, -92)
     pickerListBg:SetPoint("BOTTOMRIGHT", -10, 10)
     GUI:CreatePanelBackdrop(pickerListBg, { borderColor = { r = 0.20, g = 0.20, b = 0.20, a = 1 } })
 
@@ -834,17 +903,20 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         pickerTitle:SetTextColor(tc.r, tc.g, tc.b)
 
         -- Render groups in class order, ALL last. Headers are placed lazily
-        -- on a group's first matching row, so a group with zero search
-        -- matches never shows its header.
+        -- on a group's first matching row, so a group with zero matches
+        -- (search or filters) never shows its header.
         local index = GetPickerIndex()
         local y = 4
         local usedHeaders, usedRows = 0, 0
         local function RenderGroup(token)
+            if pickerClassFilter ~= PICKER_ALL_CLASSES and token ~= pickerClassFilter then return end
             local g = index[token]
             if not g then return end
             local headerPlaced = false
             for _, entry in ipairs(g) do
-                if pickerSearch == "" or entry.lower:find(pickerSearch, 1, true) then
+                if (pickerSearch == "" or entry.lower:find(pickerSearch, 1, true))
+                    and (pickerCatFilter == PICKER_ALL_CATS
+                        or (entry.rec.cats and entry.rec.cats[pickerCatFilter])) then
                     if not headerPlaced then
                         headerPlaced = true
                         usedHeaders = usedHeaders + 1
@@ -890,6 +962,13 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         -- pickerSearch; the refresh below renders the full list)
         if pickerSearchBox.EditBox:GetText() ~= "" then
             pickerSearchBox.EditBox:SetText("")
+        end
+        -- Filters are transient too: every open starts unfiltered
+        if pickerClassFilter ~= PICKER_ALL_CLASSES or pickerCatFilter ~= PICKER_ALL_CATS then
+            pickerClassFilter = PICKER_ALL_CLASSES
+            pickerCatFilter = PICKER_ALL_CATS
+            pickerClassDrop:UpdateText()
+            pickerCatDrop:UpdateText()
         end
         picker:Show()
         RefreshPicker()

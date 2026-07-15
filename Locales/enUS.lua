@@ -416,6 +416,7 @@ L["Aggro Highlight"] = true
 L["Aggro Settings"] = true
 L["Alignment"] = true
 L["All Buffs"] = true
+L["All Categories"] = true
 L["All Classes"] = true
 L["All Debuffs"] = true
 L["All Dispellable"] = true
