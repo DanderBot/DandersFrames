@@ -378,7 +378,7 @@ function DF:FactoryOwnsBuffRow(db)
     return (DF.AuraContainer and DF.AuraContainer.IsSupported()) or false
 end
 
--- Curated atlas glyphs for the duration-text Expiry Alert (rows + Aura Designer).
+-- Curated atlas glyphs for the Aura Designer Expiry Alert.
 -- Dropdowns display L[name] and store the KEY (never the label); the formatter
 -- resolves key -> atlas at build time. Order = dropdown order; entry 1 is the
 -- default. ⚠ EVERY atlas name here is UNVERIFIED against the live client — vet
@@ -415,8 +415,8 @@ end
 
 -- Alert part of a duration formatKey. The native formatter is bind-frozen
 -- (SetDurationText binds once per slot), so EVERY alert change is STRUCTURAL and
--- must move the row/slot signature -> Rebuild. Shared with the Aura Designer
--- factory (its durationFmtKey appends this to the placed/group struct sigs).
+-- must move the slot signature -> Rebuild. Used by the Aura Designer factory
+-- (its expiry-alert struct sigs append this).
 function DF:GetExpiryAlertFmtKey(mode, threshold, text, glyphKey)
     if mode ~= "TEXT" and mode ~= "GLYPH" then return "" end
     return ":X" .. mode .. ":" .. tostring(tonumber(threshold) or 5) .. ":"
@@ -667,17 +667,14 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
         dur = DF.TextStyle:BuildSpec(db, prefix .. "Duration", {
             baseSize = 10, defaultAnchor = "CENTER", boxW = iconSize, boxH = iconSize,
         })
-        local alertMode = g("ExpiryAlertMode")
         dur.show = true
-        dur.formatter = GetDurationFormatter(durFormat, hideAboveT, colorByTime,
-            alertMode, g("ExpiryAlertThreshold"), g("ExpiryAlertText"), g("ExpiryAlertGlyph"))
+        dur.formatter = GetDurationFormatter(durFormat, hideAboveT, colorByTime)
         -- colorByTime = colour BUCKETS baked into the formatter's band format strings
         -- (see BuildDurationFormatter — the smooth curve is not addon-reachable). The
         -- static colour must not stomp the escapes; formatKey keeps both flags in the
         -- rebuild signature (the formatter is creation-frozen on the native bind).
         if colorByTime then dur.color = nil end
         dur.formatKey = durFormat .. (colorByTime and ":C" or "") .. (hideAboveT and (":H" .. tostring(hideAboveT)) or "")
-            .. DF:GetExpiryAlertFmtKey(alertMode, g("ExpiryAlertThreshold"), g("ExpiryAlertText"), g("ExpiryAlertGlyph"))
     end
 
     -- Buff rows get native spell-ID exclude maps (AD-dedup + missing-buff hide below).
@@ -1128,15 +1125,11 @@ function DF:BuildDefensiveRowConfig(db, unit)
             baseSize = 10, defaultAnchor = "CENTER", boxW = iconSize, boxH = iconSize,
         })
         dur.show = true
-        dur.formatter = GetDurationFormatter("NUMBER", nil, colorByTime,
-            db.defensiveIconExpiryAlertMode, db.defensiveIconExpiryAlertThreshold,
-            db.defensiveIconExpiryAlertText, db.defensiveIconExpiryAlertGlyph)
+        dur.formatter = GetDurationFormatter("NUMBER", nil, colorByTime)
         -- colorByTime = colour buckets baked into the formatter bands (see
         -- BuildDurationFormatter). Static colour must not stomp the escapes.
         if colorByTime then dur.color = nil end
         dur.formatKey = "NUMBER" .. (colorByTime and ":C" or "")
-            .. DF:GetExpiryAlertFmtKey(db.defensiveIconExpiryAlertMode, db.defensiveIconExpiryAlertThreshold,
-                db.defensiveIconExpiryAlertText, db.defensiveIconExpiryAlertGlyph)
     end
 
     -- FILTER REGISTRY: the category selection drives the row as ONE plain HELPFUL
