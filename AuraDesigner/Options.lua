@@ -3285,6 +3285,9 @@ local function RefreshPreviewEffects()
     -- Every type skips hidden blocks (eye toggle, enabled == false) — same as pickWinner.
     if auraCfg.border and auraCfg.border.enabled ~= false and auraCfg.border.ShowBorder ~= false then
         local spec = DF.Border:BuildSpec(auraCfg.border, "")
+        spec.animation = nil   -- AD border animation retired on 12.1; the preview must match the
+                               -- live render (which strips it at the container chokepoint) so a
+                               -- stuck-on BorderAnimationType from an old profile doesn't animate here.
         if not spec.color then spec.color = { r = 1, g = 1, b = 1, a = 1 } end
         spec.enabled = true
         if auraCfg.border.borderMode == "custom" then
