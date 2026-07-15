@@ -32,6 +32,35 @@ R.Excluded = {
     [59752]   = "Will to Survive — 100ms stun-immunity blip; nothing to display",
     [422382]  = "Wild Growth log-side id — no client-side spell data (audit INVALID)",
     [1308649] = "Vampiric Insight — no client-side spell data (audit INVALID); re-add with the corrected id from the harvest",
+    [443113]  = "Strength of the Black Ox (ally absorb) — spec-variable rider, not worth tracking (maintainer curation)",
+    [443112]  = "Strength of the Black Ox (self cast-time buff) — same call as 443113",
+}
+
+-- Maintainer category overrides — the FINAL category set for these ids, replacing
+-- the harvest's placement (one home per spell; picked by Danders 2026-07-15 to kill
+-- cross-filter duplicates). Regeneration applies these AFTER building records and
+-- re-runs the merge step (ids whose patched sets now match collapse into one
+-- record); the diff tool compares against the PATCHED expectation. List EVERY id
+-- of the spell. Remove an entry to return to the harvest's placement.
+R.CategoryPatch = {
+    [53563]   = { healing = true },             -- Beacon of Light
+    [17]      = { healing = true },             -- Power Word: Shield
+    [1246768] = { healing = true },
+    [1254306] = { healing = true },
+    [1300008] = { healing = true },
+    [47788]   = { externalDefensives = true },  -- Guardian Spirit
+    [102342]  = { externalDefensives = true },  -- Ironbark
+    [116849]  = { externalDefensives = true },  -- Life Cocoon
+    [33206]   = { externalDefensives = true },  -- Pain Suppression
+    [1022]    = { externalDefensives = true },  -- Blessing of Protection
+    [1309794] = { externalDefensives = true },
+    [6940]    = { externalDefensives = true },  -- Blessing of Sacrifice
+    [357170]  = { externalDefensives = true },  -- Time Dilation
+    [363534]  = { raidDefensives = true },      -- Rewind
+    [1044]    = { movement = true },            -- Blessing of Freedom
+    [299256]  = { movement = true },
+    [10060]   = { powerExternals = true },      -- Power Infusion
+    [47585]   = { defensives = true },          -- Dispersion
 }
 
 -- Sidebar/list display order. `name` keys are looked up through L at
@@ -65,23 +94,21 @@ R.Spells = {
     { id = 48438,    alts = { 419344 }, n = "Wild Growth", class = "DRUID", cats = { healing = true } },
     { id = 474754,   alts = { 474750 }, n = "Symbiotic Relationship", class = "DRUID", cats = { healing = true } },
     { id = 439530,   n = "Symbiotic Blooms",          class = "DRUID",         off = true, cats = { healing = true } },
-    { id = 102342,   n = "Ironbark",                  class = "DRUID",         cats = { healing = true, externalDefensives = true } },
-    { id = 17,       alts = { 1246768, 1254306, 1300008 }, n = "Power Word: Shield", class = "PRIEST", cats = { healing = true, externalDefensives = true } },
+    { id = 102342,   n = "Ironbark",                  class = "DRUID",         cats = { externalDefensives = true } },
+    { id = 17,       alts = { 1246768, 1254306, 1300008 }, n = "Power Word: Shield", class = "PRIEST", cats = { healing = true } },
     { id = 194384,   n = "Atonement",                 class = "PRIEST",        cats = { healing = true } },
     { id = 1253593,  alts = { 1300009 }, n = "Void Shield", class = "PRIEST", cats = { healing = true } },
     { id = 41635,    n = "Prayer of Mending",         class = "PRIEST",        cats = { healing = true } },
-    { id = 33206,    n = "Pain Suppression",          class = "PRIEST",        cats = { healing = true, externalDefensives = true } },
-    { id = 10060,    n = "Power Infusion",            class = "PRIEST",        cats = { healing = true, powerExternals = true } },
+    { id = 33206,    n = "Pain Suppression",          class = "PRIEST",        cats = { externalDefensives = true } },
+    { id = 10060,    n = "Power Infusion",            class = "PRIEST",        cats = { powerExternals = true } },
     { id = 139,      n = "Renew",                     class = "PRIEST",        cats = { healing = true } },
     { id = 77489,    n = "Echo of Light",             class = "PRIEST",        off = true, cats = { healing = true } },
-    { id = 47788,    n = "Guardian Spirit",           class = "PRIEST",        cats = { healing = true, externalDefensives = true } },
+    { id = 47788,    n = "Guardian Spirit",           class = "PRIEST",        cats = { externalDefensives = true } },
     { id = 119611,   n = "Renewing Mist",             class = "MONK",          cats = { healing = true } },
     { id = 124682,   n = "Enveloping Mist",           class = "MONK",          cats = { healing = true } },
     { id = 115175,   alts = { 1260617, 198533 }, n = "Soothing Mist", class = "MONK", cats = { healing = true } },
     { id = 450769,   alts = { 450521, 450711, 450526, 450531 }, n = "Aspect of Harmony", class = "MONK", cats = { healing = true } },
-    { id = 116849,   n = "Life Cocoon",               class = "MONK",          cats = { healing = true, externalDefensives = true } },
-    { id = 443113,   n = "Strength of the Black Ox",  class = "MONK",          cats = { healing = true, externalDefensives = true } },
-    { id = 443112,   n = "Strength of the Black Ox",  class = "MONK",          cats = { healing = true } },
+    { id = 116849,   n = "Life Cocoon",               class = "MONK",          cats = { externalDefensives = true } },
     { id = 61295,    n = "Riptide",                   class = "SHAMAN",        cats = { healing = true } },
     { id = 383648,   alts = { 974 }, n = "Earth Shield", class = "SHAMAN", cats = { healing = true } },
     { id = 207400,   n = "Ancestral Vigor",           class = "SHAMAN",        off = true, cats = { healing = true } },
@@ -89,13 +116,13 @@ R.Spells = {
     { id = 444490,   n = "Hydrobubble",               class = "SHAMAN",        cats = { healing = true } },
     { id = 156910,   n = "Beacon of Faith",           class = "PALADIN",       cats = { healing = true } },
     { id = 156322,   alts = { 461432 }, n = "Eternal Flame", class = "PALADIN", cats = { healing = true } },
-    { id = 53563,    n = "Beacon of Light",           class = "PALADIN",       cats = { healing = true, externalDefensives = true } },
+    { id = 53563,    n = "Beacon of Light",           class = "PALADIN",       cats = { healing = true } },
     { id = 1244893,  alts = { 1245369 }, n = "Beacon of the Savior", class = "PALADIN", cats = { healing = true } },
     { id = 200025,   n = "Beacon of Virtue",          class = "PALADIN",       cats = { healing = true } },
-    { id = 1022,     n = "Blessing of Protection",    class = "PALADIN",       cats = { healing = true, externalDefensives = true } },
+    { id = 1022,     alts = { 1309794 }, n = "Blessing of Protection", class = "PALADIN", cats = { externalDefensives = true } },
     { id = 432502,   n = "Sacred Weapon",             class = "PALADIN",       cats = { healing = true } },
-    { id = 6940,     n = "Blessing of Sacrifice",     class = "PALADIN",       cats = { healing = true, externalDefensives = true } },
-    { id = 1044,     n = "Blessing of Freedom",       class = "PALADIN",       cats = { healing = true, movement = true } },
+    { id = 6940,     n = "Blessing of Sacrifice",     class = "PALADIN",       cats = { externalDefensives = true } },
+    { id = 1044,     alts = { 299256 }, n = "Blessing of Freedom", class = "PALADIN", cats = { movement = true } },
     { id = 431381,   alts = { 431522 }, n = "Dawnlight", class = "PALADIN", cats = { healing = true } },
     { id = 364343,   n = "Echo",                      class = "EVOKER",        cats = { healing = true } },
     { id = 366155,   n = "Reversion",                 class = "EVOKER",        cats = { healing = true } },
@@ -104,8 +131,8 @@ R.Spells = {
     { id = 376788,   n = "Echo: Dream Breath",        class = "EVOKER",        cats = { healing = true } },
     { id = 363502,   n = "Dream Flight",              class = "EVOKER",        cats = { healing = true } },
     { id = 373267,   n = "Lifebind",                  class = "EVOKER",        cats = { healing = true } },
-    { id = 357170,   n = "Time Dilation",             class = "EVOKER",        cats = { healing = true, externalDefensives = true } },
-    { id = 363534,   n = "Rewind",                    class = "EVOKER",        cats = { healing = true, raidDefensives = true } },
+    { id = 357170,   n = "Time Dilation",             class = "EVOKER",        cats = { externalDefensives = true } },
+    { id = 363534,   n = "Rewind",                    class = "EVOKER",        cats = { raidDefensives = true } },
     { id = 409895,   n = "Verdant Embrace",           class = "EVOKER",        cats = { healing = true } },
     { id = 445740,   n = "Enkindle",                  class = "EVOKER",        off = true, cats = { healing = true } },
     { id = 432607,   alts = { 432496 }, n = "Holy Bulwark", class = "PALADIN", cats = { healing = true } },
@@ -206,13 +233,12 @@ R.Spells = {
     { id = 443569,   n = "Chi-Ji's Swiftness",        class = "MONK",          cats = { movement = true } },
     { id = 276111,   alts = { 221886, 221883, 276112, 254474, 254472, 254471, 221885, 254473, 363608, 294133, 221887, 1272854, 453804, 1253874, 1253723, 1253881 },
       n = "Divine Steed", class = "PALADIN", cats = { movement = true } },
-    { id = 299256,   n = "Blessing of Freedom",       class = "PALADIN",       cats = { movement = true } },
     { id = 431752,   alts = { 431462 }, n = "Will of the Dawn", class = "PALADIN", cats = { movement = true } },
     { id = 121557,   n = "Angelic Feather",           class = "PRIEST",        cats = { movement = true } },
     { id = 65081,    n = "Body and Soul",             class = "PRIEST",        cats = { movement = true } },
     { id = 73325,    n = "Leap of Faith",             class = "PRIEST",        cats = { movement = true } },
     { id = 355851,   n = "Blaze of Light",            class = "PRIEST",        cats = { movement = true } },
-    { id = 47585,    n = "Dispersion",                class = "PRIEST",        cats = { movement = true, defensives = true } },
+    { id = 47585,    n = "Dispersion",                class = "PRIEST",        cats = { defensives = true } },
     { id = 2983,     n = "Sprint",                    class = "ROGUE",         cats = { movement = true } },
     { id = 36554,    n = "Shadowstep",                class = "ROGUE",         cats = { movement = true } },
     { id = 2645,     n = "Ghost Wolf",                class = "SHAMAN",        cats = { movement = true } },
@@ -243,7 +269,6 @@ R.Spells = {
     -- ------------------------------------------------------------
     -- External Defensives
     -- ------------------------------------------------------------
-    { id = 1309794,  n = "Blessing of Protection",    class = "PALADIN",       cats = { externalDefensives = true } },
     { id = 204018,   n = "Blessing of Spellwarding",  class = "PALADIN",       cats = { externalDefensives = true } },
     { id = 387804,   n = "Echoing Protection",        class = "PALADIN",       cats = { externalDefensives = true } },
     { id = 53480,    n = "Roar of Sacrifice",         class = "HUNTER",        cats = { externalDefensives = true } },
