@@ -1089,11 +1089,12 @@ function NativeBackend:build()
     local maxCount = handle:_slotCount()
     local groupLayout
     if isMissing then
-        -- The cell IS the push distance: >= badge width guarantees the badge clears the
-        -- window entirely when the tracked buff is present.
+        -- The cell IS the push distance: >= badge width + 2*spill guarantees the badge AND
+        -- its animation spill clear the window entirely when the tracked buff is present.
         local bw = (config.badge and config.badge.w) or 24
         local bh = (config.badge and config.badge.h) or 24
-        groupLayout = { elementWidth = bw + MISSING_PAD, elementHeight = bh }
+        local sp = (config.badge and config.badge.spill) or 0
+        groupLayout = { elementWidth = bw + 2 * sp + MISSING_PAD, elementHeight = bh }
     elseif not isOverlay then
         groupLayout = buildGroupLayout(config)
     end
@@ -1196,6 +1197,10 @@ function NativeBackend:build()
     -- The badge's rect now derives from the container's SECRET size: render-side only,
     -- never read its position in Lua (no pixel-snap, no GetLeft) — §20c rules.
     if isMissing and handle.badge then
+        -- Centre the badge in the (badge + 2*spill) window: the -MISSING_PAD container pin
+        -- and the +MISSING_PAD badge inset still cancel to park it on the window when empty;
+        -- the +spill / -spill centres it inside the enlarged window.
+        local sp = (handle.config.badge and handle.config.badge.spill) or 0
         handle.badge:ClearAllPoints()
         if testMode then
             -- P5 preview: the container stays DISABLED all test session (the
@@ -1203,9 +1208,9 @@ function NativeBackend:build()
             -- resolvable rect (its secret SetSize only runs while enabled) — a
             -- badge anchored to it renders NOTHING (live-caught). Park the
             -- badge on the WINDOW instead: that IS the "missing" position.
-            handle.badge:SetPoint("TOPLEFT", handle.frame, "TOPLEFT", 0, 0)
+            handle.badge:SetPoint("TOPLEFT", handle.frame, "TOPLEFT", sp, -sp)
         else
-            handle.badge:SetPoint("TOPLEFT", c, "TOPLEFT", MISSING_PAD, 0)
+            handle.badge:SetPoint("TOPLEFT", c, "TOPLEFT", MISSING_PAD + sp, -sp)
         end
         handle.badge:Show()
     end
@@ -1683,18 +1688,51 @@ function Handle:SetBadgeSize(w, h)
     self.config.badge = badge
     if badge.w == w and badge.h == h then return end
     badge.w, badge.h = w, h
-    self.frame:SetSize(w, h)
+    local sp = badge.spill or 0
+    self.frame:SetSize(w + 2 * sp, h + 2 * sp)
     self.badge:SetSize(w, h)
     local backend = self.backend
     local c = backend and backend.container
     if c and backend.groupKeys and c.SetAuraGroupLayout then
-        local cellLayout = { elementWidth = w + MISSING_PAD, elementHeight = h }
+        local cellLayout = { elementWidth = w + 2 * sp + MISSING_PAD, elementHeight = h }
         for _, key in ipairs(backend.groupKeys) do
             pcall(function() c:SetAuraGroupLayout(key, cellLayout) end)
         end
         if not InCombatLockdown() then
             pcall(function() c:Hide(); c:Show() end)
         end
+    end
+end
+
+-- Live-update the animation SPILL margin (px of transparent room the clip window keeps
+-- around the badge so a border animation can extend OUTSIDE the icon). Grows the window +
+-- re-centres the badge + grows the layout-push so the badge AND its spill still clear the
+-- window when the buff is present (no leak onto buffed units). No teardown -> the running
+-- animation is NOT restarted; the caller re-offsets the strip cell by -spill so the badge's
+-- on-screen position is unchanged. The push mutator applies on the next aura event, which is
+-- fine: the push only matters once the buff is present (the badge is hidden then anyway).
+function Handle:SetBadgeSpill(sp)
+    if self.config.mode ~= "missing" or not self.badge then return end
+    sp = math.max(0, math.floor(sp or 0))
+    local badge = self.config.badge or {}
+    self.config.badge = badge
+    if (badge.spill or 0) == sp then return end
+    badge.spill = sp
+    local bw, bh = badge.w or 24, badge.h or 24
+    self.frame:SetSize(bw + 2 * sp, bh + 2 * sp)
+    self.badge:ClearAllPoints()
+    local backend = self.backend
+    local c = backend and backend.container
+    if c then
+        self.badge:SetPoint("TOPLEFT", c, "TOPLEFT", MISSING_PAD + sp, -sp)
+        if backend.groupKeys and c.SetAuraGroupLayout then
+            local cellLayout = { elementWidth = bw + 2 * sp + MISSING_PAD, elementHeight = bh }
+            for _, key in ipairs(backend.groupKeys) do
+                pcall(function() c:SetAuraGroupLayout(key, cellLayout) end)
+            end
+        end
+    else
+        self.badge:SetPoint("TOPLEFT", self.frame, "TOPLEFT", sp, -sp)
     end
 end
 -- Returns the DESIRED unit; while in combat the backend retarget may still be deferred to regen.
@@ -2136,15 +2174,22 @@ function AuraContainer:Create(parent, config)
         -- button's cell width pushes it out ("present" renders NOTHING). Zero reads.
         local bw = (cfg.badge and cfg.badge.w) or 24
         local bh = (cfg.badge and cfg.badge.h) or 24
+        -- spill = transparent margin the clip window keeps AROUND the badge so a border
+        -- ANIMATION can extend OUTSIDE the icon (missing state) without the window clipping
+        -- it. The badge sits CENTRED; the layout-push (below) grows by 2*spill so the badge
+        -- AND its spill still clear the window when the buff is present (no leak onto buffed
+        -- units). Derived from the animation config by the caller (0 when no animation, so
+        -- the non-animated case is byte-identical to before). Live-updated by SetBadgeSpill.
+        local sp = (cfg.badge and cfg.badge.spill) or 0
         h.frame:SetClipsChildren(true)
-        h.frame:SetSize(bw, bh)
+        h.frame:SetSize(bw + 2 * sp, bh + 2 * sp)
         -- The badge is handle-owned (survives container rebuilds). It starts HIDDEN and
         -- parked on the window: with no live container we must not claim "missing"
         -- (false-negative until regen beats a false-positive). The backend shows it and
         -- re-anchors it to the container when a build lands; teardown re-parks it.
         h.badge = CreateFrame("Frame", nil, h.frame)
         h.badge:SetSize(bw, bh)
-        h.badge:SetPoint("TOPLEFT", h.frame, "TOPLEFT", 0, 0)
+        h.badge:SetPoint("TOPLEFT", h.frame, "TOPLEFT", sp, -sp)
         h.badge:Hide()
     else
         -- Row/overlay: h.frame occupies the unit-frame rect (row layout anchors are
