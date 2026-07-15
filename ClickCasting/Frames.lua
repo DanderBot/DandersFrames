@@ -924,8 +924,16 @@ function CC:FindHealthManaBars(obj)
     
     local function traverse(current)
         if type(current) ~= "table" then return end
+        -- 12.x secret values: a protected frame/unit reference stored on a
+        -- Blizzard frame passes the type()=="table" check but throws the moment
+        -- it's used as a table key ("cannot be indexed with secret keys"). That
+        -- aborted RegisterBlizzardFrames on combat end, so Blizzard frames never
+        -- finished click-cast setup and bindings stopped working on them. We
+        -- never need to descend into secret subtrees (health/mana bars are plain
+        -- child frames), so skip them before `current` is used as a key below.
+        if issecretvalue(current) then return end
         if checked[current] then return end
-        
+
         checked[current] = true
         if not pcall(next, current) then return end
         for key, value in pairs(current) do

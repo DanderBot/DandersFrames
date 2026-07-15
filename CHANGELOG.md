@@ -117,6 +117,10 @@ DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally chan
 * Aura Designer text colouring is drawn as a cover over the text: it ignores the out-of-range text fade, and group parts with their own inline colours keep them.
 * Dragging certain aura sliders can briefly stutter.
 
+### Bug Fixes
+
+* (Click Casting) Fixed a Lua error walking Blizzard unit frames after combat that could stop click-casting bindings from working on the default frames until reload — the frame scan now skips protected (secret) values introduced by recent client versions. (by Krathe)
+
 ## [4.7.0]
 
 ### Bug Fixes
