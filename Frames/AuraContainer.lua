@@ -470,22 +470,22 @@ local function styleButton_regions(slot, config)
                     -- configured slot size so the dashes size from it, not the secret rect.
                     if spec then spec.knownWidth, spec.knownHeight = sx, sy end
                 end
-                -- ANIMATION FILTER (single chokepoint for BOTH row and overlay).
-                -- The LCG glows re-SetParent pooled glow frames onto the host, which
-                -- taints on a native AuraButton (lab-proven), so they stay forbidden.
-                -- But the DF-owned animations in SAFE_OVERLAY_ANIM (edge-alpha ticks,
-                -- DF_DASH marching ants, Wipe/Ripple/etc overlays) run off our OWN border
-                -- textures via the external UIParent driver (secretRect path), so they're
-                -- taint-safe. OVERLAY-mode (frame-level AD) borders always recover them; a
-                -- ROW-mode container opts in with config.adBorderAnim (the Aura Designer
-                -- PLACED icon/square/bar borders) — the #205 buff/debuff rows do NOT set
-                -- the flag, so they still strip in row mode. Any type outside the set is
-                -- stripped regardless of mode.
-                if spec and spec.animation and not
-                   ((config.mode == "overlay" or config.adBorderAnim) and SAFE_OVERLAY_ANIM[spec.animation.type]) then
+                -- ANIMATION FILTER (single chokepoint for every container border).
+                -- 12.1 PTR-5 made AuraButtons blanket-forbidden while auras are secret
+                -- (combat / M+ / encounters / PvP): once forbidden, ANY API call on the
+                -- button OR its children errors from our tainted code — including the
+                -- render setters our OnUpdate border driver uses (SetVertexColor / Hide /
+                -- SetPoint). Every animated border here lives on a container-button child,
+                -- so any animation spams a per-frame forbidden error in exactly the content
+                -- these indicators are for. Animation is therefore stripped on ALL
+                -- container borders unconditionally (the recovery that once let AD placed /
+                -- overlay borders animate via config.adBorderAnim is gone). DF-owned frames
+                -- OFF the container — unit-frame border, missing-buff badge, targeted-spell
+                -- highlight — are not forbidden and keep animating through their own paths.
+                if spec then
                     spec.animation = nil
+                    DF.Border:Apply(slot.dfBorder, spec)
                 end
-                if spec then DF.Border:Apply(slot.dfBorder, spec) end
             end)
             if not ok and not warnedBorder then
                 warnedBorder = true
@@ -989,8 +989,7 @@ end
 -- container's flow layout (SetAuraLayout* translation lands in P1); overlay slots are
 -- addon-anchored via the button AddAuraSlot returns.
 --
--- Each backend owns its OWN plain container (Krathe's proven ContainerOverlay pattern —
--- reference ContainerOverlay.lua buildOverlay): insecure CreateFrame is combat-legal for the
+-- Each backend owns its OWN plain container: insecure CreateFrame is combat-legal for the
 -- aura pipeline (taint.log-proven; the earlier freeze was unrelated secret-value compares,
 -- since fixed). One container per consumer = one flow layout per row (independent
 -- positioning) and a trivial recreate-on-structural-change teardown. The container is
@@ -1011,7 +1010,7 @@ end
 
 function NativeBackend:isNativeSlots() return true end
 
--- Order (Krathe's ContainerOverlay.lua buildOverlay, proven live in combat on 68569):
+-- Build order (proven live in combat on 68569 — do not reorder):
 -- CreateFrame("AuraContainer", nil, ours, "CustomAuraContainerTemplate") -> SetAllPoints ->
 -- SetUnit -> AddAuraGroup/AddAuraSlot(each filter, initializeFrame) -> SetEnabled LAST.
 -- SetEnabled gates aura-event registration (IsVisible() and IsEnabled()); without the LAST
@@ -1023,14 +1022,14 @@ function NativeBackend:build()
     local config = handle.config
 
     -- Never stand up a container in combat: in-lockdown create/enable is a hard client
-    -- error pcall can't catch (ContainerOverlay gotcha 1). Every caller already gates this
+    -- error pcall can't catch. Every caller already gates this
     -- (Create / _rebuild / the regen handler); a stray path defers instead of dying.
     if InCombatLockdown() then handle:_deferRebuild(); return end
 
     -- OUR OWN plain per-consumer container, parented to the handle's anchor frame. Insecure
     -- creation is fine — taint.log proved the old combat freeze was unrelated secret-value
     -- compares (Config.lua SafeSetFont / Auras.lua legacy scan), both fixed — and this exact
-    -- plain-create pattern runs live in combat in the AD ContainerOverlay PoC.
+    -- plain-create pattern is confirmed to run live in combat.
     local ok, c = pcall(CreateFrame, "AuraContainer", nil, handle.frame, "CustomAuraContainerTemplate")
     if not ok or not c then
         if not warnedCreate then
@@ -1097,11 +1096,12 @@ function NativeBackend:build()
     local maxCount = handle:_slotCount()
     local groupLayout
     if isMissing then
-        -- The cell IS the push distance: >= badge width guarantees the badge clears the
-        -- window entirely when the tracked buff is present.
+        -- The cell IS the push distance: >= badge width + 2*spill guarantees the badge AND
+        -- its animation spill clear the window entirely when the tracked buff is present.
         local bw = (config.badge and config.badge.w) or 24
         local bh = (config.badge and config.badge.h) or 24
-        groupLayout = { elementWidth = bw + MISSING_PAD, elementHeight = bh }
+        local sp = (config.badge and config.badge.spill) or 0
+        groupLayout = { elementWidth = bw + 2 * sp + MISSING_PAD, elementHeight = bh }
     elseif not isOverlay then
         groupLayout = buildGroupLayout(config)
     end
@@ -1186,8 +1186,8 @@ function NativeBackend:build()
         end
     end
 
-    -- SetEnabled LAST — after the groups/slots + filters are declared (ContainerOverlay.lua
-    -- gotcha 2). This is what arms the parse + UNIT_AURA registration.
+    -- SetEnabled LAST — after the groups/slots + filters are declared. This is what arms
+    -- the parse + UNIT_AURA registration.
     -- TEST MODE: stay DISABLED until the provider bounce lands (the bounce enables
     -- us) — an enabled container parses the player's REAL auras for a tick first,
     -- creating buttons whose creation order no longer matches the sample set's
@@ -1204,6 +1204,10 @@ function NativeBackend:build()
     -- The badge's rect now derives from the container's SECRET size: render-side only,
     -- never read its position in Lua (no pixel-snap, no GetLeft) — §20c rules.
     if isMissing and handle.badge then
+        -- Centre the badge in the (badge + 2*spill) window: the -MISSING_PAD container pin
+        -- and the +MISSING_PAD badge inset still cancel to park it on the window when empty;
+        -- the +spill / -spill centres it inside the enlarged window.
+        local sp = (handle.config.badge and handle.config.badge.spill) or 0
         handle.badge:ClearAllPoints()
         if testMode then
             -- P5 preview: the container stays DISABLED all test session (the
@@ -1211,9 +1215,9 @@ function NativeBackend:build()
             -- resolvable rect (its secret SetSize only runs while enabled) — a
             -- badge anchored to it renders NOTHING (live-caught). Park the
             -- badge on the WINDOW instead: that IS the "missing" position.
-            handle.badge:SetPoint("TOPLEFT", handle.frame, "TOPLEFT", 0, 0)
+            handle.badge:SetPoint("TOPLEFT", handle.frame, "TOPLEFT", sp, -sp)
         else
-            handle.badge:SetPoint("TOPLEFT", c, "TOPLEFT", MISSING_PAD, 0)
+            handle.badge:SetPoint("TOPLEFT", c, "TOPLEFT", MISSING_PAD + sp, -sp)
         end
         handle.badge:Show()
     end
@@ -1299,8 +1303,8 @@ function NativeBackend:refresh()
     end
 end
 
--- The container is OURS (per-consumer): teardown mirrors ContainerOverlay's teardownEntry —
--- disable, drop its buttons, hide, release the ref. The next build creates a fresh container
+-- The container is OURS (per-consumer): teardown is disable, drop its buttons, hide, release
+-- the ref. The next build creates a fresh container
 -- (topology is add-only — no RemoveAuraGroup/Slot — so recreate IS the sanctioned removal).
 -- Callers gate teardown out of combat (Destroy/_rebuild defer to regen in lockdown).
 function NativeBackend:teardown()
@@ -1692,18 +1696,51 @@ function Handle:SetBadgeSize(w, h)
     self.config.badge = badge
     if badge.w == w and badge.h == h then return end
     badge.w, badge.h = w, h
-    self.frame:SetSize(w, h)
+    local sp = badge.spill or 0
+    self.frame:SetSize(w + 2 * sp, h + 2 * sp)
     self.badge:SetSize(w, h)
     local backend = self.backend
     local c = backend and backend.container
     if c and backend.groupKeys and c.SetAuraGroupLayout then
-        local cellLayout = { elementWidth = w + MISSING_PAD, elementHeight = h }
+        local cellLayout = { elementWidth = w + 2 * sp + MISSING_PAD, elementHeight = h }
         for _, key in ipairs(backend.groupKeys) do
             pcall(function() c:SetAuraGroupLayout(key, cellLayout) end)
         end
         if not InCombatLockdown() then
             pcall(function() c:Hide(); c:Show() end)
         end
+    end
+end
+
+-- Live-update the animation SPILL margin (px of transparent room the clip window keeps
+-- around the badge so a border animation can extend OUTSIDE the icon). Grows the window +
+-- re-centres the badge + grows the layout-push so the badge AND its spill still clear the
+-- window when the buff is present (no leak onto buffed units). No teardown -> the running
+-- animation is NOT restarted; the caller re-offsets the strip cell by -spill so the badge's
+-- on-screen position is unchanged. The push mutator applies on the next aura event, which is
+-- fine: the push only matters once the buff is present (the badge is hidden then anyway).
+function Handle:SetBadgeSpill(sp)
+    if self.config.mode ~= "missing" or not self.badge then return end
+    sp = math.max(0, math.floor(sp or 0))
+    local badge = self.config.badge or {}
+    self.config.badge = badge
+    if (badge.spill or 0) == sp then return end
+    badge.spill = sp
+    local bw, bh = badge.w or 24, badge.h or 24
+    self.frame:SetSize(bw + 2 * sp, bh + 2 * sp)
+    self.badge:ClearAllPoints()
+    local backend = self.backend
+    local c = backend and backend.container
+    if c then
+        self.badge:SetPoint("TOPLEFT", c, "TOPLEFT", MISSING_PAD + sp, -sp)
+        if backend.groupKeys and c.SetAuraGroupLayout then
+            local cellLayout = { elementWidth = bw + 2 * sp + MISSING_PAD, elementHeight = bh }
+            for _, key in ipairs(backend.groupKeys) do
+                pcall(function() c:SetAuraGroupLayout(key, cellLayout) end)
+            end
+        end
+    else
+        self.badge:SetPoint("TOPLEFT", self.frame, "TOPLEFT", sp, -sp)
     end
 end
 -- Returns the DESIRED unit; while in combat the backend retarget may still be deferred to regen.
@@ -2136,7 +2173,7 @@ function AuraContainer:Create(parent, config)
     AuraContainer._handles[h] = true   -- weak-keyed registry so a dropped handle GCs (else rebuild-forever on test toggle)
     ensureProviderWatch()              -- edit-mode guard (see above); one shared frame
     -- h.frame is the plain anchor frame DF positions; the backend parents its OWN
-    -- CustomAuraContainer to it (per-consumer container — Krathe's ContainerOverlay pattern).
+    -- CustomAuraContainer to it (one container per consumer).
     h.frame = CreateFrame("Frame", nil, parent)
     if cfg.mode == "missing" then
         -- MISSING mode (probe 32, live-confirmed 2026-07-10): h.frame is a CLIP WINDOW
@@ -2146,15 +2183,22 @@ function AuraContainer:Create(parent, config)
         -- button's cell width pushes it out ("present" renders NOTHING). Zero reads.
         local bw = (cfg.badge and cfg.badge.w) or 24
         local bh = (cfg.badge and cfg.badge.h) or 24
+        -- spill = transparent margin the clip window keeps AROUND the badge so a border
+        -- ANIMATION can extend OUTSIDE the icon (missing state) without the window clipping
+        -- it. The badge sits CENTRED; the layout-push (below) grows by 2*spill so the badge
+        -- AND its spill still clear the window when the buff is present (no leak onto buffed
+        -- units). Derived from the animation config by the caller (0 when no animation, so
+        -- the non-animated case is byte-identical to before). Live-updated by SetBadgeSpill.
+        local sp = (cfg.badge and cfg.badge.spill) or 0
         h.frame:SetClipsChildren(true)
-        h.frame:SetSize(bw, bh)
+        h.frame:SetSize(bw + 2 * sp, bh + 2 * sp)
         -- The badge is handle-owned (survives container rebuilds). It starts HIDDEN and
         -- parked on the window: with no live container we must not claim "missing"
         -- (false-negative until regen beats a false-positive). The backend shows it and
         -- re-anchors it to the container when a build lands; teardown re-parks it.
         h.badge = CreateFrame("Frame", nil, h.frame)
         h.badge:SetSize(bw, bh)
-        h.badge:SetPoint("TOPLEFT", h.frame, "TOPLEFT", 0, 0)
+        h.badge:SetPoint("TOPLEFT", h.frame, "TOPLEFT", sp, -sp)
         h.badge:Hide()
     else
         -- Row/overlay: h.frame occupies the unit-frame rect (row layout anchors are

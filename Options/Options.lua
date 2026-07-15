@@ -6418,13 +6418,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             parent       = self.child,
             -- Class/Role colour makes sense here: at a glance, the border
             -- communicates WHO is using the defensive cooldown (their class
-            -- or role) without the user having to read the icon. Animation
-            -- is useful as a "needs attention" alert when a high-priority
-            -- defensive fires.
+            -- or role) without the user having to read the icon. (Animation is
+            -- not offered: the defensive icon is a container button, and 12.1
+            -- forbids driving its border while auras are secret — see
+            -- AuraContainer's animation chokepoint.)
             include      = { inset = true, offset = true, blendMode = true,
                              gradient = true, shadow = true, alpha = true,
-                             classColor = true, roleColor = true,
-                             animate = true },
+                             classColor = true, roleColor = true },
             fullUpdate   = function() if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end end,
             lightUpdate  = function() DF:LightweightUpdateDefensiveIcons() end,
             lightColors  = function() DF:LightweightUpdateDefensiveIconColors() end,

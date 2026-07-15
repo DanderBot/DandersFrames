@@ -755,6 +755,12 @@ local function orbitTick(border, anim, dt)
     local tex = border.orbitTex;   if not tex then return end
     local w = border._knownW or host:GetWidth()
     local h = border._knownH or host:GetHeight()
+    -- Particles anchor to the animRect (host), which ensureAnimRect insets by anim.inset
+    -- (negative = larger). _knownW/_knownH are the BORDER's raw size (secret-rect safe), so
+    -- inset-adjust them to the host's actual size — else the perimeter walk and the anchor
+    -- box disagree and the loop "breaks" mid-cycle. (host:GetWidth() is already host-sized.)
+    if border._knownW then w = w - 2 * (anim.inset or 0) end
+    if border._knownH then h = h - 2 * (anim.inset or 0) end
     if not w or not h or w <= 0 or h <= 0 then return end
     local perimeter = 2 * (w + h)
     local bottomlim = h * 2 + w
@@ -946,6 +952,12 @@ local function pixelTick(border, anim, dt)
     local tex = border.pixelTex;   if not tex then return end
     local w = border._knownW or host:GetWidth()
     local h = border._knownH or host:GetHeight()
+    -- Particles anchor to the animRect (host), which ensureAnimRect insets by anim.inset
+    -- (negative = larger). _knownW/_knownH are the BORDER's raw size (secret-rect safe), so
+    -- inset-adjust them to the host's actual size — else the perimeter walk and the anchor
+    -- box disagree and the loop "breaks" mid-cycle. (host:GetWidth() is already host-sized.)
+    if border._knownW then w = w - 2 * (anim.inset or 0) end
+    if border._knownH then h = h - 2 * (anim.inset or 0) end
     if not w or not h or w <= 0 or h <= 0 then return end
     local perimeter = 2 * (w + h)
     local bottomlim = h * 2 + w

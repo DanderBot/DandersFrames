@@ -1219,6 +1219,41 @@ local function buildMissingCellConfig(info, unit, size)
     }
 end
 
+-- Outward reach (px) of the missing-buff border animation — how far it extends BEYOND
+-- the icon. The clip window keeps this much transparent margin around the badge so the
+-- animation shows outside the icon when the buff is missing, and the layout-push grows to
+-- match so it does NOT leak onto buffed units (the badge + its spill both clear the window
+-- when the buff is present). Returns 0 when there's no border animation, so a non-animated
+-- badge keeps the exact icon-sized window as before. Conservative — over-estimating is
+-- harmless (the extra margin is transparent, and a bigger push still just clips off-window):
+--   negative inset pushes the art out · offset shifts it · the effect's own glow/particles
+--   reach ~half the icon at scale 1.
+local function missingAnimSpill(db, badgeSize)
+    if db.missingBuffIconShowBorder == false then return 0 end
+    local t = db.missingBuffIconBorderAnimationType
+    if not t or t == "NONE" then return 0 end
+    local inset = db.missingBuffIconBorderAnimationInset or 0
+    local offX  = math.abs(db.missingBuffIconBorderAnimationOffsetX or 0)
+    local offY  = math.abs(db.missingBuffIconBorderAnimationOffsetY or 0)
+    local scale = math.max(1, db.missingBuffIconBorderAnimationScale or 1)
+    -- The anim rect (host) is the icon inset-adjusted by the animation inset (negative =
+    -- larger). Some effects flare well past their steady state during the one-shot INTRO —
+    -- Proc's contracting burst (PROC_BURST_SCALE 150/42 of the host) and Flash's opening
+    -- outer glow (2F, F = host*1.4) — so size the window to the intro, not the loop, else
+    -- the intro clips at the window edge. Others hug the border ~half the icon.
+    local host = badgeSize - 2 * inset
+    local artOut
+    if t == "DF_PROC" then
+        artOut = (host * (150 / 42) - badgeSize) / 2
+    elseif t == "DF_FLASH" then
+        artOut = (host * 2 * 1.4 - badgeSize) / 2
+    else
+        artOut = math.max(0, -inset) + badgeSize * 0.5 * scale
+    end
+    local out = math.max(0, artOut) + math.max(offX, offY)
+    return math.min(badgeSize * 5, math.max(0, math.ceil(out)))
+end
+
 -- Paint one cell's badge: spell icon + unified DF.Border (missingBuffIcon* keys).
 -- The badge frame's POSITION derives from the container's secret size (§20c):
 -- never pixel-snap it or read its rect; secretRect borders render anchor-only.
@@ -1342,12 +1377,17 @@ function DF:DriveMissingBuffFactory(frame, db)
         frame.missingFactory = cells
         frame.missingFactorySig = sig
         frame.dfMissingFactoryVersion = DF.auraLayoutVersion or 0
+        local spill = missingAnimSpill(db, badgeSize)
         for i = 1, #tracked do
             local info = tracked[i]
-            local h = DF.AuraContainer:Create(strip, buildMissingCellConfig(info, frame.unit, badgeSize))
+            local cellCfg = buildMissingCellConfig(info, frame.unit, badgeSize)
+            cellCfg.badge.spill = spill   -- transparent room for the border animation to spill outside the icon
+            local h = DF.AuraContainer:Create(strip, cellCfg)
             if h then
                 h:ClearAllPoints()
-                h:SetPoint("LEFT", strip, "LEFT", (i - 1) * (badgeSize + MISSING_BADGE_GAP), 0)
+                -- Shift the (spill-enlarged) window left by the spill so the CENTRED badge
+                -- still lands on the badge-pitch grid — icon position unchanged, window grows.
+                h:SetPoint("LEFT", strip, "LEFT", (i - 1) * (badgeSize + MISSING_BADGE_GAP) - spill, 0)
                 styleMissingBadge(h, db, frame, info)
                 cells[info[2]] = h
             end
@@ -1411,13 +1451,17 @@ function DF:DriveMissingBuffFactory(frame, db)
     if frame.dfMissingFactoryVersion ~= ver and not InCombatLockdown() then
         frame.dfMissingFactoryVersion = ver
         layoutMissingStrip(frame, db, strip, #tracked)
+        local spill = missingAnimSpill(db, badgeSize)
         for i = 1, #tracked do
             local info = tracked[i]
             local h = cells[info[2]]
             if h then
                 if h.SetBadgeSize then h:SetBadgeSize(badgeSize, badgeSize) end
+                -- Live-apply the animation spill (grows window/push, re-centres badge) with
+                -- no teardown, so a slider drag re-flows the spill without restarting the anim.
+                if h.SetBadgeSpill then h:SetBadgeSpill(spill) end
                 h:ClearAllPoints()
-                h:SetPoint("LEFT", strip, "LEFT", (i - 1) * (badgeSize + MISSING_BADGE_GAP), 0)
+                h:SetPoint("LEFT", strip, "LEFT", (i - 1) * (badgeSize + MISSING_BADGE_GAP) - spill, 0)
                 styleMissingBadge(h, db, frame, info)
             end
         end

@@ -336,15 +336,12 @@ local function renameBorderTypeKeys(t)
             if t.BorderTexture == nil then t.BorderTexture = "DF Glow" end
             if t.BorderSize    == nil then t.BorderSize    = thickness end
         elseif style == "DASHED" or style == "ANIMATED" then
+            -- The legacy dashed/animated styles drew a size-0 border made visible
+            -- ONLY by a container border animation, which 12.1 retired (aura buttons
+            -- go forbidden while auras are secret). Fold them to a visible static
+            -- border so an upgraded config renders something rather than nothing.
             t.BorderStyle = "SOLID"
-            if t.BorderSize == nil then t.BorderSize = 0 end
-            if t.BorderAnimationType == nil then
-                t.BorderAnimationType      = "DF_DASH"
-                t.BorderAnimationFrequency = (style == "ANIMATED") and 1 or 0
-                t.BorderAnimationThickness = thickness
-                t.BorderAnimationColor     = color
-                t.BorderAnimationInset     = inset
-            end
+            if t.BorderSize == nil then t.BorderSize = thickness end
         elseif style == "CORNERS" then
             t.BorderStyle = "SOLID"
             if t.BorderSize == nil then t.BorderSize = 0 end
@@ -3288,6 +3285,9 @@ local function RefreshPreviewEffects()
     -- Every type skips hidden blocks (eye toggle, enabled == false) — same as pickWinner.
     if auraCfg.border and auraCfg.border.enabled ~= false and auraCfg.border.ShowBorder ~= false then
         local spec = DF.Border:BuildSpec(auraCfg.border, "")
+        spec.animation = nil   -- AD border animation retired on 12.1; the preview must match the
+                               -- live render (which strips it at the container chokepoint) so a
+                               -- stuck-on BorderAnimationType from an old profile doesn't animate here.
         if not spec.color then spec.color = { r = 1, g = 1, b = 1, a = 1 } end
         spec.enabled = true
         if auraCfg.border.borderMode == "custom" then
@@ -3961,7 +3961,6 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 include = {
                     inset = true, offset = true, blendMode = true,
                     gradient = true, shadow = true, alpha = true,
-                    animate = true,
                 },
                 -- IMPORTANT: AD's per-aura proxy only triggers
                 -- RefreshLiveFramesThrottled + RefreshPreviewLightweight
@@ -4092,7 +4091,6 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 include = {
                     inset = true, offset = true, blendMode = true,
                     gradient = true, shadow = true, alpha = true,
-                    animate = true,
                 },
                 fullUpdate    = RPL,
                 lightUpdate   = RPL,
@@ -4214,7 +4212,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 parent  = parent,
                 include = {
                     inset = true, blendMode = true, gradient = true,
-                    shadow = true, alpha = true, animate = true,
+                    shadow = true, alpha = true,
                 },
                 fullUpdate    = RPL,
                 lightUpdate   = RPL,
@@ -4301,13 +4299,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 include = {
                     inset = true, offset = true, blendMode = true,
                     gradient = true, shadow = true, alpha = true,
-                    animate = true,
                 },
-                -- DF Flash / DF Proc are centre-anchored proc-glow flares sized to
-                -- the icon; this border wraps the WHOLE frame, so they'd bloom to an
-                -- absurd size. Exclude them here (they stay available on the icon /
-                -- square / bar indicators, whose borders are icon-sized).
-                animExcludeTypes = { DF_FLASH = 1, DF_PROC = 1 },
                 fullUpdate    = RPL,
                 lightUpdate   = RPL,
                 lightColors   = RPL,
@@ -7490,9 +7482,7 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
             include = {
                 inset = true, offset = true, blendMode = true,
                 gradient = true, shadow = true, alpha = true,
-                animate = true,
             },
-            animExcludeTypes = { DF_FLASH = true, DF_PROC = true },
             fullUpdate    = refresh,
             lightUpdate   = refresh,
             lightColors   = refresh,
