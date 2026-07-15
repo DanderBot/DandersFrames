@@ -90,7 +90,12 @@ function CC:RegisterEvents()
                 CC:RegisterAllNameplates()
                 -- Apply hovercast bindings
                 CC:ApplyGlobalBindings()
-                
+
+                -- Self-heal (bug #976): reset restricted-env hover tracking and
+                -- rebuild keyboard binding snippets after every loading screen,
+                -- so a broken hover-bind state never survives a zone change
+                CC:RunBindingRepair("zone-in", true)
+
                 -- Check for loadout-based profile on initial load
                 C_Timer.After(1, function()
                     if not InCombatLockdown() then
@@ -158,6 +163,13 @@ function CC:OnCombatEnd()
         self.needsFullRegistration = nil
     end
     
+    -- Self-heal repair queued during combat (bug #976)
+    if self.pendingBindingRepair then
+        local reason = self.pendingBindingRepair
+        self.pendingBindingRepair = nil
+        self:RunBindingRepair(reason)
+    end
+
     -- Refresh bindings if needed
     if self.needsBindingRefresh then
         self:ApplyBindings()
