@@ -27,63 +27,16 @@ local function Trim(s)
     return (s or ""):match("^%s*(.-)%s*$")
 end
 
--- ============================================================
--- SPELL TOOLTIP WITH LOAD-ON-DEMAND
--- GameTooltip:SetSpellByID renders nothing when the client hasn't
--- loaded the spell's data yet, and for server-side scripted auras
--- with no tooltip content at all (e.g. Strength of the Black Ox,
--- 443113). Ask the client to load the data and re-render if the
--- row is still hovered on the same spell when it arrives; when the
--- data is genuinely absent, fall back to a minimal name + id
--- tooltip so the hover never comes up empty.
--- ============================================================
+-- The async load-on-demand spell tooltip (R.ShowSpellTooltip), the fixed
+-- class grouping order (R.PickerClassOrder), the localized class names
+-- (R.ClassDisplayName) and the class-coloured name styling
+-- (R.ApplyClassNameColor) live in FilterRegistry/SpellPicker.lua — shared
+-- with the spell database picker. That file loads AFTER this one, so bind
+-- them at build time (inside BuildFilterDesignerPage), never at file scope.
 
-local function AddSpellTooltipFallback(spellID, fallbackName)
-    local name = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(spellID)
-    if type(name) ~= "string" or name == "" then name = fallbackName end
-    if type(name) == "string" and name ~= "" then
-        GameTooltip:AddLine(name, 1, 1, 1)
-    end
-    GameTooltip:AddLine(format(L["Spell IDs: %s"], tostring(spellID)), 0.5, 0.5, 0.5)
-end
-
--- isCurrent(row, spellID): is the (pooled, rebindable) row still showing
--- this spell? Guards the async re-render against rebinds and hover moves.
-local function ShowSpellTooltip(row, spellID, fallbackName, isCurrent)
-    GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
-    -- pcall: SetSpellByID errors outright on ids the client considers
-    -- invalid (possible for stale DB entries) — treat that as "no data".
-    local ok = pcall(GameTooltip.SetSpellByID, GameTooltip, spellID)
-    if not ok or GameTooltip:NumLines() == 0 then
-        local spell = Spell and Spell.CreateFromSpellID and Spell:CreateFromSpellID(spellID)
-        if spell and not spell:IsSpellEmpty() and not spell:IsSpellDataCached() then
-            -- Data exists server-side but isn't loaded yet: this both
-            -- requests the load and re-renders once it arrives. The cached
-            -- case never gets here (SetSpellByID already had its chance),
-            -- so the callback can't double-add the fallback lines below.
-            spell:ContinueOnSpellLoad(function()
-                if GameTooltip:IsShown() and GameTooltip:IsOwned(row)
-                    and row:IsMouseOver() and isCurrent(row, spellID) then
-                    GameTooltip:ClearLines()
-                    local ok2 = pcall(GameTooltip.SetSpellByID, GameTooltip, spellID)
-                    if not ok2 or GameTooltip:NumLines() == 0 then
-                        AddSpellTooltipFallback(spellID, fallbackName)
-                    end
-                    GameTooltip:Show()
-                end
-            end)
-        end
-        AddSpellTooltipFallback(spellID, fallbackName)
-    end
-    GameTooltip:Show()
-end
-
--- Per-site "still showing this spell?" predicates (file-local so the
--- pooled OnEnter handlers don't allocate a closure per hover)
-local function PickerRowStillShows(row, spellID)
-    return row._rec ~= nil and row._rec.id == spellID
-end
-
+-- Spell-list "still showing this spell?" predicate for the async tooltip
+-- (file-local so the pooled OnEnter handlers don't allocate a closure per
+-- hover)
 local function SpellRowStillShows(row, spellID)
     return row._spellID == spellID and not row._raw
 end
@@ -212,20 +165,6 @@ local function ScrubDeletedFilter(cfId)
     end
 end
 
--- Fixed grouping order for the spell list (token-alphabetical); records with
--- class == "ALL" (or no class) group last under L["All Classes"].
-local CLASS_ORDER = {
-    "DEATHKNIGHT", "DEMONHUNTER", "DRUID", "EVOKER", "HUNTER", "MAGE",
-    "MONK", "PALADIN", "PRIEST", "ROGUE", "SHAMAN", "WARLOCK", "WARRIOR",
-}
-
--- Localized class display names via Blizzard's global (codebase precedent:
--- TextDesigner/DataSource.lua). Covers Death Knight / Demon Hunter / Evoker.
-local function ClassDisplayName(token)
-    if token == "ALL" then return L["All Classes"] end
-    return (LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[token]) or token
-end
-
 -- ============================================================
 -- MAIN PAGE BUILD
 -- ============================================================
@@ -251,6 +190,13 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     local GUI = guiRef
     local parent = pageRef.child
     local R = DF.FilterRegistry
+
+    -- Shared helpers from FilterRegistry/SpellPicker.lua (loads after this
+    -- file — safe here because pages build long after load time)
+    local CLASS_ORDER = R.PickerClassOrder
+    local ClassDisplayName = R.ClassDisplayName
+    local ApplyNameColor = R.ApplyClassNameColor
+    local ShowSpellTooltip = R.ShowSpellTooltip
 
     -- ========== LAYOUT CONSTANTS ==========
     local PANEL_H = 490
@@ -301,22 +247,6 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         for _ in pairs(f.spells) do n = n + 1 end
         for _ in pairs(f.rawIDs) do n = n + 1 end
         return n
-    end
-
-    -- Class-coloured spell name. Disabled/already-added rows keep their 40%
-    -- alpha dim ON TOP of the class colour — the colour is scaled (0.61 ≈ the
-    -- 0.55/0.90 ratio of the neutral dim), never dropped. Records without a
-    -- valid class token ("ALL", raw ids) keep the neutral colours.
-    local function ApplyNameColor(fs, classToken, dim)
-        local cc = classToken and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classToken]
-        if cc then
-            local m = dim and 0.61 or 1
-            fs:SetTextColor(cc.r * m, cc.g * m, cc.b * m)
-        elseif dim then
-            fs:SetTextColor(0.55, 0.55, 0.55)
-        else
-            fs:SetTextColor(0.90, 0.90, 0.90)
-        end
     end
 
     -- Display name of the current selection (duplicate-prompt prefill)
@@ -630,358 +560,52 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     HookDisabledTooltip(dbBtn, L["Presets are curated — add spells to a custom filter instead."])
 
     -- ========== ADD-FROM-DATABASE PICKER ==========
-    -- In-page overlay covering both columns (the spell DB is far too large
-    -- for a StaticPopup): its own search box + pooled list of every DB spell,
-    -- class-grouped like the main spell list (name-sorted within each group,
-    -- "ALL" last). Clicking a row adds the spell to the target custom
-    -- filter; rows already in the filter render dimmed with a check instead
-    -- of being clickable. Esc or the close button dismisses.
-    local picker = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    picker:SetPoint("TOPLEFT", leftPanel, "TOPLEFT", 0, 0)
-    picker:SetPoint("BOTTOMRIGHT", rightArea, "BOTTOMRIGHT", 0, 0)
-    picker:SetFrameLevel(parent:GetFrameLevel() + 30)
-    GUI:CreatePanelBackdrop(picker, { bgAlpha = 0.98, borderColor = { r = 0.20, g = 0.20, b = 0.20, a = 1 } })
-    picker:EnableMouse(true) -- swallow clicks aimed at the page underneath
-    picker:Hide()
-
+    -- The shared spell database picker (FilterRegistry/SpellPicker.lua):
+    -- in-page overlay covering both columns (the spell DB is far too large
+    -- for a StaticPopup), search box + class/category filters + pooled list
+    -- of every DB spell, class-grouped like the main spell list. Clicking a
+    -- row adds the spell to the target custom filter; rows already in the
+    -- filter render dimmed with a check instead of being clickable. Esc or
+    -- the close button dismisses; search + filters reset on every open.
     local pickerTarget -- custom filter id the picker adds into
-    local pickerSearch = "" -- lowercased query
-    -- Class/category filters: transient UI state (locals, reset on every
-    -- open) — deliberately not db-backed. Sentinels never collide with real
-    -- class tokens or category keys.
-    local PICKER_ALL_CLASSES = "ALLCLASSES"
-    local PICKER_ALL_CATS = "ALLCATS"
-    local pickerClassFilter = PICKER_ALL_CLASSES
-    local pickerCatFilter = PICKER_ALL_CATS
-    local RefreshPicker
-
-    -- Close on Escape (same idiom as the Aura Designer popups).
-    -- SetPropagateKeyboardInput is protected in combat for insecure code:
-    -- skip the calls there (keys propagate anyway — ESC just hides the
-    -- panel), and don't trap keyboard input if built mid-combat.
-    if not InCombatLockdown() then
-        picker:EnableKeyboard(true)
-        picker:SetPropagateKeyboardInput(true)
-    end
-    picker:SetScript("OnKeyDown", function(self, key)
-        if key == "ESCAPE" then
-            if not InCombatLockdown() then self:SetPropagateKeyboardInput(false) end
-            self:Hide()
-        else
-            if not InCombatLockdown() then self:SetPropagateKeyboardInput(true) end
-        end
-    end)
-
-    local pickerTitle = picker:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    pickerTitle:SetPoint("TOPLEFT", 10, -11)
-    pickerTitle:SetText(L["Add from Database"])
-
-    local pickerTargetText = picker:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
-    pickerTargetText:SetPoint("LEFT", pickerTitle, "RIGHT", 10, 0)
-    pickerTargetText:SetTextColor(0.5, 0.5, 0.5)
-
-    local pickerClose = GUI:CreateCloseButton(picker, {
-        size = 20,
-        onClick = function() picker:Hide() end,
-    })
-    pickerClose:SetPoint("TOPRIGHT", -8, -8)
-
-    -- Search box, stretched to clear the close button (body at -33..-57)
-    local pickerSearchBox = GUI:CreateEditBox(picker, "", nil, nil, nil, 170, L["Search..."])
-    pickerSearchBox:SetPoint("TOPLEFT", 10, -18)
-    pickerSearchBox:SetPoint("TOPRIGHT", -36, -18)
-
-    -- Filter row under the search box: Class + Category dropdowns, side by
-    -- side. They combine with the search text (row shows only if it matches
-    -- all three). Inline dropdowns with customGet/customSet closing over the
-    -- transient locals (same idiom as the Nicknames page's transient
-    -- dropdowns — no db table involved).
-    local pickerClassOptions = { [PICKER_ALL_CLASSES] = L["All Classes"], _order = { PICKER_ALL_CLASSES } }
-    do
-        -- One option per class token actually present in the DB, in the
-        -- fixed class order; unknown tokens collapse into "ALL" exactly like
-        -- the list's grouping, and "ALL" (items/racials) lists last as
-        -- L["General"] so it doesn't read like the no-filter option.
-        local present = {}
-        for _, rec in ipairs(R.Spells) do
-            local token = rec.class or "ALL"
-            if token ~= "ALL" and not (RAID_CLASS_COLORS and RAID_CLASS_COLORS[token]) then
-                token = "ALL"
-            end
-            present[token] = true
-        end
-        for _, token in ipairs(CLASS_ORDER) do
-            if present[token] then
-                pickerClassOptions[token] = {
-                    text = ClassDisplayName(token),
-                    color = RAID_CLASS_COLORS and RAID_CLASS_COLORS[token] or nil,
-                }
-                tinsert(pickerClassOptions._order, token)
-            end
-        end
-        if present.ALL then
-            pickerClassOptions.ALL = L["General"]
-            tinsert(pickerClassOptions._order, "ALL")
-        end
-    end
-
-    local pickerCatOptions = { [PICKER_ALL_CATS] = L["All Categories"], _order = { PICKER_ALL_CATS } }
-    for _, cat in ipairs(R.Categories) do
-        pickerCatOptions[cat.key] = L[cat.name]
-        tinsert(pickerCatOptions._order, cat.key)
-    end
-
-    local pickerClassDrop = GUI:CreateDropdown(picker, "", pickerClassOptions, nil, nil, nil,
-        function() return pickerClassFilter end,
-        function(v)
-            pickerClassFilter = v or PICKER_ALL_CLASSES
-            if picker:IsShown() then RefreshPicker() end
-        end,
-        { inline = true })
-    pickerClassDrop:SetSize(160, 22)
-    pickerClassDrop:SetPoint("TOPLEFT", 10, -62)
-
-    local pickerCatDrop = GUI:CreateDropdown(picker, "", pickerCatOptions, nil, nil, nil,
-        function() return pickerCatFilter end,
-        function(v)
-            pickerCatFilter = v or PICKER_ALL_CATS
-            if picker:IsShown() then RefreshPicker() end
-        end,
-        { inline = true })
-    pickerCatDrop:SetSize(160, 22)
-    pickerCatDrop:SetPoint("TOPLEFT", pickerClassDrop, "TOPRIGHT", 8, 0)
-
-    -- List background: top offset clears the search row (-33..-57) plus the
-    -- filter row (-62..-84)
-    local pickerListBg = CreateFrame("Frame", nil, picker, "BackdropTemplate")
-    pickerListBg:SetPoint("TOPLEFT", 10, -92)
-    pickerListBg:SetPoint("BOTTOMRIGHT", -10, 10)
-    GUI:CreatePanelBackdrop(pickerListBg, { borderColor = { r = 0.20, g = 0.20, b = 0.20, a = 1 } })
-
-    local pickerScroll = CreateFrame("ScrollFrame", nil, pickerListBg, "ScrollFrameTemplate")
-    pickerScroll:SetPoint("TOPLEFT", 4, -4)
-    pickerScroll:SetPoint("BOTTOMRIGHT", -24, 4)
-    DF.GUI.StyleScrollBar(pickerScroll)
-
-    local pickerContent = CreateFrame("Frame", nil, pickerScroll)
-    pickerContent:SetSize(400, 1)
-    pickerScroll:SetScrollChild(pickerContent)
-    pickerScroll:SetScript("OnSizeChanged", function(_, w)
-        if w and w > 0 then pickerContent:SetWidth(w) end
-    end)
-
-    local pickerEmpty = pickerListBg:CreateFontString(nil, "OVERLAY", "DFFontDisableSmall")
-    pickerEmpty:SetPoint("CENTER", pickerListBg, "CENTER", 0, 0)
-    pickerEmpty:SetText(L["No results found"])
-    pickerEmpty:Hide()
-
-    -- Class-grouped index over the whole DB, built once on first open
-    -- (names cached for the sort + search; icons fetched fresh at bind).
-    -- Keyed by class token; records without a valid class token collapse
-    -- into "ALL", same as the main list. Name-sorted within each group.
-    local pickerIndex
-    local function GetPickerIndex()
-        if not pickerIndex then
-            pickerIndex = {}
-            for _, rec in ipairs(R.Spells) do
-                local token = rec.class or "ALL"
-                if token ~= "ALL" and not (RAID_CLASS_COLORS and RAID_CLASS_COLORS[token]) then
-                    token = "ALL"
-                end
-                local g = pickerIndex[token]
-                if not g then
-                    g = {}
-                    pickerIndex[token] = g
-                end
-                local name = R:GetSpellDisplay(rec)
-                g[#g + 1] = { rec = rec, name = name, lower = name:lower() }
-            end
-            for _, g in pairs(pickerIndex) do
-                tsort(g, function(a, b)
-                    if a.name ~= b.name then return a.name < b.name end
-                    return a.rec.id < b.rec.id
-                end)
-            end
-        end
-        return pickerIndex
-    end
-
-    -- Picker class-header pool (same pooled-fontstring idiom as the main
-    -- spell list's class headers)
-    local pickerHeaders = {}
-    local function AcquirePickerHeader(i)
-        local fs = pickerHeaders[i]
-        if fs then
-            fs:Show()
-            return fs
-        end
-        fs = pickerContent:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
-        fs:SetJustifyH("LEFT")
-        pickerHeaders[i] = fs
-        return fs
-    end
-
-    -- Picker row pool (same pooled-row idiom as the main spell list)
-    local pickerRows = {}
-    local function AcquirePickerRow(i)
-        local row = pickerRows[i]
-        if row then
-            row:Show()
-            return row
-        end
-        row = CreateFrame("Button", nil, pickerContent, "BackdropTemplate")
-        row:SetHeight(SPELL_ROW_H - 2)
-        row:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
-        row:SetBackdropColor(0.08, 0.08, 0.08, 0.6)
-
-        row.icon = row:CreateTexture(nil, "ARTWORK")
-        row.icon:SetSize(20, 20)
-        row.icon:SetPoint("LEFT", 6, 0)
-        row.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-
-        -- "Already added" affordance: green check instead of clickability
-        row.check = row:CreateTexture(nil, "OVERLAY")
-        row.check:SetSize(14, 14)
-        row.check:SetPoint("RIGHT", -8, 0)
-        row.check:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\check")
-        row.check:SetVertexColor(0.4, 0.85, 0.5)
-
-        row.name = row:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-        row.name:SetPoint("LEFT", row.icon, "RIGHT", 6, 0)
-        row.name:SetPoint("RIGHT", row.check, "LEFT", -6, 0)
-        row.name:SetJustifyH("LEFT")
-
-        row:SetScript("OnClick", function(self)
-            if self._added or not self._rec then return end
-            if R:AddSpellToCustom(pickerTarget, self._rec.id) then
-                DirectFilterChangedProxy()
-                RefreshAll() -- rebinds this list too, so the row shows its check
-            end
-        end)
-        row:SetScript("OnEnter", function(self)
-            if not self._added then
-                self:SetBackdropColor(0.12, 0.12, 0.12, 0.8)
-            end
-            if self._rec then
-                ShowSpellTooltip(self, self._rec.id, self._rec.n, PickerRowStillShows)
-            end
-        end)
-        row:SetScript("OnLeave", function(self)
-            self:SetBackdropColor(0.08, 0.08, 0.08, 0.6)
-            GUI:HideTooltip()
-        end)
-
-        pickerRows[i] = row
-        return row
-    end
-
-    local function BindPickerRow(row, y, entry, added)
-        row:ClearAllPoints()
-        row:SetPoint("TOPLEFT", 0, -y)
-        row:SetPoint("TOPRIGHT", 0, -y)
-        local rec = entry.rec
-        local _, icon = R:GetSpellDisplay(rec)
-        row.icon:SetTexture(icon or FALLBACK_ICON)
-        row.name:SetText(entry.name)
-        row._rec, row._added = rec, added
-
-        row.check:SetShown(added)
-        row.icon:SetAlpha(added and 0.4 or 1)
-        row.name:SetAlpha(added and 0.4 or 1)
-        ApplyNameColor(row.name, rec.class, added)
-        row:SetBackdropColor(0.08, 0.08, 0.08, 0.6) -- clear any lingering hover
-    end
-
-    RefreshPicker = function()
-        local f = R:GetCustomFilter(pickerTarget)
-        if not f then
-            picker:Hide()
-            return
-        end
-        pickerTargetText:SetText(f.name or tostring(pickerTarget))
-        local tc = GUI.GetThemeColor()
-        pickerTitle:SetTextColor(tc.r, tc.g, tc.b)
-
-        -- Render groups in class order, ALL last. Headers are placed lazily
-        -- on a group's first matching row, so a group with zero matches
-        -- (search or filters) never shows its header.
-        local index = GetPickerIndex()
-        local y = 4
-        local usedHeaders, usedRows = 0, 0
-        local function RenderGroup(token)
-            if pickerClassFilter ~= PICKER_ALL_CLASSES and token ~= pickerClassFilter then return end
-            local g = index[token]
-            if not g then return end
-            local headerPlaced = false
-            for _, entry in ipairs(g) do
-                if (pickerSearch == "" or entry.lower:find(pickerSearch, 1, true))
-                    and (pickerCatFilter == PICKER_ALL_CATS
-                        or (entry.rec.cats and entry.rec.cats[pickerCatFilter])) then
-                    if not headerPlaced then
-                        headerPlaced = true
-                        usedHeaders = usedHeaders + 1
-                        local hdr = AcquirePickerHeader(usedHeaders)
-                        hdr:ClearAllPoints()
-                        hdr:SetPoint("TOPLEFT", 6, -(y + 6))
-                        hdr:SetText(ClassDisplayName(token))
-                        local cc = token ~= "ALL" and RAID_CLASS_COLORS and RAID_CLASS_COLORS[token]
-                        if cc then
-                            hdr:SetTextColor(cc.r, cc.g, cc.b)
-                        else
-                            hdr:SetTextColor(0.65, 0.65, 0.65)
-                        end
-                        y = y + CLASS_HEADER_H
-                    end
-                    usedRows = usedRows + 1
-                    local row = AcquirePickerRow(usedRows)
-                    BindPickerRow(row, y, entry, f.spells[entry.rec.id] ~= nil)
-                    y = y + SPELL_ROW_H
-                end
-            end
-            if headerPlaced then y = y + 4 end
-        end
-        for _, token in ipairs(CLASS_ORDER) do
-            RenderGroup(token)
-        end
-        RenderGroup("ALL")
-
-        -- Hide pooled widgets beyond this refresh's needs
-        for j = usedHeaders + 1, #pickerHeaders do
-            pickerHeaders[j]:Hide()
-        end
-        for j = usedRows + 1, #pickerRows do
-            pickerRows[j]:Hide()
-        end
-        pickerEmpty:SetShown(usedRows == 0)
-        pickerContent:SetHeight(mmax(1, y + 4))
-    end
+    local pickerHandle -- shared-picker handle (nil until the first open)
 
     OpenPicker = function(cfId)
         pickerTarget = cfId
-        -- Clear the search (SetText fires OnTextChanged, which syncs
-        -- pickerSearch; the refresh below renders the full list)
-        if pickerSearchBox.EditBox:GetText() ~= "" then
-            pickerSearchBox.EditBox:SetText("")
-        end
-        -- Filters are transient too: every open starts unfiltered
-        if pickerClassFilter ~= PICKER_ALL_CLASSES or pickerCatFilter ~= PICKER_ALL_CATS then
-            pickerClassFilter = PICKER_ALL_CLASSES
-            pickerCatFilter = PICKER_ALL_CATS
-            pickerClassDrop:UpdateText()
-            pickerCatDrop:UpdateText()
-        end
-        picker:Show()
-        RefreshPicker()
+        pickerHandle = R:OpenSpellPicker({
+            parent = parent,
+            points = {
+                { "TOPLEFT", leftPanel, "TOPLEFT", 0, 0 },
+                { "BOTTOMRIGHT", rightArea, "BOTTOMRIGHT", 0, 0 },
+            },
+            title = L["Add from Database"],
+            -- Re-evaluated per refresh, so a rename while the picker is up
+            -- keeps the header current
+            subtitle = function()
+                local f = R:GetCustomFilter(pickerTarget)
+                return f and (f.name or tostring(pickerTarget)) or ""
+            end,
+            -- Target filter deleted while open -> the picker closes itself
+            isValid = function()
+                return R:GetCustomFilter(pickerTarget) ~= nil
+            end,
+            -- "Already in this filter" renders as the dimmed check row
+            isBlocked = function(rec)
+                local f = R:GetCustomFilter(pickerTarget)
+                return (f and f.spells[rec.id] ~= nil) and true or nil
+            end,
+            rowActions = {
+                {
+                    handler = function(rec)
+                        if R:AddSpellToCustom(pickerTarget, rec.id) then
+                            DirectFilterChangedProxy()
+                            RefreshAll() -- re-renders the picker too, so the row shows its check
+                        end
+                    end,
+                },
+            },
+        })
     end
-
-    -- HookScript (not SetScript): CreateEditBox already hooks OnTextChanged
-    -- for its placeholder handling.
-    pickerSearchBox.EditBox:HookScript("OnTextChanged", function(eb)
-        local q = (eb:GetText() or ""):lower()
-        if q == pickerSearch then return end
-        pickerSearch = q
-        if picker:IsShown() then RefreshPicker() end
-    end)
 
     UpdateActionStates = function()
         local isCustom = selKind == "custom" and R:GetCustomFilter(selKey) ~= nil
@@ -1438,11 +1062,11 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         -- Keep the picker coherent: hide it when the selection moved off its
         -- target custom filter (or the filter was deleted); otherwise
         -- re-render so newly-added rows pick up their check/dim state.
-        if picker:IsShown() then
+        if pickerHandle and pickerHandle:IsOpen() then
             if selKind == "custom" and selKey == pickerTarget and R:GetCustomFilter(pickerTarget) then
-                RefreshPicker()
+                pickerHandle:Refresh()
             else
-                picker:Hide()
+                pickerHandle:Close()
             end
         end
     end
