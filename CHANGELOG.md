@@ -10,6 +10,8 @@ DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally chan
 
 * (Aura Designer) **The Aura Designer now works for every spec** — previously healers and Augmentation only. The spec dropdown is grouped by class and searchable.
 * (Aura Designer) **New: Filter Groups.** Place an entire filter on the frame as its own icon row — link built-in or custom filters, and every matching buff appears in a self-arranging row with its own position, icon size, growth and icon cap. Filter Designer changes apply to linked groups immediately, and buffs shown by a group leave the buff bar while "Hide Duplicate Buffs" is on.
+* (Aura Designer) Fix cooldown swipes on indicators and groups draining in the opposite direction from the buff and debuff bars.
+* (Interface) Fix spells with hidden tooltips (like Strength of the Black Ox) showing an empty box in the Filter Designer — they now show their name and spell ID.
 * (Aura Designer) One spell picker everywhere — adding indicators, group spells and triggers all use the same spell database picker as the Filter Designer, with search, class and category filters, and add-by-ID.
 * (Aura Designer) Every indicator has a show/hide eye — turn one off without deleting it.
 * (Aura Designer) The editor header is condensed to a single row; Sound Alerts moved to the Global tab.
