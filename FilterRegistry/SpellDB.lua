@@ -22,6 +22,18 @@ local R = DF.FilterRegistry
 
 R.DBStamp = { harvest = "2026-07-12", gameBuild = 68569 }
 
+-- Hand-maintained exclusion list — harvest ids DF refuses to carry, with the
+-- reason. Regeneration (/update-spelldb) DROPS these ids from records (a record
+-- whose only id is excluded vanishes entirely) and the diff tool treats their
+-- absence as intentional, so they stay gone across re-harvests. Remove an entry
+-- to let the next regeneration re-add the spell.
+R.Excluded = {
+    [7744]    = "Will of the Forsaken — aura is a 100ms immunity blip; functionally a CC-removal cast, nothing to display",
+    [59752]   = "Will to Survive — 100ms stun-immunity blip; nothing to display",
+    [422382]  = "Wild Growth log-side id — no client-side spell data (audit INVALID)",
+    [1308649] = "Vampiric Insight — no client-side spell data (audit INVALID); re-add with the corrected id from the harvest",
+}
+
 -- Sidebar/list display order. `name` keys are looked up through L at
 -- display time (Options code does L[cat.name]); keep them stable.
 R.Categories = {
@@ -50,7 +62,7 @@ R.Spells = {
     { id = 8936,     alts = { 419287 }, n = "Regrowth", class = "DRUID", cats = { healing = true } },
     { id = 33763,    alts = { 419207, 1227806 }, n = "Lifebloom", class = "DRUID", cats = { healing = true } },
     { id = 155777,   n = "Germination",               class = "DRUID",         cats = { healing = true } },
-    { id = 48438,    alts = { 419344, 422382 }, n = "Wild Growth", class = "DRUID", cats = { healing = true } },
+    { id = 48438,    alts = { 419344 }, n = "Wild Growth", class = "DRUID", cats = { healing = true } },
     { id = 474754,   alts = { 474750 }, n = "Symbiotic Relationship", class = "DRUID", cats = { healing = true } },
     { id = 439530,   n = "Symbiotic Blooms",          class = "DRUID",         off = true, cats = { healing = true } },
     { id = 102342,   n = "Ironbark",                  class = "DRUID",         cats = { healing = true, externalDefensives = true } },
@@ -345,13 +357,11 @@ R.Spells = {
     { id = 65116,    n = "Stoneform",                 class = "ALL",           cats = { racials = true } },
     { id = 1238467,  n = "Thorn Bloom",               class = "ALL",           cats = { racials = true } },
     { id = 255654,   n = "Bull Rush",                 class = "ALL",           cats = { racials = true } },
-    { id = 59752,    n = "Will to Survive",           class = "ALL",           cats = { racials = true } },
     { id = 274739,   alts = { 274741, 274740, 274742 }, n = "Ancestral Call", class = "ALL", cats = { racials = true } },
     { id = 312924,   n = "Hyper Organic Light Originator", class = "ALL",           cats = { racials = true } },
     { id = 58984,    n = "Shadowmeld",                class = "ALL",           cats = { racials = true } },
     { id = 20572,    alts = { 33702, 33697 }, n = "Blood Fury", class = "ALL", cats = { racials = true } },
     { id = 26297,    n = "Berserking",                class = "ALL",           cats = { racials = true } },
-    { id = 7744,     n = "Will of the Forsaken",      class = "ALL",           cats = { racials = true } },
     { id = 256948,   n = "Spatial Rift",              class = "ALL",           cats = { racials = true } },
     { id = 68992,    n = "Darkflight",                class = "ALL",           cats = { racials = true } },
     { id = 291944,   n = "Regeneratin'",              class = "ALL",           cats = { racials = true } },
@@ -374,7 +384,6 @@ R.Spells = {
     { id = 1305230,  n = "Divine Power",              class = "PALADIN",       cats = { tierSetAuras = true } },
     { id = 1306118,  n = "Renewed Haste",             class = "PRIEST",        cats = { tierSetAuras = true } },
     { id = 1307795,  n = "Dark Transference",         class = "PRIEST",        cats = { tierSetAuras = true } },
-    { id = 1308649,  n = "Vampiric Insight",          class = "PRIEST",        cats = { tierSetAuras = true } },
     { id = 1300642,  n = "Condensation",              class = "SHAMAN",        cats = { tierSetAuras = true } },
     { id = 1300219,  n = "Flowing Elements",          class = "SHAMAN",        cats = { tierSetAuras = true } },
     { id = 1300222,  n = "Overcharge!",               class = "SHAMAN",        cats = { tierSetAuras = true } },
