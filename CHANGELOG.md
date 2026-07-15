@@ -23,6 +23,7 @@ DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally chan
 * (Auras) **New: Buff Filters.** The buff and defensive bars are now filtered by curated spell categories — healing, raid buffs, defensives, movement and more. Pick the buff bar's categories on the Aura Filters page and the defensive bar's on the Defensive Icon page.
 * (Interface) **New: Filter Designer.** A new settings page (Auras → Filter Designer) shows every spell in each category, lets you disable individual spells, and builds your own custom filters — including adding any spell by ID.
 * (Auras) Filter presets start with passive "noise" auras unticked — mastery procs and auto-applied side effects. Everything stays listed in the Filter Designer, one click to enable.
+* (Auras) Spell database updated with the latest harvest — two new filter categories, Tier Set Auras and Racials, plus dozens of new spells and placement fixes.
 * (Tooltips) Aura tooltip Enable toggles now apply immediately. Anchor/Offset and Disable in Combat can't apply to 12.1 aura icons (game limitation) and are marked in place — they still work for Frame and Binding tooltips.
 * (Aura Designer) The editor's preview canvas renders through the real 12.1 engine — what you see while styling is exactly what ships to the frames, including out-of-range fading.
 * (Aura Designer) Test mode previews the Aura Designer through the real engine — every placed indicator renders with its configured spell, styling and animations, exactly as live.

@@ -1276,6 +1276,7 @@ L["Quick Switch CC Profile"] = true
 L["Quick Switch Profile"] = true
 L["Pulse Overlay"] = true
 L["Race"] = true
+L["Racials"] = true
 L["Rage"] = true
 L["Raid"] = true
 L["RAID"] = true
@@ -1567,6 +1568,7 @@ L["This setting is being overridden by the active auto layout profile. To change
 L["Threat & Range"] = true
 L["Threat on Current Target"] = true
 L["Threat Colors"] = true
+L["Tier Set Auras"] = true
 L["Time Remaining"] = true
 L["Tint Color"] = true
 L["Tint Opacity"] = true
