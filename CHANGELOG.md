@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [4.7.2]
+
 ### Bug Fixes
 
 * (Click Casting) Fixed a Lua error walking Blizzard unit frames after combat that could stop click-casting bindings from working on the default frames until reload — the frame scan now skips protected (secret) values introduced by recent client versions. (by Krathe)
