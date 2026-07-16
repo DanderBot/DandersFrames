@@ -92,6 +92,8 @@ DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally chan
 * (Aura Designer) Layout groups and filter groups are available on the Other Buffs tab too, shared across all your specs.
 * (Aura Designer) **New: Debuffs tab.** Give debuff categories their own icon rows on the frame — for example, crowd control in its own spot with its own icon size. Tick a group's categories, set its layout, and those categories leave the main debuff bar automatically. Each group has its own dispellable mode and "Hide Long Debuffs" option.
 
+* (Aura Designer) My Buffs now reacts only to your own buffs — another player's cast of the same spell no longer lights your indicators, effects, or groups. Use the Other Buffs tab to track a buff from anyone.
+
 ### Known Issues (12.1 alpha)
 
 * The 12.1 aura displays are rebuilt on Blizzard's new container system and are under active testing — please report any case where buff, debuff, defensive or missing-buff displays stop updating, **especially in combat**.

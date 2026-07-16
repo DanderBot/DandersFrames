@@ -388,7 +388,17 @@ end
 -- AddAuraSlot, so every consumer folds it into its struct sig (toggling rebuilds).
 -- NOTE: the on-apply SOUND path can't honour othersOnly (AddAuraAppliedSound has no
 -- caster filter) — sounds fire for any caster's application.
-local function poolFilter(cfg)
+-- mine = the SPEC pool (My Buffs tab): ONLY the player's own casts light anything
+-- there (maintainer decision 2026-07-16, overriding the anyone-cast resolution in
+-- design doc §11.1 — "it's literally in the name"; a tester with two same-class
+-- players saw indicators fire for the other player's buffs). The OTHER pool is
+-- unchanged: anyone-cast, or "HELPFUL|!PLAYER" when the effect is othersOnly.
+-- ACCEPTED consequence: the buff-bar dedup exclude map is caster-agnostic, so with
+-- Hide Duplicate Buffs on, OTHER players' casts of a My-Buffs-tracked spell render
+-- nowhere (not on the PLAYER-filtered indicator, not on the bar). Narrowing the
+-- dedup to the player's own casts is a tracked follow-up, not this hotfix.
+local function poolFilter(cfg, mine)
+    if mine then return "HELPFUL|PLAYER" end
     return (type(cfg) == "table" and cfg.othersOnly) and "HELPFUL|!PLAYER" or "HELPFUL"
 end
 
@@ -617,7 +627,8 @@ local function pickWinner(spec, specAuras, otherAuras, typeKey, validate)
         end
     end
     local bestKey = bestName and ((bestPool == 2) and (OTHER_PREFIX .. bestName) or bestName)
-    return bestKey, bestCfg, bestMap, bestPrio
+    -- bestPool (1 = spec/My Buffs, 2 = other) drives the caster filter — see poolFilter.
+    return bestKey, bestCfg, bestMap, bestPrio, bestPool
 end
 
 -- Tear down every container in a per-type store that is not the current winner (winner
@@ -1005,12 +1016,12 @@ local function testEntryForMap(map)
     return { { spellID = id, name = name, icon = icon, duration = 12, stacks = 0 } }
 end
 
-local function buildPlacedConfig(unit, map, indicator, isSquare, borderSpec, defCBT)
+local function buildPlacedConfig(unit, map, indicator, isSquare, borderSpec, defCBT, mine)
     return {
         unit = unit,
         mode = "row",
         max = 1,
-        filter = poolFilter(indicator),   -- "HELPFUL|!PLAYER" when othersOnly (structural)
+        filter = poolFilter(indicator, mine),   -- "HELPFUL|PLAYER" on My Buffs; othersOnly rides the other pool (structural)
         candidateFilters = { includeSpellIDs = map },
         testEntries = testEntryForMap(map),
         enabled = true,
@@ -1035,7 +1046,7 @@ end
 -- toggling a region OFF must Rebuild the container to drop it; a plain ApplyStyle would leave
 -- the old region visible. A change here forces a whole-container Rebuild (slots can't be
 -- patched). Cosmetic styling of a live region is coSig.
-local function placedStructSig(map, isSquare, hideIcon, showStacks, showDuration, borderOn, indicator, defCBT)
+local function placedStructSig(map, isSquare, hideIcon, showStacks, showDuration, borderOn, indicator, defCBT, mine)
     return includeSig(map)
         .. "|" .. (isSquare and "sq" or "ic")
         .. "|" .. (hideIcon and "hi" or "")
@@ -1046,7 +1057,7 @@ local function placedStructSig(map, isSquare, hideIcon, showStacks, showDuration
         .. "|df=" .. durationFmtKey(indicator, true, defCBT)
         -- (No alert keys: the expiry alert lives on the COMPANION slot, whose own
         -- structSig carries alertElemStructKey — an alert edit rebuilds only it.)
-        .. "|f=" .. poolFilter(indicator)   -- filter string binds at build (othersOnly toggle -> Rebuild)
+        .. "|f=" .. poolFilter(indicator, mine)   -- filter string binds at build (pool/othersOnly change -> Rebuild)
 end
 
 -- COSMETIC signature: size/anchor/offset/scale/alpha, swipe, duration/stack styling, square
@@ -1195,12 +1206,12 @@ end
 
 -- Full row config for one placed bar (max=1 single-slot container). Same frame-level band as
 -- the icon/square placed indicators (40 + per-indicator frameLevel).
-local function buildBarConfig(frame, unit, map, indicator, borderSpec, defCBT)
+local function buildBarConfig(frame, unit, map, indicator, borderSpec, defCBT, mine)
     return {
         unit = unit,
         mode = "row",
         max = 1,
-        filter = poolFilter(indicator),   -- "HELPFUL|!PLAYER" when othersOnly (structural)
+        filter = poolFilter(indicator, mine),   -- "HELPFUL|PLAYER" on My Buffs; othersOnly rides the other pool (structural)
         candidateFilters = { includeSpellIDs = map },
         testEntries = testEntryForMap(map),
         enabled = true,
@@ -1240,7 +1251,7 @@ end
 -- (GetADTrackedSpellIDs) is built from the CONFIG records, not from live
 -- handles — the companion adds nothing to it.
 -- ============================================================
-local function buildAlertCompanionConfig(unit, map, indicator, layout)
+local function buildAlertCompanionConfig(unit, map, indicator, layout, mine)
     local mode = alertElemMode(indicator)
     if not mode then return nil end
     local formatter = DF.GetExpiryAlertElementFormatter
@@ -1253,7 +1264,7 @@ local function buildAlertCompanionConfig(unit, map, indicator, layout)
         unit = unit,
         mode = "row",
         max = 1,
-        filter = poolFilter(indicator),   -- mirror the indicator (othersOnly alerts on others' casts)
+        filter = poolFilter(indicator, mine),   -- mirror the indicator: My Buffs alerts only on YOUR cast
         candidateFilters = { includeSpellIDs = map },
         testEntries = testEntryForMap(map),
         enabled = true,
@@ -1295,12 +1306,12 @@ end
 -- geometry — dragging / resizing the indicator hot-moves its companion — plus
 -- font and alpha. Raw-config, alloc-light, computed per pass like the other
 -- placed sigs (FIX C discipline).
-local function alertCompanionStructSig(map, indicator)
+local function alertCompanionStructSig(map, indicator, mine)
     return includeSig(map)
         .. "|xalert"
         .. "|xa=" .. alertElemStructKey(indicator)
         .. "|fl=" .. tostring(tonumber(indicator.frameLevel) or 0)
-        .. "|f=" .. poolFilter(indicator)
+        .. "|f=" .. poolFilter(indicator, mine)
 end
 
 local function alertCompanionCoSig(frame, indicator, isBar, alpha)
@@ -1329,10 +1340,10 @@ end
 -- indicators carry their companion to the arranged position. Marks its key
 -- live on success; alert OFF / indicator death leave the key dead and the
 -- caller's end-of-pass sweep destroys the handle.
-local function syncAlertCompanion(frame, placed, live, key, map, indicator, isBar, alpha)
+local function syncAlertCompanion(frame, placed, live, key, map, indicator, isBar, alpha, mine)
     if not alertElemMode(indicator) then return end
     local akey = key .. ":alert"
-    local structSig = alertCompanionStructSig(map, indicator)
+    local structSig = alertCompanionStructSig(map, indicator, mine)
     local coSig = alertCompanionCoSig(frame, indicator, isBar, alpha)
     local entry = placed[akey]
     if entry and entry.structSig == structSig and entry.coSig == coSig then
@@ -1340,7 +1351,7 @@ local function syncAlertCompanion(frame, placed, live, key, map, indicator, isBa
         return
     end
     local layout = isBar and buildBarLayout(frame, indicator) or buildPlacedLayout(indicator)
-    local cfg = buildAlertCompanionConfig(frame.unit, map, indicator, layout)
+    local cfg = buildAlertCompanionConfig(frame.unit, map, indicator, layout, mine)
     if not cfg then return end   -- formatter unavailable: key stays dead -> sweep
     if not entry then
         local handle = DF.AuraContainer:Create(frame, cfg)
@@ -1439,7 +1450,7 @@ end
 
 -- STRUCTURAL signature: identity, duration-text on/off + format key (SetDurationText / SetDuration
 -- Bar bind ONCE), border on/off, frame level. Cosmetic bar styling is barCoSig.
-local function barStructSig(map, indicator, borderOn, defCBT)
+local function barStructSig(map, indicator, borderOn, defCBT, mine)
     return includeSig(map)
         .. "|bar"
         .. "|df=" .. durationFmtKey(indicator, false, defCBT)
@@ -1447,7 +1458,7 @@ local function barStructSig(map, indicator, borderOn, defCBT)
         -- structSig carries alertElemStructKey — an alert edit rebuilds only it.)
         .. "|" .. (borderOn and "bd" or "")
         .. "|fl=" .. tostring(tonumber(indicator.frameLevel) or 0)
-        .. "|f=" .. poolFilter(indicator)   -- filter string binds at build (othersOnly toggle -> Rebuild)
+        .. "|f=" .. poolFilter(indicator, mine)   -- filter string binds at build (pool/othersOnly change -> Rebuild)
 end
 
 -- COSMETIC signature: size (width/height + match-frame + the fed frame size), anchor/offset/
@@ -1625,13 +1636,13 @@ end
 -- Takes the FRAME (not unit): the border spec needs the frame db (pixelPerfect).
 -- adBorderAnim (the placed containers' DF-owned border-animation opt-in) is set
 -- only when a border exists, keeping style-less configs byte-identical.
-local function buildFilterGroupConfig(frame, map, group)
+local function buildFilterGroupConfig(frame, map, group, mine)
     local borderSpec = buildGroupBorderSpec(frame, group)
     return {
         unit = frame.unit,
         mode = "row",
         max = math.max(1, tonumber(group.maxIcons) or 8),
-        filter = poolFilter(group),
+        filter = poolFilter(group, mine),
         candidateFilters = { includeSpellIDs = map },
         testEntries = filterGroupTestEntries(map),
         enabled = true,
@@ -1958,13 +1969,15 @@ end
 -- Missing-mode config for a PLACED icon/square: mode="missing", badge sized to the indicator's
 -- square art. Same frame-level band as the present placed indicators. candidateFilters is the
 -- static identity map (structural — bound at build).
-local function buildPlacedMissingConfig(unit, map, indicator)
+local function buildPlacedMissingConfig(unit, map, indicator, mine)
     local size = math.max(8, tonumber(indicator.size) or 24)
     return {
         unit = unit,
         mode = "missing",
-        -- othersOnly + missing = "show while no OTHER player's cast is present".
-        filter = poolFilter(indicator),
+        -- My Buffs + missing = "show while MY OWN cast is absent" (another player's
+        -- copy no longer satisfies it); othersOnly + missing = "show while no OTHER
+        -- player's cast is present".
+        filter = poolFilter(indicator, mine),
         candidateFilters = { includeSpellIDs = map },
         badge = { w = size, h = size },
         enabled = true,
@@ -2295,6 +2308,8 @@ end
 -- "<key>:alert" keys (syncAlertCompanion) — the shared end-of-pass sweep
 -- retires them exactly like their indicators.
 local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSpec, defCBT)
+    -- Spec pool (My Buffs) = player-cast only; the OTHER_PREFIX pool stays anyone-cast.
+    local mine = keyPrefix == ""
     for auraName, auraCfg in pairs(auras) do
         local indicators = (type(auraCfg) == "table") and auraCfg.indicators
         if indicators then
@@ -2316,14 +2331,14 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                         local eff = memberEffective(hasMG, key, indicator)
                         local borderOn = placedBorderOn(indicator, false)
                         local alpha = tonumber(indicator.alpha) or 1
-                        local structSig = barStructSig(map, indicator, borderOn, defCBT)
+                        local structSig = barStructSig(map, indicator, borderOn, defCBT, mine)
                         local coSig = barCoSig(frame, eff, borderOn, alpha)
 
                         local entry = placed[key]
                         if not entry then
                             local borderSpec = borderOn and buildBarBorderSpec(frame, indicator) or nil
                             local handle = DF.AuraContainer:Create(frame,
-                                buildBarConfig(frame, frame.unit, map, eff, borderSpec, defCBT))
+                                buildBarConfig(frame, frame.unit, map, eff, borderSpec, defCBT, mine))
                             if handle then
                                 applyPlacedAlpha(handle, alpha)
                                 placed[key] = { handle = handle, structSig = structSig, coSig = coSig }
@@ -2331,7 +2346,7 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                         elseif entry.structSig ~= structSig then
                             local borderSpec = borderOn and buildBarBorderSpec(frame, indicator) or nil
                             entry.structSig, entry.coSig = structSig, coSig
-                            entry.handle:Rebuild(buildBarConfig(frame, frame.unit, map, eff, borderSpec, defCBT))
+                            entry.handle:Rebuild(buildBarConfig(frame, frame.unit, map, eff, borderSpec, defCBT, mine))
                             applyPlacedAlpha(entry.handle, alpha)
                         elseif entry.coSig ~= coSig then
                             local borderSpec = borderOn and buildBarBorderSpec(frame, indicator) or nil
@@ -2344,7 +2359,7 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
 
                         -- Expiry-alert companion slot (own container, own sigs —
                         -- see the EXPIRY ALERT COMPANION SLOT section).
-                        syncAlertCompanion(frame, placed, live, key, map, eff, true, alpha)
+                        syncAlertCompanion(frame, placed, live, key, map, eff, true, alpha, mine)
                     end
                 elseif isSquare or indicator.type == "icon" then
                     local ids = DF:BuildADIdentityFilters(idSpec, auraName)
@@ -2375,7 +2390,7 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                         local scaleM = tonumber(indicator.scale) or 1
                         local structSig = includeSig(map) .. "|" .. (isSquare and "sq" or "ic")
                             .. "|miss|fl=" .. tostring(tonumber(indicator.frameLevel) or 0)
-                            .. "|f=" .. poolFilter(indicator)
+                            .. "|f=" .. poolFilter(indicator, mine)
                         local coSig = tconcat({
                             "sz=" .. tostring(size), "sc=" .. tostring(scaleM),
                             "an=" .. anchorM, "ox=" .. tostring(oxM), "oy=" .. tostring(oyM),
@@ -2399,7 +2414,7 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                         end
                         if not entry then
                             local handle = DF.AuraContainer:Create(frame,
-                                buildPlacedMissingConfig(frame.unit, map, indicator))
+                                buildPlacedMissingConfig(frame.unit, map, indicator, mine))
                             if handle then
                                 placeM(handle)
                                 stylePlacedMissingBadge(handle, frame, idSpec, auraName, indicator, isSquare)
@@ -2423,14 +2438,14 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                         -- alloc — FIX C); the actual border spec is built ONLY inside a
                         -- create/rebuild/restyle branch below, never per pass.
                         local structSig = placedStructSig(map, isSquare, hideIcon, showStacks,
-                            showDuration, borderOn, indicator, defCBT)
+                            showDuration, borderOn, indicator, defCBT, mine)
                         local coSig = placedCoSig(eff, isSquare, borderOn, alpha)
 
                         local entry = placed[key]
                         if not entry then
                             local borderSpec = borderOn and buildPlacedBorderSpec(frame, indicator, hideIcon) or nil
                             local handle = DF.AuraContainer:Create(frame,
-                                buildPlacedConfig(frame.unit, map, eff, isSquare, borderSpec, defCBT))
+                                buildPlacedConfig(frame.unit, map, eff, isSquare, borderSpec, defCBT, mine))
                             if handle then
                                 applyPlacedAlpha(handle, alpha)
                                 placed[key] = { handle = handle, structSig = structSig, coSig = coSig }
@@ -2438,7 +2453,7 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                         elseif entry.structSig ~= structSig then
                             local borderSpec = borderOn and buildPlacedBorderSpec(frame, indicator, hideIcon) or nil
                             entry.structSig, entry.coSig = structSig, coSig
-                            entry.handle:Rebuild(buildPlacedConfig(frame.unit, map, eff, isSquare, borderSpec, defCBT))
+                            entry.handle:Rebuild(buildPlacedConfig(frame.unit, map, eff, isSquare, borderSpec, defCBT, mine))
                             applyPlacedAlpha(entry.handle, alpha)
                         elseif entry.coSig ~= coSig then
                             local borderSpec = borderOn and buildPlacedBorderSpec(frame, indicator, hideIcon) or nil
@@ -2451,7 +2466,7 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
 
                         -- Expiry-alert companion slot (own container, own sigs —
                         -- see the EXPIRY ALERT COMPANION SLOT section).
-                        syncAlertCompanion(frame, placed, live, key, map, eff, false, alpha)
+                        syncAlertCompanion(frame, placed, live, key, map, eff, false, alpha, mine)
                       end
                     end
                 end
@@ -2472,6 +2487,8 @@ end
 -- the pre-split A5 loop.
 -- ============================================================
 local function syncFilterGroupList(frame, fg, live, R, groups, keyPrefix)
+    -- Spec-keyed groups (My Buffs) = player-cast only; otherLayoutGroups unchanged.
+    local mine = keyPrefix == ""
     if not groups then return end
     for _, group in ipairs(groups) do
         if type(group) == "table" and group.kind == "filter" and group.enabled ~= false then
@@ -2483,20 +2500,20 @@ local function syncFilterGroupList(frame, fg, live, R, groups, keyPrefix)
                 live[key] = true
                 local structSig = selSig
                     .. "|max=" .. tostring(math.max(1, tonumber(group.maxIcons) or 8))
-                    .. "|f=" .. poolFilter(group)   -- filter string binds at build (othersOnly toggle -> Rebuild)
+                    .. "|f=" .. poolFilter(group, mine)   -- filter string binds at build (pool/othersOnly change -> Rebuild)
                     .. groupStyleStructSig(group)   -- region set + duration format key (group.style)
                 local coSig = filterGroupCoSig(group)
 
                 local entry = fg[key]
                 if not entry then
                     local handle = DF.AuraContainer:Create(frame,
-                        buildFilterGroupConfig(frame, res.map, group))
+                        buildFilterGroupConfig(frame, res.map, group, mine))
                     if handle then
                         fg[key] = { handle = handle, structSig = structSig, coSig = coSig }
                     end
                 elseif entry.structSig ~= structSig then
                     entry.structSig, entry.coSig = structSig, coSig
-                    entry.handle:Rebuild(buildFilterGroupConfig(frame, res.map, group))
+                    entry.handle:Rebuild(buildFilterGroupConfig(frame, res.map, group, mine))
                 elseif entry.coSig ~= coSig then
                     entry.coSig = coSig
                     entry.handle:ApplyStyle(
@@ -2607,11 +2624,11 @@ function Factory:SyncFrame(frame)
         local hb = store.healthbar
         if not hb then hb = {}; store.healthbar = hb end
 
-        local bestName, bestCfg, bestMap = pickWinner(spec, specAuras, otherAuras, "healthbar",
+        local bestName, bestCfg, bestMap, _, bestPool = pickWinner(spec, specAuras, otherAuras, "healthbar",
             function(c) return c.color end)
 
         if bestName then
-            local filt = poolFilter(bestCfg)
+            local filt = poolFilter(bestCfg, bestPool == 1)
             local existingHB = hb[bestName]
             local wantMissingHB = bestCfg.showWhenMissing and true or false
             if existingHB and (existingHB.missing and true or false) ~= wantMissingHB then
@@ -2704,11 +2721,11 @@ function Factory:SyncFrame(frame)
         local bg = store.background
         if not bg then bg = {}; store.background = bg end
 
-        local bestName, bestCfg, bestMap = pickWinner(spec, specAuras, otherAuras, "background",
+        local bestName, bestCfg, bestMap, _, bestPool = pickWinner(spec, specAuras, otherAuras, "background",
             function(c) return c.color end)
 
         if bestName then
-            local filt = poolFilter(bestCfg)
+            local filt = poolFilter(bestCfg, bestPool == 1)
             local existingBG = bg[bestName]
             local wantMissingBG = bestCfg.showWhenMissing and true or false
             if existingBG and (existingBG.missing and true or false) ~= wantMissingBG then
@@ -2779,7 +2796,7 @@ function Factory:SyncFrame(frame)
         -- keys `enabled` off exactly this key (Border.lua:217 → enabled = ShowBorder ~= false),
         -- so the winner set is identical to a full-spec enabled check. The one real spec is
         -- built ONCE below, for the chosen winner.
-        local bestName, bestCfg, bestMap = pickWinner(spec, specAuras, otherAuras, "border",
+        local bestName, bestCfg, bestMap, _, bestPool = pickWinner(spec, specAuras, otherAuras, "border",
             function(c) return c.ShowBorder ~= false end)
 
         local bestSpec
@@ -2789,7 +2806,7 @@ function Factory:SyncFrame(frame)
         end
 
         if bestName then
-            local filt = poolFilter(bestCfg)
+            local filt = poolFilter(bestCfg, bestPool == 1)
             local wantMissingBD = bestCfg.showWhenMissing and true or false
             local existingBD = bd[bestName]
             if existingBD and (existingBD.missing and true or false) ~= wantMissingBD then
@@ -2846,10 +2863,10 @@ function Factory:SyncFrame(frame)
             local st = store[typeKey]
             if not st then st = {}; store[typeKey] = st end
 
-            local bestName, bestCfg, bestMap = pickWinner(spec, specAuras, otherAuras, typeKey,
+            local bestName, bestCfg, bestMap, _, bestPool = pickWinner(spec, specAuras, otherAuras, typeKey,
                 function(c) return c.color and not c.showWhenMissing end)
             if bestName and TDRender then
-                local filt = poolFilter(bestCfg)
+                local filt = poolFilter(bestCfg, bestPool == 1)
                 local r, g, b, a = readADColor(bestCfg.color)
                 local color = { r = r, g = g, b = b, a = a }
                 local structSig = includeSig(bestMap) .. "|" .. filt
