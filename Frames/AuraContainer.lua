@@ -710,6 +710,14 @@ local function styleButton_regions(slot, config)
             slot.dfSymbol = slot.dfSymbolHolder:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
             slot.dfSymbol:SetPoint("CENTER")
         end
+        if slot.dfSymbol and dispelSpec.symbol and DF.TextStyle then
+            -- Symbol styling (Wave 5b): the FontString is OURS — the engine only writes
+            -- its TEXT — so the shared TextStyle spec re-applies every pass and the
+            -- font/scale/outline/colour/anchor/offset controls are live via ApplyStyle.
+            -- (If the engine also colours the glyph per type, its write simply lands
+            -- after ours on each aura update — probe P-SYMBOL settles which wins.)
+            DF.TextStyle:Apply(slot.dfSymbol, dispelSpec.symbol, slot.dfSymbolHolder)
+        end
     end
 end
 
@@ -1668,6 +1676,21 @@ function Handle:_paintTestSlot(slot, index)
             end)
         end
         slot.dfAuraBorder:SetShown(shown and true or false)
+    end
+    -- Dispel symbol: no native SetAuraSymbol bind in test mode -> fake the colourblind
+    -- letter ourselves (house rule: every native-driven region renders in test, or the
+    -- preview lies). Blizzard's per-locale DebuffTypeSymbol letters when available;
+    -- first-two-letters fallback. Live rendering ALSO needs the colorblindMode CVar —
+    -- the preview deliberately ignores that so the option is style-able without
+    -- flipping the CVar (the GUI tooltip + note carry the caveat).
+    if slot.dfSymbol then
+        local sym
+        if e.debuffType then
+            local t = DebuffTypeSymbol   -- FrameXML per-locale letter table (may not exist)
+            sym = (type(t) == "table" and t[e.debuffType]) or e.debuffType:sub(1, 2)
+        end
+        slot.dfSymbol:SetText(sym or "")
+        slot.dfSymbol:SetShown(sym and true or false)
     end
 
     -- Hover tooltip (parity with the legacy test icons), showing the curated

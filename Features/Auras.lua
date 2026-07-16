@@ -1024,16 +1024,36 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
     -- the dispel type is secret) — DF's custom per-type colours are NOT expressible on
     -- 12.1 rows (pickers frosted). Shows only on dispellable debuffs; the static
     -- DF.Border below renders always, so non-dispellable keeps the base border.
+    -- Wave 5b: the spec also hosts the NATIVE dispel-type SYMBOL (colourblind letter,
+    -- SetAuraSymbol) — DECOUPLED from the colour ring so either ships alone. Both are
+    -- engine-written (zero aura reads); the symbol additionally renders in-game only
+    -- while the colorblindMode CVar is on (test mode previews it regardless).
     local dispel
-    if prefix == "debuff" and db.debuffBorderColorByType then
-        -- thickness: match the icon's own DF border so the dispel ring reads as
-        -- "the border took the dispel colour" (flat square line at the same
-        -- weight; inset 0 lands exactly on it, negative insets halo outward).
-        local ringSize = db.debuffBorderSize or 2
-        if db.pixelPerfect and DF.PixelPerfect then ringSize = DF:PixelPerfect(ringSize) end
-        dispel = { nativeBorder = true, style = "Color", showWhenHarmful = true,
-                   inset = db.debuffDispelBorderInset or -2,
-                   thickness = ringSize }
+    if prefix == "debuff" then
+        local colorByType = db.debuffBorderColorByType
+        local showSymbol = db.debuffDispelSymbolEnabled == true
+        if colorByType or showSymbol then
+            dispel = { showWhenHarmful = true }
+            if colorByType then
+                -- thickness: match the icon's own DF border so the dispel ring reads as
+                -- "the border took the dispel colour" (flat square line at the same
+                -- weight; inset 0 lands exactly on it, negative insets halo outward).
+                local ringSize = db.debuffBorderSize or 2
+                if db.pixelPerfect and DF.PixelPerfect then ringSize = DF:PixelPerfect(ringSize) end
+                dispel.nativeBorder = true
+                dispel.style = "Color"
+                dispel.inset = db.debuffDispelBorderInset or -2
+                dispel.thickness = ringSize
+            end
+            if showSymbol then
+                dispel.nativeSymbol = true
+                -- Symbol styling is a shared TextStyle spec (the FontString is OURS;
+                -- the engine only writes its text) — restyles in place via ApplyStyle.
+                dispel.symbol = DF.TextStyle:BuildSpec(db, "debuffDispelSymbol", {
+                    baseSize = 10, defaultAnchor = "CENTER", boxW = iconSize, boxH = iconSize,
+                })
+            end
+        end
     end
 
     return {
@@ -1217,6 +1237,10 @@ local function rowStructSig(cfg)
         tostring(s.stacks and s.stacks.formatKey),
         tostring(s.border ~= nil), tostring(s.cooldown and s.cooldown.show ~= false),
         tostring(s.dispel ~= nil),          -- native dispel border (region is create-once -> Rebuild)
+        -- Wave 5b: the dispel spec hosts TWO independent create-once regions (colour
+        -- ring + colourblind symbol) — presence of EACH is structural on its own
+        -- (ApplyStyle can't create/remove either; the symbol bind is also bind-once).
+        tostring(s.dispel and s.dispel.nativeBorder), tostring(s.dispel and s.dispel.nativeSymbol),
         -- Duration bar: region is create-once (presence -> Rebuild), and strip geometry
         -- reserves layout space OUTSIDE the button rect (Wave 3.2), so shape/position/
         -- height/gap changes are structural too — the reservation must re-derive.

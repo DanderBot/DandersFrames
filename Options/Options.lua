@@ -6437,7 +6437,39 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         GUI:BlockControl12_1(colorsGroup, "limitation",
             { id = "debuffs:dispelcolors", page = L["Debuffs"], when = function(d) return DF:FactoryOwnsDebuffRow(d) end })
         AddToSection(colorsGroup, nil, 2)
-        
+
+        -- Dispel Symbol Group (col2) — the native colourblind dispel-type letter,
+        -- engine-written per aura (12.1 factory rows only; the legacy renderer has no
+        -- symbol source). The game draws it ONLY while Colorblind Mode is on — the
+        -- tooltip + caution note set that expectation; test mode previews it regardless.
+        local symbolGroup = GUI:CreateSettingsGroup(self.child, 260)
+        symbolGroup:AddWidget(GUI:CreateHeader(self.child, L["Dispel Symbol"]), 40)
+        local symbolEnable = symbolGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Dispel Symbol"], db, "debuffDispelSymbolEnabled", function()
+            self:RefreshStates()
+            -- Region presence is structural (create-once) — full re-drive rebuilds the row.
+            DF:InvalidateAuraLayout()
+            DF:UpdateAllFrames()
+        end), 30)
+        symbolEnable.tooltip = L["Shows a letter on each debuff indicating its dispel type. Requires Colorblind Mode to be enabled in WoW's Accessibility settings — without it the game does not draw the symbol."]
+        symbolEnable.keepEnabled = true
+        symbolEnable.disableOn = function(d) return not d.showDebuffs end
+        local symbolCVarNote = symbolGroup:AddWidget(GUI:CreateNote(self.child, L["Colorblind Mode is off, so the symbol will not appear in-game. Enable it in WoW's Accessibility settings."], {tone = "caution", width = 230}), 40)
+        symbolCVarNote.hideOn = function(d)
+            if not d.debuffDispelSymbolEnabled then return true end
+            local on = C_CVar and C_CVar.GetCVarBool and C_CVar.GetCVarBool("colorblindmode")
+            return on and true or false
+        end
+        GUI:CreateTextControls(symbolGroup, db, "debuffDispelSymbol", {
+            parent    = self.child,
+            include   = { color = true },
+            disableOn = function(d) return not d.debuffDispelSymbolEnabled end,
+            onChange  = function() DF:InvalidateAuraLayout() end,
+            onDrag    = function() DF:InvalidateAuraLayout() end,
+        })
+        symbolGroup.disableChildrenOn = function(d) return not d.showDebuffs end
+        symbolGroup.hideOn = function(d) return not DF:FactoryOwnsDebuffRow(d) end
+        AddToSection(symbolGroup, nil, 2)
+
         -- Stack Count Group (col1)
         local stackCountGroup = GUI:CreateSettingsGroup(self.child, 260)
         stackCountGroup:AddWidget(GUI:CreateHeader(self.child, L["Stack Count"]), 40)

@@ -1248,6 +1248,17 @@ DF.PartyDefaults = {
     debuffBorderColorPoison = {r = 0, g = 0.6, b = 0},
     debuffShowBorder = true,
     debuffDispelBorderInset = 0,    -- native dispel ring: + inward / - outward halo
+    -- Dispel symbol (Wave 5b, colourblind aid): the engine writes the dispel-type
+    -- letter into a DF-owned FontString (native SetAuraSymbol; zero aura reads).
+    -- Renders in-game ONLY while WoW's colorblindMode CVar is on (GUI tooltip caveat).
+    debuffDispelSymbolAnchor = "CENTER",
+    debuffDispelSymbolColor = {r = 1, g = 1, b = 1},
+    debuffDispelSymbolEnabled = false,
+    debuffDispelSymbolFont = "DF Roboto SemiBold",
+    debuffDispelSymbolOutline = "SHADOW;OUTLINE",
+    debuffDispelSymbolScale = 1,
+    debuffDispelSymbolX = 0,
+    debuffDispelSymbolY = 0,
     debuffDurationFormat = "NUMBER",
     debuffDurationColor = {r = 1, g = 1, b = 1},
     debuffStackColor = {r = 1, g = 0.82, b = 0},
