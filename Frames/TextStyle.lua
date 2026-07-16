@@ -86,6 +86,14 @@ function TextStyle:Apply(fs, spec, anchorFrame)
     -- for EVEN shadow offsets; odd offsets give a half-pixel, which we round (text on a
     -- half-pixel blurs), leaving an inherent <=0.5px residual. Outline ink is symmetric,
     -- so it needs no compensation. Only in stableCenter mode with no user Justify.
+    --
+    -- The no-arg DF:GetDB() (= party) read is DELIBERATE, even for raid frames: the
+    -- shadow being compensated is applied by the font FAMILY (Config.lua's
+    -- GetOrCreateFontFamily / RefreshFontFamilyShadows), which reads fontShadowOffsetX
+    -- from the same no-arg GetDB(). Families are shared global objects — one per
+    -- font/outline/size key, not per mode — so the RENDERED shadow is mode-agnostic and
+    -- this source always matches it. Reading the raid db here would compensate raid
+    -- text for an offset that isn't the one actually drawn.
     if spec.stableCenter and not (spec.justifyH or spec.justifyV)
        and type(spec.outline) == "string" and spec.outline:find("SHADOW") then
         local db = (DF.GetDB and DF:GetDB())

@@ -761,8 +761,9 @@ end
 -- Native stack-count TextStyle spec from the AD stack config keys (font/scale/outline/
 -- anchor/offset/colour). Read-free — the COUNT itself is filled secure-side by Blizzard's
 -- SetApplicationCount (no formatter — secret trap), shown at >1. defOX/defOY parameterize
--- the unset-offset defaults: placed indicators default 0/0, filter/debuff groups keep
--- their historical 2/-1 (buildFilterGroupStyle's pre-style hardcoded values).
+-- the unset-offset defaults: placed indicators default 2/-2 (the Midnight baseline),
+-- filter/debuff groups keep their historical 2/-1 (buildFilterGroupStyle's pre-style
+-- hardcoded values).
 local function buildStackSpec(indicator, defOX, defOY)
     local outline = indicator.stackOutline or "SHADOW;OUTLINE"
     if outline == "NONE" then outline = "" end

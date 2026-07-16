@@ -520,16 +520,20 @@ local function BuildDurationFormatter(format, hideAboveT, colorByTime)
 end
 
 local durationFormatterCache = {}
+local durationBreakpointsSigCache   -- memoized DF:GetDurationBreakpointsSig() string
 -- Drop cached coloured formatters after a Colours-page breakpoint edit. The new formatters
 -- rebind on the InvalidateAuraLayout re-drive the edit already triggers. (Uncoloured entries
 -- are unaffected but wiping all is simplest and cheap — they rebuild on next demand.)
+-- Anything that mutates durationColorByTimeBreakpoints MUST call this, or the memoized
+-- signature below keeps the old formatter/row signatures alive.
 function DF:InvalidateDurationFormatters()
     wipe(durationFormatterCache)
+    durationBreakpointsSigCache = nil
 end
 local function GetDurationFormatter(format, hideAboveT, colorByTime)
     format = format or "NUMBER"
     local key = format .. "|" .. tostring(hideAboveT or "") .. (colorByTime and "|C" or "")
-    if colorByTime then key = key .. "|" .. breakpointsSig(GetDurationColorBreakpoints()) end
+    if colorByTime then key = key .. "|" .. DF:GetDurationBreakpointsSig() end
     if durationFormatterCache[key] == nil then
         durationFormatterCache[key] = BuildDurationFormatter(format, hideAboveT, colorByTime) or false
     end
@@ -540,8 +544,15 @@ end
 -- duration format keys (dur.formatKey here + the AD durationFmtKey) so a breakpoint edit
 -- changes the row signature and forces a Rebuild — SetDurationText binds the formatter
 -- ONCE per slot, so ApplyStyle alone can't swap in the recoloured formatter.
+-- MEMOIZED: the AD struct sigs call this per indicator per UNIT_AURA inside syncPlacedPool,
+-- a walk that is deliberately allocation-free — recomputing (GetGlobalDB scan + sort +
+-- concat) there would churn garbage every aura event. The cache clears on
+-- InvalidateDurationFormatters, which every breakpoint edit already fires.
 function DF:GetDurationBreakpointsSig()
-    return breakpointsSig(GetDurationColorBreakpoints())
+    if not durationBreakpointsSigCache then
+        durationBreakpointsSigCache = breakpointsSig(GetDurationColorBreakpoints())
+    end
+    return durationBreakpointsSigCache
 end
 
 -- Shared with the Aura Designer factory (P4.4): its placed icon/square/bar duration text

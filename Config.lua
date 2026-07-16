@@ -359,18 +359,34 @@ end
 -- Create or get a cached font family (keyed by font + outline + size + shadow).
 -- The family is built at the REAL point size (not a scaled base) so text renders
 -- natively — no fractional SetTextScale — while keeping multi-alphabet support.
--- One family per distinct size in use; sizes are discrete (a handful), so bounded.
+--
+-- Sizes are QUANTIZED to half-point steps before keying/building. Two reasons:
+-- (a) float noise — saved scales carry float32 artifacts (buffDurationScale default is
+--     1.2000000476837), so 10*scale from two paths can differ in the 10th decimal and
+--     would mint two families for the same visual size; (b) bounding — families are
+--     permanent global font objects and scale sliders are continuous, so a drag with
+--     per-tick updates would otherwise mint one family per tick. Half a point is below
+--     visual perception at UI text sizes; the residual is absorbed, never SetTextScale'd.
+local function QuantizeFontSize(size)
+    size = tonumber(size) or BASE_FONT_SIZE
+    return math.floor(size * 2 + 0.5) / 2
+end
+-- Single source of truth for the cache key: GetOrCreateFontFamily builds with it and
+-- SafeSetFont's broken-family eviction must reproduce it exactly (a mismatched evict
+-- key would strand the broken entry). Shadow stays LAST so RefreshFontFamilyShadows'
+-- "|shadow" suffix check still identifies shadowed families.
+local function FontFamilyKey(fontPath, outline, useShadow, quantizedSize)
+    return (fontPath or "default"):lower() .. "|" .. (outline or "") .. "|" .. tostring(quantizedSize) .. "|" .. (useShadow and "shadow" or "noshadow")
+end
 local fontFamilyCounter = 0
 local function GetOrCreateFontFamily(fontPath, outline, useShadow, size)
     -- Check if CreateFontFamily API is available (WoW 11.x+)
     if not CreateFontFamily then
         return nil
     end
-    size = size or BASE_FONT_SIZE
+    size = QuantizeFontSize(size)
 
-    -- Create unique key for this font configuration. Shadow stays LAST so
-    -- RefreshFontFamilyShadows' "|shadow" suffix check still identifies it.
-    local key = (fontPath or "default"):lower() .. "|" .. (outline or "") .. "|" .. tostring(size) .. "|" .. (useShadow and "shadow" or "noshadow")
+    local key = FontFamilyKey(fontPath, outline, useShadow, size)
     
     if fontFamilies[key] then
         return fontFamilies[key]
@@ -761,10 +777,11 @@ function DF:SafeSetFont(fontString, fontNameOrPath, fontSize, outline)
             fontString:SetFontObject(_G[fontFamilyName])
         end)
         if not ok then
-            -- Evict the broken cache entry so it gets recreated later (key format
-            -- must match GetOrCreateFontFamily: font|outline|size|shadow).
-            local key = (fontPath or "default"):lower() .. "|" .. (actualOutline or "") .. "|" .. tostring(fontSize) .. "|" .. (useShadow and "shadow" or "noshadow")
-            fontFamilies[key] = nil
+            -- Evict the broken cache entry so it gets recreated later. Shared key
+            -- builder + same size quantization as GetOrCreateFontFamily — a
+            -- hand-rolled key here would drift (raw vs quantized size) and strand
+            -- the broken entry in the cache forever.
+            fontFamilies[FontFamilyKey(fontPath, actualOutline, useShadow, QuantizeFontSize(fontSize))] = nil
         else
             -- The family is built at the real point size now (per-size cache), so the
             -- glyphs render natively. Clear any fractional scale a prior SafeSetFont left
