@@ -519,10 +519,11 @@ DF.MigrateAuraDesignerPrioritiesLazy = MigratePrioritiesLazy
 -- default — so any explicit choice sticks, and placed indicators that already store
 -- their own values are untouched.
 -- durationColorByTime is DELIBERATELY not flipped: existing profiles keep their
--- duration colours (a stored OFF is as likely a choice as a leftover); only new /
--- reset profiles pick up the new ON default via the Config factory, and the Factory
--- render resolves nil-instance indicators through adDB.defaults (resolveDefCBT) so
--- the stored value actually governs.
+-- duration colours (a stored OFF is as likely a choice as a leftover). New / reset
+-- profiles pick up the new ON default via the Config factory, newly PLACED
+-- indicators always stamp ON (EnsureTypeConfig, v4 parity), and the Factory render
+-- resolves nil-instance indicators through adDB.defaults (resolveDefCBT) so the
+-- stored value actually governs.
 -- MUST be wired into BOTH this editor accessor AND the Factory render runner
 -- (Factory.lua ~2270), or the editor shows the new values while live frames render the
 -- old ones until a manual re-entry forces a rebuild.
@@ -1051,7 +1052,7 @@ local function EnsureTypeConfig(auraName, typeKey, pool)
                 durationScale = gd.durationScale or 1.0,
                 durationOutline = gd.durationOutline or "SHADOW;OUTLINE",
                 durationAnchor = "CENTER", durationX = 0, durationY = 0,
-                durationColorByTime = gd.durationColorByTime ~= false,   -- inherit the profile's global default (nil = baseline ON)
+                durationColorByTime = true,   -- DELIBERATE hardcode (v4 parity): new placements always start coloured, even in profiles whose global default is OFF — Krathe's call. Already-placed indicators are never touched.
                 -- Stack count
                 showStacks = gd.showStacks ~= false, stackMinimum = 2,
                 stackFont = gd.stackFont or "DF Roboto SemiBold",
@@ -1080,7 +1081,7 @@ local function EnsureTypeConfig(auraName, typeKey, pool)
                 durationScale = gd.durationScale or 1.0,
                 durationOutline = gd.durationOutline or "SHADOW;OUTLINE",
                 durationAnchor = "CENTER", durationX = 0, durationY = 0,
-                durationColorByTime = gd.durationColorByTime ~= false,   -- inherit the profile's global default (nil = baseline ON)
+                durationColorByTime = true,   -- DELIBERATE hardcode (v4 parity): new placements always start coloured, even in profiles whose global default is OFF — Krathe's call. Already-placed indicators are never touched.
                 -- Stack count
                 showStacks = gd.showStacks ~= false, stackMinimum = 2,
                 stackFont = gd.stackFont or "DF Roboto SemiBold",
@@ -1120,7 +1121,7 @@ local function EnsureTypeConfig(auraName, typeKey, pool)
                 durationScale = gd.durationScale or 1.0,
                 durationOutline = gd.durationOutline or "SHADOW;OUTLINE",
                 durationAnchor = "CENTER", durationX = 0, durationY = 0,
-                durationColorByTime = gd.durationColorByTime ~= false,   -- inherit the profile's global default (nil = baseline ON)
+                durationColorByTime = true,   -- DELIBERATE hardcode (v4 parity): new placements always start coloured, even in profiles whose global default is OFF — Krathe's call. Already-placed indicators are never touched.
             }
         elseif typeKey == "border" then
             auraCfg[typeKey] = {
