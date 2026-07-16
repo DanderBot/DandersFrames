@@ -4135,7 +4135,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     -- General > Integrations
     local pageIntegrations = CreateSubTab("general", "general_integrations", L["Integrations"])
     BuildPage(pageIntegrations, function(self, db, Add, AddSpace, AddSyncPoint)
-        Add(CreateCopyButton(self.child, {"colorPicker", "masque"}, L["Integrations"], "general_integrations"), 25, 2)
+        Add(CreateCopyButton(self.child, {"colorPicker"}, L["Integrations"], "general_integrations"), 25, 2)
         -- ===== COLOR PICKER GROUP (Column 1) =====
         local colorPickerGroup = GUI:CreateSettingsGroup(self.child, 280)
         colorPickerGroup:AddWidget(GUI:CreateHeader(self.child, L["Color Picker"]), 40)

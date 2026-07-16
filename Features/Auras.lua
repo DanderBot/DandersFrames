@@ -1182,6 +1182,9 @@ end
 -- maxDuration, dispel-type maps via cfSig; spell-ID maps via include/excludeSig —
 -- records carry none today, but the serializer must not go blind if they appear).
 -- Positional, so it stays aligned with filterStructSig's record order.
+-- Grammar note: the three "&"-joined components stay disambiguable because cfSig
+-- parts always contain "=", includeSig is "I:"-prefixed, and excludeSig is bare
+-- digits — any new token must keep its component recognisable within that grammar.
 local function filterTuningSig(f)
     if type(f) ~= "table" then return "" end
     local parts = {}
