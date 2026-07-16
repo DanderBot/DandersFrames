@@ -849,13 +849,20 @@ end
 -- Stable duration-text format key for the STRUCTURAL signature: the native SetDurationText
 -- formatter is creation-frozen (bind-once), so a colour-by-time OR hide-above change must
 -- Rebuild the slot to swap it. "" when duration text is off. Mirrors #205's dur.formatKey.
-local function durationFmtKey(indicator, defaultShow)
+local function durationFmtKey(indicator, defaultShow, defColorByTime)
     local showDuration = indicator.showDuration
     if showDuration == nil then showDuration = defaultShow end
     if not showDuration then return "" end
+    -- Resolve colour-by-time with the SAME caller default as buildDurationTextSpec. Otherwise a
+    -- placed icon on the default (ON, but nil on the instance) gets a COLOURED formatter while
+    -- this key stays "NUMBER" — a breakpoint edit then never moves the struct signature, so the
+    -- bind-once formatter is never re-bound and the colours go stale until /reload.
+    local rawCBT = indicator.durationColorByTime
+    if rawCBT == nil then rawCBT = defColorByTime end
+    local colorByTime = rawCBT and true or false
     local hideAboveT = durationHideAboveT(indicator)
     return "NUMBER"
-        .. (indicator.durationColorByTime and ":C" or "")
+        .. (colorByTime and (":C" .. DF:GetDurationBreakpointsSig()) or "")
         .. (hideAboveT and (":H" .. tostring(hideAboveT)) or "")
 end
 
@@ -964,7 +971,7 @@ local function placedStructSig(map, isSquare, hideIcon, showStacks, showDuration
         .. "|" .. (showDuration and "du" or "")
         .. "|" .. (borderOn and "bd" or "")
         .. "|fl=" .. tostring(tonumber(indicator.frameLevel) or 0)
-        .. "|df=" .. durationFmtKey(indicator, true)
+        .. "|df=" .. durationFmtKey(indicator, true, true)
         .. "|f=" .. poolFilter(indicator)   -- filter string binds at build (othersOnly toggle -> Rebuild)
 end
 
@@ -1150,7 +1157,7 @@ function Factory:BuildPreviewConfig(frame, indicator, typeKey, spellID)
         }
         local sig = "bar|" .. tostring(borderSpec ~= nil)
             .. "|" .. tostring(cfg.style.duration ~= nil)
-            .. "|" .. durationFmtKey(indicator, false)
+            .. "|" .. durationFmtKey(indicator, false, true)
         return cfg, sig
     end
     local isSquare = (typeKey == "square")
@@ -1168,7 +1175,7 @@ function Factory:BuildPreviewConfig(frame, indicator, typeKey, spellID)
         .. "|" .. tostring(cfg.style.stacks ~= nil)
         .. "|" .. tostring(cfg.style.duration ~= nil)
         .. "|" .. tostring(borderSpec ~= nil)
-        .. "|" .. durationFmtKey(indicator, true)
+        .. "|" .. durationFmtKey(indicator, true, true)
     return cfg, sig
 end
 
@@ -1177,7 +1184,7 @@ end
 local function barStructSig(map, indicator, borderOn)
     return includeSig(map)
         .. "|bar"
-        .. "|df=" .. durationFmtKey(indicator, false)
+        .. "|df=" .. durationFmtKey(indicator, false, true)
         .. "|" .. (borderOn and "bd" or "")
         .. "|fl=" .. tostring(tonumber(indicator.frameLevel) or 0)
         .. "|f=" .. poolFilter(indicator)   -- filter string binds at build (othersOnly toggle -> Rebuild)

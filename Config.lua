@@ -868,6 +868,21 @@ end
 
 DF.GlobalDefaults = {
     notifyOutdated = true,
+    -- Colour-by-time breakpoints (account-wide; shared by the buff/debuff/defensive rows
+    -- AND the Aura Designer indicators — they all key off the same duration formatter). Each
+    -- stop applies its colour to remaining durations AT OR ABOVE its threshold (seconds); the
+    -- highest threshold <= remaining wins, so threshold 0 is the base band. The default is a
+    -- low "warn on expiry" ladder tuned for the common case (short HoTs, ~15-30s): a fresh
+    -- HoT reads green and only ramps hot in its final seconds. Editable on the Colours page.
+    durationColorByTimeBreakpoints = {
+        -- Softened traffic-light: same hues off their pure primaries so they don't glare on
+        -- dark icons. Keep in sync with DEFAULT_DURATION_BREAKPOINTS (Features/Auras.lua) so
+        -- "Reset to Default" and the engine fallback agree. Hex: 73d373/f5d15c/f29952/e66666.
+        { threshold = 8, color = { r = 0.451, g = 0.827, b = 0.451 } },  -- green  (fresh / healthy, >=8s)
+        { threshold = 5, color = { r = 0.961, g = 0.82,  b = 0.361 } },  -- gold   (5-8s)
+        { threshold = 2, color = { r = 0.949, g = 0.6,   b = 0.322 } },  -- orange (2-5s)
+        { threshold = 0, color = { r = 0.902, g = 0.4,   b = 0.4   } },  -- red    (<2s, about to fall off)
+    },
 }
 
 -- ============================================================
@@ -2484,7 +2499,9 @@ function DF:GetGlobalDB()
     DandersFramesDB_v2.global = DandersFramesDB_v2.global or {}
     for k, v in pairs(DF.GlobalDefaults) do
         if DandersFramesDB_v2.global[k] == nil then
-            DandersFramesDB_v2.global[k] = v
+            -- DeepCopy table defaults so the SavedVariable never shares a reference with
+            -- DF.GlobalDefaults (else editing the saved value would mutate the template).
+            DandersFramesDB_v2.global[k] = (type(v) == "table" and DF.DeepCopy) and DF:DeepCopy(v) or v
         end
     end
     return DandersFramesDB_v2.global

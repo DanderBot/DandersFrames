@@ -371,6 +371,52 @@ end
 --   FULL   -> "45 Seconds" / "2 Minutes"          (SecondsFormatter, None = full word)
 -- Blizzard's own default is SHORT-like; DF's legacy rows showed NUMBER. Built once per
 -- format and cached (Blizzard securecopies the options table, so one object per format is fine).
+-- {r,g,b} (0-1) -> "rrggbb" hex for the |cff escape.
+local function colorToHex(c)
+    local function b255(x) return math.max(0, math.min(255, math.floor((tonumber(x) or 1) * 255 + 0.5))) end
+    return string.format("%02x%02x%02x", b255(c.r or c[1]), b255(c.g or c[2]), b255(c.b or c[3]))
+end
+
+-- Account-wide colour-by-time breakpoints (editable on the Colours page). Resolve to a
+-- threshold-DESCENDING list of { threshold, hex } so the first match (highest threshold <=
+-- remaining) wins. Falls back to the shipped low ladder if unset/malformed, and always ends
+-- in a threshold-0 base band.
+-- Softened traffic-light (keep in sync with Config.lua durationColorByTimeBreakpoints).
+local DEFAULT_DURATION_BREAKPOINTS = {
+    { threshold = 8, hex = "73d373" }, { threshold = 5, hex = "f5d15c" },
+    { threshold = 2, hex = "f29952" }, { threshold = 0, hex = "e66666" },
+}
+local function GetDurationColorBreakpoints()
+    local g = DF.GetGlobalDB and DF:GetGlobalDB()
+    local raw = g and g.durationColorByTimeBreakpoints
+    local out = {}
+    if type(raw) == "table" then
+        for _, bp in ipairs(raw) do
+            local t = tonumber(bp and bp.threshold)
+            if t and type(bp.color) == "table" then
+                out[#out + 1] = { threshold = math.max(0, t), hex = colorToHex(bp.color) }
+            end
+        end
+    end
+    if #out == 0 then return DEFAULT_DURATION_BREAKPOINTS end
+    table.sort(out, function(a, b) return a.threshold > b.threshold end)  -- descending
+    if out[#out].threshold ~= 0 then out[#out + 1] = { threshold = 0, hex = out[#out].hex } end
+    return out
+end
+
+-- Colour hex for an absolute remaining threshold: the highest breakpoint whose threshold <= t.
+local function colorHexAt(bps, t)
+    for _, bp in ipairs(bps) do if t >= bp.threshold then return bp.hex end end
+    return bps[#bps].hex
+end
+
+-- Stable cache signature for a breakpoints list (so an edit builds a fresh formatter).
+local function breakpointsSig(bps)
+    local p = {}
+    for _, bp in ipairs(bps) do p[#p + 1] = bp.threshold .. ":" .. bp.hex end
+    return table.concat(p, ",")
+end
+
 local function BuildDurationFormatter(format, hideAboveT, colorByTime)
     format = format or "NUMBER"
     -- Hide-above-threshold and/or COLOUR-BY-TIME buckets: both need per-band format
@@ -390,31 +436,43 @@ local function BuildDurationFormatter(format, hideAboveT, colorByTime)
     if hideAboveT or colorByTime then
         if not (C_StringUtil and C_StringUtil.CreateNumericRuleFormatter and Enum and Enum.NumericRuleFormatRounding) then return nil end
         local secFmt = (format == "SHORT" and "%.0fs") or (format == "FULL" and "%.0f Seconds") or "%.0f"
+        local minFmt = (format == "FULL") and "%.0f Minutes" or "%.0fm"
+        local hrFmt  = (format == "FULL") and "%.0f Hours"   or "%.0fh"
+        local bps = colorByTime and GetDurationColorBreakpoints() or nil
         local ok, f = pcall(function()
             local down = Enum.NumericRuleFormatRounding.Down
             local fmt = C_StringUtil.CreateNumericRuleFormatter()
             -- Highest threshold <= remaining seconds wins.
             local function add(threshold, fstr, hex, components)
-                if colorByTime then fstr = "|cff" .. hex .. fstr .. "|r" end
+                if colorByTime and hex then fstr = "|cff" .. hex .. fstr .. "|r" end
                 fmt:AddBreakpoint({ threshold = threshold, step = 1, rounding = down,
                                     min = 1, format = fstr, components = components })
             end
-            add(0, secFmt, "ff0000")
-            if colorByTime then
-                -- Colour cuts go in below the hide threshold only — a cut at/above it
-                -- would shadow the blank band. (Hide slider caps at 60s, so the two
-                -- sub-minute cuts are the only ones affected.)
-                if not hideAboveT or hideAboveT > 5  then add(5,  secFmt, "ff8000") end
-                if not hideAboveT or hideAboveT > 15 then add(15, secFmt, "ffff00") end
+            -- Cut points = the configured colour thresholds (when colouring) UNION the format
+            -- transitions (60s -> minutes, 3600s -> hours). Each band takes the colour of the
+            -- highest breakpoint <= it and the number format of its range, so a colour band
+            -- spanning a format boundary is split (same colour, m/h format). Hide-above drops
+            -- every cut at/above its threshold and caps with a blank band (they'd shadow it).
+            local cuts = { [0] = true }
+            if colorByTime then for _, bp in ipairs(bps) do cuts[bp.threshold] = true end end
+            if not hideAboveT then cuts[60] = true; cuts[3600] = true end
+            local sorted = {}
+            for t in pairs(cuts) do
+                if not (hideAboveT and t >= hideAboveT) then sorted[#sorted + 1] = t end
+            end
+            table.sort(sorted)   -- ascending
+            for _, t in ipairs(sorted) do
+                local hex = colorByTime and colorHexAt(bps, t) or nil
+                if t >= 3600 then
+                    add(t, hrFmt,  hex, { { div = 3600, step = 1, rounding = down } })
+                elseif t >= 60 then
+                    add(t, minFmt, hex, { { div = 60,   step = 1, rounding = down } })
+                else
+                    add(t, secFmt, hex)
+                end
             end
             if hideAboveT then
                 fmt:AddBreakpoint({ threshold = hideAboveT, step = 1, rounding = down, format = "" })
-            else
-                -- 60s+ renders minutes/hours (green = the legacy curve's fresh end).
-                add(60,   (format == "FULL") and "%.0f Minutes" or "%.0fm", "00ff00",
-                    { { div = 60,   step = 1, rounding = down } })
-                add(3600, (format == "FULL") and "%.0f Hours"   or "%.0fh", "00ff00",
-                    { { div = 3600, step = 1, rounding = down } })
             end
             return fmt
         end)
@@ -462,13 +520,28 @@ local function BuildDurationFormatter(format, hideAboveT, colorByTime)
 end
 
 local durationFormatterCache = {}
+-- Drop cached coloured formatters after a Colours-page breakpoint edit. The new formatters
+-- rebind on the InvalidateAuraLayout re-drive the edit already triggers. (Uncoloured entries
+-- are unaffected but wiping all is simplest and cheap — they rebuild on next demand.)
+function DF:InvalidateDurationFormatters()
+    wipe(durationFormatterCache)
+end
 local function GetDurationFormatter(format, hideAboveT, colorByTime)
     format = format or "NUMBER"
     local key = format .. "|" .. tostring(hideAboveT or "") .. (colorByTime and "|C" or "")
+    if colorByTime then key = key .. "|" .. breakpointsSig(GetDurationColorBreakpoints()) end
     if durationFormatterCache[key] == nil then
         durationFormatterCache[key] = BuildDurationFormatter(format, hideAboveT, colorByTime) or false
     end
     return durationFormatterCache[key] or nil
+end
+
+-- The account-wide colour-by-time breakpoints signature. Folded into the STRUCTURAL
+-- duration format keys (dur.formatKey here + the AD durationFmtKey) so a breakpoint edit
+-- changes the row signature and forces a Rebuild — SetDurationText binds the formatter
+-- ONCE per slot, so ApplyStyle alone can't swap in the recoloured formatter.
+function DF:GetDurationBreakpointsSig()
+    return breakpointsSig(GetDurationColorBreakpoints())
 end
 
 -- Shared with the Aura Designer factory (P4.4): its placed icon/square/bar duration text
@@ -561,7 +634,7 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
         -- static colour must not stomp the escapes; formatKey keeps both flags in the
         -- rebuild signature (the formatter is creation-frozen on the native bind).
         if colorByTime then dur.color = nil end
-        dur.formatKey = durFormat .. (colorByTime and ":C" or "") .. (hideAboveT and (":H" .. tostring(hideAboveT)) or "")
+        dur.formatKey = durFormat .. (colorByTime and (":C" .. DF:GetDurationBreakpointsSig()) or "") .. (hideAboveT and (":H" .. tostring(hideAboveT)) or "")
     end
 
     -- Buff rows get native spell-ID exclude maps (AD-dedup + missing-buff hide below).
@@ -1017,7 +1090,7 @@ function DF:BuildDefensiveRowConfig(db, unit)
         -- colorByTime = colour buckets baked into the formatter bands (see
         -- BuildDurationFormatter). Static colour must not stomp the escapes.
         if colorByTime then dur.color = nil end
-        dur.formatKey = "NUMBER" .. (colorByTime and ":C" or "")
+        dur.formatKey = "NUMBER" .. (colorByTime and (":C" .. DF:GetDurationBreakpointsSig()) or "")
     end
 
     -- FILTER REGISTRY: the category selection drives the row as ONE plain HELPFUL
