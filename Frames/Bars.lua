@@ -130,7 +130,13 @@ function DF:LayoutResourceBar(frame, db)
     -- the bInset snap above fixed only the fractional-width half of it).
     -- Corner-relative ends round identically to the border by construction.
     -- The anchor's other axis still places the bar; X/Y offsets still shift it.
-    local edgeInset = padding + bInset
+    -- max(), not sum: the historical padding + borderInset inset pushed the bar
+    -- one border-width PAST the border's inner edge whenever framePadding > 0,
+    -- leaving a constant padding-wide sliver of health bar beside the bar at
+    -- every border size (field-confirmed: bar x = 1.6 vs border width = 0.8).
+    -- Flush against whichever boundary is innermost: the border band when it
+    -- is thicker than the padding, the health bar's own inset otherwise.
+    local edgeInset = math.max(padding, bInset)
 
     if isVertical then
         -- SWAP: "Width" applies to Height (Length), "Height" applies to Width (Thickness)
