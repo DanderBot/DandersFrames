@@ -2071,7 +2071,16 @@ function GUI:StyleButton(btn, opts)
     -- early-out on self.dfDisabled. SetDisabled(false) restores the normal/
     -- active/primary rest.
     btn.SetDisabled = function(self, disabled)
-        self.dfDisabled = disabled and true or false
+        disabled = disabled and true or false
+        -- Idempotent: bail when the state isn't actually changing. Tab refresh
+        -- paths (the Aura Designer's UpdateLayoutTabState) call SetDisabled(false)
+        -- on the sub-tabs on EVERY rebuild. Re-running the enable-restore below on
+        -- an already-enabled tab left the AD Effects/Layout tabs diverging from a
+        -- never-disabled tab (Global) and broke their hover wash — the only code
+        -- that ran on them but not on Global was this call. Skipping the no-op keeps
+        -- an enabled tab identical to one SetDisabled never touched.
+        if (self.dfDisabled and true or false) == disabled then return end
+        self.dfDisabled = disabled
         if self.dfDisabled then
             self:SetBackdropColor(C_ELEMENT.r * 0.55, C_ELEMENT.g * 0.55, C_ELEMENT.b * 0.55, 0.6)
             self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.25)
@@ -5353,10 +5362,22 @@ function GUI:CreateBorderControls(group, dbTable, prefix, opts)
         end
         if c.a == nil then c.a = 1 end
 
+        -- Read-time nil-guard: these closures fire on the slider's OnShow at
+        -- arbitrary later times (tab/page re-show, mode switch), NOT just at
+        -- creation. The seed above only guarantees the table exists NOW — a proxy
+        -- dbTable can resolve BorderColor to nil later (e.g. re-showing the AD page
+        -- for a mode whose config doesn't surface the key), so re-read and guard
+        -- each call instead of assuming the table is still there.
         w.alpha = group:AddWidget(GUI:CreateSlider(parent, L["Border Alpha"], 0, 1, 0.05,
             nil, nil, fullUpdate, lightColors or lightUpdate, true,
-            function() return dbTable[key("BorderColor")].a or 1 end,
-            function(v)  dbTable[key("BorderColor")].a = v end), 55)
+            function()
+                local bc = dbTable[key("BorderColor")]
+                return (bc and bc.a) or 1
+            end,
+            function(v)
+                local bc = dbTable[key("BorderColor")]
+                if bc then bc.a = v end
+            end), 55)
         w.alpha.hideOn = function() return hideOff() or isGradient() end
     end
 

@@ -764,7 +764,7 @@ end
 -- the unset-offset defaults: placed indicators default 0/0, filter/debuff groups keep
 -- their historical 2/-1 (buildFilterGroupStyle's pre-style hardcoded values).
 local function buildStackSpec(indicator, defOX, defOY)
-    local outline = indicator.stackOutline or "OUTLINE"
+    local outline = indicator.stackOutline or "SHADOW;OUTLINE"
     if outline == "NONE" then outline = "" end
     return {
         show    = true,
@@ -812,13 +812,19 @@ local function durationHideAboveT(indicator)
     return tonumber(indicator.durationHideAboveThreshold) or 10
 end
 
-local function buildDurationTextSpec(indicator, defaultShow)
+local function buildDurationTextSpec(indicator, defaultShow, defScale, defColorByTime)
     local showDuration = indicator.showDuration
     if showDuration == nil then showDuration = defaultShow end
     if not showDuration then return nil end
-    local dOutline = indicator.durationOutline or "OUTLINE"
+    local dOutline = indicator.durationOutline or "SHADOW;OUTLINE"
     if dOutline == "NONE" then dOutline = "" end
-    local colorByTime = indicator.durationColorByTime and true or false
+    -- Scale + colour-by-time default PER CALLER (placed/bar default 1.2 / ON; groups keep
+    -- 1.0 / OFF) — the Factory renders from the raw instance, so the render default must
+    -- match the editor's global default (adDB.defaults) or the two disagree. nil on the
+    -- instance = inherit the caller's default.
+    local rawCBT = indicator.durationColorByTime
+    if rawCBT == nil then rawCBT = defColorByTime end
+    local colorByTime = rawCBT and true or false
     local hideAboveT = durationHideAboveT(indicator)
     -- Always attach the NUMBER formatter (bare "45" / "2m" / "1h") — the same default the
     -- buff/debuff/defensive rows use, and what the pre-12.1 icons showed (native cooldown
@@ -830,7 +836,7 @@ local function buildDurationTextSpec(indicator, defaultShow)
         show      = true,
         stableCenter = true,   -- centred countdown: stable box, no shift/wobble (shared TextStyle mode)
         font      = indicator.durationFont or "DF Roboto SemiBold",  -- default to the DF font, not the Friz fallback
-        size      = 10 * (tonumber(indicator.durationScale) or 1),
+        size      = 10 * (tonumber(indicator.durationScale) or defScale or 1),
         outline   = dOutline,
         anchor    = indicator.durationAnchor or "CENTER",
         offsetX   = tonumber(indicator.durationX) or 0,
@@ -887,12 +893,12 @@ local function buildPlacedStyle(indicator, isSquare, borderSpec)
     -- Duration text: a DF-owned fontstring the native SetDurationText fills secret-safe
     -- (Blizzard formats the remaining time C-side; no Lua read). Colour-by-time now routes
     -- through the #205 bucket formatter — see buildDurationTextSpec. Default show = true.
-    style.duration = buildDurationTextSpec(indicator, true)
+    style.duration = buildDurationTextSpec(indicator, true, 1.2, true)   -- placed icon/square baseline: 1.2 scale, colour-by-time on
 
     -- Stacks: native count, shown at >1. NO formatter (secret trap — see bindNative). A
     -- custom stackMinimum is NOT expressible on the no-formatter native path (deferred).
     local showStacks = indicator.showStacks; if showStacks == nil then showStacks = true end
-    if showStacks then style.stacks = buildStackSpec(indicator) end
+    if showStacks then style.stacks = buildStackSpec(indicator, 2, -2) end   -- placed baseline stack offset
 
     if borderSpec then style.border = { spec = borderSpec } end
     return style
@@ -1097,7 +1103,7 @@ local function buildBarStyle(indicator, borderSpec)
         },
     }
     -- Legacy bar default for Show Duration is OFF (unlike icon/square, which default ON).
-    style.duration = buildDurationTextSpec(indicator, false)
+    style.duration = buildDurationTextSpec(indicator, false, 1.2, true)   -- placed bar baseline: 1.2 scale, colour-by-time on
     if borderSpec then style.border = { spec = borderSpec } end
     return style
 end
@@ -2270,6 +2276,10 @@ function Factory:SyncFrame(frame)
     if DF.MigrateAuraDesignerInstancesLazy then DF.MigrateAuraDesignerInstancesLazy(adDB) end
     if DF.MigrateAuraDesignerBorderKeysLazy then DF.MigrateAuraDesignerBorderKeysLazy(adDB) end
     if DF.MigrateAuraDesignerPrioritiesLazy then DF.MigrateAuraDesignerPrioritiesLazy(adDB) end
+    -- One-time refresh of the AD global text defaults to the Midnight baseline — must run
+    -- on the RENDER-resolved adDB too (not just the editor's GetAuraDesignerDB), or live
+    -- frames resolve from the un-migrated defaults while the editor shows the new ones.
+    if DF.MigrateAuraDesignerDefaultRefreshLazy then DF.MigrateAuraDesignerDefaultRefreshLazy(adDB) end
 
     local store = frame.dfADFactory
     if not store then store = {}; frame.dfADFactory = store end

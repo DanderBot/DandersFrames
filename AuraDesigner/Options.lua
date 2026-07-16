@@ -509,6 +509,36 @@ local function MigratePrioritiesLazy(adDB)
 end
 DF.MigrateAuraDesignerPrioritiesLazy = MigratePrioritiesLazy
 
+-- Lazy, flag-gated ONE-TIME refresh of the AD global text defaults to the Midnight
+-- baseline: DF Roboto SemiBold + drop shadow, 1.2 duration scale, stack count seated
+-- bottom-right (2,-2), and colour-by-time on. Pre-12.1 the AD shipped Friz Quadrata /
+-- plain OUTLINE / 1.0 / centred stacks / static colour — WoW-generic values nobody
+-- picks deliberately (same reasoning as the settings-panel font flip, Core.lua's
+-- _settingsFontRobotoDefaultV1). Runs on the RESOLVED adDB (presets, auto-layout
+-- overlays, and the legacy inline config all covered at point of use), flipping ONLY
+-- where the value is still the EXACT old default — so any explicit choice sticks, and
+-- placed indicators that already store their own values are untouched. durationScale /
+-- durationColorByTime are shared with the bar indicator (one global default).
+-- MUST be wired into BOTH this editor accessor AND the Factory render runner
+-- (Factory.lua ~2270), or the editor shows the new values while live frames render the
+-- old ones until a manual re-entry forces a rebuild.
+local function MigrateDefaultRefreshLazy(adDB)
+    if type(adDB) ~= "table" or adDB._adDefaultRefreshV1 then return end
+    local d = adDB.defaults
+    if type(d) == "table" then
+        if d.durationFont == "Friz Quadrata TT" then d.durationFont = "DF Roboto SemiBold" end
+        if d.stackFont    == "Friz Quadrata TT" then d.stackFont    = "DF Roboto SemiBold" end
+        if d.durationOutline == "OUTLINE" then d.durationOutline = "SHADOW;OUTLINE" end
+        if d.stackOutline    == "OUTLINE" then d.stackOutline    = "SHADOW;OUTLINE" end
+        if d.durationScale == 1 then d.durationScale = 1.2 end          -- 1.0 == 1 in Lua
+        if d.stackX == 0 then d.stackX = 2 end
+        if d.stackY == 0 then d.stackY = -2 end
+        if d.durationColorByTime == false then d.durationColorByTime = true end
+    end
+    adDB._adDefaultRefreshV1 = true
+end
+DF.MigrateAuraDesignerDefaultRefreshLazy = MigrateDefaultRefreshLazy
+
 local function GetAuraDesignerDB()
     -- The editor is mode-tabbed: it edits the preset the active mode uses
     -- (party → its assigned preset, etc.). Because edited == used, live
@@ -528,6 +558,7 @@ local function GetAuraDesignerDB()
     MigrateInstancesLazy(adDB)
     MigrateBorderKeysLazy(adDB)
     MigratePrioritiesLazy(adDB)
+    MigrateDefaultRefreshLazy(adDB)
     return adDB
 end
 
@@ -1013,18 +1044,18 @@ local function EnsureTypeConfig(auraName, typeKey, pool)
                 hideSwipe = false,
                 -- Duration text
                 showDuration = gd.showDuration ~= false,
-                durationFont = gd.durationFont or "Fonts\\FRIZQT__.TTF",
+                durationFont = gd.durationFont or "DF Roboto SemiBold",
                 durationScale = gd.durationScale or 1.0,
-                durationOutline = gd.durationOutline or "OUTLINE",
+                durationOutline = gd.durationOutline or "SHADOW;OUTLINE",
                 durationAnchor = "CENTER", durationX = 0, durationY = 0,
                 durationColorByTime = true,
                 -- Stack count
                 showStacks = gd.showStacks ~= false, stackMinimum = 2,
-                stackFont = gd.stackFont or "Fonts\\FRIZQT__.TTF",
+                stackFont = gd.stackFont or "DF Roboto SemiBold",
                 stackScale = gd.stackScale or 1.0,
-                stackOutline = gd.stackOutline or "OUTLINE",
+                stackOutline = gd.stackOutline or "SHADOW;OUTLINE",
                 stackAnchor = "BOTTOMRIGHT",
-                stackX = 0, stackY = 0,
+                stackX = 2, stackY = -2,
                 -- Expiring
                 expiringEnabled = false, expiringThreshold = 30, expiringThresholdMode = "PERCENT",
                 expiringColor = {r = 1, g = 0.2, b = 0.2, a = 1},
@@ -1042,18 +1073,18 @@ local function EnsureTypeConfig(auraName, typeKey, pool)
                 hideSwipe = false,
                 -- Duration text
                 showDuration = gd.showDuration ~= false,
-                durationFont = gd.durationFont or "Fonts\\FRIZQT__.TTF",
+                durationFont = gd.durationFont or "DF Roboto SemiBold",
                 durationScale = gd.durationScale or 1.0,
-                durationOutline = gd.durationOutline or "OUTLINE",
+                durationOutline = gd.durationOutline or "SHADOW;OUTLINE",
                 durationAnchor = "CENTER", durationX = 0, durationY = 0,
                 durationColorByTime = true,
                 -- Stack count
                 showStacks = gd.showStacks ~= false, stackMinimum = 2,
-                stackFont = gd.stackFont or "Fonts\\FRIZQT__.TTF",
+                stackFont = gd.stackFont or "DF Roboto SemiBold",
                 stackScale = gd.stackScale or 1.0,
-                stackOutline = gd.stackOutline or "OUTLINE",
+                stackOutline = gd.stackOutline or "SHADOW;OUTLINE",
                 stackAnchor = "BOTTOMRIGHT",
-                stackX = 0, stackY = 0,
+                stackX = 2, stackY = -2,
                 -- Expiring
                 expiringEnabled = false, expiringThreshold = 30, expiringThresholdMode = "PERCENT",
                 expiringColor = {r = 1, g = 0.2, b = 0.2, a = 1},
@@ -1082,9 +1113,9 @@ local function EnsureTypeConfig(auraName, typeKey, pool)
                 expiringColor = {r = 1, g = 0.2, b = 0.2, a = 1},
                 -- Duration text
                 showDuration = true,
-                durationFont = gd.durationFont or "Fonts\\FRIZQT__.TTF",
+                durationFont = gd.durationFont or "DF Roboto SemiBold",
                 durationScale = gd.durationScale or 1.0,
-                durationOutline = gd.durationOutline or "OUTLINE",
+                durationOutline = gd.durationOutline or "SHADOW;OUTLINE",
                 durationAnchor = "CENTER", durationX = 0, durationY = 0,
                 durationColorByTime = true,
             }
@@ -1211,16 +1242,16 @@ local TYPE_DEFAULTS = {
         BorderAnimationSidesAxis    = "HORIZONTAL",
         BorderAnimationCornerLength = 10,
         hideSwipe = false, hideIcon = false,
-        showDuration = true, durationFont = "Friz Quadrata TT",
-        durationScale = 1.0, durationOutline = "OUTLINE",
+        showDuration = true, durationFont = "DF Roboto SemiBold",
+        durationScale = 1.2, durationOutline = "SHADOW;OUTLINE",
         durationAnchor = "CENTER", durationX = 0, durationY = 0,
         durationColorByTime = true,
         durationColor = {r = 1, g = 1, b = 1, a = 1},
         durationHideAboveEnabled = false, durationHideAboveThreshold = 10,
         showStacks = true, stackMinimum = 2,
-        stackFont = "Friz Quadrata TT", stackScale = 1.0,
-        stackOutline = "OUTLINE", stackAnchor = "BOTTOMRIGHT",
-        stackX = 0, stackY = 0,
+        stackFont = "DF Roboto SemiBold", stackScale = 1.0,
+        stackOutline = "SHADOW;OUTLINE", stackAnchor = "BOTTOMRIGHT",
+        stackX = 2, stackY = -2,
         stackColor = {r = 1, g = 1, b = 1, a = 1},
         expiringEnabled = false, expiringThreshold = 30, expiringThresholdMode = "PERCENT",
         expiringColor = {r = 1, g = 0.2, b = 0.2, a = 1},
@@ -1305,16 +1336,16 @@ local TYPE_DEFAULTS = {
         BorderAnimationSidesAxis    = "HORIZONTAL",
         BorderAnimationCornerLength = 10,
         hideSwipe = false, hideIcon = false,
-        showDuration = true, durationFont = "Friz Quadrata TT",
-        durationScale = 1.0, durationOutline = "OUTLINE",
+        showDuration = true, durationFont = "DF Roboto SemiBold",
+        durationScale = 1.2, durationOutline = "SHADOW;OUTLINE",
         durationAnchor = "CENTER", durationX = 0, durationY = 0,
         durationColorByTime = true,
         durationColor = {r = 1, g = 1, b = 1, a = 1},
         durationHideAboveEnabled = false, durationHideAboveThreshold = 10,
         showStacks = true, stackMinimum = 2,
-        stackFont = "Friz Quadrata TT", stackScale = 1.0,
-        stackOutline = "OUTLINE", stackAnchor = "BOTTOMRIGHT",
-        stackX = 0, stackY = 0,
+        stackFont = "DF Roboto SemiBold", stackScale = 1.0,
+        stackOutline = "SHADOW;OUTLINE", stackAnchor = "BOTTOMRIGHT",
+        stackX = 2, stackY = -2,
         stackColor = {r = 1, g = 1, b = 1, a = 1},
         -- Master enable for the whole Expiring feature (Stage 5.2 — mirrors
         -- the icon).  Default true so existing configs are unaffected.
@@ -1390,8 +1421,8 @@ local TYPE_DEFAULTS = {
         expiringColor = {r = 1, g = 0.2, b = 0.2, a = 1},
         expiringTintEnabled = false,
         expiringTintColor = {r = 1, g = 0.2, b = 0.2, a = 0.5},  -- #FF3333 @ 50% (matches expiring border red)
-        showDuration = true, durationFont = "Friz Quadrata TT",
-        durationScale = 1.0, durationOutline = "OUTLINE",
+        showDuration = true, durationFont = "DF Roboto SemiBold",
+        durationScale = 1.2, durationOutline = "SHADOW;OUTLINE",
         durationAnchor = "CENTER", durationX = 0, durationY = 0,
         durationColorByTime = true,
         durationHideAboveEnabled = false, durationHideAboveThreshold = 10,
@@ -4808,14 +4839,14 @@ end
 local GLOBAL_DEFAULTS_FALLBACK = {
     iconSize = 24, iconScale = 1.0,
     showDuration = true, showStacks = true,
-    durationFont = "Friz Quadrata TT", durationScale = 1.0,
-    durationOutline = "OUTLINE", durationAnchor = "CENTER",
-    durationX = 0, durationY = 0, durationColorByTime = false,
+    durationFont = "DF Roboto SemiBold", durationScale = 1.2,
+    durationOutline = "SHADOW;OUTLINE", durationAnchor = "CENTER",
+    durationX = 0, durationY = 0, durationColorByTime = true,
     durationColor = {r = 1, g = 1, b = 1, a = 1},
     durationHideAboveEnabled = false, durationHideAboveThreshold = 10,
-    stackFont = "Friz Quadrata TT", stackScale = 1.0,
-    stackOutline = "OUTLINE", stackAnchor = "BOTTOMRIGHT",
-    stackX = 0, stackY = 0,
+    stackFont = "DF Roboto SemiBold", stackScale = 1.0,
+    stackOutline = "SHADOW;OUTLINE", stackAnchor = "BOTTOMRIGHT",
+    stackX = 2, stackY = -2,
     stackColor = {r = 1, g = 1, b = 1, a = 1},
     iconBorderEnabled = true, iconBorderThickness = 1,
     stackMinimum = 2,
@@ -5876,6 +5907,15 @@ local function AddPickedSpell(auraName, typeKey, mode)
     else
         EnsureTypeConfig(auraName, typeKey)
         expandedCards["frame:" .. typeKey .. ":" .. PoolKeyPrefix() .. auraName] = true
+    end
+    -- Structural change: drive the LIVE frames, not just the editor. The callers only run
+    -- RefreshPlacedIndicators / RefreshPreviewEffects (editor chips + preview canvas), so
+    -- without this a freshly added indicator never builds its live container until some other
+    -- action (move / eye toggle / reload) fires ForceRefreshAllFrames. Mirrors AddSpellToGroup.
+    DF:InvalidateAuraLayout()
+    DF:UpdateAllFrames()
+    if DF.AuraDesigner.Engine and DF.AuraDesigner.Engine.ForceRefreshAllFrames then
+        DF.AuraDesigner.Engine:ForceRefreshAllFrames()
     end
 end
 
@@ -7068,11 +7108,11 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
     -- no ring until the user enables one).
     local defaults = {
         hideSwipe = false, showDuration = true, showStacks = true,
-        durationFont = "Friz Quadrata TT", durationScale = 1.0, durationOutline = "OUTLINE",
+        durationFont = "DF Roboto SemiBold", durationScale = 1.0, durationOutline = "SHADOW;OUTLINE",
         durationAnchor = "CENTER", durationX = 0, durationY = 0,
         durationColorByTime = false, durationColor = { r = 1, g = 1, b = 1, a = 1 },
         durationHideAboveEnabled = false, durationHideAboveThreshold = 10,
-        stackFont = "Friz Quadrata TT", stackScale = 1.0, stackOutline = "OUTLINE",
+        stackFont = "DF Roboto SemiBold", stackScale = 1.0, stackOutline = "SHADOW;OUTLINE",
         stackAnchor = "BOTTOMRIGHT", stackX = 2, stackY = -1,
         stackColor = { r = 1, g = 1, b = 1, a = 1 },
         ShowBorder = false,
