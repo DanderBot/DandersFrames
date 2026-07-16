@@ -1598,7 +1598,7 @@ local function groupStyleStructSig(group)
         -- entry). "" when disabled — absent-bar groups sig identically whether
         -- style is absent, {}, or carries durationBarEnabled = false.
         .. "|" .. (s.durationBarEnabled == true
-            and ("bar" .. tostring(s.durationBarPosition) .. ":"
+            and ("bar" .. (s.durationBarPosition == "TOP" and "TOP" or "BOTTOM") .. ":"
                 .. tostring(tonumber(s.durationBarHeight) or 4) .. ":"
                 .. tostring(tonumber(s.durationBarGap) or 2))
             or "")

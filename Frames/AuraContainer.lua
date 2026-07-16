@@ -1601,15 +1601,21 @@ function Handle:_paintTestSlot(slot, index)
         local tex = sid and C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(sid)
         if tex or e.icon then slot.dfIcon:SetTexture(tex or e.icon) end
     end
+    local barFill = 1   -- permanent aura (duration 0): full bar, never drains
     do
-        -- Live countdown: stagger per slot so the row doesn't tick in unison; the
-        -- shared test ticker (SetTestMode) counts the text down and loops timer +
-        -- swipe at zero. Permanent auras (duration 0) show no timer.
+        -- Live countdown: stagger per slot AND per unit (digits of the unit token —
+        -- party2's row must not mirror party1's; same per-unit-variation idea as
+        -- TestMode's per-index health values) so the preview doesn't tick in unison;
+        -- the shared test ticker (SetTestMode) counts the text down, drains the bar
+        -- and loops timer + swipe at zero. Permanent auras (duration 0) show no timer.
         local d = e.duration or 0
         if d > 0 then
-            local offset = (index * 3) % math.max(d - 1, 1)
+            local u = self.config.unit
+            local useed = (type(u) == "string" and tonumber(u:match("%d+"))) or 0
+            local offset = (index * 3 + useed * 5) % math.max(d - 1, 1)
             slot._dfTestDur = d
             slot._dfTestExpiry = GetTime() + (d - offset)
+            barFill = (d - offset) / d
             if slot.dfCD and slot.dfCD.SetCooldown then
                 slot.dfCD:SetCooldown(GetTime() - offset, d)
             end
@@ -1620,7 +1626,13 @@ function Handle:_paintTestSlot(slot, index)
         end
     end
     if slot.dfStack then slot.dfStack:SetText((e.stacks or 0) > 1 and tostring(e.stacks) or "") end
-    if slot.dfBar then slot.dfBar:SetMinMaxValues(0, 1); slot.dfBar:SetValue(0.65) end
+    -- Duration bar: native SetDurationBar never runs in test mode, so the fill is
+    -- OURS to fake (house rule: every native-driven region must render in test, or
+    -- the preview lies). Same DF-owned StatusBar for both shapes (fill + strip);
+    -- the value mirrors the staggered countdown above so bar, timer text and swipe
+    -- agree, and the test ticker drains it in step. SetReverseFill is styling and
+    -- was already applied by styleBarShared — value only here.
+    if slot.dfBar then slot.dfBar:SetMinMaxValues(0, 1); slot.dfBar:SetValue(barFill) end
     if slot.dfName then slot.dfName:SetText(dispName or "") end
     -- Dispel ring: no native SetAuraBorder bind in test mode -> tint + show it
     -- ourselves from the game palette (the ring art/thickness were already styled).
@@ -1690,9 +1702,10 @@ function Handle:_paintTestSlot(slot, index)
 end
 
 -- Shared 1s ticker driving the preview countdowns (test mode only; started and
--- stopped by SetTestMode). Loops each timer + swipe at zero so the preview
--- animates indefinitely. Buttons die with their containers, so stale state
--- can't outlive a rebuild (handle.buttons is wiped on teardown).
+-- stopped by SetTestMode). Loops each timer + swipe at zero and drains the
+-- duration bar in step so the preview animates indefinitely. Buttons die with
+-- their containers, so stale state can't outlive a rebuild (handle.buttons is
+-- wiped on teardown).
 function AuraContainer._startTestTicker()
     if AuraContainer._testTicker then return end
     AuraContainer._testTicker = C_Timer.NewTicker(1, function()
@@ -1700,7 +1713,8 @@ function AuraContainer._startTestTicker()
         for h in pairs(AuraContainer._handles or {}) do
             if not h._destroyed and h.buttons then
                 for _, b in ipairs(h.buttons) do
-                    if b._dfTestDur and b.dfDur then
+                    -- dfDur OR dfBar: a bar-only row (duration text off) still drains.
+                    if b._dfTestDur and (b.dfDur or b.dfBar) then
                         local rem = (b._dfTestExpiry or 0) - now
                         if rem <= 0 then
                             rem = b._dfTestDur
@@ -1709,7 +1723,8 @@ function AuraContainer._startTestTicker()
                                 pcall(function() b.dfCD:SetCooldown(now, b._dfTestDur) end)
                             end
                         end
-                        b.dfDur:SetText(formatTestDuration(h, rem))
+                        if b.dfDur then b.dfDur:SetText(formatTestDuration(h, rem)) end
+                        if b.dfBar then b.dfBar:SetValue(rem / b._dfTestDur) end
                     end
                 end
             end

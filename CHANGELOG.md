@@ -8,6 +8,7 @@
 
 DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally changed how the game handles auras. This build runs on 12.1 only — 12.0.x stays on 4.7. Every aura row — buffs, debuffs, defensives and missing buffs — now renders through the game's new protected aura engine.
 
+* (Auras) **New: Duration Bars.** Buff, debuff and defensive icons can now show a small bar that drains with each aura's remaining time, tucked just below (or above) the icon. Enable it in the new "Duration Bar" section on the Buffs, Debuffs and Defensive Icon pages, with height, gap, texture and colour options — and Aura Designer groups get the same section on each group card.
 * (Auras) New sort controls: buff and debuff bars can show your own auras first and reverse the sort direction, and the defensive icon's order is now selectable (Externals First, Most Urgent, or Default).
 * (Auras) The Dispellable debuff filter has a new "Any Dispel Type" mode — show every debuff with a dispel type, even ones nobody in the group can dispel.
 * (Auras) New "Hide Permanent Auras" option for the buff bar — hides buffs with no duration, like auras that last until cancelled.
