@@ -6166,6 +6166,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         durHideAbove.disableOn = function(d) return not d.buffShowDuration end
         local durHideAboveSlider = durationGroup:AddWidget(GUI:CreateSlider(self.child, L["Hide Above (seconds)"], 1, 60, 1, db, "buffDurationHideAboveThreshold", nil, function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 55)
         durHideAboveSlider.disableOn = function(d) return not d.buffShowDuration or not d.buffDurationHideAboveEnabled end
+        local durHidePerm = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Duration on Permanent Auras"], db, "buffDurationHideOnPermanent", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
+        durHidePerm.disableOn = function(d) return not d.buffShowDuration end
         -- Grey the whole group when Buffs are off (composes with the per-control
         -- buffShowDuration gates), matching Settings/Position/Grid.
         durationGroup.disableChildrenOn = function(d) return not d.showBuffs end
@@ -6467,6 +6469,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         durHideAbove.disableOn = function(d) return not d.debuffShowDuration end
         local durHideAboveSlider = durationGroup:AddWidget(GUI:CreateSlider(self.child, L["Hide Above (seconds)"], 1, 60, 1, db, "debuffDurationHideAboveThreshold", nil, function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 55)
         durHideAboveSlider.disableOn = function(d) return not d.debuffShowDuration or not d.debuffDurationHideAboveEnabled end
+        local durHidePerm = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Duration on Permanent Auras"], db, "debuffDurationHideOnPermanent", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
+        durHidePerm.disableOn = function(d) return not d.debuffShowDuration end
         -- Grey the whole group when Debuffs are off (composes with the per-control
         -- debuffShowDuration gates), matching Settings/Position/Grid.
         durationGroup.disableChildrenOn = function(d) return not d.showDebuffs end
@@ -6938,6 +6942,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         diDurColorByTime.hideOn = HideDefensiveDurationOptions
         local diColorsLink = AddColorsPageLink(durationGroup, self.child)
         diColorsLink.hideOn = HideDefensiveDurationOptions
+
+        local diDurHidePerm = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Duration on Permanent Auras"], db, "defensiveIconDurationHideOnPermanent", function()
+            if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
+        end), 30)
+        diDurHidePerm.hideOn = HideDefensiveDurationOptions
 
         Add(durationGroup, nil, 1)
 

@@ -1258,6 +1258,7 @@ local TYPE_DEFAULTS = {
         durationColorByTime = true,
         durationColor = {r = 1, g = 1, b = 1, a = 1},
         durationHideAboveEnabled = false, durationHideAboveThreshold = 10,
+        durationHideOnPermanent = true,   -- Wave 4: no timer text on permanent auras
         expiryAlertMode = "OFF", expiryAlertThreshold = 5,
         expiryAlertText = "", expiryAlertGlyph = "WARNING",
         expiryAlertAnchor = "TOP", expiryAlertOffsetX = 0, expiryAlertOffsetY = 0,
@@ -1356,6 +1357,7 @@ local TYPE_DEFAULTS = {
         durationColorByTime = true,
         durationColor = {r = 1, g = 1, b = 1, a = 1},
         durationHideAboveEnabled = false, durationHideAboveThreshold = 10,
+        durationHideOnPermanent = true,   -- Wave 4: no timer text on permanent auras
         expiryAlertMode = "OFF", expiryAlertThreshold = 5,
         expiryAlertText = "", expiryAlertGlyph = "WARNING",
         expiryAlertAnchor = "TOP", expiryAlertOffsetX = 0, expiryAlertOffsetY = 0,
@@ -1444,6 +1446,7 @@ local TYPE_DEFAULTS = {
         durationAnchor = "CENTER", durationX = 0, durationY = 0,
         durationColorByTime = true,
         durationHideAboveEnabled = false, durationHideAboveThreshold = 10,
+        durationHideOnPermanent = true,   -- Wave 4: no timer text on permanent auras
         expiryAlertMode = "OFF", expiryAlertThreshold = 5,
         expiryAlertText = "", expiryAlertGlyph = "WARNING",
         expiryAlertAnchor = "TOP", expiryAlertOffsetX = 0, expiryAlertOffsetY = 0,
@@ -4110,6 +4113,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Duration Above Threshold"], proxy, "durationHideAboveEnabled", UpdateHideAboveState), 28)
             hideAboveSlider = GUI:CreateSlider(parent, L["Hide Above (seconds)"], 1, 60, 1, proxy, "durationHideAboveThreshold")
             g:AddWidget(hideAboveSlider, 54)
+            g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Duration on Permanent Auras"], proxy, "durationHideOnPermanent"), 28)
             UpdateHideAboveState()
         end)
         -- Expiry Warning: the frame-anchored Expiry Alert ELEMENT (own section —
@@ -4223,6 +4227,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Duration Above Threshold"], proxy, "durationHideAboveEnabled", UpdateHideAboveState), 28)
             hideAboveSlider = GUI:CreateSlider(parent, L["Hide Above (seconds)"], 1, 60, 1, proxy, "durationHideAboveThreshold")
             g:AddWidget(hideAboveSlider, 54)
+            g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Duration on Permanent Auras"], proxy, "durationHideOnPermanent"), 28)
             UpdateHideAboveState()
         end)
         -- Expiry Warning: the frame-anchored Expiry Alert ELEMENT (own section —
@@ -4368,6 +4373,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Duration Above Threshold"], proxy, "durationHideAboveEnabled", UpdateHideAboveState), 28)
             hideAboveSlider = GUI:CreateSlider(parent, L["Hide Above (seconds)"], 1, 60, 1, proxy, "durationHideAboveThreshold")
             g:AddWidget(hideAboveSlider, 54)
+            g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Duration on Permanent Auras"], proxy, "durationHideOnPermanent"), 28)
             UpdateHideAboveState()
         end)
         -- Expiry Warning: the frame-anchored Expiry Alert ELEMENT (own section —
@@ -7235,6 +7241,7 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
         durationAnchor = "CENTER", durationX = 0, durationY = 0,
         durationColorByTime = false, durationColor = { r = 1, g = 1, b = 1, a = 1 },
         durationHideAboveEnabled = false, durationHideAboveThreshold = 10,
+        durationHideOnPermanent = true,   -- Wave 4: absent key = ON (style-less identity)
         stackFont = "DF Roboto SemiBold", stackScale = 1.0, stackOutline = "SHADOW;OUTLINE",
         stackAnchor = "BOTTOMRIGHT", stackX = 2, stackY = -1,
         stackColor = { r = 1, g = 1, b = 1, a = 1 },
@@ -7363,6 +7370,7 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
         end), 28)
         hideAboveSlider = GUI:CreateSlider(body, L["Hide Above (seconds)"], 1, 60, 1, proxy, "durationHideAboveThreshold", refresh, refresh, true)
         g:AddWidget(hideAboveSlider, 54)
+        g:AddWidget(GUI:CreateCheckbox(body, L["Hide Duration on Permanent Auras"], proxy, "durationHideOnPermanent", refresh), 28)
         UpdateHideAboveState()
     end)
 

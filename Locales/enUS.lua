@@ -976,6 +976,7 @@ L["Hide from Main Frames"] = true
 L["Hide on Tanks"] = true
 L["Hide from Main Frames Tooltip"] = "Removes this set's pinned members from your main party/raid frames so they appear only in the pinned set. Applies out of combat. Your frame sorting setting is preserved."
 L["Hide Duplicate Buffs"] = true
+L["Hide Duration on Permanent Auras"] = true
 L["Hide in Combat"] = true
 L["Hide Status Icons"] = true
 L["Hide Casts Targeting You"] = true

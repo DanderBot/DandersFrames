@@ -881,6 +881,12 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
         -- rebuild signature (the formatter is creation-frozen on the native bind).
         if colorByTime then dur.color = nil end
         dur.formatKey = durFormat .. (colorByTime and (":C" .. DF:GetDurationBreakpointsSig()) or "") .. (hideAboveT and (":H" .. tostring(hideAboveT)) or "")
+        -- Hide duration text on permanent auras (Wave 4, default ON): zeroText = ""
+        -- flows to the native binding's zeroDurationText — Blizzard renders NO text
+        -- on zero-duration/unconfigured durations. Absent key (pre-migration db)
+        -- = ON; explicit false = the pre-Wave-4 spec shape (no zeroText at all).
+        -- Creation-frozen (SetDurationText binds once) -> rides rowStructSig.
+        if g("DurationHideOnPermanent") ~= false then dur.zeroText = "" end
     end
 
     -- Buff rows get native spell-ID exclude maps (AD-dedup + missing-buff hide below).
@@ -1160,8 +1166,8 @@ end
 -- teardown+recreate for every delta; now:
 --   rowStructSig  — changes need a Rebuild (new container): the filter set
 --     (token strings + record keys), region-presence toggles (ApplyStyle can't
---     CREATE or REMOVE a region), creation-frozen formatKeys (SetDurationText
---     binds the formatter once per slot), tooltips, the native dispel region.
+--     CREATE or REMOVE a region), creation-frozen formatKeys + zeroText
+--     (SetDurationText binds both once per slot), tooltips, the native dispel region.
 --   rowTuningSig  — changes with the struct sig stable apply IN PLACE via
 --     h:ApplyTuning (OOC immediate, combat defers to regen): max, native sort,
 --     and every candidateFilters facet — config-wide include/exclude spell maps,
@@ -1172,6 +1178,9 @@ local function rowStructSig(cfg)
     return table.concat({
         filterStructSig(cfg.filter), tostring(cfg.tooltips),
         tostring(s.duration ~= nil), tostring(s.duration and s.duration.formatKey),
+        -- zeroText (hide-on-permanent, Wave 4): creation-frozen — SetDurationText
+        -- forwards it to the binding once per slot. "" (on) vs nil (off) must Rebuild.
+        tostring(s.duration and s.duration.zeroText),
         tostring(s.stacks and s.stacks.formatKey),
         tostring(s.border ~= nil), tostring(s.cooldown and s.cooldown.show ~= false),
         tostring(s.dispel ~= nil),          -- native dispel border (region is create-once -> Rebuild)
@@ -1445,6 +1454,9 @@ function DF:BuildDefensiveRowConfig(db, unit)
         -- BuildDurationFormatter). Static colour must not stomp the escapes.
         if colorByTime then dur.color = nil end
         dur.formatKey = "NUMBER" .. (colorByTime and (":C" .. DF:GetDurationBreakpointsSig()) or "")
+        -- Hide duration text on permanent auras (Wave 4, default ON — see the
+        -- buff/debuff row builder for the mechanism notes).
+        if db.defensiveIconDurationHideOnPermanent ~= false then dur.zeroText = "" end
     end
 
     -- FILTER REGISTRY: the category selection drives the row as ONE plain HELPFUL

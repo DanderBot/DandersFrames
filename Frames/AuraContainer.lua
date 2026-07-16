@@ -738,7 +738,12 @@ local function bindNative(slot, config)
         local opts = {}
         if durSpec.formatter then opts.formatter = durSpec.formatter end
         if durSpec.expiredText and durSpec.expiredText ~= "" then opts.expiredText = durSpec.expiredText end
-        if durSpec.zeroText and durSpec.zeroText ~= "" then opts.zeroDurationText = durSpec.zeroText end
+        -- zeroText: "" is MEANINGFUL — SetZeroDurationText("") renders NO text on
+        -- zero-duration/unconfigured (= permanent) auras, while nil keeps Blizzard's
+        -- default zero-duration rendering (the mixin forwards options.zeroDurationText
+        -- unconditionally and the API arg is nilable — Blizzard_CustomAuraButton.lua:169,
+        -- DurationTextBindingObject docs). So the guard is nil-vs-set, never ~= "".
+        if durSpec.zeroText ~= nil then opts.zeroDurationText = durSpec.zeroText end
         local ok, err = pcall(function() slot:SetDurationText(slot.dfDur, opts) end)
         if not ok and not warnedCurve then
             warnedCurve = true
@@ -1622,7 +1627,19 @@ function Handle:_paintTestSlot(slot, index)
             if slot.dfDur then slot.dfDur:SetText(formatTestDuration(self, d - offset)) end
         else
             slot._dfTestDur = nil
-            if slot.dfDur then slot.dfDur:SetText("") end
+            if slot.dfDur then
+                -- Hide-on-permanent (Wave 4): mirror the native zeroDurationText
+                -- route. zeroText set (the "" default) = that text verbatim; unset
+                -- (user opted out) = the formatter's zero output, "0" fallback —
+                -- best-effort mimic of Blizzard's default zero-duration rendering.
+                local durSpec = self.config.style and self.config.style.duration
+                if durSpec and durSpec.zeroText ~= nil then
+                    slot.dfDur:SetText(durSpec.zeroText)
+                else
+                    local zt = formatTestDuration(self, 0)
+                    slot.dfDur:SetText(zt ~= "" and zt or "0")
+                end
+            end
         end
     end
     if slot.dfStack then slot.dfStack:SetText((e.stacks or 0) > 1 and tostring(e.stacks) or "") end
@@ -1985,7 +2002,7 @@ end
 -- In-place cosmetic RESTYLE (colours / sizes / fonts / offsets / layout). NOTE: this
 -- REPLACES config.style (it is not a merge) and only re-applies always-updated props —
 -- it does NOT create/remove regions or change creation-frozen opts (duration
--- expiredText/colorCurve, bar interpolation/direction, dispel show flags). To toggle a
+-- expiredText/zeroText/colorCurve, bar interpolation/direction, dispel show flags). To toggle a
 -- region on/off or change a frozen opt, use Rebuild(). pcall-guarded so a restyle fault
 -- can't escape into a GUI callback.
 function Handle:ApplyStyle(style, layout)
@@ -2050,8 +2067,8 @@ function Handle:SetFilter(filter)
 end
 
 -- Public structural rebuild — for changes ApplyStyle can't do live: max, toggling a
--- region on/off, or a creation-frozen opt (bar direction, duration expiredText, dispel
--- flags). Optionally merge a partial config first. Combat-guarded (defers to regen).
+-- region on/off, or a creation-frozen opt (bar direction, duration expiredText/zeroText,
+-- dispel flags). Optionally merge a partial config first. Combat-guarded (defers to regen).
 -- Structural rebuild. `config` REPLACES the handle's config WHOLESALE when given —
 -- both bridge callers (buff/defensive) pass a COMPLETE freshly-built config. The
 -- previous pairs()-merge could never CLEAR a key that went nil: a disabled

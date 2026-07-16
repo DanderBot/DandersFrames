@@ -847,6 +847,12 @@ local function buildDurationTextSpec(indicator, defaultShow, defScale, defColorB
         offsetY   = tonumber(indicator.durationY) or 0,
         formatter = formatter,   -- nil unless colour-by-time / hide-above; |c escapes own colour
         color     = (not colorByTime) and indicator.durationColor or nil,
+        -- Hide duration text on permanent auras (Wave 4, default ON): "" flows to
+        -- the native binding's zeroDurationText (renders NO text on zero-duration/
+        -- unconfigured). ABSENT key = ON — style-less groups and untouched
+        -- indicators get the new default; explicit false = the pre-Wave-4 spec
+        -- shape (no zeroText key). Creation-frozen -> rides durationFmtKey below.
+        zeroText  = (indicator.durationHideOnPermanent ~= false) and "" or nil,
     }
 end
 
@@ -868,6 +874,11 @@ local function durationFmtKey(indicator, defaultShow, defColorByTime)
     return "NUMBER"
         .. (colorByTime and (":C" .. DF:GetDurationBreakpointsSig()) or "")
         .. (hideAboveT and (":H" .. tostring(hideAboveT)) or "")
+        -- Hide-on-permanent (Wave 4): the OFF state alone is tokenized so the
+        -- absent key sigs byte-identically to explicit true (absent = ON is the
+        -- default; style-less byte-identity holds). zeroText is creation-frozen
+        -- on the native bind, so ON<->OFF must move the struct sig -> Rebuild.
+        .. (indicator.durationHideOnPermanent == false and ":P0" or "")
 end
 
 -- ============================================================

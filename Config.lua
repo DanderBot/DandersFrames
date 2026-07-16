@@ -1077,6 +1077,7 @@ DF.PartyDefaults = {
     buffDurationColorByTime = true,
     buffDurationHideAboveEnabled = false,
     buffDurationHideAboveThreshold = 10,
+    buffDurationHideOnPermanent = true,   -- no timer text on permanent (duration-0) auras
     -- Native 12.1 max-TOTAL-duration filter (candidateFilters.maxDuration); minutes.
     buffMaxDurationEnabled = false,
     buffMaxDurationMinutes = 5,
@@ -1271,6 +1272,7 @@ DF.PartyDefaults = {
     debuffDurationColorByTime = false,
     debuffDurationHideAboveEnabled = false,
     debuffDurationHideAboveThreshold = 10,
+    debuffDurationHideOnPermanent = true,   -- no timer text on permanent (duration-0) auras
     debuffDurationFont = "DF Roboto SemiBold",
     debuffDurationOutline = "SHADOW;OUTLINE",
     debuffDurationScale = 1,
@@ -1384,6 +1386,7 @@ DF.PartyDefaults = {
     defensiveIconDurationColor = {r = 1, g = 1, b = 1},
     defensiveIconDurationColorByTime = false,
     defensiveIconDurationFont = "DF Roboto SemiBold",
+    defensiveIconDurationHideOnPermanent = true,   -- no timer text on permanent (duration-0) auras
     defensiveIconDurationOutline = "SHADOW;OUTLINE",
     defensiveIconDurationScale = 1.4,
     defensiveIconDurationX = 0,
