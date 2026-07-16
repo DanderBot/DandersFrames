@@ -2009,7 +2009,6 @@ DF.PartyDefaults = {
     resurrectionIconShowText = false,
     resurrectionIconTextCasting = "Res...",
     resurrectionIconTextColor = {r = 0.2, g = 1, b = 0.2},
-    resurrectionIconTextPending = "Res Ready",
     resurrectionIconX = 0,
     resurrectionIconY = 0,
 

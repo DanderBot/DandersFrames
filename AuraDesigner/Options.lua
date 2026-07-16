@@ -3987,7 +3987,12 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateSlider(parent, L["Scale"], 0.5, 3.0, 0.05, proxy, "scale"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Alpha"], 0, 1, 0.05, proxy, "alpha"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Frame Level"], -10, 30, 1, proxy, "frameLevel"), 54)
-            g:AddWidget(GUI:CreateDropdown(parent, L["Frame Strata"], OPTS.FRAME_STRATA_OPTIONS, proxy, "frameStrata"), 54)
+            local strataDD = g:AddWidget(GUI:CreateDropdown(parent, L["Frame Strata"], OPTS.FRAME_STRATA_OPTIONS, proxy, "frameStrata"), 54)
+            -- 12.1: indicator z-order is engine-managed (fixed per-family level
+            -- offsets; Frame Level above IS applied). Strata isn't wired on the
+            -- container path yet — planned with the z-order polish pass.
+            GUI:BlockControl12_1(strataDD, "roadmap", { id = "ad:framestrata", page = L["Aura Designer"],
+                when = function() return DF.AuraContainer and DF.AuraContainer.IsSupported and DF.AuraContainer.IsSupported() end })
             g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Cooldown Swipe"], proxy, "hideSwipe"), 28)
             -- Text-only mode: the icon TEXTURE is hidden, so a border (static OR
             -- expiring) would frame nothing. Rebuild the page on toggle so the
@@ -4157,7 +4162,12 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateColorPicker(parent, L["Color"], proxy, "color", true, RPL, RPL, true), 28)
             g:AddWidget(GUI:CreateSlider(parent, L["Alpha"], 0, 1, 0.05, proxy, "alpha"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Frame Level"], -10, 30, 1, proxy, "frameLevel"), 54)
-            g:AddWidget(GUI:CreateDropdown(parent, L["Frame Strata"], OPTS.FRAME_STRATA_OPTIONS, proxy, "frameStrata"), 54)
+            local strataDD = g:AddWidget(GUI:CreateDropdown(parent, L["Frame Strata"], OPTS.FRAME_STRATA_OPTIONS, proxy, "frameStrata"), 54)
+            -- 12.1: indicator z-order is engine-managed (fixed per-family level
+            -- offsets; Frame Level above IS applied). Strata isn't wired on the
+            -- container path yet — planned with the z-order polish pass.
+            GUI:BlockControl12_1(strataDD, "roadmap", { id = "ad:framestrata", page = L["Aura Designer"],
+                when = function() return DF.AuraContainer and DF.AuraContainer.IsSupported and DF.AuraContainer.IsSupported() end })
             g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Cooldown Swipe"], proxy, "hideSwipe"), 28)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Icon (Text Only)"], proxy, "hideIcon"), 28)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Show When Missing"], proxy, "showWhenMissing", function()
@@ -4289,7 +4299,12 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateColorPicker(parent, L["Background Color"], proxy, "bgColor", true, RPL, RPL, true), 28)
             g:AddWidget(GUI:CreateSlider(parent, L["Alpha"], 0, 1, 0.05, proxy, "alpha"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Frame Level"], -10, 30, 1, proxy, "frameLevel"), 54)
-            g:AddWidget(GUI:CreateDropdown(parent, L["Frame Strata"], OPTS.FRAME_STRATA_OPTIONS, proxy, "frameStrata"), 54)
+            local strataDD = g:AddWidget(GUI:CreateDropdown(parent, L["Frame Strata"], OPTS.FRAME_STRATA_OPTIONS, proxy, "frameStrata"), 54)
+            -- 12.1: indicator z-order is engine-managed (fixed per-family level
+            -- offsets; Frame Level above IS applied). Strata isn't wired on the
+            -- container path yet — planned with the z-order polish pass.
+            GUI:BlockControl12_1(strataDD, "roadmap", { id = "ad:framestrata", page = L["Aura Designer"],
+                when = function() return DF.AuraContainer and DF.AuraContainer.IsSupported and DF.AuraContainer.IsSupported() end })
         end)
         -- Border (Stage 5.3 — unified controls via CreateBorderControls).
         -- Full toolkit (Style / Texture / Colour / Gradient / Shadow / Blend /
@@ -4408,7 +4423,11 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             -- Draw order: lift this border above the frame's own class/role
             -- border so it fully covers it (on by default).  Off tucks it back
             -- underneath the frame border (the pre-5.4 stacking).
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Draw above frame border"], proxy, "drawAboveFrameBorder", RPL), 28)
+            local drawAboveChk = g:AddWidget(GUI:CreateCheckbox(parent, L["Draw above frame border"], proxy, "drawAboveFrameBorder", RPL), 28)
+            -- 12.1: border stacking is engine-managed on the container path —
+            -- not wired yet; planned with the z-order polish pass.
+            GUI:BlockControl12_1(drawAboveChk, "roadmap", { id = "ad:drawaboveborder", page = L["Aura Designer"],
+                when = function() return DF.AuraContainer and DF.AuraContainer.IsSupported and DF.AuraContainer.IsSupported() end })
             swmCheck = GUI:CreateCheckbox(parent, L["Show When Missing"], proxy, "showWhenMissing", function()
                 DF.AuraDesigner.Engine:ForceRefreshAllFrames()
             end)
@@ -5028,8 +5047,15 @@ local function BuildGlobalView(parent)
     AddGroup(L["General"], function(g)
         g:AddWidget(GUI:CreateSlider(parent, L["Default Icon Size"], 8, 64, 1, defaults, "iconSize"), 50)
         g:AddWidget(GUI:CreateSlider(parent, L["Default Scale"], 0.5, 3.0, 0.05, defaults, "iconScale"), 50)
-        g:AddWidget(GUI:CreateSlider(parent, L["Default Frame Level"], -10, 30, 1, defaults, "indicatorFrameLevel"), 50)
-        g:AddWidget(GUI:CreateDropdown(parent, L["Default Frame Strata"], OPTS.FRAME_STRATA_OPTIONS, defaults, "indicatorFrameStrata"), 50)
+        local defLevelSl = g:AddWidget(GUI:CreateSlider(parent, L["Default Frame Level"], -10, 30, 1, defaults, "indicatorFrameLevel"), 50)
+        local defStrataDD = g:AddWidget(GUI:CreateDropdown(parent, L["Default Frame Strata"], OPTS.FRAME_STRATA_OPTIONS, defaults, "indicatorFrameStrata"), 50)
+        -- 12.1: the container render reads only the PER-INDICATOR Frame Level
+        -- (tonumber(indicator.frameLevel) or 0) — these global defaults aren't
+        -- applied (the editor proxy displays them as fallbacks, live ignores
+        -- them) and strata isn't wired at all. Planned with the z-order polish.
+        local zGate = function() return DF.AuraContainer and DF.AuraContainer.IsSupported and DF.AuraContainer.IsSupported() end
+        GUI:BlockControl12_1(defLevelSl, "roadmap", { id = "ad:defaultframelevel", page = L["Aura Designer"], when = zGate })
+        GUI:BlockControl12_1(defStrataDD, "roadmap", { id = "ad:defaultframestrata", page = L["Aura Designer"], when = zGate })
         g:AddWidget(GUI:CreateCheckbox(parent, L["Show Duration"], defaults, "showDuration"), 24)
         g:AddWidget(GUI:CreateCheckbox(parent, L["Show Stacks"], defaults, "showStacks"), 24)
         g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Cooldown Swipe"], defaults, "hideSwipe"), 24)

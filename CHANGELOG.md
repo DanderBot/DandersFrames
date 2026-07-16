@@ -40,6 +40,8 @@ DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally chan
 * (Frames) DandersFrames no longer overwrites Blizzard's own raid-frame dispel indicator setting at every login — a leftover from a long-removed option that kept forcing a value you couldn't change.
 * (Interface) The Filter Designer's add-by-ID box now rejects over-long spell IDs like the spell picker does, and a spell picker first opened during combat regains its Escape-to-close afterwards.
 * (Profiles) Role colours (tank/healer/damage) now travel with profile exports.
+* (Aura Designer) The Frame Strata dropdowns, the global Default Frame Level, and "Draw above frame border" are now marked as not yet available on 12.1 — they previously looked live but weren't applied (indicator z-order is engine-managed for now; the per-indicator Frame Level slider does work). Planned to return with a z-order pass.
+* (Interface) Removed the Resurrection icon's "Pending Text" box and the "My Buff Indicators" export category — neither had done anything (the text was never rendered; the category exported no settings).
 * (Auras) **The Aura Blacklist has been retired**, replaced by the new filter system. Previously blacklisted buffs will show again — hide them via the Filter Designer instead. Individual debuffs can't be hidden on this version of the game.
 * (Auras) **New: Debuff Filters.** The debuff bar is now filtered by categories on the Aura Filters page — Boss, Role, Priority, Crowd Control, Raid and Dispellable (by you or by anyone). "Show All Debuffs" keeps the old behaviour.
 * (Auras) The "All Dispellable" debuff filter mode now actually filters — it previously showed every debuff.

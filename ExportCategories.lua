@@ -1047,7 +1047,6 @@ DF.ExportCategories = {
         "resurrectionIconShowText",
         "resurrectionIconTextCasting",
         "resurrectionIconTextColor",
-        "resurrectionIconTextPending",
         "resurrectionIconX",
         "resurrectionIconY",
         "roleIconAlpha",
@@ -1356,11 +1355,6 @@ DF.ExportCategoryInfo = {
         name = "Defensives",
         description = "Defensive bar and external defensive icon",
         order = 8,
-    },
-    myBuffs = {
-        name = "My Buff Indicators",
-        description = "Your own buffs shown on frames",
-        order = 9,
     },
     targetedSpells = {
         name = "Targeted Spells",
