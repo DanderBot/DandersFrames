@@ -9,6 +9,8 @@
 DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally changed how the game handles auras. This build runs on 12.1 only — 12.0.x stays on 4.7. Every aura row — buffs, debuffs, defensives and missing buffs — now renders through the game's new protected aura engine.
 
 * (Auras) New sort controls: buff and debuff bars can show your own auras first and reverse the sort direction, and the defensive icon's order is now selectable (Externals First, Most Urgent, or Default).
+* (Auras) The Dispellable debuff filter has a new "Any Dispel Type" mode — show every debuff with a dispel type, even ones nobody in the group can dispel.
+* (Auras) New "Hide Permanent Auras" option for the buff bar — hides buffs with no duration, like auras that last until cancelled.
 * (Aura Designer) Groups get sort controls too — each filter, other-buff and debuff group card now has its own Sort Order, "My Auras First" and "Reverse Order" options.
 * (Aura Designer) **The Aura Designer now works for every spec** — previously healers and Augmentation only. The spec dropdown is grouped by class and searchable.
 * (Aura Designer) **New: Filter Groups.** Place an entire filter on the frame as its own icon row — link built-in or custom filters, and every matching buff appears in a self-arranging row with its own position, icon size, growth and icon cap. Filter Designer changes apply to linked groups immediately, and buffs shown by a group leave the buff bar while "Hide Duplicate Buffs" is on.

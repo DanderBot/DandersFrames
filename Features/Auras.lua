@@ -75,7 +75,9 @@ local DISPEL_TYPES = { Magic = true, Curse = true, Disease = true, Poison = true
 -- higher priority than itself; the boolean-backed groups (bossrole, priority)
 -- negate ALL enabled token filters. Dispellable in "ALL" mode has no token —
 -- it dedups by merging excludeDispelTypes into every OTHER record instead
--- (same ownership outcome: the dispel group owns the overlap). A record never
+-- (same ownership outcome: the dispel group owns the overlap). "ANY" mode is
+-- token-backed (PTR-5 DISPELLABLE) and dedups like PLAYER via "|!DISPELLABLE"
+-- negations; without the token it degrades to the ALL map form. A record never
 -- negates its own token. Priority×Boss/Role overlap is accepted (bools can't
 -- be negated).
 --
@@ -112,7 +114,13 @@ local function BuildDirectDebuffFilters(db, claimed)
         return nil
     end
     local dispelOn = db.debuffFilterDispellable
-    local playerMode = dispelOn and db.directDebuffDispellableMode ~= "ALL"
+    local dispelMode = db.directDebuffDispellableMode
+    -- ANY mode rides the PTR-5 DISPELLABLE token (any dispel type, regardless
+    -- of whether anyone can dispel it). Defensive read like CrowdControl: on a
+    -- client without the token this stays nil and ANY falls back to the ALL
+    -- map form below (closest semantics).
+    local anyToken = dispelOn and dispelMode == "ANY" and AuraFilters.Dispellable or nil
+    local playerMode = dispelOn and dispelMode ~= "ALL" and dispelMode ~= "ANY"
     -- CC needs its Blizzard token; skip the group entirely if unavailable
     local ccToken = db.debuffFilterCrowdControl and AuraFilters.CrowdControl or nil
     local raidOn = db.debuffFilterRaid
@@ -124,7 +132,10 @@ local function BuildDirectDebuffFilters(db, claimed)
     -- apply to it. ALL-mode dispel dedups via excludeDispelTypes (see cfFor).
     local function neg(excludeDispel, excludeCC, excludeRaid)
         local s = ""
-        if excludeDispel and playerMode then s = s .. "|!" .. dispelToken end
+        if excludeDispel then
+            if playerMode then s = s .. "|!" .. dispelToken
+            elseif anyToken then s = s .. "|!" .. anyToken end
+        end
         if excludeCC and ccToken then s = s .. "|!" .. ccToken end
         if excludeRaid and raidOn then s = s .. "|!RAID" end
         return s
@@ -134,7 +145,7 @@ local function BuildDirectDebuffFilters(db, claimed)
     -- maxDuration when Keep Important is on.
     local function cfFor(important, extra)
         local cf = extra or {}
-        if dispelOn and not playerMode then cf.excludeDispelTypes = DISPEL_TYPES end
+        if dispelOn and not playerMode and not anyToken then cf.excludeDispelTypes = DISPEL_TYPES end
         if maxDur and not (important and keepImportant) then cf.maxDuration = maxDur end
         if next(cf) == nil then return nil end
         return cf
@@ -166,6 +177,9 @@ local function BuildDirectDebuffFilters(db, claimed)
     if dispelOn and not (claimed and claimed.dispellable) then
         if playerMode then
             filters[#filters + 1] = { filter = "HARMFUL|" .. dispelToken,
+                                      key = "dispel", candidateFilters = cfFor(false) }
+        elseif anyToken then
+            filters[#filters + 1] = { filter = "HARMFUL|" .. anyToken,
                                       key = "dispel", candidateFilters = cfFor(false) }
         else
             local cf = { includeDispelTypes = DISPEL_TYPES }
@@ -857,6 +871,13 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
         if db.buffMaxDurationEnabled and (db.buffMaxDurationMinutes or 0) > 0 then
             candidateFilters = candidateFilters or {}
             candidateFilters.maxDuration = (db.buffMaxDurationMinutes or 0) * 60
+        elseif db.buffHidePermanent then
+            -- Hide Permanent Auras alone: a max-FINITE cap. maxDuration rejects
+            -- duration == 0 and no finite duration exceeds 2^31-1, so this hides
+            -- ONLY permanents. Skipped when Hide Long Buffs already set a finite
+            -- cap above — that cap rejects permanents by itself. Same tuning ride.
+            candidateFilters = candidateFilters or {}
+            candidateFilters.maxDuration = 2147483647
         end
         -- Missing Buff "Hide From Buff Bar": union every raid-buff ID (all ranks/
         -- variants) into the exclude map. Legacy did this with an icon-texture match

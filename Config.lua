@@ -1080,6 +1080,8 @@ DF.PartyDefaults = {
     -- Native 12.1 max-TOTAL-duration filter (candidateFilters.maxDuration); minutes.
     buffMaxDurationEnabled = false,
     buffMaxDurationMinutes = 5,
+    -- Hide duration-0 auras (max-finite maxDuration; Hide Long Buffs subsumes it)
+    buffHidePermanent = false,
     buffDurationFont = "DF Roboto SemiBold",
     buffDurationFormat = "NUMBER",
     buffDurationOutline = "SHADOW;OUTLINE",
@@ -1144,7 +1146,7 @@ DF.PartyDefaults = {
     debuffFilterCrowdControl = true,          -- Crowd control (CROWD_CONTROL token)
     debuffFilterRaid = false,                 -- Other raid-flagged debuffs (RAID token)
     debuffFilterDispellable = true,           -- Dispellable debuffs (mode below)
-    directDebuffDispellableMode = "PLAYER",  -- "PLAYER" (dispellable by me) or "ALL" (any dispel type)
+    directDebuffDispellableMode = "PLAYER",  -- "PLAYER" (dispellable by me) / "ALL" (dispellable type map) / "ANY" (native DISPELLABLE token, PTR-5+)
     debuffMaxDurationEnabled = false,         -- Hide long debuffs
     debuffMaxDurationMinutes = 5,             -- ... threshold (base duration)
     debuffMaxDurationKeepImportant = true,    -- ... but keep Boss/Role/Priority visible

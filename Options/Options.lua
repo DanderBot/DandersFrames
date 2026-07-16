@@ -5717,6 +5717,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local bfMaxDurSlider = buffGroup:AddWidget(GUI:CreateSlider(self.child, L["Hide Longer Than (minutes)"], 1, 30, 1, db, "buffMaxDurationMinutes", nil, DirectFilterChanged), 55)
         bfMaxDurSlider.hideOn = function(d) return not DF:FactoryOwnsBuffRow(d) end
         bfMaxDurSlider.disableOn = function(d) return not d.buffMaxDurationEnabled end
+
+        -- Native-only: permanent-aura hide (max-finite candidateFilters.maxDuration).
+        -- Independent of Hide Long Buffs — but subsumed by it (a finite cap already
+        -- rejects duration-0 auras), hence the tooltip honesty.
+        local bfHidePerm = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Permanent Auras"], db, "buffHidePermanent", DirectFilterChanged), 30)
+        bfHidePerm.hideOn = function(d) return not DF:FactoryOwnsBuffRow(d) end
+        bfHidePerm.tooltip = L["Hide buffs with no duration, such as auras that last until cancelled. Hide Long Buffs also hides these while it is on."]
         Add(buffGroup, nil, 2)
 
         -- ===== DEBUFF FILTERS (Column 1, Direct mode only) =====
@@ -5777,26 +5784,33 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             self:RefreshStates()
         end), 30)
         dfDispellable.hideOn = HideDebuffSubFilters
-        dfDispellable.tooltip = L["Debuffs that can be dispelled. Use the toggle below to choose which dispels count."]
+        dfDispellable.tooltip = L["Debuffs that can be dispelled. Use the dropdown below to choose which dispels count."]
 
-        -- Mode toggle, indented under Dispellable Debuffs. The group layout has
-        -- no per-child indent, so a wrapper row supplies the offset (same
-        -- composed-row idea as the Nicknames marker dropdowns). searchEntry is
-        -- forwarded so HighlightSettings (wizard) still finds the dbKey on the
-        -- group child it inspects.
+        -- Mode dropdown, indented under Dispellable Debuffs (was a two-state
+        -- toggle until the PTR-5 DISPELLABLE token added a third mode). The
+        -- group layout has no per-child indent, so a wrapper row supplies the
+        -- offset (same composed-row idea as the Nicknames marker dropdowns).
+        -- searchEntry is forwarded so HighlightSettings (wizard) still finds
+        -- the dbKey on the group child it inspects.
         local dfDispelModeRow = CreateFrame("Frame", nil, self.child)
-        dfDispelModeRow:SetSize(250, 24)
-        local dfDispelToggle = GUI:CreateToggleSwitch(self.child, L["Dispellable By Me"], L["All Dispellable"], db, "directDebuffDispellableMode", "PLAYER", "ALL", DirectFilterChanged)
-        dfDispelToggle:SetParent(dfDispelModeRow)
-        dfDispelToggle:ClearAllPoints()
-        dfDispelToggle:SetPoint("TOPLEFT", dfDispelModeRow, "TOPLEFT", 16, 0)
-        dfDispelToggle:SetPoint("BOTTOMRIGHT", dfDispelModeRow, "BOTTOMRIGHT", 0, 0)
-        dfDispelToggle.tooltip = L["Dispellable By Me: only debuffs you can dispel. All Dispellable: any debuff that can be dispelled."]
-        dfDispelModeRow.searchEntry = dfDispelToggle.searchEntry
+        dfDispelModeRow:SetSize(250, 50)
+        local dispelModeOptions = {
+            PLAYER = L["Dispellable By Me"],
+            ALL = L["All Dispellable"],
+            ANY = L["Any Dispel Type"],
+            _order = { "PLAYER", "ALL", "ANY" },
+        }
+        local dfDispelMode = GUI:CreateDropdown(self.child, L["Mode"], dispelModeOptions, db, "directDebuffDispellableMode", DirectFilterChanged)
+        dfDispelMode:SetParent(dfDispelModeRow)
+        dfDispelMode:ClearAllPoints()
+        dfDispelMode:SetPoint("TOPLEFT", dfDispelModeRow, "TOPLEFT", 16, 0)
+        dfDispelMode:SetPoint("BOTTOMRIGHT", dfDispelModeRow, "BOTTOMRIGHT", 0, 0)
+        dfDispelMode.tooltip = L["Dispellable By Me: only debuffs you can dispel. All Dispellable: any debuff that can be dispelled. Any Dispel Type: every debuff with a dispel type, even ones that cannot be dispelled."]
+        dfDispelModeRow.searchEntry = dfDispelMode.searchEntry
         dfDispelModeRow.hideOn = function(d)
             return d.directDebuffShowAll or not d.debuffFilterDispellable
         end
-        debuffGroup:AddWidget(dfDispelModeRow, 30)
+        debuffGroup:AddWidget(dfDispelModeRow, 55)
 
         local debuffSortOptions = {
             DEFAULT = L["Default (Slot Order)"],
