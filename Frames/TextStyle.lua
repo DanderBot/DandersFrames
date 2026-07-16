@@ -81,15 +81,16 @@ function TextStyle:Apply(fs, spec, anchorFrame)
     local offX, offY = spec.offsetX or 0, spec.offsetY or 0
 
     -- stableCenter centring compensation. WoW centres the INK bounding box (glyphs +
-    -- drop shadow), so a shadow offset of sx pushes the GLYPHS left by exactly sx/2.
-    -- Add that half back so the glyphs — not glyph+shadow — sit centred. Pixel-exact
-    -- for EVEN shadow offsets; odd offsets give a half-pixel, which we round (text on a
-    -- half-pixel blurs), leaving an inherent <=0.5px residual. Outline ink is symmetric,
-    -- so it needs no compensation. Only in stableCenter mode with no user Justify.
+    -- drop shadow), so a shadow offset of s pushes the GLYPHS the other way by exactly
+    -- s/2 — on BOTH axes. Add that half back so the glyphs — not glyph+shadow — sit
+    -- centred. Pixel-exact for EVEN shadow offsets; odd offsets give a half-pixel,
+    -- which we round (text on a half-pixel blurs), leaving an inherent <=0.5px
+    -- residual. Outline ink is symmetric, so it needs no compensation. Only in
+    -- stableCenter mode with no user Justify.
     --
     -- The no-arg DF:GetDB() (= party) read is DELIBERATE, even for raid frames: the
     -- shadow being compensated is applied by the font FAMILY (Config.lua's
-    -- GetOrCreateFontFamily / RefreshFontFamilyShadows), which reads fontShadowOffsetX
+    -- GetOrCreateFontFamily / RefreshFontFamilyShadows), which reads the shadow offsets
     -- from the same no-arg GetDB(). Families are shared global objects — one per
     -- font/outline/size key, not per mode — so the RENDERED shadow is mode-agnostic and
     -- this source always matches it. Reading the raid db here would compensate raid
@@ -98,8 +99,10 @@ function TextStyle:Apply(fs, spec, anchorFrame)
        and type(spec.outline) == "string" and spec.outline:find("SHADOW") then
         local db = (DF.GetDB and DF:GetDB())
             or (DF.db and DF.db[(DF.GUI and DF.GUI.SelectedMode) or "party"])
-        local half = ((db and db.fontShadowOffsetX) or 1) / 2
-        offX = offX + (half >= 0 and math.floor(half + 0.5) or math.ceil(half - 0.5))
+        local halfX = ((db and db.fontShadowOffsetX) or 1) / 2
+        local halfY = ((db and db.fontShadowOffsetY) or -1) / 2
+        offX = offX + (halfX >= 0 and math.floor(halfX + 0.5) or math.ceil(halfX - 0.5))
+        offY = offY + (halfY >= 0 and math.floor(halfY + 0.5) or math.ceil(halfY - 0.5))
     end
 
     fs:ClearAllPoints()

@@ -867,11 +867,29 @@ local function durationFmtKey(indicator, defaultShow, defColorByTime)
         .. (hideAboveT and (":H" .. tostring(hideAboveT)) or "")
 end
 
+-- Resolve the profile's GLOBAL colour-by-time default for placed/bar duration text:
+-- adDB.defaults.durationColorByTime, nil -> ON (the Midnight baseline — mirrors the
+-- editor's GLOBAL_DEFAULTS_FALLBACK / TYPE_DEFAULTS). Threaded into every placed/bar
+-- spec builder AND struct sig so render and editor resolve from the SAME source: the
+-- editor's per-indicator proxy falls back instance -> adDB.defaults -> ON, so a
+-- hardcoded render default silently disagrees with the editor on every profile whose
+-- stored default is OFF (all pre-12.1 profiles — their Config factory stamped false,
+-- and existing profiles deliberately keep their duration colours; only new/reset
+-- profiles pick up the new ON default).
+local function resolveDefCBT(adDB)
+    local d = adDB and adDB.defaults
+    if type(d) == "table" and d.durationColorByTime ~= nil then
+        return d.durationColorByTime and true or false
+    end
+    return true
+end
+Factory.ResolveDefaultColorByTime = resolveDefCBT   -- editor preview passes this into BuildPreviewConfig
+
 -- Build the style table for a placed icon/square. icon = native spell texture (unless
 -- hideIcon = text-only); square = solid config colour fill (no SetIcon). Both keep the
 -- native cooldown swipe, the styleable duration-text fontstring, the native stack count,
 -- and the static border.
-local function buildPlacedStyle(indicator, isSquare, borderSpec)
+local function buildPlacedStyle(indicator, isSquare, borderSpec, defCBT)
     local hideIcon = indicator.hideIcon and true or false
     local style = {}
 
@@ -901,7 +919,7 @@ local function buildPlacedStyle(indicator, isSquare, borderSpec)
     -- Duration text: a DF-owned fontstring the native SetDurationText fills secret-safe
     -- (Blizzard formats the remaining time C-side; no Lua read). Colour-by-time now routes
     -- through the #205 bucket formatter — see buildDurationTextSpec. Default show = true.
-    style.duration = buildDurationTextSpec(indicator, true, 1.2, true)   -- placed icon/square baseline: 1.2 scale, colour-by-time on
+    style.duration = buildDurationTextSpec(indicator, true, 1.2, defCBT)   -- placed icon/square baseline: 1.2 scale, colour-by-time per adDB.defaults
 
     -- Stacks: native count, shown at >1. NO formatter (secret trap — see bindNative). A
     -- custom stackMinimum is NOT expressible on the no-formatter native path (deferred).
@@ -934,7 +952,7 @@ local function testEntryForMap(map)
     return { { spellID = id, name = name, icon = icon, duration = 12, stacks = 0 } }
 end
 
-local function buildPlacedConfig(unit, map, indicator, isSquare, borderSpec)
+local function buildPlacedConfig(unit, map, indicator, isSquare, borderSpec, defCBT)
     return {
         unit = unit,
         mode = "row",
@@ -952,7 +970,7 @@ local function buildPlacedConfig(unit, map, indicator, isSquare, borderSpec)
         adBorderAnim = true,
         frameLevelOffset = 40 + (tonumber(indicator.frameLevel) or 0),
         layout = buildPlacedLayout(indicator),
-        style = buildPlacedStyle(indicator, isSquare, borderSpec),
+        style = buildPlacedStyle(indicator, isSquare, borderSpec, defCBT),
     }
 end
 
@@ -964,7 +982,7 @@ end
 -- toggling a region OFF must Rebuild the container to drop it; a plain ApplyStyle would leave
 -- the old region visible. A change here forces a whole-container Rebuild (slots can't be
 -- patched). Cosmetic styling of a live region is coSig.
-local function placedStructSig(map, isSquare, hideIcon, showStacks, showDuration, borderOn, indicator)
+local function placedStructSig(map, isSquare, hideIcon, showStacks, showDuration, borderOn, indicator, defCBT)
     return includeSig(map)
         .. "|" .. (isSquare and "sq" or "ic")
         .. "|" .. (hideIcon and "hi" or "")
@@ -972,7 +990,7 @@ local function placedStructSig(map, isSquare, hideIcon, showStacks, showDuration
         .. "|" .. (showDuration and "du" or "")
         .. "|" .. (borderOn and "bd" or "")
         .. "|fl=" .. tostring(tonumber(indicator.frameLevel) or 0)
-        .. "|df=" .. durationFmtKey(indicator, true, true)
+        .. "|df=" .. durationFmtKey(indicator, true, defCBT)
         .. "|f=" .. poolFilter(indicator)   -- filter string binds at build (othersOnly toggle -> Rebuild)
 end
 
@@ -1093,7 +1111,7 @@ end
 -- config; native SetDurationBar (bindNative) drives the value. Duration text via the shared
 -- styleable fontstring (colour-by-time buckets). Interpolation/direction are creation-frozen
 -- opts (bind-once) — Immediate + RemainingTime match the legacy bar's SetTimerDuration call.
-local function buildBarStyle(indicator, borderSpec)
+local function buildBarStyle(indicator, borderSpec, defCBT)
     local fr, fg, fb, fa = readADColor(indicator.fillColor)
     local style = {
         icon     = { show = false },
@@ -1111,14 +1129,14 @@ local function buildBarStyle(indicator, borderSpec)
         },
     }
     -- Legacy bar default for Show Duration is OFF (unlike icon/square, which default ON).
-    style.duration = buildDurationTextSpec(indicator, false, 1.2, true)   -- placed bar baseline: 1.2 scale, colour-by-time on
+    style.duration = buildDurationTextSpec(indicator, false, 1.2, defCBT)   -- placed bar baseline: 1.2 scale, colour-by-time per adDB.defaults
     if borderSpec then style.border = { spec = borderSpec } end
     return style
 end
 
 -- Full row config for one placed bar (max=1 single-slot container). Same frame-level band as
 -- the icon/square placed indicators (40 + per-indicator frameLevel).
-local function buildBarConfig(frame, unit, map, indicator, borderSpec)
+local function buildBarConfig(frame, unit, map, indicator, borderSpec, defCBT)
     return {
         unit = unit,
         mode = "row",
@@ -1131,7 +1149,7 @@ local function buildBarConfig(frame, unit, map, indicator, borderSpec)
         adBorderAnim = true,   -- opt into DF-owned border animations (see buildPlacedConfig)
         frameLevelOffset = 40 + (tonumber(indicator.frameLevel) or 0),
         layout = buildBarLayout(frame, indicator),
-        style = buildBarStyle(indicator, borderSpec),
+        style = buildBarStyle(indicator, borderSpec, defCBT),
     }
 end
 
@@ -1144,7 +1162,8 @@ end
 -- recreates its slot frame when the sig changes (regions are create-only,
 -- mirror the live Rebuild rule).
 -- ============================================================
-function Factory:BuildPreviewConfig(frame, indicator, typeKey, spellID)
+function Factory:BuildPreviewConfig(frame, indicator, typeKey, spellID, defCBT)
+    if defCBT == nil then defCBT = true end   -- caller passes resolveDefCBT(adDB); nil = baseline ON
     local entries = spellID and testEntryForMap({ [spellID] = true }) or nil
     if typeKey == "bar" then
         local borderSpec = placedBorderOn(indicator, false)
@@ -1153,12 +1172,12 @@ function Factory:BuildPreviewConfig(frame, indicator, typeKey, spellID)
             mode = "row", max = 1, filter = "HELPFUL",
             adBorderAnim = true,
             layout = buildBarLayout(frame, indicator),
-            style = buildBarStyle(indicator, borderSpec),
+            style = buildBarStyle(indicator, borderSpec, defCBT),
             testEntries = entries,
         }
         local sig = "bar|" .. tostring(borderSpec ~= nil)
             .. "|" .. tostring(cfg.style.duration ~= nil)
-            .. "|" .. durationFmtKey(indicator, false, true)
+            .. "|" .. durationFmtKey(indicator, false, defCBT)
         return cfg, sig
     end
     local isSquare = (typeKey == "square")
@@ -1169,23 +1188,23 @@ function Factory:BuildPreviewConfig(frame, indicator, typeKey, spellID)
         mode = "row", max = 1, filter = "HELPFUL",
         adBorderAnim = true,
         layout = buildPlacedLayout(indicator),
-        style = buildPlacedStyle(indicator, isSquare, borderSpec),
+        style = buildPlacedStyle(indicator, isSquare, borderSpec, defCBT),
         testEntries = entries,
     }
     local sig = (isSquare and "square|" or "icon|") .. tostring(hideIcon)
         .. "|" .. tostring(cfg.style.stacks ~= nil)
         .. "|" .. tostring(cfg.style.duration ~= nil)
         .. "|" .. tostring(borderSpec ~= nil)
-        .. "|" .. durationFmtKey(indicator, true, true)
+        .. "|" .. durationFmtKey(indicator, true, defCBT)
     return cfg, sig
 end
 
 -- STRUCTURAL signature: identity, duration-text on/off + format key (SetDurationText / SetDuration
 -- Bar bind ONCE), border on/off, frame level. Cosmetic bar styling is barCoSig.
-local function barStructSig(map, indicator, borderOn)
+local function barStructSig(map, indicator, borderOn, defCBT)
     return includeSig(map)
         .. "|bar"
-        .. "|df=" .. durationFmtKey(indicator, false, true)
+        .. "|df=" .. durationFmtKey(indicator, false, defCBT)
         .. "|" .. (borderOn and "bd" or "")
         .. "|fl=" .. tostring(tonumber(indicator.frameLevel) or 0)
         .. "|f=" .. poolFilter(indicator)   -- filter string binds at build (othersOnly toggle -> Rebuild)
@@ -2030,7 +2049,7 @@ end
 -- Module-level (not a SyncFrame closure) to keep the per-aura-event hot path
 -- allocation-free. Body otherwise byte-identical to the pre-B1 placed loop.
 -- ============================================================
-local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSpec)
+local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSpec, defCBT)
     for auraName, auraCfg in pairs(auras) do
         local indicators = (type(auraCfg) == "table") and auraCfg.indicators
         if indicators then
@@ -2052,14 +2071,14 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                         local eff = memberEffective(hasMG, key, indicator)
                         local borderOn = placedBorderOn(indicator, false)
                         local alpha = tonumber(indicator.alpha) or 1
-                        local structSig = barStructSig(map, indicator, borderOn)
+                        local structSig = barStructSig(map, indicator, borderOn, defCBT)
                         local coSig = barCoSig(frame, eff, borderOn, alpha)
 
                         local entry = placed[key]
                         if not entry then
                             local borderSpec = borderOn and buildBarBorderSpec(frame, indicator) or nil
                             local handle = DF.AuraContainer:Create(frame,
-                                buildBarConfig(frame, frame.unit, map, eff, borderSpec))
+                                buildBarConfig(frame, frame.unit, map, eff, borderSpec, defCBT))
                             if handle then
                                 applyPlacedAlpha(handle, alpha)
                                 placed[key] = { handle = handle, structSig = structSig, coSig = coSig }
@@ -2067,13 +2086,13 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                         elseif entry.structSig ~= structSig then
                             local borderSpec = borderOn and buildBarBorderSpec(frame, indicator) or nil
                             entry.structSig, entry.coSig = structSig, coSig
-                            entry.handle:Rebuild(buildBarConfig(frame, frame.unit, map, eff, borderSpec))
+                            entry.handle:Rebuild(buildBarConfig(frame, frame.unit, map, eff, borderSpec, defCBT))
                             applyPlacedAlpha(entry.handle, alpha)
                         elseif entry.coSig ~= coSig then
                             local borderSpec = borderOn and buildBarBorderSpec(frame, indicator) or nil
                             entry.coSig = coSig
                             entry.handle:ApplyStyle(
-                                buildBarStyle(indicator, borderSpec),
+                                buildBarStyle(indicator, borderSpec, defCBT),
                                 buildBarLayout(frame, eff))
                             applyPlacedAlpha(entry.handle, alpha)
                         end
@@ -2153,14 +2172,14 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                         -- alloc — FIX C); the actual border spec is built ONLY inside a
                         -- create/rebuild/restyle branch below, never per pass.
                         local structSig = placedStructSig(map, isSquare, hideIcon, showStacks,
-                            showDuration, borderOn, indicator)
+                            showDuration, borderOn, indicator, defCBT)
                         local coSig = placedCoSig(eff, isSquare, borderOn, alpha)
 
                         local entry = placed[key]
                         if not entry then
                             local borderSpec = borderOn and buildPlacedBorderSpec(frame, indicator, hideIcon) or nil
                             local handle = DF.AuraContainer:Create(frame,
-                                buildPlacedConfig(frame.unit, map, eff, isSquare, borderSpec))
+                                buildPlacedConfig(frame.unit, map, eff, isSquare, borderSpec, defCBT))
                             if handle then
                                 applyPlacedAlpha(handle, alpha)
                                 placed[key] = { handle = handle, structSig = structSig, coSig = coSig }
@@ -2168,13 +2187,13 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                         elseif entry.structSig ~= structSig then
                             local borderSpec = borderOn and buildPlacedBorderSpec(frame, indicator, hideIcon) or nil
                             entry.structSig, entry.coSig = structSig, coSig
-                            entry.handle:Rebuild(buildPlacedConfig(frame.unit, map, eff, isSquare, borderSpec))
+                            entry.handle:Rebuild(buildPlacedConfig(frame.unit, map, eff, isSquare, borderSpec, defCBT))
                             applyPlacedAlpha(entry.handle, alpha)
                         elseif entry.coSig ~= coSig then
                             local borderSpec = borderOn and buildPlacedBorderSpec(frame, indicator, hideIcon) or nil
                             entry.coSig = coSig
                             entry.handle:ApplyStyle(
-                                buildPlacedStyle(indicator, isSquare, borderSpec),
+                                buildPlacedStyle(indicator, isSquare, borderSpec, defCBT),
                                 buildPlacedLayout(eff))
                             applyPlacedAlpha(entry.handle, alpha)
                         end
@@ -2639,14 +2658,20 @@ function Factory:SyncFrame(frame)
         -- only, all else raw record).
         local hasMG, hasOtherMG = arrangeMemberGroups(adDB, spec, specAuras, otherAuras)
 
+        -- The profile's global colour-by-time default — resolved ONCE per sync (the pool
+        -- walk is allocation-free and per-UNIT_AURA hot) and threaded into every placed/
+        -- bar spec + struct sig, so nil-instance indicators follow adDB.defaults exactly
+        -- like the editor's proxy does.
+        local defCBT = resolveDefCBT(adDB)
+
         if specAuras then
-            syncPlacedPool(frame, placed, live, hasMG, specAuras, "", spec)
+            syncPlacedPool(frame, placed, live, hasMG, specAuras, "", spec, defCBT)
         end
         -- OTHER BUFFS pool: same store, same live/sweep — keys carry OTHER_PREFIX so
         -- the pools can't collide (the arranger's scratch keys carry it too) and NIL
         -- idSpec (spec-independent identity).
         if otherAuras then
-            syncPlacedPool(frame, placed, live, hasOtherMG, otherAuras, OTHER_PREFIX, nil)
+            syncPlacedPool(frame, placed, live, hasOtherMG, otherAuras, OTHER_PREFIX, nil, defCBT)
         end
 
         -- Tear down any placed container whose indicator is gone / de-configured.

@@ -511,14 +511,18 @@ DF.MigrateAuraDesignerPrioritiesLazy = MigratePrioritiesLazy
 
 -- Lazy, flag-gated ONE-TIME refresh of the AD global text defaults to the Midnight
 -- baseline: DF Roboto SemiBold + drop shadow, 1.2 duration scale, stack count seated
--- bottom-right (2,-2), and colour-by-time on. Pre-12.1 the AD shipped Friz Quadrata /
--- plain OUTLINE / 1.0 / centred stacks / static colour — WoW-generic values nobody
--- picks deliberately (same reasoning as the settings-panel font flip, Core.lua's
--- _settingsFontRobotoDefaultV1). Runs on the RESOLVED adDB (presets, auto-layout
--- overlays, and the legacy inline config all covered at point of use), flipping ONLY
--- where the value is still the EXACT old default — so any explicit choice sticks, and
--- placed indicators that already store their own values are untouched. durationScale /
--- durationColorByTime are shared with the bar indicator (one global default).
+-- bottom-right (2,-2). Pre-12.1 the AD shipped Friz Quadrata / plain OUTLINE / 1.0 /
+-- centred stacks — WoW-generic values nobody picks deliberately (same reasoning as the
+-- settings-panel font flip, Core.lua's _settingsFontRobotoDefaultV1). Runs on the
+-- RESOLVED adDB (presets, auto-layout overlays, and the legacy inline config all
+-- covered at point of use), flipping ONLY where the value is still the EXACT old
+-- default — so any explicit choice sticks, and placed indicators that already store
+-- their own values are untouched.
+-- durationColorByTime is DELIBERATELY not flipped: existing profiles keep their
+-- duration colours (a stored OFF is as likely a choice as a leftover); only new /
+-- reset profiles pick up the new ON default via the Config factory, and the Factory
+-- render resolves nil-instance indicators through adDB.defaults (resolveDefCBT) so
+-- the stored value actually governs.
 -- MUST be wired into BOTH this editor accessor AND the Factory render runner
 -- (Factory.lua ~2270), or the editor shows the new values while live frames render the
 -- old ones until a manual re-entry forces a rebuild.
@@ -533,7 +537,6 @@ local function MigrateDefaultRefreshLazy(adDB)
         if d.durationScale == 1 then d.durationScale = 1.2 end          -- 1.0 == 1 in Lua
         if d.stackX == 0 then d.stackX = 2 end
         if d.stackY == 0 then d.stackY = -2 end
-        if d.durationColorByTime == false then d.durationColorByTime = true end
     end
     adDB._adDefaultRefreshV1 = true
 end
@@ -1048,7 +1051,7 @@ local function EnsureTypeConfig(auraName, typeKey, pool)
                 durationScale = gd.durationScale or 1.0,
                 durationOutline = gd.durationOutline or "SHADOW;OUTLINE",
                 durationAnchor = "CENTER", durationX = 0, durationY = 0,
-                durationColorByTime = true,
+                durationColorByTime = gd.durationColorByTime ~= false,   -- inherit the profile's global default (nil = baseline ON)
                 -- Stack count
                 showStacks = gd.showStacks ~= false, stackMinimum = 2,
                 stackFont = gd.stackFont or "DF Roboto SemiBold",
@@ -1077,7 +1080,7 @@ local function EnsureTypeConfig(auraName, typeKey, pool)
                 durationScale = gd.durationScale or 1.0,
                 durationOutline = gd.durationOutline or "SHADOW;OUTLINE",
                 durationAnchor = "CENTER", durationX = 0, durationY = 0,
-                durationColorByTime = true,
+                durationColorByTime = gd.durationColorByTime ~= false,   -- inherit the profile's global default (nil = baseline ON)
                 -- Stack count
                 showStacks = gd.showStacks ~= false, stackMinimum = 2,
                 stackFont = gd.stackFont or "DF Roboto SemiBold",
@@ -1117,7 +1120,7 @@ local function EnsureTypeConfig(auraName, typeKey, pool)
                 durationScale = gd.durationScale or 1.0,
                 durationOutline = gd.durationOutline or "SHADOW;OUTLINE",
                 durationAnchor = "CENTER", durationX = 0, durationY = 0,
-                durationColorByTime = true,
+                durationColorByTime = gd.durationColorByTime ~= false,   -- inherit the profile's global default (nil = baseline ON)
             }
         elseif typeKey == "border" then
             auraCfg[typeKey] = {
@@ -2676,7 +2679,10 @@ local function RenderPreviewIndicator(mockFrame, spec, auraName, info, indicator
         local rec = R and R.GetSpellByName and R:GetSpellByName(auraName)
         spellID = rec and rec.id
     end
-    local cfg, sig = Factory:BuildPreviewConfig(mockFrame, effectiveConfig, indicator.type or "icon", spellID)
+    -- Resolve the global colour-by-time default with the Factory's OWN resolver so the
+    -- canvas preview and the live render can never disagree on the fallback.
+    local defCBT = Factory.ResolveDefaultColorByTime and Factory.ResolveDefaultColorByTime(GetAuraDesignerDB())
+    local cfg, sig = Factory:BuildPreviewConfig(mockFrame, effectiveConfig, indicator.type or "icon", spellID, defCBT)
     if not (cfg.testEntries and cfg.testEntries[1]) then
         -- No resolvable spell ID: synthesize an entry from the configured art so
         -- the paint can never fall back to the generic curated pool.
