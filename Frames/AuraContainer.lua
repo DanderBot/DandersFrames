@@ -1738,6 +1738,20 @@ function Handle:_positionTestTip(tip, index)
     local wrap = G.verticalPrimary and 1 or (tonumber(L.wrap) or 0)
     if wrap < 1 then wrap = n end
     local idx = index - 1
+    -- Strip reservation (Wave 3.2/3.3): rendered rows stride by elementHeight
+    -- (sy + reservation) + spacing, and a strip FACING the flow's vertical start
+    -- insets the first row by the reservation (SetAuraLayoutPadding). Mirror
+    -- both here or the hover zones drift by `resv` per row once a bar is on.
+    local resv, topStrip = stripReservation(self.config)
+    local inset = 0
+    if resv > 0 then
+        if G.vName == "Up" then
+            inset = (not topStrip) and resv or 0
+        else
+            inset = topStrip and resv or 0
+        end
+    end
+    local strideY = sy + resv + spY
     tip:SetSize(sx * scale, sy * scale)
     tip:ClearAllPoints()
     if G.center then
@@ -1746,10 +1760,12 @@ function Handle:_positionTestTip(tip, index)
         -- its corner — anchor each tip by its CENTRE at the icon's rendered centre.
         local x, y
         if G.verticalPrimary then
-            -- Single centred column.
-            local colH = n * sy + (n - 1) * spY
+            -- Single centred column. Box height = start inset + n cells of
+            -- (sy + resv) + the between gaps (the flow's self-size); the icon
+            -- sits at its cell's flow corner (extra height lands away from start).
+            local colH = inset + n * (sy + resv) + (n - 1) * spY
             x = (L.offsetX or 0) + (G.pinX + ((G.secondary == "LEFT") and -sx / 2 or sx / 2)) * scale
-            y = (L.offsetY or 0) + (G.pinY + colH / 2 - idx * (sy + spY) - sy / 2) * scale
+            y = (L.offsetY or 0) + (G.pinY + colH / 2 - inset - idx * strideY - sy / 2) * scale
         else
             local col = idx % wrap
             local row = math.floor(idx / wrap)
@@ -1757,7 +1773,7 @@ function Handle:_positionTestTip(tip, index)
             local rowW = m * sx + (m - 1) * spX
             local rowDir = (G.secondary == "UP") and 1 or -1
             x = (L.offsetX or 0) + (G.pinX + col * (sx + spX) - rowW / 2 + sx / 2) * scale
-            y = (L.offsetY or 0) + (G.pinY + rowDir * (row * (sy + spY) + sy / 2)) * scale
+            y = (L.offsetY or 0) + (G.pinY + rowDir * (inset + row * strideY + sy / 2)) * scale
         end
         tip:SetPoint("CENTER", self.frame, G.anchor, x, y)
         return
@@ -1765,13 +1781,15 @@ function Handle:_positionTestTip(tip, index)
     -- Directional growth: replicate the flow from the anchor corner. The container
     -- itself is scaled; in handle.frame space each step and the element size render
     -- multiplied by scale. User offsets are container-anchor offsets in parent
-    -- space (unscaled).
+    -- space (unscaled). The start inset shifts every row along the flow's vertical
+    -- direction (down for Down-flow, up for Up-flow).
     local pAxis = AXIS[G.primary] or AXIS.RIGHT
     local sAxis = AXIS[G.secondary] or AXIS.DOWN
+    local vSign = (G.vName == "Up") and 1 or -1
     local col = idx % wrap
     local row = math.floor(idx / wrap)
     local x = (L.offsetX or 0) + (pAxis.x * col + sAxis.x * row) * (sx + spX) * scale
-    local y = (L.offsetY or 0) + (pAxis.y * col + sAxis.y * row) * (sy + spY) * scale
+    local y = (L.offsetY or 0) + ((pAxis.y * col + sAxis.y * row) * strideY + vSign * inset) * scale
     tip:SetPoint(G.anchor, self.frame, G.anchor, x, y)
 end
 function Handle:_layoutSlots()

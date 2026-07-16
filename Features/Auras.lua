@@ -823,6 +823,31 @@ function DF:BuildAuraSort(order, mineFirst, reverse)
     return { method = method, direction = reverse and "Reverse" or nil }
 end
 
+-- Duration bar (Wave 3, #205): prefixed key block -> the engine's style.bar
+-- STRIP spec (fill = false; the fill shape is AD-only). Returns nil when the
+-- Enabled key is off/absent, so disabled configs stay byte-identical to
+-- pre-Wave-3 output (no style.bar key at all). The tonumber clamps are
+-- load-bearing: they guarantee styling (styleBarShared / strip geometry) and
+-- the layout reservation (stripReservation) see the SAME number for height/gap
+-- even if a profile carries garbage — both engine defaults are 4/2.
+-- SHARED: rows pass (db, "buffDurationBar"/"debuffDurationBar"/
+-- "defensiveDurationBar"); the AD group families pass (group.style,
+-- "durationBar") — one builder, callers feed their own storage.
+function DF:BuildDurationBarSpec(store, keyPrefix)
+    if not store or store[keyPrefix .. "Enabled"] ~= true then return nil end
+    return {
+        show        = true,
+        fill        = false,   -- strip shape (out-of-rect; the engine reserves wrap space)
+        position    = (store[keyPrefix .. "Position"] == "TOP") and "TOP" or "BOTTOM",
+        height      = tonumber(store[keyPrefix .. "Height"]) or 4,
+        gap         = tonumber(store[keyPrefix .. "Gap"]) or 2,
+        texture     = store[keyPrefix .. "Texture"],
+        color       = store[keyPrefix .. "Color"],
+        bgColor     = store[keyPrefix .. "BGColor"],
+        reverseFill = store[keyPrefix .. "ReverseFill"] and true or false,
+    }
+end
+
 -- Map a prefixed aura-row setting block (buff*/debuff*) -> DF.AuraContainer config.
 -- prefix = "buff" (debuff reuses this later). opts.filterList is the PRE-BUILT native
 -- filter list (buffs: BuildDirectBuffFilters); opts.unit is the initial unit token.
@@ -1010,6 +1035,10 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
             cooldown = { show = not g("HideSwipe"), reverse = true, edge = false, numbers = false },
             duration = dur,
             dispel   = dispel,
+            -- Duration bar strip (nil when disabled — byte-neutral). Presence +
+            -- geometry are structural (rowStructSig's s.bar entry, Wave 3.1);
+            -- texture/colours restyle in place.
+            bar      = DF:BuildDurationBarSpec(db, prefix .. "DurationBar"),
             -- Shared TextStyle spec (font/scale/outline/anchor/offsets/justify/colour).
             -- No formatter: forbidden on container rows (secret trap — see the
             -- GetStacksFormatter tombstone above). Native default = counts > 1.
@@ -1489,6 +1518,8 @@ function DF:BuildDefensiveRowConfig(db, unit)
             border = (db.defensiveIconShowBorder ~= false) and { db = db, prefix = "defensiveIcon" } or nil,
             cooldown = { show = not db.defensiveIconHideSwipe, reverse = true, edge = false, numbers = false },
             duration = dur,
+            -- Duration bar strip (nil when disabled — byte-neutral; see the buff row).
+            bar      = DF:BuildDurationBarSpec(db, "defensiveDurationBar"),
             -- TextStyle-shaped spec (defensive stacks have no db keys — legacy fixed
             -- look, size/outline explicit now that TextStyle owns the render defaults).
             -- No formatter: forbidden on container rows (secret trap — see the

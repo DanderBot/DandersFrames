@@ -1088,6 +1088,18 @@ DF.PartyDefaults = {
     buffDurationScale = 1.2000000476837,
     buffDurationX = 0,
     buffDurationY = 2,
+    -- Duration bar (12.1 factory rows): a strip below/above each icon that
+    -- drains with the aura's remaining time (native SetDurationBar fill —
+    -- render-side, works on secret auras). Geometry (position/height/gap) is
+    -- structural (layout reservation); texture/colours restyle in place.
+    buffDurationBarEnabled = false,
+    buffDurationBarPosition = "BOTTOM",       -- "BOTTOM" / "TOP"
+    buffDurationBarHeight = 4,
+    buffDurationBarGap = 2,
+    buffDurationBarTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Minimalist",
+    buffDurationBarColor = {r = 0.2, g = 0.9, b = 0.3, a = 1},
+    buffDurationBarBGColor = {r = 0, g = 0, b = 0, a = 0.8},
+    buffDurationBarReverseFill = false,
     buffExpiringBorderColor = {r = 1, g = 0.50196081399918, b = 0, a = 1},
     buffExpiringBorderColorByTime = false,
     buffExpiringBorderEnabled = true,
@@ -1264,6 +1276,15 @@ DF.PartyDefaults = {
     debuffDurationScale = 1,
     debuffDurationX = 0,
     debuffDurationY = 0,
+    -- Duration bar (12.1 factory rows) — see the buff block above.
+    debuffDurationBarEnabled = false,
+    debuffDurationBarPosition = "BOTTOM",     -- "BOTTOM" / "TOP"
+    debuffDurationBarHeight = 4,
+    debuffDurationBarGap = 2,
+    debuffDurationBarTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Minimalist",
+    debuffDurationBarColor = {r = 0.2, g = 0.9, b = 0.3, a = 1},
+    debuffDurationBarBGColor = {r = 0, g = 0, b = 0, a = 0.8},
+    debuffDurationBarReverseFill = false,
     debuffExpiringBorderColor = {r = 1, g = 0.27843138575554, b = 0, a = 1},
     debuffExpiringBorderColorByTime = false,
     debuffExpiringBorderEnabled = true,
@@ -1314,6 +1335,16 @@ DF.PartyDefaults = {
     defensiveBarWrap = 5,
     defensiveBarX = 0,
     defensiveBarY = 0,
+
+    -- Duration bar (12.1 factory rows) — see the buff block above.
+    defensiveDurationBarEnabled = false,
+    defensiveDurationBarPosition = "BOTTOM",  -- "BOTTOM" / "TOP"
+    defensiveDurationBarHeight = 4,
+    defensiveDurationBarGap = 2,
+    defensiveDurationBarTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Minimalist",
+    defensiveDurationBarColor = {r = 0.2, g = 0.9, b = 0.3, a = 1},
+    defensiveDurationBarBGColor = {r = 0, g = 0, b = 0, a = 0.8},
+    defensiveDurationBarReverseFill = false,
 
     -- Defensive Icon
     defensiveIconAnchor = "CENTER",

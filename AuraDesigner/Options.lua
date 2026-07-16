@@ -7239,6 +7239,14 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
         stackAnchor = "BOTTOMRIGHT", stackX = 2, stackY = -1,
         stackColor = { r = 1, g = 1, b = 1, a = 1 },
         ShowBorder = false,
+        -- Duration bar strip (Wave 3) — mirrors the row pages' defaults
+        -- (Config.lua buffDurationBar*). OFF until the user enables it.
+        durationBarEnabled = false, durationBarPosition = "BOTTOM",
+        durationBarHeight = 4, durationBarGap = 2,
+        durationBarTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Minimalist",
+        durationBarColor = { r = 0.2, g = 0.9, b = 0.3, a = 1 },
+        durationBarBGColor = { r = 0, g = 0, b = 0, a = 0.8 },
+        durationBarReverseFill = false,
     }
     for k, v in pairs(TYPE_DEFAULTS.icon) do
         if k:find("^Border") and defaults[k] == nil then defaults[k] = v end
@@ -7368,6 +7376,42 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
             colorLabel = L["Stack Text Color"],
             onChange = refresh, onDrag = refresh,
         })
+    end)
+
+    -- ── DURATION BAR ── (Wave 3: strip below/above each icon, drained by the
+    -- native SetDurationBar fill — render-side, works on secret auras. The keys
+    -- mirror the row pages' buffDurationBar* block; enable/position/height/gap
+    -- are structural (group struct sig -> Rebuild), texture/colours hot-apply.)
+    AddSection(L["Duration Bar"], "durationbar", function(g)
+        local dbWidgets = {}
+        local function UpdateBarGrey()
+            local on = proxy.durationBarEnabled and true or false
+            for i = 1, #dbWidgets do
+                local w = dbWidgets[i]
+                if w.SetEnabled then w:SetEnabled(on)
+                else
+                    w:SetAlpha(on and 1 or 0.4)
+                    if w.EnableMouse then w:EnableMouse(on) end
+                end
+            end
+        end
+        g:AddWidget(GUI:CreateCheckbox(body, L["Enable Duration Bar"], proxy, "durationBarEnabled", function()
+            UpdateBarGrey()
+            refresh()
+        end), 28)
+        local function barChild(widget, h)
+            g:AddWidget(widget, h)
+            dbWidgets[#dbWidgets + 1] = widget
+            return widget
+        end
+        barChild(GUI:CreateDropdown(body, L["Position"], { BOTTOM = L["Bottom"], TOP = L["Top"] }, proxy, "durationBarPosition", refresh), 54)
+        barChild(GUI:CreateSlider(body, L["Height"], 1, 12, 1, proxy, "durationBarHeight", refresh, refresh, true), 54)
+        barChild(GUI:CreateSlider(body, L["Gap"], 0, 10, 1, proxy, "durationBarGap", refresh, refresh, true), 54)
+        barChild(GUI:CreateTextureDropdown(body, L["Bar Texture"], proxy, "durationBarTexture", refresh), 54)
+        barChild(GUI:CreateColorPicker(body, L["Bar Color"], proxy, "durationBarColor", true, refresh, refresh, true), 28)
+        barChild(GUI:CreateColorPicker(body, L["Background Color"], proxy, "durationBarBGColor", true, refresh, refresh, true), 28)
+        barChild(GUI:CreateCheckbox(body, L["Reverse Fill"], proxy, "durationBarReverseFill", refresh), 28)
+        UpdateBarGrey()
     end)
 
     return by

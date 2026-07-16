@@ -6218,6 +6218,46 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         GUI:BlockControl12_1(expiringGroup, "roadmap", { id = "buffs:expiring", page = L["Buffs"], when = function(d) return DF:FactoryOwnsBuffRow(d) end })
 
         currentSection = nil
+        AddSpace(10, "both")
+
+        -- ===== DURATION BAR SECTION ===== (12.1 factory rows only — the native
+        -- container drains the strip render-side; the legacy renderer has no bar)
+        local durBarSection = Add(GUI:CreateCollapsibleSection(self.child, L["Duration Bar"], true), 36, "both")
+        durBarSection.hideOn = function(d) return not DF:FactoryOwnsBuffRow(d) end
+        currentSection = durBarSection
+
+        -- Every bar edit routes through the factory drive: the sig split decides
+        -- Rebuild (enable/position/height/gap — layout reservation) vs in-place
+        -- restyle (texture/colours) — same callback either way.
+        local function BuffBarChanged() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end
+
+        local durBarGroup = GUI:CreateSettingsGroup(self.child, 260)
+        durBarGroup.hideOn = durBarSection.hideOn
+        durBarGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 40)
+        durBarGroup:AddWidget(GUI:CreateLabel(self.child, L["Shows a bar on each icon that drains with the aura's remaining time."], 250), 30)
+        local buffBarEnable = durBarGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Duration Bar"], db, "buffDurationBarEnabled", function()
+            self:RefreshStates()
+            BuffBarChanged()
+        end), 30)
+        buffBarEnable.keepEnabled = true
+        buffBarEnable.disableOn = function(d) return not d.showBuffs end
+        durBarGroup.disableChildrenOn = function(d) return not d.showBuffs or not d.buffDurationBarEnabled end
+        durBarGroup:AddWidget(GUI:CreateDropdown(self.child, L["Position"], { BOTTOM = L["Bottom"], TOP = L["Top"] }, db, "buffDurationBarPosition", BuffBarChanged), 55)
+        durBarGroup:AddWidget(GUI:CreateSlider(self.child, L["Height"], 1, 12, 1, db, "buffDurationBarHeight", nil, BuffBarChanged, true), 55)
+        durBarGroup:AddWidget(GUI:CreateSlider(self.child, L["Gap"], 0, 10, 1, db, "buffDurationBarGap", nil, BuffBarChanged, true), 55)
+        AddToSection(durBarGroup, nil, 1)
+
+        local durBarStyleGroup = GUI:CreateSettingsGroup(self.child, 260)
+        durBarStyleGroup.hideOn = durBarSection.hideOn
+        durBarStyleGroup:AddWidget(GUI:CreateHeader(self.child, L["Bar Style"]), 40)
+        durBarStyleGroup:AddWidget(GUI:CreateTextureDropdown(self.child, L["Texture"], db, "buffDurationBarTexture", BuffBarChanged), 55)
+        durBarStyleGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Bar Color"], db, "buffDurationBarColor", true, BuffBarChanged), 30)
+        durBarStyleGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Background Color"], db, "buffDurationBarBGColor", true, BuffBarChanged), 30)
+        durBarStyleGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Reverse Fill"], db, "buffDurationBarReverseFill", BuffBarChanged), 30)
+        durBarStyleGroup.disableChildrenOn = durBarGroup.disableChildrenOn
+        AddToSection(durBarStyleGroup, nil, 2)
+
+        currentSection = nil
 
         -- See Also links
         AddSpace(20, "both")
@@ -6433,6 +6473,43 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         AddToSection(durationGroup, nil, 2)
 
         currentSection = nil
+        AddSpace(10, "both")
+
+        -- ===== DURATION BAR SECTION ===== (12.1 factory rows only — mirrors the
+        -- Buffs page's block; see there for the sig-split routing note)
+        local durBarSection = Add(GUI:CreateCollapsibleSection(self.child, L["Duration Bar"], true), 36, "both")
+        durBarSection.hideOn = function(d) return not DF:FactoryOwnsDebuffRow(d) end
+        currentSection = durBarSection
+
+        local function DebuffBarChanged() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end
+
+        local durBarGroup = GUI:CreateSettingsGroup(self.child, 260)
+        durBarGroup.hideOn = durBarSection.hideOn
+        durBarGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 40)
+        durBarGroup:AddWidget(GUI:CreateLabel(self.child, L["Shows a bar on each icon that drains with the aura's remaining time."], 250), 30)
+        local debuffBarEnable = durBarGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Duration Bar"], db, "debuffDurationBarEnabled", function()
+            self:RefreshStates()
+            DebuffBarChanged()
+        end), 30)
+        debuffBarEnable.keepEnabled = true
+        debuffBarEnable.disableOn = function(d) return not d.showDebuffs end
+        durBarGroup.disableChildrenOn = function(d) return not d.showDebuffs or not d.debuffDurationBarEnabled end
+        durBarGroup:AddWidget(GUI:CreateDropdown(self.child, L["Position"], { BOTTOM = L["Bottom"], TOP = L["Top"] }, db, "debuffDurationBarPosition", DebuffBarChanged), 55)
+        durBarGroup:AddWidget(GUI:CreateSlider(self.child, L["Height"], 1, 12, 1, db, "debuffDurationBarHeight", nil, DebuffBarChanged, true), 55)
+        durBarGroup:AddWidget(GUI:CreateSlider(self.child, L["Gap"], 0, 10, 1, db, "debuffDurationBarGap", nil, DebuffBarChanged, true), 55)
+        AddToSection(durBarGroup, nil, 1)
+
+        local durBarStyleGroup = GUI:CreateSettingsGroup(self.child, 260)
+        durBarStyleGroup.hideOn = durBarSection.hideOn
+        durBarStyleGroup:AddWidget(GUI:CreateHeader(self.child, L["Bar Style"]), 40)
+        durBarStyleGroup:AddWidget(GUI:CreateTextureDropdown(self.child, L["Texture"], db, "debuffDurationBarTexture", DebuffBarChanged), 55)
+        durBarStyleGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Bar Color"], db, "debuffDurationBarColor", true, DebuffBarChanged), 30)
+        durBarStyleGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Background Color"], db, "debuffDurationBarBGColor", true, DebuffBarChanged), 30)
+        durBarStyleGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Reverse Fill"], db, "debuffDurationBarReverseFill", DebuffBarChanged), 30)
+        durBarStyleGroup.disableChildrenOn = durBarGroup.disableChildrenOn
+        AddToSection(durBarStyleGroup, nil, 2)
+
+        currentSection = nil
 
         -- See Also links
         AddSpace(20, "both")
@@ -6625,7 +6702,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- (prefix matcher, see Profile.lua) so the category selection edited on
         -- this page rides this page's Copy/Sync/Reset. It is also registered on
         -- the Aura Filters page — overlap is fine, both DeepCopy the same value.
-        Add(CreateCopyButton(self.child, {"defensiveIcon", "defensiveFilterSelection", "defensiveSortOrder"}, L["Defensive Icon"], "auras_defensiveicon"), 25, 2)
+        Add(CreateCopyButton(self.child, {"defensiveIcon", "defensiveFilterSelection", "defensiveSortOrder", "defensiveDurationBar"}, L["Defensive Icon"], "auras_defensiveicon"), 25, 2)
         
         local anchorOptions = {
             CENTER= L["Center"], TOP= L["Top"], BOTTOM= L["Bottom"], LEFT= L["Left"], RIGHT= L["Right"],
@@ -6910,6 +6987,32 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end, function() DF:LightweightUpdateDefensiveIcons() end, true), 55)
 
         Add(layoutGroup, nil, 1)
+
+        -- ===== DURATION BAR GROUP (Column 1) ===== (12.1 factory rows only —
+        -- mirrors the Buffs page's block; UpdateAllDefensiveBars bumps the layout
+        -- version, and the sig split routes Rebuild vs in-place restyle)
+        local durBarGroup = GUI:CreateSettingsGroup(self.child, 280)
+        durBarGroup.hideOn = function(d) return not DF:FactoryOwnsDefensiveRow(d) end
+        durBarGroup:AddWidget(GUI:CreateHeader(self.child, L["Duration Bar"]), 40)
+        durBarGroup:AddWidget(GUI:CreateLabel(self.child, L["Shows a bar on each icon that drains with the aura's remaining time."], 250), 30)
+        local function DefBarChanged()
+            if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
+        end
+        local defBarEnable = durBarGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Duration Bar"], db, "defensiveDurationBarEnabled", function()
+            self:RefreshStates()
+            DefBarChanged()
+        end), 30)
+        defBarEnable.keepEnabled = true
+        defBarEnable.disableOn = HideDefensiveIconOptions
+        durBarGroup.disableChildrenOn = function(d) return not d.defensiveIconEnabled or not d.defensiveDurationBarEnabled end
+        durBarGroup:AddWidget(GUI:CreateDropdown(self.child, L["Position"], { BOTTOM = L["Bottom"], TOP = L["Top"] }, db, "defensiveDurationBarPosition", DefBarChanged), 55)
+        durBarGroup:AddWidget(GUI:CreateSlider(self.child, L["Height"], 1, 12, 1, db, "defensiveDurationBarHeight", nil, DefBarChanged, true), 55)
+        durBarGroup:AddWidget(GUI:CreateSlider(self.child, L["Gap"], 0, 10, 1, db, "defensiveDurationBarGap", nil, DefBarChanged, true), 55)
+        durBarGroup:AddWidget(GUI:CreateTextureDropdown(self.child, L["Texture"], db, "defensiveDurationBarTexture", DefBarChanged), 55)
+        durBarGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Bar Color"], db, "defensiveDurationBarColor", true, DefBarChanged), 30)
+        durBarGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Background Color"], db, "defensiveDurationBarBGColor", true, DefBarChanged), 30)
+        durBarGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Reverse Fill"], db, "defensiveDurationBarReverseFill", DefBarChanged), 30)
+        Add(durBarGroup, nil, 1)
 
         -- See Also links
         AddSpace(20, "both")

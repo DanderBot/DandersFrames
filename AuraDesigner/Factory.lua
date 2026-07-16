@@ -1573,6 +1573,10 @@ local function buildFilterGroupStyle(group, borderSpec)
         cooldown = { show = true, swipe = not s.hideSwipe, reverse = true, numbers = false },
         duration = buildDurationTextSpec(s, true),
         stacks   = (s.showStacks ~= false) and buildStackSpec(s, 2, -1) or nil,
+        -- Duration bar strip (Wave 3): the ROW's shared spec builder over the
+        -- group.style key block. nil when disabled/absent — style-less groups
+        -- stay byte-identical (no style.bar key at all).
+        bar      = DF.BuildDurationBarSpec and DF:BuildDurationBarSpec(s, "durationBar") or nil,
     }
     if borderSpec then style.border = { spec = borderSpec } end
     return style
@@ -1588,6 +1592,16 @@ local function groupStyleStructSig(group)
         .. "|" .. ((s.showDuration ~= false) and "du" or "")
         .. "|" .. (s.ShowBorder == true and "bd" or "")
         .. "|df=" .. durationFmtKey(s, true)
+        -- Duration bar presence + GEOMETRY (Wave 3): the region is create-once
+        -- and the strip reserves wrap space outside the button rect, so
+        -- position/height/gap ride the struct sig (mirror rowStructSig's s.bar
+        -- entry). "" when disabled — absent-bar groups sig identically whether
+        -- style is absent, {}, or carries durationBarEnabled = false.
+        .. "|" .. (s.durationBarEnabled == true
+            and ("bar" .. tostring(s.durationBarPosition) .. ":"
+                .. tostring(tonumber(s.durationBarHeight) or 4) .. ":"
+                .. tostring(tonumber(s.durationBarGap) or 2))
+            or "")
 end
 
 -- EDITOR PREVIEW CONFIG for one SAMPLE slot of a filter/debuff group: the same
@@ -1704,6 +1718,14 @@ local function filterGroupCoSig(group, wrapDefault)
             colSig(s.stackColor),
         }, ","),
         "bd=" .. placedBorderRawSig(s, s.ShowBorder == true),
+        -- Duration bar STYLING (Wave 3): texture/colours/reverse-fill hot-apply
+        -- via ApplyStyle (geometry + presence live in groupStyleStructSig).
+        -- Gated on Enabled so stray durationBar* keys on a disabled bar emit the
+        -- same "" as a never-barred group — no churn, sigs identical.
+        "dbar=" .. (s.durationBarEnabled == true and tconcat({
+            tostring(s.durationBarTexture), colSig(s.durationBarColor),
+            colSig(s.durationBarBGColor), tostring(s.durationBarReverseFill and 1 or 0),
+        }, ",") or ""),
     }, "|")
 end
 
