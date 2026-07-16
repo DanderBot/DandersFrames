@@ -8348,7 +8348,7 @@ BuildDebuffGroupsTab = function()
         { key = "priority",     label = L["Priority Debuffs"],    tooltip = L["Debuffs Blizzard flags as high priority."] },
         { key = "crowdControl", label = L["Crowd Control"],       tooltip = L["CC effects like stuns, roots, and incapacitates."] },
         { key = "raid",         label = L["Raid Debuffs"],        tooltip = L["Other debuffs Blizzard flags for raid frames."] },
-        { key = "dispellable",  label = L["Dispellable Debuffs"], tooltip = L["Debuffs that can be dispelled. Use the toggle below to choose which dispels count."] },
+        { key = "dispellable",  label = L["Dispellable Debuffs"], tooltip = L["Debuffs that can be dispelled. Use the dropdown below to choose which dispels count."] },
     }
 
     -- FULL structural refresh incl. tab rebuild — discrete edits (category
