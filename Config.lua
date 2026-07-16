@@ -885,6 +885,12 @@ end
 
 DF.GlobalDefaults = {
     notifyOutdated = true,
+    -- Aura duration-text update rate (buff/debuff/defensive rows + Aura Designer).
+    -- Stored as a raw key; the mapping to the native binding's updateInterval seconds
+    -- lives in Features/Auras.lua (DF:GetAuraDurationUpdateInterval): SMOOTH = 0.1,
+    -- PERFORMANCE = 1.0, NORMAL = emit nothing (Blizzard's own default cadence —
+    -- behavior-neutral, since the C-side default value is undocumented).
+    auraDurationUpdateInterval = "NORMAL",
     -- Colour-by-time breakpoints (account-wide; shared by the buff/debuff/defensive rows
     -- AND the Aura Designer indicators — they all key off the same duration formatter). Each
     -- stop applies its colour to remaining durations AT OR ABOVE its threshold (seconds); the

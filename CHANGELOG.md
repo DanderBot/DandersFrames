@@ -8,6 +8,7 @@
 
 DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally changed how the game handles auras. This build runs on 12.1 only — 12.0.x stays on 4.7. Every aura row — buffs, debuffs, defensives and missing buffs — now renders through the game's new protected aura engine.
 
+* (Auras) New "Aura Duration Update Rate" setting (General > Settings) — choose how often aura countdown text refreshes: Smooth, Normal or Performance. Applies account-wide to the buff, debuff and defensive bars and Aura Designer indicators.
 * (Auras) Permanent auras no longer show a duration timer on their icons. This is the new default for the buff, debuff and defensive bars and for Aura Designer indicators and groups — you can bring the timer back with the "Hide Duration on Permanent Auras" checkbox in each Duration section.
 * (Auras) **New: Duration Bars.** Buff, debuff and defensive icons can now show a small bar that drains with each aura's remaining time, tucked just below (or above) the icon. Enable it in the new "Duration Bar" section on the Buffs, Debuffs and Defensive Icon pages, with height, gap, texture and colour options — and Aura Designer groups get the same section on each group card.
 * (Auras) New sort controls: buff and debuff bars can show your own auras first and reverse the sort direction, and the defensive icon's order is now selectable (Externals First, Most Urgent, or Default).

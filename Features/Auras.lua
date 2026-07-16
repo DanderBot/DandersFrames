@@ -720,6 +720,32 @@ function DF:GetDurationBreakpointsSig()
     return durationBreakpointsSigCache
 end
 
+-- Account-wide duration-text update rate (Wave 5a) -> the native binding's
+-- `updateInterval` (minimum seconds between automatic text refreshes; 0 = every
+-- game tick). Creation-frozen: SetDurationText forwards options.updateInterval
+-- to the binding once per slot (Blizzard_CustomAuraButton.lua:164), so the value
+-- rides every duration spec + struct sig (rows: rowStructSig; AD: durationFmtKey).
+-- NORMAL — the default — returns NIL: the spec omits the key and the binding
+-- keeps Blizzard's own default cadence. The C-side default is not documented
+-- anywhere addon-readable, so the default option must not guess a number —
+-- shipping is behavior-neutral by construction. MEMOIZED like the breakpoints
+-- sig above (the builders/sigs run per drive); the Options dropdown fires the
+-- invalidator on change.
+local AURA_DURATION_UPDATE_INTERVALS = { SMOOTH = 0.1, PERFORMANCE = 1.0 }
+local durationUpdateIntervalCache   -- resolved seconds, or false = NORMAL/native default
+function DF:InvalidateAuraDurationUpdateInterval()
+    durationUpdateIntervalCache = nil
+end
+function DF:GetAuraDurationUpdateInterval()
+    local c = durationUpdateIntervalCache
+    if c == nil then
+        local g = DF.GetGlobalDB and DF:GetGlobalDB()
+        c = (g and AURA_DURATION_UPDATE_INTERVALS[g.auraDurationUpdateInterval]) or false
+        durationUpdateIntervalCache = c
+    end
+    return c or nil
+end
+
 -- Shared with the Aura Designer factory (P4.4): its placed icon/square/bar duration text
 -- reuses the EXACT same secret-safe colour-by-time BUCKET formatter as the #205 buff/debuff
 -- rows (|cRRGGBB escapes baked into the native NumericRuleFormatter bands, evaluated C-side).
@@ -887,6 +913,10 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
         -- = ON; explicit false = the pre-Wave-4 spec shape (no zeroText at all).
         -- Creation-frozen (SetDurationText binds once) -> rides rowStructSig.
         if g("DurationHideOnPermanent") ~= false then dur.zeroText = "" end
+        -- Duration-text update rate (Wave 5a, account-wide): nil at the NORMAL
+        -- default (key absent -> the binding keeps Blizzard's default cadence,
+        -- byte-identical to the pre-setting spec). Creation-frozen -> rowStructSig.
+        dur.updateInterval = DF:GetAuraDurationUpdateInterval()
     end
 
     -- Buff rows get native spell-ID exclude maps (AD-dedup + missing-buff hide below).
@@ -1181,6 +1211,9 @@ local function rowStructSig(cfg)
         -- zeroText (hide-on-permanent, Wave 4): creation-frozen — SetDurationText
         -- forwards it to the binding once per slot. "" (on) vs nil (off) must Rebuild.
         tostring(s.duration and s.duration.zeroText),
+        -- updateInterval (duration-text update rate, Wave 5a): creation-frozen the
+        -- same way; nil at the NORMAL default, so only a non-default rate moves it.
+        tostring(s.duration and s.duration.updateInterval),
         tostring(s.stacks and s.stacks.formatKey),
         tostring(s.border ~= nil), tostring(s.cooldown and s.cooldown.show ~= false),
         tostring(s.dispel ~= nil),          -- native dispel border (region is create-once -> Rebuild)
@@ -1457,6 +1490,8 @@ function DF:BuildDefensiveRowConfig(db, unit)
         -- Hide duration text on permanent auras (Wave 4, default ON — see the
         -- buff/debuff row builder for the mechanism notes).
         if db.defensiveIconDurationHideOnPermanent ~= false then dur.zeroText = "" end
+        -- Duration-text update rate (Wave 5a, account-wide; nil at the NORMAL default).
+        dur.updateInterval = DF:GetAuraDurationUpdateInterval()
     end
 
     -- FILTER REGISTRY: the category selection drives the row as ONE plain HELPFUL

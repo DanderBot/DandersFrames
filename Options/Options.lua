@@ -1426,6 +1426,27 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end
             renderingGroup:AddWidget(scaleHint, 45)
         end
+        -- Aura duration-text update rate (account-wide, DF.GlobalDefaults). Feeds the
+        -- native duration binding at bind time (creation-frozen), so a change is
+        -- structural: invalidate the memoized value + re-drive rows AND the Aura
+        -- Designer (the ApplyColorByTime pattern — the other global folded into the
+        -- aura struct sigs).
+        local auraDurRateValues = {
+            SMOOTH = L["Smooth"], NORMAL = L["Normal"], PERFORMANCE = L["Performance"],
+            _order = { "SMOOTH", "NORMAL", "PERFORMANCE" },
+        }
+        renderingGroup:AddWidget(GUI:CreateDropdown(self.child, L["Aura Duration Update Rate"],
+            auraDurRateValues, DF:GetGlobalDB(), "auraDurationUpdateInterval", function()
+                if DF.InvalidateAuraDurationUpdateInterval then DF:InvalidateAuraDurationUpdateInterval() end
+                if DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
+                if DF.UpdateAllFrames then DF:UpdateAllFrames() end
+                if DF.AuraDesigner and DF.AuraDesigner.Engine and DF.AuraDesigner.Engine.ForceRefreshAllFrames then
+                    DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+                end
+            end), 55)
+        renderingGroup:AddWidget(GUI:CreateLabel(self.child,
+            L["How often aura countdown text refreshes. Smooth updates ten times a second, Performance once a second. Normal keeps the standard rate."],
+            250), 45)
         Add(renderingGroup, nil, 1)
 
         -- ===== SETTINGS PANEL APPEARANCE GROUP (Column 2, Top) =====

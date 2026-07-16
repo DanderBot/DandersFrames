@@ -853,6 +853,10 @@ local function buildDurationTextSpec(indicator, defaultShow, defScale, defColorB
         -- indicators get the new default; explicit false = the pre-Wave-4 spec
         -- shape (no zeroText key). Creation-frozen -> rides durationFmtKey below.
         zeroText  = (indicator.durationHideOnPermanent ~= false) and "" or nil,
+        -- Duration-text update rate (Wave 5a, account-wide): nil at the NORMAL
+        -- default (key absent = the binding's own cadence — byte-identical to the
+        -- pre-setting spec). Creation-frozen -> rides durationFmtKey below.
+        updateInterval = (DF.GetAuraDurationUpdateInterval and DF:GetAuraDurationUpdateInterval()) or nil,
     }
 end
 
@@ -871,6 +875,10 @@ local function durationFmtKey(indicator, defaultShow, defColorByTime)
     if rawCBT == nil then rawCBT = defColorByTime end
     local colorByTime = rawCBT and true or false
     local hideAboveT = durationHideAboveT(indicator)
+    -- Duration-text update rate (Wave 5a, account-wide): tokenized only when
+    -- non-default (NORMAL resolves nil), so untouched sigs stay byte-identical
+    -- and a rate change Rebuilds every duration-text slot (creation-frozen bind).
+    local updateIv = DF.GetAuraDurationUpdateInterval and DF:GetAuraDurationUpdateInterval()
     return "NUMBER"
         .. (colorByTime and (":C" .. DF:GetDurationBreakpointsSig()) or "")
         .. (hideAboveT and (":H" .. tostring(hideAboveT)) or "")
@@ -879,6 +887,7 @@ local function durationFmtKey(indicator, defaultShow, defColorByTime)
         -- default; style-less byte-identity holds). zeroText is creation-frozen
         -- on the native bind, so ON<->OFF must move the struct sig -> Rebuild.
         .. (indicator.durationHideOnPermanent == false and ":P0" or "")
+        .. (updateIv and (":U" .. tostring(updateIv)) or "")
 end
 
 -- ============================================================

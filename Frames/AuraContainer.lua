@@ -744,6 +744,12 @@ local function bindNative(slot, config)
         -- unconditionally and the API arg is nilable — Blizzard_CustomAuraButton.lua:169,
         -- DurationTextBindingObject docs). So the guard is nil-vs-set, never ~= "".
         if durSpec.zeroText ~= nil then opts.zeroDurationText = durSpec.zeroText end
+        -- updateInterval (Wave 5a): minimum seconds between automatic text
+        -- refreshes (Blizzard_CustomAuraButton.lua:164 forwards it to
+        -- SetUpdateInterval). Absent = the binding's own default cadence — the
+        -- NORMAL setting deliberately emits nothing (the C-side default is
+        -- undocumented, so absent-key is the only behavior-neutral shape).
+        if durSpec.updateInterval then opts.updateInterval = durSpec.updateInterval end
         local ok, err = pcall(function() slot:SetDurationText(slot.dfDur, opts) end)
         if not ok and not warnedCurve then
             warnedCurve = true
@@ -2002,7 +2008,7 @@ end
 -- In-place cosmetic RESTYLE (colours / sizes / fonts / offsets / layout). NOTE: this
 -- REPLACES config.style (it is not a merge) and only re-applies always-updated props —
 -- it does NOT create/remove regions or change creation-frozen opts (duration
--- expiredText/zeroText/colorCurve, bar interpolation/direction, dispel show flags). To toggle a
+-- expiredText/zeroText/updateInterval/colorCurve, bar interpolation/direction, dispel show flags). To toggle a
 -- region on/off or change a frozen opt, use Rebuild(). pcall-guarded so a restyle fault
 -- can't escape into a GUI callback.
 function Handle:ApplyStyle(style, layout)
@@ -2067,8 +2073,8 @@ function Handle:SetFilter(filter)
 end
 
 -- Public structural rebuild — for changes ApplyStyle can't do live: max, toggling a
--- region on/off, or a creation-frozen opt (bar direction, duration expiredText/zeroText,
--- dispel flags). Optionally merge a partial config first. Combat-guarded (defers to regen).
+-- region on/off, or a creation-frozen opt (bar direction, duration expiredText/zeroText/
+-- updateInterval, dispel flags). Optionally merge a partial config first. Combat-guarded (defers to regen).
 -- Structural rebuild. `config` REPLACES the handle's config WHOLESALE when given —
 -- both bridge callers (buff/defensive) pass a COMPLETE freshly-built config. The
 -- previous pairs()-merge could never CLEAR a key that went nil: a disabled
