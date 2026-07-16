@@ -420,10 +420,14 @@ DF.ExportCategories = {
         "defensiveFilterSelection",
         "directBuffOnlyMine",
         "directBuffShowAll",
+        "directBuffSortMineFirst",
         "directBuffSortOrder",
+        "directBuffSortReverse",
         "directDebuffDispellableMode",
         "directDebuffShowAll",
+        "directDebuffSortMineFirst",
         "directDebuffSortOrder",
+        "directDebuffSortReverse",
         "fadeDeadAuras",
         "showBuffs",
         "showDebuffs",
@@ -573,6 +577,7 @@ DF.ExportCategories = {
         "defensiveIconSize",
         "defensiveIconX",
         "defensiveIconY",
+        "defensiveSortOrder",
     },
     -- Targeted spells (incl. personal)
     targetedSpells = {

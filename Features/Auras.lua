@@ -786,6 +786,25 @@ local function includeSig(cf)
     return "I:" .. table.concat(ids, ",")
 end
 
+-- Sort Order dropdown ("DEFAULT"/"TIME"/"NAME") + Mine First / Reverse checkboxes
+-- -> config.sort (AuraContainerSortMethod/SortDirection member NAMES). Rides the
+-- row TUNING sig (rowTuningSig serializes method + direction), so changes apply
+-- in place via ApplyTuning. nil = no sort declared = Blizzard's inbound default
+-- (mine-first slot order) — today's DEFAULT behaviour, kept byte-identical.
+local function BuildRowSort(order, mineFirst, reverse)
+    local method
+    if order == "TIME" then
+        method = mineFirst and "Expiration" or "ExpirationOnly"
+    elseif order == "NAME" then
+        method = mineFirst and "Name" or "NameOnly"
+    elseif reverse then
+        -- DEFAULT + Reverse: the direction needs an explicit method to ride on.
+        method = "Default"
+    end
+    if not method then return nil end
+    return { method = method, direction = reverse and "Reverse" or nil }
+end
+
 -- Map a prefixed aura-row setting block (buff*/debuff*) -> DF.AuraContainer config.
 -- prefix = "buff" (debuff reuses this later). opts.filterList is the PRE-BUILT native
 -- filter list (buffs: BuildDirectBuffFilters); opts.unit is the initial unit token.
@@ -898,19 +917,20 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
     end
 
     -- Native sort: the legacy Sort Order dropdown (directBuffSortOrder) mapped onto
-    -- AuraContainerSortMethod member NAMES — TIME/NAME map to the *Only comparators
-    -- (pure single-dimension sorts, matching the legacy Lua sort's behaviour).
-    -- DEFAULT/nil passes nothing = Blizzard's default slot order. The backend
-    -- resolves the name against the securecopy'd global enum at build time.
+    -- AuraContainerSortMethod member NAMES, refined by the Wave-2 checkboxes.
+    -- Mine First picks the composite comparators (Expiration/Name = own auras
+    -- first, then the dimension); off keeps the *Only pure single-dimension
+    -- sorts (the pre-Wave-2 behaviour, byte-identical with both boxes off).
+    -- DEFAULT ignores Mine First (Blizzard's slot order is already mine-first;
+    -- the GUI greys the box) and passes nothing — unless Reverse is on, which
+    -- needs an explicit method ("Default") to hang the direction on. Reverse
+    -- maps to sort.direction = "Reverse"; omitted = the engine's "Normal".
+    -- The backend resolves member names against the securecopy'd global enums.
     local sort
     if prefix == "buff" then
-        local o = db.directBuffSortOrder
-        if o == "TIME" then sort = { method = "ExpirationOnly" }
-        elseif o == "NAME" then sort = { method = "NameOnly" } end
+        sort = BuildRowSort(db.directBuffSortOrder, db.directBuffSortMineFirst, db.directBuffSortReverse)
     elseif prefix == "debuff" then
-        local o = db.directDebuffSortOrder
-        if o == "TIME" then sort = { method = "ExpirationOnly" }
-        elseif o == "NAME" then sort = { method = "NameOnly" } end
+        sort = BuildRowSort(db.directDebuffSortOrder, db.directDebuffSortMineFirst, db.directDebuffSortReverse)
     end
 
     -- Debuff rows: NATIVE dispel border when Color-by-Dispel-Type is on. The colour is
@@ -1402,10 +1422,18 @@ function DF:BuildDefensiveRowConfig(db, unit)
         candidateFilters = defensiveCandidates,
         max      = db.defensiveBarMax or 4,
         enabled  = true,
-        -- Native sort built FOR this row: longest-duration external first, own
-        -- defensives last (AuraUtil.BigDefensiveAuraCompare) — "show me the save
-        -- someone else put on this player". Carried in the row signature.
-        sort     = { method = "BigDefensive" },
+        -- Native sort per the Sort Order dropdown (tuning-only — the filter string
+        -- never moves with it). EXTERNALS (the default) = the shipped BigDefensive
+        -- order: longest-duration external first, own defensives last
+        -- (AuraUtil.BigDefensiveAuraCompare) — "show me the save someone else put
+        -- on this player". TIME = soonest-to-expire first (ExpirationOnly).
+        -- DEFAULT = nil = Blizzard's inbound slot order.
+        sort     = (function()
+            local o = db.defensiveSortOrder
+            if o == "DEFAULT" then return nil end
+            if o == "TIME" then return { method = "ExpirationOnly" } end
+            return { method = "BigDefensive" }
+        end)(),
         -- P5 preview: HELPFUL category alone would page the buff pool — show
         -- curated defensives instead (TestMode drives testMax per role).
         testPool = "defensives",

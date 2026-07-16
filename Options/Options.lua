@@ -5692,7 +5692,19 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- the same key onto the native AuraContainerSortMethod (TIME -> ExpirationOnly,
         -- NAME -> NameOnly) declared at AddAuraGroup — see BuildAuraRowConfig. (The
         -- 12.1 frost this control used to carry was lifted once the native mapping landed.)
-        local bfSort = buffGroup:AddWidget(GUI:CreateDropdown(self.child, L["Sort Order"], buffSortOptions, db, "directBuffSortOrder", DirectFilterChanged), 55)
+        local bfSort = buffGroup:AddWidget(GUI:CreateDropdown(self.child, L["Sort Order"], buffSortOptions, db, "directBuffSortOrder", function()
+            DirectFilterChanged()
+            self:RefreshStates()   -- Mine First greys while Sort Order = Default
+        end), 55)
+
+        -- Sort refinements (native rows only — the legacy Lua scan doesn't read them)
+        local bfSortMine = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["My Auras First"], db, "directBuffSortMineFirst", DirectFilterChanged), 30)
+        bfSortMine.hideOn = function(d) return not DF:FactoryOwnsBuffRow(d) end
+        bfSortMine.disableOn = function(d) return d.directBuffSortOrder == "DEFAULT" end
+        bfSortMine.tooltip = L["Sort your own auras before other players'. The Default sort order already shows yours first."]
+        local bfSortRev = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Reverse Order"], db, "directBuffSortReverse", DirectFilterChanged), 30)
+        bfSortRev.hideOn = function(d) return not DF:FactoryOwnsBuffRow(d) end
+        bfSortRev.tooltip = L["Reverse the sort direction."]
 
         -- Native-only: max TOTAL duration filter (12.1 candidateFilters.maxDuration).
         -- Hidden while the legacy render owns the row (not expressible there).
@@ -5791,7 +5803,19 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             TIME = L["Time Remaining"],
             NAME = L["Alphabetical"],
         }
-        local dfSort = debuffGroup:AddWidget(GUI:CreateDropdown(self.child, L["Sort Order"], debuffSortOptions, db, "directDebuffSortOrder", DirectFilterChanged), 55)
+        local dfSort = debuffGroup:AddWidget(GUI:CreateDropdown(self.child, L["Sort Order"], debuffSortOptions, db, "directDebuffSortOrder", function()
+            DirectFilterChanged()
+            self:RefreshStates()   -- Mine First greys while Sort Order = Default
+        end), 55)
+
+        -- Sort refinements (native rows only — the legacy Lua scan doesn't read them)
+        local dfSortMine = debuffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["My Auras First"], db, "directDebuffSortMineFirst", DirectFilterChanged), 30)
+        dfSortMine.hideOn = function(d) return not DF:FactoryOwnsDebuffRow(d) end
+        dfSortMine.disableOn = function(d) return d.directDebuffSortOrder == "DEFAULT" end
+        dfSortMine.tooltip = L["Sort your own auras before other players'. The Default sort order already shows yours first."]
+        local dfSortRev = debuffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Reverse Order"], db, "directDebuffSortReverse", DirectFilterChanged), 30)
+        dfSortRev.hideOn = function(d) return not DF:FactoryOwnsDebuffRow(d) end
+        dfSortRev.tooltip = L["Reverse the sort direction."]
 
         -- Native-only: max TOTAL duration filter (12.1 candidateFilters.maxDuration).
         -- Hidden while the legacy render owns the row. Works in ALL-debuffs mode too
@@ -6587,7 +6611,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- (prefix matcher, see Profile.lua) so the category selection edited on
         -- this page rides this page's Copy/Sync/Reset. It is also registered on
         -- the Aura Filters page — overlap is fine, both DeepCopy the same value.
-        Add(CreateCopyButton(self.child, {"defensiveIcon", "defensiveFilterSelection"}, L["Defensive Icon"], "auras_defensiveicon"), 25, 2)
+        Add(CreateCopyButton(self.child, {"defensiveIcon", "defensiveFilterSelection", "defensiveSortOrder"}, L["Defensive Icon"], "auras_defensiveicon"), 25, 2)
         
         local anchorOptions = {
             CENTER= L["Center"], TOP= L["Top"], BOTTOM= L["Bottom"], LEFT= L["Left"], RIGHT= L["Right"],
@@ -6842,6 +6866,18 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         layoutGroup:AddWidget(GUI:CreateSlider(self.child, L["Max Icons"], 1, 5, 1, db, "defensiveBarMax", function()
             if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
         end, nil, true), 55)
+
+        -- Native rows only — the legacy fallback keeps its own fixed order.
+        local defSortOptions = {
+            DEFAULT = L["Default (Slot Order)"],
+            TIME = L["Most Urgent"],
+            EXTERNALS = L["Externals First"],
+        }
+        local defSortDrop = layoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Sort Order"], defSortOptions, db, "defensiveSortOrder", function()
+            if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
+        end), 55)
+        defSortDrop.hideOn = function(d) return not DF:FactoryOwnsDefensiveRow(d) end
+        defSortDrop.tooltip = L["Externals First: defensives cast on this player by others show first, their own last. Most Urgent: soonest to expire first."]
 
         local defWrap = layoutGroup:AddWidget(GUI:CreateSlider(self.child, L["Icons Per Row"], 1, 5, 1, db, "defensiveBarWrap", function()
             if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end

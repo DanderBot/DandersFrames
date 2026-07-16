@@ -8,6 +8,7 @@
 
 DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally changed how the game handles auras. This build runs on 12.1 only — 12.0.x stays on 4.7. Every aura row — buffs, debuffs, defensives and missing buffs — now renders through the game's new protected aura engine.
 
+* (Auras) New sort controls: buff and debuff bars can show your own auras first and reverse the sort direction, and the defensive icon's order is now selectable (Externals First, Most Urgent, or Default).
 * (Aura Designer) **The Aura Designer now works for every spec** — previously healers and Augmentation only. The spec dropdown is grouped by class and searchable.
 * (Aura Designer) **New: Filter Groups.** Place an entire filter on the frame as its own icon row — link built-in or custom filters, and every matching buff appears in a self-arranging row with its own position, icon size, growth and icon cap. Filter Designer changes apply to linked groups immediately, and buffs shown by a group leave the buff bar while "Hide Duplicate Buffs" is on.
 * (Aura Designer) **New: Expiry Alerts.** Indicators can now warn you when a tracked buff is about to run out — below a threshold you choose, your own custom text or a warning glyph appears on the unit frame, positioned and sized however you like, so a tracked shield can literally say "Shield dropping!". Find it in each indicator's Expiry Warning section.

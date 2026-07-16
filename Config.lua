@@ -1133,6 +1133,8 @@ DF.PartyDefaults = {
         uncategorised = false,
     },
     directBuffSortOrder = "TIME",             -- "DEFAULT" / "TIME" / "NAME"
+    directBuffSortMineFirst = false,          -- Own auras before others' (TIME/NAME sorts; DEFAULT is already mine-first)
+    directBuffSortReverse = false,            -- Reverse the sort direction
 
     -- Direct Mode: Debuff Filters
     directDebuffShowAll = false,              -- Show all debuffs (ignores category filters)
@@ -1147,6 +1149,8 @@ DF.PartyDefaults = {
     debuffMaxDurationMinutes = 5,             -- ... threshold (base duration)
     debuffMaxDurationKeepImportant = true,    -- ... but keep Boss/Role/Priority visible
     directDebuffSortOrder = "TIME",           -- "DEFAULT" / "TIME" / "NAME"
+    directDebuffSortMineFirst = false,        -- Own auras before others' (TIME/NAME sorts; DEFAULT is already mine-first)
+    directDebuffSortReverse = false,          -- Reverse the sort direction
 
     buffGrowth = "LEFT_UP",
     buffHideSwipe = false,
@@ -1360,6 +1364,7 @@ DF.PartyDefaults = {
     defensiveIconSize = 30,
     defensiveIconX = 0,
     defensiveIconY = 0,
+    defensiveSortOrder = "EXTERNALS",         -- "DEFAULT" / "TIME" / "EXTERNALS" (EXTERNALS = the shipped BigDefensive order)
 
     -- Dispel Overlay (game-palette colours only — the Custom Colors mode and its
     -- per-type pickers/intensity were removed 2026-07-11; see Features/Dispel.lua)
