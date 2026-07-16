@@ -536,6 +536,29 @@ local function EmbedCustomFilterData(exportData, includeOverrides)
     end
     collectRefs(exportData.party)
     collectRefs(exportData.raid)
+    -- Raid auto-layout overrides carry whole-table copies of the mode
+    -- selection tables (including .customs) — a filter referenced ONLY by a
+    -- layout override must still ride the export, or the receiver's layout
+    -- points at a filter that never arrives and its row renders nothing.
+    -- Runs on exportData.raidAutoProfiles, which is attached before this
+    -- embed in both the full and selective export paths.
+    local function collectLayout(layout)
+        local ov = type(layout) == "table" and layout.overrides
+        if type(ov) == "table" then
+            collectSel(ov.buffFilterSelection)
+            collectSel(ov.defensiveFilterSelection)
+        end
+    end
+    if type(exportData.raidAutoProfiles) == "table" then
+        for _, ct in pairs(exportData.raidAutoProfiles) do
+            if type(ct) == "table" then
+                if type(ct.profiles) == "table" then
+                    for _, layout in pairs(ct.profiles) do collectLayout(layout) end
+                end
+                collectLayout(ct.profile)   -- mythic carries a single layout
+            end
+        end
+    end
     -- Aura Designer filter groups link custom filters via
     -- group.filterSelection.customs. layoutGroups is spec-keyed post-V2
     -- ({ [specKey] = {groups} }) but old preset data may still carry the
@@ -1030,6 +1053,28 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
         end
         remapSel(importData.party)
         remapSel(importData.raid)
+        -- Raid auto-layout overrides in the payload carry whole-table copies
+        -- of the selection tables — remap their customs ids too, or every
+        -- applied layout resolves against the RECEIVER's unrelated cf ids
+        -- (ids are "cf1", "cf2", … on every account, so a stale ref silently
+        -- shows the wrong auras). Payload-side, before the apply below.
+        local function remapLayout(layout)
+            local ov = type(layout) == "table" and layout.overrides
+            if type(ov) == "table" then
+                remapCustoms(ov.buffFilterSelection)
+                remapCustoms(ov.defensiveFilterSelection)
+            end
+        end
+        if type(importData.raidAutoProfiles) == "table" then
+            for _, ct in pairs(importData.raidAutoProfiles) do
+                if type(ct) == "table" then
+                    if type(ct.profiles) == "table" then
+                        for _, layout in pairs(ct.profiles) do remapLayout(layout) end
+                    end
+                    remapLayout(ct.profile)   -- mythic carries a single layout
+                end
+            end
+        end
         -- AD filter-group links in the payload's preset libraries: remap
         -- payload-side, BEFORE ImportDesignerPresets applies them (same
         -- rationale as the mode selections above — never touch DF.db refs
