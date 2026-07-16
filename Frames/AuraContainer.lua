@@ -25,7 +25,9 @@ local addonName, DF = ...
 --   local h = DF.AuraContainer:Create(parent, config)  -- nil if unsupported
 --   h:SetUnit(unit) / h:SetShown(b) / h:Enable() / h:Disable()
 --   h:ApplyStyle(style) -- in-place cosmetic restyle (no teardown)
---   h:SetFilter(filter) / h:SetSort(sort) -- structural (rebuild) / PTR-4 no-op now
+--   h:ApplyTuning(tuning) -- in-place max/sort/candidateFilters mutate (no teardown;
+--                            OOC-only, defers to regen in combat). REPLACES all three keys.
+--   h:SetFilter(filter) -- structural (rebuild)
 --   h:Rebuild(config)      -- structural rebuild (max / region toggles / frozen opts); a
 --                             table REPLACES the config wholesale (callers pass complete configs)
 --   h:Refresh() -- force a re-scan (Hide/Show bounce; for dynamic-unit consumers)
@@ -297,6 +299,30 @@ local function resolveEnum(enumTable, name)
         return enumTable[name]
     end
     return nil
+end
+
+-- Shared TUNING derivation — build() declares these at AddAuraGroup/AddAuraSlot;
+-- applyGroupTuning() re-pushes them through the live SetAuraGroup* mutators. ONE
+-- derivation so the config -> native mapping can't fork between the two paths
+-- (max is likewise shared via Handle:_slotCount).
+-- config.sort = { method = "ExpirationOnly", direction? } holds enum MEMBER NAMES;
+-- resolve against the securecopy'd globals so a renamed member degrades to
+-- Blizzard's default order rather than erroring.
+local function deriveSort(config)
+    local sortMethod, sortDirection
+    if config.sort and type(config.sort.method) == "string" and _G.AuraContainerSortMethod then
+        sortMethod = _G.AuraContainerSortMethod[config.sort.method]
+        if sortMethod ~= nil and _G.AuraContainerSortDirection then
+            sortDirection = _G.AuraContainerSortDirection[config.sort.direction or "Normal"]
+        end
+    end
+    return sortMethod, sortDirection
+end
+
+-- A record's candidateFilters REPLACES the config-wide set for that group/slot
+-- (the dispel overlay's per-type slots) — see normalizeFilters.
+local function recordCandidateFilters(rec, config)
+    return rec.candidateFilters or config.candidateFilters
 end
 
 -- Dynamic-unit tokens whose underlying unit changes WITHOUT the token changing, so
@@ -1101,7 +1127,8 @@ function NativeBackend:build()
 
     -- Declare one AuraGroup per filter (row) / one AuraSlot per filter (overlay). The
     -- container is exclusively ours, so keys need no cross-consumer namespacing. Group
-    -- keys are remembered so ApplyStyle can hot-apply per-group layout (live mutator).
+    -- keys are remembered so ApplyStyle can hot-apply per-group layout and ApplyTuning
+    -- can hot-apply max/sort/candidateFilters (all live mutators).
     local filters = normalizeFilters(config.filter)
     local maxCount = handle:_slotCount()
     local groupLayout
@@ -1116,21 +1143,17 @@ function NativeBackend:build()
         groupLayout = buildGroupLayout(config)
     end
     -- Native candidate filters (spell-ID include/exclude maps, dispel types, maxDuration,
-    -- booleans) — evaluated Blizzard-side per group/slot. ⚠ Spell-ID maps only apply on
-    -- units the player can assist (helpful) / attack (harmful) — a harmful spell-ID map
-    -- on a friendly-frame consumer is silently inert (the Meorawr gate). Structural:
-    -- changing the set is a Rebuild (consumers put it in their row signature).
-    local candidateFilters = config.candidateFilters
-    -- Native sort (rows only): config.sort = { method = "ExpirationOnly", direction? } holds
-    -- enum MEMBER NAMES; resolve here against the securecopy'd globals so a renamed member
-    -- degrades to Blizzard's default order rather than erroring the build. Structural:
-    -- declared at AddAuraGroup (consumers carry it in their row signature).
+    -- booleans) — evaluated Blizzard-side per group/slot, derived per record via
+    -- recordCandidateFilters (shared with applyGroupTuning). ⚠ Spell-ID maps only apply
+    -- on units the player can assist (helpful) / attack (harmful) — a harmful spell-ID
+    -- map on a friendly-frame consumer is silently inert (the Meorawr gate). Changing
+    -- the config-wide set is live-tunable (ApplyTuning); changing the filter SET or a
+    -- record's own cf is structural -> Rebuild.
+    -- Native sort (rows only): declared at AddAuraGroup here, re-tunable live via
+    -- applyGroupTuning — one shared derivation (deriveSort).
     local sortMethod, sortDirection
-    if not testMode and config.sort and type(config.sort.method) == "string" and _G.AuraContainerSortMethod then
-        sortMethod = _G.AuraContainerSortMethod[config.sort.method]
-        if sortMethod ~= nil and _G.AuraContainerSortDirection then
-            sortDirection = _G.AuraContainerSortDirection[config.sort.direction or "Normal"]
-        end
+    if not testMode then
+        sortMethod, sortDirection = deriveSort(config)
     end
     self.groupKeys = {}
     self.slotButtons = isOverlay and {} or nil   -- overlay: key -> native slot button (consumer styling)
@@ -1167,7 +1190,7 @@ function NativeBackend:build()
     end
     for i, rec in ipairs(filters) do
         local f = rec.f
-        local cf = (not testMode) and (rec.candidateFilters or candidateFilters) or nil
+        local cf = (not testMode) and recordCandidateFilters(rec, config) or nil
         if AuraUtil and AuraUtil.IsValidFilterString and not AuraUtil.IsValidFilterString(f) then
             DF:DebugWarn(DBG, "filter rejected by IsValidFilterString: %s (group skipped)", tostring(f))
         else
@@ -1284,6 +1307,60 @@ function NativeBackend:applyLayout()
     -- SECURE-side and calls UpdateAllAuras from inside the partition -> arms +
     -- processes next frame. OOC-only (this whole path is combat-gated by ApplyStyle,
     -- but guard anyway — Show re-arms the parse, same op class as enable).
+    if not InCombatLockdown() then
+        pcall(function() c:Hide(); c:Show() end)
+    end
+end
+
+-- Hot-apply TUNING (maxFrameCount / sort / candidateFilters) to the LIVE container's
+-- groups — the in-place path that replaces teardown+recreate on a tuning-only delta
+-- (each recreate = visible flicker + a stranded button set; WoW never GCs frames).
+-- All three natives are live mutators (68569 source: SetAuraGroupMaxFrameCount /
+-- SetAuraGroupSortMethod MarkDirty(AuraFrameAssignments); SetAuraGroupCandidateFilters
+-- runs UpdateAllAuras). Row mode only — overlay/missing guard mirrors applyLayout;
+-- slot-mode tuning (SetAuraSlot* setters) is a deferred follow-up. Callers combat-gate
+-- this (ApplyTuning defers to regen in lockdown): no native tuning setter ever runs
+-- in combat.
+function NativeBackend:applyGroupTuning()
+    local c = self.container
+    if not c or self.handle.config.mode == "overlay" or self.handle.config.mode == "missing" then return end
+    -- Test mode declares per-slot PIN groups (maxFrameCount = 1, curated paint) —
+    -- tuning them would break the slot pinning. Handle:ApplyTuning rebuilds the
+    -- preview instead, so this path is never reached in test mode; guard anyway.
+    if AuraContainer._testMode then return end
+    if not (self.groupKeys and c.SetAuraGroupMaxFrameCount) then return end
+    local config = self.handle.config
+    local maxCount = self.handle:_slotCount()
+    -- SetAuraGroupSortMethod validates BOTH args as enum members (nil asserts), so an
+    -- unset/unresolved sort maps back to the AddAuraGroup inbound defaults
+    -- (Default/Normal) — clearing a previously-set sort actually clears.
+    local sortMethod, sortDirection = deriveSort(config)
+    if sortMethod == nil and _G.AuraContainerSortMethod then
+        sortMethod = _G.AuraContainerSortMethod.Default
+    end
+    if sortDirection == nil and _G.AuraContainerSortDirection then
+        sortDirection = _G.AuraContainerSortDirection.Normal
+    end
+    -- Per-group candidateFilters: re-derive the SAME records build declared — the
+    -- filter set is structural and unchanged on this path, so keys line up with
+    -- self.groupKeys (rec.key or positional "df<i>").
+    local cfByKey = {}
+    for i, rec in ipairs(normalizeFilters(config.filter)) do
+        cfByKey[rec.key or ("df" .. i)] = recordCandidateFilters(rec, config)
+    end
+    for _, key in ipairs(self.groupKeys) do
+        pcall(function() c:SetAuraGroupMaxFrameCount(key, maxCount) end)
+        -- nil CLEARS: the inbound copy runs over an EMPTY defaults table, so a
+        -- toggled-off filter set doesn't survive (the old Rebuild-merge lesson).
+        pcall(function() c:SetAuraGroupCandidateFilters(key, cfByKey[key]) end)
+        if sortMethod ~= nil and sortDirection ~= nil then
+            pcall(function() c:SetAuraGroupSortMethod(key, sortMethod, sortDirection) end)
+        end
+    end
+    -- ★ PARTITION KICK (same mechanism as applyLayout): the inbound mutators mark
+    -- dirty but cannot ARM the private-side processor — without the bounce the change
+    -- lands one aura event late. OOC-only path, but guard anyway (Show re-arms the
+    -- parse, same op class as enable).
     if not InCombatLockdown() then
         pcall(function() c:Hide(); c:Show() end)
     end
@@ -1875,12 +1952,37 @@ function Handle:Rebuild(config)
     self:_rebuild()
 end
 
--- PTR-4 sort. No-op until HasSort() flips true, at which point this wires the
--- managed inbound sort setter. Accepting it now keeps callers unchanged at PTR-4.
-function Handle:SetSort(sort)
-    self.config.sort = sort
-    if not AuraContainer.HasSort() then return end
-    -- TODO(PTR-4): route to the managed backend's sort setter (rule + direction).
+-- In-place TUNING mutate — max / sort / candidateFilters, the three live-tunable group
+-- keys — WITHOUT the teardown+recreate a Rebuild costs (flicker + a stranded frame set;
+-- WoW never GCs frames). `tuning` REPLACES all three keys wholesale (same lesson as
+-- Rebuild: a merge could never CLEAR a toggled-off key) — callers pass the complete trio
+-- { max, sort, candidateFilters }; an omitted key is CLEARED, not kept. Per-record
+-- candidateFilters still ride config.filter records; changing THOSE — or anything
+-- else — is structural: use Rebuild/SetFilter.
+-- Combat: no native tuning setter ever runs in lockdown (matches oUF/MSUF — neither
+-- applies user tuning mid-combat). Defers exactly like ApplyStyle: mark pending, flush
+-- via applyGroupTuning at regen — the deferred flush costs no flicker/leak either.
+function Handle:ApplyTuning(tuning)
+    if type(tuning) == "table" then
+        self.config.max = tuning.max
+        self.config.sort = tuning.sort
+        self.config.candidateFilters = tuning.candidateFilters
+    end
+    -- Test mode: the preview's per-slot pin groups can't be tuned in place
+    -- (maxFrameCount = 1 by design) — rebuild so the preview honours the new cap.
+    -- _rebuild carries its own combat gate.
+    if AuraContainer._testMode then
+        self:_rebuild()
+        return
+    end
+    if InCombatLockdown() then
+        self._pendingTuning = true
+        self:_registerRegen()
+        return
+    end
+    if self.backend and self.backend.applyGroupTuning then
+        self.backend:applyGroupTuning()
+    end
 end
 
 -- Force a re-scan of the container. 68569: UpdateAllAuras() is an addon-callable
@@ -1974,6 +2076,7 @@ function Handle:Destroy()
     end
     self._pendingOp = nil
     self._pendingRestyle = nil
+    self._pendingTuning = nil
     self:_teardownContainer()
 end
 
@@ -2000,6 +2103,8 @@ function Handle:_registerRegen()
                 h._pendingOp = nil
                 local restyle = h._pendingRestyle
                 h._pendingRestyle = nil
+                local tune = h._pendingTuning
+                h._pendingTuning = nil
                 -- pcall each handle's op so one failure can't strand the rest.
                 if op == "destroy" then
                     pcall(function() h:_teardownContainer() end)
@@ -2014,6 +2119,15 @@ function Handle:_registerRegen()
                                 if h.backend then h.backend:setEnabled(h.config.enabled ~= false) end
                             end
                         end)
+                    end
+                    -- Combat-deferred in-place tuning (ApplyTuning hit in lockdown):
+                    -- flush via the in-place mutate, NOT a recreate — the deferred
+                    -- change costs no flicker/leak either. A rebuild redeclares the
+                    -- groups from the already-swapped config, so only non-rebuild
+                    -- paths need the explicit flush. Tuning runs BEFORE restyle
+                    -- (population first, cosmetics second).
+                    if tune and op ~= "rebuild" and h.backend and h.backend.applyGroupTuning then
+                        pcall(function() h.backend:applyGroupTuning() end)
                     end
                     -- Combat-deferred cosmetic restyle (ApplyStyle hit in lockdown). A
                     -- rebuild already styles fresh buttons from the updated config, so
