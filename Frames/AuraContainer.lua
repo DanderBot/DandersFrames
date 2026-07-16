@@ -1147,8 +1147,12 @@ function NativeBackend:build()
     -- recordCandidateFilters (shared with applyGroupTuning). ⚠ Spell-ID maps only apply
     -- on units the player can assist (helpful) / attack (harmful) — a harmful spell-ID
     -- map on a friendly-frame consumer is silently inert (the Meorawr gate). Changing
-    -- the config-wide set is live-tunable (ApplyTuning); changing the filter SET or a
-    -- record's own cf is structural -> Rebuild.
+    -- the config-wide set is live-tunable (ApplyTuning). A record's OWN cf is also
+    -- live-tunable via the consumer pre-swap pattern (see ApplyTuning's header):
+    -- the caller replaces config.filter with a GROUP-IDENTICAL list (record strings +
+    -- keys pinned by its structural sig, only cf differs), then applyGroupTuning
+    -- re-derives per-record cf from it. Changing the filter SET itself (strings/keys/
+    -- record count) is structural -> Rebuild.
     -- Native sort (rows only): declared at AddAuraGroup here, re-tunable live via
     -- applyGroupTuning — one shared derivation (deriveSort).
     local sortMethod, sortDirection
@@ -1957,8 +1961,15 @@ end
 -- WoW never GCs frames). `tuning` REPLACES all three keys wholesale (same lesson as
 -- Rebuild: a merge could never CLEAR a toggled-off key) — callers pass the complete trio
 -- { max, sort, candidateFilters }; an omitted key is CLEARED, not kept. Per-record
--- candidateFilters still ride config.filter records; changing THOSE — or anything
--- else — is structural: use Rebuild/SetFilter.
+-- candidateFilters still ride config.filter records; ApplyTuning does NOT read a
+-- filter list from `tuning`, but the flush re-derives per-record cf from config.filter
+-- — so the SANCTIONED way to tune them (the Wave-1 row drivers do this; replicate it)
+-- is the consumer PRE-SWAP: assign handle.config.filter a fresh GROUP-IDENTICAL list
+-- first, then call ApplyTuning. Legal ONLY when the caller's structural sig pins every
+-- record's filter string + key (record identity unchanged, only candidateFilters
+-- differ) — group keys must line up with the declared groups. Changing the filter SET
+-- itself (strings/keys/record count) — or anything else — is structural: use
+-- Rebuild/SetFilter.
 -- Combat: no native tuning setter ever runs in lockdown (matches oUF/MSUF — neither
 -- applies user tuning mid-combat). Defers exactly like ApplyStyle: mark pending, flush
 -- via applyGroupTuning at regen — the deferred flush costs no flicker/leak either.
