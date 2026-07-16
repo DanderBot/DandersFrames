@@ -2504,32 +2504,13 @@ end
 -- Deep copy helper (also defined in Profile.lua, but needed here too)
 -- Note: DeepCopy, ResetProfile and CopyProfile are defined in Profile.lua
 
--- ============================================================
--- CVAR SETTINGS (Blizzard frame settings we control)
--- ============================================================
-
--- Apply saved CVar settings on login/reload
--- These control Blizzard's debuff display filtering which we use for our frames
-function DF:ApplySavedCVarSettings()
-    if not DF.db then return end
-    
-    -- These settings are stored in the party profile (shared between modes)
-    local db = DF.db.party
-    if not db then return end
-    
-    -- Apply dispel indicator type (1=All Dispellable, 2=My Dispels, 3=None but we force minimum 1)
-    local dispelIndicator = db._blizzDispelIndicator
-    if dispelIndicator == nil or dispelIndicator == 0 then
-        dispelIndicator = 1  -- Default to "All Dispellable"
-        db._blizzDispelIndicator = 1
-    end
-    SetCVar("raidFramesDispelIndicatorType", dispelIndicator)
-    
-    if DF.debugEnabled then
-        print("|cff00ff00DandersFrames:|r Applied CVar settings:")
-        print("  raidFramesDispelIndicatorType =", dispelIndicator)
-    end
-end
+-- (Removed) DF:ApplySavedCVarSettings — it force-stamped Blizzard's
+-- raidFramesDispelIndicatorType CVar from _blizzDispelIndicator, a key no
+-- GUI has written since the v4.3.4 dispel-source rework (the visible
+-- dropdown writes dispelOverlayDispelType, which only drives DF's own
+-- overlay). The stamp silently re-imposed a frozen value on Blizzard's
+-- frames every login and fought changes made anywhere else. The saved key
+-- is stripped in the v5 legacy-aura cleanup below.
 
 -- Deep equality check for the proxy contamination guard.
 -- Lua's == is reference equality for tables, so a new table with identical
@@ -4107,6 +4088,9 @@ DF._MainEventDispatcher = function(self, event, arg1)
             "bossDebuffsShowCountdown", "bossDebuffsShowNumbers",
             "bossDebuffsSpacing", "bossDebuffsTextScale", "testShowBossDebuffs",
             "bossDebuffsLegacyAnchors", "testBossDebuffCount", "_paIconSizeMigrated", "_paStrataHighV434",
+            -- Blizzard-frame dispel-indicator CVar stamp (party-only key; its
+            -- v4.3.4 fold into dispelOverlayDispelType runs before this strip).
+            "_blizzDispelIndicator",
             -- Old external-defensive icon (its widget died with the legacy pools;
             -- the settings migrated into defensiveIcon* long ago).
             "externalDefAnchor", "externalDefBorderColor", "externalDefBorderSize",
@@ -5102,8 +5086,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 DF:RegisterRaidClickCastFrames()
             end
             
-            -- Apply saved CVar settings after world is ready
-            DF:ApplySavedCVarSettings()
             -- Update rested indicator
             if DF.UpdateRestedIndicator then
                 DF:UpdateRestedIndicator()

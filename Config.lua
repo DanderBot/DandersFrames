@@ -914,7 +914,6 @@ DF.GlobalDefaults = {
 
 DF.PartyDefaults = {
     -- Internal migration flags
-    _blizzDispelIndicator = 1,
     _defensiveIconMigrated = true,
 
     -- Global Font Shadow Settings (applies when outline is SHADOW)

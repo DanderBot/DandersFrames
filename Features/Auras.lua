@@ -256,40 +256,18 @@ end
 -- EVENT FRAME FOR PROACTIVE UPDATES
 -- ============================================================
 
+-- (Removed) ApplyBlizzardFrameSettings — the login/roster stamp of Blizzard's
+-- raidFramesDispelIndicatorType CVar from _blizzDispelIndicator. No GUI has
+-- written that key since v4.3.4 (the dropdown writes dispelOverlayDispelType,
+-- consumed only by DF's own overlay), so the stamp just re-imposed a frozen
+-- value on Blizzard's frames every login. The key is stripped in Core.lua's
+-- v5 legacy-aura cleanup.
 local eventFrame = CreateFrame("Frame")
-eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 eventFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
-
--- Apply our saved Blizzard frame settings via CVars only (not optionTable)
--- Modifying optionTable causes protected value errors in combat
-local function ApplyBlizzardFrameSettings()
-    if not DF.db or not DF.db.party then return end
-    
-    local db = DF.db.party
-    
-    local dispelIndicator = db._blizzDispelIndicator
-
-    -- Force dispel indicator to be at least 1 (never disabled)
-    if dispelIndicator == nil or dispelIndicator == 0 then
-        dispelIndicator = 1
-        db._blizzDispelIndicator = 1
-    end
-
-    -- Set via CVar only - do NOT modify optionTable
-    SetCVar("raidFramesDispelIndicatorType", dispelIndicator)
-end
-
--- Export for use elsewhere
-DF.ApplyBlizzardFrameSettings = ApplyBlizzardFrameSettings
 
 eventFrame:SetScript("OnEvent", function(self, event, arg1)
     if event == "GROUP_ROSTER_UPDATE" then
         if DF.RosterDebugEvent then DF:RosterDebugEvent("Auras.lua(blizz):GROUP_ROSTER_UPDATE") end
-    end
-    if event == "PLAYER_ENTERING_WORLD" or event == "GROUP_ROSTER_UPDATE" then
-        -- Apply our saved Blizzard-frame settings (CVars) once frames settle
-        C_Timer.After(0.2, ApplyBlizzardFrameSettings)
-        C_Timer.After(1.0, ApplyBlizzardFrameSettings)
     end
 end)
 
