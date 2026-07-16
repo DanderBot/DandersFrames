@@ -1235,9 +1235,6 @@ DF.ExportCategories = {
         "rangeCheckSpellID",
         "rangeFadeAlpha",
         "rangeUpdateInterval",
-        "roleBorderColorDamager",
-        "roleBorderColorHealer",
-        "roleBorderColorTank",
         "selectionHighlightAlpha",
         "selectionHighlightColor",
         "selectionHighlightInset",
@@ -1570,15 +1567,16 @@ DF.ExportLocalOnly = {
 }
 
 -- Keys that legitimately appear in category lists WITHOUT a Config default
--- (GUI-write-only keys where nil is meaningful — e.g. roleBorderColor* nil
--- means "fall back to class colour" — plus top-level/legacy carriers).
+-- (GUI-write-only keys where nil is meaningful — plus top-level/legacy
+-- carriers). roleBorderColor* left this set with the profile-root roleColors
+-- move (the legacy per-mode keys no longer export; roleColors rides the
+-- full-export payload like classColors).
 local EXPORT_KEYS_WITHOUT_DEFAULTS = {
     afkIconTimerFont = true, afkIconTimerOutline = true,
     auraDesignerPreset = true, textDesignerPreset = true,
     auraDesigner = true, textDesigner = true,           -- legacy inline tables
     defensiveIconBorderColorSource = true, missingBuffIconBorderColorSource = true,
     raidPlayerGroupFirst = true,
-    roleBorderColorTank = true, roleBorderColorHealer = true, roleBorderColorDamager = true,
     raidAutoProfiles = true,                            -- top-level key, special-cased in Profile.lua
     -- Config.lua lists these as `= nil` (documentation only — a nil assignment
     -- creates NO table key), so at runtime they have no default: nil means

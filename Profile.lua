@@ -648,6 +648,11 @@ function DF:ExportProfile(categories, frameTypes, profileName)
         if DF.db.powerColors and next(DF.db.powerColors) then
             exportData.powerColors = DF:DeepCopy(DF.db.powerColors)
         end
+        -- Include role colours (profile-root since MigrateRoleBorderColors;
+        -- without this the Colors page's role set never travelled)
+        if DF.db.roleColors and next(DF.db.roleColors) then
+            exportData.roleColors = DF:DeepCopy(DF.db.roleColors)
+        end
         -- Include auto layout profiles
         if DF.db.raidAutoProfiles then
             exportData.raidAutoProfiles = DF:DeepCopy(DF.db.raidAutoProfiles)
@@ -963,6 +968,7 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
             raidAutoProfiles = DF:DeepCopy(DF.db.raidAutoProfiles or DF.RaidAutoProfilesDefaults),
             classColors = DF:DeepCopy(DF.db.classColors or {}),
             powerColors = DF:DeepCopy(DF.db.powerColors or {}),
+            roleColors = DF:DeepCopy(DF.db.roleColors or {}),
             auraBlacklist = DF:DeepCopy(DF.db.auraBlacklist or { buffs = {}, debuffs = {} }),
             filterPresetOverrides = DF:DeepCopy(DF.db.filterPresetOverrides or {}),
             -- Designer preset LIBRARIES (profile-root): the copied mode tables
@@ -1120,6 +1126,10 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
         -- Import power color overrides if present
         if importData.powerColors then
             DF.db.powerColors = importData.powerColors
+        end
+        -- Import role colours if present
+        if importData.roleColors then
+            DF.db.roleColors = importData.roleColors
         end
         -- Import auto layout profiles if present
         if importData.raidAutoProfiles then
