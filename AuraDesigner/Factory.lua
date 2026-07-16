@@ -1618,6 +1618,30 @@ function Factory:BuildGroupPreviewConfig(frame, group)
     return cfg, sig
 end
 
+-- Per-group sort (Wave 2): the group card's Sort Order dropdown + My Auras
+-- First / Reverse Order checkboxes, stored as OPTIONAL per-group fields
+-- (sortOrder / sortMineFirst / sortReverse — the othersOnly idiom: absent on
+-- pre-Wave-2 groups AND on fresh groups until the user touches a control).
+-- Mapped through the ROW's shared mapper (DF:BuildAuraSort — one function,
+-- callers feed their own storage). defaultOrder preserves each family's
+-- pre-Wave-2 behaviour when the field is absent: fgroups passed no sort
+-- ("DEFAULT" -> nil = Blizzard slot order), dgroups hardcoded ExpirationOnly
+-- ("TIME") — upgrade-neutral by construction.
+local function groupSort(group, defaultOrder)
+    return DF.BuildAuraSort and DF:BuildAuraSort(group.sortOrder or defaultOrder,
+        group.sortMineFirst, group.sortReverse) or nil
+end
+
+-- Sort's TUNING-sig component (sort is a live mutator — SetAuraGroupSortMethod
+-- rides ApplyTuning, never Rebuild). Serializes the RAW fields and returns ""
+-- when none is set, so pre-Wave-2 groups (and untouched new ones) produce
+-- byte-identical tuning sigs to the pre-Wave-2 format.
+local function groupSortSig(group)
+    local o, m, r = group.sortOrder, group.sortMineFirst, group.sortReverse
+    if o == nil and not m and not r then return "" end
+    return "|so=" .. tostring(o) .. (m and ",M" or "") .. (r and ",R" or "")
+end
+
 -- Full row config for one filter group. Same frame-level band as the placed
 -- indicators (40) so group icons read on top of the frame content.
 -- othersOnly rides poolFilter (group-level "HELPFUL|!PLAYER" — the B1 slot
@@ -1633,6 +1657,7 @@ local function buildFilterGroupConfig(frame, map, group)
         mode = "row",
         max = math.max(1, tonumber(group.maxIcons) or 8),
         filter = poolFilter(group),
+        sort = groupSort(group, "DEFAULT"),
         candidateFilters = { includeSpellIDs = map },
         testEntries = filterGroupTestEntries(map),
         enabled = true,
@@ -1743,11 +1768,12 @@ end
 -- Full row config for one debuff group. Records ride as cfg.filter exactly like
 -- the main debuff row's filterList (per-record candidateFilters; no top-level
 -- map — harmful spell-ID maps are inert on friendly frames). Style is the
--- uniform filter-group style; sort mirrors the ROW's default: the row maps
--- directDebuffSortOrder (Config default "TIME") -> { method = "ExpirationOnly" }
--- in BuildAuraRowConfig, so groups sort identically. No testEntries: the test
--- paint's HARMFUL fallback pool (TestData.debuffs) previews these rows, same as
--- the main debuff row's preview data.
+-- uniform filter-group style; sort is the per-group Wave-2 mapping with the
+-- family default "TIME" -> { method = "ExpirationOnly" } — exactly the old
+-- hardcode (and the ROW's own Config-default mapping), so untouched groups
+-- sort identically to before. No testEntries: the test paint's HARMFUL
+-- fallback pool (TestData.debuffs) previews these rows, same as the main
+-- debuff row's preview data.
 local function buildDebuffGroupConfig(frame, records, group)
     local borderSpec = buildGroupBorderSpec(frame, group)
     return {
@@ -1755,7 +1781,7 @@ local function buildDebuffGroupConfig(frame, records, group)
         mode = "row",
         max = math.max(1, tonumber(group.maxIcons) or 4),
         filter = records,
-        sort = { method = "ExpirationOnly" },
+        sort = groupSort(group, "TIME"),
         enabled = true,
         tooltips = false,
         adBorderAnim = borderSpec and true or nil,
@@ -2491,6 +2517,7 @@ local function syncFilterGroupList(frame, fg, live, R, groups, keyPrefix)
                     .. groupStyleStructSig(group)             -- region set + duration format key (group.style)
                 local tuningSig = selSig                      -- selection edits: live include-map swap (config-wide candidateFilters)
                     .. "|max=" .. tostring(math.max(1, tonumber(group.maxIcons) or 8))
+                    .. groupSortSig(group)                    -- per-group sort (Wave 2): live SetAuraGroupSortMethod
                 local coSig = filterGroupCoSig(group)
 
                 local entry = fg[key]
@@ -2506,10 +2533,12 @@ local function syncFilterGroupList(frame, fg, live, R, groups, keyPrefix)
                     entry.handle:Rebuild(buildFilterGroupConfig(frame, res.map, group))
                 else
                     if entry.tuningSig ~= tuningSig then
-                        -- Selection edit / maxIcons with the struct sig stable: tune the
-                        -- live container in place (OOC immediate; ApplyTuning self-defers
-                        -- in combat). The full trio rides the fresh config — max, sort
-                        -- (nil -> Blizzard default, matching build), candidateFilters =
+                        -- Selection edit / maxIcons / per-group sort with the struct sig
+                        -- stable: tune the live container in place (OOC immediate;
+                        -- ApplyTuning self-defers in combat). The full trio rides the
+                        -- fresh config — max, sort (the Wave-2 per-group mapping; nil at
+                        -- the "DEFAULT" family default = Blizzard slot order, matching
+                        -- build), candidateFilters =
                         -- the new include map (replace semantics). Swap the map-derived
                         -- testEntries onto the handle config too, so a test-mode rebuild
                         -- previews the NEW selection instead of a stale one.
@@ -2969,7 +2998,8 @@ function Factory:SyncFrame(frame)
     -- the keys disjoint). Structural sig = the group filter string + the group.style
     -- region set (groupStyleStructSig) -> Rebuild. Tuning sig = the registry
     -- selection signature (live link: filter edits / preset updates move it) + max
-    -- slot count -> in-place ApplyTuning (Wave 1). The layout fields and
+    -- slot count + the per-group sort fields (Wave 2) -> in-place ApplyTuning
+    -- (Wave 1). The layout fields and
     -- cosmetic style fields hot-apply via ApplyStyle. Eye-hidden groups (`enabled == false`;
     -- nil/true = shown) are not marked live -> the sweep destroys their handle.
     -- Same for deleted groups and spec switches (different id set; other-pool
@@ -3000,7 +3030,8 @@ function Factory:SyncFrame(frame)
     -- resolved record strings + keys (the row's own struct serializer — a selection
     -- edit that changes the record SET moves it) + the group.style region set
     -- (groupStyleStructSig) -> Rebuild. Tuning sig = the records' candidateFilters
-    -- (hideLong / keepImportant / dispel maps) + max slot count -> in-place
+    -- (hideLong / keepImportant / dispel maps) + max slot count + the per-group
+    -- sort fields (Wave 2) -> in-place
     -- ApplyTuning with the config.filter pre-swap (Wave 1). The layout fields and
     -- cosmetic style fields hot-apply via ApplyStyle. Eye-hidden groups (`enabled == false`), empty selections
     -- (no records) and deleted groups are not marked live -> the sweep destroys their
@@ -3027,6 +3058,7 @@ function Factory:SyncFrame(frame)
                             .. groupStyleStructSig(group)   -- region set + duration format key (group.style)
                         local tuningSig = recTuningSig      -- per-record candidateFilters (hideLong / keepImportant / dispel maps)
                             .. "|max=" .. tostring(math.max(1, tonumber(group.maxIcons) or 4))
+                            .. groupSortSig(group)          -- per-group sort (Wave 2): live SetAuraGroupSortMethod
                         local coSig = filterGroupCoSig(group, 4)
 
                         local entry = dg[key]
@@ -3049,8 +3081,8 @@ function Factory:SyncFrame(frame)
                                 -- every record's filter string + key — then ApplyTuning;
                                 -- the engine flush re-derives per-record cf from
                                 -- config.filter. The full trio rides the fresh config: max,
-                                -- the hardcoded ExpirationOnly sort (routed through the trio
-                                -- so Wave 2's per-group sort slots in), candidateFilters =
+                                -- the Wave-2 per-group sort (family default "TIME" =
+                                -- ExpirationOnly, the old hardcode), candidateFilters =
                                 -- nil (dgroups carry no config-wide map).
                                 entry.tuningSig = tuningSig
                                 local cfg = buildDebuffGroupConfig(frame, records, group)

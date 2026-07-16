@@ -788,10 +788,14 @@ end
 
 -- Sort Order dropdown ("DEFAULT"/"TIME"/"NAME") + Mine First / Reverse checkboxes
 -- -> config.sort (AuraContainerSortMethod/SortDirection member NAMES). Rides the
--- row TUNING sig (rowTuningSig serializes method + direction), so changes apply
--- in place via ApplyTuning. nil = no sort declared = Blizzard's inbound default
--- (mine-first slot order) — today's DEFAULT behaviour, kept byte-identical.
-local function BuildRowSort(order, mineFirst, reverse)
+-- TUNING sig (rows: rowTuningSig serializes method + direction; AD groups fold
+-- the raw fields into their tuning sig), so changes apply in place via
+-- ApplyTuning. nil = no sort declared = Blizzard's inbound default (mine-first
+-- slot order) — today's DEFAULT behaviour, kept byte-identical.
+-- SHARED (Wave 2): exposed on DF so the AD group families (filter / other-buff /
+-- debuff groups, AuraDesigner/Factory.lua) map their per-group sort fields
+-- through the SAME function as the rows — callers feed their own storage.
+function DF:BuildAuraSort(order, mineFirst, reverse)
     local method
     if order == "TIME" then
         method = mineFirst and "Expiration" or "ExpirationOnly"
@@ -928,9 +932,9 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
     -- The backend resolves member names against the securecopy'd global enums.
     local sort
     if prefix == "buff" then
-        sort = BuildRowSort(db.directBuffSortOrder, db.directBuffSortMineFirst, db.directBuffSortReverse)
+        sort = DF:BuildAuraSort(db.directBuffSortOrder, db.directBuffSortMineFirst, db.directBuffSortReverse)
     elseif prefix == "debuff" then
-        sort = BuildRowSort(db.directDebuffSortOrder, db.directDebuffSortMineFirst, db.directDebuffSortReverse)
+        sort = DF:BuildAuraSort(db.directDebuffSortOrder, db.directDebuffSortMineFirst, db.directDebuffSortReverse)
     end
 
     -- Debuff rows: NATIVE dispel border when Color-by-Dispel-Type is on. The colour is

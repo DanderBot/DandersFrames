@@ -94,6 +94,12 @@ local function RefreshLocaleStrings()
         HORIZONTAL = L["Horizontal"], VERTICAL = L["Vertical"],
         _order = {"HORIZONTAL", "VERTICAL"},
     }
+
+    -- Per-group Sort Order (Wave 2) — mirrors the aura rows' dropdown exactly.
+    OPTS.SORT_OPTIONS = {
+        DEFAULT = L["Default (Slot Order)"], TIME = L["Time Remaining"], NAME = L["Alphabetical"],
+        _order = {"DEFAULT", "TIME", "NAME"},
+    }
 end
 
 RefreshLocaleStrings()
@@ -8237,6 +8243,40 @@ BuildLayoutGroupsTab = function()
                     if maxSlider.SetWidth then maxSlider:SetWidth(bodyWidth - 10) end
                     by = by - 54
 
+                    -- ── SORT (Wave 2) ── per-group sort is TUNING: the factory
+                    -- re-applies it in place via ApplyTuning (OOC-immediate;
+                    -- self-defers in combat) — no rebuild. The fields are
+                    -- OPTIONAL on the group (othersOnly idiom): absent = the
+                    -- family default "DEFAULT" (Blizzard slot order, the
+                    -- pre-Wave-2 behaviour), read through a customGet so legacy
+                    -- groups display correctly without a write-on-open.
+                    local sortRefresh = function()
+                        RefreshPlacedIndicators()
+                        DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+                    end
+                    local sortMineCb   -- forward capture: the dropdown greys it
+                    local sortDrop = GUI:CreateDropdown(body, L["Sort Order"], OPTS.SORT_OPTIONS, nil, nil, function()
+                        sortRefresh()
+                        if sortMineCb then sortMineCb:SetEnabled((group.sortOrder or "DEFAULT") ~= "DEFAULT") end
+                    end, function() return group.sortOrder or "DEFAULT" end,
+                       function(v) group.sortOrder = v end)
+                    sortDrop:SetPoint("TOPLEFT", body, "TOPLEFT", 5, -(-by))
+                    if sortDrop.SetWidth then sortDrop:SetWidth(bodyWidth - 10) end
+                    by = by - 54
+
+                    sortMineCb = GUI:CreateCheckbox(body, L["My Auras First"], group, "sortMineFirst", sortRefresh)
+                    sortMineCb:SetPoint("TOPLEFT", body, "TOPLEFT", 8, -(-by))
+                    sortMineCb:SetWidth(bodyWidth - 16)
+                    sortMineCb.tooltip = L["Sort your own auras before other players'. The Default sort order already shows yours first."]
+                    sortMineCb:SetEnabled((group.sortOrder or "DEFAULT") ~= "DEFAULT")
+                    by = by - 26
+
+                    local sortRevCb = GUI:CreateCheckbox(body, L["Reverse Order"], group, "sortReverse", sortRefresh)
+                    sortRevCb:SetPoint("TOPLEFT", body, "TOPLEFT", 8, -(-by))
+                    sortRevCb:SetWidth(bodyWidth - 16)
+                    sortRevCb.tooltip = L["Reverse the sort direction."]
+                    by = by - 30
+
                     -- ── OTHERS ONLY (Other Buffs tab only — flat-store groups) ──
                     -- Same idiom as the effect-card checkbox: the group's filter
                     -- string ("HELPFUL|!PLAYER") binds at container build, so
@@ -8662,6 +8702,36 @@ BuildDebuffGroupsTab = function()
                 maxSlider:SetPoint("TOPLEFT", body, "TOPLEFT", 5, by)
                 if maxSlider.SetWidth then maxSlider:SetWidth(bodyWidth - 10) end
                 by = by - 54
+
+                -- ── SORT (Wave 2) ── per-group sort is TUNING: the factory
+                -- re-applies it in place via ApplyTuning (OOC-immediate;
+                -- self-defers in combat) — no rebuild. Fields are OPTIONAL on
+                -- the group (othersOnly idiom): absent = the family default
+                -- "TIME" (soonest-to-expire first — the old hardcode), read
+                -- through a customGet so legacy groups display correctly
+                -- without a write-on-open.
+                local sortMineCb   -- forward capture: the dropdown greys it
+                local sortDrop = GUI:CreateDropdown(body, L["Sort Order"], OPTS.SORT_OPTIONS, nil, nil, function()
+                    LayoutDebuffGroupRefresh()
+                    if sortMineCb then sortMineCb:SetEnabled((group.sortOrder or "TIME") ~= "DEFAULT") end
+                end, function() return group.sortOrder or "TIME" end,
+                   function(v) group.sortOrder = v end)
+                sortDrop:SetPoint("TOPLEFT", body, "TOPLEFT", 5, by)
+                if sortDrop.SetWidth then sortDrop:SetWidth(bodyWidth - 10) end
+                by = by - 54
+
+                sortMineCb = GUI:CreateCheckbox(body, L["My Auras First"], group, "sortMineFirst", LayoutDebuffGroupRefresh)
+                sortMineCb:SetPoint("TOPLEFT", 8, by)
+                sortMineCb:SetWidth(bodyWidth - 16)
+                sortMineCb.tooltip = L["Sort your own auras before other players'. The Default sort order already shows yours first."]
+                sortMineCb:SetEnabled((group.sortOrder or "TIME") ~= "DEFAULT")
+                by = by - 26
+
+                local sortRevCb = GUI:CreateCheckbox(body, L["Reverse Order"], group, "sortReverse", LayoutDebuffGroupRefresh)
+                sortRevCb:SetPoint("TOPLEFT", 8, by)
+                sortRevCb:SetWidth(bodyWidth - 16)
+                sortRevCb.tooltip = L["Reverse the sort direction."]
+                by = by - 30
 
                 -- ── APPEARANCE (collapsible — the effect-card section idiom) ──
                 by = by - 10
