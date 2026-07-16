@@ -1207,6 +1207,16 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
         DF:MigrateBorderInsetFold()
     end
 
+    -- v5 legacy passes (dispel-enable fold, legacy-aura key strip, retired
+    -- animation remap, alpha dispel-custom cleanup): otherwise these only
+    -- re-run at ADDON_LOADED, leaving a just-imported v4 payload rendering a
+    -- wrong dispel state and dead animation values until the next reload.
+    -- Flag-gated / value-idempotent — a no-op for v5 payloads and untouched
+    -- profiles.
+    if DF.RunV5LegacyMigrations then
+        DF:RunV5LegacyMigrations()
+    end
+
     DF:FullProfileRefresh()
     print("|cff00ff00DandersFrames:|r " .. L["Profile imported successfully!"])
 

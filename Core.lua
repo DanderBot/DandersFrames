@@ -4195,6 +4195,33 @@ DF._MainEventDispatcher = function(self, event, arg1)
             end
         end
 
+        -- Expose the v5 legacy passes for the profile-import path (mirrors the
+        -- MigrateAuraDesignerToInstances export above). Without this, a v4
+        -- export imported at runtime shows a wrong dispel-enable state and
+        -- retired animation values until the next reload (all four passes only
+        -- re-ran at ADDON_LOADED). Walks the RAW profile tables only — DF.db
+        -- is proxied by the time an import runs, and the current profile is in
+        -- DandersFramesDB_v2.profiles anyway. Each pass is flag-gated or
+        -- value-idempotent, so re-running over untouched profiles is a no-op;
+        -- v5 exports carry the guard flags and skip straight through.
+        function DF:RunV5LegacyMigrations()
+            if not (DandersFramesDB_v2 and DandersFramesDB_v2.profiles) then return end
+            for _, profile in pairs(DandersFramesDB_v2.profiles) do
+                if type(profile) == "table" then
+                    for _, mode in ipairs({"party", "raid"}) do
+                        local m = profile[mode]
+                        if type(m) == "table" then
+                            MigrateDispelSourceToEnabled(m)
+                            StripLegacyAuraKeys(m)
+                            DropDispelCustomMode(m)
+                        end
+                    end
+                    StripRootLegacyKeys(profile)
+                    remapRetiredAnims(profile, {})
+                end
+            end
+        end
+
         -- Migrate personal targeted spells container centre to icon-block midpoint (bug 880).
         -- Previously the saved (x, y) was the position of icon 1 (container centre).
         -- Now (x, y) is the visual centre of the icon block; the container is offset so
