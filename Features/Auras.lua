@@ -451,7 +451,7 @@ end
 -- the whole output — payload band below the threshold, EMPTY band above (no countdown,
 -- no colour-by-time, no hide-above; the indicator's own duration text is untouched and
 -- keeps its own formatter). format/hideAboveT/colorByTime are ignored in this variant.
-local function BuildDurationFormatter(format, hideAboveT, colorByTime, alertMode, alertThreshold, alertText, alertAtlas, alertElem, alertElemSize)
+local function BuildDurationFormatter(format, hideAboveT, colorByTime, alertMode, alertThreshold, alertText, alertAtlas, alertElem, alertElemSize, alertGlyphKey)
     format = format or "NUMBER"
     local alertT
     if alertMode == "TEXT" or alertMode == "GLYPH" then
@@ -463,16 +463,10 @@ local function BuildDurationFormatter(format, hideAboveT, colorByTime, alertMode
     if alertElem then
         if not alertT then return nil end
         if not (C_StringUtil and C_StringUtil.CreateNumericRuleFormatter and Enum and Enum.NumericRuleFormatRounding) then return nil end
-        -- Payload composed by the shared helper — GLYPH resolves through alertAtlas
-        -- (already key->atlas resolved by the caller), so feed the escape directly.
-        local payload
-        if alertMode == "GLYPH" then
-            local s = math.floor(tonumber(alertElemSize) or 14)
-            if s < 1 then s = 1 end
-            payload = "|A:" .. tostring(alertAtlas or "") .. ":" .. s .. ":" .. s .. "|a"
-        else
-            payload = DF:GetExpiryAlertPayload("TEXT", alertText)
-        end
+        -- Payload composed by the shared helper for BOTH modes (GLYPH resolves
+        -- key->atlas inside it), so the live band string and the editor-canvas
+        -- preview (buildAlertPreview) can never drift.
+        local payload = DF:GetExpiryAlertPayload(alertMode, alertText, alertGlyphKey, alertElemSize)
         local ok, f = pcall(function()
             local down = Enum.NumericRuleFormatRounding.Down
             local fmt = C_StringUtil.CreateNumericRuleFormatter()
@@ -653,7 +647,7 @@ function DF:GetExpiryAlertElementFormatter(mode, threshold, text, glyphKey, size
         .. ":" .. (alertAtlas or tostring(text or ""))
     if durationFormatterCache[key] == nil then
         durationFormatterCache[key] = BuildDurationFormatter(nil, nil, nil,
-            mode, threshold, text, alertAtlas, true, size) or false
+            mode, threshold, text, alertAtlas, true, size, glyphKey) or false
     end
     return durationFormatterCache[key] or nil
 end

@@ -1220,7 +1220,7 @@ local TYPE_DEFAULTS = {
         expiryAlertMode = "OFF", expiryAlertThreshold = 5,
         expiryAlertText = "", expiryAlertGlyph = "WARNING",
         expiryAlertAnchor = "TOP", expiryAlertOffsetX = 0, expiryAlertOffsetY = 0,
-        expiryAlertSize = 14, expiryAlertAnim = "NONE",
+        expiryAlertSize = 14,
         showStacks = true, stackMinimum = 2,
         stackFont = "Friz Quadrata TT", stackScale = 1.0,
         stackOutline = "OUTLINE", stackAnchor = "BOTTOMRIGHT",
@@ -1318,7 +1318,7 @@ local TYPE_DEFAULTS = {
         expiryAlertMode = "OFF", expiryAlertThreshold = 5,
         expiryAlertText = "", expiryAlertGlyph = "WARNING",
         expiryAlertAnchor = "TOP", expiryAlertOffsetX = 0, expiryAlertOffsetY = 0,
-        expiryAlertSize = 14, expiryAlertAnim = "NONE",
+        expiryAlertSize = 14,
         showStacks = true, stackMinimum = 2,
         stackFont = "Friz Quadrata TT", stackScale = 1.0,
         stackOutline = "OUTLINE", stackAnchor = "BOTTOMRIGHT",
@@ -1406,7 +1406,7 @@ local TYPE_DEFAULTS = {
         expiryAlertMode = "OFF", expiryAlertThreshold = 5,
         expiryAlertText = "", expiryAlertGlyph = "WARNING",
         expiryAlertAnchor = "TOP", expiryAlertOffsetX = 0, expiryAlertOffsetY = 0,
-        expiryAlertSize = 14, expiryAlertAnim = "NONE",
+        expiryAlertSize = 14,
         frameLevel = 30, frameStrata = "INHERIT",
     },
     -- Frame-level types: mirror the inline literals in EnsureTypeConfig so the
@@ -1664,18 +1664,19 @@ local GLOBAL_DEFAULT_MAP = {
 }
 
 -- "Expiry Warning" section for the placed icon/square/bar cards: the per-
--- indicator EXPIRY ALERT ELEMENT — a frame-anchored FontString showing the
--- custom text / glyph only below the threshold (natively driven; see
--- Factory.lua's EXPIRY ALERT ELEMENT section). Mode dropdown, then the
--- mode-dependent payload controls (custom text / glyph picker), threshold,
--- and the element's own frame anchor / offsets / size / animation. Writes
--- ride the proxy's __newindex refresh; every key except anchor/offset/anim
--- sits in the placed/bar struct sigs (the formatter is bind-frozen ->
--- Rebuild), the rest hot-apply through the cosmetic sig. Mode-inapplicable
--- controls grey via SetEnabled — the cards' static-height boxes can't hide
--- rows without re-measuring. Glyph labels embed the atlas escape as a live
--- preview. The animation dropdown is EXPERIMENTAL: it exists to validate
--- external-region animation on 12.1 (tooltip says so).
+-- indicator EXPIRY ALERT ELEMENT — a FontString on the indicator's own aura
+-- button showing the custom text / glyph only below the threshold (natively
+-- driven; see Factory.lua's EXPIRY ALERT ELEMENT section). Mode dropdown,
+-- then the mode-dependent payload controls (custom text / glyph picker),
+-- threshold, and the element's button anchor / offsets / size. Writes ride
+-- the proxy's __newindex refresh; EVERY key sits in the placed/bar struct
+-- sigs (the region is a button child, bind-frozen at init — PTR-5 — so even
+-- anchor/offset/size changes Rebuild the slot). Mode-inapplicable controls
+-- grey via SetEnabled — the cards' static-height boxes can't hide rows
+-- without re-measuring. Glyph labels embed the atlas escape as a live
+-- preview. No animation control: a button-child region can't be animated
+-- while auras are secret (PTR-5), and out-of-combat-only animation is
+-- worthless for an expiry warning.
 local function AddExpiryAlertControls(g, parent, proxy)
     local textBox, glyphDrop, dependents
     local function UpdateState()
@@ -1702,16 +1703,12 @@ local function AddExpiryAlertControls(g, parent, proxy)
     dependents = {}
     local function dep(w, h) g:AddWidget(w, h); dependents[#dependents + 1] = w; return w end
     dep(GUI:CreateSlider(parent, L["Alert Below (seconds)"], 1, 60, 1, proxy, "expiryAlertThreshold"), 54)
-    -- Element placement: anchored to the UNIT FRAME (not the indicator).
+    -- Element placement: anchored to the INDICATOR's aura button (the a243064
+    -- external-region probe ruled out frame-anchored placement).
     dep(GUI:CreateDropdown(parent, L["Anchor"], OPTS.ANCHOR_OPTIONS, proxy, "expiryAlertAnchor"), 54)
     dep(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 1, proxy, "expiryAlertOffsetX"), 54)
     dep(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, proxy, "expiryAlertOffsetY"), 54)
     dep(GUI:CreateSlider(parent, L["Size"], 6, 48, 1, proxy, "expiryAlertSize"), 54)
-    local animOptions = { NONE = L["None"], PULSE = L["Pulsate"], FLASH = L["Flash"],
-                          _order = { "NONE", "PULSE", "FLASH" } }
-    local animDrop = dep(GUI:CreateDropdown(parent, L["Animation (Experimental)"], animOptions,
-        proxy, "expiryAlertAnim"), 54)
-    animDrop.tooltip = L["Animations are being validated on 12.1 and may not run in combat."]
     UpdateState()
 end
 
@@ -2757,25 +2754,27 @@ local function RenderPreviewIndicator(mockFrame, spec, auraName, info, indicator
     slot:Show()
 
     -- Expiry Alert element sample (cfg.alertPreview): the static payload at the
-    -- configured frame anchor/offset/size, so positioning is WYSIWYG while
-    -- editing. The live element parents to the UNIT frame; the sample parents
-    -- to the mock frame — same anchor math. Static only (no animation on the
-    -- canvas: the anim dropdown is an in-combat/live validation knob).
+    -- configured anchor/offset/size, so positioning is WYSIWYG while editing.
+    -- Anchored to the PREVIEW SLOT (button-relative) exactly like the live
+    -- region: holder covers the slot at the dfAlert level (+7), the FontString
+    -- pins its anchor point to the same point on the holder plus offsets —
+    -- mirroring styleButton_regions' TextStyle:Apply on dfAlertHolder/dfAlert.
+    -- nil (hidden) when the alert is off or the indicator is show-when-missing
+    -- (buildAlertPreview gates both, matching the factory's live behaviour).
     local ap = cfg.alertPreview
     if ap then
         local ah = rec.alertHolder
         if not ah then
-            ah = CreateFrame("Frame", nil, mockFrame)
-            ah:SetSize(1, 1)
+            ah = CreateFrame("Frame", nil, slot)
             ah.fs = ah:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
             rec.alertHolder = ah
         end
         ah:ClearAllPoints()
-        ah:SetPoint(ap.anchor, mockFrame, ap.anchor, ap.offsetX, ap.offsetY)
-        ah:SetFrameStrata(mockFrame:GetFrameStrata())
-        ah:SetFrameLevel(mockFrame:GetFrameLevel() + 9)
+        ah:SetAllPoints(slot)
+        ah:SetFrameStrata(slot:GetFrameStrata())
+        ah:SetFrameLevel(slot:GetFrameLevel() + 7)
         ah.fs:ClearAllPoints()
-        ah.fs:SetPoint(ap.anchor, ah, ap.anchor, 0, 0)
+        ah.fs:SetPoint(ap.anchor, ah, ap.anchor, ap.offsetX, ap.offsetY)
         if DF.SafeSetFont then DF:SafeSetFont(ah.fs, ap.font, ap.size, "OUTLINE") end
         ah.fs:SetText(ap.payload)
         ah:Show()

@@ -522,6 +522,22 @@ local function styleButton_regions(slot, config)
         DF.TextStyle:Apply(slot.dfDur, durSpec, slot.dfDurHolder)
     end
 
+    -- EXPIRY ALERT text region (Aura Designer; native second SetDurationText bind is in
+    -- bindNative). Same holder idiom as dfDur, one level higher (durSpec level 6 -> 7),
+    -- so the alert renders ABOVE the icon and above a bar indicator's fill. Positioning
+    -- is anchor-only and size comes from config (§20c — the button's rect is secret).
+    -- The a243064 probe put this region OUTSIDE the button subtree (unit-frame parent):
+    -- in-game the binding neither errored nor drove it — soft rejection — so the region
+    -- lives in the button subtree now, like every other bound region.
+    local alertSpec = style.alert
+    if isRow and alertSpec then
+        if not slot.dfAlert then
+            slot.dfAlertHolder = makeHolder(slot, alertSpec.level or 7)
+            slot.dfAlert = slot.dfAlertHolder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        end
+        DF.TextStyle:Apply(slot.dfAlert, alertSpec, slot.dfAlertHolder)
+    end
+
     -- STACK count region (native SetApplicationCount bind is in bindNative).
     local stackSpec = style.stacks
     if isRow and stackSpec and stackSpec.show then
@@ -692,34 +708,34 @@ local function bindNative(slot, config)
     end
 
     -- EXPIRY ALERT element (Aura Designer): a SECOND SetDurationText binding on the
-    -- SAME button, targeting a DF-owned FontString parented OUTSIDE the button subtree
-    -- (the factory's frame-anchored alert holder). Its formatter renders the alert
-    -- payload below the threshold and an EMPTY string above — the C-side binding does
-    -- all the driving, zero Lua time reads. TWO deliberate engine probes ride here
-    -- (UNVERIFIED on 68569 — the first in-game session answers both):
-    --   A. Does the binding accept/drive a region parented outside the button subtree?
-    --      External parent = the region is NOT under the PTR-5 forbidden umbrella, so
-    --      alpha animations on its holder are legal. If the call ERRORS, the warn-once
-    --      below fires (A failed hard). If it silently doesn't drive, the element just
-    --      never shows text (A failed soft).
+    -- SAME button, driving the dfAlert FontString (button-subtree holder region, the
+    -- dfDur idiom). Its formatter renders the alert payload below the threshold and an
+    -- EMPTY string above — the C-side binding does all the driving, zero Lua time reads.
+    -- Probe history: the a243064 external-region variant (region parented to the unit
+    -- frame) was SOFT-REJECTED in-game — no error, no text — so probe A is answered:
+    -- the binding will not drive a region outside the button subtree. ONE probe remains
+    -- (UNVERIFIED on 68569 — the first in-game session answers it):
     --   B. Can one button carry TWO duration-text bindings? Bound AFTER the normal
-    --      dfDur bind, so replace-semantics have a deterministic symptom: the icon's
-    --      own duration text goes dead while the alert works (B failed). Indicators
-    --      with duration text OFF carry ONLY this binding, isolating probe A.
+    --      dfDur bind, so the failure symptoms are deterministic:
+    --        * alert dead, duration alive  -> the second bind was rejected (B failed,
+    --          rejection semantics);
+    --        * duration dead, alert alive  -> the second bind REPLACED the first (B
+    --          failed, replace semantics).
+    --      Indicators with duration text OFF carry ONLY this binding, isolating the
+    --      single-binding baseline.
     -- Fallback story if B fails: an invisible companion slot per alert (own 1-slot
     -- container, icon show=false — the bar indicator already ships icon-less slots)
-    -- whose sole duration binding is the alert region. If A fails: button-parented
-    -- region — which forfeits the animations (PTR-5 forbidden subtree).
+    -- whose sole duration binding is the alert region.
     local alertSpec = style.alert
-    if alertSpec and alertSpec.region and alertSpec.formatter
+    if slot.dfAlert and alertSpec and alertSpec.formatter
         and slot.SetDurationText and not slot._boundAlert then
         slot._boundAlert = true
         local ok, err = pcall(function()
-            slot:SetDurationText(alertSpec.region, { formatter = alertSpec.formatter })
+            slot:SetDurationText(slot.dfAlert, { formatter = alertSpec.formatter })
         end)
         if not ok and not warnedAlertBind then
             warnedAlertBind = true
-            DF:DebugWarn(DBG, "Expiry-alert SetDurationText bind failed (external region rejected?): %s", tostring(err))
+            DF:DebugWarn(DBG, "Expiry-alert SetDurationText bind failed (second binding rejected?): %s", tostring(err))
         end
     end
 
@@ -1398,14 +1414,14 @@ local function formatTestDuration(handle, rem)
 end
 
 -- Test/preview drive for the AD expiry-alert element (style.alert): push the alert
--- formatter's banded output onto its EXTERNAL region — the exact object the live
--- native binding drives, so the preview shows the payload below the threshold and
--- clears above it, mirroring live. Fallback "" (no plain-format fallback: empty IS
--- the correct above-threshold render).
-local function paintTestAlert(handle, rem)
+-- formatter's banded output onto the slot's dfAlert region — the exact object the
+-- live native binding drives, so the preview shows the payload below the threshold
+-- and clears above it, mirroring live. Fallback "" (no plain-format fallback: empty
+-- IS the correct above-threshold render).
+local function paintTestAlert(handle, slot, rem)
     local al = handle.config.style and handle.config.style.alert
-    local region = al and al.region
-    if not region then return end
+    local region = slot and slot.dfAlert
+    if not (al and region) then return end
     local f, out = al.formatter, ""
     if f and f.FormatNumber and rem and rem > 0 then
         local ok, s = pcall(f.FormatNumber, f, rem)
@@ -1496,11 +1512,11 @@ function Handle:_paintTestSlot(slot, index)
                 slot.dfCD:SetCooldown(GetTime() - offset, d)
             end
             if slot.dfDur then slot.dfDur:SetText(formatTestDuration(self, d - offset)) end
-            paintTestAlert(self, d - offset)
+            paintTestAlert(self, slot, d - offset)
         else
             slot._dfTestDur = nil
             if slot.dfDur then slot.dfDur:SetText("") end
-            paintTestAlert(self, nil)
+            paintTestAlert(self, slot, nil)
         end
     end
     if slot.dfStack then slot.dfStack:SetText((e.stacks or 0) > 1 and tostring(e.stacks) or "") end
@@ -1583,12 +1599,12 @@ function AuraContainer._startTestTicker()
         local now = GetTime()
         for h in pairs(AuraContainer._handles or {}) do
             if not h._destroyed and h.buttons then
-                -- Alert-element region (style.alert): counted down alongside dfDur.
+                -- Alert-element region (slot.dfAlert): counted down alongside dfDur.
                 -- Checked per handle (max=1 placed containers are the only carriers)
                 -- so an alert-only indicator (duration text OFF) still ticks.
                 local hasAlert = h.config.style and h.config.style.alert
                 for _, b in ipairs(h.buttons) do
-                    if b._dfTestDur and (b.dfDur or hasAlert) then
+                    if b._dfTestDur and (b.dfDur or (hasAlert and b.dfAlert)) then
                         local rem = (b._dfTestExpiry or 0) - now
                         if rem <= 0 then
                             rem = b._dfTestDur
@@ -1598,7 +1614,7 @@ function AuraContainer._startTestTicker()
                             end
                         end
                         if b.dfDur then b.dfDur:SetText(formatTestDuration(h, rem)) end
-                        if hasAlert then paintTestAlert(h, rem) end
+                        if hasAlert then paintTestAlert(h, b, rem) end
                     end
                 end
             end
@@ -2208,9 +2224,12 @@ end
 --   layout   = { anchor, growth, wrap, scale, size|sizeX|sizeY, spacing|spacingX|spacingY, offsetX, offsetY },
 --   style    = { icon{show,zoom,inset,staticSpellID}, border, cooldown{show,edge,reverse,numbers},
 --                duration, stacks, bar, spellName, dispel, overlay,
---                alert{region,formatter} },   -- AD expiry-alert element: a second
---                                            -- SetDurationText bind onto an EXTERNAL
---                                            -- DF-owned FontString (see bindNative)
+--                alert{formatter,anchor,offsetX,offsetY,font,size,outline,level} },
+--                                            -- AD expiry-alert element: a second
+--                                            -- SetDurationText bind onto the slot's
+--                                            -- own dfAlert FontString (see bindNative);
+--                                            -- the non-formatter fields are a TextStyle
+--                                            -- spec applied in styleButton_regions
 -- }
 function AuraContainer:Create(parent, config)
     if not AuraContainer.IsSupported() then return nil end
