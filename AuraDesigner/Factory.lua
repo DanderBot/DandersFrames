@@ -22,7 +22,8 @@ local addonName, DF = ...
 --
 -- COMBAT / SECRET obligations (delegated to the DF.AuraContainer handle, the #205-proven
 -- path): containers are created/enabled OUT of combat and deferred to PLAYER_REGEN_ENABLED
--- in lockdown (Create/_deferRebuild, Rebuild/_deferRebuild, ApplyStyle/_pendingRestyle);
+-- in lockdown (Create/_deferRebuild, Rebuild/_deferRebuild, ApplyStyle/_pendingRestyle,
+-- ApplyTuning/_pendingTuning — the Wave-1 in-place group tuning path);
 -- SetEnabled runs LAST; identity is static config, never a live aura's spellId/duration/
 -- applications/dispelName. SyncFrame's own per-tick work is a cheap sig-compare table walk
 -- and only touches a handle on an actual config change (build-once-leave-it).
@@ -1725,15 +1726,18 @@ end
 -- swap the tables and self-invalidate), entries keyed to DF.auraLayoutVersion
 -- (C2's group edits ride the structural refresh chain, which bumps it). The
 -- cached records table is SHARED across frames within a version — immutable.
+-- Signed in SPLIT halves (Wave 1, the row serializers via DF): struct = record
+-- strings + keys (Rebuild), tuning = per-record candidateFilters (in-place).
 local dgroupResCache = setmetatable({}, { __mode = "k" })
 local function resolveDebuffGroup(group)
     local ver = DF.auraLayoutVersion or 0
     local c = dgroupResCache[group]
-    if c and c.version == ver then return c.records, c.sig end
+    if c and c.version == ver then return c.records, c.structSig, c.tuningSig end
     local records = buildDebuffGroupRecords(group)
-    local sig = records and DF.DebuffFilterRecordsSig and DF:DebuffFilterRecordsSig(records) or ""
-    dgroupResCache[group] = { version = ver, records = records, sig = sig }
-    return records, sig
+    local structSig = records and DF.DebuffFilterRecordsStructSig and DF:DebuffFilterRecordsStructSig(records) or ""
+    local tuningSig = records and DF.DebuffFilterRecordsTuningSig and DF:DebuffFilterRecordsTuningSig(records) or ""
+    dgroupResCache[group] = { version = ver, records = records, structSig = structSig, tuningSig = tuningSig }
+    return records, structSig, tuningSig
 end
 
 -- Full row config for one debuff group. Records ride as cfg.filter exactly like
@@ -2481,10 +2485,12 @@ local function syncFilterGroupList(frame, fg, live, R, groups, keyPrefix)
             if res.kind == "include" and res.map and next(res.map) then
                 local key = "fgroup:" .. keyPrefix .. tostring(group.id)
                 live[key] = true
-                local structSig = selSig
+                -- SPLIT sigs (Wave 1): structural -> Rebuild (recreate), tuning ->
+                -- in-place h:ApplyTuning, cosmetic -> ApplyStyle.
+                local structSig = "f=" .. poolFilter(group)   -- filter string binds at build (othersOnly toggle -> Rebuild)
+                    .. groupStyleStructSig(group)             -- region set + duration format key (group.style)
+                local tuningSig = selSig                      -- selection edits: live include-map swap (config-wide candidateFilters)
                     .. "|max=" .. tostring(math.max(1, tonumber(group.maxIcons) or 8))
-                    .. "|f=" .. poolFilter(group)   -- filter string binds at build (othersOnly toggle -> Rebuild)
-                    .. groupStyleStructSig(group)   -- region set + duration format key (group.style)
                 local coSig = filterGroupCoSig(group)
 
                 local entry = fg[key]
@@ -2492,16 +2498,32 @@ local function syncFilterGroupList(frame, fg, live, R, groups, keyPrefix)
                     local handle = DF.AuraContainer:Create(frame,
                         buildFilterGroupConfig(frame, res.map, group))
                     if handle then
-                        fg[key] = { handle = handle, structSig = structSig, coSig = coSig }
+                        fg[key] = { handle = handle, structSig = structSig,
+                                    tuningSig = tuningSig, coSig = coSig }
                     end
                 elseif entry.structSig ~= structSig then
-                    entry.structSig, entry.coSig = structSig, coSig
+                    entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
                     entry.handle:Rebuild(buildFilterGroupConfig(frame, res.map, group))
-                elseif entry.coSig ~= coSig then
-                    entry.coSig = coSig
-                    entry.handle:ApplyStyle(
-                        buildFilterGroupStyle(group, buildGroupBorderSpec(frame, group)),
-                        buildFilterGroupLayout(group))
+                else
+                    if entry.tuningSig ~= tuningSig then
+                        -- Selection edit / maxIcons with the struct sig stable: tune the
+                        -- live container in place (OOC immediate; ApplyTuning self-defers
+                        -- in combat). The full trio rides the fresh config — max, sort
+                        -- (nil -> Blizzard default, matching build), candidateFilters =
+                        -- the new include map (replace semantics). Swap the map-derived
+                        -- testEntries onto the handle config too, so a test-mode rebuild
+                        -- previews the NEW selection instead of a stale one.
+                        entry.tuningSig = tuningSig
+                        local cfg = buildFilterGroupConfig(frame, res.map, group)
+                        entry.handle.config.testEntries = cfg.testEntries
+                        entry.handle:ApplyTuning(cfg)
+                    end
+                    if entry.coSig ~= coSig then
+                        entry.coSig = coSig
+                        entry.handle:ApplyStyle(
+                            buildFilterGroupStyle(group, buildGroupBorderSpec(frame, group)),
+                            buildFilterGroupLayout(group))
+                    end
                 end
             elseif res.kind == "exclude" then
                 -- Unreachable from the group UI (no Uncategorised option in the
@@ -2944,9 +2966,10 @@ function Factory:SyncFrame(frame)
     -- One handle per filter group, keyed "fgroup:<keyPrefix><id>" — "" for the
     -- spec-keyed groups, OTHER_PREFIX for the flat spec-independent
     -- adDB.otherLayoutGroups store (the two id counters overlap, the prefix keeps
-    -- the keys disjoint). Structural sig = the registry selection signature (live
-    -- link: filter edits / preset updates move it) + max slot count + the
-    -- group.style region set (groupStyleStructSig); the layout fields and
+    -- the keys disjoint). Structural sig = the group filter string + the group.style
+    -- region set (groupStyleStructSig) -> Rebuild. Tuning sig = the registry
+    -- selection signature (live link: filter edits / preset updates move it) + max
+    -- slot count -> in-place ApplyTuning (Wave 1). The layout fields and
     -- cosmetic style fields hot-apply via ApplyStyle. Eye-hidden groups (`enabled == false`;
     -- nil/true = shown) are not marked live -> the sweep destroys their handle.
     -- Same for deleted groups and spec switches (different id set; other-pool
@@ -2974,10 +2997,12 @@ function Factory:SyncFrame(frame)
 
     -- ---- DEBUFF CATEGORY GROUPS (container-backed category rows) — C1 -----------------
     -- One handle per enabled group, keyed "dgroup:<id>". Structural sig = the group's
-    -- resolved filter records (serialized by the row's own filterListSig — a selection
-    -- edit moves the records, the sig follows) + max slot count + the group.style
-    -- region set (groupStyleStructSig); the layout fields and cosmetic style fields
-    -- hot-apply via ApplyStyle. Eye-hidden groups (`enabled == false`), empty selections
+    -- resolved record strings + keys (the row's own struct serializer — a selection
+    -- edit that changes the record SET moves it) + the group.style region set
+    -- (groupStyleStructSig) -> Rebuild. Tuning sig = the records' candidateFilters
+    -- (hideLong / keepImportant / dispel maps) + max slot count -> in-place
+    -- ApplyTuning with the config.filter pre-swap (Wave 1). The layout fields and
+    -- cosmetic style fields hot-apply via ApplyStyle. Eye-hidden groups (`enabled == false`), empty selections
     -- (no records) and deleted groups are not marked live -> the sweep destroys their
     -- handle. adDB.debuffGroups is preset-level and spec-INDEPENDENT (mirror otherAuras),
     -- but rides the same spec gate as the rest of SyncFrame (no spec -> ClearFrame).
@@ -2992,13 +3017,16 @@ function Factory:SyncFrame(frame)
                 if type(group) == "table" and group.enabled ~= false then
                     -- Version-cached: within one auraLayoutVersion this is a table
                     -- lookup; the resolve + record serialization run once per version.
-                    local records, recSig = resolveDebuffGroup(group)
+                    local records, recStructSig, recTuningSig = resolveDebuffGroup(group)
                     if records then
                         local key = "dgroup:" .. tostring(group.id)
                         live[key] = true
-                        local structSig = recSig
-                            .. "|max=" .. tostring(math.max(1, tonumber(group.maxIcons) or 4))
+                        -- SPLIT sigs (Wave 1): structural -> Rebuild (recreate), tuning ->
+                        -- in-place h:ApplyTuning, cosmetic -> ApplyStyle.
+                        local structSig = recStructSig      -- record strings + keys (the SET defines the groups)
                             .. groupStyleStructSig(group)   -- region set + duration format key (group.style)
+                        local tuningSig = recTuningSig      -- per-record candidateFilters (hideLong / keepImportant / dispel maps)
+                            .. "|max=" .. tostring(math.max(1, tonumber(group.maxIcons) or 4))
                         local coSig = filterGroupCoSig(group, 4)
 
                         local entry = dg[key]
@@ -3006,16 +3034,35 @@ function Factory:SyncFrame(frame)
                             local handle = DF.AuraContainer:Create(frame,
                                 buildDebuffGroupConfig(frame, records, group))
                             if handle then
-                                dg[key] = { handle = handle, structSig = structSig, coSig = coSig }
+                                dg[key] = { handle = handle, structSig = structSig,
+                                            tuningSig = tuningSig, coSig = coSig }
                             end
                         elseif entry.structSig ~= structSig then
-                            entry.structSig, entry.coSig = structSig, coSig
+                            entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
                             entry.handle:Rebuild(buildDebuffGroupConfig(frame, records, group))
-                        elseif entry.coSig ~= coSig then
-                            entry.coSig = coSig
-                            entry.handle:ApplyStyle(
-                                buildFilterGroupStyle(group, buildGroupBorderSpec(frame, group)),
-                                buildFilterGroupLayout(group, 4))
+                        else
+                            if entry.tuningSig ~= tuningSig then
+                                -- Tunables live in the RECORDS' candidateFilters, so the
+                                -- mandatory consumer PRE-SWAP applies (Handle:ApplyTuning
+                                -- header): replace config.filter with the fresh GROUP-
+                                -- IDENTICAL record list — legal because the struct sig pins
+                                -- every record's filter string + key — then ApplyTuning;
+                                -- the engine flush re-derives per-record cf from
+                                -- config.filter. The full trio rides the fresh config: max,
+                                -- the hardcoded ExpirationOnly sort (routed through the trio
+                                -- so Wave 2's per-group sort slots in), candidateFilters =
+                                -- nil (dgroups carry no config-wide map).
+                                entry.tuningSig = tuningSig
+                                local cfg = buildDebuffGroupConfig(frame, records, group)
+                                entry.handle.config.filter = cfg.filter
+                                entry.handle:ApplyTuning(cfg)
+                            end
+                            if entry.coSig ~= coSig then
+                                entry.coSig = coSig
+                                entry.handle:ApplyStyle(
+                                    buildFilterGroupStyle(group, buildGroupBorderSpec(frame, group)),
+                                    buildFilterGroupLayout(group, 4))
+                            end
                         end
                     end
                 end

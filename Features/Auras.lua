@@ -1067,6 +1067,21 @@ local function filterTuningSig(f)
     return table.concat(parts, ";")
 end
 
+-- Public split halves for the AD debuff-group containers (AuraDesigner/Factory.lua,
+-- Wave 1) — the record shape is the same one the row folds into its own signatures,
+-- so the groups reuse the exact serializers. Struct half = record strings + keys
+-- (a selection edit that changes the record SET Rebuilds); tuning half = per-record
+-- candidateFilters (applies in place via ApplyTuning + the config.filter pre-swap).
+-- The combined DF:DebuffFilterRecordsSig above stays as the canonical whole-record
+-- serializer (harness equivalence oracle).
+function DF:DebuffFilterRecordsStructSig(records)
+    return filterStructSig(records)
+end
+
+function DF:DebuffFilterRecordsTuningSig(records)
+    return filterTuningSig(records)
+end
+
 -- Row signatures, SPLIT (Wave 1). The old combined buffFactorySig forced a
 -- teardown+recreate for every delta; now:
 --   rowStructSig  — changes need a Rebuild (new container): the filter set
