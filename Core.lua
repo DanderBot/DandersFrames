@@ -1492,23 +1492,31 @@ function DF:MigratePinnedMatchMode()
                         if set.matchMode ~= "party" and set.matchMode ~= "raid" then
                             set.matchMode = mode  -- default / repair → the set's own mode
                         end
-                        if set.useCustomSize ~= nil then
-                            if set.useCustomSize ~= true then
-                                set.customWidth = nil
-                                set.customHeight = nil
+                        -- One-shot per set (flag): the old-default-to-inherit
+                        -- conversions below collide with deliberate values — a
+                        -- user setting scale back to exactly 1.0 (or spacing to
+                        -- 2) as an override had it cleared to "inherit" on
+                        -- every reload. Convert once, then leave the set alone.
+                        if not set._matchOverridesV1 then
+                            if set.useCustomSize ~= nil then
+                                if set.useCustomSize ~= true then
+                                    set.customWidth = nil
+                                    set.customHeight = nil
+                                end
+                                set.useCustomSize = nil
                             end
-                            set.useCustomSize = nil
+                            -- Scale inherits from the Based-on mode unless overridden:
+                            -- a value still at the old hard default (1.0) is treated as
+                            -- "inherit" (cleared); a changed value is kept as override.
+                            if set.scale == 1.0 then set.scale = nil end
+                            -- Spacing inherits the Based-on mode's frameSpacing unless
+                            -- overridden: the old hard default was 2, so a value still
+                            -- at 2 is treated as "inherit" (cleared); a non-2 value is
+                            -- kept as a deliberate override.
+                            if set.horizontalSpacing == 2 then set.horizontalSpacing = nil end
+                            if set.verticalSpacing == 2 then set.verticalSpacing = nil end
+                            set._matchOverridesV1 = true
                         end
-                        -- Scale inherits from the Based-on mode unless overridden:
-                        -- a value still at the old hard default (1.0) is treated as
-                        -- "inherit" (cleared); a changed value is kept as override.
-                        if set.scale == 1.0 then set.scale = nil end
-                        -- Spacing inherits the Based-on mode's frameSpacing unless
-                        -- overridden: the old hard default was 2, so a value still
-                        -- at 2 is treated as "inherit" (cleared); a non-2 value is
-                        -- kept as a deliberate override.
-                        if set.horizontalSpacing == 2 then set.horizontalSpacing = nil end
-                        if set.verticalSpacing == 2 then set.verticalSpacing = nil end
                         -- growDirection is a plain pinned-only setting; an earlier
                         -- build briefly cleared its HORIZONTAL default to nil, so
                         -- restore a concrete value for the dropdown.
@@ -3383,25 +3391,14 @@ DF._MainEventDispatcher = function(self, event, arg1)
             end
         end
         
-        -- Migrate external defensive icon settings to new defensive icon
-        for _, mode in ipairs({"party", "raid"}) do
-            local modeDb = DF.db[mode]
-            if modeDb.externalDefEnabled and not modeDb._defensiveIconMigrated then
-                -- Enable the new defensive icon if the old external def was enabled
-                modeDb.defensiveIconEnabled = true
-                -- Migrate old settings to new ones
-                if modeDb.externalDefScale then modeDb.defensiveIconScale = modeDb.externalDefScale end
-                if modeDb.externalDefAnchor then modeDb.defensiveIconAnchor = modeDb.externalDefAnchor end
-                if modeDb.externalDefX then modeDb.defensiveIconX = modeDb.externalDefX end
-                if modeDb.externalDefY then modeDb.defensiveIconY = modeDb.externalDefY end
-                if modeDb.externalDefBorderColor then modeDb.defensiveIconBorderColor = modeDb.externalDefBorderColor end
-                if modeDb.externalDefBorderSize then modeDb.defensiveIconBorderSize = modeDb.externalDefBorderSize end
-                if modeDb.externalDefShowDuration ~= nil then modeDb.defensiveIconShowDuration = modeDb.externalDefShowDuration end
-                if modeDb.externalDefFrameLevel then modeDb.defensiveIconFrameLevel = modeDb.externalDefFrameLevel end
-                modeDb._defensiveIconMigrated = true
-            end
-        end
-        
+        -- (Removed) The externalDef* -> defensiveIcon* adoption migration. It
+        -- was UNREACHABLE for its entire life: the defaults backfill above
+        -- seeded its `_defensiveIconMigrated = true` guard from PartyDefaults
+        -- before it could ever run (true in v4 as well). The flag left the
+        -- defaults with this removal, and the externalDef* keys plus the flag
+        -- are stripped by the v5 legacy-aura cleanup below.
+
+
         -- (Removed) The v4.0.9 / v4.0.9b one-time FORCED filter stamps used to
         -- live here and below. Unlike every other migration they were not
         -- no-ops on fresh defaults: a profile reset wipes the migration flags
@@ -3848,27 +3845,13 @@ DF._MainEventDispatcher = function(self, event, arg1)
             DF.db.raidAutoEditingRecovery = nil
         end
 
-        -- Clean up Aura Designer entries for spells removed in the HARF→native transition.
-        -- These spells remain secret and can no longer be tracked without HARF.
-        local removedAuras = {
-            "TimeDilation", "Rewind", "VerdantEmbrace",
-            "IronBark", "PainSuppression", "PowerInfusion", "GuardianSpirit",
-            "LifeCocoon", "StrengthOfTheBlackOx",
-            "BlessingOfProtection", "HolyBulwark", "SacredWeapon",
-            "BlessingOfSacrifice",
-        }
-        if DandersFramesDB_v2 and DandersFramesDB_v2.profiles then
-            for _, profile in pairs(DandersFramesDB_v2.profiles) do
-                for _, mode in ipairs({"party", "raid"}) do
-                    local ad = profile[mode] and profile[mode].auraDesigner
-                    if ad and ad.auras then
-                        for _, auraName in ipairs(removedAuras) do
-                            ad.auras[auraName] = nil
-                        end
-                    end
-                end
-            end
-        end
+        -- (Removed) The HARF-era cleanup that deleted AD entries for
+        -- then-untrackable externals (Pain Suppression, Life Cocoon, ...). Its
+        -- premise is obsolete on 12.1 — those spells are live AD registry
+        -- entries again (identity-gated spell-ID tracking) — and the one case
+        -- where it still fired (an ancient pre-preset inline import) would
+        -- have deleted spells v5 CAN track, before conversion. Modern preset
+        -- data was never touched (it only walked the legacy inline store).
 
         -- One-time: force hideBlizzardRaidFrames = true for existing users
         for _, mode in ipairs({"party", "raid"}) do

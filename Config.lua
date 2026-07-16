@@ -913,9 +913,6 @@ DF.GlobalDefaults = {
 -- ============================================================
 
 DF.PartyDefaults = {
-    -- Internal migration flags
-    _defensiveIconMigrated = true,
-
     -- Global Font Shadow Settings (applies when outline is SHADOW)
     fontShadowOffsetX = 1,
     fontShadowOffsetY = -1,
