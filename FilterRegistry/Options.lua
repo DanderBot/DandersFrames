@@ -453,6 +453,14 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
             Echo(L["Enter a valid spell ID."])
             return
         end
+        -- Length cap after zero-strip (same rule as the shared picker):
+        -- past ~15 digits tonumber loses integer precision, and the float
+        -- would persist as a junk key in the account-wide store.
+        text = text:match("^0*(%d+)$") or text
+        if #text > 10 then
+            Echo(L["Enter a valid spell ID."])
+            return
+        end
         local idNum = tonumber(text)
         local result = R:AddSpellToCustom(selKey, idNum)
         if result == "spell" then

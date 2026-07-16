@@ -743,6 +743,16 @@ function R:OpenSpellPicker(opts)
     inst.opts = opts
     local picker = inst.frame
 
+    -- Instances are cached per parent, so one BUILT mid-combat skipped its
+    -- keyboard setup and would never get ESC-close. Retry at every open:
+    -- EnableKeyboard is not the protected call (only
+    -- SetPropagateKeyboardInput is, and the OnKeyDown handler already
+    -- combat-guards those).
+    if not picker:IsKeyboardEnabled() and not InCombatLockdown() then
+        picker:EnableKeyboard(true)
+        picker:SetPropagateKeyboardInput(true)
+    end
+
     picker:ClearAllPoints()
     if opts.points then
         for _, p in ipairs(opts.points) do
