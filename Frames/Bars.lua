@@ -119,23 +119,47 @@ function DF:LayoutResourceBar(frame, db)
     -- WoW rounds it differently per frame, producing a 1px gap alternating left/right.
     local bInset = db.pixelPerfect and DF:PixelPerfect(borderInset) or borderInset
 
+    local anchor = db.resourceBarAnchor or "CENTER"
+    local offX = db.resourceBarX or 0
+    local offY = db.resourceBarY or 0
+    -- Match Width defines the bar by its ENDS, anchored to the same frame
+    -- corners the border edges use. The old single-point anchor + SetWidth
+    -- spread the bar from its anchor, so each end could round onto a different
+    -- physical pixel than the corner-anchored border band — a hairline gap of
+    -- health bar beside the border at small border sizes (UI-scale dependent;
+    -- the bInset snap above fixed only the fractional-width half of it).
+    -- Corner-relative ends round identically to the border by construction.
+    -- The anchor's other axis still places the bar; X/Y offsets still shift it.
+    local edgeInset = padding + bInset
+
     if isVertical then
         -- SWAP: "Width" applies to Height (Length), "Height" applies to Width (Thickness)
         bar:SetWidth(ppThickness)
-        bar:SetHeight(ppLength)
         if db.resourceBarMatchWidth and healthBarHeight > 1 then
-            bar:SetHeight(healthBarHeight - bInset * 2)
+            local topPoint, bottomPoint
+            if anchor:find("LEFT") then topPoint, bottomPoint = "TOPLEFT", "BOTTOMLEFT"
+            elseif anchor:find("RIGHT") then topPoint, bottomPoint = "TOPRIGHT", "BOTTOMRIGHT"
+            else topPoint, bottomPoint = "TOP", "BOTTOM" end
+            bar:SetPoint(topPoint, frame, topPoint, offX, -edgeInset + offY)
+            bar:SetPoint(bottomPoint, frame, bottomPoint, offX, edgeInset + offY)
+        else
+            bar:SetHeight(ppLength)
+            bar:SetPoint(anchor, frame, anchor, offX, offY)
         end
     else
-        bar:SetWidth(ppLength)
         bar:SetHeight(ppThickness)
         if db.resourceBarMatchWidth and healthBarWidth > 1 then
-            bar:SetWidth(healthBarWidth - bInset * 2)
+            local leftPoint, rightPoint
+            if anchor:find("TOP") then leftPoint, rightPoint = "TOPLEFT", "TOPRIGHT"
+            elseif anchor:find("BOTTOM") then leftPoint, rightPoint = "BOTTOMLEFT", "BOTTOMRIGHT"
+            else leftPoint, rightPoint = "LEFT", "RIGHT" end
+            bar:SetPoint(leftPoint, frame, leftPoint, edgeInset + offX, offY)
+            bar:SetPoint(rightPoint, frame, rightPoint, -edgeInset + offX, offY)
+        else
+            bar:SetWidth(ppLength)
+            bar:SetPoint(anchor, frame, anchor, offX, offY)
         end
     end
-
-    local anchor = db.resourceBarAnchor or "CENTER"
-    bar:SetPoint(anchor, frame, anchor, db.resourceBarX or 0, db.resourceBarY or 0)
 
     -- Frame level - relative to the main frame. Default 2 puts it below the frame
     -- border (at +10); values above 10 render above it.
