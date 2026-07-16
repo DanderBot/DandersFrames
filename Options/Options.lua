@@ -7,7 +7,34 @@ local format = string.format
 
 function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     local L = DF.L
-    
+
+    -- Small info banner with a hyperlink to the Colors page, dropped in under a
+    -- "Color by Time Remaining" toggle so users can jump to where the shared,
+    -- account-wide breakpoint colours actually live. Mirrors the Aura Filters
+    -- cross-links (|HdfPage:<id>| markup + onLinkClick -> GUI.SelectTab). `group`
+    -- is the settings group the toggle sits in; `parent` is the page child frame.
+    local function AddColorsPageLink(group, parent)
+        local tc = (GUI.GetThemeColor and GUI.GetThemeColor()) or { r = 1, g = 1, b = 1 }
+        local linkColor = format("|cFF%02X%02X%02X",
+            math.floor((tc.r or 1) * 255), math.floor((tc.g or 1) * 255), math.floor((tc.b or 1) * 255))
+        -- Plain hint with only "Colors page" as the clickable link (jumps to the shared,
+        -- account-wide breakpoint editor). One format-string key so the link can move for
+        -- other locales' word order. No arrow glyph — the DF font renders it as a box.
+        local link = linkColor .. "|HdfPage:display_classcolors|h" .. L["Colors page"] .. "|h|r"
+        local text = format(L["Customize duration colors on the %s."], link)
+        local banner = GUI:CreateInfoBanner(parent, {
+            tone = "info",
+            html = true,
+            text = text,
+            onLinkClick = function(pageId)
+                if GUI.SelectTab then GUI.SelectTab(pageId) end
+            end,
+            minHeight = 28,
+        })
+        group:AddWidget(banner, banner.layoutHeight or 32)
+        return banner
+    end
+
     -- Helper function to create a themed "Copy to Raid/Party" button for a section.
     -- Pass omitReset=true for pages that manage their own reset flow (Aura Designer,
     -- Click Casting) so they only get the Sync/Copy pair, not the destructive trio.
@@ -4279,8 +4306,224 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end
 
         Add(col2, nil, 2)
+
+        -- ===== Column 2 (cont.): Color by Time Remaining =====
+        -- Account-wide duration-colour breakpoints, shared by the buff / debuff / defensive
+        -- rows AND the Aura Designer wherever "Color by Time Remaining" is enabled. Each stop
+        -- colours the duration text from its threshold upward; the highest threshold at or below
+        -- the time left wins. Editing here re-drives the aura formatters live (no /reload).
+        --
+        -- Hybrid editor: a read-only preview strip (low time on the left, high on the right)
+        -- over one row per stop. Each row reuses CreateColorPicker with its LABEL set to the
+        -- human range it covers ("8s and above", "5-8s", "under 2s"), and a small +/- stepper
+        -- moves that stop's lower boundary. Colour edits re-tint the strip in place; boundary
+        -- add/remove/reset rebuild the page so every range label and the strip stay in sync.
+        local cbtGlobalDB = DF:GetGlobalDB()
+        if type(cbtGlobalDB.durationColorByTimeBreakpoints) ~= "table" or #cbtGlobalDB.durationColorByTimeBreakpoints == 0 then
+            cbtGlobalDB.durationColorByTimeBreakpoints = DF:DeepCopy(DF.GlobalDefaults.durationColorByTimeBreakpoints)
+        end
+        local bps = cbtGlobalDB.durationColorByTimeBreakpoints
+        local iconPath = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
+
+        local function cbtT(s) return math.max(0, tonumber(s and s.threshold) or 0) end
+        local function cbtSorted(descending)
+            local out = {}
+            for _, s in ipairs(bps) do out[#out + 1] = s end
+            table.sort(out, function(a, b)
+                if descending then return cbtT(a) > cbtT(b) else return cbtT(a) < cbtT(b) end
+            end)
+            return out
+        end
+
+        local function ApplyColorByTime()
+            if DF.InvalidateDurationFormatters then DF:InvalidateDurationFormatters() end
+            if DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
+            if DF.UpdateAllFrames then DF:UpdateAllFrames() end
+            if DF.AuraDesigner and DF.AuraDesigner.Engine and DF.AuraDesigner.Engine.ForceRefreshAllFrames then
+                DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+            end
+        end
+
+        -- The colour swatch fires its callback on EVERY change (many ticks per wheel drag),
+        -- so debounce the heavy re-drive: only the settled colour rebuilds the containers.
+        -- (add/remove/reset call ApplyColorByTime directly — discrete, no debounce needed.)
+        local cbtApplyTimer
+        local function ScheduleColorApply()
+            if cbtApplyTimer then cbtApplyTimer:Cancel() end
+            cbtApplyTimer = C_Timer.NewTimer(0.2, function()
+                cbtApplyTimer = nil
+                ApplyColorByTime()
+            end)
+        end
+
+        local cbtGroup = GUI:CreateSettingsGroup(self.child, 280)
+        cbtGroup:AddWidget(GUI:CreateHeader(self.child, L["Color by Time"]), 40)
+        cbtGroup:AddWidget(GUI:CreateLabel(self.child, L["Sets the duration-text colors used wherever Color by Time Remaining is enabled (buffs, debuffs, defensives and the Aura Designer)."], 260), 48)
+
+        -- Read-only preview strip: 0s at the left, (highest + a little) at the right.
+        local previewW = 256
+        local asc = cbtSorted(false)
+        local maxT = math.max(12, cbtT(asc[#asc]) + 2)
+        local strip = CreateFrame("Frame", nil, self.child)
+        strip:SetSize(previewW, 18)
+        strip.segs = {}
+        for k = 1, #asc do
+            local lo = cbtT(asc[k])
+            local hi = (k < #asc) and cbtT(asc[k + 1]) or maxT
+            if hi > lo then
+                local tex = strip:CreateTexture(nil, "ARTWORK")
+                tex:SetPoint("TOPLEFT", strip, "TOPLEFT", (lo / maxT) * previewW, 0)
+                tex:SetSize(((hi - lo) / maxT) * previewW, 18)
+                local c = asc[k].color or { r = 1, g = 1, b = 1 }
+                tex:SetColorTexture(c.r or 1, c.g or 1, c.b or 1, 1)
+                strip.segs[asc[k]] = tex
+            end
+        end
+        cbtGroup:AddWidget(strip, 24)
+
+        local function RefreshPreview()
+            for stop, tex in pairs(strip.segs) do
+                local c = stop.color or { r = 1, g = 1, b = 1 }
+                tex:SetColorTexture(c.r or 1, c.g or 1, c.b or 1, 1)
+            end
+        end
+
+        -- One row per stop, freshest (highest threshold) first.
+        local desc = cbtSorted(true)
+        for i = 1, #desc do
+            local bp = desc[i]
+            if type(bp.color) ~= "table" then bp.color = { r = 1, g = 1, b = 1 } end
+            local t = cbtT(bp)
+            local above = (i > 1) and cbtT(desc[i - 1]) or nil
+            local rangeLabel
+            if i == 1 then
+                rangeLabel = format(L["%ds and above"], t)
+            elseif t == 0 then
+                rangeLabel = format(L["under %ds"], above or 0)
+            else
+                rangeLabel = format(L["%d-%ds"], t, above or t)
+            end
+
+            cbtGroup:AddWidget(GUI:CreateColorPicker(self.child, rangeLabel, bp, "color", false, function()
+                RefreshPreview()
+                ScheduleColorApply()
+            end, nil, false), 30)
+
+            -- Boundary stepper (the t == 0 base band has no adjustable lower edge).
+            -- +/- nudge by one; the middle field is typeable for big jumps (8 -> 120).
+            if t ~= 0 then
+                local lowerBound = (i < #desc) and (cbtT(desc[i + 1]) + 1) or 1
+                local upperBound = (i > 1) and (cbtT(desc[i - 1]) - 1) or 600
+                local row = CreateFrame("Frame", nil, self.child)
+                row:SetSize(previewW, 22)
+                local cap = row:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+                cap:SetPoint("LEFT", row, "LEFT", 12, 0)
+                cap:SetText(L["Starts at"])
+                cap:SetTextColor(0.7, 0.7, 0.7)
+
+                local eb
+                local function commitTo(nt)
+                    nt = math.floor(tonumber(nt) or cbtT(bp))
+                    nt = math.max(lowerBound, math.min(upperBound, nt))
+                    if nt == cbtT(bp) then
+                        if eb then eb:SetText(tostring(cbtT(bp))) end
+                        return
+                    end
+                    bp.threshold = nt
+                    ApplyColorByTime()
+                    if pageColors and pageColors.Refresh then pageColors:Refresh() end
+                end
+
+                local minus = CreateFrame("Button", nil, row, "BackdropTemplate")
+                GUI:StyleButton(minus, { width = 22, height = 20, icon = { texture = iconPath .. "remove", size = 12, color = { r = 0.85, g = 0.85, b = 0.85 } } })
+                minus:SetPoint("LEFT", cap, "RIGHT", 8, 0)
+                minus:SetScript("OnClick", function() commitTo(cbtT(bp) - 1) end)
+
+                eb = CreateFrame("EditBox", nil, row)
+                GUI:StyleEditBox(eb)
+                eb:SetSize(42, 20)
+                eb:SetPoint("LEFT", minus, "RIGHT", 4, 0)
+                eb:SetAutoFocus(false)
+                eb:SetNumeric(true)
+                eb:SetMaxLetters(4)
+                eb:SetJustifyH("CENTER")
+                eb:SetText(tostring(t))
+                eb:SetCursorPosition(0)
+                eb:SetScript("OnEnterPressed", function(self)
+                    local text = self:GetText()
+                    self:ClearFocus()
+                    commitTo(text)
+                end)
+                eb:SetScript("OnEscapePressed", function(self)
+                    self:SetText(tostring(cbtT(bp)))
+                    self:ClearFocus()
+                end)
+                eb:SetScript("OnEditFocusLost", function(self)
+                    self:SetText(tostring(cbtT(bp)))
+                end)
+
+                local plus = CreateFrame("Button", nil, row, "BackdropTemplate")
+                GUI:StyleButton(plus, { width = 22, height = 20, icon = { texture = iconPath .. "add", size = 12, color = { r = 0.85, g = 0.85, b = 0.85 } } })
+                plus:SetPoint("LEFT", eb, "RIGHT", 4, 0)
+                plus:SetScript("OnClick", function() commitTo(cbtT(bp) + 1) end)
+
+                if #bps > 2 then
+                    -- Reuse the shared close-X in its default (dismiss) form — grey glyph at
+                    -- rest, white glyph + red hover wash on mouseover, exactly like the GUI's
+                    -- own close button. (No tone="danger" — that tints the glyph red at rest.)
+                    local remBtn = GUI:CreateCloseButton(row, {
+                        size = 20,
+                        onClick = function()
+                            for idx, s in ipairs(bps) do
+                                if s == bp then table.remove(bps, idx) break end
+                            end
+                            ApplyColorByTime()
+                            if pageColors and pageColors.Refresh then pageColors:Refresh() end
+                        end,
+                    })
+                    remBtn:SetPoint("RIGHT", row, "RIGHT", -6, 0)
+                end
+                cbtGroup:AddWidget(row, 24)
+            end
+        end
+
+        local addStopBtn = CreateFrame("Button", nil, self.child, "BackdropTemplate")
+        GUI:StyleButton(addStopBtn, { width = 260, height = 24, text = L["Add Color Stop"] })
+        addStopBtn:SetScript("OnClick", function()
+            -- Drop a new stop into the widest existing gap.
+            local a2 = cbtSorted(false)
+            local mx = math.max(12, cbtT(a2[#a2]) + 2)
+            local bestT, bestGap = nil, -1
+            for k = 1, #a2 do
+                local lo = cbtT(a2[k])
+                local hi = (k < #a2) and cbtT(a2[k + 1]) or mx
+                local mid = math.floor((lo + hi) / 2)
+                if (hi - lo) > bestGap and mid > lo and mid < hi then
+                    bestGap = hi - lo
+                    bestT = mid
+                end
+            end
+            if bestT then bps[#bps + 1] = { threshold = bestT, color = { r = 1, g = 1, b = 1 } } end
+            ApplyColorByTime()
+            if pageColors and pageColors.Refresh then pageColors:Refresh() end
+        end)
+        cbtGroup:AddWidget(addStopBtn, 30)
+
+        local resetStopsBtn = CreateFrame("Button", nil, self.child, "BackdropTemplate")
+        GUI:StyleButton(resetStopsBtn, { width = 260, height = 24, text = L["Reset to Default"] })
+        resetStopsBtn:SetScript("OnClick", function()
+            wipe(bps)
+            for _, dv in ipairs(DF.GlobalDefaults.durationColorByTimeBreakpoints) do
+                bps[#bps + 1] = { threshold = dv.threshold, color = { r = dv.color.r, g = dv.color.g, b = dv.color.b } }
+            end
+            ApplyColorByTime()
+            if pageColors and pageColors.Refresh then pageColors:Refresh() end
+        end)
+        cbtGroup:AddWidget(resetStopsBtn, 30)
+
+        Add(cbtGroup, nil, 2)
     end)
-    
+
     -- ========================================
     -- CATEGORY: Bars
     -- ========================================
@@ -5880,6 +6123,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         })
         local durColor = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Color by Time Remaining"], db, "buffDurationColorByTime", function() self:RefreshStates(); DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
         durColor.disableOn = function(d) return not d.buffShowDuration end
+        AddColorsPageLink(durationGroup, self.child)
         local durHideAbove = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Above Threshold"], db, "buffDurationHideAboveEnabled", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
         durHideAbove.disableOn = function(d) return not d.buffShowDuration end
         local durHideAboveSlider = durationGroup:AddWidget(GUI:CreateSlider(self.child, L["Hide Above (seconds)"], 1, 60, 1, db, "buffDurationHideAboveThreshold", nil, function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 55)
@@ -6140,6 +6384,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         durColorPick.disableOn = function(d) return not d.debuffShowDuration or d.debuffDurationColorByTime end
         local durColor = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Color by Time Remaining"], db, "debuffDurationColorByTime", function() self:RefreshStates(); DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
         durColor.disableOn = function(d) return not d.debuffShowDuration end
+        AddColorsPageLink(durationGroup, self.child)
         local durHideAbove = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Above Threshold"], db, "debuffDurationHideAboveEnabled", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
         durHideAbove.disableOn = function(d) return not d.debuffShowDuration end
         local durHideAboveSlider = durationGroup:AddWidget(GUI:CreateSlider(self.child, L["Hide Above (seconds)"], 1, 60, 1, db, "debuffDurationHideAboveThreshold", nil, function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 55)
@@ -6576,6 +6821,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
         end), 30)
         diDurColorByTime.hideOn = HideDefensiveDurationOptions
+        local diColorsLink = AddColorsPageLink(durationGroup, self.child)
+        diColorsLink.hideOn = HideDefensiveDurationOptions
 
         Add(durationGroup, nil, 1)
 

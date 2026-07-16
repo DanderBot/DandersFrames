@@ -313,9 +313,10 @@ end
 
 -- Build font family members for CreateFontFamily
 -- Uses custom font for supported alphabets, Blizzard fallbacks for others
-local function GetFontFamilyMembers(customFontPath, outline)
+local function GetFontFamilyMembers(customFontPath, outline, size)
     local members = {}
     local coreFont = GameFontNormal
+    size = size or BASE_FONT_SIZE
     
     -- Check if GetFontObjectForAlphabet exists (WoW 11.x+)
     if not coreFont or not coreFont.GetFontObjectForAlphabet then
@@ -338,7 +339,7 @@ local function GetFontFamilyMembers(customFontPath, outline)
             table.insert(members, {
                 alphabet = alphabet,
                 file = customFontPath,
-                height = BASE_FONT_SIZE,
+                height = size,
                 flags = outline,
             })
         else
@@ -346,7 +347,7 @@ local function GetFontFamilyMembers(customFontPath, outline)
             table.insert(members, {
                 alphabet = alphabet,
                 file = blizzFile,
-                height = BASE_FONT_SIZE,
+                height = size,
                 flags = outline,
             })
         end
@@ -355,23 +356,44 @@ local function GetFontFamilyMembers(customFontPath, outline)
     return members
 end
 
--- Create or get a cached font family (keyed by font + outline + shadow)
+-- Create or get a cached font family (keyed by font + outline + size + shadow).
+-- The family is built at the REAL point size (not a scaled base) so text renders
+-- natively — no fractional SetTextScale — while keeping multi-alphabet support.
+--
+-- Sizes are QUANTIZED to half-point steps before keying/building. Two reasons:
+-- (a) float noise — saved scales carry float32 artifacts (buffDurationScale default is
+--     1.2000000476837), so 10*scale from two paths can differ in the 10th decimal and
+--     would mint two families for the same visual size; (b) bounding — families are
+--     permanent global font objects and scale sliders are continuous, so a drag with
+--     per-tick updates would otherwise mint one family per tick. Half a point is below
+--     visual perception at UI text sizes; the residual is absorbed, never SetTextScale'd.
+local function QuantizeFontSize(size)
+    size = tonumber(size) or BASE_FONT_SIZE
+    return math.floor(size * 2 + 0.5) / 2
+end
+-- Single source of truth for the cache key: GetOrCreateFontFamily builds with it and
+-- SafeSetFont's broken-family eviction must reproduce it exactly (a mismatched evict
+-- key would strand the broken entry). Shadow stays LAST so RefreshFontFamilyShadows'
+-- "|shadow" suffix check still identifies shadowed families.
+local function FontFamilyKey(fontPath, outline, useShadow, quantizedSize)
+    return (fontPath or "default"):lower() .. "|" .. (outline or "") .. "|" .. tostring(quantizedSize) .. "|" .. (useShadow and "shadow" or "noshadow")
+end
 local fontFamilyCounter = 0
-local function GetOrCreateFontFamily(fontPath, outline, useShadow)
+local function GetOrCreateFontFamily(fontPath, outline, useShadow, size)
     -- Check if CreateFontFamily API is available (WoW 11.x+)
     if not CreateFontFamily then
         return nil
     end
-    
-    -- Create unique key for this font configuration (include shadow state)
-    local key = (fontPath or "default"):lower() .. "|" .. (outline or "") .. "|" .. (useShadow and "shadow" or "noshadow")
+    size = QuantizeFontSize(size)
+
+    local key = FontFamilyKey(fontPath, outline, useShadow, size)
     
     if fontFamilies[key] then
         return fontFamilies[key]
     end
     
     -- Get font family members
-    local members = GetFontFamilyMembers(fontPath, outline or "")
+    local members = GetFontFamilyMembers(fontPath, outline or "", size)
     if not members then
         return nil  -- API not available or failed
     end
@@ -742,7 +764,7 @@ function DF:SafeSetFont(fontString, fontNameOrPath, fontSize, outline)
     PreloadFont(fontPath)
     
     -- Try to use font family for multi-alphabet support (WoW 11.x+)
-    local fontFamilyName = GetOrCreateFontFamily(fontPath, actualOutline, useShadow)
+    local fontFamilyName = GetOrCreateFontFamily(fontPath, actualOutline, useShadow, fontSize)
 
     if fontFamilyName and _G[fontFamilyName] then
         -- Validate the font family object is usable before calling SetFontObject.
@@ -755,13 +777,17 @@ function DF:SafeSetFont(fontString, fontNameOrPath, fontSize, outline)
             fontString:SetFontObject(_G[fontFamilyName])
         end)
         if not ok then
-            -- Evict the broken cache entry so it gets recreated later
-            local key = (fontPath or "default"):lower() .. "|" .. (actualOutline or "") .. "|" .. (useShadow and "shadow" or "noshadow")
-            fontFamilies[key] = nil
+            -- Evict the broken cache entry so it gets recreated later. Shared key
+            -- builder + same size quantization as GetOrCreateFontFamily — a
+            -- hand-rolled key here would drift (raw vs quantized size) and strand
+            -- the broken entry in the cache forever.
+            fontFamilies[FontFamilyKey(fontPath, actualOutline, useShadow, QuantizeFontSize(fontSize))] = nil
         else
-            -- Use SetTextScale to achieve desired size (font family uses BASE_FONT_SIZE)
-            local scale = fontSize / BASE_FONT_SIZE
-            fontString:SetTextScale(scale)
+            -- The family is built at the real point size now (per-size cache), so the
+            -- glyphs render natively. Clear any fractional scale a prior SafeSetFont left
+            -- on this fontstring — the old BASE_FONT_SIZE + SetTextScale(size/12) path was
+            -- the source of the sub-pixel blur / off-centre drift that got worse with size.
+            fontString:SetTextScale(1)
 
             -- Force WoW to re-render the text with new font properties
             -- This is needed because switching between font families with different outline flags
@@ -859,6 +885,21 @@ end
 
 DF.GlobalDefaults = {
     notifyOutdated = true,
+    -- Colour-by-time breakpoints (account-wide; shared by the buff/debuff/defensive rows
+    -- AND the Aura Designer indicators — they all key off the same duration formatter). Each
+    -- stop applies its colour to remaining durations AT OR ABOVE its threshold (seconds); the
+    -- highest threshold <= remaining wins, so threshold 0 is the base band. The default is a
+    -- low "warn on expiry" ladder tuned for the common case (short HoTs, ~15-30s): a fresh
+    -- HoT reads green and only ramps hot in its final seconds. Editable on the Colours page.
+    durationColorByTimeBreakpoints = {
+        -- Softened traffic-light: same hues off their pure primaries so they don't glare on
+        -- dark icons. Keep in sync with DEFAULT_DURATION_BREAKPOINTS (Features/Auras.lua) so
+        -- "Reset to Default" and the engine fallback agree. Hex: 73d373/f5d15c/f29952/e66666.
+        { threshold = 8, color = { r = 0.451, g = 0.827, b = 0.451 } },  -- green  (fresh / healthy, >=8s)
+        { threshold = 5, color = { r = 0.961, g = 0.82,  b = 0.361 } },  -- gold   (5-8s)
+        { threshold = 2, color = { r = 0.949, g = 0.6,   b = 0.322 } },  -- orange (2-5s)
+        { threshold = 0, color = { r = 0.902, g = 0.4,   b = 0.4   } },  -- red    (<2s, about to fall off)
+    },
 }
 
 -- ============================================================
@@ -1043,7 +1084,7 @@ DF.PartyDefaults = {
     buffDurationFormat = "NUMBER",
     buffDurationOutline = "SHADOW;OUTLINE",
     buffDurationScale = 1.2000000476837,
-    buffDurationX = 1,
+    buffDurationX = 0,
     buffDurationY = 2,
     buffExpiringBorderColor = {r = 1, g = 0.50196081399918, b = 0, a = 1},
     buffExpiringBorderColorByTime = false,
@@ -1111,7 +1152,7 @@ DF.PartyDefaults = {
     buffHideSwipe = false,
     buffMax = 4,
     buffOffsetX = -2,
-    buffOffsetY = 5,
+    buffOffsetY = 6,
     buffPaddingX = 2,
     buffPaddingY = 2,
     buffScale = 1,
@@ -1125,7 +1166,7 @@ DF.PartyDefaults = {
     buffStackOutline = "SHADOW;OUTLINE",
     buffStackScale = 1,
     buffStackX = 3,
-    buffStackY = 0,
+    buffStackY = -2,
     buffWrap = 2,
     buffWrapOffsetX = 0,
     buffWrapOffsetY = 0,
@@ -1306,8 +1347,8 @@ DF.PartyDefaults = {
     defensiveIconDurationColor = {r = 1, g = 1, b = 1},
     defensiveIconDurationColorByTime = false,
     defensiveIconDurationFont = "DF Roboto SemiBold",
-    defensiveIconDurationOutline = "SHADOW",
-    defensiveIconDurationScale = 1.0499999523163,
+    defensiveIconDurationOutline = "SHADOW;OUTLINE",
+    defensiveIconDurationScale = 1.4,
     defensiveIconDurationX = 0,
     defensiveIconDurationY = 0,
     defensiveIconEnabled = true,
@@ -2362,22 +2403,22 @@ DF.PartyDefaults = {
             iconScale = 1.0,
             showDuration = true,
             showStacks = true,
-            durationFont = "Friz Quadrata TT",
-            durationScale = 1.0,
-            durationOutline = "OUTLINE",
+            durationFont = "DF Roboto SemiBold",
+            durationScale = 1.2,
+            durationOutline = "SHADOW;OUTLINE",
             durationAnchor = "CENTER",
             durationX = 0,
             durationY = 0,
-            stackFont = "Friz Quadrata TT",
+            stackFont = "DF Roboto SemiBold",
             stackScale = 1.0,
-            stackOutline = "OUTLINE",
+            stackOutline = "SHADOW;OUTLINE",
             stackAnchor = "BOTTOMRIGHT",
-            stackX = 0,
-            stackY = 0,
+            stackX = 2,
+            stackY = -2,
             iconBorderEnabled = true,
             iconBorderThickness = 1,
             stackMinimum = 2,
-            durationColorByTime = false,
+            durationColorByTime = true,
             durationColor = {r = 1, g = 1, b = 1, a = 1},
             stackColor = {r = 1, g = 1, b = 1, a = 1},
             hideIcon = false,
@@ -2475,7 +2516,9 @@ function DF:GetGlobalDB()
     DandersFramesDB_v2.global = DandersFramesDB_v2.global or {}
     for k, v in pairs(DF.GlobalDefaults) do
         if DandersFramesDB_v2.global[k] == nil then
-            DandersFramesDB_v2.global[k] = v
+            -- DeepCopy table defaults so the SavedVariable never shares a reference with
+            -- DF.GlobalDefaults (else editing the saved value would mutate the template).
+            DandersFramesDB_v2.global[k] = (type(v) == "table" and DF.DeepCopy) and DF:DeepCopy(v) or v
         end
     end
     return DandersFramesDB_v2.global

@@ -516,7 +516,10 @@ local function styleButton_regions(slot, config)
     local durSpec = style.duration
     if isRow and durSpec and durSpec.show then
         if not slot.dfDur then
-            slot.dfDurHolder = makeHolder(slot, durSpec.level or 6)
+            -- Holder ABOVE the +10 DF.Border (and the +12 dispel ring): content text
+            -- must draw ON TOP of the icon border, never under it. See the dispel-border
+            -- holder note below for the same +10-clearance rationale.
+            slot.dfDurHolder = makeHolder(slot, durSpec.level or 13)
             slot.dfDur = slot.dfDurHolder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         end
         DF.TextStyle:Apply(slot.dfDur, durSpec, slot.dfDurHolder)
@@ -526,7 +529,10 @@ local function styleButton_regions(slot, config)
     local stackSpec = style.stacks
     if isRow and stackSpec and stackSpec.show then
         if not slot.dfStack then
-            slot.dfStackHolder = makeHolder(slot, stackSpec.level or 7)
+            -- Holder ABOVE the +10 DF.Border and +12 dispel ring (one above the duration
+            -- text): the stack count is the top-most content and was rendering UNDER the
+            -- icon border at the old +7 (Krathe 2026-07-15).
+            slot.dfStackHolder = makeHolder(slot, stackSpec.level or 14)
             slot.dfStack = slot.dfStackHolder:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
         end
         DF.TextStyle:Apply(slot.dfStack, stackSpec, slot.dfStackHolder)
@@ -590,7 +596,9 @@ local function styleButton_regions(slot, config)
     local nameSpec = style.spellName
     if isRow and nameSpec and nameSpec.show then
         if not slot.dfName then
-            slot.dfNameHolder = makeHolder(slot, 5)
+            -- Above the +10 border / +12 dispel ring (see duration holder) so the spell
+            -- name never renders under the icon border.
+            slot.dfNameHolder = makeHolder(slot, 13)
             slot.dfName = slot.dfNameHolder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         end
         slot.dfName:ClearAllPoints()
@@ -642,7 +650,9 @@ local function styleButton_regions(slot, config)
             slot.dfAuraBorder:SetTexCoord(aX, 1 - aX, aY, 1 - aY)
         end
         if dispelSpec.nativeSymbol and not slot.dfSymbol then
-            slot.dfSymbolHolder = makeHolder(slot, 7)
+            -- Above the +10 border / +12 dispel ring (see duration holder) so the dispel
+            -- symbol glyph sits on top of the icon border, not under it.
+            slot.dfSymbolHolder = makeHolder(slot, 13)
             slot.dfSymbol = slot.dfSymbolHolder:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
             slot.dfSymbol:SetPoint("CENTER")
         end
