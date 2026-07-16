@@ -357,6 +357,41 @@ local function makeHolder(button, levelOffset)
     return h
 end
 
+-- Shared duration-bar STYLING, applied to BOTH bar shapes (fill and strip): fill
+-- texture, orientation (fill-only — a strip is horizontal by definition, so the
+-- gate lives here to keep the fill path's call order byte-identical), reverse-fill,
+-- background colour/texture child, fill colour. GEOMETRY stays per-shape at the
+-- call sites (fill = SetAllPoints, strip = relative edge anchors). dr/dg/db2/da are
+-- the caller's colour fallback (fill's legacy white vs the strip's legacy green).
+local function styleBarShared(slot, sb, barSpec, dr, dg, db2, da)
+    if barSpec.texture and DF.SafeSetStatusBarTexture then
+        DF:SafeSetStatusBarTexture(sb, barSpec.texture)
+    end
+    if barSpec.fill and barSpec.orientation and sb.SetOrientation then sb:SetOrientation(barSpec.orientation) end
+    if sb.SetReverseFill then sb:SetReverseFill(barSpec.reverseFill and true or false) end
+    -- Background texture child (drawn under the fill). Create-once; recolour live.
+    if barSpec.bgColor or barSpec.bgTexture then
+        if not slot.dfBarBG then
+            slot.dfBarBG = sb:CreateTexture(nil, "BACKGROUND")
+            slot.dfBarBG:SetAllPoints(sb)
+        end
+        local cr, cg, cb, ca = readColor(barSpec.bgColor, 0.15, 0.15, 0.15, 0.8)
+        if barSpec.bgTexture then
+            -- Textured background: tint the supplied texture via vertex colour.
+            slot.dfBarBG:SetTexture(barSpec.bgTexture)
+            slot.dfBarBG:SetVertexColor(cr, cg, cb, ca)
+        else
+            -- Solid colour, no texture: paint it directly. SetVertexColor alone
+            -- tints NOTHING when the texture has no source, so a bgColor set
+            -- without a bgTexture never showed (this bug).
+            slot.dfBarBG:SetColorTexture(cr, cg, cb, ca)
+        end
+    elseif slot.dfBarBG then
+        slot.dfBarBG:SetColorTexture(0, 0, 0, 0)   -- background cleared
+    end
+    sb:SetStatusBarColor(readColor(barSpec.color, dr, dg, db2, da))
+end
+
 -- ============================================================
 -- BUTTON STYLING — split into two source-agnostic halves (F1 two-halves design):
 --   styleButton_regions(slot, config) — creates/positions/fonts/colours EVERY region.
@@ -568,8 +603,13 @@ local function styleButton_regions(slot, config)
     --   * barSpec.fill (Aura Designer bar indicator, P4.4): the StatusBar IS the slot
     --     content, filling it edge-to-edge — no icon, no square, no swipe. Native
     --     SetDurationBar drives the value from the aura's Duration object (read-free).
-    --     Texture / fill-colour / orientation / reverse-fill / background from config.
-    --   * legacy strip (dormant #205 duration-bar option): a short bar hung below the icon.
+    --   * strip (#205 duration-bar option, Wave 3): a short horizontal bar hung off the
+    --     slot's bottom (or top) edge — barSpec.position "BOTTOM"/"TOP", barSpec.gap
+    --     (icon-edge → strip distance), barSpec.height.
+    -- Styling (texture / orientation / reverse-fill / background / colour) is SHARED
+    -- via styleBarShared; geometry is per-shape below. Both shapes style the SAME
+    -- slot.dfBar region, so the single SetDurationBar bind (bindNative, bind-once)
+    -- serves whichever shape the config picked — never both, never a double bind.
     local barSpec = style.bar
     if isRow and barSpec and barSpec.show then
         if not slot.dfBar then
@@ -579,42 +619,30 @@ local function styleButton_regions(slot, config)
         end
         local sb = slot.dfBar
         if barSpec.fill then
-            -- Re-anchor to fill the slot every pass (idempotent; safe on ApplyStyle).
+            -- FILL geometry: re-anchor to fill the slot every pass (idempotent; safe on ApplyStyle).
             sb:ClearAllPoints()
             sb:SetAllPoints(slot)
-            if barSpec.texture and DF.SafeSetStatusBarTexture then
-                DF:SafeSetStatusBarTexture(sb, barSpec.texture)
-            end
-            if barSpec.orientation and sb.SetOrientation then sb:SetOrientation(barSpec.orientation) end
-            if sb.SetReverseFill then sb:SetReverseFill(barSpec.reverseFill and true or false) end
-            -- Background texture child (drawn under the fill). Create-once; recolour live.
-            if barSpec.bgColor or barSpec.bgTexture then
-                if not slot.dfBarBG then
-                    slot.dfBarBG = sb:CreateTexture(nil, "BACKGROUND")
-                    slot.dfBarBG:SetAllPoints(sb)
-                end
-                local cr, cg, cb, ca = readColor(barSpec.bgColor, 0.15, 0.15, 0.15, 0.8)
-                if barSpec.bgTexture then
-                    -- Textured background: tint the supplied texture via vertex colour.
-                    slot.dfBarBG:SetTexture(barSpec.bgTexture)
-                    slot.dfBarBG:SetVertexColor(cr, cg, cb, ca)
-                else
-                    -- Solid colour, no texture: paint it directly. SetVertexColor alone
-                    -- tints NOTHING when the texture has no source, so a bgColor set
-                    -- without a bgTexture never showed (this bug).
-                    slot.dfBarBG:SetColorTexture(cr, cg, cb, ca)
-                end
-            elseif slot.dfBarBG then
-                slot.dfBarBG:SetColorTexture(0, 0, 0, 0)   -- background cleared
-            end
-            sb:SetStatusBarColor(readColor(barSpec.color, 1, 1, 1, 1))
         else
-            if sb:GetNumPoints() == 0 then
-                sb:SetPoint("TOPLEFT", slot, "BOTTOMLEFT", 0, -2)
-                sb:SetPoint("TOPRIGHT", slot, "BOTTOMRIGHT", 0, -2)
+            -- STRIP geometry: width follows the button via left+right edge anchors;
+            -- gap/height are CONFIG values (relative SetPoint only — the slot rect is
+            -- secret, never measured, §20c). Re-anchored every pass so position/gap/
+            -- height edits apply live via ApplyStyle.
+            local gap = tonumber(barSpec.gap) or 2
+            sb:ClearAllPoints()
+            if barSpec.position == "TOP" then
+                sb:SetPoint("BOTTOMLEFT", slot, "TOPLEFT", 0, gap)
+                sb:SetPoint("BOTTOMRIGHT", slot, "TOPRIGHT", 0, gap)
+            else   -- default BOTTOM: hang below the icon
+                sb:SetPoint("TOPLEFT", slot, "BOTTOMLEFT", 0, -gap)
+                sb:SetPoint("TOPRIGHT", slot, "BOTTOMRIGHT", 0, -gap)
             end
-            sb:SetStatusBarColor(readColor(barSpec.color, 0.2, 0.9, 0.3, 1))
             sb:SetHeight(barSpec.height or 4)
+        end
+        -- Shared styling; colour fallback per shape (fill white / strip legacy green).
+        if barSpec.fill then
+            styleBarShared(slot, sb, barSpec, 1, 1, 1, 1)
+        else
+            styleBarShared(slot, sb, barSpec, 0.2, 0.9, 0.3, 1)
         end
     end
 

@@ -1146,6 +1146,10 @@ local function rowStructSig(cfg)
         tostring(s.stacks and s.stacks.formatKey),
         tostring(s.border ~= nil), tostring(s.cooldown and s.cooldown.show ~= false),
         tostring(s.dispel ~= nil),          -- native dispel border (region is create-once -> Rebuild)
+        -- Duration bar: region is create-once (presence -> Rebuild), and strip geometry
+        -- reserves layout space OUTSIDE the button rect (Wave 3.2), so shape/position/
+        -- height/gap changes are structural too — the reservation must re-derive.
+        tostring(s.bar ~= nil), tostring(s.bar and (tostring(s.bar.fill) .. ":" .. tostring(s.bar.position) .. ":" .. tostring(s.bar.height) .. ":" .. tostring(s.bar.gap))),
     }, "|")
 end
 
