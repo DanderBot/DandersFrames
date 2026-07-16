@@ -927,6 +927,29 @@ local function resolveGrowthLayout(L)
     return out
 end
 
+-- STRIP RESERVATION (Wave 3.2). A strip-shape duration bar renders OUTSIDE the
+-- button rect (3.1): `height + gap` px beyond the slot edge on the side
+-- barSpec.position names. Nothing in the flow layout knows about it, so wrapped
+-- rows collide with the strips. The reservation is derived from CONFIG only —
+-- never measured (button rects are secret, §20c): returns the px to reserve
+-- (0 = fill / no bar / hidden) plus whether the strip sits on TOP of the icon.
+-- Consumed in two places, both reached from build AND from the live applyLayout:
+--   * buildGroupLayout folds it into elementHeight — the flow's GetElementSize
+--     OVERRIDES the measured button height with elementHeight, so the row stride
+--     AND the container's self-size grow by the reservation. The extra space
+--     lands on the side AWAY from the flow's start corner, which covers every
+--     between-row gap (clearance = reservation + spacingY exactly) and the
+--     far-side boundary row.
+--   * applyContainerLayout insets the START side via the layout padding when the
+--     strip FACES it (TOP strip on downward growth / BOTTOM strip on upward) —
+--     otherwise the first row's strips poke past the container's start edge at
+--     the user's anchor.
+local function stripReservation(config)
+    local bar = config.style and config.style.bar
+    if not (bar and bar.show and not bar.fill) then return 0, false end
+    return (tonumber(bar.height) or 4) + (tonumber(bar.gap) or 2), bar.position == "TOP"
+end
+
 local function applyContainerLayout(c, handle)
     local config = handle.config
     local L = config.layout or {}
@@ -950,6 +973,23 @@ local function applyContainerLayout(c, handle)
         rowWidth = wrap * sx + (wrap - 1) * spX + headroom
     end   -- nil -> math.huge (no wrap) inside SetAuraLayoutRowWidth
 
+    -- Strip reservation, start-side inset (see stripReservation): only when the strip
+    -- faces the flow's vertical start. Padding is config-derived, live (MarkDirty
+    -- AuraFrameLayout) and counted into the container's self-size, so CENTER-growth
+    -- edge pinning stays centred over the reserved box. The call is SKIPPED unless
+    -- padding is (or ever was) non-zero on this container — no-bar/fill containers
+    -- keep the exact pre-strip native call sequence; _dfPadApplied clears a stale
+    -- inset if a live restyle flips the strip to the far side (or to fill).
+    local resv, topStrip = stripReservation(config)
+    local padTop, padBottom = 0, 0
+    if resv > 0 then
+        if G.vName == "Up" then
+            if not topStrip then padBottom = resv end
+        elseif topStrip then
+            padTop = resv
+        end
+    end
+
     pcall(function()
         c:SetScale(scale)
         -- Pin the container to the frame's anchor point + offsets. Directional
@@ -967,6 +1007,10 @@ local function applyContainerLayout(c, handle)
             if h ~= nil and v ~= nil then c:SetAuraLayoutGrowthDirection(h, v) end
         end
         c:SetAuraLayoutRowWidth(rowWidth)
+        if padTop > 0 or padBottom > 0 or c._dfPadApplied then
+            c._dfPadApplied = (padTop > 0 or padBottom > 0) or nil
+            c:SetAuraLayoutPadding(0, 0, padTop, padBottom)
+        end
     end)
 end
 
@@ -985,7 +1029,11 @@ local function buildGroupLayout(config)
     local spY = (L.spacingY or L.spacing or 4)
     return {
         elementWidth    = sx,
-        elementHeight   = sy,
+        -- + strip reservation: elementHeight overrides the measured button height in
+        -- the flow (GetElementSize), so the row stride and the container self-size
+        -- both grow by the strip's out-of-rect space (0 for fill / no bar). The
+        -- start-side inset half of the reservation lives in applyContainerLayout.
+        elementHeight   = sy + stripReservation(config),
         elementSpacingX = spX,
         elementSpacingY = spY,
         gapX            = 0,
