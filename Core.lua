@@ -4262,34 +4262,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
             DF:InitializeFrames()
         end
 
-        -- Initialize Masque support if available
-        local Masque = LibStub and LibStub("Masque", true)
-        if Masque then
-            DF.Masque = Masque
-            DF.MasqueGroup_Buffs = Masque:Group("DandersFrames", "Buffs")
-            DF.MasqueGroup_Debuffs = Masque:Group("DandersFrames", "Debuffs")
-            
-            -- Callback when Masque skin changes (using newer API)
-            local function MasqueCallback(event, Group, SkinID, Backdrop, Shadow, Gloss, Colors, Disabled)
-                -- Reskin happens automatically, but we may need to refresh
-                if DF.UpdateAllFrames then
-                    C_Timer.After(0.1, function()
-                        DF:UpdateAllFrames()
-                    end)
-                end
-            end
-            
-            -- Use newer RegisterCallback API if available, fallback to SetCallback
-            if DF.MasqueGroup_Buffs.RegisterCallback then
-                DF.MasqueGroup_Buffs:RegisterCallback("Group_ReSkin", MasqueCallback)
-                DF.MasqueGroup_Debuffs:RegisterCallback("Group_ReSkin", MasqueCallback)
-            elseif DF.MasqueGroup_Buffs.SetCallback then
-                -- Fallback for older Masque versions
-                DF.MasqueGroup_Buffs:SetCallback(MasqueCallback)
-                DF.MasqueGroup_Debuffs:SetCallback(MasqueCallback)
-            end
-        end
-        
     elseif event == "PLAYER_LOGIN" then
         -- Check for NephUI
         -- NOTE: NephUI previously contained stolen DandersFrames code. A compatibility

@@ -1608,9 +1608,6 @@ DF.PartyDefaults = {
     leaderIconX = 0,
     leaderIconY = 6,
 
-    -- Masque
-    masqueBorderControl = false,
-
     -- Minimap
     minimapIcon = {
         hide = false,

@@ -81,7 +81,7 @@ DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally chan
 * (Auras) **Debuffs now render through the 12.1 aura engine** — the last row on the legacy path, which could show nothing in combat. Layout, borders, text and sort work like the buff row, and a new "Dispel Border Inset" slider positions the dispel ring.
 * (Auras) Buff "Sort Order" works again — Time Remaining and Alphabetical apply natively, in combat too.
 * (Auras) New "Hide Long Buffs" filter: hides buffs whose total duration exceeds a threshold — e.g. hour-long food buffs. Permanent buffs are also hidden while this is on.
-* (Interface) Buff Border settings no longer hide when Masque's "Let Masque control borders" is on — Masque can't skin the 12.1 aura buttons, so DF's own border applies.
+* (Auras) **Masque skinning support has been retired** — the new 12.1 aura icons can't be skinned by third-party addons, so the Masque option on the Integrations page no longer did anything and has been removed. DF's own border settings always apply.
 * (Auras) Texture-style aura borders no longer scatter, lose their colour or vanish until a /reload — and fine border detail stays crisp at small icon sizes.
 * (Auras) "Color by Time Remaining" works again on duration text, ticking in combat — fixed time steps (red under 5s, orange under 15s, yellow under a minute).
 * (Auras) Buff and defensive icon text share one styling system, adding Duration and Stack colour options. The "Short" format no longer shows a stray space.

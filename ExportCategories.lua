@@ -1159,7 +1159,6 @@ DF.ExportCategories = {
         "hoverHighlightInset",
         "hoverHighlightMode",
         "hoverHighlightThickness",
-        "masqueBorderControl",
         "oorAbsorbBarAlpha",
         "oorAuraDesignerAlpha",
         "oorAurasAlpha",

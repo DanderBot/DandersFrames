@@ -148,8 +148,8 @@ Notes:
 These remain separate by design and are not routed through the helpers: the
 **Dispel overlay** borders (need direct StatusBar colour control), the
 **Highlights / marching-ants selection** system, and the legacy **Targeted
-Spell** page (superseded by Targeted List). Masque integration remains a
-legitimate pass-through.
+Spell** page (superseded by Targeted List). (Masque integration has been
+retired — Masque cannot skin the 12.1 container aura buttons.)
 
 ## Performance
 

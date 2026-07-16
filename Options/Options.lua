@@ -4170,24 +4170,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         
         Add(colorPickerGroup, nil, 1)
         
-        -- ===== MASQUE GROUP (Column 2) =====
-        local masqueGroup = GUI:CreateSettingsGroup(self.child, 280)
-        masqueGroup:AddWidget(GUI:CreateHeader(self.child, L["Masque Integration"]), 40)
-        
-        if DF.Masque then
-            local masqueBorderChk = masqueGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Let Masque Control Aura Borders"], db, "masqueBorderControl", function()
-                if DF.ApplyLayout then DF:ApplyLayout() end
-                if DF.UpdateAllFrames then DF:UpdateAllFrames() end
-                print("|cff00ff00DandersFrames:|r Masque border control " .. (db.masqueBorderControl and L["enabled"] or L["disabled"]) .. ". A /reload may be needed.")
-            end), 30)
-            GUI:BlockControl12_1(masqueBorderChk, "roadmap", { id = "integrations:masqueborder", page = L["Integrations"] })
-            masqueGroup:AddWidget(GUI:CreateLabel(self.child, L["When enabled, Masque skins aura icons and borders. DF border settings will be disabled."], 250), 45)
-        else
-            masqueGroup:AddWidget(GUI:CreateLabel(self.child, L["Masque addon is not installed.\n\nMasque allows you to skin buff/debuff icons with custom textures. Install Masque from CurseForge to enable."], 250), 75)
-        end
-        
-        Add(masqueGroup, nil, 2)
-        
+        -- (Masque Integration group removed on 12.1: Masque cannot skin the
+        -- native container aura buttons — its script hooks and backdrops are
+        -- blocked on the protected buttons — so the toggle had no effect.)
+
         -- (Click-Through Icons group removed on 12.1: the container aura buttons
         -- are always click-through by design — Blizzard's AlwaysPropagateInput +
         -- the factory's unconditional SetMouseClickEnabled(false) — so the toggle
@@ -6104,21 +6090,12 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local appearanceSection = Add(GUI:CreateCollapsibleSection(self.child, L["Appearance"], true), 36, "both")
         currentSection = appearanceSection
 
-        local function MasqueControlsBorders(d)
-            -- Masque can't skin the native 12.1 container buttons, so while the
-            -- factory owns the row DF's own border renders regardless of the
-            -- Integrations toggle — don't hide the border controls for it.
-            return DF.Masque and d.masqueBorderControl and not DF:FactoryOwnsBuffRow(d)
-        end
-
         -- Border Group (col1)
         local borderGroup = GUI:CreateSettingsGroup(self.child, 260)
         borderGroup:AddWidget(GUI:CreateHeader(self.child, L["Border"]), 40)
-        local buffMasqueNote = borderGroup:AddWidget(GUI:CreateNote(self.child, L["Borders controlled by Masque."] .. " " .. L["See Integrations."], {tone = "caution", width = 230}), 30)
-        buffMasqueNote.hideOn = function(d) return not MasqueControlsBorders(d) end
         -- Full border toolkit via the unified helper (Stage 5.5 Phase 2).  No
         -- class/role colour (aura indicators aren't unit-class).  Hidden when
-        -- buffs are off or Masque controls the borders.
+        -- buffs are off.
         -- Border Animation is intentionally NOT offered on the buff/debuff rows:
         -- these containers can hold many icons and animating each border is a
         -- per-frame FPS cost, so DF exposes border animations only on the
@@ -6132,7 +6109,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             lightUpdate   = function() DF:LightweightUpdateAuraBorder("buff") end,
             lightColors   = function() DF:LightweightUpdateAuraBorder("buff") end,
             refreshStates = function() self:RefreshStates() end,
-            hideWhen      = function(d) return not d.showBuffs or MasqueControlsBorders(d) end,
+            hideWhen      = function(d) return not d.showBuffs end,
         })
         AddToSection(borderGroup, nil, 1)
         
@@ -6374,11 +6351,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local appearanceSection = Add(GUI:CreateCollapsibleSection(self.child, L["Appearance"], true), 36, "both")
         currentSection = appearanceSection
         
-        local function MasqueControlsBorders(d)
-            -- Masque can't skin the native 12.1 container buttons (see the buff page).
-            return DF.Masque and d.masqueBorderControl and not DF:FactoryOwnsDebuffRow(d)
-        end
-        
         local function InvalidateAndUpdate()
             DF.debuffBorderCurve = nil
             DF:UpdateAllFrames()
@@ -6387,8 +6359,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Border Group (col1)
         local borderGroup = GUI:CreateSettingsGroup(self.child, 260)
         borderGroup:AddWidget(GUI:CreateHeader(self.child, L["Border"]), 40)
-        local debuffMasqueNote = borderGroup:AddWidget(GUI:CreateNote(self.child, L["Borders controlled by Masque."] .. " " .. L["See Integrations."], {tone = "caution", width = 230}), 30)
-        debuffMasqueNote.hideOn = function(d) return not MasqueControlsBorders(d) end
         -- Full border toolkit via the unified helper (Stage 5.5 Phase 2).  When
         -- "Color by Dispel Type" (below) is ON, the border is forced SOLID and
         -- recoloured per dispel type, so Style/Colour/Gradient here only take
@@ -6403,34 +6373,32 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             lightUpdate   = function() DF:LightweightUpdateAuraBorder("debuff") end,
             lightColors   = function() DF:LightweightUpdateAuraBorder("debuff") end,
             refreshStates = function() self:RefreshStates() end,
-            hideWhen      = function(d) return not d.showDebuffs or MasqueControlsBorders(d) end,
+            hideWhen      = function(d) return not d.showDebuffs end,
         })
         local colorByType = borderGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Color by Dispel Type"], db, "debuffBorderColorByType", InvalidateAndUpdate), 30)
-        colorByType.disableOn = function(d) return not d.debuffShowBorder or MasqueControlsBorders(d) end
-        colorByType.hideOn = function(d) return MasqueControlsBorders(d) end
+        colorByType.disableOn = function(d) return not d.debuffShowBorder end
         -- 12.1 rows: the native dispel ring's inset (+ inward / - outward halo; the
         -- ring geometry is ours even though Blizzard tints it). Live via restyle.
         local dispelInset = borderGroup:AddWidget(GUI:CreateSlider(self.child, L["Dispel Border Inset"], -8, 8, 1, db, "debuffDispelBorderInset", nil, function() DF:LightweightUpdateAuraBorder("debuff") end, true), 55)
-        dispelInset.disableOn = function(d) return not d.debuffBorderColorByType or MasqueControlsBorders(d) end
-        dispelInset.hideOn = function(d) return MasqueControlsBorders(d) or not DF:FactoryOwnsDebuffRow(d) end
+        dispelInset.disableOn = function(d) return not d.debuffBorderColorByType end
+        dispelInset.hideOn = function(d) return not DF:FactoryOwnsDebuffRow(d) end
         AddToSection(borderGroup, nil, 1)
         
         -- Dispel Colors Group (col2)
         local colorsGroup = GUI:CreateSettingsGroup(self.child, 260)
         colorsGroup:AddWidget(GUI:CreateHeader(self.child, L["Dispel Type Colors"]), 40)
         local magicColor = colorsGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Magic"], db, "debuffBorderColorMagic", false, InvalidateAndUpdate, function() DF:LightweightUpdateDebuffBorderColors() end, true), 30)
-        magicColor.disableOn = function(d) return not d.debuffShowBorder or not d.debuffBorderColorByType or MasqueControlsBorders(d) end
+        magicColor.disableOn = function(d) return not d.debuffShowBorder or not d.debuffBorderColorByType end
         local curseColor = colorsGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Curse"], db, "debuffBorderColorCurse", false, InvalidateAndUpdate, function() DF:LightweightUpdateDebuffBorderColors() end, true), 30)
-        curseColor.disableOn = function(d) return not d.debuffShowBorder or not d.debuffBorderColorByType or MasqueControlsBorders(d) end
+        curseColor.disableOn = function(d) return not d.debuffShowBorder or not d.debuffBorderColorByType end
         local diseaseColor = colorsGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Disease"], db, "debuffBorderColorDisease", false, InvalidateAndUpdate, function() DF:LightweightUpdateDebuffBorderColors() end, true), 30)
-        diseaseColor.disableOn = function(d) return not d.debuffShowBorder or not d.debuffBorderColorByType or MasqueControlsBorders(d) end
+        diseaseColor.disableOn = function(d) return not d.debuffShowBorder or not d.debuffBorderColorByType end
         local poisonColor = colorsGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Poison"], db, "debuffBorderColorPoison", false, InvalidateAndUpdate, function() DF:LightweightUpdateDebuffBorderColors() end, true), 30)
-        poisonColor.disableOn = function(d) return not d.debuffShowBorder or not d.debuffBorderColorByType or MasqueControlsBorders(d) end
+        poisonColor.disableOn = function(d) return not d.debuffShowBorder or not d.debuffBorderColorByType end
         local bleedColor = colorsGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Bleed / Enrage"], db, "debuffBorderColorBleed", false, InvalidateAndUpdate, function() DF:LightweightUpdateDebuffBorderColors() end, true), 30)
-        bleedColor.disableOn = function(d) return not d.debuffShowBorder or not d.debuffBorderColorByType or MasqueControlsBorders(d) end
+        bleedColor.disableOn = function(d) return not d.debuffShowBorder or not d.debuffBorderColorByType end
         local noneColor = colorsGroup:AddWidget(GUI:CreateColorPicker(self.child, L["None / Physical"], db, "debuffBorderColorNone", false, InvalidateAndUpdate, function() DF:LightweightUpdateDebuffBorderColors() end, true), 30)
-        noneColor.disableOn = function(d) return not d.debuffShowBorder or not d.debuffBorderColorByType or MasqueControlsBorders(d) end
-        colorsGroup.hideOn = function(d) return MasqueControlsBorders(d) end
+        noneColor.disableOn = function(d) return not d.debuffShowBorder or not d.debuffBorderColorByType end
         -- 12.1: the native dispel border is coloured PRIVATE-side from Blizzard's
         -- standard dispel palette (the aura's dispel type is secret) -- custom
         -- per-type colours are not expressible on the factory row.
