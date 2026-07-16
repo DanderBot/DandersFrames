@@ -232,6 +232,10 @@ local function BuildIndex(inst)
             end
             local name = rec.display
             if not name then name = R:GetSpellDisplay(rec) end
+            -- A provider record with no display, no db name and an id the
+            -- client doesn't know yields nil — index it as "#id" rather than
+            -- erroring the whole picker build.
+            if not name then name = "#" .. tostring(rec.id or "?") end
             g[#g + 1] = { rec = rec, name = name, lower = name:lower() }
         end
     end
