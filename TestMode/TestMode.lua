@@ -759,8 +759,8 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
             -- Element-specific alpha mode
             healthBarAlpha = db.oorHealthBarAlpha or 0.55
             backgroundAlpha = db.oorBackgroundAlpha or 0.55
-            nameAlpha = db.oorNameTextAlpha or 0.55
-            healthTextAlpha = db.oorHealthTextAlpha or 0.55
+            nameAlpha = db.oorTextAlpha or 0.55
+            healthTextAlpha = db.oorTextAlpha or 0.55
             aurasAlpha = db.oorAurasAlpha or 0.55
             iconsAlpha = db.oorIconsAlpha or 0.55
             powerBarAlpha = db.oorPowerBarAlpha or 0.55

@@ -36,6 +36,7 @@ DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally chan
 * (Aura Designer) The editor header is condensed to a single row; Sound Alerts moved to the Global tab.
 * (Profiles) Custom filters and your category tweaks travel with profile exports — including filters linked in the Aura Designer.
 * (Profiles) Custom filters picked inside a raid auto layout's settings are handled everywhere the rest of the profile is: deleting a filter now removes it from every layout (including the active one), exports carry filters only a layout references, and imports re-link them instead of pointing at the wrong filter on the receiving account.
+* (Frames) The Out of Range "Text Alpha" slider now also governs pet frame text and the test-mode preview — those still followed hidden per-element values no control could change.
 * (Auras) **The Aura Blacklist has been retired**, replaced by the new filter system. Previously blacklisted buffs will show again — hide them via the Filter Designer instead. Individual debuffs can't be hidden on this version of the game.
 * (Auras) **New: Debuff Filters.** The debuff bar is now filtered by categories on the Aura Filters page — Boss, Role, Priority, Crowd Control, Raid and Dispellable (by you or by anyone). "Show All Debuffs" keeps the old behaviour.
 * (Auras) The "All Dispellable" debuff filter mode now actually filters — it previously showed every debuff.

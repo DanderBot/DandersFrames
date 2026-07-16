@@ -486,7 +486,7 @@ function DF:UpdateNameTextAppearance(frame)
     frame.nameText:SetTextColor(r, g, b, 1.0)
 
     if db.oorEnabled then
-        local oorAlpha = db.oorNameTextAlpha or 1
+        local oorAlpha = db.oorTextAlpha or 0.55
         ApplyOORAlpha(frame.nameText, inRange, alpha, oorAlpha)
     else
         frame.nameText:SetAlpha(alpha)
@@ -543,7 +543,7 @@ function DF:UpdateHealthTextAppearance(frame)
     frame.healthText:SetTextColor(r, g, b, 1.0)
 
     if db.oorEnabled then
-        local oorAlpha = db.oorHealthTextAlpha or 0.25
+        local oorAlpha = db.oorTextAlpha or 0.55
         ApplyOORAlpha(frame.healthText, inRange, alpha, oorAlpha)
     else
         frame.healthText:SetAlpha(alpha)

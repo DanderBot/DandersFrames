@@ -1689,12 +1689,13 @@ DF.PartyDefaults = {
     oorDispelOverlayAlpha = 0.20000000298023,
     oorEnabled = false,
     oorHealthBarAlpha = 0.20000000298023,
-    oorHealthTextAlpha = 0.25,
     oorIconsAlpha = 0.5,
     oorMissingBuffAlpha = 0.5,
     oorMissingHealthAlpha = 0.20000000298023,
-    oorNameTextAlpha = 1,
-    oorTextAlpha = 0.55,  -- unified OOR alpha for ALL Text Designer text (replaces the per-element name/health text alphas, which are legacy)
+    -- oorNameTextAlpha / oorHealthTextAlpha are retired: oorTextAlpha governs
+    -- ALL unit text (TD elements, pet/legacy fontstrings and test previews
+    -- alike). MigrateOORTextAlpha folds the old name value, then strips both.
+    oorTextAlpha = 0.55,
     oorPowerBarAlpha = 0.20000000298023,
     oorTargetedSpellAlpha = 0.5,
     oorAuraDesignerAlpha = 0.20000000298023,

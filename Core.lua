@@ -1882,13 +1882,13 @@ function DF:LightweightUpdateTextColor(textType)
                 if db.testShowOutOfRange and testData.outOfRange then
                     if textType == "name" then
                         if db.oorEnabled then
-                            alpha = db.oorNameTextAlpha or 0.55
+                            alpha = db.oorTextAlpha or 0.55
                         else
                             alpha = db.rangeFadeAlpha or 0.55
                         end
                     elseif textType == "health" then
                         if db.oorEnabled then
-                            alpha = db.oorHealthTextAlpha or 0.55
+                            alpha = db.oorTextAlpha or 0.55
                         else
                             alpha = db.rangeFadeAlpha or 0.55
                         end
@@ -2890,11 +2890,22 @@ end
 function DF:MigrateOORTextAlpha()
     if not DandersFramesDB_v2 or not DandersFramesDB_v2.profiles then return end
     for _, profile in pairs(DandersFramesDB_v2.profiles) do
-        if type(profile) == "table" and not profile._oorTextAlphaV1 then
+        if type(profile) == "table" then
             for _, modeKey in ipairs({ "party", "raid" }) do
                 local m = profile[modeKey]
-                if type(m) == "table" and m.oorNameTextAlpha ~= nil and m.oorNameTextAlpha ~= 1 then
-                    m.oorTextAlpha = m.oorNameTextAlpha
+                if type(m) == "table" then
+                    if not profile._oorTextAlphaV1
+                        and m.oorNameTextAlpha ~= nil and m.oorNameTextAlpha ~= 1 then
+                        m.oorTextAlpha = m.oorNameTextAlpha
+                    end
+                    -- The per-element keys are retired (every reader now uses
+                    -- oorTextAlpha; stale values were still driving the pet /
+                    -- legacy fontstring and test-preview paths, unreachable by
+                    -- any control). Strip AFTER the fold above has consumed the
+                    -- name value; idempotent, and with the Config defaults gone
+                    -- the backfill can't reseed them.
+                    m.oorNameTextAlpha = nil
+                    m.oorHealthTextAlpha = nil
                 end
             end
             profile._oorTextAlphaV1 = true
