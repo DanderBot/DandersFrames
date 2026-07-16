@@ -760,8 +760,9 @@ end
 -- longer enforced; the Aura Blacklist page is a retirement notice.)
 
 -- Stable signature of an excludeSpellIDs map (sorted IDs) — exclude-set changes
--- (AD-dedup, missing-buff hide) are STRUCTURAL (candidateFilters are declared at
--- AddAuraGroup), so the row signature must move when the set does.
+-- (AD-dedup, missing-buff hide) are TUNING (Wave 1: SetAuraGroupCandidateFilters is a
+-- live mutator), so the row TUNING signature must move when the set does — the row
+-- re-applies the maps in place via ApplyTuning instead of a teardown+recreate.
 local function excludeSig(cf)
     local m = cf and cf.excludeSpellIDs
     if not m then return "" end
@@ -772,10 +773,10 @@ local function excludeSig(cf)
 end
 
 -- Include-map counterpart (filter-registry selection resolved to includeSpellIDs) —
--- same structural rule: the row signature must move when the set does. Presence-marked
+-- same tuning rule: the row TUNING signature must move when the set does. Presence-marked
 -- ("I:" prefix) so an EMPTY-but-present include map (include-nothing, e.g. the only
 -- selected custom filter has zero spells) still differs from no map at all — the
--- all -> include-nothing transition must Rebuild.
+-- all -> include-nothing transition must re-apply.
 local function includeSig(cf)
     local m = cf and cf.includeSpellIDs
     if not m then return "" end
@@ -828,7 +829,8 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
         -- Native max-TOTAL-duration filter (candidateFilters.maxDuration, seconds).
         -- Blizzard-side semantics: auras with duration > max OR duration == 0 are
         -- filtered — i.e. permanent auras are IMPLICITLY always hidden while this
-        -- is on (documented in the GUI tooltip). Structural: declared at AddAuraGroup.
+        -- is on (documented in the GUI tooltip). Tuning: re-applied in place
+        -- (SetAuraGroupCandidateFilters is a live mutator — rides the tuning sig).
         if db.buffMaxDurationEnabled and (db.buffMaxDurationMinutes or 0) > 0 then
             candidateFilters = candidateFilters or {}
             candidateFilters.maxDuration = (db.buffMaxDurationMinutes or 0) * 60
@@ -836,7 +838,7 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
         -- Missing Buff "Hide From Buff Bar": union every raid-buff ID (all ranks/
         -- variants) into the exclude map. Legacy did this with an icon-texture match
         -- in the scan, OUT of combat only (reads); the native filter holds in combat
-        -- too — a strict upgrade. Structural (rides excludeSig in the row signature).
+        -- too — a strict upgrade. Tuning (rides excludeSig in the row tuning signature).
         if db.missingBuffHideFromBar and DF.RaidBuffs then
             candidateFilters = candidateFilters or {}
             local map = candidateFilters.excludeSpellIDs or {}
@@ -857,8 +859,9 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
         -- (GetADTrackedSpellIDs) — no stored write, no refcount — so it is
         -- automatically correct across indicator add/remove, aura delete, profile
         -- switch and spec change. UNIONED into (never replacing) the exclude
-        -- map above, and folded into the row signature via excludeSig, so a change in
-        -- the tracked set forces a buff-row Rebuild (see buffFactorySig). On 12.1 only
+        -- map above, and folded into the row tuning signature via excludeSig, so a
+        -- change in the tracked set re-applies the buff row's candidate filters in
+        -- place (see rowTuningSig / ApplyTuning). On 12.1 only
         -- the AD half of the legacy toggle is expressible — the defensive row's contents
         -- aren't enumerable as spell IDs read-free (category-filter driven).
         if db.buffDeduplicateDefensives and opts.frame and DF.GetADTrackedSpellIDs then
@@ -1027,23 +1030,73 @@ function DF:DebuffFilterRecordsSig(records)
     return filterListSig(records)
 end
 
--- Structural signature: a change here needs a Rebuild (new container); everything else is
--- an in-place ApplyStyle (no frame leak — WoW never GCs frames).
-local function buffFactorySig(cfg)
-    local f = filterListSig(cfg.filter)
-    -- Include region-presence toggles: ApplyStyle can't CREATE or REMOVE a region, so a
-    -- show/hide flip (duration / border / swipe) must take the Rebuild path.
+-- STRUCTURAL half of a filter list: token strings + record keys only — the parts
+-- AddAuraGroup freezes (a group's filterString can't be changed live; the record SET
+-- defines the groups themselves). Per-record candidateFilters are deliberately
+-- EXCLUDED — they're live-tunable (see filterTuningSig).
+local function filterStructSig(f)
+    if type(f) ~= "table" then return tostring(f) end
+    local parts = {}
+    for i = 1, #f do
+        local entry = f[i]
+        if type(entry) == "table" then
+            parts[i] = tostring(entry.filter) .. "#" .. tostring(entry.key)
+        else
+            parts[i] = entry
+        end
+    end
+    return table.concat(parts, ";")
+end
+
+-- TUNING half of a filter list: each record's candidateFilters (boolean flags,
+-- maxDuration, dispel-type maps via cfSig; spell-ID maps via include/excludeSig —
+-- records carry none today, but the serializer must not go blind if they appear).
+-- Positional, so it stays aligned with filterStructSig's record order.
+local function filterTuningSig(f)
+    if type(f) ~= "table" then return "" end
+    local parts = {}
+    for i = 1, #f do
+        local entry = f[i]
+        if type(entry) == "table" then
+            local cf = entry.candidateFilters
+            parts[i] = cfSig(cf) .. "&" .. includeSig(cf) .. "&" .. excludeSig(cf)
+        else
+            parts[i] = ""
+        end
+    end
+    return table.concat(parts, ";")
+end
+
+-- Row signatures, SPLIT (Wave 1). The old combined buffFactorySig forced a
+-- teardown+recreate for every delta; now:
+--   rowStructSig  — changes need a Rebuild (new container): the filter set
+--     (token strings + record keys), region-presence toggles (ApplyStyle can't
+--     CREATE or REMOVE a region), creation-frozen formatKeys (SetDurationText
+--     binds the formatter once per slot), tooltips, the native dispel region.
+--   rowTuningSig  — changes with the struct sig stable apply IN PLACE via
+--     h:ApplyTuning (OOC immediate, combat defers to regen): max, native sort,
+--     and every candidateFilters facet — config-wide include/exclude spell maps,
+--     maxDuration, per-record flags/dispel maps.
+-- Everything in neither sig is a plain in-place ApplyStyle (cosmetics).
+local function rowStructSig(cfg)
     local s = cfg.style
     return table.concat({
-        tostring(cfg.max), tostring(f), tostring(cfg.tooltips),
+        filterStructSig(cfg.filter), tostring(cfg.tooltips),
         tostring(s.duration ~= nil), tostring(s.duration and s.duration.formatKey),
         tostring(s.stacks and s.stacks.formatKey),
         tostring(s.border ~= nil), tostring(s.cooldown and s.cooldown.show ~= false),
-        excludeSig(cfg.candidateFilters),   -- exclude set (structural: declared at AddAuraGroup)
-        includeSig(cfg.candidateFilters),   -- filter-registry include set (structural, same rule)
-        tostring(cfg.candidateFilters and cfg.candidateFilters.maxDuration),  -- max-duration filter (structural)
-        tostring(cfg.sort and cfg.sort.method),                               -- native sort (declared at AddAuraGroup)
         tostring(s.dispel ~= nil),          -- native dispel border (region is create-once -> Rebuild)
+    }, "|")
+end
+
+local function rowTuningSig(cfg)
+    local cf = cfg.candidateFilters
+    return table.concat({
+        tostring(cfg.max),
+        tostring(cfg.sort and cfg.sort.method),      -- live: SetAuraGroupSortMethod
+        tostring(cfg.sort and cfg.sort.direction),
+        includeSig(cf), excludeSig(cf), cfSig(cf),   -- config-wide candidateFilters (cfSig carries maxDuration)
+        filterTuningSig(cfg.filter),                 -- per-record candidateFilters (debuff row)
     }, "|")
 end
 
@@ -1060,7 +1113,10 @@ function DF:DriveBuffFactory(frame, db)
         }))
         frame.buffFactory = h
         frame.dfBuffFactoryVersion = DF.auraLayoutVersion or 0
-        if h then frame.buffFactorySig = buffFactorySig(h.config) end
+        if h then
+            frame.buffFactoryStructSig = rowStructSig(h.config)
+            frame.buffFactoryTuningSig = rowTuningSig(h.config)
+        end
     end
 
     if not h then return end
@@ -1110,11 +1166,21 @@ function DF:DriveBuffFactory(frame, db)
         })
         -- Re-apply the z-order level (buffs default to +40 = legacy parity). Not part of the sig.
         h:GetFrame():SetFrameLevel(math.max(0, frame:GetFrameLevel() + (cfg.frameLevelOffset or 40)))
-        local sig = buffFactorySig(cfg)
-        if frame.buffFactorySig ~= sig then
-            frame.buffFactorySig = sig
-            h:Rebuild(cfg)                      -- structural (max/filter/tooltips) — discrete, leak-safe
+        local structSig, tuningSig = rowStructSig(cfg), rowTuningSig(cfg)
+        if frame.buffFactoryStructSig ~= structSig then
+            frame.buffFactoryStructSig = structSig
+            frame.buffFactoryTuningSig = tuningSig
+            h:Rebuild(cfg)                      -- structural (filter set/regions/tooltips) — discrete, leak-safe
         else
+            if frame.buffFactoryTuningSig ~= tuningSig then
+                frame.buffFactoryTuningSig = tuningSig
+                -- Per-record candidateFilters ride cfg.filter; the struct sig pins
+                -- every record's filter string + key, so the fresh list is
+                -- group-identical and applyGroupTuning re-derives per-record
+                -- filters from it (keys line up with the declared groups).
+                h.config.filter = cfg.filter
+                h:ApplyTuning(cfg)              -- max/sort/candidateFilters — in place, no leak
+            end
             h:ApplyStyle(cfg.style, cfg.layout) -- cosmetics — in place, no leak
         end
     end
@@ -1177,7 +1243,10 @@ function DF:DriveDebuffFactory(frame, db)
         }))
         frame.debuffFactory = h
         frame.dfDebuffFactoryVersion = ver
-        if h then frame.debuffFactorySig = buffFactorySig(h.config) end
+        if h then
+            frame.debuffFactoryStructSig = rowStructSig(h.config)
+            frame.debuffFactoryTuningSig = rowTuningSig(h.config)
+        end
     end
 
     if not h then return end
@@ -1217,11 +1286,20 @@ function DF:DriveDebuffFactory(frame, db)
             filterList = filterList,
         })
         h:GetFrame():SetFrameLevel(math.max(0, frame:GetFrameLevel() + (cfg.frameLevelOffset or 40)))
-        local sig = buffFactorySig(cfg)
-        if frame.debuffFactorySig ~= sig then
-            frame.debuffFactorySig = sig
+        local structSig, tuningSig = rowStructSig(cfg), rowTuningSig(cfg)
+        if frame.debuffFactoryStructSig ~= structSig then
+            frame.debuffFactoryStructSig = structSig
+            frame.debuffFactoryTuningSig = tuningSig
             h:Rebuild(cfg)                      -- structural — REPLACES the config wholesale
         else
+            if frame.debuffFactoryTuningSig ~= tuningSig then
+                frame.debuffFactoryTuningSig = tuningSig
+                -- hideLong minutes / Keep Important within a stable category set
+                -- live in the RECORDS' candidateFilters — swap the (group-identical)
+                -- list so applyGroupTuning re-derives them (see the buff driver).
+                h.config.filter = cfg.filter
+                h:ApplyTuning(cfg)              -- max/sort/candidateFilters — in place, no leak
+            end
             h:ApplyStyle(cfg.style, cfg.layout) -- cosmetics — in place, no leak
         end
     end
@@ -1231,7 +1309,7 @@ end
 -- DEFENSIVE-ICON FACTORY BRIDGE (pilot — first non-buff consumer)
 -- Routes the defensive row through DF.AuraContainer on 12.1 using the native
 -- BIG_DEFENSIVE / EXTERNAL_DEFENSIVE filters. Reuses the buff bridge's config SHAPE
--- + buffFactorySig (the element-agnostic row signature). Defensive settings have a
+-- + rowStructSig/rowTuningSig (the element-agnostic row signatures). Defensive settings have a
 -- different key layout (defensiveIcon* + defensiveBar*), so they get a dedicated
 -- mapper rather than the prefix builder. Native-only on 12.1 (requires
 -- on) + IsSupported → no effect on live 12.0.x.
@@ -1255,8 +1333,8 @@ end
 
 -- Map the defensive settings -> the AuraContainer config SHAPE. Filter = the native
 -- defensive list the legacy classifier already uses; a row of up to defensiveBarMax
--- icons. Stacks use the legacy min-2 display. buffFactorySig treats this cfg the same
--- as a buff cfg (it reads derived fields, not db keys).
+-- icons. Stacks use the legacy min-2 display. rowStructSig/rowTuningSig treat this cfg
+-- the same as a buff cfg (they read derived fields, not db keys).
 function DF:BuildDefensiveRowConfig(db, unit)
     local iconSize = db.defensiveIconSize or 24
     local dur
@@ -1364,7 +1442,10 @@ function DF:DriveDefensiveFactory(frame, db)
         h = DF.AuraContainer:Create(frame, DF:BuildDefensiveRowConfig(db, frame.unit))
         frame.defensiveFactory = h
         frame.dfDefFactoryVersion = DF.auraLayoutVersion or 0
-        if h then frame.defensiveFactorySig = buffFactorySig(h.config) end
+        if h then
+            frame.defensiveFactoryStructSig = rowStructSig(h.config)
+            frame.defensiveFactoryTuningSig = rowTuningSig(h.config)
+        end
     end
 
     if not h then return end
@@ -1397,11 +1478,17 @@ function DF:DriveDefensiveFactory(frame, db)
         -- Re-apply the z-order level (honors runtime defensiveIconFrameLevel changes; survives
         -- Rebuild since the new container inherits relative to h.frame). Not part of the sig.
         h:GetFrame():SetFrameLevel(math.max(0, frame:GetFrameLevel() + (cfg.frameLevelOffset or 40)))
-        local sig = buffFactorySig(cfg)
-        if frame.defensiveFactorySig ~= sig then
-            frame.defensiveFactorySig = sig
-            h:Rebuild(cfg)                      -- structural (max/filter/tooltips)
+        local structSig, tuningSig = rowStructSig(cfg), rowTuningSig(cfg)
+        if frame.defensiveFactoryStructSig ~= structSig then
+            frame.defensiveFactoryStructSig = structSig
+            frame.defensiveFactoryTuningSig = tuningSig
+            h:Rebuild(cfg)                      -- structural (filter set/regions/tooltips)
         else
+            if frame.defensiveFactoryTuningSig ~= tuningSig then
+                frame.defensiveFactoryTuningSig = tuningSig
+                h.config.filter = cfg.filter    -- group-identical records (see the buff driver)
+                h:ApplyTuning(cfg)              -- max/sort/candidateFilters — in place, no leak
+            end
             h:ApplyStyle(cfg.style, cfg.layout) -- cosmetics — in place, no leak
         end
     end
