@@ -91,6 +91,7 @@ DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally chan
 * (Aura Designer) A spell can be tracked in one tab at a time — the picker shows where a spell already lives, so the same buff never renders twice.
 * (Aura Designer) Layout groups and filter groups are available on the Other Buffs tab too, shared across all your specs.
 * (Aura Designer) **New: Debuffs tab.** Give debuff categories their own icon rows on the frame — for example, crowd control in its own spot with its own icon size. Tick a group's categories, set its layout, and those categories leave the main debuff bar automatically. Each group has its own dispellable mode and "Hide Long Debuffs" option.
+* (Auras) Changing aura filters, sort order, or max icons no longer rebuilds the icon rows — changes apply instantly in place, with no flicker. This covers the buff, debuff and defensive bars and the Aura Designer's filter and debuff groups. Changes made in combat apply the moment combat ends.
 
 ### Known Issues (12.1 alpha)
 
