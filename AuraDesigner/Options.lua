@@ -9354,23 +9354,3 @@ function DF:AuraDesigner_RefreshPage()
         DF:InvalidateAuraLayout()
     end
 end
-
--- ============================================================
--- TAB DISABLE STATE
--- Standalone function so it can be called from GUI.lua on open
--- and from RefreshPage when the enable checkbox toggles.
--- ============================================================
-
--- Disable the My Buff Indicators tab when AD is enabled (never compatible).
--- Buffs tab is always accessible — it can coexist with AD.
-function DF:ApplyAuraDesignerTabState()
-    local guiRef = DF.GUI
-    if not guiRef or not guiRef.Tabs then return end
-    if not DF.db then return end
-
-    local mode = (guiRef.SelectedMode) or "party"
-    local adCfg = DF.GetModeAuraDesigner and DF:GetModeAuraDesigner(mode)
-    local adEnabled = adCfg and adCfg.enabled
-
-    -- My Buff Indicators tab removed — feature deprecated
-end

@@ -331,13 +331,6 @@ function DF:StopTooltipRefresh() StopTooltipRefresh() end
 -- Set to true to enable debug output: /run DandersFrames.debugDurationAPI = true
 DF.debugDurationAPI = false
 
--- Debug print helper for duration API
-local function DebugDuration(...)
-    if DF.debugDurationAPI then
-        print("|cFF00FF00[DF Duration Debug]|r", ...)
-    end
-end
-
 -- Test function to verify debug is working - call with: /run DandersFrames:TestDurationDebug()
 function DF:TestDurationDebug()
     print("|cFF00FF00[DF Duration Debug]|r === Debug Test ===")

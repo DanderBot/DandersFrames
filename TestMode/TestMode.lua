@@ -12,11 +12,11 @@ local L = DF.L
 
 DF.TestData = {
     units = {
-        {name = "Tankerino", class = "WARRIOR", role = "TANK", specID = 73, health = 1.0, maxHealth = 100000, absorb = 0.20, healAbsorb = 0, healPrediction = 0.15, status = nil, outOfRange = false, isLeader = true, raidTarget = 8, dispelType = nil, centerStatus = nil, isMainTank = true, isAFK = false, isPhased = false, inVehicle = false, isBGCarrier = false, isInCombat = true, hasMyBuff = true, reducedMaxPct = 0.20},  -- Skull marker, leader, main tank, has HoT, in combat (BG carrier kept to raid test to avoid overlapping the leader's ready-check icon)
-        {name = "Healsworth", class = "PRIEST", role = "HEALER", specID = 257, health = 0.95, maxHealth = 85000, absorb = 0.10, healAbsorb = 0, healPrediction = 0.05, status = nil, outOfRange = false, isAssist = true, raidTarget = nil, dispelType = "Magic", centerStatus = "summon", isMainAssist = true, isAFK = false, isPhased = false, inVehicle = false, hasMyBuff = false, reducedMaxPct = 0},  -- Assistant, main assist, summon pending
-        {name = "Мишок", class = "MAGE", role = "DAMAGER", specID = 63, health = 0.60, maxHealth = 75000, absorb = 0, healAbsorb = 0.15, healPrediction = 0.15, status = nil, outOfRange = true, raidTarget = 1, dispelType = "Curse", centerStatus = nil, isAFK = true, isPhased = false, inVehicle = false, hasMyBuff = true, reducedMaxPct = 0},  -- Star marker, AFK, has HoT
-        {name = "Alexandrosthegreat", class = "PALADIN", role = "DAMAGER", specID = 70, health = 0, maxHealth = 90000, absorb = 0, healAbsorb = 0, healPrediction = 0, status = "Dead", outOfRange = false, raidTarget = nil, dispelType = nil, centerStatus = "resurrect", isAFK = false, isPhased = false, inVehicle = false, hasMyBuff = false, reducedMaxPct = 0},  -- Dead unit, being resurrected
-        {name = "Xx", class = "ROGUE", role = "DAMAGER", specID = 260, health = 0.30, maxHealth = 70000, absorb = 0.05, healAbsorb = 0.12, healPrediction = 0.25, status = nil, outOfRange = false, raidTarget = nil, dispelType = "Poison", centerStatus = nil, isAFK = false, isPhased = true, inVehicle = true, hasMyBuff = true, reducedMaxPct = 0.45},  -- Phased, in vehicle, has HoT
+        {name = "Tankerino", class = "WARRIOR", role = "TANK", specID = 73, health = 1.0, maxHealth = 100000, absorb = 0.20, healAbsorb = 0, healPrediction = 0.15, status = nil, outOfRange = false, isLeader = true, raidTarget = 8, dispelType = nil, centerStatus = nil, isMainTank = true, isAFK = false, isPhased = false, inVehicle = false, isBGCarrier = false, isInCombat = true, reducedMaxPct = 0.20},  -- Skull marker, leader, main tank, has HoT, in combat (BG carrier kept to raid test to avoid overlapping the leader's ready-check icon)
+        {name = "Healsworth", class = "PRIEST", role = "HEALER", specID = 257, health = 0.95, maxHealth = 85000, absorb = 0.10, healAbsorb = 0, healPrediction = 0.05, status = nil, outOfRange = false, isAssist = true, raidTarget = nil, dispelType = "Magic", centerStatus = "summon", isMainAssist = true, isAFK = false, isPhased = false, inVehicle = false, reducedMaxPct = 0},  -- Assistant, main assist, summon pending
+        {name = "Мишок", class = "MAGE", role = "DAMAGER", specID = 63, health = 0.60, maxHealth = 75000, absorb = 0, healAbsorb = 0.15, healPrediction = 0.15, status = nil, outOfRange = true, raidTarget = 1, dispelType = "Curse", centerStatus = nil, isAFK = true, isPhased = false, inVehicle = false, reducedMaxPct = 0},  -- Star marker, AFK, has HoT
+        {name = "Alexandrosthegreat", class = "PALADIN", role = "DAMAGER", specID = 70, health = 0, maxHealth = 90000, absorb = 0, healAbsorb = 0, healPrediction = 0, status = "Dead", outOfRange = false, raidTarget = nil, dispelType = nil, centerStatus = "resurrect", isAFK = false, isPhased = false, inVehicle = false, reducedMaxPct = 0},  -- Dead unit, being resurrected
+        {name = "Xx", class = "ROGUE", role = "DAMAGER", specID = 260, health = 0.30, maxHealth = 70000, absorb = 0.05, healAbsorb = 0.12, healPrediction = 0.25, status = nil, outOfRange = false, raidTarget = nil, dispelType = "Poison", centerStatus = nil, isAFK = false, isPhased = true, inVehicle = true, reducedMaxPct = 0.45},  -- Phased, in vehicle, has HoT
     },
     -- Test aura data - expanded for testing layouts. spellID (where a stable,
     -- still-live spell matches) lets the 12.1 container preview show the REAL
@@ -95,7 +95,7 @@ function DF:GetTestUnitData(index, isRaid, isBoss)
             raidTarget = nil,
             dispelType = nil,
             centerStatus = nil,
-            hasMyBuff = false,
+           
             isMainTank = false,
             isMainAssist = false,
             isAFK = false,
@@ -254,7 +254,6 @@ function DF:GetTestUnitData(index, isRaid, isBoss)
             raidTarget = (i <= 8) and i or nil,
             dispelType = dispelType,
             centerStatus = isDead and "resurrect" or ((i == 2 or i == 6) and "summon" or nil),  -- Dead get resurrect, frames 2 and 6 get summon
-            hasMyBuff = (i % 3 == 1) and not isDead,  -- Every 3rd frame starting at 1 (1, 4, 7, 10...), but not dead
             -- New icon states
             isMainTank = (i == 1 or i == 25),  -- First frame and frame 25
             isMainAssist = (i == 2 or i == 26),  -- Second frame and frame 26
@@ -307,7 +306,6 @@ function DF:GetTestUnitData(index, isRaid, isBoss)
         raidTarget = data.raidTarget,
         dispelType = data.dispelType,
         centerStatus = data.centerStatus,
-        hasMyBuff = data.hasMyBuff,
         -- New icon states
         isMainTank = data.isMainTank,
         isMainAssist = data.isMainAssist,
