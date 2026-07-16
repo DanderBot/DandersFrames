@@ -4357,7 +4357,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         local cbtGroup = GUI:CreateSettingsGroup(self.child, 280)
         cbtGroup:AddWidget(GUI:CreateHeader(self.child, L["Color by Time"]), 40)
-        cbtGroup:AddWidget(GUI:CreateLabel(self.child, L["Sets the duration-text colors used wherever Color by Time Remaining is enabled (buffs, debuffs, defensives and the Aura Designer). Each stop colors the time remaining from its value upward."], 260), 66)
+        cbtGroup:AddWidget(GUI:CreateLabel(self.child, L["Sets the duration-text colors used wherever Color by Time Remaining is enabled (buffs, debuffs, defensives and the Aura Designer)."], 260), 48)
 
         -- Read-only preview strip: 0s at the left, (highest + a little) at the right.
         local previewW = 256
@@ -4467,11 +4467,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 plus:SetScript("OnClick", function() commitTo(cbtT(bp) + 1) end)
 
                 if #bps > 2 then
-                    -- Reuse the shared close-X (tone=danger => soft-red -> bright-red
-                    -- hover + red wash), same glyph as the GUI's close button.
+                    -- Reuse the shared close-X in its default (dismiss) form — grey glyph at
+                    -- rest, white glyph + red hover wash on mouseover, exactly like the GUI's
+                    -- own close button. (No tone="danger" — that tints the glyph red at rest.)
                     local remBtn = GUI:CreateCloseButton(row, {
                         size = 20,
-                        tone = "danger",
                         onClick = function()
                             for idx, s in ipairs(bps) do
                                 if s == bp then table.remove(bps, idx) break end
