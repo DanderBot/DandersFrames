@@ -22,6 +22,9 @@ local addonName, DF = ...
 --               word-wrap on) so justification has something to align within —
 --               the DF_AuraLab-proven pattern. nil/"" = legacy auto-sized string.
 --   boxW/boxH = the justify box (consumers pass the icon/button size)
+--   stableCenter = countdown-timer mode: a fixed, over-wide box centred on the anchor
+--               with NO wrap, so centring references the box, not the changing glyph run
+--               — no shadow/outline drift, no per-tick wobble. A user Justify still wins.
 --   color     = {r,g,b,a} or nil. nil = DON'T touch colour (a formatter/curve or
 --               the consumer owns it) — never force white here.
 --
@@ -75,16 +78,47 @@ function TextStyle:Apply(fs, spec, anchorFrame)
     anchorFrame = anchorFrame or fs:GetParent()
 
     local anchor = spec.anchor or "CENTER"
+    local offX, offY = spec.offsetX or 0, spec.offsetY or 0
+
+    -- stableCenter centring compensation. WoW centres the INK bounding box (glyphs +
+    -- drop shadow), so a shadow offset of sx pushes the GLYPHS left by exactly sx/2.
+    -- Add that half back so the glyphs — not glyph+shadow — sit centred. Pixel-exact
+    -- for EVEN shadow offsets; odd offsets give a half-pixel, which we round (text on a
+    -- half-pixel blurs), leaving an inherent <=0.5px residual. Outline ink is symmetric,
+    -- so it needs no compensation. Only in stableCenter mode with no user Justify.
+    if spec.stableCenter and not (spec.justifyH or spec.justifyV)
+       and type(spec.outline) == "string" and spec.outline:find("SHADOW") then
+        local db = (DF.GetDB and DF:GetDB())
+            or (DF.db and DF.db[(DF.GUI and DF.GUI.SelectedMode) or "party"])
+        local half = ((db and db.fontShadowOffsetX) or 1) / 2
+        offX = offX + (half >= 0 and math.floor(half + 0.5) or math.ceil(half - 0.5))
+    end
+
     fs:ClearAllPoints()
-    fs:SetPoint(anchor, anchorFrame, anchor, spec.offsetX or 0, spec.offsetY or 0)
+    fs:SetPoint(anchor, anchorFrame, anchor, offX, offY)
 
     if DF.SafeSetFont then
         DF:SafeSetFont(fs, spec.font, spec.size or 10, spec.outline or "NONE")
     end
 
-    -- Justify needs a box to align within (auto-sized strings ignore it). Box mode
-    -- is opt-in per spec; off = reset to auto-size so a live toggle is clean.
-    if spec.justifyH or spec.justifyV then
+    -- Centring strategy, in priority order:
+    --   1. stableCenter (countdown timers) — a FIXED, over-wide box centred on the anchor
+    --      with NO wrap, so the box (not the changing glyph run) is the centring reference.
+    --      Kills the shadow/outline left-drift (box is symmetric) and the per-tick wobble
+    --      (the box doesn't resize as digits change); over-wide so no value ever clips.
+    --      A user-set Justify still wins (drops to box mode below).
+    --   2. user Justify — box sized to the icon, word-wrap on, aligned as the user picked.
+    --   3. default — auto-size + centre (legacy; the slight glyph-box offset is accepted).
+    local userJustify = spec.justifyH or spec.justifyV
+    if spec.stableCenter and not userJustify then
+        local w = spec.boxW or 0
+        local minW = (spec.size or 10) * 6      -- comfortably wider than any timer string
+        if w < minW then w = minW end
+        fs:SetSize(w, spec.boxH or 0)
+        fs:SetWordWrap(false)
+        fs:SetJustifyH("CENTER")
+        fs:SetJustifyV("MIDDLE")
+    elseif userJustify then
         fs:SetSize(spec.boxW or 0, spec.boxH or 0)
         fs:SetWordWrap(true)
         fs:SetJustifyH(spec.justifyH or "CENTER")

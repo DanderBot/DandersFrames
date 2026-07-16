@@ -313,9 +313,10 @@ end
 
 -- Build font family members for CreateFontFamily
 -- Uses custom font for supported alphabets, Blizzard fallbacks for others
-local function GetFontFamilyMembers(customFontPath, outline)
+local function GetFontFamilyMembers(customFontPath, outline, size)
     local members = {}
     local coreFont = GameFontNormal
+    size = size or BASE_FONT_SIZE
     
     -- Check if GetFontObjectForAlphabet exists (WoW 11.x+)
     if not coreFont or not coreFont.GetFontObjectForAlphabet then
@@ -338,7 +339,7 @@ local function GetFontFamilyMembers(customFontPath, outline)
             table.insert(members, {
                 alphabet = alphabet,
                 file = customFontPath,
-                height = BASE_FONT_SIZE,
+                height = size,
                 flags = outline,
             })
         else
@@ -346,7 +347,7 @@ local function GetFontFamilyMembers(customFontPath, outline)
             table.insert(members, {
                 alphabet = alphabet,
                 file = blizzFile,
-                height = BASE_FONT_SIZE,
+                height = size,
                 flags = outline,
             })
         end
@@ -355,23 +356,28 @@ local function GetFontFamilyMembers(customFontPath, outline)
     return members
 end
 
--- Create or get a cached font family (keyed by font + outline + shadow)
+-- Create or get a cached font family (keyed by font + outline + size + shadow).
+-- The family is built at the REAL point size (not a scaled base) so text renders
+-- natively — no fractional SetTextScale — while keeping multi-alphabet support.
+-- One family per distinct size in use; sizes are discrete (a handful), so bounded.
 local fontFamilyCounter = 0
-local function GetOrCreateFontFamily(fontPath, outline, useShadow)
+local function GetOrCreateFontFamily(fontPath, outline, useShadow, size)
     -- Check if CreateFontFamily API is available (WoW 11.x+)
     if not CreateFontFamily then
         return nil
     end
-    
-    -- Create unique key for this font configuration (include shadow state)
-    local key = (fontPath or "default"):lower() .. "|" .. (outline or "") .. "|" .. (useShadow and "shadow" or "noshadow")
+    size = size or BASE_FONT_SIZE
+
+    -- Create unique key for this font configuration. Shadow stays LAST so
+    -- RefreshFontFamilyShadows' "|shadow" suffix check still identifies it.
+    local key = (fontPath or "default"):lower() .. "|" .. (outline or "") .. "|" .. tostring(size) .. "|" .. (useShadow and "shadow" or "noshadow")
     
     if fontFamilies[key] then
         return fontFamilies[key]
     end
     
     -- Get font family members
-    local members = GetFontFamilyMembers(fontPath, outline or "")
+    local members = GetFontFamilyMembers(fontPath, outline or "", size)
     if not members then
         return nil  -- API not available or failed
     end
@@ -742,7 +748,7 @@ function DF:SafeSetFont(fontString, fontNameOrPath, fontSize, outline)
     PreloadFont(fontPath)
     
     -- Try to use font family for multi-alphabet support (WoW 11.x+)
-    local fontFamilyName = GetOrCreateFontFamily(fontPath, actualOutline, useShadow)
+    local fontFamilyName = GetOrCreateFontFamily(fontPath, actualOutline, useShadow, fontSize)
 
     if fontFamilyName and _G[fontFamilyName] then
         -- Validate the font family object is usable before calling SetFontObject.
@@ -755,13 +761,16 @@ function DF:SafeSetFont(fontString, fontNameOrPath, fontSize, outline)
             fontString:SetFontObject(_G[fontFamilyName])
         end)
         if not ok then
-            -- Evict the broken cache entry so it gets recreated later
-            local key = (fontPath or "default"):lower() .. "|" .. (actualOutline or "") .. "|" .. (useShadow and "shadow" or "noshadow")
+            -- Evict the broken cache entry so it gets recreated later (key format
+            -- must match GetOrCreateFontFamily: font|outline|size|shadow).
+            local key = (fontPath or "default"):lower() .. "|" .. (actualOutline or "") .. "|" .. tostring(fontSize) .. "|" .. (useShadow and "shadow" or "noshadow")
             fontFamilies[key] = nil
         else
-            -- Use SetTextScale to achieve desired size (font family uses BASE_FONT_SIZE)
-            local scale = fontSize / BASE_FONT_SIZE
-            fontString:SetTextScale(scale)
+            -- The family is built at the real point size now (per-size cache), so the
+            -- glyphs render natively. Clear any fractional scale a prior SafeSetFont left
+            -- on this fontstring — the old BASE_FONT_SIZE + SetTextScale(size/12) path was
+            -- the source of the sub-pixel blur / off-centre drift that got worse with size.
+            fontString:SetTextScale(1)
 
             -- Force WoW to re-render the text with new font properties
             -- This is needed because switching between font families with different outline flags
@@ -1043,7 +1052,7 @@ DF.PartyDefaults = {
     buffDurationFormat = "NUMBER",
     buffDurationOutline = "SHADOW;OUTLINE",
     buffDurationScale = 1.2000000476837,
-    buffDurationX = 1,
+    buffDurationX = 0,
     buffDurationY = 2,
     buffExpiringBorderColor = {r = 1, g = 0.50196081399918, b = 0, a = 1},
     buffExpiringBorderColorByTime = false,
@@ -1111,7 +1120,7 @@ DF.PartyDefaults = {
     buffHideSwipe = false,
     buffMax = 4,
     buffOffsetX = -2,
-    buffOffsetY = 5,
+    buffOffsetY = 6,
     buffPaddingX = 2,
     buffPaddingY = 2,
     buffScale = 1,
@@ -1306,8 +1315,8 @@ DF.PartyDefaults = {
     defensiveIconDurationColor = {r = 1, g = 1, b = 1},
     defensiveIconDurationColorByTime = false,
     defensiveIconDurationFont = "DF Roboto SemiBold",
-    defensiveIconDurationOutline = "SHADOW",
-    defensiveIconDurationScale = 1.0499999523163,
+    defensiveIconDurationOutline = "SHADOW;OUTLINE",
+    defensiveIconDurationScale = 1.4,
     defensiveIconDurationX = 0,
     defensiveIconDurationY = 0,
     defensiveIconEnabled = true,

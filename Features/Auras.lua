@@ -554,6 +554,7 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
             baseSize = 10, defaultAnchor = "CENTER", boxW = iconSize, boxH = iconSize,
         })
         dur.show = true
+        dur.stableCenter = true   -- centred countdown: stable box, no shift, no wobble
         dur.formatter = GetDurationFormatter(durFormat, hideAboveT, colorByTime)
         -- colorByTime = colour BUCKETS baked into the formatter's band format strings
         -- (see BuildDurationFormatter — the smooth curve is not addon-reachable). The
@@ -1011,6 +1012,7 @@ function DF:BuildDefensiveRowConfig(db, unit)
             baseSize = 10, defaultAnchor = "CENTER", boxW = iconSize, boxH = iconSize,
         })
         dur.show = true
+        dur.stableCenter = true   -- centred countdown: stable box, no shift, no wobble
         dur.formatter = GetDurationFormatter("NUMBER", nil, colorByTime)
         -- colorByTime = colour buckets baked into the formatter bands (see
         -- BuildDurationFormatter). Static colour must not stomp the escapes.

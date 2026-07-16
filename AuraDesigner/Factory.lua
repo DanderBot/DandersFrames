@@ -768,7 +768,7 @@ local function buildStackSpec(indicator, defOX, defOY)
     if outline == "NONE" then outline = "" end
     return {
         show    = true,
-        font    = indicator.stackFont,
+        font    = indicator.stackFont or "DF Roboto SemiBold",  -- default to the DF font, not the Friz fallback
         size    = 10 * (tonumber(indicator.stackScale) or 1),
         outline = outline,
         anchor  = indicator.stackAnchor or "BOTTOMRIGHT",
@@ -828,7 +828,8 @@ local function buildDurationTextSpec(indicator, defaultShow)
         and DF:GetFactoryDurationFormatter("NUMBER", hideAboveT, colorByTime) or nil
     return {
         show      = true,
-        font      = indicator.durationFont,
+        stableCenter = true,   -- centred countdown: stable box, no shift/wobble (shared TextStyle mode)
+        font      = indicator.durationFont or "DF Roboto SemiBold",  -- default to the DF font, not the Friz fallback
         size      = 10 * (tonumber(indicator.durationScale) or 1),
         outline   = dOutline,
         anchor    = indicator.durationAnchor or "CENTER",

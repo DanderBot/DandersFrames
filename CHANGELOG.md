@@ -33,6 +33,7 @@ DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally chan
 * (Auras) **Animated borders are available on the Missing-Buff icons**, with the full DF animation set. The animation driver is now shared, so animated borders are lighter across the board.
 * (Auras) Border animations aren't offered on the aura icons themselves — buff, debuff, defensive and Aura Designer indicators. On 12.1 the game hides aura data in combat and forbids addons from touching aura icons while it's hidden, so an animated border there would break; those borders are static. Frame borders, the Missing-Buff badge and targeted-spell highlights are unaffected and still animate.
 * (Auras) Out-of-range and dead-unit fading works on the 12.1 aura displays again — live and in test mode.
+* (Auras) Aura text is sharper and countdown timers stay put — text now renders at its true size instead of being scaled up (which softened it, more so at larger sizes), and centred timers no longer drift or wobble as they tick down or when a text outline or shadow is enabled.
 * (Aura Designer) The spell picker shows one unified list — the separate "Inferred Tracking" section is gone; every tracked aura now works the same way.
 * (Aura Designer) Filter and debuff group boxes in the editor preview show greyed example icons, sized and arranged to your layout settings.
 * (Aura Designer) Filter and debuff groups can be styled like placed indicators — Appearance, Border, Duration Text and Stack Count sections — and the preview's example icons wear your styling live.
