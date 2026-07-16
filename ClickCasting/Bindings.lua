@@ -289,75 +289,13 @@ function CC:GetBindingDisplayIcon(binding)
     return QM
 end
 
--- BINDING MIGRATION
--- ============================================================
--- Migrate bindings to use root spell IDs instead of override spell IDs
--- This ensures bindings survive talent changes (e.g., Chrono Flames -> Living Flame)
-
-local MIGRATION_VERSION = 1  -- Increment this when adding new migrations
-
-function CC:MigrateBindingsToRootSpells()
-    -- Check if we have access to the saved data
-    if not DandersFrames_ClickCastDB then return end
-    
-    local _, classId = UnitClassBase("player")
-    if not classId then return end
-    
-    local classData = DandersFrames_ClickCastDB[classId]
-    if not classData or not classData.profiles then return end
-    
-    -- Check if migration already done for this class
-    local currentMigration = classData.migrationVersion or 0
-    
-    if currentMigration >= MIGRATION_VERSION then
-        return  -- Already migrated
-    end
-    
-    local totalMigrated = 0
-    
-    -- Migrate ALL profiles for this class
-    for profileName, profile in pairs(classData.profiles) do
-        if profile.bindings then
-            local profileMigrated = 0
-            
-            for i, binding in ipairs(profile.bindings) do
-                if binding.spellName and binding.spellId then
-                    -- Check if this spell has a root spell
-                    if C_Spell.GetBaseSpell then
-                        local rootId = C_Spell.GetBaseSpell(binding.spellId)
-                        if rootId and rootId ~= binding.spellId then
-                            -- Get the root spell's name
-                            local rootInfo = C_Spell.GetSpellInfo(rootId)
-                            if rootInfo and rootInfo.name then
-                                local oldName = binding.spellName
-                                
-                                -- Update binding to use root spell
-                                binding.spellName = rootInfo.name
-                                binding.spellId = rootId
-                                
-                                profileMigrated = profileMigrated + 1
-                                print("|cff33cc66DandersFrames:|r [" .. profileName .. "] Migrated '" .. oldName .. "' -> '" .. rootInfo.name .. "'")
-                            end
-                        end
-                    end
-                end
-            end
-            
-            totalMigrated = totalMigrated + profileMigrated
-        end
-    end
-    
-    -- Mark migration as complete for this class
-    classData.migrationVersion = MIGRATION_VERSION
-    
-    if totalMigrated > 0 then
-        print("|cff33cc66DandersFrames:|r Migrated " .. totalMigrated .. " binding(s) to use root spells for better talent compatibility.")
-        -- Refresh the active profile's bindings reference
-        if self.profile and self.db then
-            self.db.bindings = self.profile.bindings
-        end
-    end
-end
+-- (Removed) CC:MigrateBindingsToRootSpells — the one-time rewrite of saved
+-- bindings to root spell ids. It guarded on DandersFrames_ClickCastDB, a
+-- global that never existed (the real DB is DandersFramesClickCastingDB), so
+-- it silently no-opped for every user since it shipped. Superseded anyway:
+-- root/override resolution happens live at bind time via C_Spell.GetBaseSpell
+-- / GetOverrideSpell (see trueRootId below), so stored ids no longer need a
+-- one-shot rewrite.
 
 -- Check if a binding should be active based on load conditions
 function CC:ShouldBindingLoad(binding)
