@@ -17,10 +17,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local tc = (GUI.GetThemeColor and GUI.GetThemeColor()) or { r = 1, g = 1, b = 1 }
         local linkColor = format("|cFF%02X%02X%02X",
             math.floor((tc.r or 1) * 255), math.floor((tc.g or 1) * 255), math.floor((tc.b or 1) * 255))
-        -- One format-string key (not concatenated fragments) so locales with a different
-        -- word order can move the link within the sentence.
-        local link = linkColor .. "|HdfPage:display_classcolors|h" .. L["Colors"] .. "|h|r"
-        local text = format(L["Set the time colors on the %s page."], link)
+        -- Plain hint with only "Colors page" as the clickable link (jumps to the shared,
+        -- account-wide breakpoint editor). One format-string key so the link can move for
+        -- other locales' word order. No arrow glyph — the DF font renders it as a box.
+        local link = linkColor .. "|HdfPage:display_classcolors|h" .. L["Colors page"] .. "|h|r"
+        local text = format(L["Customize duration colors on the %s."], link)
         local banner = GUI:CreateInfoBanner(parent, {
             tone = "info",
             html = true,
