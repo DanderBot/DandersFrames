@@ -1664,19 +1664,19 @@ local GLOBAL_DEFAULT_MAP = {
 }
 
 -- "Expiry Warning" section for the placed icon/square/bar cards: the per-
--- indicator EXPIRY ALERT ELEMENT — a FontString on the indicator's own aura
--- button showing the custom text / glyph only below the threshold (natively
--- driven; see Factory.lua's EXPIRY ALERT ELEMENT section). Mode dropdown,
--- then the mode-dependent payload controls (custom text / glyph picker),
--- threshold, and the element's button anchor / offsets / size. Writes ride
--- the proxy's __newindex refresh; EVERY key sits in the placed/bar struct
--- sigs (the region is a button child, bind-frozen at init — PTR-5 — so even
--- anchor/offset/size changes Rebuild the slot). Mode-inapplicable controls
--- grey via SetEnabled — the cards' static-height boxes can't hide rows
--- without re-measuring. Glyph labels embed the atlas escape as a live
--- preview. No animation control: a button-child region can't be animated
--- while auras are secret (PTR-5), and out-of-combat-only animation is
--- worthless for an expiry warning.
+-- indicator EXPIRY ALERT ELEMENT — text/glyph shown only below the threshold,
+-- natively driven on an invisible COMPANION SLOT over the indicator (one
+-- duration binding per button; see Factory.lua's EXPIRY ALERT COMPANION SLOT
+-- section). Mode dropdown, then the mode-dependent payload controls (custom
+-- text / glyph picker), threshold, and the element's anchor / offsets / size
+-- (relative to the indicator's rect). Writes ride the proxy's __newindex
+-- refresh; EVERY key is structural (the companion's formatter and placement
+-- are bind-frozen at init — PTR-5 — so any change Rebuilds the companion).
+-- Mode-inapplicable controls grey via SetEnabled — the cards' static-height
+-- boxes can't hide rows without re-measuring. Glyph labels embed the atlas
+-- escape as a live preview. No animation control: a button-child region
+-- can't be animated while auras are secret (PTR-5), and out-of-combat-only
+-- animation is worthless for an expiry warning.
 local function AddExpiryAlertControls(g, parent, proxy)
     local textBox, glyphDrop, dependents
     local function UpdateState()
@@ -1703,8 +1703,8 @@ local function AddExpiryAlertControls(g, parent, proxy)
     dependents = {}
     local function dep(w, h) g:AddWidget(w, h); dependents[#dependents + 1] = w; return w end
     dep(GUI:CreateSlider(parent, L["Alert Below (seconds)"], 1, 60, 1, proxy, "expiryAlertThreshold"), 54)
-    -- Element placement: anchored to the INDICATOR's aura button (the a243064
-    -- external-region probe ruled out frame-anchored placement).
+    -- Element placement: anchored to the INDICATOR's rect (the companion slot
+    -- coincides with it; the a243064 probe ruled out frame-anchored placement).
     dep(GUI:CreateDropdown(parent, L["Anchor"], OPTS.ANCHOR_OPTIONS, proxy, "expiryAlertAnchor"), 54)
     dep(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 1, proxy, "expiryAlertOffsetX"), 54)
     dep(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, proxy, "expiryAlertOffsetY"), 54)
@@ -2755,12 +2755,13 @@ local function RenderPreviewIndicator(mockFrame, spec, auraName, info, indicator
 
     -- Expiry Alert element sample (cfg.alertPreview): the static payload at the
     -- configured anchor/offset/size, so positioning is WYSIWYG while editing.
-    -- Anchored to the PREVIEW SLOT (button-relative) exactly like the live
-    -- region: holder covers the slot at the dfAlert level (+7), the FontString
-    -- pins its anchor point to the same point on the holder plus offsets —
-    -- mirroring styleButton_regions' TextStyle:Apply on dfAlertHolder/dfAlert.
-    -- nil (hidden) when the alert is off or the indicator is show-when-missing
-    -- (buildAlertPreview gates both, matching the factory's live behaviour).
+    -- Anchored to the PREVIEW SLOT: live, the companion slot's invisible button
+    -- coincides with the indicator's rect and its duration text pins the
+    -- configured anchor point to the same point on the button plus offsets —
+    -- the holder-over-slot + anchored FontString here is the same math (+7 =
+    -- the companion's duration holder layering). nil (hidden) when the alert
+    -- is off or the indicator is show-when-missing (buildAlertPreview gates
+    -- both, matching the factory's live behaviour).
     local ap = cfg.alertPreview
     if ap then
         local ah = rec.alertHolder
