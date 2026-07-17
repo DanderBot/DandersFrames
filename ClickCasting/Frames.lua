@@ -453,29 +453,34 @@ function CC:CreateClickCastHeader()
     -- Clears bindings when there's no mouseover unit (e.g., a Blizzard panel
     -- opens over the frame, stealing focus without firing WrapScript OnLeave).
     --
-    -- Guard uses BOTH IsUnderMouse() and GetMousePosition() — only clears if
-    -- both report the cursor is off the frame. Each API has independent failure
-    -- modes (IsUnderMouse() has historically returned nil during brief flickers
-    -- when the cursor sits on a child region of a parent unit button; the bounds
-    -- check on GetMousePosition() can also stutter), and a false clear here
-    -- silently wipes keyboard click-cast bindings mid-hover. Treating either
-    -- "over frame" signal as authoritative is the safe default: an extra
-    -- OnLeave cycle will catch the real exit when the mouse genuinely moves
-    -- off the frame.
+    -- The clear is gated on the frame's rect being MEASURABLE. IsUnderMouse()
+    -- and GetMousePosition() are not independent checks: both are computed in
+    -- the restricted environment from the same scrub(GetRect)/scrub(
+    -- GetEffectiveScale) values, so when the frame's geometry is briefly
+    -- unavailable they report "cursor off the frame" TOGETHER — a false clear
+    -- that silently wipes keyboard click-cast bindings mid-hover. GetRect()
+    -- exposes the difference the other two hide: rect present + cursor outside
+    -- it = provably off the frame (safe to clear); rect unavailable = cannot
+    -- know (keep the bindings — the OnLeave/OnHide wraps or the next driver
+    -- flip handle the genuine exit).
     self.header:SetAttribute("_onstate-mouseoverstate", [[
         if newstate == "false" and mouseoverbutton then
+            local l, b, w, h = mouseoverbutton:GetRect()
+            local rectKnown = l and w and h and w > 0 and h > 0
             local underMouse = mouseoverbutton:IsUnderMouse()
             local x, y = mouseoverbutton:GetMousePosition()
             local inBounds = x and y and x >= 0 and x <= 1 and y >= 0 and y <= 1
 
-            -- Store diagnostics from both checks
+            -- Store diagnostics from all checks
             mouseoverbutton:SetAttribute("dfStateDriverCount", (mouseoverbutton:GetAttribute("dfStateDriverCount") or 0) + 1)
             mouseoverbutton:SetAttribute("dfStateDriverUnderMouse", tostring(underMouse))
+            mouseoverbutton:SetAttribute("dfStateDriverRectKnown", tostring(rectKnown))
             mouseoverbutton:SetAttribute("dfSDMouseX", x)
             mouseoverbutton:SetAttribute("dfSDMouseY", y)
 
-            -- Only clear bindings if BOTH checks agree the cursor is off the frame
-            if not underMouse and not inBounds then
+            -- Clear only when the rect is measurable and both cursor checks
+            -- agree the cursor is off the frame
+            if rectKnown and not underMouse and not inBounds then
                 mouseoverbutton:SetAttribute("dfClearedBy", "statedriver")
                 mouseoverbutton:ClearBindings()
                 mouseoverbutton:SetAttribute("dfBindingsActive", nil)
@@ -1393,6 +1398,7 @@ function CC:SetupSecureHandlers(frame)
             self:SetAttribute("dfClearedBy", nil)
             self:SetAttribute("dfStateDriverCount", nil)
             self:SetAttribute("dfStateDriverUnderMouse", nil)
+            self:SetAttribute("dfStateDriverRectKnown", nil)
             self:SetAttribute("dfSDMouseX", nil)
             self:SetAttribute("dfSDMouseY", nil)
             self:SetAttribute("dfEnterPhase", 0)
@@ -1655,12 +1661,13 @@ function CC:SetupSecureHandlers(frame)
             local clearedBy = self:GetAttribute("dfClearedBy") or "nobody"
             local stateDriverCount = self:GetAttribute("dfStateDriverCount") or 0
             local stateDriverUnderMouse = self:GetAttribute("dfStateDriverUnderMouse")
+            local stateDriverRectKnown = self:GetAttribute("dfStateDriverRectKnown")
             local sdMouseX = self:GetAttribute("dfSDMouseX")
             local sdMouseY = self:GetAttribute("dfSDMouseY")
             DF:DebugError("CLICK", "BINDINGS STILL ACTIVE after OnLeave %s! wrapLeave=%s mouseoverbutton=%s checkPassed=%s isSecureMO=%s postCheck=%s",
                 frameName, tostring(wrapLeaveFired), mouseoverOnLeave, tostring(leaveCheckPassed), tostring(isSecureMouseover), postCheck)
-            DF:DebugError("CLICK", "  clearedBy=%s stateDriverFired=%d underMouse=%s mousePos=%s,%s",
-                clearedBy, stateDriverCount, tostring(stateDriverUnderMouse), tostring(sdMouseX), tostring(sdMouseY))
+            DF:DebugError("CLICK", "  clearedBy=%s stateDriverFired=%d underMouse=%s rectKnown=%s mousePos=%s,%s",
+                clearedBy, stateDriverCount, tostring(stateDriverUnderMouse), tostring(stateDriverRectKnown), tostring(sdMouseX), tostring(sdMouseY))
         end
     end)
 
