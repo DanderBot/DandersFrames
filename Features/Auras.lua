@@ -1667,7 +1667,15 @@ local function missingAnimSpill(db, badgeSize)
         artOut = math.max(0, -inset) + badgeSize * 0.5 * scale
     end
     local out = math.max(0, artOut) + math.max(offX, offY)
-    return math.min(badgeSize * 5, math.max(0, math.ceil(out)))
+    out = math.min(badgeSize * 5, math.max(0, math.ceil(out)))
+    -- pp: the spill enters the badge's anchor offsets and the window size — a
+    -- fractional-pixel spill shifts the badge off the grid (uneven border). Snap
+    -- it in the strip's scaled space like the badge size/pitch.
+    if out > 0 and db.pixelPerfect and DF.PixelPerfect then
+        local ss = db.missingBuffIconScale or 1.5
+        out = DF:PixelPerfect(out * ss) / ss
+    end
+    return out
 end
 
 -- Paint one cell's badge: spell icon + unified DF.Border (missingBuffIcon* keys).
@@ -1689,14 +1697,17 @@ local function styleMissingBadge(h, db, frame, info)
     badge.dfIcon:SetTexture(iconTex)
 
     local showBorder = db.missingBuffIconShowBorder ~= false
+    -- pp: no manual pre-snap here — the badge renders inside the strip's SetScale
+    -- (layoutMissingStrip), so Border:Apply snaps via spec.renderScale below and the
+    -- art inset goes through the same SnapThickness so both land identically.
     local borderSize = db.missingBuffIconBorderSize or 2
-    if db.pixelPerfect then borderSize = DF:PixelPerfect(borderSize) end
     if not badge.dfBorder then
         badge.dfBorder = DF.Border:New(badge, { frameLevelOffset = 0, secretRect = true })
     end
     local spec = DF.Border:BuildSpec(db, "missingBuffIcon", { unit = frame.unit, frame = frame, iconMode = true })
     spec.enabled = showBorder
     spec.size = borderSize
+    spec.renderScale = db.missingBuffIconScale or 1.5   -- the strip's SetScale (layoutMissingStrip)
     -- DF_DASH sizes its dash layout from the border's frame width/height; the badge's
     -- rect is SECRET (secretRect on the container button subtree, reading it taints), so
     -- feed the configured badge size for the dash math to use instead.
@@ -1713,17 +1724,43 @@ local function styleMissingBadge(h, db, frame, info)
     end
     DF.Border:Apply(badge.dfBorder, spec)
 
-    local artInset = showBorder and borderSize or 0
+    local artInset = showBorder
+        and DF.Border:SnapThickness(borderSize, db.pixelPerfect, spec.renderScale) or 0
     badge.dfIcon:ClearAllPoints()
     badge.dfIcon:SetPoint("TOPLEFT", artInset, -artInset)
     badge.dfIcon:SetPoint("BOTTOMRIGHT", -artInset, artInset)
+end
+
+-- pp: the badge subtree renders under the strip's SetScale — quantize the badge
+-- size in that scaled space so every cell window / badge edge lands on whole
+-- physical pixels. Field-caught (/df ppdump): a raw size rendered the cell at
+-- 28.13 physical px — the right/top edges straddled the grid and the badge
+-- border drew visibly thicker on one side.
+local function missingBadgeSizeFor(db)
+    local size = db.missingBuffIconSize or MISSING_BADGE_SIZE
+    if db.pixelPerfect and DF.PixelPerfect then
+        local ss = db.missingBuffIconScale or 1.5
+        size = DF:PixelPerfect(size * ss) / ss
+    end
+    return size
+end
+
+-- Whole-pixel cell pitch (badge size + gap) in strip space — cells 2+ otherwise
+-- accumulate fractional offsets (size must already be quantized by the caller).
+local function missingPitchFor(db, size)
+    local gap = MISSING_BADGE_GAP
+    if db.pixelPerfect and DF.PixelPerfect then
+        local ss = db.missingBuffIconScale or 1.5
+        gap = DF:PixelPerfect(gap * ss) / ss
+    end
+    return size + gap
 end
 
 -- Position/scale/level the strip (the OUR-side outer frame all cells live in) —
 -- mirrors the missingBuffIcon* position keys, applied to the strip. The strip
 -- is a plain DF frame (non-secret rect): pixel-snap is fine HERE.
 local function layoutMissingStrip(frame, db, strip, cellCount)
-    local size = db.missingBuffIconSize or MISSING_BADGE_SIZE
+    local size = missingBadgeSizeFor(db)
     local w = cellCount * size + math.max(0, cellCount - 1) * MISSING_BADGE_GAP
     strip:SetSize(math.max(w, 1), size)
     strip:SetScale(db.missingBuffIconScale or 1.5)
@@ -1778,7 +1815,7 @@ function DF:DriveMissingBuffFactory(frame, db)
     -- Badge size is NOT in the signature: it hot-applies through h:SetBadgeSize
     -- (live group-layout mutator + our frames) in the version-gated block below —
     -- a size slider drag must never recreate containers (per-tick churn).
-    local badgeSize = db.missingBuffIconSize or MISSING_BADGE_SIZE
+    local badgeSize = missingBadgeSizeFor(db)
     local sig = missingFactorySig(tracked)
     if not strip then
         strip = CreateFrame("Frame", nil, frame.contentOverlay or frame)
@@ -1794,6 +1831,10 @@ function DF:DriveMissingBuffFactory(frame, db)
         frame.missingFactorySig = sig
         frame.dfMissingFactoryVersion = DF.auraLayoutVersion or 0
         local spill = missingAnimSpill(db, badgeSize)
+        -- pp: whole-pixel cell pitch in the STRIP's scaled space (the strip carries
+        -- missingBuffIconScale), else cells 2+ accumulate fractional offsets and
+        -- their badge borders render uneven while cell 1's are clean.
+        local pitch = missingPitchFor(db, badgeSize)
         for i = 1, #tracked do
             local info = tracked[i]
             local cellCfg = buildMissingCellConfig(info, frame.unit, badgeSize)
@@ -1803,7 +1844,7 @@ function DF:DriveMissingBuffFactory(frame, db)
                 h:ClearAllPoints()
                 -- Shift the (spill-enlarged) window left by the spill so the CENTRED badge
                 -- still lands on the badge-pitch grid — icon position unchanged, window grows.
-                h:SetPoint("LEFT", strip, "LEFT", (i - 1) * (badgeSize + MISSING_BADGE_GAP) - spill, 0)
+                h:SetPoint("LEFT", strip, "LEFT", (i - 1) * pitch - spill, 0)
                 styleMissingBadge(h, db, frame, info)
                 cells[info[2]] = h
             end
@@ -1877,7 +1918,7 @@ function DF:DriveMissingBuffFactory(frame, db)
                 -- no teardown, so a slider drag re-flows the spill without restarting the anim.
                 if h.SetBadgeSpill then h:SetBadgeSpill(spill) end
                 h:ClearAllPoints()
-                h:SetPoint("LEFT", strip, "LEFT", (i - 1) * (badgeSize + MISSING_BADGE_GAP) - spill, 0)
+                h:SetPoint("LEFT", strip, "LEFT", (i - 1) * missingPitchFor(db, badgeSize) - spill, 0)
                 styleMissingBadge(h, db, frame, info)
             end
         end

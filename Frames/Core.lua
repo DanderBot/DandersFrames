@@ -256,7 +256,21 @@ function DF:UpdatePixelScale()
     local uiScale = UIParent:GetEffectiveScale()
     -- WoW's reference resolution is 768 pixels high
     local pixelScale = 768 / physicalHeight
-    cachedPixelScale = pixelScale / uiScale
+    local newScale = pixelScale / uiScale
+    -- When the value actually CHANGES with a previous cache in place, every
+    -- pixel-snapped size already baked (aura container borders / art insets /
+    -- quantized layouts) was computed with the stale value — at login UIParent's
+    -- scale settles AFTER the first builds. The factory coSigs carry a
+    -- pixel-scale token, so a layout invalidation makes the next drive restyle
+    -- everything with the fresh value (exactly what a manual settings toggle
+    -- did). Deferred a frame: this can fire mid-event-storm during loading.
+    local changed = cachedPixelScale ~= nil and math.abs(cachedPixelScale - newScale) > 1e-6
+    cachedPixelScale = newScale
+    if changed and C_Timer and C_Timer.After then
+        C_Timer.After(0, function()
+            if DF.InvalidateAuraLayout then pcall(function() DF:InvalidateAuraLayout() end) end
+        end)
+    end
 end
 
 -- Get the cached pixel scale (calculates if not yet cached)
@@ -376,6 +390,21 @@ pixelScaleFrame:SetScript("OnEvent", function()
         if DF.UpdateRaidLayout then
             DF:UpdateRaidLayout()
         end
+    end
+end)
+-- Login settle net (own frame — the handler above full-refreshes on ANY of its
+-- events, which we don't want per loading screen): UI_SCALE_CHANGED doesn't
+-- always fire for the scale UIParent lands on during loading, so the first
+-- builds can bake pixel-snapped values with a scale that's stale by the time
+-- the world is up — and nothing restyled them (field-caught: aura icon borders
+-- uneven after every reload, perfect after any settings toggle). Re-derive
+-- shortly after entering world; UpdatePixelScale invalidates the aura layout
+-- only when the value actually CHANGED, so the quiet case costs nothing.
+local pixelSettleFrame = CreateFrame("Frame")
+pixelSettleFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+pixelSettleFrame:SetScript("OnEvent", function()
+    if C_Timer and C_Timer.After then
+        C_Timer.After(1.5, function() DF:UpdatePixelScale() end)
     end
 end)
 
