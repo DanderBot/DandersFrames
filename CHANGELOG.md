@@ -2,6 +2,10 @@
 
 ## [5.0.0]
 
+### Bug Fixes
+
+* (Bars) Fixed class-coloured health bars staying stuck on the gradient colour (usually green) after using or switching away from the Percent colour mode — the class/custom colour is now written directly to the bar texture, so it can no longer be masked by a leftover gradient tint. (by Krathe)
+
 ### WoW 12.1 (Midnight) Rework
 
 *The 12.1 rework is a big team effort — brought to you by Danders, Krathe and Maelareth. A single change below often includes work from more than one of us, so entries aren't credited individually.*
