@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Bug Fixes
+
+* (Bars) **Fixed health bars rendering solid green when a profile references a bar texture you don't have** — imported profiles often point at another addon's texture files; if that addon isn't installed (or its files changed), the bar showed WoW's green missing-texture state and class colours appeared broken. All bar textures now fall back to the stock texture with a one-time warning, on every update path (the fallback previously only applied when a frame was first created and was immediately overwritten). (by Krathe)
+* (Bars) Fixed class-coloured health bars staying stuck on the gradient colour (usually green) after using or switching away from the Percent colour mode — the class/custom colour is now written directly to the bar texture, so it can no longer be masked by a leftover gradient tint. (by Krathe)
+
 ## [4.7.2]
 
 ### Bug Fixes
