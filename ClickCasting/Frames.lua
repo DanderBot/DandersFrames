@@ -440,11 +440,20 @@ function CC:CreateClickCastHeader()
     self.header:SetAttribute("dfClickCastEnabled", self.db and self.db.enabled or false)
     
     -- Initialize secure environment variables
-    -- mouseoverbutton tracks the currently hovered frame (Cell's pattern)
+    -- mouseoverbutton tracks the currently hovered frame (handle, used ONLY
+    -- for geometry checks in the state driver and identity comparisons).
+    -- mouseovername mirrors it as a plain string for diagnostics, so no
+    -- snippet ever needs to call a method on a possibly-stale handle.
+    -- owner is a permanent handle to this header: ALL hover override bindings
+    -- are owned by it (set/cleared through it), so clearing bindings never
+    -- has to touch a unit-frame handle that may have gone stale. The header
+    -- lives for the whole session, so owner can never dangle.
     if self.header.Execute then
         pcall(function()
             self.header:Execute([[
+                owner = self
                 mouseoverbutton = nil
+                mouseovername = nil
             ]])
         end)
     end
@@ -479,13 +488,16 @@ function CC:CreateClickCastHeader()
             mouseoverbutton:SetAttribute("dfSDMouseY", y)
 
             -- Clear only when the rect is measurable and both cursor checks
-            -- agree the cursor is off the frame
+            -- agree the cursor is off the frame. Hover binds are owned by the
+            -- header (self here), so the binding wipe never touches the frame
+            -- handle — it only writes diagnostics to it.
             if rectKnown and not underMouse and not inBounds then
                 mouseoverbutton:SetAttribute("dfClearedBy", "statedriver")
-                mouseoverbutton:ClearBindings()
+                self:ClearBindings()
                 mouseoverbutton:SetAttribute("dfBindingsActive", nil)
                 mouseoverbutton:SetAttribute("dfIsSecureMouseover", nil)
                 mouseoverbutton = nil
+                mouseovername = nil
             end
         end
     ]])
@@ -1389,7 +1401,17 @@ function CC:SetupSecureHandlers(frame)
     
     if self.header and self.header.WrapScript then
         -- WrapScript OnEnter: Set up bindings
-        -- Also clears previous frame's bindings to avoid stacking
+        --
+        -- HANDLE-SAFETY INVARIANT: this snippet must never call a method on
+        -- any frame handle other than `self` (which is always fresh — the
+        -- frame the mouse just entered) or `owner` (the header, which lives
+        -- for the whole session). The previous design called
+        -- mouseoverbutton:ClearBindings() here to clean up the prior frame's
+        -- bindings; if that shared handle ever went stale, the call errored
+        -- and aborted EVERY frame's OnEnter at that step, killing keyboard
+        -- hover binds addon-wide until /reload. All hover binds are now owned
+        -- by the header, so the cross-frame cleanup is a single
+        -- owner:ClearBindings() that cannot dangle.
         local onEnterSnippet = [[
             -- Phase 0: Reset tracking for this enter cycle
             -- dfBindingsActive is cleared FIRST so a stale true from the previous
@@ -1408,32 +1430,32 @@ function CC:SetupSecureHandlers(frame)
             self:SetAttribute("dfWrapEnterCount", wrapCount)
             self:SetAttribute("dfEnterPhase", 1)
 
-            -- Phase 2: store what mouseoverbutton was before we change it
-            if mouseoverbutton then
-                self:SetAttribute("dfSecurePrevMouseover", mouseoverbutton:GetAttribute("dfFrameName") or "unknown")
-            else
-                self:SetAttribute("dfSecurePrevMouseover", "nil")
-            end
+            -- Phase 2: store what was hovered before us (string mirror, so no
+            -- method call on the possibly-stale previous handle)
+            self:SetAttribute("dfSecurePrevMouseover", mouseovername or "nil")
             self:SetAttribute("dfEnterPhase", 2)
 
-            -- Phase 3: Clear bindings from previous button if any
-            if mouseoverbutton and mouseoverbutton ~= self then
-                mouseoverbutton:ClearBindings()
-                mouseoverbutton:SetAttribute("dfBindingsActive", nil)
-                mouseoverbutton:SetAttribute("dfIsSecureMouseover", nil)
-            end
+            -- Phase 3: Wipe ALL hover binds owner-side. This covers the
+            -- previous frame's binds without touching its handle AT ALL — not
+            -- even SetAttribute, which would equally abort on a stale handle.
+            -- (The previous frame's dfBindingsActive/dfIsSecureMouseover are
+            -- reset by its own next OnEnter Phase 0; its OnLeave normally
+            -- already cleared them.)
+            owner:ClearBindings()
             self:SetAttribute("dfEnterPhase", 3)
 
             -- Phase 4: Set mouseoverbutton
             mouseoverbutton = self
+            mouseovername = self:GetName() or "unnamed"
             self:SetAttribute("dfIsSecureMouseover", true)
             self:SetAttribute("dfEnterPhase", 4)
 
-            -- Phase 5: Clear our own bindings first then re-apply
+            -- Phase 5: Clear any legacy frame-owned bindings (self is always
+            -- a fresh handle here, so this cannot dangle)
             self:ClearBindings()
             self:SetAttribute("dfEnterPhase", 5)
 
-            -- Phase 6: Run the binding snippet
+            -- Phase 6: Run the binding snippet (binds owner-owned, targeting self)
             local snippet = self:GetAttribute("dfBindingSnippet")
             if snippet and snippet ~= "" then
                 self:Run(snippet)
@@ -1450,7 +1472,7 @@ function CC:SetupSecureHandlers(frame)
                 self:SetAttribute("dfPostCheck", "ok")
             elseif mouseoverbutton then
                 -- mouseoverbutton changed to a DIFFERENT frame during OnEnter
-                self:SetAttribute("dfPostCheck", mouseoverbutton:GetAttribute("dfFrameName") or "other")
+                self:SetAttribute("dfPostCheck", mouseovername or "other")
             else
                 -- mouseoverbutton is nil — something wiped it during OnEnter
                 self:SetAttribute("dfPostCheck", "nil")
@@ -1466,21 +1488,19 @@ function CC:SetupSecureHandlers(frame)
             local leaveCount = (self:GetAttribute("dfWrapLeaveCount") or 0) + 1
             self:SetAttribute("dfWrapLeaveCount", leaveCount)
 
-            -- Debug: store who mouseoverbutton actually points to when leave fires
-            if mouseoverbutton then
-                self:SetAttribute("dfMouseoverOnLeave", mouseoverbutton:GetAttribute("dfFrameName") or "unknown")
-            else
-                self:SetAttribute("dfMouseoverOnLeave", "nil")
-            end
+            -- Debug: store who mouseoverbutton points to when leave fires
+            -- (string mirror — never a method call on the shared handle)
+            self:SetAttribute("dfMouseoverOnLeave", mouseovername or "nil")
             -- Store whether the mouseoverbutton==self check will pass
             self:SetAttribute("dfLeaveCheckPassed", mouseoverbutton == self)
 
             if mouseoverbutton == self then
                 self:SetAttribute("dfClearedBy", "onleave")
-                self:ClearBindings()
+                owner:ClearBindings()
                 self:SetAttribute("dfBindingsActive", nil)
                 self:SetAttribute("dfIsSecureMouseover", nil)
                 mouseoverbutton = nil
+                mouseovername = nil
             end
         ]]
         
@@ -1492,10 +1512,11 @@ function CC:SetupSecureHandlers(frame)
         local onHideSnippet = [[
             if mouseoverbutton == self then
                 self:SetAttribute("dfClearedBy", "onhide")
-                self:ClearBindings()
+                owner:ClearBindings()
                 self:SetAttribute("dfBindingsActive", nil)
                 self:SetAttribute("dfIsSecureMouseover", nil)
                 mouseoverbutton = nil
+                mouseovername = nil
             end
         ]]
 
@@ -1768,9 +1789,14 @@ function CC:UpdateFrameBindingAttributes(frame)
                             bindType == "scroll" and (binding.key == "SCROLLUP" and "MOUSEWHEELUP" or "MOUSEWHEELDOWN") or binding.key)
                     end
                     
-                    -- Build SetBindingClick call - FRAME owns bindings, targets SELF
+                    -- Build SetBindingClick call — the HEADER (owner) owns the
+                    -- binding, the click targets the hovered frame (self at
+                    -- snippet run time). Header ownership means every clear is
+                    -- an owner-side wipe that can never hit a stale frame
+                    -- handle. The snippet runs via self:Run() in the OnEnter
+                    -- wrap, so self = the frame; owner = the header env var.
                     table.insert(snippetLines, string.format(
-                        [[self:SetBindingClick(true, %q, self, %q)]],
+                        [[owner:SetBindingClick(true, %q, self, %q)]],
                         bindKey, virtualBtn
                     ))
                 end
