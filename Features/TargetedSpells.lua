@@ -4338,7 +4338,7 @@ local function TargetedList_ApplyBarAppearance(bar, db)
     -- which clobbers the progress fill set by ApplyBarContent.
     local texturePath = db.targetedListTexture or "Interface\\TargetingFrame\\UI-StatusBar"
     if bar._lastTexturePath ~= texturePath then
-        bar.progress:SetStatusBarTexture(texturePath)
+        DF:SafeSetStatusBarTexture(bar.progress, texturePath)
         bar._lastTexturePath = texturePath
     end
 

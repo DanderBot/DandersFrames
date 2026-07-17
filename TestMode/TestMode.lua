@@ -471,7 +471,7 @@ function DF:UpdateTestFrameHealthOnly(frame, index)
             if not texture or texture == "" then
                 texture = db.healthTexture or "Interface\\TargetingFrame\\UI-StatusBar"
             end
-            frame.missingHealthBar:SetStatusBarTexture(texture)
+            DF:SafeSetStatusBarTexture(frame.missingHealthBar, texture)
             
             frame.missingHealthBar:Show()
         else
@@ -667,7 +667,7 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
             if not texture or texture == "" then
                 texture = db.healthTexture or "Interface\\TargetingFrame\\UI-StatusBar"
             end
-            frame.missingHealthBar:SetStatusBarTexture(texture)
+            DF:SafeSetStatusBarTexture(frame.missingHealthBar, texture)
             
             frame.missingHealthBar:Show()
         else
@@ -2606,7 +2606,7 @@ function DF:ApplyTestFrameLayout(frame)
     if frame.healthBar then
         -- Texture
         local healthTex = db.healthTexture or "Interface\\TargetingFrame\\UI-StatusBar"
-        frame.healthBar:SetStatusBarTexture(healthTex)
+        DF:SafeSetStatusBarTexture(frame.healthBar, healthTex)
         
         -- Orientation
         local orientation = db.healthOrientation or "HORIZONTAL"
@@ -2634,7 +2634,7 @@ function DF:ApplyTestFrameLayout(frame)
             if not missingTex or missingTex == "" then
                 missingTex = healthTex
             end
-            frame.missingHealthBar:SetStatusBarTexture(missingTex)
+            DF:SafeSetStatusBarTexture(frame.missingHealthBar, missingTex)
             
             if orientation == "HORIZONTAL" then
                 frame.missingHealthBar:SetOrientation("HORIZONTAL")
