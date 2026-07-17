@@ -79,7 +79,11 @@ function DF:ApplyFrameLayout(frame)
     if healthBar then
         -- Texture
         local healthTex = db.healthTexture or "Interface\\TargetingFrame\\UI-StatusBar"
-        healthBar:SetStatusBarTexture(healthTex)
+        -- Safe setter: falls back to the stock texture when the configured path
+        -- is missing (imported profiles referencing another addon's media render
+        -- solid green otherwise). Frame CREATION already used the safe setter,
+        -- but this per-update raw call immediately clobbered its fallback.
+        DF:SafeSetStatusBarTexture(healthBar, healthTex)
         
         -- Orientation
         local orientation = db.healthOrientation or "HORIZONTAL"
@@ -139,7 +143,7 @@ function DF:ApplyFrameLayout(frame)
         local absorbTex = db.absorbBarTexture or "Interface\\Buttons\\WHITE8x8"
         local absorbColor = db.absorbBarColor or {r = 0, g = 0.835, b = 1, a = 0.7}
         
-        absorbBar:SetStatusBarTexture(absorbTex)
+        DF:SafeSetStatusBarTexture(absorbBar, absorbTex)
         absorbBar:SetStatusBarColor(absorbColor.r, absorbColor.g, absorbColor.b, absorbColor.a)
         
         if absorbMode == "FLOATING" then
@@ -177,7 +181,7 @@ function DF:ApplyFrameLayout(frame)
         local healAbsorbTex = db.healAbsorbBarTexture or "Interface\\Buttons\\WHITE8x8"
         local healAbsorbColor = db.healAbsorbBarColor or {r = 0.4, g = 0.1, b = 0.1, a = 0.7}
         
-        healAbsorbBar:SetStatusBarTexture(healAbsorbTex)
+        DF:SafeSetStatusBarTexture(healAbsorbBar, healAbsorbTex)
         healAbsorbBar:SetStatusBarColor(healAbsorbColor.r, healAbsorbColor.g, healAbsorbColor.b, healAbsorbColor.a)
         
         if healAbsorbMode == "FLOATING" then
