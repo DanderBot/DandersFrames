@@ -4074,6 +4074,9 @@ DF._MainEventDispatcher = function(self, event, arg1)
             -- Blizzard-frame dispel-indicator CVar stamp (party-only key; its
             -- v4.3.4 fold into dispelOverlayDispelType runs before this strip).
             "_blizzDispelIndicator",
+            -- Masque integration control (removed in 5.0 — Masque can't skin the
+            -- 12.1 container aura buttons; the saved toggle drives nothing now).
+            "masqueBorderControl",
             -- Old external-defensive icon (its widget died with the legacy pools;
             -- the settings migrated into defensiveIcon* long ago).
             "externalDefAnchor", "externalDefBorderColor", "externalDefBorderSize",
