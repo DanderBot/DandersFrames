@@ -95,7 +95,6 @@ function DF:GetTestUnitData(index, isRaid, isBoss)
             raidTarget = nil,
             dispelType = nil,
             centerStatus = nil,
-           
             isMainTank = false,
             isMainAssist = false,
             isAFK = false,

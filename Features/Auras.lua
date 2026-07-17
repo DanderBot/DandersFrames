@@ -252,6 +252,9 @@ end
 -- consumed only by DF's own overlay), so the stamp just re-imposed a frozen
 -- value on Blizzard's frames every login. The key is stripped in Core.lua's
 -- v5 legacy-aura cleanup.
+-- DELIBERATE: this frame survives the removal above solely to feed the roster
+-- diagnostics counter (/dfroster) — it tallies how many GROUP_ROSTER_UPDATE
+-- handlers fire per roster change across the addon. No render work happens here.
 local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
 
