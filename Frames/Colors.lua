@@ -287,15 +287,31 @@ function DF:ApplyHealthColors(frame)
             end
         end
         frame.healthBar:SetStatusBarColor(r, g, b)
-        -- Apply alpha separately so range/dead fade can control it
-        if not deadFadeActive then
-            local tex = frame.healthBar:GetStatusBarTexture()
-            if tex then tex:SetAlpha(classColorAlpha) end
+        local tex = frame.healthBar:GetStatusBarTexture()
+        if tex then
+            -- ALSO write the colour to the texture's vertex directly (the same
+            -- channel PERCENT mode and ElementAppearance use). Without this,
+            -- switching from Percent to Class can leave the last gradient
+            -- colour visible: PERCENT painted the texture directly, so the
+            -- StatusBar's own cached colour may already equal the class colour
+            -- and SetStatusBarColor above no-ops, leaving the gradient stain
+            -- (typically green at full health) until /reload. Writing the same
+            -- rgb through the vertex guarantees the visible state either way,
+            -- and matches UpdateHealthBarAppearance's channel so the two
+            -- appliers can't fight.
+            tex:SetVertexColor(r, g, b)
+            -- Apply alpha separately so range/dead fade can control it
+            if not deadFadeActive then
+                tex:SetAlpha(classColorAlpha)
+            end
         end
     else
         -- Custom color mode - use RGBA
         local c = db.healthColor
         frame.healthBar:SetStatusBarColor(c.r, c.g, c.b, c.a or 1)
+        -- Same direct vertex write as the CLASS branch above (gradient-stain fix).
+        local tex = frame.healthBar:GetStatusBarTexture()
+        if tex then tex:SetVertexColor(c.r, c.g, c.b) end
     end
     
     -- Skip background color if dead fade with custom color is active

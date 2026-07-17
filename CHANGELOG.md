@@ -1,5 +1,11 @@
 # DandersFrames Changelog
 
+## [4.7.3]
+
+### Bug Fixes
+
+* (Bars) Fixed class-coloured health bars staying stuck on the gradient colour (usually green) after using or switching away from the Percent colour mode — the class/custom colour is now written directly to the bar texture, so it can no longer be masked by a leftover gradient tint. (by Krathe)
+
 ## [4.7.2]
 
 ### Bug Fixes
