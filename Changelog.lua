@@ -1,10 +1,17 @@
 local addonName, DF = ...
-DF.BUILD_DATE = "2026-07-16T19:38:43Z"
+DF.BUILD_DATE = "2026-07-17T09:24:30Z"
 DF.RELEASE_CHANNEL = "alpha"
 DF.CHANGELOG_TEXT = [===[
 # DandersFrames Changelog
 
 ## [5.0.0]
+
+### Bug Fixes
+
+* (Click Casting) Fixed a Lua error walking Blizzard unit frames after combat that could stop click-casting bindings from working on the default frames until reload — the frame scan now skips protected (secret) values introduced by recent client versions. (by Krathe)
+* (Click Casting) Keyboard binds that stop working mid-session now recover automatically after combat ends or a loading screen, instead of staying broken until a reload.
+* (Bars) **Fixed health bars rendering solid green when a profile references a bar texture you don't have** — imported profiles often point at another addon's texture files; if that addon isn't installed (or its files changed), the bar showed WoW's green missing-texture state and class colours appeared broken. All bar textures now fall back to the stock texture with a one-time warning, on every update path (the fallback previously only applied when a frame was first created and was immediately overwritten). (by Krathe)
+* (Bars) Fixed class-coloured health bars staying stuck on the gradient colour (usually green) after using or switching away from the Percent colour mode — the class/custom colour is now written directly to the bar texture, so it can no longer be masked by a leftover gradient tint. (by Krathe)
 
 ### WoW 12.1 (Midnight) Rework
 
@@ -12,6 +19,15 @@ DF.CHANGELOG_TEXT = [===[
 
 DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally changed how the game handles auras. This build runs on 12.1 only — 12.0.x stays on 4.7. Every aura row — buffs, debuffs, defensives and missing buffs — now renders through the game's new protected aura engine.
 
+* (Auras) **New: Dispel Symbol.** The debuff bar can show a letter on each debuff indicating its dispel type — a colourblind-friendly cue alongside the coloured border. Enable it in the new "Dispel Symbol" section on the Debuffs page, with font, size, colour and position options. Note: the symbol only appears in-game while Colorblind Mode is enabled in WoW's Accessibility settings.
+* (Auras) New "Aura Duration Update Rate" setting (General > Settings) — choose how often aura countdown text refreshes: Smooth, Normal or Performance. Applies account-wide to the buff, debuff and defensive bars and Aura Designer indicators.
+* (Auras) Permanent auras no longer show a duration timer on their icons. This is the new default for the buff, debuff and defensive bars and for Aura Designer indicators and groups — you can bring the timer back with the "Hide Duration on Permanent Auras" checkbox in each Duration section.
+* (Auras) **New: Duration Bars.** Buff, debuff and defensive icons can now show a small bar that drains with each aura's remaining time, tucked just below (or above) the icon. Enable it in the new "Duration Bar" section on the Buffs, Debuffs and Defensive Icon pages, with height, gap, texture and colour options — and Aura Designer groups get the same section on each group card.
+* (Auras) New sort controls: buff and debuff bars can show your own auras first and reverse the sort direction, and the defensive icon's order is now selectable (Externals First, Most Urgent, or Default).
+* (Auras) The Dispellable debuff filter has a new "Any Dispel Type" mode — show every debuff with a dispel type, even ones nobody in the group can dispel.
+* (Auras) New "Hide Permanent Auras" option for the buff bar — hides buffs with no duration, like auras that last until cancelled.
+* (Aura Designer) Groups get sort controls too — each filter, other-buff and debuff group card now has its own Sort Order, "My Auras First" and "Reverse Order" options.
+* (Auras) Changing aura filters, sort order, or max icons no longer rebuilds the icon rows — changes apply instantly in place, with no flicker. This covers the buff, debuff and defensive bars and the Aura Designer's filter and debuff groups. Changes made in combat apply the moment combat ends.
 * (Aura Designer) **The Aura Designer now works for every spec** — previously healers and Augmentation only. The spec dropdown is grouped by class and searchable.
 * (Aura Designer) **New: Filter Groups.** Place an entire filter on the frame as its own icon row — link built-in or custom filters, and every matching buff appears in a self-arranging row with its own position, icon size, growth and icon cap. Filter Designer changes apply to linked groups immediately, and buffs shown by a group leave the buff bar while "Hide Duplicate Buffs" is on.
 * (Aura Designer) **New: Expiry Alerts.** Indicators can now warn you when a tracked buff is about to run out — below a threshold you choose, your own custom text or a warning glyph appears on the unit frame, positioned and sized however you like, so a tracked shield can literally say "Shield dropping!". Find it in each indicator's Expiry Warning section.
@@ -77,7 +93,7 @@ DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally chan
 * (Auras) **Debuffs now render through the 12.1 aura engine** — the last row on the legacy path, which could show nothing in combat. Layout, borders, text and sort work like the buff row, and a new "Dispel Border Inset" slider positions the dispel ring.
 * (Auras) Buff "Sort Order" works again — Time Remaining and Alphabetical apply natively, in combat too.
 * (Auras) New "Hide Long Buffs" filter: hides buffs whose total duration exceeds a threshold — e.g. hour-long food buffs. Permanent buffs are also hidden while this is on.
-* (Interface) Buff Border settings no longer hide when Masque's "Let Masque control borders" is on — Masque can't skin the 12.1 aura buttons, so DF's own border applies.
+* (Auras) **Masque skinning support has been retired** — the new 12.1 aura icons can't be skinned by third-party addons, so the Masque option on the Integrations page no longer did anything and has been removed. DF's own border settings always apply.
 * (Auras) Texture-style aura borders no longer scatter, lose their colour or vanish until a /reload — and fine border detail stays crisp at small icon sizes.
 * (Auras) "Color by Time Remaining" works again on duration text, ticking in combat — fixed time steps (red under 5s, orange under 15s, yellow under a minute).
 * (Auras) Buff and defensive icon text share one styling system, adding Duration and Stack colour options. The "Short" format no longer shows a stray space.
