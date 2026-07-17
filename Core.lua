@@ -4595,6 +4595,14 @@ DF._MainEventDispatcher = function(self, event, arg1)
             elseif msg == "auras" or msg == "debugauras" then
                 -- Debug command to compare aura filters
                 DF:DebugAuraFilters("player")
+            elseif msg == "ppdump" then
+                -- Pixel-perfect geometry ground truth for aura containers (physical-px
+                -- rects + grid deviation per anchor-chain element)
+                if DF.AuraContainer and DF.AuraContainer.DebugDumpPP then DF.AuraContainer.DebugDumpPP() end
+            elseif msg == "ppbadge" then
+                -- Diagnostic: window-park missing badges (bypasses the container's secret
+                -- self-size) — proves/disproves the last missing-badge pp drift source
+                if DF.AuraContainer and DF.AuraContainer.ToggleBadgeParkDebug then DF.AuraContainer.ToggleBadgeParkDebug() end
             elseif msg == "admissing" then
                 -- Diagnostic for the Aura Designer show-when-missing push mechanism
                 if DF.DebugADMissing then DF:DebugADMissing() end

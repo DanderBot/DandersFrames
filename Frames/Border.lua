@@ -1832,6 +1832,28 @@ end
 --                 The shadow widget is lazy-created on first use and reused
 --                 thereafter; spec.shadow nil/disabled simply hides it.
 --   pixelPerfect  snap size and inset to whole screen pixels
+--   renderScale   Optional (default 1). The extra SetScale between this border's
+--                 frame and UIParent (e.g. an aura container's layout scale, a
+--                 missing-badge window's indicator scale). PixelPerfect math lives
+--                 in UIParent space; a border rendered inside a scaled subtree must
+--                 fold that scale in (snap size*s, divide back out) or the "snapped"
+--                 thickness renders at s x snapped physical pixels — fractional
+--                 again (uneven fat/thin edges). Only consulted when pixelPerfect.
+
+-- Snap a border thickness to whole PHYSICAL pixels in the border's actual render
+-- space (see spec.renderScale above). Min one physical pixel — a thin border that
+-- rounds to 0 must not vanish. PUBLIC: consumers that place art flush against the
+-- border's inner edge (the AD factory's art insets) MUST size that inset through
+-- this same function so art edge and border edge snap identically.
+function Border:SnapThickness(value, pixelPerfect, renderScale)
+    if not pixelPerfect or not DF.PixelPerfectThickness then return value end
+    local s = tonumber(renderScale) or 1
+    if s > 0 and s ~= 1 then
+        return DF:PixelPerfectThickness(value * s) / s
+    end
+    return DF:PixelPerfectThickness(value)
+end
+
 function Border:Apply(border, spec)
     if not border then return end
     spec = spec or {}
@@ -1873,8 +1895,15 @@ function Border:Apply(border, spec)
     local size = spec.size or 1
     local inset = spec.inset or 0
     if spec.pixelPerfect and DF.PixelPerfect then
-        size = DF:PixelPerfect(size)
-        if inset ~= 0 then inset = DF:PixelPerfect(inset) end
+        local rs = tonumber(spec.renderScale) or 1
+        size = self:SnapThickness(size, true, rs)
+        if inset ~= 0 then
+            if rs > 0 and rs ~= 1 then
+                inset = DF:PixelPerfect(inset * rs) / rs
+            else
+                inset = DF:PixelPerfect(inset)
+            end
+        end
     end
     local cr, cg, cb, ca = readColor(spec.color)
 
@@ -2102,8 +2131,8 @@ function Border:Apply(border, spec)
         local shadowSize = shadow.size or 1
         local shadowOX   = shadow.offsetX or 0
         local shadowOY   = shadow.offsetY or 0
-        if spec.pixelPerfect and DF.PixelPerfect then
-            shadowSize = DF:PixelPerfect(shadowSize)
+        if spec.pixelPerfect then
+            shadowSize = self:SnapThickness(shadowSize, true, spec.renderScale)
         end
         local shr, shg, shb, sha = readColor(shadow.color)
 

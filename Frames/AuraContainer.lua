@@ -545,6 +545,14 @@ local function styleButton_regions(slot, config)
                 -- highlight — are not forbidden and keep animating through their own paths.
                 if spec then
                     spec.animation = nil
+                    -- pp: the border renders inside the container's SetScale(scale)
+                    -- subtree — Apply must snap thickness in that space, not
+                    -- UIParent's (spec.renderScale, Border:SnapThickness). Factory
+                    -- pre-built specs already carry it (their art insets must
+                    -- agree); the db-path specs built just above get it here.
+                    if spec.renderScale == nil then
+                        spec.renderScale = tonumber(config.layout and config.layout.scale) or 1
+                    end
                     DF.Border:Apply(slot.dfBorder, spec)
                 end
             end)
@@ -969,6 +977,102 @@ local function stripReservation(config)
     return (tonumber(bar.height) or 4) + (tonumber(bar.gap) or 2), bar.position == "TOP"
 end
 
+-- ============================================================
+-- PIXEL PERFECT (container edition). The legacy aura icons kept three PP
+-- invariants the container port initially lost:
+--   1. border thickness snapped in the RENDER space (legacy ran scale=1.0 and
+--      folded scale into size; containers use real SetScale, so snapping must
+--      fold the scale — DF.Border spec.renderScale / Border:SnapThickness);
+--   2. icon size / spacing quantized to whole physical pixels (fractional
+--      strides accumulate across a row — adjacent icons rendered visibly
+--      different borders);
+--   3. the render origin nudged onto the physical pixel grid (legacy:
+--      SnapPointToPixelGrid per icon placement).
+-- Buttons here are anchored by Blizzard's secure flow layout (secret offsets,
+-- §20c) so a per-button snap is impossible — instead the CONTAINER'S pin offset
+-- is adjusted arithmetically from the anchor frame's rect (a plain DF frame,
+-- readable; the container's own rect is secret-derived and never read). With the
+-- pin corner on-grid and every stride whole-pixel, each button lands on-grid.
+-- CENTER growth stays best-effort: its pin is a centre-of-edge, so an odd total
+-- row width still straddles by half a pixel.
+-- ============================================================
+
+-- pp resolution: config.pixelPerfect wins when set; else the HOST frame's db —
+-- handle.frame's parent is the unit frame the consumer attached to. Non-DF hosts
+-- (GUI preview panels, healthbar sub-frames for overlays) resolve nil -> off.
+local function resolvePixelPerfect(handle)
+    local cfgPP = handle.config and handle.config.pixelPerfect
+    if cfgPP ~= nil then return cfgPP and true or false end
+    local ok, pp = pcall(function()
+        local host = handle.frame and handle.frame:GetParent()
+        local db = host and DF.GetFrameDB and DF:GetFrameDB(host)
+        return db and db.pixelPerfect
+    end)
+    return (ok and pp) and true or false
+end
+
+-- Snap a layout length to whole physical pixels in the container's SCALED space
+-- (layout numbers live in the container's own units; rendered px = value x
+-- scale). 0 stays 0 (a zero spacing/offset is exact already).
+local function ppSnapScaled(v, scale)
+    if not v or v == 0 or not DF.PixelPerfect then return v end
+    local s = tonumber(scale) or 1
+    if s > 0 and s ~= 1 then return DF:PixelPerfect(v * s) / s end
+    return DF:PixelPerfect(v)
+end
+
+-- Quantize the geometry fields of a layout table into a SHALLOW COPY (the
+-- caller's table is shared by reference and must not be mutated — see Create).
+-- Sizes and spacings only: the pin/user offsets need the anchor frame's live
+-- rect, so they snap later in applyContainerLayout. Read-site fallback defaults
+-- (the `or 32` / `or 4` in the consumers) stay raw — every real config sets
+-- these fields explicitly. Idempotent via the _ppQuantized flag, so repeated
+-- adoption passes (ApplyStyle then a rebuild) are safe.
+local PP_QUANT_FIELDS = { "size", "sizeX", "sizeY", "spacing", "spacingX", "spacingY" }
+local function quantizeLayout(L)
+    if type(L) ~= "table" then return L end
+    local q = {}
+    for k, v in pairs(L) do q[k] = v end
+    local scale = tonumber(L.scale) or 1
+    for _, k in ipairs(PP_QUANT_FIELDS) do
+        if type(q[k]) == "number" then q[k] = ppSnapScaled(q[k], scale) end
+    end
+    q._ppQuantized = true
+    return q
+end
+
+-- Nudge the container pin offsets (<= half a pixel per axis) so the pin point
+-- lands on the physical pixel grid. Computed from the ANCHOR frame's rect only —
+-- never the container's own (secret-derived). Offsets live in the container's
+-- scaled space: rendered px = offset x scale x (anchor-frame px-per-unit).
+-- Third return = whether a real rect was used: false means the anchor frame
+-- isn't laid out yet (login/reload build order — containers build BEFORE the
+-- unit frames get their first layout) and the raw offsets came back untouched.
+-- The CALLER must retry once the rect exists (see the re-pin hooks in
+-- applyContainerLayout / Create) — a silently unsnapped pin was live-caught as
+-- "one AD icon's border uneven at login, perfect after any settings toggle,
+-- broken again on reload".
+local function snapPinOffsets(anchorFrame, anchor, px, py, scale)
+    local ok, nx, ny = pcall(function()
+        local l, b = anchorFrame:GetLeft(), anchorFrame:GetBottom()
+        local w, h = anchorFrame:GetWidth(), anchorFrame:GetHeight()
+        local eff = anchorFrame:GetEffectiveScale()
+        local _, physH = GetPhysicalScreenSize()
+        if not (l and b and w and h and eff and eff > 0 and physH and physH > 0) then return end
+        local s = tonumber(scale) or 1
+        if s <= 0 then s = 1 end
+        local ppu = eff * physH / 768   -- physical px per anchor-frame unit
+        local ax = anchor:find("LEFT") and 0 or (anchor:find("RIGHT") and w) or w / 2
+        local ay = anchor:find("BOTTOM") and 0 or (anchor:find("TOP") and h) or h / 2
+        local rx = (l + ax + px * s) * ppu
+        local ry = (b + ay + py * s) * ppu
+        return px + (math.floor(rx + 0.5) - rx) / (s * ppu),
+               py + (math.floor(ry + 0.5) - ry) / (s * ppu)
+    end)
+    if ok and nx and ny then return nx, ny, true end
+    return px, py, false
+end
+
 local function applyContainerLayout(c, handle)
     local config = handle.config
     local L = config.layout or {}
@@ -1000,6 +1104,7 @@ local function applyContainerLayout(c, handle)
     -- keep the exact pre-strip native call sequence; _dfPadApplied clears a stale
     -- inset if a live restyle flips the strip to the far side (or to fill).
     local resv, topStrip = stripReservation(config)
+    if resv > 0 and handle._pp then resv = ppSnapScaled(resv, scale) end
     local padTop, padBottom = 0, 0
     if resv > 0 then
         if G.vName == "Up" then
@@ -1009,6 +1114,18 @@ local function applyContainerLayout(c, handle)
         end
     end
 
+    -- Pin offsets: user offset + growth fold, then (pp) nudged onto the physical
+    -- pixel grid — the container-era equivalent of the legacy per-icon
+    -- SnapPointToPixelGrid (see the PIXEL PERFECT block above).
+    local px = (L.offsetX or 0) + G.pinX
+    local py = (L.offsetY or 0) + G.pinY
+    local pinResolved = true
+    if handle._pp then
+        px, py, pinResolved = snapPinOffsets(handle.frame, G.anchor, px, py, scale)
+    end
+    -- /df ppdump ground truth: the last pin decision this handle rendered with.
+    handle._ppDbg = { px = px, py = py, resolved = pinResolved, anchor = G.anchor, pin = G.pinPoint, scale = scale }
+
     pcall(function()
         c:SetScale(scale)
         -- Pin the container to the frame's anchor point + offsets. Directional
@@ -1017,8 +1134,7 @@ local function applyContainerLayout(c, handle)
         -- whose offsets rode the scaled buttons). CENTER growth: the box's
         -- centre-of-edge pins instead (see resolveGrowthLayout).
         c:ClearAllPoints()
-        c:SetPoint(G.pinPoint, handle.frame, G.anchor,
-            (L.offsetX or 0) + G.pinX, (L.offsetY or 0) + G.pinY)
+        c:SetPoint(G.pinPoint, handle.frame, G.anchor, px, py)
         c:SetAuraLayoutAnchorPoint(G.flowAnchor)
         if AnchorUtil and AnchorUtil.FlowDirection then
             local h = resolveEnum(AnchorUtil.FlowDirection, G.hName)
@@ -1031,6 +1147,30 @@ local function applyContainerLayout(c, handle)
             c:SetAuraLayoutPadding(0, 0, padTop, padBottom)
         end
     end)
+
+    -- PIN RETRY (live-caught): at login/reload the containers build BEFORE the
+    -- unit frames' first layout — the anchor rect is nil, the pin snap above
+    -- no-ops, and that one container renders off-grid until any settings pass
+    -- happens to re-run the layout. Poll (self-terminating, one per anchor
+    -- frame, hidden frames don't tick) until the rect resolves, then re-run
+    -- this whole layout so the snap lands. Guarded against a torn-down /
+    -- rebuilt container so a stale closure can't relayout a dead one.
+    if handle._pp and not pinResolved then
+        local f = handle.frame
+        local tries = 0
+        f:SetScript("OnUpdate", function(fr)
+            tries = tries + 1
+            local live = handle.backend and handle.backend.container == c
+            -- GetLeft on our plain window is expected non-secret; guard anyway —
+            -- truthiness on a secret number is the 12.1 taint trap.
+            local gl = fr:GetLeft()
+            if gl and issecretvalue and issecretvalue(gl) then gl = nil end
+            if not live or gl or tries > 600 then
+                fr:SetScript("OnUpdate", nil)
+                if live and gl then applyContainerLayout(c, handle) end
+            end
+        end)
+    end
 end
 
 -- Per-group layout options (stride/spacing). gapX stays 0: the flow advances its
@@ -1046,13 +1186,18 @@ local function buildGroupLayout(config)
     local sy = (L.sizeY or L.size or sx)
     local spX = (L.spacingX or L.spacing or 4)
     local spY = (L.spacingY or L.spacing or 4)
+    -- pp (quantized layout): the reservation joins elementHeight, so it must be
+    -- whole-pixel too or every row stride goes fractional again. _ppQuantized is
+    -- the adoption-time pp marker (no handle in scope here).
+    local resv = stripReservation(config)
+    if resv > 0 and L._ppQuantized then resv = ppSnapScaled(resv, tonumber(L.scale) or 1) end
     return {
         elementWidth    = sx,
         -- + strip reservation: elementHeight overrides the measured button height in
         -- the flow (GetElementSize), so the row stride and the container self-size
         -- both grow by the strip's out-of-rect space (0 for fill / no bar). The
         -- start-side inset half of the reservation lives in applyContainerLayout.
-        elementHeight   = sy + stripReservation(config),
+        elementHeight   = sy + resv,
         elementSpacingX = spX,
         elementSpacingY = spY,
         gapX            = 0,
@@ -1096,6 +1241,12 @@ local function layoutRow(handle)
         local row = math.floor(idx / wrap)
         local x = (L.offsetX or 0) + (pAxis.x * col + sAxis.x * row) * stepX
         local y = (L.offsetY or 0) + (pAxis.y * col + sAxis.y * row) * stepY
+        -- pp: whole-pixel offsets relative to the (grid-snapped) anchor frame.
+        -- Offsets here live in the BUTTON's scaled space (b:SetScale below).
+        if handle._pp then
+            x = ppSnapScaled(x, scale)
+            y = ppSnapScaled(y, scale)
+        end
         b:SetScale(scale)
         b:ClearAllPoints()
         b:SetPoint(anchor, handle.frame, anchor, x, y)
@@ -1131,6 +1282,18 @@ end
 -- state parks the badge exactly on the window. Also the extra cell width beyond the
 -- badge, so the pushed badge clears the window with margin.
 local MISSING_PAD = 2
+-- An EMPTY container is NOT zero-sized: AnchorUtil.ApplyFlowLayout reports
+-- math.max(layoutWidth, 1) to OnLayoutComplete, and the secure SetSize floors
+-- every empty container at 1x1 units (Blizzard_SharedXMLBase/AnchorUtil.lua,
+-- 12.1; padding defaults are all 0 so the floor always wins when empty). The
+-- parked missing badge rides the container's TOPLEFT = pin - selfWidth, so that
+-- 1 unit re-entered the badge position as a FRACTIONAL-pixel drift (1 unit is
+-- rarely a whole physical pixel) — field-caught as the missing badge's border
+-- rendering thicker on one side under pixel perfect, surviving every other
+-- quantization fix. Compensate it EXACTLY in the badge offset; the push's
+-- evacuation margin becomes MISSING_PAD - MISSING_EMPTY_W (= 1 unit, still
+-- clear of the window even with the animation spill, which cancels out).
+local MISSING_EMPTY_W = 1
 
 local NativeBackend = {}
 NativeBackend.__index = NativeBackend
@@ -1339,9 +1502,13 @@ function NativeBackend:build()
         -- Centre the badge in the (badge + 2*spill) window: the -MISSING_PAD container pin
         -- and the +MISSING_PAD badge inset still cancel to park it on the window when empty;
         -- the +spill / -spill centres it inside the enlarged window.
+        -- _badgeParkDebug (/df ppbadge): force the WINDOW anchor live — the parked badge
+        -- position then can't inherit the empty container's SECRET (and field-measured
+        -- fractional) self-width. DIAGNOSTIC ONLY: the layout-push cannot move a
+        -- window-anchored badge, so presence no longer hides it while the flag is on.
         local sp = (handle.config.badge and handle.config.badge.spill) or 0
         handle.badge:ClearAllPoints()
-        if testMode then
+        if testMode or AuraContainer._badgeParkDebug then
             -- P5 preview: the container stays DISABLED all test session (the
             -- bounce skips missing mode) and a never-laid-out container has NO
             -- resolvable rect (its secret SetSize only runs while enabled) — a
@@ -1349,7 +1516,9 @@ function NativeBackend:build()
             -- badge on the WINDOW instead: that IS the "missing" position.
             handle.badge:SetPoint("TOPLEFT", handle.frame, "TOPLEFT", sp, -sp)
         else
-            handle.badge:SetPoint("TOPLEFT", c, "TOPLEFT", MISSING_PAD + sp, -sp)
+            -- +MISSING_EMPTY_W: cancel the empty container's 1-unit size floor so the
+            -- parked badge lands EXACTLY at window TOPLEFT + spill (see the constant).
+            handle.badge:SetPoint("TOPLEFT", c, "TOPLEFT", MISSING_PAD + sp + MISSING_EMPTY_W, -sp)
         end
         handle.badge:Show()
     end
@@ -1967,7 +2136,13 @@ end
 -- fine: the push only matters once the buff is present (the badge is hidden then anyway).
 function Handle:SetBadgeSpill(sp)
     if self.config.mode ~= "missing" or not self.badge then return end
-    sp = math.max(0, math.floor(sp or 0))
+    -- Do NOT floor: the caller pixel-quantizes the spill (whole PHYSICAL px =
+    -- fractional UNITS) and uses the SAME value to shift the strip cell by
+    -- -spill — flooring here desynced the two by the fractional part, so the
+    -- window-grows/cell-shifts cancellation broke and the badge visibly
+    -- wiggled/shifted while dragging the animation inset/offset sliders
+    -- (live-caught). The value must survive this round trip bit-exact.
+    sp = math.max(0, tonumber(sp) or 0)
     local badge = self.config.badge or {}
     self.config.badge = badge
     if (badge.spill or 0) == sp then return end
@@ -1978,7 +2153,8 @@ function Handle:SetBadgeSpill(sp)
     local backend = self.backend
     local c = backend and backend.container
     if c then
-        self.badge:SetPoint("TOPLEFT", c, "TOPLEFT", MISSING_PAD + sp, -sp)
+        -- +MISSING_EMPTY_W: same empty-size-floor compensation as the build anchor.
+        self.badge:SetPoint("TOPLEFT", c, "TOPLEFT", MISSING_PAD + sp + MISSING_EMPTY_W, -sp)
         if backend.groupKeys and c.SetAuraGroupLayout then
             local cellLayout = { elementWidth = bw + 2 * sp + MISSING_PAD, elementHeight = bh }
             for _, key in ipairs(backend.groupKeys) do
@@ -2034,6 +2210,22 @@ end
 -- expiredText/zeroText/updateInterval/colorCurve, bar interpolation/direction, dispel show flags). To toggle a
 -- region on/off or change a frozen opt, use Rebuild(). pcall-guarded so a restyle fault
 -- can't escape into a GUI callback.
+-- Resolve + cache the pixel-perfect flag and (when on) swap config.layout for a
+-- pixel-quantized copy (see the PIXEL PERFECT block above applyContainerLayout).
+-- Runs at every config/layout adoption: _build (covers Create + Rebuild) and
+-- ApplyStyle. Pure table math + a db read — combat-safe.
+function Handle:_ppPrepare()
+    self._pp = resolvePixelPerfect(self)
+    -- /df ppdump discriminator: the pixel-scale CACHE value this handle's layout
+    -- was quantized with. UIParent's scale can settle AFTER login builds — a
+    -- stale cache here bakes every snapped size subtly wrong until a restyle.
+    self._ppCacheAt = (DF.GetPixelScale and DF:GetPixelScale()) or nil
+    local L = self.config and self.config.layout
+    if self._pp and type(L) == "table" and not L._ppQuantized then
+        self.config.layout = quantizeLayout(L)
+    end
+end
+
 function Handle:ApplyStyle(style, layout)
     if type(style) == "table" then
         self.config.style = style
@@ -2041,6 +2233,7 @@ function Handle:ApplyStyle(style, layout)
     if type(layout) == "table" then
         self.config.layout = layout   -- optional geometry swap (size/scale/spacing/growth/offsets)
     end
+    self:_ppPrepare()
     -- BUILD-ONCE-LEAVE-IT (combat parity with the proven DF_AuraLab pattern): a live
     -- native container's buttons are NEVER re-touched in combat. The lab builds once,
     -- lets Blizzard drive, and only restyles on explicit OOC user action; restyling
@@ -2338,6 +2531,7 @@ end
 -- (see AuraContainer.SetTestMode). The backend owns the container + slot
 -- production; the handle owns styling/layout/lifecycle.
 function Handle:_build()
+    self:_ppPrepare()          -- pp flag + quantized layout BEFORE any geometry runs
     self.backend = NativeBackend.new(self)
     self.backend:build()
     self:_updateDynRefresh()   -- auto-bounce on target/focus/mouseover change
@@ -2494,6 +2688,18 @@ function AuraContainer:Create(parent, config)
         -- Row/overlay: h.frame occupies the unit-frame rect (row layout anchors are
         -- relative to it; overlay covers it). Reposition: h:ClearAllPoints() + h:SetPoint(...).
         h.frame:SetAllPoints(parent)
+        -- pp: the pin snap depends on this rect (position AND width/height — centre
+        -- and right-side anchors reference them), so a resize invalidates it. This
+        -- also fires on the frame's FIRST layout (size resolving 0 -> WxH), making
+        -- it the primary late-login re-pin path; the OnUpdate poll in
+        -- applyContainerLayout is the belt-and-braces fallback. No-op for non-pp
+        -- users and for overlay mode (no pin — the container covers the host).
+        if cfg.mode ~= "overlay" then
+            h.frame:SetScript("OnSizeChanged", function()
+                local c = h._pp and h.backend and h.backend.container
+                if c then pcall(applyContainerLayout, c, h) end
+            end)
+        end
     end
     -- Z-order: legacy renders host aura icons ABOVE contentOverlay (parent+25, name/health
     -- text). Raising h.frame raises the whole subtree — the native container + AuraButtons +
@@ -2524,6 +2730,116 @@ end
 -- its preview IS the factory's own rendering. No container, no aura
 -- data: styling + the curated entry only.
 -- ============================================================
+
+-- /df ppbadge — diagnostic toggle: park missing badges on the WINDOW instead of
+-- the container (see _badgeParkDebug at the build). Border renders perfect =>
+-- the empty container's secret fractional self-width is confirmed as the last
+-- off-grid source. Rebuilds every missing handle on toggle. NOT a fix: the
+-- layout-push can't hide a window-anchored badge, so present buffs still show
+-- their badge while this is on.
+function AuraContainer.ToggleBadgeParkDebug()
+    AuraContainer._badgeParkDebug = not AuraContainer._badgeParkDebug or nil
+    local n = 0
+    for h in pairs(AuraContainer._handles or {}) do
+        if h.config and h.config.mode == "missing" then
+            n = n + 1
+            pcall(function() h:_rebuild() end)
+        end
+    end
+    print(("|cff33ff99[ppbadge]|r window-anchored badge park: %s (%d missing container(s) rebuilt). Push is %s while on."):format(
+        AuraContainer._badgeParkDebug and "ON" or "OFF", n,
+        AuraContainer._badgeParkDebug and "DISABLED (badge stays visible even when the buff is present)" or "restored"))
+end
+
+-- /df ppdump — pixel-perfect geometry ground truth (the resource-bar lesson:
+-- field numbers beat source-theorising for pixel bugs). For each visible row /
+-- missing handle: the anchor chain's rects in PHYSICAL pixels with the signed
+-- distance to the nearest pixel grid line ("frac", 0.000 = on-grid), effective
+-- scales, and the pin snap's last inputs/outcome. Every rect read is pcall'd —
+-- SECRET rects print as such instead of erroring.
+function AuraContainer.DebugDumpPP()
+    local _, physH = GetPhysicalScreenSize()
+    local uiEff = UIParent:GetEffectiveScale()
+    print(("|cff33ff99[ppdump]|r physH=%d UIParent eff=%.4f (1px = %.4f UIParent-units)"):format(
+        physH, uiEff, (768 / physH) / uiEff))
+    local function frac(v, ppu)
+        local p = v * ppu
+        return p - math.floor(p + 0.5)
+    end
+    local function row(label, fr)
+        if not fr then print("      " .. label .. ": nil") return end
+        local ok, l, b, w, h, eff = pcall(function()
+            return fr:GetLeft(), fr:GetBottom(), fr:GetWidth(), fr:GetHeight(), fr:GetEffectiveScale()
+        end)
+        if not ok then print("      " .. label .. ": forbidden (getter threw)") return end
+        -- 12.1: rect getters can RETURN secret numbers rather than throw (the
+        -- container self-size is secret-derived even in town) — arithmetic or
+        -- truthiness on them taints, so detect and report per component instead.
+        if issecretvalue then
+            local sec = {}
+            if issecretvalue(l) then sec[#sec + 1] = "L" end
+            if issecretvalue(b) then sec[#sec + 1] = "B" end
+            if issecretvalue(w) then sec[#sec + 1] = "W" end
+            if issecretvalue(h) then sec[#sec + 1] = "H" end
+            if issecretvalue(eff) then sec[#sec + 1] = "eff" end
+            if #sec > 0 then
+                print(("      %s: SECRET rect components (%s)"):format(label, table.concat(sec, ",")))
+                return
+            end
+        end
+        if not (l and b and w and h and eff) then print("      " .. label .. ": no rect (unlaid)") return end
+        local ppu = eff * physH / 768
+        print(("      %s: eff=%.4f  physW=%.2f physH=%.2f | frac L=%+.3f B=%+.3f R=%+.3f T=%+.3f"):format(
+            label, eff, w * ppu, h * ppu,
+            frac(l, ppu), frac(b, ppu), frac(l + w, ppu), frac(b + h, ppu)))
+    end
+    local n = 0
+    for h in pairs(AuraContainer._handles or {}) do
+        local cfg = h.config
+        if cfg and cfg.mode ~= "overlay" and h.frame and h.frame.IsVisible and h.frame:IsVisible() then
+            n = n + 1
+            if n > 12 then print("|cff33ff99[ppdump]|r (capped at 12 handles)") break end
+            local L = cfg.layout or {}
+            print(("|cff33ff99[%d]|r mode=%s unit=%s pp=%s layoutScale=%s anchor=%s quantized=%s"):format(
+                n, tostring(cfg.mode), tostring(cfg.unit), tostring(h._pp),
+                tostring(L.scale), tostring(L.anchor), tostring(L._ppQuantized)))
+            local d = h._ppDbg
+            if d then
+                print(("      pin: %s -> frame %s  px=%.3f py=%.3f snapResolved=%s"):format(
+                    tostring(d.pin), tostring(d.anchor), d.px or 0, d.py or 0, tostring(d.resolved)))
+            end
+            -- Baked style numbers + the pixel-scale cache they were computed under.
+            -- cacheAt != now after a reload = the login builds baked with a stale
+            -- cache (UIParent scale settled later) — the "wrong until any toggle"
+            -- signature. Values are container-local units, raw as baked.
+            local st = cfg.style or {}
+            local bs = st.border and st.border.spec
+            print(("      baked: cacheAt=%s now=%s | iconInset=%s borderSize=%s qSize=%s"):format(
+                tostring(h._ppCacheAt), tostring((DF.GetPixelScale and DF:GetPixelScale()) or "?"),
+                tostring(st.icon and st.icon.inset),
+                tostring(bs and bs.size or (st.border and "db-path" or "none")),
+                tostring(L.size or L.sizeX)))
+            if cfg.mode == "missing" and cfg.badge then
+                -- spill enters the badge anchor offsets; badge position otherwise
+                -- rides the container's SECRET self-size (the layout-push design)
+                print(("      missing: badge=%sx%s spill=%s"):format(
+                    tostring(cfg.badge.w), tostring(cfg.badge.h), tostring(cfg.badge.spill or 0)))
+            end
+            row("host  ", h.frame:GetParent())
+            row("window", h.frame)
+            row("contnr", h.backend and h.backend.container)
+            local b1 = (cfg.mode == "missing") and h.badge or (h.buttons and h.buttons[1])
+            row((cfg.mode == "missing") and "badge " or "button", b1)
+            local bw = b1 and (b1.dfBorder or b1.dfADBorder)
+            if bw then
+                row("border", bw)
+                if bw.top then row("b.top ", bw.top) end
+                if bw.left then row("b.left", bw.left) end
+            end
+        end
+    end
+    if n == 0 then print("|cff33ff99[ppdump]|r no visible row/missing containers found") end
+end
 
 function AuraContainer.StylePreviewSlot(slot, config)
     styleButton_regions(slot, config)
