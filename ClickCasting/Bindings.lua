@@ -533,11 +533,21 @@ function CC:ApplyBindings()
         self.needsBindingRefresh = true
         return
     end
-    
+
     -- Cancel any pending batch binding pass from a previous call
     if self.batchBindingTimer then
         self.batchBindingTimer:Cancel()
         self.batchBindingTimer = nil
+    end
+
+    -- Hover keyboard/scroll binds are owned by the click-cast header, so a
+    -- full rebuild starts by wiping the header's override bindings — any
+    -- bind from the outgoing set that is still active (e.g. the user is
+    -- hovering a frame right now) would otherwise survive with its OLD
+    -- action until the next leave/enter cycle. The next OnEnter re-applies
+    -- from the freshly built snippets.
+    if self.header then
+        pcall(ClearOverrideBindings, self.header)
     end
     
     -- Migrate existing macro bindings to have no fallbacks

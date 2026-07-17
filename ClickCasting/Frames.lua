@@ -1916,18 +1916,23 @@ function CC:RunBindingRepair(reason, force)
 
     DF:DebugWarn("CLICK", "Running binding repair (%s)", tostring(reason))
 
-    -- 1. Reset restricted-env hover tracking. A stale mouseoverbutton
-    --    reference aborts every OnEnter WrapScript at the cross-frame
-    --    cleanup step, killing keyboard binds addon-wide until /reload.
+    -- 1. Reset restricted-env hover tracking (handle + string mirror).
+    --    OnEnter no longer method-calls the shared handle, but the
+    --    mouseoverstate driver still reads geometry through it, so a stale
+    --    reference can still waste driver runs until something resets it.
     if self.header and self.header.Execute then
         pcall(function()
-            self.header:Execute([[ mouseoverbutton = nil ]])
+            self.header:Execute([[ mouseoverbutton = nil mouseovername = nil ]])
         end)
     end
 
     -- 2. Clear stray override bindings + hover state. After the env reset
     --    the OnLeave wrap can no longer clear these (mouseoverbutton ~= self),
     --    so clear them here or keys would stay stolen from the action bars.
+    --    Hover binds are owned by the HEADER now, so that is the wipe that
+    --    matters; the per-frame wipe stays to cover any legacy frame-owned
+    --    override from an older code path.
+    pcall(ClearOverrideBindings, self.header)
     local function scrub(frame)
         if frame.GetAttribute and frame:GetAttribute("dfBindingsActive") then
             pcall(ClearOverrideBindings, frame)
