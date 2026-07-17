@@ -3783,7 +3783,25 @@ function DF:ApplyRaidGroupSorting()
             end
         end
 
-        local changed = sortChangedAny or countChanged
+        -- A header can be shown yet UNANCHORED: the secure position snippet
+        -- ClearAllPoints()s every group header and only re-anchors populated
+        -- slots, so a raid-to-party collapse (all counts hit 0) strips the
+        -- anchors while the caches above still describe the populated raid.
+        -- Converting back with the same roster, nothing above reads as
+        -- changed, and the early-out below would skip the only reposition
+        -- that could re-anchor the headers — frames stay alive (shown,
+        -- units assigned, alpha 1) but draw nothing until a /reload.
+        -- GetLeft() is nil on a frame with no resolved rect.
+        local headerUnanchored = false
+        for gi = 1, 8 do
+            local gh = DF.raidSeparatedHeaders[gi]
+            if gh and gh:IsShown() and not gh:GetLeft() then
+                headerUnanchored = true
+                break
+            end
+        end
+
+        local changed = sortChangedAny or countChanged or headerUnanchored
             or (DF._lastRaidLayoutSig ~= layoutSig)
             or (not DF._raidSortApplied)
 
