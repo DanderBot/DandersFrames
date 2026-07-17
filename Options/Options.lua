@@ -9681,7 +9681,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             
             if self.importInfoLabel then
                 self.importInfoLabel:SetText(string.format("|cff00ff00" .. L["OK"] .. "|r v%s %s%s",
-                    tostring(info.version),
+                    (tostring(info.version):gsub("^[vV]", "")),
                     info.hasParty and L["[Party]"] or "",
                     info.hasRaid and L["[Raid]"] or ""))
             end
