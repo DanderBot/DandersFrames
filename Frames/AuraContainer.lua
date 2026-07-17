@@ -325,6 +325,33 @@ local function recordCandidateFilters(rec, config)
     return rec.candidateFilters or config.candidateFilters
 end
 
+-- IDENTITY-GATE EXPOSURE (12.1, live-confirmed 2026-07-17). include/excludeSpellIDs
+-- are only evaluated inside CanApplyIdentityCandidateFilters, which for HELPFUL
+-- auras requires UnitCanAssist("player", unit) — and a FAILED gate SKIPS the
+-- checks entirely (fail-open: every helpful aura passes). UnitCanAssist flips
+-- FALSE for a CROSS-FACTION group member outside instanced content — and for a
+-- duel partner — so an "only these spells" pool silently degrades to "every
+-- buff" (food buffs flooding the defensive row; caught live via a cross-faction
+-- party + duel, DF_AuraLab probe 38). A pool whose SELECTION is includeSpellIDs
+-- renders pure garbage under a failed gate, so the handle hides itself until
+-- the gate holds again (see Handle:_applyIdentityGate).
+--   * "HELPFUL|PLAYER" pools are immune: the PLAYER token filters at the QUERY
+--     level, outside the identity gate (the AD "My Buffs" pools).
+--   * "!PLAYER" pools are NOT immune — the token narrows the pool but the
+--     spell-ID selection still fails open (exact-token check below).
+--   * excludeSpellIDs-only pools are deliberately NOT gated: "everything except
+--     X" degrading to "everything" beats hiding a whole row.
+--   * HARMFUL pools are out of scope (their gate is UnitCanAttack — a separate
+--     question owned by the debuff-filtering work).
+local function filterVulnerableToIdentityGate(filterString, cf)
+    if not (cf and cf.includeSpellIDs) then return false end
+    if type(filterString) ~= "string" or not filterString:find("HELPFUL") then return false end
+    for token in filterString:gmatch("[^|%s]+") do
+        if token == "PLAYER" then return false end
+    end
+    return true
+end
+
 -- Dynamic-unit tokens whose underlying unit changes WITHOUT the token changing, so
 -- OnUnitChanged never fires -> they need a Refresh() bounce on the matching event.
 -- Prefix-match so "targettarget"/"focustarget" are covered by their base event too.
@@ -1419,6 +1446,7 @@ function NativeBackend:build()
     end
     self.groupKeys = {}
     self.slotButtons = isOverlay and {} or nil   -- overlay: key -> native slot button (consumer styling)
+    handle._idGateVulnerable = nil   -- re-derived from this build's records (see the record loop)
     if testMode and not isOverlay and not isMissing then
         -- PER-SLOT TEST GROUPS (P5). Two hard-won facts drive this shape:
         --  * The flow lays buttons out by the container's own aura ordering, NOT
@@ -1453,6 +1481,9 @@ function NativeBackend:build()
     for i, rec in ipairs(filters) do
         local f = rec.f
         local cf = (not testMode) and recordCandidateFilters(rec, config) or nil
+        if cf and filterVulnerableToIdentityGate(f, cf) then
+            handle._idGateVulnerable = true
+        end
         if AuraUtil and AuraUtil.IsValidFilterString and not AuraUtil.IsValidFilterString(f) then
             DF:DebugWarn(DBG, "filter rejected by IsValidFilterString: %s (group skipped)", tostring(f))
         else
@@ -1525,6 +1556,10 @@ function NativeBackend:build()
 
     DF:Debug(DBG, "built (native) unit=%s mode=%s groups=%d",
         tostring(config.unit), tostring(config.mode or "row"), #filters)
+
+    -- Initial identity-gate state for this build's unit (see _applyIdentityGate);
+    -- the module watcher re-evaluates on faction/phase/roster/world changes.
+    handle:_applyIdentityGate()
 end
 
 function NativeBackend:setUnit(unit)
@@ -2179,8 +2214,37 @@ function Handle:Enable() self:_applyEnabled(true) end
 function Handle:Disable() self:_applyEnabled(false) end
 function Handle:SetShown(shown)
     shown = shown and true or false
-    self.frame:SetShown(shown)          -- plain anchor frame; safe in combat
+    self._intendedShown = shown          -- consumer INTENT; the identity gate composes on top
+    self.frame:SetShown(shown and not self._idGateHidden)   -- plain anchor frame; safe in combat
     self:_applyEnabled(shown)
+end
+
+-- Hide this handle while the 12.1 identity gate would fail open on its unit (see
+-- filterVulnerableToIdentityGate — HELPFUL includeSpellIDs pools render every
+-- buff for a unit failing UnitCanAssist, e.g. a cross-faction group member
+-- outside instanced content or a duel partner). RENDER-SIDE ONLY: hides the
+-- plain anchor frame (combat-safe), never touches the secure enabled state —
+-- that stays owned by SetShown/_applyEnabled. Composes with consumer intent:
+-- a consumer-hidden handle stays hidden when the gate lifts. Fail-safe on any
+-- doubt (secret value, pcall failure, missing unit): SHOW — a wrongly-hidden
+-- row is worse than one garbage frame.
+function Handle:_applyIdentityGate()
+    if not self._idGateVulnerable then return end
+    local hide = false
+    if not AuraContainer._testMode then
+        local unit = self.config and self.config.unit
+        if type(unit) == "string" and unit ~= "player" and UnitExists(unit) then
+            local ok, can = pcall(UnitCanAssist, "player", unit)
+            if ok then
+                if issecretvalue and issecretvalue(can) then can = true end
+                hide = not can
+            end
+        end
+    end
+    if (hide or nil) ~= self._idGateHidden then
+        self._idGateHidden = hide or nil
+        self.frame:SetShown((self._intendedShown ~= false) and not hide)
+    end
 end
 
 -- Enable/disable the (secure) container's parse+bind. COMBAT-GUARDED: SetEnabled
@@ -2730,6 +2794,26 @@ end
 -- its preview IS the factory's own rendering. No container, no aura
 -- data: styling + the curated entry only.
 -- ============================================================
+
+-- IDENTITY-GATE WATCHER: re-evaluate the gate for every vulnerable handle when
+-- assistability can flip — faction changes (cross-faction membership + duels),
+-- phasing, roster changes, zoning, and retargets (dynamic-unit handles on
+-- target/focus frames). The per-handle check is a couple of API calls and the
+-- vulnerable set is small, so a blanket re-eval beats brittle unit matching.
+local idGateWatch = CreateFrame("Frame")
+idGateWatch:RegisterEvent("UNIT_FACTION")
+idGateWatch:RegisterEvent("UNIT_PHASE")
+idGateWatch:RegisterEvent("GROUP_ROSTER_UPDATE")
+idGateWatch:RegisterEvent("PLAYER_ENTERING_WORLD")
+idGateWatch:RegisterEvent("PLAYER_TARGET_CHANGED")
+idGateWatch:RegisterEvent("PLAYER_FOCUS_CHANGED")
+idGateWatch:SetScript("OnEvent", function()
+    for h in pairs(AuraContainer._handles or {}) do
+        if h._idGateVulnerable then
+            pcall(function() h:_applyIdentityGate() end)
+        end
+    end
+end)
 
 -- /df ppbadge — diagnostic toggle: park missing badges on the WINDOW instead of
 -- the container (see _badgeParkDebug at the build). Border renders perfect =>
