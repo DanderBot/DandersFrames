@@ -141,16 +141,44 @@ local function ScrubDeletedFilter(cfId)
             end
         end
     end
+    -- Raid auto-layout overrides: a layout-edit session stores a whole-table
+    -- copy of the mode selection tables — INCLUDING .customs — into each
+    -- layout's overrides (AutoProfiles' ExitEditing diff scan), and
+    -- ApplyRuntimeProfile re-injects that copy on every activation. Without
+    -- this walk the deleted id resurrects with the layout, and a dangling
+    -- customs key makes ResolveSelection return an empty include map (the
+    -- row renders NOTHING while that layout is active).
+    local function scrubSelection(sel)
+        if type(sel) == "table" and type(sel.customs) == "table" then
+            sel.customs[cfId] = nil
+        end
+    end
+    local function scrubAutoLayouts(autoDb)
+        if type(autoDb) ~= "table" then return end
+        local function scrubLayout(layout)
+            local ov = type(layout) == "table" and layout.overrides
+            if type(ov) == "table" then
+                scrubSelection(ov.buffFilterSelection)
+                scrubSelection(ov.defensiveFilterSelection)
+            end
+        end
+        for _, ct in pairs(autoDb) do
+            if type(ct) == "table" then
+                if type(ct.profiles) == "table" then
+                    for _, layout in pairs(ct.profiles) do scrubLayout(layout) end
+                end
+                scrubLayout(ct.profile)   -- mythic carries a single layout
+            end
+        end
+    end
 
     for _, profile in pairs(profiles) do
         if type(profile) == "table" then
             for i = 1, 2 do
                 local mode = (i == 1) and profile.party or profile.raid
                 if type(mode) == "table" then
-                    local sel = mode.buffFilterSelection
-                    if sel and sel.customs then sel.customs[cfId] = nil end
-                    sel = mode.defensiveFilterSelection
-                    if sel and sel.customs then sel.customs[cfId] = nil end
+                    scrubSelection(mode.buffFilterSelection)
+                    scrubSelection(mode.defensiveFilterSelection)
                     -- Legacy inline AD config (pre-preset-library profiles)
                     scrubADConfig(mode.auraDesigner)
                 end
@@ -161,7 +189,17 @@ local function ScrubDeletedFilter(cfId)
                     scrubADConfig(preset)
                 end
             end
+            scrubAutoLayouts(profile.raidAutoProfiles)
         end
+    end
+
+    -- Live runtime overlay: while an auto layout is ACTIVE its override copy
+    -- is what the raid proxy actually reads (until the next re-apply) — clear
+    -- the id there too so it can't drive the current session's rows.
+    local live = DF.raidOverrides
+    if type(live) == "table" then
+        scrubSelection(live.buffFilterSelection)
+        scrubSelection(live.defensiveFilterSelection)
     end
 end
 
@@ -412,6 +450,14 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         -- Integers only: tonumber() also accepts floats/hex, which are never
         -- valid spell ids
         if not text:match("^%d+$") then
+            Echo(L["Enter a valid spell ID."])
+            return
+        end
+        -- Length cap after zero-strip (same rule as the shared picker):
+        -- past ~15 digits tonumber loses integer precision, and the float
+        -- would persist as a junk key in the account-wide store.
+        text = text:match("^0*(%d+)$") or text
+        if #text > 10 then
             Echo(L["Enter a valid spell ID."])
             return
         end

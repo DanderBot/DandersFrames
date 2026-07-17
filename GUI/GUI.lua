@@ -10559,11 +10559,6 @@ function DF:CreateGUI()
         DF.AutoProfilesUI:SetupEditingBanner()
     end
     
-    -- Apply Aura Designer tab disabled state before first SelectTab
-    if DF.ApplyAuraDesignerTabState then
-        DF:ApplyAuraDesignerTabState()
-    end
-
     -- Update tab layout after all tabs created
     GUI:UpdateTabLayout()
 

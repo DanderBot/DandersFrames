@@ -35,6 +35,17 @@ DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally chan
 * (Aura Designer) Every indicator has a show/hide eye — turn one off without deleting it.
 * (Aura Designer) The editor header is condensed to a single row; Sound Alerts moved to the Global tab.
 * (Profiles) Custom filters and your category tweaks travel with profile exports — including filters linked in the Aura Designer.
+* (Profiles) Custom filters picked inside a raid auto layout's settings are handled everywhere the rest of the profile is: deleting a filter now removes it from every layout (including the active one), exports carry filters only a layout references, and imports re-link them instead of pointing at the wrong filter on the receiving account.
+* (Frames) The Out of Range "Text Alpha" slider now also governs pet frame text and the test-mode preview — those still followed hidden per-element values no control could change.
+* (Frames) DandersFrames no longer overwrites Blizzard's own raid-frame dispel indicator setting at every login — a leftover from a long-removed option that kept forcing a value you couldn't change.
+* (Interface) The Filter Designer's add-by-ID box now rejects over-long spell IDs like the spell picker does, and a spell picker first opened during combat regains its Escape-to-close afterwards.
+* (Profiles) Role colours (tank/healer/damage) now travel with profile exports.
+* (Aura Designer) The Frame Strata dropdowns, the global Default Frame Level, and "Draw above frame border" are now marked as not yet available on 12.1 — they previously looked live but weren't applied (indicator z-order is engine-managed for now; the per-indicator Frame Level slider does work). Planned to return with a z-order pass.
+* (Interface) Removed the Resurrection icon's "Pending Text" box and the "My Buff Indicators" export category — neither had done anything (the text was never rendered; the category exported no settings).
+* (Auras) Fixed an error ("Attempt to access forbidden object") from the dispel overlay when zoning out of an instance mid-run — the overlay's layout pass could measure a protected aura-button rect during the transition; it now measures safely and falls back to defaults for that one pass.
+* (Bars) Fixed a gap on either side of a "Match Health Bar Width" resource bar at frame border sizes 1-3 (most visible with a non-zero Frame Padding). The bar now sits flush inside the border, and stays aligned with it at any UI scale.
+* (Frames) Fixed grouped raid frames staying invisible after converting a raid to a party and back until a /reload — the frames were alive underneath, but their group anchors were never restored on re-entering the raid.
+* (Frames) Clicks on party and raid frames no longer redirect to a member's vehicle or pet slot while the game flags them as being in a vehicle (sitting on housing furniture counts) — a legacy behaviour Blizzard's own frames dropped, which could target the wrong unit or open a pet menu.
 * (Auras) **The Aura Blacklist has been retired**, replaced by the new filter system. Previously blacklisted buffs will show again — hide them via the Filter Designer instead. Individual debuffs can't be hidden on this version of the game.
 * (Auras) **New: Debuff Filters.** The debuff bar is now filtered by categories on the Aura Filters page — Boss, Role, Priority, Crowd Control, Raid and Dispellable (by you or by anyone). "Show All Debuffs" keeps the old behaviour.
 * (Auras) The "All Dispellable" debuff filter mode now actually filters — it previously showed every debuff.

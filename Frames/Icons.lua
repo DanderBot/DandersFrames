@@ -29,20 +29,6 @@ local issecretvalue = issecretvalue or function() return false end
 local DEFAULT_DEFENSIVE_BORDER_COLOR = {r = 0, g = 0.8, b = 0, a = 1}
 local DEFAULT_DEFENSIVE_DURATION_COLOR = {r = 1, g = 1, b = 1}
 
--- Growth direction helper for defensive bar (mirrors Update.lua pattern)
-local function GetDefensiveGrowthOffset(direction, iconSize, pad)
-    if direction == "LEFT" then
-        return -(iconSize + pad), 0
-    elseif direction == "RIGHT" then
-        return iconSize + pad, 0
-    elseif direction == "UP" then
-        return 0, iconSize + pad
-    elseif direction == "DOWN" then
-        return 0, -(iconSize + pad)
-    end
-    return 0, 0
-end
-
 -- Get raid buff icons for fallback filtering (when spellId is secret)
 -- This is cached after first call
 function DF:GetRaidBuffIcons()

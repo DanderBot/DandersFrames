@@ -232,6 +232,10 @@ local function BuildIndex(inst)
             end
             local name = rec.display
             if not name then name = R:GetSpellDisplay(rec) end
+            -- A provider record with no display, no db name and an id the
+            -- client doesn't know yields nil — index it as "#id" rather than
+            -- erroring the whole picker build.
+            if not name then name = "#" .. tostring(rec.id or "?") end
             g[#g + 1] = { rec = rec, name = name, lower = name:lower() }
         end
     end
@@ -742,6 +746,16 @@ function R:OpenSpellPicker(opts)
     end
     inst.opts = opts
     local picker = inst.frame
+
+    -- Instances are cached per parent, so one BUILT mid-combat skipped its
+    -- keyboard setup and would never get ESC-close. Retry at every open:
+    -- EnableKeyboard is not the protected call (only
+    -- SetPropagateKeyboardInput is, and the OnKeyDown handler already
+    -- combat-guards those).
+    if not picker:IsKeyboardEnabled() and not InCombatLockdown() then
+        picker:EnableKeyboard(true)
+        picker:SetPropagateKeyboardInput(true)
+    end
 
     picker:ClearAllPoints()
     if opts.points then

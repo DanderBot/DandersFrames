@@ -8451,7 +8451,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         resurrectionIconEnableCb.keepEnabled = true
         resSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show as Text"], db, "resurrectionIconShowText", function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end), 30)
         resSettings:AddWidget(GUI:CreateEditBox(self.child, L["Casting Text"], db, "resurrectionIconTextCasting", function() DF:UpdateAllFramesStatusIcons() end, 120), 55)
-        resSettings:AddWidget(GUI:CreateEditBox(self.child, L["Pending Text"], db, "resurrectionIconTextPending", function() DF:UpdateAllFramesStatusIcons() end, 120), 55)
+        -- ("Pending Text" removed: resurrectionIconTextPending was never read by
+        -- any render path — live or test — since inception. The pending state
+        -- renders as the yellow icon tint.)
         Add(resSettings, nil, 1)
         resSection:RegisterChild(resSettings)
 
@@ -9478,7 +9480,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- nil = Look/Layout leave the frame-type row alone.
         local presets = {
             {name = "All", x = 0, frameTypes = true, cats = categoryOrder},
-            {name = "Look", x = 60, cats = {"bars", "auras", "dispel", "bossDebuffs", "missingBuffs", "defensives", "myBuffs", "targetedSpells", "targetedList", "text", "textDesigner", "icons", "other"}},
+            {name = "Look", x = 60, cats = {"bars", "auras", "dispel", "missingBuffs", "defensives", "targetedSpells", "targetedList", "text", "textDesigner", "icons", "other"}},
             {name = "Layout", x = 120, cats = {"position", "layout"}},
             {name = "None", x = 180, frameTypes = false, cats = {}},
         }

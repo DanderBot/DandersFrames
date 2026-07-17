@@ -28,7 +28,16 @@ function R:GetStore()
 end
 
 function R:GetCustomFilter(id)
-    return self:GetStore().customFilters[id]
+    local f = self:GetStore().customFilters[id]
+    if f then
+        -- Self-heal the shape: ResolveSelection / DuplicateFilter /
+        -- CustomSpellCount assume both subtables exist, but a hand-edited or
+        -- older-alpha store can carry a filter without them (sameContent is
+        -- the only defensive reader). Persisting the empty tables is harmless.
+        f.spells = f.spells or {}
+        f.rawIDs = f.rawIDs or {}
+    end
+    return f
 end
 
 function R:CreateCustomFilter(name)
@@ -110,17 +119,47 @@ local function sameContent(a, b)
         and setsEqual(a.rawIDs or {}, b.rawIDs or {})
 end
 
+-- Numeric sort for "cfN" ids so the import scan is deterministic — pairs()
+-- order otherwise decides which local filter a content-equal import reuses
+-- (and which imported name wins on create), and the winner is written into
+-- saved selections.
+local function cfIdLess(a, b)
+    local na = tonumber(tostring(a):match("^cf(%d+)$"))
+    local nb = tonumber(tostring(b):match("^cf(%d+)$"))
+    if na and nb then return na < nb end
+    if na ~= nil or nb ~= nil then return na ~= nil end
+    return tostring(a) < tostring(b)
+end
+
 function R:ImportCustomFilters(imported)
     local store = self:GetStore()
     local remap = {}
-    for cfId, def in pairs(imported) do
+    local importIds, storeIds = {}, {}
+    for cfId in pairs(imported) do importIds[#importIds + 1] = cfId end
+    for otherId in pairs(store.customFilters) do storeIds[#storeIds + 1] = otherId end
+    table.sort(importIds, cfIdLess)
+    table.sort(storeIds, cfIdLess)
+
+    for _, cfId in ipairs(importIds) do
+        local def = imported[cfId]
+        -- Content-based reuse needs actual content: setsEqual({}, {}) is true
+        -- and ids are "cf1", "cf2", ... on every account, so without this any
+        -- imported EMPTY filter silently became any local empty filter — and
+        -- spells added to "it" later changed the other selection's meaning.
+        -- Empty filters only reuse an empty filter with the SAME name.
+        local hasContent = next(def.spells or {}) ~= nil or next(def.rawIDs or {}) ~= nil
+        local function canReuse(other)
+            if not sameContent(other, def) then return false end
+            if hasContent then return true end
+            return (other.name or "") == (def.name or "")
+        end
         local existing = store.customFilters[cfId]
-        if existing and sameContent(existing, def) then
+        if existing and canReuse(existing) then
             remap[cfId] = cfId
         else
             local reuse
-            for otherId, other in pairs(store.customFilters) do
-                if sameContent(other, def) then
+            for _, otherId in ipairs(storeIds) do
+                if canReuse(store.customFilters[otherId]) then
                     reuse = otherId
                     break
                 end
@@ -133,6 +172,9 @@ function R:ImportCustomFilters(imported)
                 for sid in pairs(def.spells or {}) do dst.spells[sid] = true end
                 for rid in pairs(def.rawIDs or {}) do dst.rawIDs[rid] = true end
                 remap[cfId] = newId
+                -- Later payload entries with the same content collapse onto
+                -- this one (pre-sort behaviour, now deterministic).
+                storeIds[#storeIds + 1] = newId
             end
         end
     end

@@ -31,20 +31,6 @@ local UnitPower = UnitPower
 local UnitPowerMax = UnitPowerMax
 local UnitPowerType = UnitPowerType
 
--- Growth direction helper (file-scope, no closure allocation)
-local function GetGrowthOffset(direction, iconSize, pad)
-    if direction == "LEFT" then
-        return -(iconSize + pad), 0
-    elseif direction == "RIGHT" then
-        return iconSize + pad, 0
-    elseif direction == "UP" then
-        return 0, iconSize + pad
-    elseif direction == "DOWN" then
-        return 0, -(iconSize + pad)
-    end
-    return 0, 0
-end
-
 -- Shared default tables (avoid per-call allocation)
 
 function DF:ApplyFrameLayout(frame)
@@ -924,10 +910,6 @@ function DF:UpdateUnitFrame(frame, source)
         DF:UpdateDispelGradientHealth(frame)
     end
     
-    -- Update my buff gradient if it's tracking current health
-    if DF.UpdateMyBuffGradientHealth then
-        DF:UpdateMyBuffGradientHealth(frame)
-    end
 
     -- Update AD tint overlay if it's tracking current health
     if DF.UpdateADTintHealth then
@@ -1188,10 +1170,6 @@ function DF:UpdateHealthFast(frame)
         DF:UpdateDispelGradientHealth(frame)
     end
     
-    -- Update my buff gradient if it's tracking current health
-    if DF.UpdateMyBuffGradientHealth then
-        DF:UpdateMyBuffGradientHealth(frame)
-    end
 
     -- Update AD tint overlay if it's tracking current health
     if DF.UpdateADTintHealth then
@@ -1412,10 +1390,6 @@ function DF:UpdateHealth(frame)
         DF:UpdateDispelGradientHealth(frame)
     end
     
-    -- Update my buff gradient if it's tracking current health
-    if DF.UpdateMyBuffGradientHealth then
-        DF:UpdateMyBuffGradientHealth(frame)
-    end
 
     -- Update AD tint overlay if it's tracking current health
     if DF.UpdateADTintHealth then

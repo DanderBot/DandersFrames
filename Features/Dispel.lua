@@ -328,13 +328,36 @@ end
 -- slot path regions are parented under the slot BUTTON (visibility must ride it), so
 -- the consumer sets overlay.gradientAnchorTarget = frame.healthBar and the layout
 -- anchors there while parenting stays slot-side. Nil = legacy behaviour.
+-- Measure a gradient anchor rect without tripping 12.1 restricted-rect
+-- propagation: a slot-hosted widget's rect derives from the secret aura
+-- button, and GetHeight/GetWidth on it THROW from addon code. The GetParent()
+-- fallback below reaches exactly such a widget when both anchor candidates
+-- are nil — live-caught zoning out of an M+ key, where a half-initialized
+-- frame left gradientAnchorTarget unstamped for one pass. nil = "couldn't
+-- measure"; callers fall back to the defaults and self-heal next drive.
+local function SafeRectSize(region)
+    if not region then return nil, nil end
+    local okH, h = pcall(region.GetHeight, region)
+    local okW, w = pcall(region.GetWidth, region)
+    if not okH or not okW then return nil, nil end
+    -- GetHeight/GetWidth can return a SECRET number without throwing (restricted
+    -- content); a secret dimension is not a usable measure. issecretvalue is the
+    -- real global for this (canaccessvalue is not a callable global — it's only a
+    -- documented return-field name).
+    if issecretvalue(h) or issecretvalue(w) then
+        return nil, nil
+    end
+    return h, w
+end
+
 local function LayoutStateChanged(overlay, db)
     -- Measure the padded-frame anchor proxy when it exists (the rect the layout
     -- actually uses); the healthBar fallback only applies before the first pass.
     local gradientParent = overlay.dfGradientAnchorProxy or overlay.gradientAnchorTarget
         or (overlay.gradient and overlay.gradient:GetParent())
-    local parentH = gradientParent and gradientParent:GetHeight() or 40
-    local parentW = gradientParent and gradientParent:GetWidth() or 80
+    local parentH, parentW = SafeRectSize(gradientParent)
+    parentH = parentH or 40
+    parentW = parentW or 80
     return overlay.dfL_borderSize              ~= db.dispelBorderSize
         or overlay.dfL_framePadding            ~= db.framePadding
         or overlay.dfL_borderInset             ~= db.dispelBorderInset
@@ -370,8 +393,9 @@ local function CacheLayoutState(overlay, db)
     overlay.dfL_gradientSize            = db.dispelGradientSize
     overlay.dfL_gradientOnCurrentHealth = db.dispelGradientOnCurrentHealth
     overlay.dfL_healthOrientation       = db.healthOrientation
-    overlay.dfL_parentH                 = gradientParent and gradientParent:GetHeight() or 40
-    overlay.dfL_parentW                 = gradientParent and gradientParent:GetWidth() or 80
+    local parentH, parentW = SafeRectSize(gradientParent)
+    overlay.dfL_parentH                 = parentH or 40
+    overlay.dfL_parentW                 = parentW or 80
 end
 
 local function ApplyOverlayLayout(overlay, db, frame)
@@ -461,8 +485,9 @@ local function ApplyOverlayLayout(overlay, db, frame)
     else
         gradientParent = overlay.gradientAnchorTarget or overlay.gradient:GetParent()
     end
-    local parentHeight = gradientParent and gradientParent:GetHeight() or 40
-    local parentWidth = gradientParent and gradientParent:GetWidth() or 80
+    local parentHeight, parentWidth = SafeRectSize(gradientParent)
+    parentHeight = parentHeight or 40
+    parentWidth = parentWidth or 80
     
     overlay.gradient:ClearAllPoints()
     if overlay.gradientDarken then
@@ -1206,8 +1231,11 @@ local function EnsureSlotWidget(btn, frame)
         for _, icon in pairs(w.icons) do icon:SetFrameLevel(iconLevel) end
     end
     -- Geometry anchors to the health bar; parenting stays slot-side (see the
-    -- gradientAnchorTarget note on LayoutStateChanged).
-    w.gradientAnchorTarget = frame.healthBar
+    -- gradientAnchorTarget note on LayoutStateChanged). Keep a previous good
+    -- target if the frame is mid-initialization (healthBar nil for one pass
+    -- during zone transitions) — a nil stamp dropped the layout measure onto
+    -- the slot widget's restricted rect.
+    w.gradientAnchorTarget = frame.healthBar or w.gradientAnchorTarget
     return w
 end
 

@@ -8,8 +8,11 @@
     
     <Button name="DandersUnitButtonTemplate" inherits="SecureUnitButtonTemplate,SecureHandlerEnterLeaveTemplate" virtual="true">
         <Attributes>
-            <!-- Vehicle support - automatically switch unit when entering vehicle -->
-            <Attribute name="toggleForVehicle" type="boolean" value="true"/>
+            <!-- Legacy vehicle click-swap stays OFF: with it on, SecureButton_GetModifiedUnit
+                 rewrites clicks raidN->raidpetN / partyN->partypetN whenever UnitHasVehicleUI(unit)
+                 is true (sitting on housing furniture counts), so clicks target the pet slot and
+                 right-click opens pet menus. Nothing in Blizzard's own 12.1 UI sets this anymore. -->
+            <Attribute name="toggleForVehicle" type="boolean" value="false"/>
         </Attributes>
         <Scripts>
             <OnLoad>

@@ -50,7 +50,6 @@ local AuraFilters = AuraUtil and AuraUtil.AuraFilters or {}
 local cachedPartyBuffFilters = nil
 local cachedRaidBuffFilters = nil
 local cachedDefensiveFilters = nil   -- mode-independent
-local cachedDispelFilter = nil       -- mode-independent (single string, no OR needed)
 
 -- Build the filter string for buffs. One native group: category selection is
 -- expressed via candidateFilters spell-ID maps (see BuildAuraRowConfig), so the
@@ -223,14 +222,6 @@ function BuildDirectDefensiveFilters()
     return cachedDefensiveFilters
 end
 
--- Build dispel filter (HARMFUL + RAID_PLAYER_DISPELLABLE, single string)
-local function BuildDirectDispelFilter()
-    if cachedDispelFilter then return cachedDispelFilter end
-    local dispelConst = AuraFilters.RaidPlayerDispellable or "RAID_PLAYER_DISPELLABLE"
-    cachedDispelFilter = "HARMFUL|" .. dispelConst
-    return cachedDispelFilter
-end
-
 -- Rebuild cached filter tables from current settings (per mode)
 -- (Debuff filters are not cached — the debuff driver builds them fresh.)
 function DF:RebuildDirectFilterStrings()
@@ -244,7 +235,6 @@ function DF:RebuildDirectFilterStrings()
     end
     -- Defensive and dispel are mode-independent, clear to rebuild on next use
     cachedDefensiveFilters = nil
-    cachedDispelFilter = nil
 
 end
 
@@ -256,119 +246,23 @@ end
 -- EVENT FRAME FOR PROACTIVE UPDATES
 -- ============================================================
 
+-- (Removed) ApplyBlizzardFrameSettings — the login/roster stamp of Blizzard's
+-- raidFramesDispelIndicatorType CVar from _blizzDispelIndicator. No GUI has
+-- written that key since v4.3.4 (the dropdown writes dispelOverlayDispelType,
+-- consumed only by DF's own overlay), so the stamp just re-imposed a frozen
+-- value on Blizzard's frames every login. The key is stripped in Core.lua's
+-- v5 legacy-aura cleanup.
+-- DELIBERATE: this frame survives the removal above solely to feed the roster
+-- diagnostics counter (/dfroster) — it tallies how many GROUP_ROSTER_UPDATE
+-- handlers fire per roster change across the addon. No render work happens here.
 local eventFrame = CreateFrame("Frame")
-eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 eventFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
-
--- Apply our saved Blizzard frame settings via CVars only (not optionTable)
--- Modifying optionTable causes protected value errors in combat
-local function ApplyBlizzardFrameSettings()
-    if not DF.db or not DF.db.party then return end
-    
-    local db = DF.db.party
-    
-    local dispelIndicator = db._blizzDispelIndicator
-
-    -- Force dispel indicator to be at least 1 (never disabled)
-    if dispelIndicator == nil or dispelIndicator == 0 then
-        dispelIndicator = 1
-        db._blizzDispelIndicator = 1
-    end
-
-    -- Set via CVar only - do NOT modify optionTable
-    SetCVar("raidFramesDispelIndicatorType", dispelIndicator)
-end
-
--- Export for use elsewhere
-DF.ApplyBlizzardFrameSettings = ApplyBlizzardFrameSettings
 
 eventFrame:SetScript("OnEvent", function(self, event, arg1)
     if event == "GROUP_ROSTER_UPDATE" then
         if DF.RosterDebugEvent then DF:RosterDebugEvent("Auras.lua(blizz):GROUP_ROSTER_UPDATE") end
     end
-    if event == "PLAYER_ENTERING_WORLD" or event == "GROUP_ROSTER_UPDATE" then
-        -- Apply our saved Blizzard-frame settings (CVars) once frames settle
-        C_Timer.After(0.2, ApplyBlizzardFrameSettings)
-        C_Timer.After(1.0, ApplyBlizzardFrameSettings)
-    end
 end)
-
--- Canonical discovery/setup for an aura icon's native cooldown countdown text.
--- Finds the FontString inside the Blizzard cooldown, creates durationHideWrapper
--- (the parent frame whose alpha implements "hide duration above threshold") and
--- parents the text into it, and applies the current duration font/anchor on
--- first discovery so the large default font never flashes. Every path that
--- needs the native text (live render, shared timer safety net, slider
--- lightweight update, test mode) MUST come through here: the hand-rolled
--- copies this replaces disagreed about parenting — test mode moved the text to
--- textOverlay and the slider path never created the wrapper, either of which
--- left hide-above-threshold driving an empty wrapper until /reload.
-function DF:EnsureAuraDurationText(icon, db, prefix)
-    if not icon or not icon.cooldown then return icon and icon.nativeCooldownText end
-
-    if not icon.nativeCooldownText then
-        local regions = {icon.cooldown:GetRegions()}
-        for _, region in ipairs(regions) do
-            if region and region.GetObjectType and region:GetObjectType() == "FontString" then
-                icon.nativeCooldownText = region
-
-                if db and prefix and DF.SafeSetFont then
-                    local durationScale = db[prefix .. "DurationScale"] or 1.0
-                    local durationFont = db[prefix .. "DurationFont"] or "Fonts\\FRIZQT__.TTF"
-                    local durationOutline = db[prefix .. "DurationOutline"] or "OUTLINE"
-                    if durationOutline == "NONE" then durationOutline = "" end
-                    DF:SafeSetFont(region, durationFont, 10 * durationScale, durationOutline)
-
-                    local durationAnchor = db[prefix .. "DurationAnchor"] or "CENTER"
-                    region:ClearAllPoints()
-                    region:SetPoint(durationAnchor, icon, durationAnchor,
-                        db[prefix .. "DurationX"] or 0, db[prefix .. "DurationY"] or 0)
-                end
-
-                -- Sync Blizzard's own countdown-number visibility to the user setting
-                -- (icon.showDuration is stamped by ApplyAuraLayout, which runs before
-                -- any icon displays in both live and test paths; if it hasn't been
-                -- stamped yet, leave visibility to the caller rather than force-hiding).
-                if icon.showDuration ~= nil and icon.cooldown.SetHideCountdownNumbers then
-                    icon.cooldown:SetHideCountdownNumbers(not icon.showDuration)
-                end
-                break
-            end
-        end
-    end
-
-    local text = icon.nativeCooldownText
-    if text then
-        if not icon.durationHideWrapper then
-            icon.durationHideWrapper = CreateFrame("Frame", nil, icon.cooldown)
-            icon.durationHideWrapper:SetAllPoints(icon)
-            icon.durationHideWrapper:SetFrameLevel(icon.cooldown:GetFrameLevel() + 2)
-            icon.durationHideWrapper:EnableMouse(false)
-        end
-        if text:GetParent() ~= icon.durationHideWrapper then
-            text:SetParent(icon.durationHideWrapper)
-        end
-    end
-    return text
-end
-
--- Dispel-type name → configured debuff border colour (with the shared default
--- palette). Single source for the live colour-curve construction and test
--- mode's mock recolour so the defaults can't drift apart.
-function DF:GetDebuffTypeColor(db, dispelName)
-    if dispelName == "Magic" then
-        return db.debuffBorderColorMagic or {r = 0.2, g = 0.6, b = 1.0}
-    elseif dispelName == "Curse" then
-        return db.debuffBorderColorCurse or {r = 0.6, g = 0.0, b = 1.0}
-    elseif dispelName == "Disease" then
-        return db.debuffBorderColorDisease or {r = 0.6, g = 0.4, b = 0.0}
-    elseif dispelName == "Poison" then
-        return db.debuffBorderColorPoison or {r = 0.0, g = 0.6, b = 0.0}
-    elseif dispelName == "Bleed" or dispelName == "Enrage" then
-        return db.debuffBorderColorBleed or {r = 1.0, g = 0.0, b = 0.0}
-    end
-    return db.debuffBorderColorNone or {r = 0.8, g = 0.0, b = 0.0}
-end
 
 -- ============================================================
 -- BUFF FACTORY BRIDGE

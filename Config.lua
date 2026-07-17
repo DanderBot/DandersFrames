@@ -913,10 +913,6 @@ DF.GlobalDefaults = {
 -- ============================================================
 
 DF.PartyDefaults = {
-    -- Internal migration flags
-    _blizzDispelIndicator = 1,
-    _defensiveIconMigrated = true,
-
     -- Global Font Shadow Settings (applies when outline is SHADOW)
     fontShadowOffsetX = 1,
     fontShadowOffsetY = -1,
@@ -927,9 +923,6 @@ DF.PartyDefaults = {
     absorbBarAttachedClampMode = 1,
     absorbBarBackgroundColor = {r = 0, g = 0, b = 0, a = 1},
     absorbBarBlendMode = "BLEND",
-    absorbBarBorderColor = {r = 1, g = 0, b = 0.29803922772408, a = 1},
-    absorbBarBorderEnabled = true,
-    absorbBarBorderSize = 4,
     absorbBarColor = {r = 0, g = 0.83529418706894, b = 1, a = 0.80208319425583},
     absorbBarFrameLevel = 11,
     absorbBarHeight = 7,
@@ -947,7 +940,6 @@ DF.PartyDefaults = {
     absorbBarWidth = 46,
     absorbBarX = 0,
     absorbBarY = 0,
-    showAbsorbBar = true,
 
     -- AFK Icon
     afkIconAlpha = 0.8,
@@ -1072,11 +1064,6 @@ DF.PartyDefaults = {
     buffBorderShadowSize = 1,
     buffBorderShadowOffsetX = 1,
     buffBorderShadowOffsetY = -1,
-    buffCountdownFont = "Friz Quadrata TT",
-    buffCountdownOutline = "OUTLINE",
-    buffCountdownScale = 1,
-    buffCountdownX = 0,
-    buffCountdownY = 0,
     buffDeduplicateDefensives = true,
     buffDurationAnchor = "CENTER",
     buffDurationColor = {r = 1, g = 1, b = 1},
@@ -1133,10 +1120,6 @@ DF.PartyDefaults = {
     buffExpiringThresholdMode = "PERCENT",
     buffExpiringTintColor = {r = 1, g = 0, b = 0.12156863510609, a = 0.46354159712791},
     buffExpiringTintEnabled = false,
-    buffFilterCancelable = false,
-    buffFilterMode = "BLIZZARD",
-    buffFilterPlayer = true,
-    buffFilterRaid = false,
 
     -- Aura Source Mode
 
@@ -1181,7 +1164,6 @@ DF.PartyDefaults = {
     buffPaddingX = 2,
     buffPaddingY = 2,
     buffScale = 1,
-    buffShowCountdown = false,
     buffShowDuration = true,
     buffSize = 20,
     buffStackAnchor = "BOTTOMRIGHT",
@@ -1193,15 +1175,12 @@ DF.PartyDefaults = {
     buffStackX = 3,
     buffStackY = -2,
     buffWrap = 2,
-    buffWrapOffsetX = 0,
-    buffWrapOffsetY = 0,
     showBuffs = true,
 
     -- Center Status Icon
     centerStatusIconAnchor = "CENTER",
     centerStatusIconEnabled = true,
     centerStatusIconFrameLevel = 0,
-    centerStatusIconHide = false,
     centerStatusIconScale = 1,
     centerStatusIconX = 0,
     centerStatusIconY = 0,
@@ -1212,13 +1191,6 @@ DF.PartyDefaults = {
     colorPickerOverride = true,
 
     -- Dead/Fade Settings
-    deadBackgroundAlpha = 0.3,
-    deadBackgroundColor = {r = 0.2, g = 0.2, b = 0.2, a = 1},
-    deadFadeEnabled = false,
-    deadHealthBarAlpha = 0.3,
-    deadHealthTextAlpha = 0.3,
-    deadNameAlpha = 0.5,
-    deadUseCustomBgColor = false,
     fadeDeadAuras = 1,
     fadeDeadBackground = 1,
     fadeDeadBackgroundColor = {r = 1, g = 0, b = 0, a = 1},
@@ -1280,11 +1252,6 @@ DF.PartyDefaults = {
     debuffBorderShadowSize = 1,
     debuffBorderShadowOffsetX = 1,
     debuffBorderShadowOffsetY = -1,
-    debuffCountdownFont = "Friz Quadrata TT",
-    debuffCountdownOutline = "OUTLINE",
-    debuffCountdownScale = 1,
-    debuffCountdownX = 0,
-    debuffCountdownY = 0,
     debuffDurationAnchor = "CENTER",
     debuffDurationColorByTime = false,
     debuffDurationHideAboveEnabled = false,
@@ -1323,8 +1290,6 @@ DF.PartyDefaults = {
     debuffPaddingX = 2,
     debuffPaddingY = 2,
     debuffScale = 1,
-    debuffShowAll = false,
-    debuffShowCountdown = false,
     debuffShowDuration = false,
     debuffSize = 20,
     debuffStackAnchor = "BOTTOMRIGHT",
@@ -1335,25 +1300,13 @@ DF.PartyDefaults = {
     debuffStackX = 0,
     debuffStackY = 0,
     debuffWrap = 3,
-    debuffWrapOffsetX = 0,
-    debuffWrapOffsetY = 0,
     showDebuffs = true,
 
     -- Defensive Bar
-    defensiveBarAnchor = "CENTER",
-    defensiveBarBorderColor = {r = 0, g = 0.8, b = 0, a = 1},
-    defensiveBarBorderSize = 2,
-    defensiveBarEnabled = true,
-    defensiveBarFrameLevel = 0,
     defensiveBarGrowth = "RIGHT_DOWN",
-    defensiveBarIconSize = 24,
     defensiveBarMax = 4,
-    defensiveBarScale = 1.5,
-    defensiveBarShowDuration = true,
     defensiveBarSpacing = 2,
     defensiveBarWrap = 5,
-    defensiveBarX = 0,
-    defensiveBarY = 0,
 
     -- Duration bar (12.1 factory rows) — see the buff block above.
     defensiveDurationBarEnabled = false,
@@ -1422,12 +1375,9 @@ DF.PartyDefaults = {
     -- Dispel Overlay (game-palette colours only — the Custom Colors mode and its
     -- per-type pickers/intensity were removed 2026-07-11; see Features/Dispel.lua)
     dispelAnimate = false,
-    dispelAnimateSpeed = 0.5,
     dispelBorderAlpha = 1,
     dispelBorderInset = 0,
     dispelBorderSize = 2,
-    dispelBorderStyle = "OUTER",
-    dispelFrameLevel = 10,
     dispelGradientAlpha = 1,
     dispelGradientBlendMode = "BLEND",
     dispelGradientDarkenAlpha = 0.40000000596046,
@@ -1502,23 +1452,14 @@ DF.PartyDefaults = {
 
     -- Heal Absorb Bar
     healAbsorbBarAnchor = "BOTTOM",
-    healAbsorbBarAttachedClampMode = 1,
     healAbsorbBarBackgroundColor = {r = 0, g = 0, b = 0, a = 0.4570315182209},
     healAbsorbBarBlendMode = "BLEND",
-    healAbsorbBarBorderColor = {r = 0, g = 0, b = 0, a = 1},
-    healAbsorbBarBorderEnabled = false,
-    healAbsorbBarBorderSize = 1,
     healAbsorbBarColor = {r = 1, g = 0.25098040699959, b = 0.25098040699959, a = 0.77604186534882},
     healAbsorbBarHeight = 6,
     healAbsorbBarMode = "OVERLAY",
     healAbsorbBarOrientation = "HORIZONTAL",
     healAbsorbBarOverlayReverse = false,
-    healAbsorbBarOvershieldAlpha = 0.8,
-    healAbsorbBarOvershieldColor = nil,
-    healAbsorbBarOvershieldReverse = false,
-    healAbsorbBarOvershieldStyle = "SPARK",
     healAbsorbBarReverse = false,
-    healAbsorbBarShowOvershield = false,
     healAbsorbBarTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes",
     healAbsorbBarWidth = 50,
     healAbsorbBarX = 0,
@@ -1529,7 +1470,6 @@ DF.PartyDefaults = {
     healPredictionAnchor = "CENTER",
     healPredictionBackgroundColor = {r = 0, g = 0, b = 0, a = 0.5},
     healPredictionBlendMode = "BLEND",
-    healPredictionClampMode = 1,
     healPredictionEnabled = true,
     healPredictionFrameLevel = 12,
     healPredictionHeight = 6,
@@ -1537,8 +1477,6 @@ DF.PartyDefaults = {
     healPredictionMyColor = {r = 0, g = 0.8, b = 0.2, a = 0.7},
     healPredictionOrientation = "HORIZONTAL",
     healPredictionOthersColor = {r = 0, g = 0.5, b = 0.8, a = 0.7},
-    healPredictionOverflowPercent = 0,
-    healPredictionOverlayReverse = false,
     healPredictionReverse = false,
     healPredictionShowMode = "MINE",
     healPredictionShowOverheal = false,
@@ -1583,7 +1521,6 @@ DF.PartyDefaults = {
     reducedMaxHealthTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes",
 
     -- Blizzard Frame Hiding
-    hideBlizzardFrames = true,
     hideBlizzardPartyFrames = true,
     hideBlizzardRaidFrames = true,
     hideDefaultPlayerFrame = false,
@@ -1602,7 +1539,6 @@ DF.PartyDefaults = {
     leaderIconAnchor = "TOPLEFT",
     leaderIconEnabled = true,
     leaderIconFrameLevel = 0,
-    leaderIconHide = false,
     leaderIconHideInCombat = true,
     leaderIconScale = 1,
     leaderIconX = 0,
@@ -1689,12 +1625,13 @@ DF.PartyDefaults = {
     oorDispelOverlayAlpha = 0.20000000298023,
     oorEnabled = false,
     oorHealthBarAlpha = 0.20000000298023,
-    oorHealthTextAlpha = 0.25,
     oorIconsAlpha = 0.5,
     oorMissingBuffAlpha = 0.5,
     oorMissingHealthAlpha = 0.20000000298023,
-    oorNameTextAlpha = 1,
-    oorTextAlpha = 0.55,  -- unified OOR alpha for ALL Text Designer text (replaces the per-element name/health text alphas, which are legacy)
+    -- oorNameTextAlpha / oorHealthTextAlpha are retired: oorTextAlpha governs
+    -- ALL unit text (TD elements, pet/legacy fontstrings and test previews
+    -- alike). MigrateOORTextAlpha folds the old name value, then strips both.
+    oorTextAlpha = 0.55,
     oorPowerBarAlpha = 0.20000000298023,
     oorTargetedSpellAlpha = 0.5,
     oorAuraDesignerAlpha = 0.20000000298023,
@@ -1909,7 +1846,6 @@ DF.PartyDefaults = {
     raidTargetIconAnchor = "TOP",
     raidTargetIconEnabled = true,
     raidTargetIconFrameLevel = 0,
-    raidTargetIconHide = false,
     raidTargetIconHideInCombat = false,
     raidTargetIconScale = 1.1000000238419,
     raidTargetIconX = 36,
@@ -1919,7 +1855,6 @@ DF.PartyDefaults = {
 
     -- Range Check
     rangeAlpha = 0.5,
-    rangeCheckEnabled = true,
     rangeCheckSpellID = 0,
     rangeFadeAlpha = 0.40000000596046,
     rangeUpdateInterval = 0.5,
@@ -1929,7 +1864,6 @@ DF.PartyDefaults = {
     readyCheckIconAnchor = "CENTER",
     readyCheckIconEnabled = true,
     readyCheckIconFrameLevel = 0,
-    readyCheckIconHide = false,
     readyCheckIconHideInCombat = false,
     readyCheckIconPersist = 6,
     readyCheckIconScale = 1.6000000238419,
@@ -1993,7 +1927,6 @@ DF.PartyDefaults = {
 
     -- Rested Indicator
     restedIndicator = false,
-    restedIndicatorAnchor = "TOPRIGHT",
     restedIndicatorGlow = false,
     restedIndicatorIcon = true,
     restedIndicatorOffsetX = -18,
@@ -2009,7 +1942,6 @@ DF.PartyDefaults = {
     resurrectionIconShowText = false,
     resurrectionIconTextCasting = "Res...",
     resurrectionIconTextColor = {r = 0.2, g = 1, b = 0.2},
-    resurrectionIconTextPending = "Res Ready",
     resurrectionIconX = 0,
     resurrectionIconY = 0,
 
@@ -2017,11 +1949,6 @@ DF.PartyDefaults = {
     roleIconAlpha = 1,
     roleIconAnchor = "TOPLEFT",
     roleIconFrameLevel = 0,
-    roleIconHide = false,
-    roleIconHideDPS = true,
-    roleIconHideHealer = false,
-    roleIconHideOnlyInCombat = true,
-    roleIconHideTank = true,
     roleIconExternalDPS = "",
     roleIconExternalHealer = "",
     roleIconExternalTank = "",
@@ -2033,7 +1960,6 @@ DF.PartyDefaults = {
     roleIconStyle = "CUSTOM",
     roleIconX = 2,
     roleIconY = -2,
-    showRoleIcon = true,
 
     -- Selection Highlight
     selectionHighlightAlpha = 1,
@@ -2502,7 +2428,6 @@ DF.PartyDefaults = {
 
 local RAID_DEFAULT_OVERRIDES = {
     defensiveBarMax = 3,      -- party: 4
-    defensiveBarScale = 1.0,  -- party: 1.5
     defensiveIconSize = 20,   -- party: 30
 }
 

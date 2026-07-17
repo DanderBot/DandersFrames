@@ -1492,23 +1492,31 @@ function DF:MigratePinnedMatchMode()
                         if set.matchMode ~= "party" and set.matchMode ~= "raid" then
                             set.matchMode = mode  -- default / repair → the set's own mode
                         end
-                        if set.useCustomSize ~= nil then
-                            if set.useCustomSize ~= true then
-                                set.customWidth = nil
-                                set.customHeight = nil
+                        -- One-shot per set (flag): the old-default-to-inherit
+                        -- conversions below collide with deliberate values — a
+                        -- user setting scale back to exactly 1.0 (or spacing to
+                        -- 2) as an override had it cleared to "inherit" on
+                        -- every reload. Convert once, then leave the set alone.
+                        if not set._matchOverridesV1 then
+                            if set.useCustomSize ~= nil then
+                                if set.useCustomSize ~= true then
+                                    set.customWidth = nil
+                                    set.customHeight = nil
+                                end
+                                set.useCustomSize = nil
                             end
-                            set.useCustomSize = nil
+                            -- Scale inherits from the Based-on mode unless overridden:
+                            -- a value still at the old hard default (1.0) is treated as
+                            -- "inherit" (cleared); a changed value is kept as override.
+                            if set.scale == 1.0 then set.scale = nil end
+                            -- Spacing inherits the Based-on mode's frameSpacing unless
+                            -- overridden: the old hard default was 2, so a value still
+                            -- at 2 is treated as "inherit" (cleared); a non-2 value is
+                            -- kept as a deliberate override.
+                            if set.horizontalSpacing == 2 then set.horizontalSpacing = nil end
+                            if set.verticalSpacing == 2 then set.verticalSpacing = nil end
+                            set._matchOverridesV1 = true
                         end
-                        -- Scale inherits from the Based-on mode unless overridden:
-                        -- a value still at the old hard default (1.0) is treated as
-                        -- "inherit" (cleared); a changed value is kept as override.
-                        if set.scale == 1.0 then set.scale = nil end
-                        -- Spacing inherits the Based-on mode's frameSpacing unless
-                        -- overridden: the old hard default was 2, so a value still
-                        -- at 2 is treated as "inherit" (cleared); a non-2 value is
-                        -- kept as a deliberate override.
-                        if set.horizontalSpacing == 2 then set.horizontalSpacing = nil end
-                        if set.verticalSpacing == 2 then set.verticalSpacing = nil end
                         -- growDirection is a plain pinned-only setting; an earlier
                         -- build briefly cleared its HORIZONTAL default to nil, so
                         -- restore a concrete value for the dropdown.
@@ -1882,13 +1890,13 @@ function DF:LightweightUpdateTextColor(textType)
                 if db.testShowOutOfRange and testData.outOfRange then
                     if textType == "name" then
                         if db.oorEnabled then
-                            alpha = db.oorNameTextAlpha or 0.55
+                            alpha = db.oorTextAlpha or 0.55
                         else
                             alpha = db.rangeFadeAlpha or 0.55
                         end
                     elseif textType == "health" then
                         if db.oorEnabled then
-                            alpha = db.oorHealthTextAlpha or 0.55
+                            alpha = db.oorTextAlpha or 0.55
                         else
                             alpha = db.rangeFadeAlpha or 0.55
                         end
@@ -2504,32 +2512,13 @@ end
 -- Deep copy helper (also defined in Profile.lua, but needed here too)
 -- Note: DeepCopy, ResetProfile and CopyProfile are defined in Profile.lua
 
--- ============================================================
--- CVAR SETTINGS (Blizzard frame settings we control)
--- ============================================================
-
--- Apply saved CVar settings on login/reload
--- These control Blizzard's debuff display filtering which we use for our frames
-function DF:ApplySavedCVarSettings()
-    if not DF.db then return end
-    
-    -- These settings are stored in the party profile (shared between modes)
-    local db = DF.db.party
-    if not db then return end
-    
-    -- Apply dispel indicator type (1=All Dispellable, 2=My Dispels, 3=None but we force minimum 1)
-    local dispelIndicator = db._blizzDispelIndicator
-    if dispelIndicator == nil or dispelIndicator == 0 then
-        dispelIndicator = 1  -- Default to "All Dispellable"
-        db._blizzDispelIndicator = 1
-    end
-    SetCVar("raidFramesDispelIndicatorType", dispelIndicator)
-    
-    if DF.debugEnabled then
-        print("|cff00ff00DandersFrames:|r Applied CVar settings:")
-        print("  raidFramesDispelIndicatorType =", dispelIndicator)
-    end
-end
+-- (Removed) DF:ApplySavedCVarSettings — it force-stamped Blizzard's
+-- raidFramesDispelIndicatorType CVar from _blizzDispelIndicator, a key no
+-- GUI has written since the v4.3.4 dispel-source rework (the visible
+-- dropdown writes dispelOverlayDispelType, which only drives DF's own
+-- overlay). The stamp silently re-imposed a frozen value on Blizzard's
+-- frames every login and fought changes made anywhere else. The saved key
+-- is stripped in the v5 legacy-aura cleanup below.
 
 -- Deep equality check for the proxy contamination guard.
 -- Lua's == is reference equality for tables, so a new table with identical
@@ -2890,11 +2879,30 @@ end
 function DF:MigrateOORTextAlpha()
     if not DandersFramesDB_v2 or not DandersFramesDB_v2.profiles then return end
     for _, profile in pairs(DandersFramesDB_v2.profiles) do
-        if type(profile) == "table" and not profile._oorTextAlphaV1 then
+        if type(profile) == "table" then
             for _, modeKey in ipairs({ "party", "raid" }) do
                 local m = profile[modeKey]
-                if type(m) == "table" and m.oorNameTextAlpha ~= nil and m.oorNameTextAlpha ~= 1 then
-                    m.oorTextAlpha = m.oorNameTextAlpha
+                if type(m) == "table" then
+                    -- Fold the retired per-element name-alpha into the unified
+                    -- oorTextAlpha whenever it is PRESENT (a non-default value),
+                    -- not gated on the _oorTextAlphaV1 flag: a v4 export imported
+                    -- over an already-migrated profile reintroduces
+                    -- oorNameTextAlpha, and a flag-gated fold would skip it while
+                    -- the strip below still deletes it — silently resetting the
+                    -- imported OOR alpha. oorNameTextAlpha only ever exists on
+                    -- un-folded data (this pass strips it), so presence is the
+                    -- correct trigger and can't clobber a deliberate oorTextAlpha.
+                    if m.oorNameTextAlpha ~= nil and m.oorNameTextAlpha ~= 1 then
+                        m.oorTextAlpha = m.oorNameTextAlpha
+                    end
+                    -- The per-element keys are retired (every reader now uses
+                    -- oorTextAlpha; stale values were still driving the pet /
+                    -- legacy fontstring and test-preview paths, unreachable by
+                    -- any control). Strip AFTER the fold above has consumed the
+                    -- name value; idempotent, and with the Config defaults gone
+                    -- the backfill can't reseed them.
+                    m.oorNameTextAlpha = nil
+                    m.oorHealthTextAlpha = nil
                 end
             end
             profile._oorTextAlphaV1 = true
@@ -3391,25 +3399,14 @@ DF._MainEventDispatcher = function(self, event, arg1)
             end
         end
         
-        -- Migrate external defensive icon settings to new defensive icon
-        for _, mode in ipairs({"party", "raid"}) do
-            local modeDb = DF.db[mode]
-            if modeDb.externalDefEnabled and not modeDb._defensiveIconMigrated then
-                -- Enable the new defensive icon if the old external def was enabled
-                modeDb.defensiveIconEnabled = true
-                -- Migrate old settings to new ones
-                if modeDb.externalDefScale then modeDb.defensiveIconScale = modeDb.externalDefScale end
-                if modeDb.externalDefAnchor then modeDb.defensiveIconAnchor = modeDb.externalDefAnchor end
-                if modeDb.externalDefX then modeDb.defensiveIconX = modeDb.externalDefX end
-                if modeDb.externalDefY then modeDb.defensiveIconY = modeDb.externalDefY end
-                if modeDb.externalDefBorderColor then modeDb.defensiveIconBorderColor = modeDb.externalDefBorderColor end
-                if modeDb.externalDefBorderSize then modeDb.defensiveIconBorderSize = modeDb.externalDefBorderSize end
-                if modeDb.externalDefShowDuration ~= nil then modeDb.defensiveIconShowDuration = modeDb.externalDefShowDuration end
-                if modeDb.externalDefFrameLevel then modeDb.defensiveIconFrameLevel = modeDb.externalDefFrameLevel end
-                modeDb._defensiveIconMigrated = true
-            end
-        end
-        
+        -- (Removed) The externalDef* -> defensiveIcon* adoption migration. It
+        -- was UNREACHABLE for its entire life: the defaults backfill above
+        -- seeded its `_defensiveIconMigrated = true` guard from PartyDefaults
+        -- before it could ever run (true in v4 as well). The flag left the
+        -- defaults with this removal, and the externalDef* keys plus the flag
+        -- are stripped by the v5 legacy-aura cleanup below.
+
+
         -- (Removed) The v4.0.9 / v4.0.9b one-time FORCED filter stamps used to
         -- live here and below. Unlike every other migration they were not
         -- no-ops on fresh defaults: a profile reset wipes the migration flags
@@ -3856,27 +3853,13 @@ DF._MainEventDispatcher = function(self, event, arg1)
             DF.db.raidAutoEditingRecovery = nil
         end
 
-        -- Clean up Aura Designer entries for spells removed in the HARF→native transition.
-        -- These spells remain secret and can no longer be tracked without HARF.
-        local removedAuras = {
-            "TimeDilation", "Rewind", "VerdantEmbrace",
-            "IronBark", "PainSuppression", "PowerInfusion", "GuardianSpirit",
-            "LifeCocoon", "StrengthOfTheBlackOx",
-            "BlessingOfProtection", "HolyBulwark", "SacredWeapon",
-            "BlessingOfSacrifice",
-        }
-        if DandersFramesDB_v2 and DandersFramesDB_v2.profiles then
-            for _, profile in pairs(DandersFramesDB_v2.profiles) do
-                for _, mode in ipairs({"party", "raid"}) do
-                    local ad = profile[mode] and profile[mode].auraDesigner
-                    if ad and ad.auras then
-                        for _, auraName in ipairs(removedAuras) do
-                            ad.auras[auraName] = nil
-                        end
-                    end
-                end
-            end
-        end
+        -- (Removed) The HARF-era cleanup that deleted AD entries for
+        -- then-untrackable externals (Pain Suppression, Life Cocoon, ...). Its
+        -- premise is obsolete on 12.1 — those spells are live AD registry
+        -- entries again (identity-gated spell-ID tracking) — and the one case
+        -- where it still fired (an ancient pre-preset inline import) would
+        -- have deleted spells v5 CAN track, before conversion. Modern preset
+        -- data was never touched (it only walked the legacy inline store).
 
         -- One-time: force hideBlizzardRaidFrames = true for existing users
         for _, mode in ipairs({"party", "raid"}) do
@@ -4096,6 +4079,12 @@ DF._MainEventDispatcher = function(self, event, arg1)
             "bossDebuffsShowCountdown", "bossDebuffsShowNumbers",
             "bossDebuffsSpacing", "bossDebuffsTextScale", "testShowBossDebuffs",
             "bossDebuffsLegacyAnchors", "testBossDebuffCount", "_paIconSizeMigrated", "_paStrataHighV434",
+            -- Blizzard-frame dispel-indicator CVar stamp (party-only key; its
+            -- v4.3.4 fold into dispelOverlayDispelType runs before this strip).
+            "_blizzDispelIndicator",
+            -- Masque integration control (removed in 5.0 — Masque can't skin the
+            -- 12.1 container aura buttons; the saved toggle drives nothing now).
+            "masqueBorderControl",
             -- Old external-defensive icon (its widget died with the legacy pools;
             -- the settings migrated into defensiveIcon* long ago).
             "externalDefAnchor", "externalDefBorderColor", "externalDefBorderSize",
@@ -4196,6 +4185,33 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     if profile[mode] then
                         DropDispelCustomMode(profile[mode])
                     end
+                end
+            end
+        end
+
+        -- Expose the v5 legacy passes for the profile-import path (mirrors the
+        -- MigrateAuraDesignerToInstances export above). Without this, a v4
+        -- export imported at runtime shows a wrong dispel-enable state and
+        -- retired animation values until the next reload (all four passes only
+        -- re-ran at ADDON_LOADED). Walks the RAW profile tables only — DF.db
+        -- is proxied by the time an import runs, and the current profile is in
+        -- DandersFramesDB_v2.profiles anyway. Each pass is flag-gated or
+        -- value-idempotent, so re-running over untouched profiles is a no-op;
+        -- v5 exports carry the guard flags and skip straight through.
+        function DF:RunV5LegacyMigrations()
+            if not (DandersFramesDB_v2 and DandersFramesDB_v2.profiles) then return end
+            for _, profile in pairs(DandersFramesDB_v2.profiles) do
+                if type(profile) == "table" then
+                    for _, mode in ipairs({"party", "raid"}) do
+                        local m = profile[mode]
+                        if type(m) == "table" then
+                            MigrateDispelSourceToEnabled(m)
+                            StripLegacyAuraKeys(m)
+                            DropDispelCustomMode(m)
+                        end
+                    end
+                    StripRootLegacyKeys(profile)
+                    remapRetiredAnims(profile, {})
                 end
             end
         end
@@ -5091,8 +5107,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 DF:RegisterRaidClickCastFrames()
             end
             
-            -- Apply saved CVar settings after world is ready
-            DF:ApplySavedCVarSettings()
             -- Update rested indicator
             if DF.UpdateRestedIndicator then
                 DF:UpdateRestedIndicator()

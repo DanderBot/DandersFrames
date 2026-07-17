@@ -78,9 +78,6 @@ function CC:RegisterEvents()
         elseif event == "PLAYER_ENTERING_WORLD" then
             -- Initial load or reload
             C_Timer.After(0.5, function()
-                -- Run one-time migration to convert bindings to root spells
-                CC:MigrateBindingsToRootSpells()
-                
                 CC:RegisterAllFrames()
                 -- Register Blizzard frames if any binding needs them
                 if CC:AnyBindingNeedsBlizzardFrames() then
