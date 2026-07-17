@@ -340,7 +340,11 @@ local function SafeRectSize(region)
     local okH, h = pcall(region.GetHeight, region)
     local okW, w = pcall(region.GetWidth, region)
     if not okH or not okW then return nil, nil end
-    if canaccessvalue and (not canaccessvalue(h) or not canaccessvalue(w)) then
+    -- GetHeight/GetWidth can return a SECRET number without throwing (restricted
+    -- content); a secret dimension is not a usable measure. issecretvalue is the
+    -- real global for this (canaccessvalue is not a callable global — it's only a
+    -- documented return-field name).
+    if issecretvalue(h) or issecretvalue(w) then
         return nil, nil
     end
     return h, w

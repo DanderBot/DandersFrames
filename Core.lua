@@ -2883,8 +2883,16 @@ function DF:MigrateOORTextAlpha()
             for _, modeKey in ipairs({ "party", "raid" }) do
                 local m = profile[modeKey]
                 if type(m) == "table" then
-                    if not profile._oorTextAlphaV1
-                        and m.oorNameTextAlpha ~= nil and m.oorNameTextAlpha ~= 1 then
+                    -- Fold the retired per-element name-alpha into the unified
+                    -- oorTextAlpha whenever it is PRESENT (a non-default value),
+                    -- not gated on the _oorTextAlphaV1 flag: a v4 export imported
+                    -- over an already-migrated profile reintroduces
+                    -- oorNameTextAlpha, and a flag-gated fold would skip it while
+                    -- the strip below still deletes it — silently resetting the
+                    -- imported OOR alpha. oorNameTextAlpha only ever exists on
+                    -- un-folded data (this pass strips it), so presence is the
+                    -- correct trigger and can't clobber a deliberate oorTextAlpha.
+                    if m.oorNameTextAlpha ~= nil and m.oorNameTextAlpha ~= 1 then
                         m.oorTextAlpha = m.oorNameTextAlpha
                     end
                     -- The per-element keys are retired (every reader now uses
