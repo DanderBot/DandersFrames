@@ -462,16 +462,19 @@ function CC:CreateClickCastHeader()
     -- Clears bindings when there's no mouseover unit (e.g., a Blizzard panel
     -- opens over the frame, stealing focus without firing WrapScript OnLeave).
     --
-    -- The clear is gated on the frame's rect being MEASURABLE. IsUnderMouse()
-    -- and GetMousePosition() are not independent checks: both are computed in
-    -- the restricted environment from the same scrub(GetRect)/scrub(
-    -- GetEffectiveScale) values, so when the frame's geometry is briefly
-    -- unavailable they report "cursor off the frame" TOGETHER — a false clear
-    -- that silently wipes keyboard click-cast bindings mid-hover. GetRect()
-    -- exposes the difference the other two hide: rect present + cursor outside
-    -- it = provably off the frame (safe to clear); rect unavailable = cannot
-    -- know (keep the bindings — the OnLeave/OnHide wraps or the next driver
-    -- flip handle the genuine exit).
+    -- Guard uses BOTH IsUnderMouse() and GetMousePosition() — only clears if
+    -- both report the cursor is off the frame; a false clear here silently
+    -- wipes keyboard click-cast bindings mid-hover.
+    --
+    -- ⚠ DO NOT gate this clear on HANDLE:GetRect() being non-nil (tried in
+    -- 4.7.4, reverted in 4.7.5): GetRect returns nil for ANCHORING-RESTRICTED
+    -- frames, and protected unit frames are anchoring-restricted for the
+    -- whole of combat — the gate silently disabled this driver in combat,
+    -- removing the safety net that releases hover binds after a missed
+    -- OnLeave. Stuck binds stole every DF-bound key until reload (the 4.7.4
+    -- "keyboard unplugged" reports). IsUnderMouse/GetMousePosition do NOT
+    -- perform the anchoring-restricted check, so they keep working in combat.
+    -- The rect is still read below purely as a diagnostic.
     self.header:SetAttribute("_onstate-mouseoverstate", [[
         if newstate == "false" and mouseoverbutton then
             local l, b, w, h = mouseoverbutton:GetRect()
@@ -487,11 +490,11 @@ function CC:CreateClickCastHeader()
             mouseoverbutton:SetAttribute("dfSDMouseX", x)
             mouseoverbutton:SetAttribute("dfSDMouseY", y)
 
-            -- Clear only when the rect is measurable and both cursor checks
-            -- agree the cursor is off the frame. Hover binds are owned by the
-            -- header (self here), so the binding wipe never touches the frame
-            -- handle — it only writes diagnostics to it.
-            if rectKnown and not underMouse and not inBounds then
+            -- Only clear bindings if BOTH cursor checks agree the cursor is
+            -- off the frame (pre-4.7.4 semantics). Hover binds are owned by
+            -- the header (self here), so the binding wipe never touches the
+            -- frame handle — it only writes diagnostics to it.
+            if not underMouse and not inBounds then
                 mouseoverbutton:SetAttribute("dfClearedBy", "statedriver")
                 self:ClearBindings()
                 mouseoverbutton:SetAttribute("dfBindingsActive", nil)
