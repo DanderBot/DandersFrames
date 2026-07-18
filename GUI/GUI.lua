@@ -2084,11 +2084,18 @@ function GUI:StyleButton(btn, opts)
         if self.dfDisabled then
             self:SetBackdropColor(C_ELEMENT.r * 0.55, C_ELEMENT.g * 0.55, C_ELEMENT.b * 0.55, 0.6)
             self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.25)
-            hl:SetAlpha(0)  -- kill the auto hover wash while disabled
+            -- Kill the hover wash through its VERTEX alpha — the same channel
+            -- ApplyThemeColor uses for the wash's rest STRENGTH. The old object-
+            -- alpha toggle (hl:SetAlpha 0/1) mixed two alpha channels, so a
+            -- disable->enable cycle could restore the wash at FULL strength
+            -- instead of 0.30 (seen live on the Filter Designer add/rename/
+            -- delete buttons when switching a preset -> a custom filter).
+            local wc = accent or GetThemeColor()
+            hl:SetVertexColor(wc.r, wc.g, wc.b, 0)
             if self.Text then self.Text:SetAlpha(0.35) end
             if self.Icon then self.Icon:SetAlpha(0.35) end
         else
-            hl:SetAlpha(1)
+            self.ApplyThemeColor(accent or GetThemeColor())  -- re-assert the wash's rest colour + alpha (0.30 / 0.15)
             restBackdrop(self, accent or GetThemeColor())
             if self.Text then self.Text:SetAlpha(1) end
             if self.Icon then self.Icon:SetAlpha(1) end
