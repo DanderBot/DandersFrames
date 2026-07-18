@@ -491,11 +491,14 @@ function CC:CreateClickCastHeader()
             mouseoverbutton:SetAttribute("dfSDMouseY", y)
 
             -- Only clear bindings if BOTH cursor checks agree the cursor is
-            -- off the frame (pre-4.7.4 semantics). Hover binds are owned by
-            -- the header (self here), so the binding wipe never touches the
-            -- frame handle — it only writes diagnostics to it.
+            -- off the frame (pre-4.7.4 semantics). Binds are FRAME-owned, so
+            -- the frame-handle clear is the release that matters; the header
+            -- wipe (self here) stays as a belt. This snippet already method-
+            -- calls mouseoverbutton for the geometry checks above, so the
+            -- ClearBindings call adds no new stale-handle risk class.
             if not underMouse and not inBounds then
                 mouseoverbutton:SetAttribute("dfClearedBy", "statedriver")
+                mouseoverbutton:ClearBindings()
                 self:ClearBindings()
                 mouseoverbutton:SetAttribute("dfBindingsActive", nil)
                 mouseoverbutton:SetAttribute("dfIsSecureMouseover", nil)
@@ -1428,16 +1431,16 @@ function CC:SetupSecureHandlers(frame)
     if self.header and self.header.WrapScript then
         -- WrapScript OnEnter: Set up bindings
         --
-        -- HANDLE-SAFETY INVARIANT: this snippet must never call a method on
-        -- any frame handle other than `self` (which is always fresh — the
-        -- frame the mouse just entered) or `owner` (the header, which lives
-        -- for the whole session). The previous design called
-        -- mouseoverbutton:ClearBindings() here to clean up the prior frame's
-        -- bindings; if that shared handle ever went stale, the call errored
-        -- and aborted EVERY frame's OnEnter at that step, killing keyboard
-        -- hover binds addon-wide until /reload. All hover binds are now owned
-        -- by the header, so the cross-frame cleanup is a single
-        -- owner:ClearBindings() that cannot dangle.
+        -- OWNERSHIP: hover binds are FRAME-owned (see the snippet builder in
+        -- UpdateFrameBindingAttributes for why header ownership is not
+        -- achievable). The cross-frame mouseoverbutton:ClearBindings() in
+        -- Phase 3 is therefore load-bearing: it is what releases a stale
+        -- frame's binds after a missed OnLeave. Known accepted risk: if the
+        -- shared handle ever goes stale, that call can error and abort the
+        -- OnEnter (the pre-4.7.4 bug #976 class) — the OnHide wrap keeps the
+        -- handle fresh in the common paths, and the self-heal repair plus the
+        -- insecure OnLeave backstop recover the rare stale case. Diagnostics
+        -- read the mouseovername string mirror rather than the handle.
         local onEnterSnippet = [[
             -- Phase 0: Reset tracking for this enter cycle
             -- dfBindingsActive is cleared FIRST so a stale true from the previous
@@ -1461,12 +1464,16 @@ function CC:SetupSecureHandlers(frame)
             self:SetAttribute("dfSecurePrevMouseover", mouseovername or "nil")
             self:SetAttribute("dfEnterPhase", 2)
 
-            -- Phase 3: Wipe ALL hover binds owner-side. This covers the
-            -- previous frame's binds without touching its handle AT ALL — not
-            -- even SetAttribute, which would equally abort on a stale handle.
-            -- (The previous frame's dfBindingsActive/dfIsSecureMouseover are
-            -- reset by its own next OnEnter Phase 0; its OnLeave normally
-            -- already cleared them.)
+            -- Phase 3: Clear the previous frame's hover binds. Binds are
+            -- FRAME-owned (see UpdateFrameBindingAttributes: HANDLE:Run
+            -- executes the binding snippet in the FRAME's managed
+            -- environment, so frame ownership is the only deterministic
+            -- model), which makes this cross-frame clear load-bearing — it
+            -- is what releases a stale frame's binds after a missed OnLeave.
+            -- The owner wipe stays as a belt for any header-owned stray.
+            if mouseoverbutton and mouseoverbutton ~= self then
+                mouseoverbutton:ClearBindings()
+            end
             owner:ClearBindings()
             self:SetAttribute("dfEnterPhase", 3)
 
@@ -1522,6 +1529,10 @@ function CC:SetupSecureHandlers(frame)
 
             if mouseoverbutton == self then
                 self:SetAttribute("dfClearedBy", "onleave")
+                -- Binds are FRAME-owned: self:ClearBindings() is the release
+                -- that matters. owner:ClearBindings() stays as a belt for any
+                -- header-owned stray. self is always a fresh handle here.
+                self:ClearBindings()
                 owner:ClearBindings()
                 self:SetAttribute("dfBindingsActive", nil)
                 self:SetAttribute("dfIsSecureMouseover", nil)
@@ -1538,6 +1549,7 @@ function CC:SetupSecureHandlers(frame)
         local onHideSnippet = [[
             if mouseoverbutton == self then
                 self:SetAttribute("dfClearedBy", "onhide")
+                self:ClearBindings()
                 owner:ClearBindings()
                 self:SetAttribute("dfBindingsActive", nil)
                 self:SetAttribute("dfIsSecureMouseover", nil)
@@ -1747,6 +1759,9 @@ function CC:SetupSecureHandlers(frame)
                 if InCombatLockdown() then
                     CC:RequestBindingRepair("stuck-binds-onleave")
                 else
+                    -- Binds are FRAME-owned; clear the frame first, then the
+                    -- header as a belt.
+                    pcall(ClearOverrideBindings, self)
                     pcall(ClearOverrideBindings, CC.header)
                     if CC.header and CC.header.Execute then
                         pcall(function()
@@ -1858,14 +1873,20 @@ function CC:UpdateFrameBindingAttributes(frame)
                             bindType == "scroll" and (binding.key == "SCROLLUP" and "MOUSEWHEELUP" or "MOUSEWHEELDOWN") or binding.key)
                     end
                     
-                    -- Build SetBindingClick call — the HEADER (owner) owns the
-                    -- binding, the click targets the hovered frame (self at
-                    -- snippet run time). Header ownership means every clear is
-                    -- an owner-side wipe that can never hit a stale frame
-                    -- handle. The snippet runs via self:Run() in the OnEnter
-                    -- wrap, so self = the frame; owner = the header env var.
+                    -- Build SetBindingClick call — FRAME owns the binding,
+                    -- targets SELF (pre-4.7.4 semantics, restored). This is
+                    -- deliberate: the snippet runs via self:Run() in the
+                    -- OnEnter wrap, and HANDLE:Run executes the body in the
+                    -- FRAME's managed environment (Blizzard RestrictedFrames:
+                    -- GetManagedEnvironment(frame)) — NOT the header's. An
+                    -- env-var owner is therefore not a reliable owner for the
+                    -- set, and 4.7.4 proved it: sets and clears resolved to
+                    -- different owners and every clear no-opped, leaving keys
+                    -- stolen until reload. Frame ownership is deterministic;
+                    -- every clear site releases the frame AND belt-clears the
+                    -- header.
                     table.insert(snippetLines, string.format(
-                        [[owner:SetBindingClick(true, %q, self, %q)]],
+                        [[self:SetBindingClick(true, %q, self, %q)]],
                         bindKey, virtualBtn
                     ))
                 end
@@ -1998,12 +2019,13 @@ function CC:RunBindingRepair(reason, force)
     -- 2. Clear stray override bindings + hover state. After the env reset
     --    the OnLeave wrap can no longer clear these (mouseoverbutton ~= self),
     --    so clear them here or keys would stay stolen from the action bars.
-    --    Hover binds are owned by the HEADER now, so that is the wipe that
-    --    matters; the per-frame wipe stays to cover any legacy frame-owned
-    --    override from an older code path.
+    --    Binds are FRAME-owned: clear EVERY frame unconditionally — the
+    --    dfBindingsActive flag has been proven able to read clear while a
+    --    frame-owned bind is still live, so it must not gate the release.
+    --    The header wipe stays as a belt.
     pcall(ClearOverrideBindings, self.header)
     local function scrub(frame)
-        if frame.GetAttribute and frame:GetAttribute("dfBindingsActive") then
+        if frame.GetAttribute then
             pcall(ClearOverrideBindings, frame)
             frame:SetAttribute("dfBindingsActive", nil)
             frame:SetAttribute("dfIsSecureMouseover", nil)

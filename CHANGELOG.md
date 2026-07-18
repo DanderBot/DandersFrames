@@ -4,8 +4,8 @@
 
 ### Bug Fixes
 
-* (Click Casting) **Fixed the 4.7.4 regression where all DF-bound keybinds went dead ("like my keyboard is unplugged") after moving on/off party or raid frames, until a reload.** A safety check added in 4.7.4 unintentionally disabled — for the whole of combat — the fallback that releases hover binds when the normal hover-exit handler is skipped, so the binds stayed stuck and stole every DF-bound key from the action bars. The fallback is restored to its pre-4.7.4 behaviour, keys release again the moment the cursor leaves a frame. (by Krathe)
-* (Click Casting) Added a second recovery layer for the same class of problem: if stuck hover binds are ever detected after leaving a frame (a case the fallback can't see, e.g. when the cursor lands on another unit), they are now released immediately out of combat, or at combat end / next frame hover in combat — instead of lasting until a reload. (by Krathe)
+* (Click Casting) **Fixed the 4.7.4 regression where every key bound in DF stopped working on the action bars ("like my keyboard is unplugged") after hovering a party/raid frame, until a reload.** 4.7.4 moved hover-bind ownership in a way that made the release step clear the wrong owner — so leaving a frame looked clean but never actually released the keys. Hover binds are back on their pre-4.7.4 ownership, every release point now clears both possible owners, and the combat safety-check regression from 4.7.4 is also reverted, so keys release the moment the cursor leaves a frame again. (by Krathe)
+* (Click Casting) Added extra recovery layers on top: stuck hover binds detected after leaving a frame are released immediately out of combat (or at combat end / next frame hover in combat), and the loading-screen self-repair now releases lingering hover binds unconditionally instead of trusting a state flag. (by Krathe)
 
 ## [4.7.4]
 
