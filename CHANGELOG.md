@@ -1,5 +1,12 @@
 # DandersFrames Changelog
 
+## [Unreleased]
+
+### Bug Fixes
+
+* (Click Casting) **Fixed the 4.7.4 regression where every key bound in DF stopped working on the action bars ("like my keyboard is unplugged") after hovering a party/raid frame, until a reload.** 4.7.4's hover-bind rework applied binds under one owner but released them under another — so leaving a frame looked clean but never actually freed the keys. Bind ownership is now genuinely held by one permanent frame (applied and released in the same secure context), every release point additionally clears both possible owners as insurance, and the combat safety-check regression from 4.7.4 is reverted — keys release the moment the cursor leaves a frame. (by Krathe)
+* (Click Casting) Added extra recovery layers on top: stuck hover binds detected after leaving a frame are released immediately out of combat (or at combat end / next frame hover in combat), and the loading-screen self-repair now releases lingering hover binds unconditionally instead of trusting a state flag. (by Krathe)
+
 ## [4.7.4]
 
 ### Bug Fixes
