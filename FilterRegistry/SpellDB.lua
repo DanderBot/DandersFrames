@@ -66,9 +66,9 @@ R.CategoryPatch = {
 -- Sidebar/list display order. `name` keys are looked up through L at
 -- display time (Options code does L[cat.name]); keep them stable.
 R.Categories = {
-    { key = "healing",            name = "Per-spec Healing" },
+    { key = "healing",            name = "Healing" },
     { key = "raidBuffs",          name = "Raid Buffs" },
-    { key = "raidDefensives",     name = "Raid Defensives" },
+    { key = "raidDefensives",     name = "Raid Cooldowns" },
     { key = "externalDefensives", name = "External Defensives" },
     { key = "defensives",         name = "Defensives" },
     { key = "powerExternals",     name = "Power Externals" },
@@ -85,7 +85,7 @@ R.Categories = {
 -- source data; multi-category spells carry every category in `cats`.
 R.Spells = {
     -- ------------------------------------------------------------
-    -- Per-spec Healing
+    -- Healing
     -- ------------------------------------------------------------
     { id = 774,      alts = { 419204 }, n = "Rejuvenation", class = "DRUID", cats = { healing = true } },
     { id = 8936,     alts = { 419287 }, n = "Regrowth", class = "DRUID", cats = { healing = true } },
@@ -172,7 +172,7 @@ R.Spells = {
     { id = 317920,   n = "Concentration Aura",        class = "PALADIN",       cats = { raidBuffs = true } },
 
     -- ------------------------------------------------------------
-    -- Raid Defensives
+    -- Raid Cooldowns
     -- ------------------------------------------------------------
     { id = 97463,    alts = { 97462 }, n = "Rallying Cry", class = "WARRIOR", cats = { raidDefensives = true } },
     { id = 145629,   alts = { 51052 }, n = "Anti-Magic Zone", class = "DEATHKNIGHT", cats = { raidDefensives = true } },
