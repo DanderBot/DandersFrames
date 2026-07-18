@@ -500,6 +500,9 @@ function CC:CreateClickCastHeader()
             -- self-limiting — it cannot poison OnEnter).
             if not underMouse and not inBounds then
                 mouseoverbutton:SetAttribute("dfClearedBy", "statedriver")
+                -- Cumulative recovery counter (NOT reset by OnEnter Phase 0):
+                -- surfaces silent missed-leave recoveries in the debug log
+                mouseoverbutton:SetAttribute("dfSDClearCount", (mouseoverbutton:GetAttribute("dfSDClearCount") or 0) + 1)
                 mouseoverbutton:ClearBindings()
                 self:ClearBindings()
                 mouseoverbutton:SetAttribute("dfBindingsActive", nil)
@@ -1556,6 +1559,8 @@ function CC:SetupSecureHandlers(frame)
         local onHideSnippet = [[
             if mouseoverbutton == self then
                 self:SetAttribute("dfClearedBy", "onhide")
+                -- Cumulative recovery counter (see the OnEnter hook reader)
+                self:SetAttribute("dfHideClearCount", (self:GetAttribute("dfHideClearCount") or 0) + 1)
                 self:ClearBindings()
                 owner:ClearBindings()
                 self:SetAttribute("dfBindingsActive", nil)
@@ -1629,6 +1634,25 @@ function CC:SetupSecureHandlers(frame)
             tostring(hasKeyboardBindings), tostring(type1),
             tostring(wrapEnterFired), wrapEnterCount, wrapLeaveCount,
             enterPhase, prevMouseover, postCheck)
+
+        -- Surface silent safety-net recoveries. The mouseoverstate driver and
+        -- the OnHide wrap bump CUMULATIVE counters when they release hover
+        -- binds (Phase 0 deliberately does not reset these); a delta since
+        -- the last enter means a missed OnLeave was recovered without any
+        -- visible failure — log it so test runs can see the nets firing, not
+        -- just the absence of errors.
+        local sdClears = self:GetAttribute("dfSDClearCount") or 0
+        if sdClears ~= (self.dfLastSDClearCount or 0) then
+            DF:DebugWarn("CLICK", "SAFETY NET: state driver released hover binds %dx on %s since last enter (session total %d)",
+                sdClears - (self.dfLastSDClearCount or 0), frameName, sdClears)
+            self.dfLastSDClearCount = sdClears
+        end
+        local hideClears = self:GetAttribute("dfHideClearCount") or 0
+        if hideClears ~= (self.dfLastHideClearCount or 0) then
+            DF:DebugWarn("CLICK", "SAFETY NET: OnHide wrap released hover binds %dx on %s since last enter (session total %d)",
+                hideClears - (self.dfLastHideClearCount or 0), frameName, hideClears)
+            self.dfLastHideClearCount = hideClears
+        end
 
         -- Key diagnostic: mouseoverbutton was not self after OnEnter completed
         if wrapEnterFired and postCheck ~= "ok" then
