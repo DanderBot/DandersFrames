@@ -303,6 +303,7 @@ local DEFAULT_BINDING = {
         target = false,
         selfCast = false,
         stopSpellTarget = false,
+        alwaysCast = false,
     },
     -- Load conditions
     loadSpec = nil, -- nil = all specs, or table of spec IDs
@@ -452,6 +453,10 @@ local FALLBACK_INFO = {
     selfCast = {
         name = "Self",
         desc = "Cast on yourself as a last resort if no other valid target is found.",
+    },
+    alwaysCast = {
+        name = "Always Cast",
+        desc = "If no rule above matches (hovering nothing, or an ineligible unit), cast anyway using the spell's normal targeting. Lets ground-targeted spells show their aiming circle when pressed in the open. If Self is also enabled, Self applies first.",
     },
     stopSpellTarget = {
         name = "Cancel Targeting",
