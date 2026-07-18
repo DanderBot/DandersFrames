@@ -732,6 +732,25 @@ end
 -- CLICKCASTFRAMES GLOBAL TABLE
 -- ============================================================
 
+-- A ClickCastFrames entry is only click-castable if it is an actual unit
+-- frame: a Button/Frame carrying a "unit" attribute. Registration rewrites the
+-- frame's click attributes to DF's macro/target actions, which BREAKS any
+-- non-unit secure button that lands in the global table — a toy/action button
+-- has no unit and can't receive unit-targeted casts anyway (bug #988,
+-- ToyPicker's button had its type1 replaced). Frames whose unit is assigned
+-- late (secure header children) are picked up by the next RegisterAllFrames
+-- sweep once the attribute exists.
+local function clickCastFrameEligible(frame)
+    if type(frame) ~= "table" or not frame.GetObjectType or not frame.GetAttribute then
+        return false
+    end
+    local objType = frame:GetObjectType()
+    if objType ~= "Button" and objType ~= "Frame" then return false end
+    local unit = frame:GetAttribute("unit")
+    if issecretvalue(unit) then return false end
+    return unit ~= nil
+end
+
 function CC:SetupClickCastFramesGlobal()
     -- If our click casting is disabled, DON'T set up our metatable
     -- This allows Clique/Clicked to set up their own metatable and work normally
@@ -765,7 +784,7 @@ function CC:SetupClickCastFramesGlobal()
             if CC.db and CC.db.enabled then
                 if enabled == nil or enabled == false then
                     CC:UnregisterFrame(frame)
-                else
+                elseif clickCastFrameEligible(frame) then
                     CC:RegisterFrame(frame)
                 end
             end
@@ -853,7 +872,7 @@ function CC:ScanForThirdPartyFrames()
     -- Also scan ClickCastFrames in case something was added via rawset
     if ClickCastFrames then
         for frame, enabled in pairs(ClickCastFrames) do
-            if enabled and type(frame) == "table" and not self.registeredFrames[frame] then
+            if enabled and not self.registeredFrames[frame] and clickCastFrameEligible(frame) then
                 self:RegisterFrame(frame)
                 registered = registered + 1
             end
@@ -2059,10 +2078,14 @@ function CC:RegisterAllFrames()
         end
     end
     
-    -- Also check ClickCastFrames global (for third-party addon support)
+    -- Also check ClickCastFrames global (for third-party addon support).
+    -- NOTE: the old condition here was `enabled and A or B` — precedence made
+    -- it (enabled and Button) or Frame, so entries an addon explicitly
+    -- DISABLED (ClickCastFrames[f] = false, the documented unregister method)
+    -- were re-registered on every sweep if their object type was "Frame".
     if ClickCastFrames then
         for frame, enabled in pairs(ClickCastFrames) do
-            if enabled and frame:GetObjectType() == "Button" or frame:GetObjectType() == "Frame" then
+            if enabled and clickCastFrameEligible(frame) then
                 self:RegisterFrame(frame)
             end
         end

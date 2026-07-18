@@ -766,11 +766,16 @@ function DF:SafeSetFont(fontString, fontNameOrPath, fontSize, outline)
             -- Force WoW to re-render the text with new font properties
             -- This is needed because switching between font families with different outline flags
             -- may not immediately update the rendered text without a text refresh
-            -- Note: Some fontStrings have "secret" text that cannot be read or compared,
-            -- so we wrap this in pcall to handle those cases safely
+            -- Note: the text may be a SECRET string (native cooldown countdown
+            -- text, health text, ...). Truthiness on a secret is allowed, but a
+            -- value comparison (~= "") is BLOCKED — and even inside pcall each
+            -- blocked compare logs a DandersFrames taint incident (hundreds per
+            -- minute in PvP instances; bugs #987/#988). GetText() returns nil,
+            -- never "", for empty text, so truthiness is also the complete
+            -- check. SetText accepts secret strings, so the round trip is safe.
             pcall(function()
                 local text = fontString:GetText()
-                if text and text ~= "" then
+                if text then
                     fontString:SetText("")
                     fontString:SetText(text)
                 end
