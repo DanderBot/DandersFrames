@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Bug Fixes
+
+* (Click Casting) **Fixed keyboard and extra-mouse-button hover binds dying addon-wide mid-combat until a /reload** — hover binds are now owned by one permanent frame instead of the unit frame under the cursor, removing the cleanup step that could hit a dead frame reference and silently break every later hover. The 4.7.2 after-the-fact self-repair stays as a safety net, but the cause is gone. (by Krathe)
+* (Click Casting) Fixed keyboard and mouse-wheel click-cast binds being silently dropped mid-hover during combat — the safety check that removes hover binds could misread the cursor as off the frame while the frame's position was briefly unreadable, wiping the binds until the frame was re-hovered. Binds are now only removed when the cursor is provably off the frame. (by Krathe)
+
 ## [4.7.3]
 
 ### Bug Fixes
