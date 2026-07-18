@@ -1,5 +1,11 @@
 # DandersFrames Changelog
 
+## [Unreleased]
+
+### Bug Fixes
+
+* (Click Casting) **Fixed all DF-bound keybinds going dead ("like my keyboard is unplugged") after hovering off party/raid frames, until a reload** — the game sometimes skips the secure hover-exit handler that releases the hover binds, leaving every key bound in DF stolen from the action bars. The addon now detects that exact state the moment it happens and releases the keys immediately (at combat end if it happens mid-combat, or on the next frame hover). (by Krathe)
+
 ## [4.7.4]
 
 ### Bug Fixes

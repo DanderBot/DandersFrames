@@ -1712,6 +1712,49 @@ function CC:SetupSecureHandlers(frame)
                 frameName, tostring(wrapLeaveFired), mouseoverOnLeave, tostring(leaveCheckPassed), tostring(isSecureMouseover), postCheck)
             DF:DebugError("CLICK", "  clearedBy=%s stateDriverFired=%d underMouse=%s rectKnown=%s mousePos=%s,%s",
                 clearedBy, stateDriverCount, tostring(stateDriverUnderMouse), tostring(stateDriverRectKnown), tostring(sdMouseX), tostring(sdMouseY))
+
+            -- STUCK-BINDS BACKSTOP: the client sometimes skips the secure
+            -- OnLeave wrap (and the mouseoverstate driver has a blind spot
+            -- when the cursor leaves onto another mouseover unit, so nothing
+            -- fires on its transition). When that happens the header-owned
+            -- hover binds stay active and every DF-bound key is stolen from
+            -- the action bars — dead until something clears them. This hook
+            -- has just OBSERVED that exact state, so act on it:
+            --   * if the cursor is now over another registered frame, its
+            --     secure OnEnter already wiped + rebuilt the binds — do
+            --     nothing (wiping here would kill that frame's live binds)
+            --   * out of combat: clear the header's override bindings and
+            --     reset the secure hover tracking right away
+            --   * in combat: insecure clearing is blocked — queue the
+            --     self-heal repair, which runs at combat end and clears the
+            --     header (keys also self-correct on the next frame hover,
+            --     whose secure OnEnter wipes owner-side)
+            local overRegisteredFrame = false
+            local foci = GetMouseFoci and GetMouseFoci()
+            if foci then
+                for _, focus in ipairs(foci) do
+                    if CC.registeredFrames and CC.registeredFrames[focus] then
+                        overRegisteredFrame = true
+                        break
+                    end
+                end
+            end
+
+            if not overRegisteredFrame then
+                if InCombatLockdown() then
+                    CC:RequestBindingRepair("stuck-binds-onleave")
+                else
+                    pcall(ClearOverrideBindings, CC.header)
+                    if CC.header and CC.header.Execute then
+                        pcall(function()
+                            CC.header:Execute([[ mouseoverbutton = nil mouseovername = nil ]])
+                        end)
+                    end
+                    self:SetAttribute("dfBindingsActive", nil)
+                    self:SetAttribute("dfIsSecureMouseover", nil)
+                    DF:DebugWarn("CLICK", "Stuck hover binds cleared for %s (secure OnLeave was skipped)", frameName)
+                end
+            end
         end
     end)
 
