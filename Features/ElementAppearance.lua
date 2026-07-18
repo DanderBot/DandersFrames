@@ -849,26 +849,28 @@ function DF:UpdateDispelOverlayAppearance(frame)
 
     if DF.testMode or DF.raidTestMode then return end
 
-    -- 12.1 factory path: one alpha on each slot BUTTON — the whole widget (and the
-    -- game-mode icon slot) rides it, and it MULTIPLIES with the pulse animation's
-    -- widget alpha instead of fighting it. Buttons' Shown is Blizzard-owned; alpha
-    -- is not, so this is the sanctioned dimming channel.
+    -- 12.1 factory path: one alpha on the handle's plain anchor WINDOW (ours) —
+    -- the whole subtree rides it (every slot button, the slot-hosted widgets, the
+    -- game-mode icon slots) and it MULTIPLIES with the pulse animation's widget
+    -- alpha. ⚠ NEVER write alpha on the slot BUTTONS themselves: PTR-5 made
+    -- AuraButtons blanket-forbidden while auras are secret, so ANY method call on
+    -- them (SetAlpha included) from addon code errors in restricted content —
+    -- the old per-button loop error-spammed every range tick in raid combat
+    -- (live-caught). Same channel the buff/defensive row fades already use.
     local h = frame.dispelFactory
-    if h and h.GetOverlaySlots then
-        local buttons = h:GetOverlaySlots()
-        if buttons then
+    if h and h.GetFrame then
+        local w = h:GetFrame()
+        if w then
             local fDeadAlpha = 1.0
             if IsDeadOrOffline(frame) and db.fadeDeadFrames then
                 fDeadAlpha = db.fadeDeadBackground or 1
             end
-            local fInRange = GetInRange(frame)
-            local fOorAlpha = db.oorDispelOverlayAlpha or 0.2
-            for _, btn in pairs(buttons) do
-                if db.oorEnabled then
-                    ApplyOORAlpha(btn, fInRange, fDeadAlpha, fDeadAlpha * fOorAlpha)
-                else
-                    btn:SetAlpha(fDeadAlpha)
-                end
+            if db.oorEnabled then
+                local fInRange = GetInRange(frame)
+                local fOorAlpha = db.oorDispelOverlayAlpha or 0.2
+                ApplyOORAlpha(w, fInRange, fDeadAlpha, fDeadAlpha * fOorAlpha)
+            else
+                w:SetAlpha(fDeadAlpha)
             end
         end
     end
