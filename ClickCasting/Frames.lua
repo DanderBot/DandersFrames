@@ -76,7 +76,12 @@ function CC:InitializeSavedVariables()
     if self.db.global.disableWhileFlying == nil then
         self.db.global.disableWhileFlying = false
     end
-    
+
+    -- Retired: the persisted "re-wipe Blizzard's click-cast profile on every
+    -- enable" flag (see the removal note in DisableBlizzardClickCast).
+    -- Clearing is a one-time, explicitly confirmed action now.
+    self.db.clearBlizzardOnEnable = nil
+
     -- Ensure classes table exists
     if not self.db.classes then
         self.db.classes = {}
@@ -568,12 +573,14 @@ function CC:DisableBlizzardClickCasting()
     
     -- Hook into Blizzard's click cast system to prevent conflicts
     if not self.blizzardClickCastDisabled then
-        -- Reset Blizzard's click-casting profile on first run (if user chose to clear)
-        -- This completely removes any Blizzard click-cast bindings
-        if self.db.clearBlizzardOnEnable and C_ClickBindings and C_ClickBindings.ResetCurrentProfile then
-            C_ClickBindings.ResetCurrentProfile()
-        end
-        
+        -- (Removed) The clearBlizzardOnEnable auto re-wipe. Pressing "Clear
+        -- Blizzard Bindings" once used to persist the flag and silently
+        -- ResetCurrentProfile() — a PERMANENT wipe of the user's native
+        -- click-cast profile — on every future enable. Clearing is now a
+        -- one-time action taken only when the button is pressed (with a
+        -- permanence warning in the dialog); the stored flag is stripped in
+        -- InitializeSavedVariables.
+
         -- Clear any existing Blizzard click cast config on our frames
         if SetUnitFrameClickCastConfig then
             -- Hook to prevent Blizzard from setting click casts on frames we manage

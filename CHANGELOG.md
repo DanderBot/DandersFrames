@@ -1,5 +1,12 @@
 # DandersFrames Changelog
 
+## [Unreleased]
+
+### Improvements
+
+* (Click Casting) Enabling a targeting fallback (Global, Target, Self or Always Cast) on a key that already does something in WoW now asks for confirmation and names exactly what the key will stop doing — these options make the key active everywhere, not just over the frames. The fallback tooltips explain this too.
+* (Click Casting) The "Clear Blizzard Bindings" button now warns that clearing is permanent, and it no longer silently re-clears Blizzard's click-casting profile every time click casting is enabled — clearing only happens when you press the button.
+
 ## [4.7.5]
 
 ### Bug Fixes
