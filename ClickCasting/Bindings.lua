@@ -805,8 +805,11 @@ function CC:GetHovercastSuffix(binding)
         -- Mouse button
         return "dfmouse" .. modKey .. buttonNum
     else
-        -- Keyboard/scroll key
-        return "dfbutton" .. modKey .. key:lower()
+        -- Keyboard/scroll key. EncodeKeyToken: identical to the old :lower()
+        -- for alphanumeric keys; international and punctuation keys get an
+        -- ASCII-safe encoding so their bytes never enter attribute names
+        -- (bug #977).
+        return "dfbutton" .. modKey .. self:EncodeKeyToken(key)
     end
 end
 
@@ -990,6 +993,33 @@ function CC:ClearGlobalBindings()
             button.bindingKey = nil
         end
     end
+end
+
+-- Encode a captured key name into an ASCII-only token for use inside derived
+-- names (virtual mouse button names -> secure attribute names). Keys from
+-- non-US keyboard layouts (æ, ø, å, ñ, ü, ...) arrive from OnKeyDown as
+-- multibyte UTF-8; embedding those raw bytes in attribute names is the one
+-- structural difference between this pipeline and the systems that handle
+-- such keys correctly (Blizzard's own bindings, Dominos, EllesmereUI — none
+-- of which put key characters into derived names). The BINDING key itself is
+-- always passed byte-exact as captured; only derived names go through this.
+-- a-z / 0-9 pass through and A-Z lowercases, so alphanumeric keys (the vast
+-- majority) produce the identical name the old :lower() did. Every other
+-- byte — multibyte sequences AND ASCII punctuation — becomes "_" plus its
+-- zero-padded byte value: fixed width, so two distinct keys can never encode
+-- to the same token. Punctuation is deliberately encoded too: characters
+-- like "*" carry wildcard meaning in secure attribute names, so raw
+-- punctuation in a derived name was never safe either. (bug #977)
+function CC:EncodeKeyToken(key)
+    return (tostring(key or ""):gsub(".", function(c)
+        local b = c:byte()
+        if (b >= 97 and b <= 122) or (b >= 48 and b <= 57) then
+            return c                            -- a-z, 0-9 unchanged
+        elseif b >= 65 and b <= 90 then
+            return string.char(b + 32)          -- A-Z -> a-z (legacy casing)
+        end
+        return string.format("_%03d", b)        -- everything else: byte-encoded
+    end))
 end
 
 -- Get the WoW key string for a binding
