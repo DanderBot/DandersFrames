@@ -2,6 +2,20 @@
 
 ## [5.0.0]
 
+### Improvements
+
+* (Click Casting) Enabling a targeting fallback (Global, Target, Self or Always Cast) on a key that already does something in WoW now asks for confirmation and names exactly what the key will stop doing — these options make the key active everywhere, not just over the frames. The fallback tooltips explain this too.
+* (Click Casting) The "Clear Blizzard Bindings" button now warns that clearing is permanent, and it no longer silently re-clears Blizzard's click-casting profile every time click casting is enabled — clearing only happens when you press the button.
+
+## [4.7.5]
+
+### Bug Fixes
+
+* (Click Casting) **Fixed the 4.7.4 regression where every key bound in DF stopped working on the action bars ("like my keyboard is unplugged") after hovering a party/raid frame, until a reload.** 4.7.4's hover-bind rework applied binds under one owner but released them under another — so leaving a frame looked clean but never actually freed the keys. Bind ownership is now genuinely held by one permanent frame (applied and released in the same secure context), every release point additionally clears both possible owners as insurance, and the combat safety-check regression from 4.7.4 is reverted — keys release the moment the cursor leaves a frame. (by Krathe)
+* (Click Casting) Added extra recovery layers on top: stuck hover binds detected after leaving a frame are released immediately out of combat (or at combat end / next frame hover in combat), and the loading-screen self-repair now releases lingering hover binds unconditionally instead of trusting a state flag. (by Krathe)
+
+## [4.7.4]
+
 ### Bug Fixes
 
 * (Click Casting) Fixed a Lua error walking Blizzard unit frames after combat that could stop click-casting bindings from working on the default frames until reload — the frame scan now skips protected (secret) values introduced by recent client versions. (by Krathe)

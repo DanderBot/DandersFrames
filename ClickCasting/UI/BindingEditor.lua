@@ -710,12 +710,46 @@ function CC:CreateEditBindingPanel()
     fallbackSubtitle:SetTextColor(0.5, 0.5, 0.5)
     panel.fallbackSubtitle = fallbackSubtitle
     
+    -- Enabling any global-forcing fallback (Mouseover/Target/Self/Always Cast)
+    -- puts the binding's key on the PERMANENT global bind list
+    -- (BuildHovercastSetupScript): the key then performs this binding
+    -- everywhere and stops doing its normal job, even away from the frames —
+    -- a wheel bind eats camera zoom, for example. If the key currently has a
+    -- Blizzard binding, confirm the capture and name exactly what gets
+    -- replaced. The flag is already set by the checkbox handler; Cancel
+    -- reverts it (nothing persists until Save anyway).
+    local function ConfirmGlobalKeyCapture(cb, flagKey)
+        if not cb:GetChecked() then return end          -- unchecking never captures
+        local b = panel.pendingBinding
+        if not b or (b.bindType ~= "key" and b.bindType ~= "scroll") then return end
+        local keyString = CC:GetBindingKeyString(b)
+        if not keyString or keyString == "" then return end
+        local action = GetBindingAction and GetBindingAction(keyString)
+        if not action or action == "" then return end
+        local actionName = (GetBindingText and GetBindingText(action)) or action
+        DF:ShowPopupAlert({
+            title = L["Key Used Elsewhere"],
+            message = format(L["This will capture %s everywhere — even away from the frames — and replace its current action:"], keyString)
+                .. "\n\n|cffffcc00" .. actionName .. "|r",
+            buttons = {
+                { label = L["Enable Anyway"], onClick = nil },
+                { label = L["Cancel"], onClick = function()
+                    cb:SetChecked(false)
+                    if panel.pendingBinding and panel.pendingBinding.fallback then
+                        panel.pendingBinding.fallback[flagKey] = false
+                    end
+                end },
+            },
+        })
+    end
+
     -- Mouseover checkbox
     local mouseoverCB = CreateCheckbox(advancedContent, FALLBACK_INFO.mouseover.name, FALLBACK_INFO.mouseover.desc)
     mouseoverCB:SetPoint("TOPLEFT", 18, -38)
     mouseoverCB:SetScript("OnClick", function(self)
         panel.pendingBinding.fallback = panel.pendingBinding.fallback or {}
         panel.pendingBinding.fallback.mouseover = self:GetChecked()
+        ConfirmGlobalKeyCapture(self, "mouseover")
     end)
     panel.mouseoverCB = mouseoverCB
     
@@ -725,6 +759,7 @@ function CC:CreateEditBindingPanel()
     targetFallbackCB:SetScript("OnClick", function(self)
         panel.pendingBinding.fallback = panel.pendingBinding.fallback or {}
         panel.pendingBinding.fallback.target = self:GetChecked()
+        ConfirmGlobalKeyCapture(self, "target")
     end)
     panel.targetFallbackCB = targetFallbackCB
     
@@ -734,6 +769,7 @@ function CC:CreateEditBindingPanel()
     selfCB:SetScript("OnClick", function(self)
         panel.pendingBinding.fallback = panel.pendingBinding.fallback or {}
         panel.pendingBinding.fallback.selfCast = self:GetChecked()
+        ConfirmGlobalKeyCapture(self, "selfCast")
     end)
     panel.selfCB = selfCB
 
@@ -743,6 +779,7 @@ function CC:CreateEditBindingPanel()
     alwaysCastCB:SetScript("OnClick", function(self)
         panel.pendingBinding.fallback = panel.pendingBinding.fallback or {}
         panel.pendingBinding.fallback.alwaysCast = self:GetChecked()
+        ConfirmGlobalKeyCapture(self, "alwaysCast")
     end)
     panel.alwaysCastCB = alwaysCastCB
 
