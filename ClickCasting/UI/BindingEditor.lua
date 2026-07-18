@@ -656,7 +656,7 @@ function CC:CreateEditBindingPanel()
     -- ============================================================
     
     local COLLAPSED_HEIGHT = 502
-    local EXPANDED_HEIGHT = 685
+    local EXPANDED_HEIGHT = 707
     
     -- Advanced header/toggle button
     local advancedToggle = CreateFrame("Button", nil, panel, "BackdropTemplate")
@@ -689,7 +689,7 @@ function CC:CreateEditBindingPanel()
     -- Advanced content container (hidden by default)
     local advancedContent = CreateFrame("Frame", nil, panel)
     advancedContent:SetPoint("TOPLEFT", advancedToggle, "BOTTOMLEFT", 0, -8)
-    advancedContent:SetSize(296, 140)
+    advancedContent:SetSize(296, 162)
     advancedContent:Hide()
     panel.advancedContent = advancedContent
     
@@ -737,16 +737,25 @@ function CC:CreateEditBindingPanel()
     end)
     panel.selfCB = selfCB
 
+    -- Always Cast checkbox (terminal unconditional fallback — bug #991)
+    local alwaysCastCB = CreateCheckbox(advancedContent, FALLBACK_INFO.alwaysCast.name, FALLBACK_INFO.alwaysCast.desc)
+    alwaysCastCB:SetPoint("TOPLEFT", 18, -104)
+    alwaysCastCB:SetScript("OnClick", function(self)
+        panel.pendingBinding.fallback = panel.pendingBinding.fallback or {}
+        panel.pendingBinding.fallback.alwaysCast = self:GetChecked()
+    end)
+    panel.alwaysCastCB = alwaysCastCB
+
     -- Macro Options section header
     local macroOptionsLabel = advancedContent:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    macroOptionsLabel:SetPoint("TOPLEFT", 0, -108)
+    macroOptionsLabel:SetPoint("TOPLEFT", 0, -130)
     macroOptionsLabel:SetText(L["Macro Options:"])
     macroOptionsLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     panel.macroOptionsLabel = macroOptionsLabel
 
     -- Cancel Targeting checkbox (stopSpellTarget)
     local stopSpellTargetCB = CreateCheckbox(advancedContent, FALLBACK_INFO.stopSpellTarget.name, FALLBACK_INFO.stopSpellTarget.desc)
-    stopSpellTargetCB:SetPoint("TOPLEFT", 18, -128)
+    stopSpellTargetCB:SetPoint("TOPLEFT", 18, -150)
     stopSpellTargetCB:SetScript("OnClick", function(self)
         panel.pendingBinding.fallback = panel.pendingBinding.fallback or {}
         panel.pendingBinding.fallback.stopSpellTarget = self:GetChecked()
@@ -755,7 +764,7 @@ function CC:CreateEditBindingPanel()
 
     -- Target on cast checkbox (per-binding override of the global setting)
     local targetOnCastCB = CreateCheckbox(advancedContent, L["Target on cast"], L["Also make this unit your target when you click-cast on it. Overrides the global 'Target unit when click-casting' setting."])
-    targetOnCastCB:SetPoint("TOPLEFT", 18, -150)
+    targetOnCastCB:SetPoint("TOPLEFT", 18, -172)
     targetOnCastCB:SetScript("OnClick", function(self)
         panel.pendingBinding.targetOnCast = self:GetChecked()
     end)
@@ -763,7 +772,7 @@ function CC:CreateEditBindingPanel()
 
     -- Priority slider (inside advanced content)
     local priorityLabel = advancedContent:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    priorityLabel:SetPoint("TOPLEFT", 0, -158)
+    priorityLabel:SetPoint("TOPLEFT", 0, -180)
     priorityLabel:SetText(L["Priority:"])
     priorityLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     panel.priorityLabel = priorityLabel
@@ -796,7 +805,7 @@ function CC:CreateEditBindingPanel()
         end,
         CC.ACCENT                   -- accentColor (ClickCasting green)
     )
-    prioritySlider:SetPoint("TOPLEFT", 68, -155)
+    prioritySlider:SetPoint("TOPLEFT", 68, -177)
 
     -- Direction note (standard GUI label style). The slider's container is 50px
     -- tall (its bottom sits near the Delete/Cancel/Save row), so the note is placed
@@ -1182,7 +1191,7 @@ function CC:ShowEditBindingPanel(spellData, existingBinding, existingIndex)
     -- Check if this binding has advanced options set (should auto-expand)
     local fallback = panel.pendingBinding.fallback or { mouseover = false, target = false, selfCast = false }
     local hasAdvancedOptions = fallback.mouseover or fallback.target or fallback.selfCast or fallback.stopSpellTarget
-        or panel.pendingBinding.targetOnCast ~= nil
+        or fallback.alwaysCast or panel.pendingBinding.targetOnCast ~= nil
     local currentPriority = panel.pendingBinding.priority or 5
     if currentPriority ~= 5 then
         hasAdvancedOptions = true
@@ -1203,6 +1212,7 @@ function CC:ShowEditBindingPanel(spellData, existingBinding, existingIndex)
         if panel.mouseoverCB then panel.mouseoverCB:Hide() end
         if panel.targetFallbackCB then panel.targetFallbackCB:Hide() end
         if panel.selfCB then panel.selfCB:Hide() end
+        if panel.alwaysCastCB then panel.alwaysCastCB:Hide() end
         if panel.macroOptionsLabel then panel.macroOptionsLabel:Hide() end
         if panel.stopSpellTargetCB then panel.stopSpellTargetCB:Hide() end
         if panel.targetOnCastCB then panel.targetOnCastCB:Hide() end
@@ -1259,6 +1269,7 @@ function CC:ShowEditBindingPanel(spellData, existingBinding, existingIndex)
         if panel.mouseoverCB then panel.mouseoverCB:Show() end
         if panel.targetFallbackCB then panel.targetFallbackCB:Show() end
         if panel.selfCB then panel.selfCB:Show() end
+        if panel.alwaysCastCB then panel.alwaysCastCB:Show() end
         if panel.macroOptionsLabel then panel.macroOptionsLabel:Show() end
         if panel.stopSpellTargetCB then panel.stopSpellTargetCB:Show() end
         if panel.targetOnCastCB then panel.targetOnCastCB:Show() end
@@ -1275,14 +1286,14 @@ function CC:ShowEditBindingPanel(spellData, existingBinding, existingIndex)
         end
         
         -- Reset priority slider position for spells (shifted down for the
-        -- Target on cast row added to Macro Options)
+        -- Target on cast + Always Cast rows added to the advanced section)
         if panel.priorityLabel then
             panel.priorityLabel:ClearAllPoints()
-            panel.priorityLabel:SetPoint("TOPLEFT", panel.advancedContent, "TOPLEFT", 0, -182)
+            panel.priorityLabel:SetPoint("TOPLEFT", panel.advancedContent, "TOPLEFT", 0, -204)
         end
         if panel.prioritySlider then
             panel.prioritySlider:ClearAllPoints()
-            panel.prioritySlider:SetPoint("TOPLEFT", panel.advancedContent, "TOPLEFT", 68, -179)
+            panel.prioritySlider:SetPoint("TOPLEFT", panel.advancedContent, "TOPLEFT", 68, -201)
         end
         
         -- Auto-expand if binding has advanced options
@@ -1360,7 +1371,7 @@ function CC:ShowEditBindingPanel(spellData, existingBinding, existingIndex)
 
     -- Adjust panel height based on macro/item vs spell, and Advanced expanded state
     local SPELL_COLLAPSED_HEIGHT = 502
-    local SPELL_EXPANDED_HEIGHT = 685
+    local SPELL_EXPANDED_HEIGHT = 707
     local MACRO_COLLAPSED_HEIGHT = 475  -- With Global Keybind section above Active
     local MACRO_EXPANDED_HEIGHT = 540   -- With Advanced expanded (just priority slider)
     local SPECIAL_COLLAPSED_HEIGHT = 450 -- Target/menu: target type + combat, no Advanced section
@@ -1391,6 +1402,7 @@ function CC:ShowEditBindingPanel(spellData, existingBinding, existingIndex)
         panel.mouseoverCB:SetChecked(fallback.mouseover == true)
         panel.targetFallbackCB:SetChecked(fallback.target == true)
         panel.selfCB:SetChecked(fallback.selfCast == true)
+        panel.alwaysCastCB:SetChecked(fallback.alwaysCast == true)
         panel.stopSpellTargetCB:SetChecked(fallback.stopSpellTarget == true)
         -- Show the effective state (global default unless this binding overrides it).
         -- Clicking writes an explicit override; leaving it untouched keeps inheriting.

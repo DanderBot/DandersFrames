@@ -8,6 +8,10 @@
 * (Click Casting) Fixed keyboard and mouse-wheel click-cast binds being silently dropped mid-hover during combat — the safety check that removes hover binds could misread the cursor as off the frame while the frame's position was briefly unreadable, wiping the binds until the frame was re-hovered. Binds are now only removed when the cursor is provably off the frame. (by Krathe)
 * (Click Casting) Fixed binds on keys from international keyboard layouts (such as æ, ø or å) not casting on the frame under the cursor.
 
+### New Features
+
+* (Click Casting) New "Always Cast" option in a binding's Advanced settings. When enabled, the key still casts with the spell's normal targeting if no other rule matches — so ground-targeted spells (like aimable Shaman totems) show their aiming circle when pressed while hovering nothing.
+
 ## [4.7.3]
 
 ### Bug Fixes

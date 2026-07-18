@@ -847,7 +847,9 @@ function CC:BuildHovercastSetupScript()
             -- These fallbacks only work when NOT hovering a frame, so we need
             -- the key binding to be active globally, not just when hovering
             local fallback = binding.fallback or {}
-            local hasFallbackThatNeedsGlobal = fallback.mouseover or fallback.target or fallback.selfCast
+            -- alwaysCast needs the key active everywhere too — its whole point
+            -- is casting while hovering nothing (bug #991)
+            local hasFallbackThatNeedsGlobal = fallback.mouseover or fallback.target or fallback.selfCast or fallback.alwaysCast
             
             -- Check for useGlobalBind flag (for items/macros that need to work everywhere)
             local hasGlobalBindFlag = binding.useGlobalBind == true
@@ -2031,7 +2033,18 @@ function CC:BuildMacroTextForBinding(binding, forGlobalBinding)
         if hasSelf then
             table.insert(parts, "[@player" .. combatStr .. mountedStr .. "] " .. spellName)
         end
-        
+
+        -- Always Cast: terminal unconditional clause — when no clause above
+        -- matches (nothing hovered / ineligible unit), cast with WoW's default
+        -- targeting so ground-targeted spells show their aiming circle
+        -- (bug #991). With Self enabled the [@player] clause above always
+        -- resolves first, so Self takes precedence. Combat/mounted gating
+        -- still applies.
+        if fallback.alwaysCast then
+            local conds = (combatStr .. mountedStr):sub(2)   -- strip leading comma; "" when ungated
+            table.insert(parts, (conds ~= "" and ("[" .. conds .. "] ") or "") .. spellName)
+        end
+
         -- If no fallbacks enabled, just cast normally (will use WoW's default targeting)
         if #parts == 0 then
             table.insert(parts, spellName)
@@ -2349,7 +2362,20 @@ function CC:BuildCombinedMacroForBindings(bindings, forGlobalBinding)
             table.insert(parts, "[@player" .. combatStr .. "] " .. friendlySpell)
         end
     end
-    
+
+    -- Always Cast (bug #991): terminal unconditional clause, mirroring the
+    -- single-binding builder. First contributing binding with the flag wins;
+    -- the self-cast clause above resolves first when enabled.
+    for _, b in ipairs({friendlyBinding, hostileBinding, anyBinding}) do
+        if b and b.fallback and b.fallback.alwaysCast and b.spellName then
+            local spell = GetLocalizedSpellName(b.spellId) or b.spellName
+            local combatCond = GetCombatCondition(b)
+            local combatStr = combatCond == "combat" and ",combat" or (combatCond == "nocombat" and ",nocombat" or "")
+            table.insert(parts, (combatStr ~= "" and ("[" .. combatStr:sub(2) .. "] ") or "") .. spell)
+            break
+        end
+    end
+
     if #parts == 0 then return nil end
 
     -- Check if any contributing binding has stopSpellTarget enabled
