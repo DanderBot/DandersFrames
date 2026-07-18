@@ -903,13 +903,14 @@ DF.GlobalDefaults = {
     -- low "warn on expiry" ladder tuned for the common case (short HoTs, ~15-30s): a fresh
     -- HoT reads green and only ramps hot in its final seconds. Editable on the Colours page.
     durationColorByTimeBreakpoints = {
-        -- Softened traffic-light: same hues off their pure primaries so they don't glare on
-        -- dark icons. Keep in sync with DEFAULT_DURATION_BREAKPOINTS (Features/Auras.lua) so
-        -- "Reset to Default" and the engine fallback agree. Hex: 73d373/f5d15c/f29952/e66666.
-        { threshold = 8, color = { r = 0.451, g = 0.827, b = 0.451 } },  -- green  (fresh / healthy, >=8s)
-        { threshold = 5, color = { r = 0.961, g = 0.82,  b = 0.361 } },  -- gold   (5-8s)
-        { threshold = 2, color = { r = 0.949, g = 0.6,   b = 0.322 } },  -- orange (2-5s)
-        { threshold = 0, color = { r = 0.902, g = 0.4,   b = 0.4   } },  -- red    (<2s, about to fall off)
+        -- Vivid traffic-light: brighter and more saturated than the softened set — clearer at
+        -- a glance in combat without going pure-primary neon. Keep in sync with
+        -- DEFAULT_DURATION_BREAKPOINTS (Features/Auras.lua) so "Reset to Default" and the engine
+        -- fallback agree. Hex: 5fe05f/ffd23d/ff9838/f75555.
+        { threshold = 8, color = { r = 0.373, g = 0.878, b = 0.373 } },  -- green  (fresh / healthy, >=8s)
+        { threshold = 5, color = { r = 1.0,   g = 0.824, b = 0.239 } },  -- gold   (5-8s)
+        { threshold = 2, color = { r = 1.0,   g = 0.596, b = 0.22  } },  -- orange (2-5s)
+        { threshold = 0, color = { r = 0.969, g = 0.333, b = 0.333 } },  -- red    (<2s, about to fall off)
     },
 }
 

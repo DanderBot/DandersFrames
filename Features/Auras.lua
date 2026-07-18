@@ -362,10 +362,10 @@ end
 -- threshold-DESCENDING list of { threshold, hex } so the first match (highest threshold <=
 -- remaining) wins. Falls back to the shipped low ladder if unset/malformed, and always ends
 -- in a threshold-0 base band.
--- Softened traffic-light (keep in sync with Config.lua durationColorByTimeBreakpoints).
+-- Vivid traffic-light (keep in sync with Config.lua durationColorByTimeBreakpoints).
 local DEFAULT_DURATION_BREAKPOINTS = {
-    { threshold = 8, hex = "73d373" }, { threshold = 5, hex = "f5d15c" },
-    { threshold = 2, hex = "f29952" }, { threshold = 0, hex = "e66666" },
+    { threshold = 8, hex = "5fe05f" }, { threshold = 5, hex = "ffd23d" },
+    { threshold = 2, hex = "ff9838" }, { threshold = 0, hex = "f75555" },
 }
 local function GetDurationColorBreakpoints()
     local g = DF.GetGlobalDB and DF:GetGlobalDB()
