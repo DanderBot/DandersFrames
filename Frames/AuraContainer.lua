@@ -325,31 +325,43 @@ local function recordCandidateFilters(rec, config)
     return rec.candidateFilters or config.candidateFilters
 end
 
--- IDENTITY-GATE EXPOSURE (12.1, live-confirmed 2026-07-17). include/excludeSpellIDs
--- are only evaluated inside CanApplyIdentityCandidateFilters, which for HELPFUL
--- auras requires UnitCanAssist("player", unit) — and a FAILED gate SKIPS the
--- checks entirely (fail-open: every helpful aura passes). UnitCanAssist flips
--- FALSE for a CROSS-FACTION group member outside instanced content — and for a
--- duel partner — so an "only these spells" pool silently degrades to "every
--- buff" (food buffs flooding the defensive row; caught live via a cross-faction
--- party + duel, DF_AuraLab probe 38). A pool whose SELECTION is includeSpellIDs
--- renders pure garbage under a failed gate, so the handle hides itself until
--- the gate holds again (see Handle:_applyIdentityGate).
---   * "HELPFUL|PLAYER" pools are immune: the PLAYER token filters at the QUERY
---     level, outside the identity gate (the AD "My Buffs" pools).
---   * "!PLAYER" pools are NOT immune — the token narrows the pool but the
---     spell-ID selection still fails open (exact-token check below).
---   * excludeSpellIDs-only pools are deliberately NOT gated: "everything except
---     X" degrading to "everything" beats hiding a whole row.
---   * HARMFUL pools are out of scope (their gate is UnitCanAttack — a separate
---     question owned by the debuff-filtering work).
+-- IDENTITY-GATE EXPOSURE (12.1, live-confirmed 2026-07-17, widened 2026-07-18).
+-- include/excludeSpellIDs are only evaluated inside
+-- CanApplyIdentityCandidateFilters, which for HELPFUL auras requires
+-- UnitCanAssist("player", unit) — and a FAILED gate SKIPS the checks entirely
+-- (fail-open: every helpful aura passes). UnitCanAssist flips FALSE for a
+-- CROSS-FACTION group member outside instanced content — and for a duel
+-- partner — so an "only these spells" pool silently degrades to "every buff"
+-- (food buffs flooding the defensive row; caught live via a cross-faction
+-- party + duel, DF_AuraLab probe 38). A pool whose SELECTION rides identity
+-- filtering renders garbage under a failed gate, so the handle hides itself
+-- until the gate holds again (see Handle:_applyIdentityGate). Vulnerable =
+-- HELPFUL pool with ANY of:
+--   * includeSpellIDs — REGARDLESS of tokens. "HELPFUL|PLAYER" is NOT immune
+--     (field-caught 2026-07-18): the PLAYER token still narrows the pool at
+--     the query level, but the spell-ID whitelist is skipped — so a My Buffs
+--     slot degrades to "anything I cast", and buffs persisting from instanced
+--     content (Fortitude on a cross-faction ally) render in it. The earlier
+--     "PLAYER pools are immune" note was a probe artifact (no other
+--     player-cast aura on the test target, so the failed-open pool was empty).
+--   * excludeSpellIDs — "everything except X" degrades to "everything",
+--     re-showing buffs the user chose to hide; gated for a uniform blackout
+--     on non-assistable units (Krathe's call, 2026-07-18).
+--   * a spell-CATEGORY token (BIG_DEFENSIVE / EXTERNAL_DEFENSIVE, negated or
+--     not — the defensive row's empty-selection fallback): the category is
+--     spell-identity-derived, same fail-open family.
+-- NOT gated: genuinely unfiltered pools (plain HELPFUL, no selection) — their
+-- data is CORRECT on a non-assistable unit (probe: the ALL row showed the real
+-- buffs), so hiding them would hide truth, not garbage. HARMFUL pools are out
+-- of scope (their gate is UnitCanAttack — owned by the debuff-filtering work).
+local GATED_CATEGORY_TOKENS = { BIG_DEFENSIVE = true, EXTERNAL_DEFENSIVE = true }
 local function filterVulnerableToIdentityGate(filterString, cf)
-    if not (cf and cf.includeSpellIDs) then return false end
     if type(filterString) ~= "string" or not filterString:find("HELPFUL") then return false end
+    if cf and (cf.includeSpellIDs or cf.excludeSpellIDs) then return true end
     for token in filterString:gmatch("[^|%s]+") do
-        if token == "PLAYER" then return false end
+        if GATED_CATEGORY_TOKENS[(token:gsub("^!", ""))] then return true end
     end
-    return true
+    return false
 end
 
 -- Dynamic-unit tokens whose underlying unit changes WITHOUT the token changing, so
@@ -2215,8 +2227,55 @@ function Handle:Disable() self:_applyEnabled(false) end
 function Handle:SetShown(shown)
     shown = shown and true or false
     self._intendedShown = shown          -- consumer INTENT; the identity gate composes on top
-    self.frame:SetShown(shown and not self._idGateHidden)   -- plain anchor frame; safe in combat
+    self:_applyVisibility()
     self:_applyEnabled(shown)
+end
+
+-- Single writer for the window's shown state (consumer intent composed with the
+-- identity gate). NEVER flip visibility while the cursor is inside the window:
+-- hiding/showing it runs the hovered native button's tooltip intrinsics
+-- (Blizzard_AuraButton OnEnter/OnLeave -> Show/HideTooltip) synchronously INSIDE
+-- our tainted execution, and those index secret aura data. That error class is
+-- REPORTED to the user even when caught by pcall, so hover avoidance is the
+-- defence and pcall only a backstop. While hovered (or after a failed write)
+-- park a short retry; the flip lands as soon as the cursor moves off. Verified
+-- against IsShown, so an aborted write can never strand the gate out of sync
+-- (the original stranded-fail-open field bug).
+function Handle:_applyVisibility()
+    if self._destroyed then return end
+    local want = (self._intendedShown ~= false) and not self._idGateHidden
+    -- Respect the fake-data park (Edit Mode etc.): while parked, this handle is
+    -- hidden regardless of intent/gate — otherwise a hover-deferred retry could
+    -- ping-pong against the park's own deferred hide.
+    local watch = AuraContainer._providerWatch
+    if watch and watch._fakeActive and watch._hidden[self] then want = false end
+    if self.frame:IsShown() == want then self._visRetry = nil; return end
+    local okOver, over = pcall(self.frame.IsMouseOver, self.frame)
+    local blocked = (okOver and over)
+        or not pcall(self.frame.SetShown, self.frame, want)
+        or self.frame:IsShown() ~= want
+    if not blocked then
+        self._visRetry = nil
+    elseif not self._visRetry then
+        self._visRetry = true
+        C_Timer.After(0.25, function()
+            self._visRetry = nil
+            self:_applyVisibility()
+        end)
+    end
+end
+
+-- Hover-safe Hide for windows leaving the handle bookkeeping (destroy / the
+-- fake-data park): same hazard + deferral as _applyVisibility, minus the intent
+-- composition. `stillWanted` (optional) is re-checked on each retry so a
+-- deferred hide can't clobber a window someone legitimately re-showed meanwhile.
+local function safeHideWindow(frame, stillWanted)
+    if not frame or not frame:IsShown() then return end
+    if stillWanted and not stillWanted() then return end
+    local okOver, over = pcall(frame.IsMouseOver, frame)
+    if (okOver and over) or not pcall(frame.Hide, frame) or frame:IsShown() then
+        C_Timer.After(0.25, function() safeHideWindow(frame, stillWanted) end)
+    end
 end
 
 -- Hide this handle while the 12.1 identity gate would fail open on its unit (see
@@ -2227,11 +2286,12 @@ end
 -- that stays owned by SetShown/_applyEnabled. Composes with consumer intent:
 -- a consumer-hidden handle stays hidden when the gate lifts. Fail-safe on any
 -- doubt (secret value, pcall failure, missing unit): SHOW — a wrongly-hidden
--- row is worse than one garbage frame.
+-- row is worse than one garbage frame. Always recomputes (no vulnerable
+-- early-out) so a handle rebuilt onto a non-vulnerable filter clears a stale
+-- hidden flag instead of staying hidden forever.
 function Handle:_applyIdentityGate()
-    if not self._idGateVulnerable then return end
     local hide = false
-    if not AuraContainer._testMode then
+    if self._idGateVulnerable and not AuraContainer._testMode then
         local unit = self.config and self.config.unit
         if type(unit) == "string" and unit ~= "player" and UnitExists(unit) then
             local ok, can = pcall(UnitCanAssist, "player", unit)
@@ -2241,10 +2301,8 @@ function Handle:_applyIdentityGate()
             end
         end
     end
-    if (hide or nil) ~= self._idGateHidden then
-        self._idGateHidden = hide or nil
-        self.frame:SetShown((self._intendedShown ~= false) and not hide)
-    end
+    self._idGateHidden = hide or nil
+    self:_applyVisibility()
 end
 
 -- Enable/disable the (secure) container's parse+bind. COMBAT-GUARDED: SetEnabled
@@ -2262,6 +2320,7 @@ end
 function Handle:SetUnit(unit)
     self.config.unit = unit
     self:_updateDynRefresh()   -- re-evaluate dynamic-unit auto-refresh for the new token
+    self:_applyIdentityGate()  -- the last gate verdict was for the OLD unit (plain frame; combat-safe)
     -- In combat, defer JUST the retarget (a full rebuild would leak a container + N
     -- buttons every combat on roster churn); "retarget" re-runs SetUnit at regen.
     if InCombatLockdown() then self:_queueOp("retarget"); return end
@@ -2491,7 +2550,10 @@ function Handle:Destroy()
     if AuraContainer._dyn then AuraContainer._dyn._handles[self] = nil end
     if AuraContainer._handles then AuraContainer._handles[self] = nil end
     self._destroyed = true
-    if self.frame then self.frame:Hide() end   -- plain frame; safe in combat, hides the container child too
+    -- Plain frame; safe in combat, hides the container child too. Hover-safe:
+    -- hiding while a native button is under the cursor runs its tooltip
+    -- intrinsic under our taint (see _applyVisibility).
+    if self.frame then safeHideWindow(self.frame) end
     if InCombatLockdown() then
         -- Can't tear down secure container state in lockdown; defer to regen.
         self:_queueOp("destroy")
@@ -2647,7 +2709,10 @@ local function ensureProviderWatch()
             for h in pairs(self._hidden) do
                 self._hidden[h] = nil
                 if not h._destroyed then
-                    h:GetFrame():Show()
+                    -- Restore through the visibility channel: hover-safe, and
+                    -- composes intent + identity gate (a bare Show() re-opened
+                    -- gate-hidden windows on Edit Mode exit).
+                    h:_applyVisibility()
                     h:Refresh()        -- re-parse real data (Edit Mode exit is OOC)
                 end
             end
@@ -2656,7 +2721,7 @@ local function ensureProviderWatch()
             for h in pairs(AuraContainer._handles or {}) do
                 if not h._destroyed and h:GetFrame():IsShown() then
                     self._hidden[h] = true
-                    h:GetFrame():Hide()
+                    safeHideWindow(h:GetFrame(), function() return self._hidden[h] end)
                 end
             end
         end
@@ -2782,7 +2847,9 @@ function AuraContainer:Create(parent, config)
     local watch = AuraContainer._providerWatch
     if watch and watch._fakeActive then
         watch._hidden[h] = true
-        h.frame:Hide()
+        -- Hover-safe + self-cancelling: if the fake period ends before a deferred
+        -- hide lands, the retry sees _hidden cleared and stands down.
+        safeHideWindow(h.frame, function() return watch._hidden[h] end)
     end
     return h
 end
@@ -2797,23 +2864,97 @@ end
 
 -- IDENTITY-GATE WATCHER: re-evaluate the gate for every vulnerable handle when
 -- assistability can flip — faction changes (cross-faction membership + duels),
--- phasing, roster changes, zoning, and retargets (dynamic-unit handles on
--- target/focus frames). The per-handle check is a couple of API calls and the
--- vulnerable set is small, so a blanket re-eval beats brittle unit matching.
+-- phasing, roster/member-data changes, zoning, and retargets (dynamic-unit
+-- handles on target/focus frames). The per-handle check is a couple of API
+-- calls and the vulnerable set is small; sweeps coalesce onto a short timer so
+-- event bursts (name/roster spam on joins) run once.
+-- Field lesson (cross-faction party + /reload): UnitCanAssist can still report
+-- the pre-load answer while the world streams in, and in the steady state no
+-- watched event fires after it settles — the wrong verdict stuck until a real
+-- invite. So member-data events are watched too, and PLAYER_ENTERING_WORLD
+-- additionally parks two delayed sweeps to catch the settled value.
 local idGateWatch = CreateFrame("Frame")
 idGateWatch:RegisterEvent("UNIT_FACTION")
 idGateWatch:RegisterEvent("UNIT_PHASE")
+idGateWatch:RegisterEvent("UNIT_NAME_UPDATE")      -- member data streaming in post-load
+idGateWatch:RegisterEvent("PARTY_MEMBER_ENABLE")   -- member connect/instance-state settle
+idGateWatch:RegisterEvent("PARTY_MEMBER_DISABLE")
 idGateWatch:RegisterEvent("GROUP_ROSTER_UPDATE")
 idGateWatch:RegisterEvent("PLAYER_ENTERING_WORLD")
 idGateWatch:RegisterEvent("PLAYER_TARGET_CHANGED")
 idGateWatch:RegisterEvent("PLAYER_FOCUS_CHANGED")
-idGateWatch:SetScript("OnEvent", function()
+local gateSweepQueued
+local function IdentityGateSweep()
+    gateSweepQueued = nil
     for h in pairs(AuraContainer._handles or {}) do
         if h._idGateVulnerable then
             pcall(function() h:_applyIdentityGate() end)
         end
     end
+end
+idGateWatch:SetScript("OnEvent", function(_, event)
+    if not gateSweepQueued then
+        gateSweepQueued = true
+        C_Timer.After(0.05, IdentityGateSweep)
+    end
+    if event == "PLAYER_ENTERING_WORLD" then
+        C_Timer.After(2, IdentityGateSweep)
+        C_Timer.After(6, IdentityGateSweep)
+    end
 end)
+
+-- /df idgate — identity-gate ground truth: EVERY handle (not just the
+-- vulnerable ones — an under-flagged handle is exactly the failure this dump
+-- must expose), with its unit, vulnerability flag, the LIVE UnitCanAssist
+-- answer, the stored gate verdict, and the window's actual visibility
+-- (+ whether a hover-deferred flip is parked). Developer diagnostic: plain
+-- print by project convention.
+function AuraContainer.DebugDumpIdentityGate()
+    local CAP = 30
+    local n, vuln = 0, 0
+    for h in pairs(AuraContainer._handles or {}) do
+        n = n + 1
+        if h._idGateVulnerable then vuln = vuln + 1 end
+        if n <= CAP then
+            local cfg = h.config or {}
+            local unit = cfg.unit
+            local canTxt = "-"
+            if type(unit) == "string" and UnitExists(unit) then
+                local ok, can = pcall(UnitCanAssist, "player", unit)
+                if not ok then canTxt = "ERR"
+                elseif issecretvalue and issecretvalue(can) then canTxt = "SECRET"
+                else canTxt = tostring(can) end
+            end
+            -- Filter + cf summary: distinct record filter strings, and whether ANY
+            -- record carries an include/exclude spell map — the fields the
+            -- vulnerability classification is derived from.
+            local fParts, seenF, inc, exc = {}, {}, false, false
+            for _, rec in ipairs(normalizeFilters(cfg.filter)) do
+                if not seenF[rec.f] then
+                    seenF[rec.f] = true
+                    fParts[#fParts + 1] = rec.f
+                end
+                local cf = recordCandidateFilters(rec, cfg)
+                if cf and cf.includeSpellIDs then inc = true end
+                if cf and cf.excludeSpellIDs then exc = true end
+            end
+            print(("|cff33ff99[idgate %d]|r mode=%s unit=%s filter=%s inc=%s exc=%s vuln=%s exists=%s canAssist=%s gateHidden=%s intent=%s shown=%s retry=%s"):format(
+                n, tostring(cfg.mode or "row"), tostring(unit),
+                table.concat(fParts, "&"), tostring(inc), tostring(exc),
+                tostring(h._idGateVulnerable or false),
+                tostring(type(unit) == "string" and UnitExists(unit) or false), canTxt,
+                tostring(h._idGateHidden or false),
+                tostring(h._intendedShown ~= false),
+                tostring(h.frame and h.frame:IsShown() or false),
+                tostring(h._visRetry or false)))
+        end
+    end
+    if n > CAP then
+        print(("|cff33ff99[idgate]|r (capped at %d lines)"):format(CAP))
+    end
+    print(("|cff33ff99[idgate]|r %d handle(s), %d gate-vulnerable; testMode=%s"):format(
+        n, vuln, tostring(AuraContainer._testMode or false)))
+end
 
 -- /df ppbadge — diagnostic toggle: park missing badges on the WINDOW instead of
 -- the container (see _badgeParkDebug at the build). Border renders perfect =>

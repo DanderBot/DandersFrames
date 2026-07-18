@@ -4603,6 +4603,10 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- Diagnostic: window-park missing badges (bypasses the container's secret
                 -- self-size) — proves/disproves the last missing-badge pp drift source
                 if DF.AuraContainer and DF.AuraContainer.ToggleBadgeParkDebug then DF.AuraContainer.ToggleBadgeParkDebug() end
+            elseif msg == "idgate" then
+                -- Identity-gate ground truth: per vulnerable handle, live UnitCanAssist
+                -- vs the stored gate verdict vs actual window visibility
+                if DF.AuraContainer and DF.AuraContainer.DebugDumpIdentityGate then DF.AuraContainer.DebugDumpIdentityGate() end
             elseif msg == "admissing" then
                 -- Diagnostic for the Aura Designer show-when-missing push mechanism
                 if DF.DebugADMissing then DF:DebugADMissing() end
