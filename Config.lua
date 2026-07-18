@@ -792,17 +792,22 @@ function DF:SafeSetFont(fontString, fontNameOrPath, fontSize, outline)
             -- Force WoW to re-render the text with new font properties
             -- This is needed because switching between font families with different outline flags
             -- may not immediately update the rendered text without a text refresh
-            -- Note: Some fontStrings have "secret" text that cannot be read or compared,
-            -- so we wrap this in pcall to handle those cases safely
-            -- 12.1: a fontstring's text can be SECRET (e.g. a unit name in combat). Reading it
-            -- is fine, but COMPARING a secret (text ~= "") is BLOCKED and TAINTS DandersFrames.
-            -- This runs in the SecureGroupHeader's child-refresh path (Text Designer), so the
-            -- taint poisons the secure header + the 12.1 aura containers → froze auras in combat
-            -- (taint.log: 168× Config.lua:773). Skip the re-render for secret text (issecretvalue
-            -- short-circuits BEFORE any boolean/compare use of the secret).
+            -- Note: the text may be a SECRET string (native cooldown countdown
+            -- text, health text, unit names in combat). COMPARING a secret
+            -- (text ~= "") is BLOCKED, and each blocked compare logs a
+            -- DandersFrames taint incident even inside pcall — bugs #987/#988
+            -- (hundreds/minute in PvP instances on live); on 12.1 this runs in
+            -- the SecureGroupHeader's child-refresh path, so the taint poisoned
+            -- the secure header + aura containers and froze auras in combat
+            -- (taint.log: 168× Config.lua:773). Skip the re-render for secret
+            -- text: issecretvalue runs BEFORE any boolean use of the value, and
+            -- secret-text fontstrings rewrite on every update anyway, so the
+            -- font change lands on the next natural SetText. The old `~= ""`
+            -- guard is dropped as redundant — GetText() returns nil, never "",
+            -- for empty text.
             pcall(function()
                 local text = fontString:GetText()
-                if not (issecretvalue and issecretvalue(text)) and text and text ~= "" then
+                if not (issecretvalue and issecretvalue(text)) and text then
                     fontString:SetText("")
                     fontString:SetText(text)
                 end

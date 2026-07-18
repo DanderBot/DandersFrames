@@ -440,11 +440,20 @@ function CC:CreateClickCastHeader()
     self.header:SetAttribute("dfClickCastEnabled", self.db and self.db.enabled or false)
     
     -- Initialize secure environment variables
-    -- mouseoverbutton tracks the currently hovered frame (Cell's pattern)
+    -- mouseoverbutton tracks the currently hovered frame (handle, used ONLY
+    -- for geometry checks in the state driver and identity comparisons).
+    -- mouseovername mirrors it as a plain string for diagnostics, so no
+    -- snippet ever needs to call a method on a possibly-stale handle.
+    -- owner is a permanent handle to this header: ALL hover override bindings
+    -- are owned by it (set/cleared through it), so clearing bindings never
+    -- has to touch a unit-frame handle that may have gone stale. The header
+    -- lives for the whole session, so owner can never dangle.
     if self.header.Execute then
         pcall(function()
             self.header:Execute([[
+                owner = self
                 mouseoverbutton = nil
+                mouseovername = nil
             ]])
         end)
     end
@@ -453,34 +462,42 @@ function CC:CreateClickCastHeader()
     -- Clears bindings when there's no mouseover unit (e.g., a Blizzard panel
     -- opens over the frame, stealing focus without firing WrapScript OnLeave).
     --
-    -- Guard uses BOTH IsUnderMouse() and GetMousePosition() — only clears if
-    -- both report the cursor is off the frame. Each API has independent failure
-    -- modes (IsUnderMouse() has historically returned nil during brief flickers
-    -- when the cursor sits on a child region of a parent unit button; the bounds
-    -- check on GetMousePosition() can also stutter), and a false clear here
-    -- silently wipes keyboard click-cast bindings mid-hover. Treating either
-    -- "over frame" signal as authoritative is the safe default: an extra
-    -- OnLeave cycle will catch the real exit when the mouse genuinely moves
-    -- off the frame.
+    -- The clear is gated on the frame's rect being MEASURABLE. IsUnderMouse()
+    -- and GetMousePosition() are not independent checks: both are computed in
+    -- the restricted environment from the same scrub(GetRect)/scrub(
+    -- GetEffectiveScale) values, so when the frame's geometry is briefly
+    -- unavailable they report "cursor off the frame" TOGETHER — a false clear
+    -- that silently wipes keyboard click-cast bindings mid-hover. GetRect()
+    -- exposes the difference the other two hide: rect present + cursor outside
+    -- it = provably off the frame (safe to clear); rect unavailable = cannot
+    -- know (keep the bindings — the OnLeave/OnHide wraps or the next driver
+    -- flip handle the genuine exit).
     self.header:SetAttribute("_onstate-mouseoverstate", [[
         if newstate == "false" and mouseoverbutton then
+            local l, b, w, h = mouseoverbutton:GetRect()
+            local rectKnown = l and w and h and w > 0 and h > 0
             local underMouse = mouseoverbutton:IsUnderMouse()
             local x, y = mouseoverbutton:GetMousePosition()
             local inBounds = x and y and x >= 0 and x <= 1 and y >= 0 and y <= 1
 
-            -- Store diagnostics from both checks
+            -- Store diagnostics from all checks
             mouseoverbutton:SetAttribute("dfStateDriverCount", (mouseoverbutton:GetAttribute("dfStateDriverCount") or 0) + 1)
             mouseoverbutton:SetAttribute("dfStateDriverUnderMouse", tostring(underMouse))
+            mouseoverbutton:SetAttribute("dfStateDriverRectKnown", tostring(rectKnown))
             mouseoverbutton:SetAttribute("dfSDMouseX", x)
             mouseoverbutton:SetAttribute("dfSDMouseY", y)
 
-            -- Only clear bindings if BOTH checks agree the cursor is off the frame
-            if not underMouse and not inBounds then
+            -- Clear only when the rect is measurable and both cursor checks
+            -- agree the cursor is off the frame. Hover binds are owned by the
+            -- header (self here), so the binding wipe never touches the frame
+            -- handle — it only writes diagnostics to it.
+            if rectKnown and not underMouse and not inBounds then
                 mouseoverbutton:SetAttribute("dfClearedBy", "statedriver")
-                mouseoverbutton:ClearBindings()
+                self:ClearBindings()
                 mouseoverbutton:SetAttribute("dfBindingsActive", nil)
                 mouseoverbutton:SetAttribute("dfIsSecureMouseover", nil)
                 mouseoverbutton = nil
+                mouseovername = nil
             end
         end
     ]])
@@ -715,6 +732,25 @@ end
 -- CLICKCASTFRAMES GLOBAL TABLE
 -- ============================================================
 
+-- A ClickCastFrames entry is only click-castable if it is an actual unit
+-- frame: a Button/Frame carrying a "unit" attribute. Registration rewrites the
+-- frame's click attributes to DF's macro/target actions, which BREAKS any
+-- non-unit secure button that lands in the global table — a toy/action button
+-- has no unit and can't receive unit-targeted casts anyway (bug #988,
+-- ToyPicker's button had its type1 replaced). Frames whose unit is assigned
+-- late (secure header children) are picked up by the next RegisterAllFrames
+-- sweep once the attribute exists.
+local function clickCastFrameEligible(frame)
+    if type(frame) ~= "table" or not frame.GetObjectType or not frame.GetAttribute then
+        return false
+    end
+    local objType = frame:GetObjectType()
+    if objType ~= "Button" and objType ~= "Frame" then return false end
+    local unit = frame:GetAttribute("unit")
+    if issecretvalue(unit) then return false end
+    return unit ~= nil
+end
+
 function CC:SetupClickCastFramesGlobal()
     -- If our click casting is disabled, DON'T set up our metatable
     -- This allows Clique/Clicked to set up their own metatable and work normally
@@ -748,7 +784,7 @@ function CC:SetupClickCastFramesGlobal()
             if CC.db and CC.db.enabled then
                 if enabled == nil or enabled == false then
                     CC:UnregisterFrame(frame)
-                else
+                elseif clickCastFrameEligible(frame) then
                     CC:RegisterFrame(frame)
                 end
             end
@@ -836,7 +872,7 @@ function CC:ScanForThirdPartyFrames()
     -- Also scan ClickCastFrames in case something was added via rawset
     if ClickCastFrames then
         for frame, enabled in pairs(ClickCastFrames) do
-            if enabled and type(frame) == "table" and not self.registeredFrames[frame] then
+            if enabled and not self.registeredFrames[frame] and clickCastFrameEligible(frame) then
                 self:RegisterFrame(frame)
                 registered = registered + 1
             end
@@ -1196,14 +1232,18 @@ function CC:GetVirtualButtonName(binding)
         if buttonNum then
             key = "mouse" .. buttonNum
         else
-            key = binding.button:lower()
+            key = CC:EncodeKeyToken(binding.button)
         end
     elseif binding.bindType == "scroll" then
         key = binding.key == "SCROLLUP" and "scrollup" or "scrolldown"
     else
         -- Keyboard binding - prefix with "key" to avoid conflict with mouse button numbers
-        -- e.g., key "5" becomes "key5", key "Q" becomes "keyq"
-        key = "key" .. (binding.key or ""):lower()
+        -- e.g., key "5" becomes "key5", key "Q" becomes "keyq". EncodeKeyToken
+        -- matches the old :lower() byte-for-byte on alphanumeric keys;
+        -- international (æ, ø, å, ...) and punctuation keys get an ASCII-safe
+        -- encoding so their raw bytes never enter the virtual button /
+        -- attribute names (bug #977).
+        key = "key" .. CC:EncodeKeyToken(binding.key)
     end
     table.insert(parts, key)
     
@@ -1384,7 +1424,17 @@ function CC:SetupSecureHandlers(frame)
     
     if self.header and self.header.WrapScript then
         -- WrapScript OnEnter: Set up bindings
-        -- Also clears previous frame's bindings to avoid stacking
+        --
+        -- HANDLE-SAFETY INVARIANT: this snippet must never call a method on
+        -- any frame handle other than `self` (which is always fresh — the
+        -- frame the mouse just entered) or `owner` (the header, which lives
+        -- for the whole session). The previous design called
+        -- mouseoverbutton:ClearBindings() here to clean up the prior frame's
+        -- bindings; if that shared handle ever went stale, the call errored
+        -- and aborted EVERY frame's OnEnter at that step, killing keyboard
+        -- hover binds addon-wide until /reload. All hover binds are now owned
+        -- by the header, so the cross-frame cleanup is a single
+        -- owner:ClearBindings() that cannot dangle.
         local onEnterSnippet = [[
             -- Phase 0: Reset tracking for this enter cycle
             -- dfBindingsActive is cleared FIRST so a stale true from the previous
@@ -1393,6 +1443,7 @@ function CC:SetupSecureHandlers(frame)
             self:SetAttribute("dfClearedBy", nil)
             self:SetAttribute("dfStateDriverCount", nil)
             self:SetAttribute("dfStateDriverUnderMouse", nil)
+            self:SetAttribute("dfStateDriverRectKnown", nil)
             self:SetAttribute("dfSDMouseX", nil)
             self:SetAttribute("dfSDMouseY", nil)
             self:SetAttribute("dfEnterPhase", 0)
@@ -1402,32 +1453,32 @@ function CC:SetupSecureHandlers(frame)
             self:SetAttribute("dfWrapEnterCount", wrapCount)
             self:SetAttribute("dfEnterPhase", 1)
 
-            -- Phase 2: store what mouseoverbutton was before we change it
-            if mouseoverbutton then
-                self:SetAttribute("dfSecurePrevMouseover", mouseoverbutton:GetAttribute("dfFrameName") or "unknown")
-            else
-                self:SetAttribute("dfSecurePrevMouseover", "nil")
-            end
+            -- Phase 2: store what was hovered before us (string mirror, so no
+            -- method call on the possibly-stale previous handle)
+            self:SetAttribute("dfSecurePrevMouseover", mouseovername or "nil")
             self:SetAttribute("dfEnterPhase", 2)
 
-            -- Phase 3: Clear bindings from previous button if any
-            if mouseoverbutton and mouseoverbutton ~= self then
-                mouseoverbutton:ClearBindings()
-                mouseoverbutton:SetAttribute("dfBindingsActive", nil)
-                mouseoverbutton:SetAttribute("dfIsSecureMouseover", nil)
-            end
+            -- Phase 3: Wipe ALL hover binds owner-side. This covers the
+            -- previous frame's binds without touching its handle AT ALL — not
+            -- even SetAttribute, which would equally abort on a stale handle.
+            -- (The previous frame's dfBindingsActive/dfIsSecureMouseover are
+            -- reset by its own next OnEnter Phase 0; its OnLeave normally
+            -- already cleared them.)
+            owner:ClearBindings()
             self:SetAttribute("dfEnterPhase", 3)
 
             -- Phase 4: Set mouseoverbutton
             mouseoverbutton = self
+            mouseovername = self:GetName() or "unnamed"
             self:SetAttribute("dfIsSecureMouseover", true)
             self:SetAttribute("dfEnterPhase", 4)
 
-            -- Phase 5: Clear our own bindings first then re-apply
+            -- Phase 5: Clear any legacy frame-owned bindings (self is always
+            -- a fresh handle here, so this cannot dangle)
             self:ClearBindings()
             self:SetAttribute("dfEnterPhase", 5)
 
-            -- Phase 6: Run the binding snippet
+            -- Phase 6: Run the binding snippet (binds owner-owned, targeting self)
             local snippet = self:GetAttribute("dfBindingSnippet")
             if snippet and snippet ~= "" then
                 self:Run(snippet)
@@ -1444,7 +1495,7 @@ function CC:SetupSecureHandlers(frame)
                 self:SetAttribute("dfPostCheck", "ok")
             elseif mouseoverbutton then
                 -- mouseoverbutton changed to a DIFFERENT frame during OnEnter
-                self:SetAttribute("dfPostCheck", mouseoverbutton:GetAttribute("dfFrameName") or "other")
+                self:SetAttribute("dfPostCheck", mouseovername or "other")
             else
                 -- mouseoverbutton is nil — something wiped it during OnEnter
                 self:SetAttribute("dfPostCheck", "nil")
@@ -1460,21 +1511,19 @@ function CC:SetupSecureHandlers(frame)
             local leaveCount = (self:GetAttribute("dfWrapLeaveCount") or 0) + 1
             self:SetAttribute("dfWrapLeaveCount", leaveCount)
 
-            -- Debug: store who mouseoverbutton actually points to when leave fires
-            if mouseoverbutton then
-                self:SetAttribute("dfMouseoverOnLeave", mouseoverbutton:GetAttribute("dfFrameName") or "unknown")
-            else
-                self:SetAttribute("dfMouseoverOnLeave", "nil")
-            end
+            -- Debug: store who mouseoverbutton points to when leave fires
+            -- (string mirror — never a method call on the shared handle)
+            self:SetAttribute("dfMouseoverOnLeave", mouseovername or "nil")
             -- Store whether the mouseoverbutton==self check will pass
             self:SetAttribute("dfLeaveCheckPassed", mouseoverbutton == self)
 
             if mouseoverbutton == self then
                 self:SetAttribute("dfClearedBy", "onleave")
-                self:ClearBindings()
+                owner:ClearBindings()
                 self:SetAttribute("dfBindingsActive", nil)
                 self:SetAttribute("dfIsSecureMouseover", nil)
                 mouseoverbutton = nil
+                mouseovername = nil
             end
         ]]
         
@@ -1486,10 +1535,11 @@ function CC:SetupSecureHandlers(frame)
         local onHideSnippet = [[
             if mouseoverbutton == self then
                 self:SetAttribute("dfClearedBy", "onhide")
-                self:ClearBindings()
+                owner:ClearBindings()
                 self:SetAttribute("dfBindingsActive", nil)
                 self:SetAttribute("dfIsSecureMouseover", nil)
                 mouseoverbutton = nil
+                mouseovername = nil
             end
         ]]
 
@@ -1655,12 +1705,13 @@ function CC:SetupSecureHandlers(frame)
             local clearedBy = self:GetAttribute("dfClearedBy") or "nobody"
             local stateDriverCount = self:GetAttribute("dfStateDriverCount") or 0
             local stateDriverUnderMouse = self:GetAttribute("dfStateDriverUnderMouse")
+            local stateDriverRectKnown = self:GetAttribute("dfStateDriverRectKnown")
             local sdMouseX = self:GetAttribute("dfSDMouseX")
             local sdMouseY = self:GetAttribute("dfSDMouseY")
             DF:DebugError("CLICK", "BINDINGS STILL ACTIVE after OnLeave %s! wrapLeave=%s mouseoverbutton=%s checkPassed=%s isSecureMO=%s postCheck=%s",
                 frameName, tostring(wrapLeaveFired), mouseoverOnLeave, tostring(leaveCheckPassed), tostring(isSecureMouseover), postCheck)
-            DF:DebugError("CLICK", "  clearedBy=%s stateDriverFired=%d underMouse=%s mousePos=%s,%s",
-                clearedBy, stateDriverCount, tostring(stateDriverUnderMouse), tostring(sdMouseX), tostring(sdMouseY))
+            DF:DebugError("CLICK", "  clearedBy=%s stateDriverFired=%d underMouse=%s rectKnown=%s mousePos=%s,%s",
+                clearedBy, stateDriverCount, tostring(stateDriverUnderMouse), tostring(stateDriverRectKnown), tostring(sdMouseX), tostring(sdMouseY))
         end
     end)
 
@@ -1761,9 +1812,14 @@ function CC:UpdateFrameBindingAttributes(frame)
                             bindType == "scroll" and (binding.key == "SCROLLUP" and "MOUSEWHEELUP" or "MOUSEWHEELDOWN") or binding.key)
                     end
                     
-                    -- Build SetBindingClick call - FRAME owns bindings, targets SELF
+                    -- Build SetBindingClick call — the HEADER (owner) owns the
+                    -- binding, the click targets the hovered frame (self at
+                    -- snippet run time). Header ownership means every clear is
+                    -- an owner-side wipe that can never hit a stale frame
+                    -- handle. The snippet runs via self:Run() in the OnEnter
+                    -- wrap, so self = the frame; owner = the header env var.
                     table.insert(snippetLines, string.format(
-                        [[self:SetBindingClick(true, %q, self, %q)]],
+                        [[owner:SetBindingClick(true, %q, self, %q)]],
                         bindKey, virtualBtn
                     ))
                 end
@@ -1883,18 +1939,23 @@ function CC:RunBindingRepair(reason, force)
 
     DF:DebugWarn("CLICK", "Running binding repair (%s)", tostring(reason))
 
-    -- 1. Reset restricted-env hover tracking. A stale mouseoverbutton
-    --    reference aborts every OnEnter WrapScript at the cross-frame
-    --    cleanup step, killing keyboard binds addon-wide until /reload.
+    -- 1. Reset restricted-env hover tracking (handle + string mirror).
+    --    OnEnter no longer method-calls the shared handle, but the
+    --    mouseoverstate driver still reads geometry through it, so a stale
+    --    reference can still waste driver runs until something resets it.
     if self.header and self.header.Execute then
         pcall(function()
-            self.header:Execute([[ mouseoverbutton = nil ]])
+            self.header:Execute([[ mouseoverbutton = nil mouseovername = nil ]])
         end)
     end
 
     -- 2. Clear stray override bindings + hover state. After the env reset
     --    the OnLeave wrap can no longer clear these (mouseoverbutton ~= self),
     --    so clear them here or keys would stay stolen from the action bars.
+    --    Hover binds are owned by the HEADER now, so that is the wipe that
+    --    matters; the per-frame wipe stays to cover any legacy frame-owned
+    --    override from an older code path.
+    pcall(ClearOverrideBindings, self.header)
     local function scrub(frame)
         if frame.GetAttribute and frame:GetAttribute("dfBindingsActive") then
             pcall(ClearOverrideBindings, frame)
@@ -2017,10 +2078,14 @@ function CC:RegisterAllFrames()
         end
     end
     
-    -- Also check ClickCastFrames global (for third-party addon support)
+    -- Also check ClickCastFrames global (for third-party addon support).
+    -- NOTE: the old condition here was `enabled and A or B` — precedence made
+    -- it (enabled and Button) or Frame, so entries an addon explicitly
+    -- DISABLED (ClickCastFrames[f] = false, the documented unregister method)
+    -- were re-registered on every sweep if their object type was "Frame".
     if ClickCastFrames then
         for frame, enabled in pairs(ClickCastFrames) do
-            if enabled and frame:GetObjectType() == "Button" or frame:GetObjectType() == "Frame" then
+            if enabled and clickCastFrameEligible(frame) then
                 self:RegisterFrame(frame)
             end
         end
