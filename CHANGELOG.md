@@ -1,6 +1,6 @@
 # DandersFrames Changelog
 
-## [Unreleased]
+## [4.7.5]
 
 ### Bug Fixes
 
