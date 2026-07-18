@@ -1213,14 +1213,18 @@ function CC:GetVirtualButtonName(binding)
         if buttonNum then
             key = "mouse" .. buttonNum
         else
-            key = binding.button:lower()
+            key = CC:EncodeKeyToken(binding.button)
         end
     elseif binding.bindType == "scroll" then
         key = binding.key == "SCROLLUP" and "scrollup" or "scrolldown"
     else
         -- Keyboard binding - prefix with "key" to avoid conflict with mouse button numbers
-        -- e.g., key "5" becomes "key5", key "Q" becomes "keyq"
-        key = "key" .. (binding.key or ""):lower()
+        -- e.g., key "5" becomes "key5", key "Q" becomes "keyq". EncodeKeyToken
+        -- matches the old :lower() byte-for-byte on alphanumeric keys;
+        -- international (æ, ø, å, ...) and punctuation keys get an ASCII-safe
+        -- encoding so their raw bytes never enter the virtual button /
+        -- attribute names (bug #977).
+        key = "key" .. CC:EncodeKeyToken(binding.key)
     end
     table.insert(parts, key)
     
