@@ -358,18 +358,27 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     countText:SetPoint("LEFT", titleText, "RIGHT", 10, 0)
     countText:SetTextColor(0.5, 0.5, 0.5)
 
-    -- ========== RESET TO STOCK (header row 1) ==========
-    -- Only shown while the selected preset has per-profile overrides. Flows
-    -- after the counts, so it can no longer collide with the search box at
-    -- narrow GUI widths (search lives on its own row below).
-    local resetBtn = GUI:CreateButton(headerPanel, L["Reset to stock"], 110, 20, function()
+    -- ========== RESET TO DEFAULT (header row 1) ==========
+    -- Red danger tone (icon + label), matching the Reset Page button. Only
+    -- shown while the selected preset has per-profile overrides. Flows after
+    -- the counts, so it can't collide with the search box at narrow GUI widths
+    -- (search lives on its own row below).
+    local resetBtn = CreateFrame("Button", nil, headerPanel, "BackdropTemplate")
+    resetBtn:SetSize(115, 20)
+    GUI:StyleButton(resetBtn, {
+        tone = "danger",
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\refresh", size = 14 },
+        text = L["Reset to Default"],
+    })
+    resetBtn:SetWidth(math.ceil(resetBtn.Text:GetStringWidth()) + 32)
+    resetBtn:SetPoint("LEFT", countText, "RIGHT", 12, 0)
+    resetBtn:Hide()
+    resetBtn:SetScript("OnClick", function()
         if selKind ~= "preset" or not selKey then return end
         R:ResetPreset(selKey)
         DirectFilterChangedProxy()
         RefreshAll()
     end)
-    resetBtn:SetPoint("LEFT", countText, "RIGHT", 12, 0)
-    resetBtn:Hide()
 
     -- Row 2: the Add-from-Database picker button is right-anchored; the
     -- search box stretches between the panel's left edge and the button, so
@@ -686,12 +695,13 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         row.count:SetJustifyH("RIGHT")
         row.count:SetTextColor(0.5, 0.5, 0.5)
 
-        -- Yellow "modified" dot (preset has per-profile overrides)
-        row.dot = row:CreateTexture(nil, "OVERLAY")
-        row.dot:SetSize(6, 6)
-        row.dot:SetPoint("RIGHT", row.count, "LEFT", -5, 0)
-        row.dot:SetTexture("Interface\\Buttons\\WHITE8x8")
-        row.dot:SetVertexColor(1, 0.82, 0, 1)
+        -- "Modified" override marker (preset has per-profile enable/disable
+        -- overrides). Shared filled-dot marker used for overrides addon-wide;
+        -- it propagates clicks so it doesn't swallow the row's select handler.
+        row.dot = GUI:CreateOverrideMarker(row, 8)
+        row.dot:SetPoint("RIGHT", row.count, "LEFT", -3, 0)
+        row.dot.tooltipText = L["Override active"]
+        row.dot.tooltipSubText = L["This preset has been changed from its defaults."]
 
         row.name = row:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
         row.name:SetPoint("LEFT", 10, 0)

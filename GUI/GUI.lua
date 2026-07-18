@@ -2760,71 +2760,85 @@ SlashCmdList["DFOVERRIDEDEBUG"] = function()
     end
 end
 
+-- ============================================================
+-- SHARED OVERRIDE CONTROLS
+-- One "override active" marker (a coloured dot) + one "reset to global" button
+-- (red, icon-only, danger tone — reads like the Reset Page button), so every
+-- override control across the addon speaks one visual language. Callers create
+-- them, position the returned frames, and toggle Show/Hide.
+-- ============================================================
+-- Single source of truth for the override-marker colour.
+GUI.OVERRIDE_MARKER_COLOR = { 1, 0.8, 0.2 }
+
+-- A coloured dot marking "this setting is overridden". Returns a hidden Button
+-- so the caller can set .tooltipText / .tooltipSubText for a hover tooltip.
+-- `size` = dot diameter in px (default 12); the hit frame is a touch larger.
+function GUI:CreateOverrideMarker(parent, size)
+    size = size or 12
+    local c = GUI.OVERRIDE_MARKER_COLOR
+    local btn = CreateFrame("Button", nil, parent)
+    btn:SetSize(size + 6, size + 6)
+    -- Only ever a hover-tooltip target; let clicks fall through so a marker
+    -- placed on a clickable parent (e.g. a nav tab) doesn't eat its clicks.
+    if btn.SetPropagateMouseClicks then btn:SetPropagateMouseClicks(true) end
+    local icon = btn:CreateTexture(nil, "OVERLAY")
+    icon:SetPoint("CENTER")
+    icon:SetSize(size, size)
+    icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\dot")
+    icon:SetVertexColor(c[1], c[2], c[3])
+    btn.icon = icon
+    btn:SetScript("OnEnter", function(s)
+        if s.tooltipText then
+            GUI:ShowTooltip(s, { title = s.tooltipText, lines = s.tooltipSubText and { s.tooltipSubText } or nil })
+        end
+    end)
+    btn:SetScript("OnLeave", function() GUI:HideTooltip() end)
+    btn:Hide()
+    return btn
+end
+
+-- A "reset to global" button — red, icon-only, danger tone (matches the Reset
+-- Page button). Returns a hidden Button. opts: { size = 18, tooltip = title,
+-- tooltipDesc = line, onClick = fn }.
+function GUI:CreateOverrideResetButton(parent, opts)
+    opts = opts or {}
+    local size = opts.size or 18
+    local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
+    GUI:StyleButton(btn, {
+        width = size, height = size,
+        tone = "danger",
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\refresh", size = size - 6 },
+    })
+    btn:Hide()
+    -- StyleButton owns OnEnter (hover wash); hook the tooltip on top.
+    btn:HookScript("OnEnter", function(self)
+        if opts.tooltip then
+            GUI:ShowTooltip(self, { title = opts.tooltip, lines = opts.tooltipDesc and { opts.tooltipDesc } or nil })
+        end
+    end)
+    btn:HookScript("OnLeave", function() GUI:HideTooltip() end)
+    if opts.onClick then btn:SetScript("OnClick", opts.onClick) end
+    return btn
+end
+
 local function AddOverrideIndicators(container, lbl, dbKey, onReset, verticalOffset, optionsMap, dbTable)
     -- Skip for proxy tables (e.g. Aura Designer) that don't support per-key override tracking
     if dbTable and rawget(dbTable, "_skipOverrideIndicators") then return end
     verticalOffset = verticalOffset or 0
     container.overrideOptionsMap = optionsMap
     
-    -- Reset button (shown when overridden) - positioned at top right
-    local resetBtn = CreateFrame("Button", nil, container, "BackdropTemplate")
-    resetBtn:SetSize(18, 18)
+    -- Reset button (red, icon-only) at top-right; the override marker (dot)
+    -- sits to its left. Both are shared helpers (GUI:CreateOverride*).
+    local resetBtn = GUI:CreateOverrideResetButton(container, {
+        tooltip = L["Reset to Global"],
+        tooltipDesc = L["Reset this setting to its global value."],
+        onClick = function() if onReset then onReset() end end,
+    })
     resetBtn:SetPoint("TOPRIGHT", container, "TOPRIGHT", 0, verticalOffset)
-    resetBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    resetBtn:SetBackdropColor(0.1, 0.1, 0.1, 0.8)
-    resetBtn:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
-    resetBtn:Hide()
-    
-    local resetIcon = resetBtn:CreateTexture(nil, "OVERLAY")
-    resetIcon:SetPoint("CENTER")
-    resetIcon:SetSize(12, 12)
-    resetIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\refresh")
-    resetIcon:SetVertexColor(0.6, 0.6, 0.6)
-    
-    resetBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropBorderColor(1, 0.8, 0.2, 1)
-        resetIcon:SetVertexColor(1, 0.8, 0.2)
-        GUI:ShowTooltip(self, { title = L["Reset to Global"] })
-    end)
-    resetBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
-        resetIcon:SetVertexColor(0.6, 0.6, 0.6)
-        GameTooltip:Hide()
-    end)
-    resetBtn:SetScript("OnClick", function()
-        if onReset then
-            onReset()
-        end
-    end)
     container.overrideResetBtn = resetBtn
-    
-    -- Override icon (shown when overridden) - positioned LEFT of reset button, yellow/gold color
-    local starBtn = CreateFrame("Button", nil, container, "BackdropTemplate")
-    starBtn:SetSize(18, 18)
+
+    local starBtn = GUI:CreateOverrideMarker(container)
     starBtn:SetPoint("RIGHT", resetBtn, "LEFT", -2, 0)
-    starBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    starBtn:SetBackdropColor(0, 0, 0, 0)
-    starBtn:SetBackdropBorderColor(0, 0, 0, 0)
-    starBtn:Hide()
-    local starIcon = starBtn:CreateTexture(nil, "OVERLAY")
-    starIcon:SetSize(12, 12)
-    starIcon:SetPoint("CENTER")
-    starIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\star")
-    starIcon:SetVertexColor(1, 0.8, 0.2)
-    starBtn:SetScript("OnEnter", function(s)
-        if s.tooltipText then
-            GUI:ShowTooltip(s, { title = s.tooltipText, lines = s.tooltipSubText and { s.tooltipSubText } or nil })
-        end
-    end)
-    starBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
     container.overrideStar = starBtn
 
     -- Global value text (shown when in edit mode) - positioned inline after label
@@ -2883,7 +2897,7 @@ local function AddOverrideIndicators(container, lbl, dbKey, onReset, verticalOff
 
         -- Runtime override mode: show star + global value, but no reset button
         if isRuntimeOverridden and not isEditing then
-            self.overrideStar.tooltipText = L["Overridden by Auto Layout"]
+            self.overrideStar.tooltipText = L["Override active"]
             self.overrideStar.tooltipSubText = L["This setting is being overridden by the active auto layout profile. To change it, edit the profile in the Auto Layouts tab."]
             self.overrideStar:Show()
             self.overrideResetBtn:Hide()  -- Can't reset runtime overrides from controls
@@ -2933,7 +2947,7 @@ local function AddOverrideIndicators(container, lbl, dbKey, onReset, verticalOff
 
         -- Show/hide star and reset button
         if isOverridden then
-            self.overrideStar.tooltipText = L["Overridden in this layout"]
+            self.overrideStar.tooltipText = L["Override active"]
             self.overrideStar.tooltipSubText = L["This setting differs from the global profile value. Click the reset button to revert."]
             self.overrideStar:Show()
             self.overrideResetBtn:Show()
@@ -2997,64 +3011,18 @@ end
 -- Override indicators for order list controls (drag lists)
 -- These don't have traditional labels, so we use a compact star + reset + "Modified" badge
 local function AddOrderListOverrideIndicators(container, dbKey, onReset)
-    -- Reset button (shown when overridden) - positioned at top right
-    local resetBtn = CreateFrame("Button", nil, container, "BackdropTemplate")
-    resetBtn:SetSize(18, 18)
+    -- Reset button (red, icon-only) + override marker (dot) — shared helpers.
+    local resetBtn = GUI:CreateOverrideResetButton(container, {
+        tooltip = L["Reset to Global Order"],
+        onClick = function() if onReset then onReset() end end,
+    })
     resetBtn:SetPoint("TOPRIGHT", container, "TOPRIGHT", 0, 14)
-    resetBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    resetBtn:SetBackdropColor(0.1, 0.1, 0.1, 0.8)
-    resetBtn:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
-    resetBtn:Hide()
-    
-    local resetIcon = resetBtn:CreateTexture(nil, "OVERLAY")
-    resetIcon:SetPoint("CENTER")
-    resetIcon:SetSize(12, 12)
-    resetIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\refresh")
-    resetIcon:SetVertexColor(0.6, 0.6, 0.6)
-    
-    resetBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropBorderColor(1, 0.8, 0.2, 1)
-        resetIcon:SetVertexColor(1, 0.8, 0.2)
-        GUI:ShowTooltip(self, { title = L["Reset to Global Order"] })
-    end)
-    resetBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
-        resetIcon:SetVertexColor(0.6, 0.6, 0.6)
-        GameTooltip:Hide()
-    end)
-    resetBtn:SetScript("OnClick", function()
-        if onReset then onReset() end
-    end)
     container.overrideResetBtn = resetBtn
-    
-    -- Star icon to the left of reset button (Button for tooltip support)
-    local starBtn = CreateFrame("Button", nil, container, "BackdropTemplate")
-    starBtn:SetSize(18, 18)
+
+    local starBtn = GUI:CreateOverrideMarker(container)
     starBtn:SetPoint("RIGHT", resetBtn, "LEFT", -2, 0)
-    starBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    starBtn:SetBackdropColor(0, 0, 0, 0)
-    starBtn:SetBackdropBorderColor(0, 0, 0, 0)
-    starBtn:Hide()
-    local starIcon = starBtn:CreateTexture(nil, "OVERLAY")
-    starIcon:SetSize(12, 12)
-    starIcon:SetPoint("CENTER")
-    starIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\star")
-    starIcon:SetVertexColor(1, 0.8, 0.2)
-    starBtn:SetScript("OnEnter", function(s)
-        if s.tooltipText then
-            GUI:ShowTooltip(s, { title = s.tooltipText, lines = s.tooltipSubText and { s.tooltipSubText } or nil })
-        end
-    end)
-    starBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
     container.overrideStar = starBtn
+    local starIcon = starBtn.icon  -- the "Modified" badge below anchors to the dot
 
     -- "Modified" text to the left of star
     local modifiedText = container:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
@@ -3098,7 +3066,7 @@ local function AddOrderListOverrideIndicators(container, dbKey, onReset)
         local isOverridden = AutoProfilesUI:IsSettingOverridden(dbKey)
         
         if isOverridden then
-            self.overrideStar.tooltipText = L["Overridden in this layout"]
+            self.overrideStar.tooltipText = L["Override active"]
             self.overrideStar.tooltipSubText = L["This setting differs from the global profile value. Click the reset button to revert."]
             self.overrideStar:Show()
             self.overrideResetBtn:Show()
@@ -9143,13 +9111,13 @@ function DF:CreateGUI()
     btnLock:SetWidth(math.ceil(btnLock.Text:GetStringWidth()) + 38)
     GUI.LockButton = btnLock
     
-    -- Position override star (shown next to lock button when position is overridden)
-    local positionOverrideStar = frame:CreateTexture(nil, "OVERLAY")
-    positionOverrideStar:SetSize(14, 14)
+    -- Position override marker (shown next to the lock button when the frame
+    -- position is overridden in the layout being edited). Shared marker helper →
+    -- dot + hover tooltip, one colour with every other override marker.
+    local positionOverrideStar = GUI:CreateOverrideMarker(frame, 14)
     positionOverrideStar:SetPoint("LEFT", btnLock, "RIGHT", 4, 0)
-    positionOverrideStar:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\star")
-    positionOverrideStar:SetVertexColor(1, 0.8, 0.2)  -- Yellow/gold
-    positionOverrideStar:Hide()
+    positionOverrideStar.tooltipText = L["Override active"]
+    positionOverrideStar.tooltipSubText = L["The frame position is overridden in this layout."]
     GUI.PositionOverrideStar = positionOverrideStar
     
     -- Function to update position override indicator

@@ -134,6 +134,8 @@ DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally chan
 * (Aura Designer) **New: Debuffs tab.** Give debuff categories their own icon rows on the frame — for example, crowd control in its own spot with its own icon size. Tick a group's categories, set its layout, and those categories leave the main debuff bar automatically. Each group has its own dispellable mode and "Hide Long Debuffs" option.
 
 * (Aura Designer) My Buffs now reacts only to your own buffs — another player's cast of the same spell no longer lights your indicators, effects, or groups. Use the Other Buffs tab to track a buff from anyone.
+* (Auras) The Aura Filters page now opens with a short explainer: you have full control over which buffs show — enable or disable any spell in the presets, or build your own custom filter — while debuffs can only be filtered by category (boss, dispellable, crowd control, and so on) because of a Blizzard limitation. The old Aura Filter Setup wizard has been removed; use the Reset Page button to return filters to their defaults.
+* (Interface) Overrides now read the same way across the whole addon: auto layouts and the Filter Designer use one coloured dot — with a hover tooltip saying what's overridden — in place of the old mix of stars and boxes, and every reset-to-default control shares one red icon style.
 
 ### Known Issues (12.1 alpha)
 
