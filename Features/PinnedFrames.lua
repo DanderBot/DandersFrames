@@ -2604,9 +2604,25 @@ end
 -- Runs at the end of Initialize (login + every rebuild) and on profile switch
 -- (FullProfileRefresh). Skips live-frame writes during test mode (live frames
 -- are hidden then; ExitTestMode re-asserts state on the way out). Combat-safe:
--- only non-secure frames are touched in lockdown; the secure header's Hide()
--- is deferred (it renders nothing without members anyway — the visible box is
--- always the non-secure mover/container).
+-- movers/labels are genuinely non-secure and hide immediately, but the
+-- CONTAINERS are implicitly protected (the secure header is a child), so —
+-- like SetEnabled's pendingVisibilityUpdate — container and header hides are
+-- deferred to PLAYER_REGEN_ENABLED (pendingPrune re-runs the whole prune).
+local PRUNE_MODE_SUFFIXES = { "Party", "Raid" }
+
+-- Hide a frame from the container tree. The secure header is parented to the
+-- container, which makes the container implicitly protected — Hide() from
+-- insecure code in lockdown is a blocked action. In combat: leave it, flag
+-- the re-run at regen instead.
+local function hideContainerSafe(self, f)
+    if not f then return end
+    if InCombatLockdown() then
+        if f:IsShown() then self.pendingPrune = true end
+        return
+    end
+    f:Hide()
+end
+
 function PinnedFrames:PruneOrphanedSets()
     if self.testModeActive then return end
     local inCombat = InCombatLockdown()
@@ -2615,10 +2631,9 @@ function PinnedFrames:PruneOrphanedSets()
     for i = 1, PinnedFrames.MAX_SETS do
         -- 1) Inactive-mode containers are never legitimate (runtime frames only
         --    exist for the active mode) — hide by name, tracked or not.
-        for _, suffix in ipairs({ "Party", "Raid" }) do
+        for _, suffix in ipairs(PRUNE_MODE_SUFFIXES) do
             if suffix ~= activeSuffix then
-                local c = _G["DandersPinned" .. i .. suffix .. "Container"]
-                if c then c:Hide() end
+                hideContainerSafe(self, _G["DandersPinned" .. i .. suffix .. "Container"])
             end
         end
 
@@ -2629,28 +2644,38 @@ function PinnedFrames:PruneOrphanedSets()
 
         if not set then
             -- 2) No set at this index in the current profile/mode: hide + untrack
-            --    everything. Header Hide() is combat-protected; defer if locked.
-            if self.headers[i] and not inCombat then
-                self.headers[i]:Hide()
-                self.headers[i] = nil
+            --    everything. Header/container hides are combat-protected; in
+            --    lockdown the tracking is left intact too, so the pendingPrune
+            --    re-run at regen repeats the full teardown.
+            if self.headers[i] then
+                if inCombat then
+                    self.pendingPrune = true
+                else
+                    self.headers[i]:Hide()
+                    self.headers[i] = nil
+                end
             end
             if self.containers[i] then
                 if self.containers[i].mover then self.containers[i].mover:Hide() end
-                self.containers[i]:Hide()
-                self.containers[i] = nil
+                if inCombat then
+                    self.pendingPrune = true
+                else
+                    self.containers[i]:Hide()
+                    self.containers[i] = nil
+                end
             end
             if self.labels[i] then self.labels[i]:Hide() end
-            self.labels[i] = nil
+            if not inCombat then self.labels[i] = nil end
             if mover then mover:Hide() end
             if label then label:Hide() end
-            if activeC then activeC:Hide() end
+            hideContainerSafe(self, activeC)
         else
             -- 3) Set exists: chrome may only show when the set is effectively
             --    visible; the mover additionally requires the global unlock.
             local visible = set.enabled and PinnedSoloAllowed(set)
             if mover and (not visible or not self.moversShown) then mover:Hide() end
             if label and (not visible or not set.showLabel) then label:Hide() end
-            if activeC and not visible then activeC:Hide() end
+            if activeC and not visible then hideContainerSafe(self, activeC) end
         end
     end
 end
@@ -3057,6 +3082,14 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1, ...)
                 PinnedFrames:SetEnabled(setIndex, enabled)
             end
             PinnedFrames.pendingVisibilityUpdate = nil
+        end
+
+        -- Replay a prune whose container/header hides were blocked by combat
+        -- (PruneOrphanedSets defers protected-frame writes; see hideContainerSafe).
+        -- After the SetEnabled replays above, so the re-run sees final state.
+        if PinnedFrames.pendingPrune then
+            PinnedFrames.pendingPrune = nil
+            PinnedFrames:PruneOrphanedSets()
         end
 
         -- Replay layout changes (Direction/spacing/size/anchor) that were attempted
