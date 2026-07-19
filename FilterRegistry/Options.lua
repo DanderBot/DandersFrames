@@ -879,7 +879,8 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
 
         local dim = isPreset and not item.enabled
         row.icon:SetAlpha(dim and 0.4 or 1)
-        row.name:SetAlpha(dim and 0.4 or 1)
+        row.icon:SetDesaturated(dim)
+        row.name:SetAlpha(dim and 0.5 or 1)
         ApplyNameColor(row.name, rec and rec.class, dim)
 
         if isPreset then

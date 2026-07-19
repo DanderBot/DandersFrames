@@ -111,17 +111,17 @@ local function ClassDisplayName(token)
 end
 R.ClassDisplayName = ClassDisplayName
 
--- Class-coloured spell name. Disabled/already-added rows keep their 40%
--- alpha dim ON TOP of the class colour — the colour is scaled (0.61 ≈ the
--- 0.55/0.90 ratio of the neutral dim), never dropped. Records without a
--- valid class token ("ALL", raw ids) keep the neutral colours.
+-- Class-coloured spell name. Disabled / already-added rows keep the TRUE class
+-- colour and read as "faded" purely through the caller's name alpha — never a
+-- hue shift or a scale toward black — so the Shaman blue (etc.) stays itself,
+-- just dimmer and still legible. Only the ICON takes the hard 0.4 dim. Records
+-- without a valid class token ("ALL", raw ids) use the neutral greys.
 local function ApplyNameColor(fs, classToken, dim)
     local cc = classToken and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classToken]
     if cc then
-        local m = dim and 0.61 or 1
-        fs:SetTextColor(cc.r * m, cc.g * m, cc.b * m)
+        fs:SetTextColor(cc.r, cc.g, cc.b)
     elseif dim then
-        fs:SetTextColor(0.55, 0.55, 0.55)
+        fs:SetTextColor(0.62, 0.62, 0.62)
     else
         fs:SetTextColor(0.90, 0.90, 0.90)
     end
@@ -440,8 +440,9 @@ local function BindRow(inst, row, y, entry)
 
     local dim = blocked and true or false
     row.icon:SetAlpha(dim and 0.4 or 1)
+    row.icon:SetDesaturated(dim)
     row.letter:SetAlpha(dim and 0.4 or 1)
-    row.name:SetAlpha(dim and 0.4 or 1)
+    row.name:SetAlpha(dim and 0.5 or 1)
     ApplyNameColor(row.name, rec.class, dim)
     row:SetBackdropColor(0.08, 0.08, 0.08, 0.6) -- clear any lingering hover
 end
