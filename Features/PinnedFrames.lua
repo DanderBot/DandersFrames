@@ -2579,48 +2579,78 @@ function PinnedFrames:Initialize()
         if set then self:SetEnabled(i, set.enabled) end
     end
 
+    -- Enforce the visibility invariant over ALL pinned frames — including
+    -- untracked strays from before this init (profile-switch orphans, frames
+    -- from a previous session's state). Runs on every init so login itself
+    -- cleans a stuck frame no matter how it was stranded.
+    self:PruneOrphanedSets()
+
     DF:Debug("PINNED", "Initialized pinned frames")
 end
 
--- Hide + untrack any pinned frame whose set no longer exists in the current
--- profile/mode. Pinned containers/movers/labels are parented to UIParent under
--- fixed global names and outlive the module's self.containers references, so a
--- set-count drop can strand them: the classic case is switching from a profile
--- with two sets to one with a single set — the index-2 frame stays live but
--- untracked, and every hide path gates on GetSetDB (now nil for that index), so
--- nothing ever hides it (the "stuck orange box" reports). This reaps both the
--- tracked leftovers and any untracked orphan, across BOTH mode suffixes and the
--- suffix-less mover/label, for every index the current profile/mode no longer
--- defines. Combat-safe (Hide + attribute-free).
+-- Enforce the pinned visibility invariant: nothing pinned may be visible unless
+-- the CURRENT profile/mode justifies it. Pinned containers/movers/labels are
+-- parented to UIParent under fixed global names and can outlive the module's
+-- self.containers references (profile switch to a fewer-set profile is the
+-- confirmed case: the extra index's frames stay live but untracked, and every
+-- hide path gates on GetSetDB — so nothing ever hides them; the "stuck orange
+-- box that survives everything" reports). Rather than only reaping known
+-- orphans, this asserts the full invariant by global name so ANY stranded or
+-- wrongly-shown frame is cleaned regardless of how it got that way:
+--   1. inactive-mode containers: never legitimate — always hidden
+--   2. set missing at an index: everything for that index hidden + untracked
+--   3. set disabled / solo-gated: container+label hidden; mover also requires
+--      the global unlock (moversShown)
+-- Runs at the end of Initialize (login + every rebuild) and on profile switch
+-- (FullProfileRefresh). Skips live-frame writes during test mode (live frames
+-- are hidden then; ExitTestMode re-asserts state on the way out). Combat-safe:
+-- only non-secure frames are touched in lockdown; the secure header's Hide()
+-- is deferred (it renders nothing without members anyway — the visible box is
+-- always the non-secure mover/container).
 function PinnedFrames:PruneOrphanedSets()
+    if self.testModeActive then return end
     local inCombat = InCombatLockdown()
+    local activeSuffix = (GetActualMode() == "raid") and "Raid" or "Party"
+
     for i = 1, PinnedFrames.MAX_SETS do
-        if not GetSetDB(i) then
-            -- The header is a SecureGroupHeaderTemplate — its Hide() is protected
-            -- in combat. It renders nothing for an orphan (no members), so the
-            -- visible box is always the non-secure mover/container; defer the
-            -- header hide to the next out-of-combat prune if we're locked.
+        -- 1) Inactive-mode containers are never legitimate (runtime frames only
+        --    exist for the active mode) — hide by name, tracked or not.
+        for _, suffix in ipairs({ "Party", "Raid" }) do
+            if suffix ~= activeSuffix then
+                local c = _G["DandersPinned" .. i .. suffix .. "Container"]
+                if c then c:Hide() end
+            end
+        end
+
+        local set = GetSetDB(i)
+        local mover = _G["DandersPinned" .. i .. "Mover"]
+        local label = _G["DandersPinned" .. i .. "Label"]
+        local activeC = _G["DandersPinned" .. i .. activeSuffix .. "Container"]
+
+        if not set then
+            -- 2) No set at this index in the current profile/mode: hide + untrack
+            --    everything. Header Hide() is combat-protected; defer if locked.
             if self.headers[i] and not inCombat then
                 self.headers[i]:Hide()
                 self.headers[i] = nil
             end
-            -- Non-secure frames (plain UIParent children) — safe to hide anytime.
             if self.containers[i] then
                 if self.containers[i].mover then self.containers[i].mover:Hide() end
                 self.containers[i]:Hide()
                 self.containers[i] = nil
             end
-            if self.labels[i] then self.labels[i]:Hide(); self.labels[i] = nil end
-
-            -- Untracked orphans by global name (mover/label have no mode suffix).
-            local mover = _G["DandersPinned" .. i .. "Mover"]
+            if self.labels[i] then self.labels[i]:Hide() end
+            self.labels[i] = nil
             if mover then mover:Hide() end
-            local label = _G["DandersPinned" .. i .. "Label"]
             if label then label:Hide() end
-            local partyC = _G["DandersPinned" .. i .. "PartyContainer"]
-            if partyC then partyC:Hide() end
-            local raidC = _G["DandersPinned" .. i .. "RaidContainer"]
-            if raidC then raidC:Hide() end
+            if activeC then activeC:Hide() end
+        else
+            -- 3) Set exists: chrome may only show when the set is effectively
+            --    visible; the mover additionally requires the global unlock.
+            local visible = set.enabled and PinnedSoloAllowed(set)
+            if mover and (not visible or not self.moversShown) then mover:Hide() end
+            if label and (not visible or not set.showLabel) then label:Hide() end
+            if activeC and not visible then activeC:Hide() end
         end
     end
 end
@@ -2685,13 +2715,7 @@ function PinnedFrames:Reinitialize()
     end
 
     self.initialized = false
-    self:Initialize()
-
-    -- Belt for stranded frames the tracked teardown above cannot reach: an
-    -- index whose set no longer exists in the current profile/mode, whose
-    -- container/mover was orphaned (e.g. by a profile switch to a
-    -- fewer-set profile) and left untracked. See PruneOrphanedSets.
-    self:PruneOrphanedSets()
+    self:Initialize()  -- ends with PruneOrphanedSets: reaps untracked strays too
 
     -- If Test Mode was active before Reinitialize (e.g. user changed
     -- frame type in the settings panel while test mode was on), re-enter

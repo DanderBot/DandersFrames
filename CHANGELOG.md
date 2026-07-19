@@ -4,7 +4,7 @@
 
 ### Bug Fixes
 
-* (Pinned Frames) Fixed a leftover pinned-frame handle (an empty "drag to move" box, often orange) that could stay stuck on screen and survive reloads. It appeared after switching to a profile with fewer pinned sets than the previous one — the extra set's frame was left behind with no way to hide it. Pinned frames now clean up sets the active profile no longer has. (by Krathe)
+* (Pinned Frames) Fixed a leftover pinned-frame handle (an empty "drag to move" box, often orange) that could stay stuck on screen and survive reloads. The confirmed trigger was switching to a profile with fewer pinned sets than the previous one — the extra set's frame was left behind with no way to hide it. The cleanup now enforces the full rule at every login, profile switch and party/raid change: any pinned frame that the active profile doesn't define, has disabled, or that belongs to the other mode is hidden — so a stuck box is cleaned up no matter how it got stranded. (by Krathe)
 
 ### Improvements
 
