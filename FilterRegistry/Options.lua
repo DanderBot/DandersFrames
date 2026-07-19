@@ -955,6 +955,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
 
     -- ========== REFRESH: RIGHT LIST ==========
     local rawResolveRepaint -- one pending repaint while direct-ID spell data streams in
+    local rawResolveTried = {} -- ids already given their one load-request + repaint
     RefreshRight = function()
         -- Guard: selected custom filter no longer exists (deleted elsewhere)
         if selKind == "custom" and not R:GetCustomFilter(selKey) then
@@ -1022,7 +1023,12 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
                 if ok and type(v) == "string" and v ~= "" then name = v end
                 local okT, t = pcall(C_Spell.GetSpellTexture, id)
                 if okT and type(t) == "number" then icon = t end
-                if not name and C_Spell.RequestLoadSpellData then
+                if not name and C_Spell.RequestLoadSpellData and not rawResolveTried[id] then
+                    -- One load-request + one repaint per id, ever: a genuinely
+                    -- invalid id never resolves, and re-requesting from the
+                    -- repaint's own RefreshRight would loop the 0.8s timer
+                    -- forever (even with the page closed).
+                    rawResolveTried[id] = true
                     pcall(C_Spell.RequestLoadSpellData, id)
                     if not rawResolveRepaint then
                         rawResolveRepaint = true
