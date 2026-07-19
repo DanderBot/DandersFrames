@@ -2683,6 +2683,15 @@ end
 
 local placedIndicators = {}
 
+-- Set by ClearPlacedIndicators, consumed by the page's RefreshStates: tab
+-- switching re-enters the page through GUI RefreshCached -> RefreshStates ONLY
+-- (the builder is cache-skipped), and RefreshStates early-outs when the page
+-- dimensions are unchanged — so a canvas cleared by the OnHide hook stayed
+-- blank on every same-size revisit (the first revisit only worked because the
+-- dims baseline was captured pre-layout). The flag lets the dimension guard
+-- distinguish "nothing changed" from "cleared and awaiting repaint".
+local placedCleared = false
+
 local function ClearPlacedIndicators()
     -- Preview border ANIMATIONS must be stopped explicitly on every frame this
     -- pass hides: the drivers are external (Border.lua's shared UIParent-hosted
@@ -2719,6 +2728,7 @@ local function ClearPlacedIndicators()
         end
         mock.dfAD = nil
     end
+    placedCleared = true
 end
 
 -- ============================================================
@@ -3103,6 +3113,7 @@ end
 
 local function RefreshPlacedIndicators()
     ClearPlacedIndicators()
+    placedCleared = false   -- this pass IS the repaint (after Clear re-armed the flag)
     if not framePreview then return end
 
     local mockFrame = framePreview.mockFrame
@@ -8960,6 +8971,15 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
         -- only fire it on genuine size transitions (window resize / tab
         -- switch / first show).
         if self._lastRefreshStatesH == pageH and self._lastRefreshStatesW == newW then
+            -- Same-size revisit AFTER the OnHide hook cleared the canvas (tab
+            -- away + back re-enters ONLY through RefreshCached -> here; the
+            -- builder is cache-skipped). Repaint the pooled slots without the
+            -- full page rebuild: slot restyling creates no banners, so the
+            -- banner-cascade loop this early-out exists for cannot re-arm.
+            if placedCleared then
+                RefreshPlacedIndicators()
+                RefreshPreviewEffects()
+            end
             return
         end
         self._lastRefreshStatesH = pageH

@@ -996,7 +996,7 @@ function AutoProfilesUI:BuildPage(GUI, pageFrame, db, Add, AddSpace)
     ex1Text:SetText(format(L["%sGlobal: 80%s %s— Setting matches global, no override stored%s"], "|cff4db84d", "|r", "|cff666666", "|r"))
     yOff = yOff - 18
     
-    -- Visual example row 2: Overridden (star + reset)
+    -- Visual example row 2: Overridden (dot + reset)
     local exRow2 = CreateFrame("Frame", nil, infoBody)
     exRow2:SetPoint("TOPLEFT", 24, yOff)
     exRow2:SetSize(460, 16)
@@ -1004,7 +1004,7 @@ function AutoProfilesUI:BuildPage(GUI, pageFrame, db, Add, AddSpace)
     local ex2Star = exRow2:CreateTexture(nil, "OVERLAY")
     ex2Star:SetPoint("LEFT", 0, 0)
     ex2Star:SetSize(12, 12)
-    ex2Star:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\star")
+    ex2Star:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\dot")
     ex2Star:SetVertexColor(1, 0.8, 0.2)
     
     local ex2ResetBg = exRow2:CreateTexture(nil, "ARTWORK")
@@ -1016,7 +1016,7 @@ function AutoProfilesUI:BuildPage(GUI, pageFrame, db, Add, AddSpace)
     ex2Reset:SetPoint("CENTER", ex2ResetBg, "CENTER", 0, 0)
     ex2Reset:SetSize(10, 10)
     ex2Reset:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\refresh")
-    ex2Reset:SetVertexColor(0.6, 0.6, 0.6)
+    ex2Reset:SetVertexColor(0.9, 0.45, 0.45)  -- danger red, matches the live reset button
     
     local ex2Text = exRow2:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     ex2Text:SetPoint("LEFT", ex2ResetBg, "RIGHT", 6, 0)
@@ -2801,11 +2801,11 @@ function AutoProfilesUI:CreateEditingBanner(parent)
     banner:SetFrameLevel(parent:GetFrameLevel() + 50)  -- Ensure banner is above page content
     banner:Hide()
     
-    -- Settings icon
+    -- Edit icon
     local icon = banner:CreateTexture(nil, "OVERLAY")
     icon:SetPoint("LEFT", 12, 0)
     icon:SetSize(20, 20)
-    icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\settings")
+    icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\edit_square")
     icon:SetVertexColor(1, 0.5, 0.2)
     
     -- "Editing:" label
@@ -3014,31 +3014,29 @@ function AutoProfilesUI:SetupEditingBanner()
     self.sidebarHintDismissed = false
 
     -- =============================================
-    -- OVERRIDE STAR INDICATORS ON TABS
-    -- Small orange star on tabs that have overridden settings
+    -- OVERRIDE MARKERS ON NAV TABS / CATEGORIES
+    -- A small dot (shared GUI:CreateOverrideMarker — same size, colour and
+    -- hover tooltip as every other override marker) on tabs/categories that
+    -- carry an override. Clicks fall through to the tab (the marker propagates).
     -- =============================================
     for tabName, tab in pairs(GUI.Tabs) do
         if not tab.overrideStar then
-            local star = tab:CreateTexture(nil, "OVERLAY")
-            star:SetSize(10, 10)
-            star:SetPoint("LEFT", 12, 0)
-            star:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\star")
-            star:SetVertexColor(1, 0.67, 0)
-            star:Hide()
-            tab.overrideStar = star
+            local m = GUI:CreateOverrideMarker(tab, 8)
+            m:SetPoint("LEFT", 12, 0)
+            m.tooltipText = L["Override active"]
+            m.tooltipSubText = L["This page has an overridden setting."]
+            tab.overrideStar = m
         end
     end
 
-    -- Stars on category headers (visible when category is collapsed)
+    -- Markers on category headers (visible when a category is collapsed).
     for catName, cat in pairs(GUI.Categories) do
         if not cat.overrideStar then
-            local star = cat:CreateTexture(nil, "OVERLAY")
-            star:SetSize(8, 8)
-            star:SetPoint("RIGHT", -6, 0)
-            star:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\star")
-            star:SetVertexColor(1, 0.67, 0)
-            star:Hide()
-            cat.overrideStar = star
+            local m = GUI:CreateOverrideMarker(cat, 8)
+            m:SetPoint("RIGHT", -6, 0)
+            m.tooltipText = L["Override active"]
+            m.tooltipSubText = L["A page in this category has an overridden setting."]
+            cat.overrideStar = m
         end
     end
 

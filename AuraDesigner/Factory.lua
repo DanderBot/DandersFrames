@@ -570,12 +570,28 @@ local function subSig(t)
     end
     return tconcat(parts, ",")
 end
+-- Pixel-scale token folded into every cosmetic signature that gates a restyle of
+-- pixel-snapped geometry (border thickness, art insets, quantized layouts). At
+-- login the builds can run BEFORE UIParent's scale settles — the pixel-scale
+-- cache then changes underneath values already baked with the stale one, and
+-- nothing restyled (coSig unchanged) until the user touched any setting
+-- (field-caught: AD icon borders uneven at every reload, perfect after any
+-- toggle). With the cache in the sig, the settle flips every coSig and the next
+-- drive replays exactly what the manual toggle did. Rounded so float noise
+-- can't flap the sigs. Rides into placedCoSig / barCoSig / filterGroupCoSig /
+-- the placed-missing inline sig via placedBorderRawSig, and into the
+-- frame-level border sigs via borderSpecSig.
+local function ppSigToken()
+    local ps = DF.GetPixelScale and DF:GetPixelScale()
+    return ps and tostring(math.floor(ps * 100000 + 0.5)) or "?"
+end
+
 local function borderSpecSig(spec)
     if type(spec) ~= "table" then return "" end
     local keys = {}
     for kk in pairs(spec) do keys[#keys + 1] = kk end
     tsort(keys)
-    local parts = {}
+    local parts = { "pps=" .. ppSigToken() }
     for _, kk in ipairs(keys) do
         local v = spec[kk]
         local tv = type(v)
@@ -709,6 +725,11 @@ local function buildPlacedBorderSpec(frame, indicator, hideIcon, knownSize)
     if not spec.color then spec.color = { r = 0, g = 0, b = 0, a = 0.8 } end
     local fdb = DF:GetFrameDB(frame) or {}
     spec.pixelPerfect = fdb.pixelPerfect
+    -- The placed indicator renders inside a subtree scaled by indicator.scale (row mode:
+    -- the container's SetScale; missing mode: the window's SetScale in placeM) — the pp
+    -- thickness snap must fold that scale (Border spec.renderScale) or it snaps in the
+    -- wrong space and the edges land fractional again.
+    spec.renderScale = tonumber(indicator.scale) or 1
     -- Fed geometry for DF_DASH: the icon/square slot is square at the configured size (floored
     -- at 8, matching buildPlacedLayout), whose live rect is secret on 12.1.
     local sz = knownSize or math.max(8, tonumber(indicator.size) or 24)
@@ -760,7 +781,7 @@ local PLACED_BORDER_COLOR_KEYS = {
 }
 local function placedBorderRawSig(indicator, borderOn)
     if not borderOn then return "" end
-    local parts = {}
+    local parts = { ppSigToken() }
     for _, kk in ipairs(PLACED_BORDER_KEYS) do
         parts[#parts + 1] = tostring(indicator[kk])
     end
@@ -967,6 +988,20 @@ local function resolveDefCBT(adDB)
 end
 Factory.ResolveDefaultColorByTime = resolveDefCBT   -- editor preview passes this into BuildPreviewConfig
 
+-- The art (icon / square fill) insets by the border's RENDERED thickness so the ring frames
+-- it flush. DF.Border:Apply snaps its thickness through Border:SnapThickness (pixel-perfect
+-- fold, incl. the container's render scale); the art inset must go through the SAME function
+-- or the art edge and the border's inner edge drift a sub-pixel apart — visible as a hairline
+-- gap (snap-down) or overlap (snap-up) when pixel-perfect is on. Reads borderSpec.size +
+-- renderScale (the exact values Apply renders), so the two coincide by construction. Caller
+-- supplies the no-border fallback.
+local function borderArtInset(borderSpec)
+    if DF.Border and DF.Border.SnapThickness then
+        return DF.Border:SnapThickness(borderSpec.size, borderSpec.pixelPerfect, borderSpec.renderScale)
+    end
+    return borderSpec.size
+end
+
 -- Build the style table for a placed icon/square. icon = native spell texture (unless
 -- hideIcon = text-only); square = solid config colour fill (no SetIcon). Both keep the
 -- native cooldown swipe, the styleable duration-text fontstring, the native stack count,
@@ -980,13 +1015,13 @@ local function buildPlacedStyle(indicator, isSquare, borderSpec, defCBT)
         -- fill insets by the border thickness so the ring frames it (legacy parity).
         if not hideIcon then
             local r, g, b = readADColor(indicator.color)
-            local inset = borderSpec and (indicator.BorderSize or indicator.borderThickness or 1) or 0
+            local inset = borderSpec and borderArtInset(borderSpec) or 0
             style.square = { color = { r, g, b, 1 }, inset = inset }
         end
     else
         -- Spell icon. hideIcon = text-only: skip the icon texture, keep cooldown/border/
         -- stacks. Art inset matches the border thickness so the ring frames the art.
-        local inset = borderSpec and (indicator.BorderSize or indicator.borderThickness or 1) or 1
+        local inset = borderSpec and borderArtInset(borderSpec) or 1
         style.icon = { show = not hideIcon, inset = inset }
     end
 
@@ -1172,6 +1207,8 @@ local function buildBarBorderSpec(frame, indicator)
     if not spec.color then spec.color = { r = 0, g = 0, b = 0, a = 1 } end
     local fdb = DF:GetFrameDB(frame) or {}
     spec.pixelPerfect = fdb.pixelPerfect
+    spec.renderScale = tonumber(indicator.scale) or 1   -- see buildPlacedBorderSpec
+
     local w, h = resolveBarSize(frame, indicator)
     spec.knownWidth  = w
     spec.knownHeight = h
@@ -1600,7 +1637,7 @@ local function buildFilterGroupStyle(group, borderSpec)
     local s = groupStyle(group)
     local style = {
         -- Art insets by the border thickness so the ring frames it (placed-icon parity).
-        icon     = { show = true, zoom = true, inset = borderSpec and (s.BorderSize or 1) or 0 },
+        icon     = { show = true, zoom = true, inset = borderSpec and borderArtInset(borderSpec) or 0 },
         cooldown = { show = true, swipe = not s.hideSwipe, reverse = true, numbers = false },
         duration = buildDurationTextSpec(s, true),
         stacks   = (s.showStacks ~= false) and buildStackSpec(s, 2, -1) or nil,
@@ -2088,7 +2125,7 @@ local function stylePlacedMissingBadge(h, frame, spec, auraName, indicator, isSq
     -- border resolves off (or hideIcon), matching the present path.
     local borderSpec = buildPlacedBorderSpec(frame, indicator, hideIcon)
     if borderSpec then borderSpec.animation = nil end
-    local artInset = borderSpec and (borderSpec.size or indicator.BorderSize or 1) or 0
+    local artInset = borderSpec and borderArtInset(borderSpec) or 0
 
     if isSquare then
         if not badge.dfADFill then badge.dfADFill = badge:CreateTexture(nil, "ARTWORK") end
@@ -2476,7 +2513,29 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                             handle:ClearAllPoints()
                             handle:SetPoint(anchorM, frame, anchorM, oxM, oyM)
                             local f = handle.GetFrame and handle:GetFrame()
-                            if f then pcall(function() f:SetScale(scaleM) end) end
+                            if f then
+                                pcall(function() f:SetScale(scaleM) end)
+                                -- pp: grid-snap the window AFTER the scale is set
+                                -- (the snap works in effective-scale space); the
+                                -- badge + its border then render on whole pixels.
+                                local pp = (DF:GetFrameDB(frame) or {}).pixelPerfect
+                                DF:SnapPointToPixelGrid(f, pp)
+                                if pp and not f:GetLeft() then
+                                    -- Login build order: the rect isn't laid out yet, so the
+                                    -- snap above no-op'd. Poll until it resolves, snap once
+                                    -- (mirrors the engine's pin retry in applyContainerLayout).
+                                    local tries = 0
+                                    f:SetScript("OnUpdate", function(fr)
+                                        tries = tries + 1
+                                        local gl = fr:GetLeft()
+                                        if gl and issecretvalue and issecretvalue(gl) then gl = nil end
+                                        if gl or tries > 600 then
+                                            fr:SetScript("OnUpdate", nil)
+                                            DF:SnapPointToPixelGrid(fr, true)
+                                        end
+                                    end)
+                                end
+                            end
                         end
                         local entry = placed[key]
                         -- Identity/struct change on a missing container = Destroy+recreate

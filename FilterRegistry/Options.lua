@@ -358,18 +358,27 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     countText:SetPoint("LEFT", titleText, "RIGHT", 10, 0)
     countText:SetTextColor(0.5, 0.5, 0.5)
 
-    -- ========== RESET TO STOCK (header row 1) ==========
-    -- Only shown while the selected preset has per-profile overrides. Flows
-    -- after the counts, so it can no longer collide with the search box at
-    -- narrow GUI widths (search lives on its own row below).
-    local resetBtn = GUI:CreateButton(headerPanel, L["Reset to stock"], 110, 20, function()
+    -- ========== RESET TO DEFAULT (header row 1) ==========
+    -- Red danger tone (icon + label), matching the Reset Page button. Only
+    -- shown while the selected preset has per-profile overrides. Flows after
+    -- the counts, so it can't collide with the search box at narrow GUI widths
+    -- (search lives on its own row below).
+    local resetBtn = CreateFrame("Button", nil, headerPanel, "BackdropTemplate")
+    resetBtn:SetSize(115, 20)
+    GUI:StyleButton(resetBtn, {
+        tone = "danger",
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\refresh", size = 14 },
+        text = L["Reset to Default"],
+    })
+    resetBtn:SetWidth(math.ceil(resetBtn.Text:GetStringWidth()) + 32)
+    resetBtn:SetPoint("LEFT", countText, "RIGHT", 12, 0)
+    resetBtn:Hide()
+    resetBtn:SetScript("OnClick", function()
         if selKind ~= "preset" or not selKey then return end
         R:ResetPreset(selKey)
         DirectFilterChangedProxy()
         RefreshAll()
     end)
-    resetBtn:SetPoint("LEFT", countText, "RIGHT", 12, 0)
-    resetBtn:Hide()
 
     -- Row 2: the Add-from-Database picker button is right-anchored; the
     -- search box stretches between the panel's left edge and the button, so
@@ -487,7 +496,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     -- HookScript (not SetScript): StyleButton owns OnEnter for the hover wash
     addBtn:HookScript("OnEnter", function(self)
         if self.dfDisabled then
-            GUI:ShowTooltip(self, { title = L["Presets are curated — add spells to a custom filter instead."] })
+            GUI:ShowTooltip(self, { title = L["Presets are curated"], lines = { L["You can enable or disable the spells shown, but not add new ones. Create a custom filter to add your own."] } })
         end
     end)
     addBtn:HookScript("OnLeave", function() GUI:HideTooltip() end)
@@ -593,17 +602,17 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
 
     -- Grey-when-disabled: SetDisabled keeps the button natively enabled so
     -- this tooltip can explain WHY (the OnClick handlers early-out instead)
-    local function HookDisabledTooltip(btn, title)
+    local function HookDisabledTooltip(btn, title, desc)
         btn:HookScript("OnEnter", function(self)
             if self.dfDisabled then
-                GUI:ShowTooltip(self, { title = title })
+                GUI:ShowTooltip(self, { title = title, lines = desc and { desc } or nil })
             end
         end)
         btn:HookScript("OnLeave", function() GUI:HideTooltip() end)
     end
-    HookDisabledTooltip(renameBtn, L["Built-in presets can't be renamed or deleted."])
-    HookDisabledTooltip(delBtn, L["Built-in presets can't be renamed or deleted."])
-    HookDisabledTooltip(dbBtn, L["Presets are curated — add spells to a custom filter instead."])
+    HookDisabledTooltip(renameBtn, L["Presets are curated"], L["Built-in presets can't be renamed or deleted."])
+    HookDisabledTooltip(delBtn, L["Presets are curated"], L["Built-in presets can't be renamed or deleted."])
+    HookDisabledTooltip(dbBtn, L["Presets are curated"], L["You can enable or disable the spells shown, but not add new ones. Create a custom filter to add your own."])
 
     -- ========== ADD-FROM-DATABASE PICKER ==========
     -- The shared spell database picker (FilterRegistry/SpellPicker.lua):
@@ -686,12 +695,13 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         row.count:SetJustifyH("RIGHT")
         row.count:SetTextColor(0.5, 0.5, 0.5)
 
-        -- Yellow "modified" dot (preset has per-profile overrides)
-        row.dot = row:CreateTexture(nil, "OVERLAY")
-        row.dot:SetSize(6, 6)
-        row.dot:SetPoint("RIGHT", row.count, "LEFT", -5, 0)
-        row.dot:SetTexture("Interface\\Buttons\\WHITE8x8")
-        row.dot:SetVertexColor(1, 0.82, 0, 1)
+        -- "Modified" override marker (preset has per-profile enable/disable
+        -- overrides). Shared filled-dot marker used for overrides addon-wide;
+        -- it propagates clicks so it doesn't swallow the row's select handler.
+        row.dot = GUI:CreateOverrideMarker(row, 8)
+        row.dot:SetPoint("RIGHT", row.count, "LEFT", -3, 0)
+        row.dot.tooltipText = L["Override active"]
+        row.dot.tooltipSubText = L["This preset has been changed from its defaults."]
 
         row.name = row:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
         row.name:SetPoint("LEFT", 10, 0)
@@ -869,7 +879,8 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
 
         local dim = isPreset and not item.enabled
         row.icon:SetAlpha(dim and 0.4 or 1)
-        row.name:SetAlpha(dim and 0.4 or 1)
+        row.icon:SetDesaturated(dim)
+        row.name:SetAlpha(dim and 0.5 or 1)
         ApplyNameColor(row.name, rec and rec.class, dim)
 
         if isPreset then
@@ -943,6 +954,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     end
 
     -- ========== REFRESH: RIGHT LIST ==========
+    local rawResolveRepaint -- one pending repaint while direct-ID spell data streams in
     RefreshRight = function()
         -- Guard: selected custom filter no longer exists (deleted elsewhere)
         if selKind == "custom" and not R:GetCustomFilter(selKey) then
@@ -998,11 +1010,35 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
             return name:lower():find(searchText, 1, true) ~= nil
         end
         local function putRaw(id)
-            local nm = format("#%d", id)
+            -- Not in the shipped database: resolve name/icon LIVE from the
+            -- client so a valid direct ID reads like a real spell — the row
+            -- keeps a "not in database" chip to mark it. The first resolve can
+            -- miss while spell data streams in, so request the load and repaint
+            -- once shortly after; only a genuinely unknown ID keeps the
+            -- "#id" + question-mark presentation.
+            local name, icon
+            if C_Spell and C_Spell.GetSpellName then
+                local ok, v = pcall(C_Spell.GetSpellName, id)
+                if ok and type(v) == "string" and v ~= "" then name = v end
+                local okT, t = pcall(C_Spell.GetSpellTexture, id)
+                if okT and type(t) == "number" then icon = t end
+                if not name and C_Spell.RequestLoadSpellData then
+                    pcall(C_Spell.RequestLoadSpellData, id)
+                    if not rawResolveRepaint then
+                        rawResolveRepaint = true
+                        C_Timer.After(0.8, function()
+                            rawResolveRepaint = nil
+                            RefreshRight()
+                        end)
+                    end
+                end
+            end
+            local nm = name or format("#%d", id)
             if matches(nm) then
                 put("ALL", {
-                    id = id, name = nm, icon = FALLBACK_ICON,
-                    chip = L["unknown ID"], raw = true, tooltipID = id,
+                    id = id, name = nm, icon = icon or FALLBACK_ICON,
+                    chip = name and L["not in database"] or L["unknown ID"],
+                    raw = true, tooltipID = id,
                 })
             end
         end
@@ -1048,7 +1084,8 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         for _, g in pairs(groups) do
             tsort(g, function(a, b)
                 if (a.raw or false) ~= (b.raw or false) then return not a.raw end
-                if a.raw then return a.id < b.id end
+                -- Raw rows sort by resolved name too; unresolved "#id" names
+                -- cluster first ("#" < letters), ordered by id via the tiebreak.
                 if a.name ~= b.name then return a.name < b.name end
                 return a.id < b.id
             end)

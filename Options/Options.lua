@@ -2662,66 +2662,17 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             local AutoProfilesUI = DF.AutoProfilesUI
             if not AutoProfilesUI then return end
             
-            -- Reset button
-            local resetBtn = CreateFrame("Button", nil, container, "BackdropTemplate")
-            resetBtn:SetSize(18, 18)
+            -- Reset button (red, icon-only) + override marker (dot) — shared helpers.
+            local resetBtn = GUI:CreateOverrideResetButton(container, {
+                tooltip = L["Reset to Global"],
+                tooltipDesc = L["Reset this setting to its global value."],
+                onClick = function() if onReset then onReset() end end,
+            })
             resetBtn:SetPoint("TOPRIGHT", container, "TOPRIGHT", 0, 0)
-            resetBtn:SetBackdrop({
-                bgFile = "Interface\\Buttons\\WHITE8x8",
-                edgeFile = "Interface\\Buttons\\WHITE8x8",
-                edgeSize = 1,
-            })
-            resetBtn:SetBackdropColor(0.1, 0.1, 0.1, 0.8)
-            resetBtn:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
-            resetBtn:Hide()
-            
-            local resetIcon = resetBtn:CreateTexture(nil, "OVERLAY")
-            resetIcon:SetPoint("CENTER")
-            resetIcon:SetSize(12, 12)
-            resetIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\refresh")
-            resetIcon:SetVertexColor(0.6, 0.6, 0.6)
-            
-            resetBtn:SetScript("OnEnter", function(s)
-                s:SetBackdropBorderColor(1, 0.8, 0.2, 1)
-                resetIcon:SetVertexColor(1, 0.8, 0.2)
-                GUI:ShowTooltip(s, { title = L["Reset to Global"] })
-            end)
-            resetBtn:SetScript("OnLeave", function(s)
-                s:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
-                resetIcon:SetVertexColor(0.6, 0.6, 0.6)
-                GameTooltip:Hide()
-            end)
-            resetBtn:SetScript("OnClick", function()
-                if onReset then onReset() end
-            end)
             container.overrideResetBtn = resetBtn
-            
-            -- Star icon (Button with invisible backdrop for reliable mouse events)
-            local starFrame = CreateFrame("Button", nil, container, "BackdropTemplate")
-            starFrame:SetSize(18, 18)
+
+            local starFrame = GUI:CreateOverrideMarker(container)
             starFrame:SetPoint("RIGHT", resetBtn, "LEFT", -2, 0)
-            starFrame:SetBackdrop({
-                bgFile = "Interface\\Buttons\\WHITE8x8",
-                edgeFile = "Interface\\Buttons\\WHITE8x8",
-                edgeSize = 1,
-            })
-            starFrame:SetBackdropColor(0, 0, 0, 0)
-            starFrame:SetBackdropBorderColor(0, 0, 0, 0)
-            starFrame:Hide()
-            local starIcon = starFrame:CreateTexture(nil, "OVERLAY")
-            starIcon:SetSize(12, 12)
-            starIcon:SetPoint("CENTER")
-            starIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\star")
-            starIcon:SetVertexColor(1, 0.8, 0.2)
-            starFrame:SetScript("OnEnter", function(s)
-                if s.tooltipText then
-                    GUI:ShowTooltip(s, {
-                        title = s.tooltipText,
-                        lines = s.tooltipSubText and { s.tooltipSubText } or nil,
-                    })
-                end
-            end)
-            starFrame:SetScript("OnLeave", function() GameTooltip:Hide() end)
             container.overrideStar = starFrame
             
             -- Global value text
@@ -2780,7 +2731,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
                 -- Runtime override mode: show star + global value, no reset button
                 if isRuntimeOverridden and not isEditing then
-                    self.overrideStar.tooltipText = L["Overridden by Auto Layout"]
+                    self.overrideStar.tooltipText = L["Override active"]
                     self.overrideStar.tooltipSubText = L["This setting is being overridden by the active auto layout profile. To change it, edit the profile in the Auto Layouts tab."]
                     self.overrideStar:Show()
                     self.overrideResetBtn:Hide()
@@ -2813,7 +2764,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 local globalValue = AutoProfilesUI:GetGlobalValue(pinnedKey)
 
                 if isOverridden then
-                    self.overrideStar.tooltipText = L["Overridden in this layout"]
+                    self.overrideStar.tooltipText = L["Override active"]
                     self.overrideStar.tooltipSubText = L["This setting differs from the global profile value. Click the reset button to revert."]
                     self.overrideStar:Show()
                     self.overrideResetBtn:Show()
@@ -3067,47 +3018,21 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
             -- Reset-to-Match button (TOPRIGHT) + gold override star to its left,
             -- mirroring AddPinnedOverrideIndicators so it reads like a layout override.
-            local resetBtn = CreateFrame("Button", nil, container, "BackdropTemplate")
-            resetBtn:SetSize(18, 18)
+            -- Reset-to-Match (red, icon-only) + override marker (dot) — shared
+            -- helpers. The marker tooltip is dynamic (shows the inherited value)
+            -- so it's set below; the reset OnClick is wired further down.
+            local resetBtn = GUI:CreateOverrideResetButton(container, { tooltip = L["Reset to inherited value"] })
             resetBtn:SetPoint("TOPRIGHT", container, "TOPRIGHT", 0, 0)
-            resetBtn:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
-            resetBtn:SetBackdropColor(0.1, 0.1, 0.1, 0.8)
-            resetBtn:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
-            resetBtn:Hide()
-            local resetIcon = resetBtn:CreateTexture(nil, "OVERLAY")
-            resetIcon:SetPoint("CENTER")
-            resetIcon:SetSize(12, 12)
-            resetIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\refresh")
-            resetIcon:SetVertexColor(0.6, 0.6, 0.6)
-            resetBtn:SetScript("OnEnter", function(s)
-                s:SetBackdropBorderColor(1, 0.8, 0.2, 1); resetIcon:SetVertexColor(1, 0.8, 0.2)
-                GUI:ShowTooltip(s, { title = L["Reset to inherited value"] })
-            end)
-            resetBtn:SetScript("OnLeave", function(s)
-                s:SetBackdropBorderColor(0.3, 0.3, 0.3, 1); resetIcon:SetVertexColor(0.6, 0.6, 0.6); GameTooltip:Hide()
-            end)
 
-            local starFrame = CreateFrame("Button", nil, container, "BackdropTemplate")
-            starFrame:SetSize(18, 18)
+            local starFrame = GUI:CreateOverrideMarker(container)
             starFrame:SetPoint("RIGHT", resetBtn, "LEFT", -2, 0)
-            starFrame:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
-            starFrame:SetBackdropColor(0, 0, 0, 0)
-            starFrame:SetBackdropBorderColor(0, 0, 0, 0)
-            starFrame:Hide()
-            local starIcon = starFrame:CreateTexture(nil, "OVERLAY")
-            starIcon:SetSize(12, 12)
-            starIcon:SetPoint("CENTER")
-            starIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\star")
-            starIcon:SetVertexColor(1, 0.8, 0.2)
             starFrame:SetScript("OnEnter", function(s)
                 GUI:ShowTooltip(s, {
-                    title = L["Overriding inherited value"],
-                    lines = {
-                        string.format(L["Inherited value: %s"], FmtVal(MatchValue())),
-                    },
+                    title = L["Override active"],
+                    lines = { string.format(L["Inherited value: %s"], FmtVal(MatchValue())) },
                 })
             end)
-            starFrame:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            starFrame:SetScript("OnLeave", function() GUI:HideTooltip() end)
 
             UpdateIndicators = function()
                 if IsOverridden() then starFrame:Show(); resetBtn:Show() else starFrame:Hide(); resetBtn:Hide() end
@@ -3676,28 +3601,15 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- frames (discards edits). Shown only when a border setting actually differs
         -- from the inherited value.
         do
-            local rb = CreateFrame("Button", nil, borderCheck, "BackdropTemplate")
-            rb:SetSize(18, 18)
+            local rb = GUI:CreateOverrideResetButton(borderCheck, {
+                tooltip = L["Reset Border to Inherited"],
+                onClick = function()
+                    if DF.PinnedFrames then DF.PinnedFrames:SeedSetBorderOverride(GetCurrentSet(), true) end
+                    UpdateHighlightLayout()
+                    if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
+                end,
+            })
             rb:SetPoint("TOPRIGHT", borderCheck, "TOPRIGHT", 0, -2)
-            rb:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
-            rb:SetBackdropColor(0.1, 0.1, 0.1, 0.8)
-            rb:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
-            local ic = rb:CreateTexture(nil, "OVERLAY")
-            ic:SetPoint("CENTER"); ic:SetSize(12, 12)
-            ic:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\refresh")
-            ic:SetVertexColor(0.6, 0.6, 0.6)
-            rb:SetScript("OnEnter", function(s)
-                s:SetBackdropBorderColor(1, 0.8, 0.2, 1); ic:SetVertexColor(1, 0.8, 0.2)
-                GUI:ShowTooltip(s, { title = L["Reset Border to Inherited"] })
-            end)
-            rb:SetScript("OnLeave", function(s)
-                s:SetBackdropBorderColor(0.3, 0.3, 0.3, 1); ic:SetVertexColor(0.6, 0.6, 0.6); GameTooltip:Hide()
-            end)
-            rb:SetScript("OnClick", function()
-                if DF.PinnedFrames then DF.PinnedFrames:SeedSetBorderOverride(GetCurrentSet(), true) end
-                UpdateHighlightLayout()
-                if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
-            end)
             borderResetIcon = rb
             local origRefresh = borderCheck.Refresh
             borderCheck.Refresh = function(...) if origRefresh then origRefresh(...) end refreshBorderReset() end
@@ -5493,32 +5405,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     -- Auras > Aura Filters (master switch for Blizzard vs Direct API mode)
     local pageAuraFilters = CreateSubTab("auras", "auras_filters", L["Aura Filters"])
     BuildPage(pageAuraFilters, function(self, db, Add, AddSpace, AddSyncPoint)
-        -- Setup wizard banner: guided walkthrough of the aura filters.
-        do
-            local banner = GUI:CreateInfoBanner(self.child, { tone = "info" })
-            banner:SetText(L["Having trouble with buffs or debuffs? Run the setup wizard for guided help."])
-            -- Reserve room on the right for the action button (the banner body
-            -- otherwise anchors to RIGHT -12 and would slide under it).
-            banner.body:SetPoint("RIGHT", banner, "RIGHT", -110, 0)
-
-            local bannerBtn = GUI:CreateButton(banner, L["Run Setup Wizard"], 105, 28, function()
-                if DF.WizardBuilder then
-                    local builtins = DF.WizardBuilder:GetBuiltinWizards()
-                    for _, entry in ipairs(builtins) do
-                        if entry.name == "Aura Filter Setup" and entry.build then
-                            local config = entry.build()
-                            if config then DF:ShowPopupWizard(config) end
-                            break
-                        end
-                    end
-                end
-            end)
-            bannerBtn:SetPoint("RIGHT", -8, 0)
-
-            Add(banner, 50, "both")
-            AddSpace(4, "both")
-        end
-
         -- Copy button at top. buffFilterSelection is an exact-key entry: the
         -- registry matcher is a string-prefix test with longest-match-wins
         -- ownership (DF:SectionOwnsKey in Profile.lua), and a full key is just
@@ -5535,8 +5421,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         Add(CreateCopyButton(self.child, {"directBuff", "directDebuff", "buffFilterSelection", "debuffFilter", "debuffMaxDuration", "buffMaxDuration"}, L["Aura Filters"], "auras_filters"), 25, 2)
 
         -- ===== INFO BANNER =====
-        -- Explains that Aura Filters only affect buff/debuff bars, with inline
-        -- links to related pages so users can find the independent systems.
+        -- How buff vs debuff filtering works, then that Aura Filters only affect
+        -- the buff/debuff bars — with inline links to the independent systems.
         do
             local tc = GUI.GetThemeColor()
             local linkColor = string.format("|cFF%02X%02X%02X",
@@ -5546,7 +5432,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             local function L_link(text, pageId)
                 return linkColor .. "|HdfPage:" .. pageId .. "|h" .. text .. "|h|r"
             end
-            local bodyText = L["Aura Filters only affect the"] .. " "
+            local bodyText = L["You have full control over buffs — enable or disable any spell in the presets below, or create your own custom filters. Debuffs are more limited: Blizzard only lets addons filter them by category (boss, dispellable, crowd control, and so on), not by individual spell, so the debuff filters themselves can't be customised."]
+                .. "\n\n"
+                .. L["Aura Filters only affect the"] .. " "
                 .. L_link(L["Buff Bar"], "auras_buffs") .. " "
                 .. L["and"] .. " "
                 .. L_link(L["Debuff Bar"], "auras_debuffs") .. "."
@@ -5565,7 +5453,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 onLinkClick = function(pageId)
                     if GUI.SelectTab then GUI.SelectTab(pageId) end
                 end,
-                minHeight = 56,
+                minHeight = 90,
             })
             Add(infoBanner, infoBanner.layoutHeight, "both")
             AddSpace(4, "both")
@@ -9681,7 +9569,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             
             if self.importInfoLabel then
                 self.importInfoLabel:SetText(string.format("|cff00ff00" .. L["OK"] .. "|r v%s %s%s",
-                    tostring(info.version),
+                    (tostring(info.version):gsub("^[vV]", "")),
                     info.hasParty and L["[Party]"] or "",
                     info.hasRaid and L["[Raid]"] or ""))
             end

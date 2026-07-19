@@ -3078,7 +3078,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     }
                 },
                 wizardConfigs = {},
-                seenAuraSetupWizard = true,  -- New users don't need the wizard
             }
         end
         
@@ -4595,6 +4594,18 @@ DF._MainEventDispatcher = function(self, event, arg1)
             elseif msg == "auras" or msg == "debugauras" then
                 -- Debug command to compare aura filters
                 DF:DebugAuraFilters("player")
+            elseif msg == "ppdump" then
+                -- Pixel-perfect geometry ground truth for aura containers (physical-px
+                -- rects + grid deviation per anchor-chain element)
+                if DF.AuraContainer and DF.AuraContainer.DebugDumpPP then DF.AuraContainer.DebugDumpPP() end
+            elseif msg == "ppbadge" then
+                -- Diagnostic: window-park missing badges (bypasses the container's secret
+                -- self-size) — proves/disproves the last missing-badge pp drift source
+                if DF.AuraContainer and DF.AuraContainer.ToggleBadgeParkDebug then DF.AuraContainer.ToggleBadgeParkDebug() end
+            elseif msg == "idgate" then
+                -- Identity-gate ground truth: per vulnerable handle, live UnitCanAssist
+                -- vs the stored gate verdict vs actual window visibility
+                if DF.AuraContainer and DF.AuraContainer.DebugDumpIdentityGate then DF.AuraContainer.DebugDumpIdentityGate() end
             elseif msg == "admissing" then
                 -- Diagnostic for the Aura Designer show-when-missing push mechanism
                 if DF.DebugADMissing then DF:DebugADMissing() end
@@ -4920,20 +4931,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 else
                     print("|cffff0000DandersFrames:|r Usage: /df importwizard <string>")
                 end
-            elseif msg == "aurasetup" then
-                -- Launch the Aura Filter Setup wizard
-                if DF.WizardBuilder then
-                    local builtins = DF.WizardBuilder:GetBuiltinWizards()
-                    for _, entry in ipairs(builtins) do
-                        if entry.name == "Aura Filter Setup" and entry.build then
-                            local config = entry.build()
-                            if config then DF:ShowPopupWizard(config) end
-                            break
-                        end
-                    end
-                else
-                    print("|cffff0000DandersFrames:|r WizardBuilder not loaded")
-                end
             elseif msg == "testbuilder" then
                 -- Test the wizard builder popup
                 if DF.ShowWizardBuilder then
@@ -5142,35 +5139,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 DF:UpdateRaidGroupLabels()
             end
         end)
-
-        -- Show Aura Filter Setup wizard for existing users on first login after update.
-        -- apiBlocked.blizzardAuraSource is a LEGACY flag (the Blizzard aura source
-        -- was removed in 4.6.1); it is only read here so long-time users who
-        -- already saw the 12.0.5 API-block popup don't get the wizard re-prompt.
-        local blizzardAuraSourceGone =
-            DandersFramesDB_v2 and DandersFramesDB_v2.apiBlocked
-            and DandersFramesDB_v2.apiBlocked.blizzardAuraSource
-        if DandersFramesDB_v2 and not DandersFramesDB_v2.seenAuraSetupWizard
-           and not blizzardAuraSourceGone then
-            DandersFramesDB_v2.seenAuraSetupWizard = true
-            C_Timer.After(3, function()
-                if DF.WizardBuilder and not InCombatLockdown() then
-                    local builtins = DF.WizardBuilder:GetBuiltinWizards()
-                    for _, entry in ipairs(builtins) do
-                        if entry.name == "Aura Filter Setup" and entry.build then
-                            local config = entry.build()
-                            if config then DF:ShowPopupWizard(config) end
-                            break
-                        end
-                    end
-                end
-            end)
-        elseif blizzardAuraSourceGone and DandersFramesDB_v2 then
-            -- Mark as "seen" so that if/when Blizzard reverses the change and
-            -- this block stops catching, we don't suddenly pop the wizard on a
-            -- user who's been running for months without it.
-            DandersFramesDB_v2.seenAuraSetupWizard = true
-        end
 
         -- Show the Targeted Spells opt-in setup wizard once per account.
         -- The feature defaults OFF; this wizard explains what it does, its

@@ -325,6 +325,45 @@ local function recordCandidateFilters(rec, config)
     return rec.candidateFilters or config.candidateFilters
 end
 
+-- IDENTITY-GATE EXPOSURE (12.1, live-confirmed 2026-07-17, widened 2026-07-18).
+-- include/excludeSpellIDs are only evaluated inside
+-- CanApplyIdentityCandidateFilters, which for HELPFUL auras requires
+-- UnitCanAssist("player", unit) — and a FAILED gate SKIPS the checks entirely
+-- (fail-open: every helpful aura passes). UnitCanAssist flips FALSE for a
+-- CROSS-FACTION group member outside instanced content — and for a duel
+-- partner — so an "only these spells" pool silently degrades to "every buff"
+-- (food buffs flooding the defensive row; caught live via a cross-faction
+-- party + duel, DF_AuraLab probe 38). A pool whose SELECTION rides identity
+-- filtering renders garbage under a failed gate, so the handle hides itself
+-- until the gate holds again (see Handle:_applyIdentityGate). Vulnerable =
+-- HELPFUL pool with ANY of:
+--   * includeSpellIDs — REGARDLESS of tokens. "HELPFUL|PLAYER" is NOT immune
+--     (field-caught 2026-07-18): the PLAYER token still narrows the pool at
+--     the query level, but the spell-ID whitelist is skipped — so a My Buffs
+--     slot degrades to "anything I cast", and buffs persisting from instanced
+--     content (Fortitude on a cross-faction ally) render in it. The earlier
+--     "PLAYER pools are immune" note was a probe artifact (no other
+--     player-cast aura on the test target, so the failed-open pool was empty).
+--   * excludeSpellIDs — "everything except X" degrades to "everything",
+--     re-showing buffs the user chose to hide; gated for a uniform blackout
+--     on non-assistable units (Krathe's call, 2026-07-18).
+--   * a spell-CATEGORY token (BIG_DEFENSIVE / EXTERNAL_DEFENSIVE, negated or
+--     not — the defensive row's empty-selection fallback): the category is
+--     spell-identity-derived, same fail-open family.
+-- NOT gated: genuinely unfiltered pools (plain HELPFUL, no selection) — their
+-- data is CORRECT on a non-assistable unit (probe: the ALL row showed the real
+-- buffs), so hiding them would hide truth, not garbage. HARMFUL pools are out
+-- of scope (their gate is UnitCanAttack — owned by the debuff-filtering work).
+local GATED_CATEGORY_TOKENS = { BIG_DEFENSIVE = true, EXTERNAL_DEFENSIVE = true }
+local function filterVulnerableToIdentityGate(filterString, cf)
+    if type(filterString) ~= "string" or not filterString:find("HELPFUL") then return false end
+    if cf and (cf.includeSpellIDs or cf.excludeSpellIDs) then return true end
+    for token in filterString:gmatch("[^|%s]+") do
+        if GATED_CATEGORY_TOKENS[(token:gsub("^!", ""))] then return true end
+    end
+    return false
+end
+
 -- Dynamic-unit tokens whose underlying unit changes WITHOUT the token changing, so
 -- OnUnitChanged never fires -> they need a Refresh() bounce on the matching event.
 -- Prefix-match so "targettarget"/"focustarget" are covered by their base event too.
@@ -545,6 +584,14 @@ local function styleButton_regions(slot, config)
                 -- highlight — are not forbidden and keep animating through their own paths.
                 if spec then
                     spec.animation = nil
+                    -- pp: the border renders inside the container's SetScale(scale)
+                    -- subtree — Apply must snap thickness in that space, not
+                    -- UIParent's (spec.renderScale, Border:SnapThickness). Factory
+                    -- pre-built specs already carry it (their art insets must
+                    -- agree); the db-path specs built just above get it here.
+                    if spec.renderScale == nil then
+                        spec.renderScale = tonumber(config.layout and config.layout.scale) or 1
+                    end
                     DF.Border:Apply(slot.dfBorder, spec)
                 end
             end)
@@ -969,6 +1016,102 @@ local function stripReservation(config)
     return (tonumber(bar.height) or 4) + (tonumber(bar.gap) or 2), bar.position == "TOP"
 end
 
+-- ============================================================
+-- PIXEL PERFECT (container edition). The legacy aura icons kept three PP
+-- invariants the container port initially lost:
+--   1. border thickness snapped in the RENDER space (legacy ran scale=1.0 and
+--      folded scale into size; containers use real SetScale, so snapping must
+--      fold the scale — DF.Border spec.renderScale / Border:SnapThickness);
+--   2. icon size / spacing quantized to whole physical pixels (fractional
+--      strides accumulate across a row — adjacent icons rendered visibly
+--      different borders);
+--   3. the render origin nudged onto the physical pixel grid (legacy:
+--      SnapPointToPixelGrid per icon placement).
+-- Buttons here are anchored by Blizzard's secure flow layout (secret offsets,
+-- §20c) so a per-button snap is impossible — instead the CONTAINER'S pin offset
+-- is adjusted arithmetically from the anchor frame's rect (a plain DF frame,
+-- readable; the container's own rect is secret-derived and never read). With the
+-- pin corner on-grid and every stride whole-pixel, each button lands on-grid.
+-- CENTER growth stays best-effort: its pin is a centre-of-edge, so an odd total
+-- row width still straddles by half a pixel.
+-- ============================================================
+
+-- pp resolution: config.pixelPerfect wins when set; else the HOST frame's db —
+-- handle.frame's parent is the unit frame the consumer attached to. Non-DF hosts
+-- (GUI preview panels, healthbar sub-frames for overlays) resolve nil -> off.
+local function resolvePixelPerfect(handle)
+    local cfgPP = handle.config and handle.config.pixelPerfect
+    if cfgPP ~= nil then return cfgPP and true or false end
+    local ok, pp = pcall(function()
+        local host = handle.frame and handle.frame:GetParent()
+        local db = host and DF.GetFrameDB and DF:GetFrameDB(host)
+        return db and db.pixelPerfect
+    end)
+    return (ok and pp) and true or false
+end
+
+-- Snap a layout length to whole physical pixels in the container's SCALED space
+-- (layout numbers live in the container's own units; rendered px = value x
+-- scale). 0 stays 0 (a zero spacing/offset is exact already).
+local function ppSnapScaled(v, scale)
+    if not v or v == 0 or not DF.PixelPerfect then return v end
+    local s = tonumber(scale) or 1
+    if s > 0 and s ~= 1 then return DF:PixelPerfect(v * s) / s end
+    return DF:PixelPerfect(v)
+end
+
+-- Quantize the geometry fields of a layout table into a SHALLOW COPY (the
+-- caller's table is shared by reference and must not be mutated — see Create).
+-- Sizes and spacings only: the pin/user offsets need the anchor frame's live
+-- rect, so they snap later in applyContainerLayout. Read-site fallback defaults
+-- (the `or 32` / `or 4` in the consumers) stay raw — every real config sets
+-- these fields explicitly. Idempotent via the _ppQuantized flag, so repeated
+-- adoption passes (ApplyStyle then a rebuild) are safe.
+local PP_QUANT_FIELDS = { "size", "sizeX", "sizeY", "spacing", "spacingX", "spacingY" }
+local function quantizeLayout(L)
+    if type(L) ~= "table" then return L end
+    local q = {}
+    for k, v in pairs(L) do q[k] = v end
+    local scale = tonumber(L.scale) or 1
+    for _, k in ipairs(PP_QUANT_FIELDS) do
+        if type(q[k]) == "number" then q[k] = ppSnapScaled(q[k], scale) end
+    end
+    q._ppQuantized = true
+    return q
+end
+
+-- Nudge the container pin offsets (<= half a pixel per axis) so the pin point
+-- lands on the physical pixel grid. Computed from the ANCHOR frame's rect only —
+-- never the container's own (secret-derived). Offsets live in the container's
+-- scaled space: rendered px = offset x scale x (anchor-frame px-per-unit).
+-- Third return = whether a real rect was used: false means the anchor frame
+-- isn't laid out yet (login/reload build order — containers build BEFORE the
+-- unit frames get their first layout) and the raw offsets came back untouched.
+-- The CALLER must retry once the rect exists (see the re-pin hooks in
+-- applyContainerLayout / Create) — a silently unsnapped pin was live-caught as
+-- "one AD icon's border uneven at login, perfect after any settings toggle,
+-- broken again on reload".
+local function snapPinOffsets(anchorFrame, anchor, px, py, scale)
+    local ok, nx, ny = pcall(function()
+        local l, b = anchorFrame:GetLeft(), anchorFrame:GetBottom()
+        local w, h = anchorFrame:GetWidth(), anchorFrame:GetHeight()
+        local eff = anchorFrame:GetEffectiveScale()
+        local _, physH = GetPhysicalScreenSize()
+        if not (l and b and w and h and eff and eff > 0 and physH and physH > 0) then return end
+        local s = tonumber(scale) or 1
+        if s <= 0 then s = 1 end
+        local ppu = eff * physH / 768   -- physical px per anchor-frame unit
+        local ax = anchor:find("LEFT") and 0 or (anchor:find("RIGHT") and w) or w / 2
+        local ay = anchor:find("BOTTOM") and 0 or (anchor:find("TOP") and h) or h / 2
+        local rx = (l + ax + px * s) * ppu
+        local ry = (b + ay + py * s) * ppu
+        return px + (math.floor(rx + 0.5) - rx) / (s * ppu),
+               py + (math.floor(ry + 0.5) - ry) / (s * ppu)
+    end)
+    if ok and nx and ny then return nx, ny, true end
+    return px, py, false
+end
+
 local function applyContainerLayout(c, handle)
     local config = handle.config
     local L = config.layout or {}
@@ -1000,6 +1143,7 @@ local function applyContainerLayout(c, handle)
     -- keep the exact pre-strip native call sequence; _dfPadApplied clears a stale
     -- inset if a live restyle flips the strip to the far side (or to fill).
     local resv, topStrip = stripReservation(config)
+    if resv > 0 and handle._pp then resv = ppSnapScaled(resv, scale) end
     local padTop, padBottom = 0, 0
     if resv > 0 then
         if G.vName == "Up" then
@@ -1009,6 +1153,18 @@ local function applyContainerLayout(c, handle)
         end
     end
 
+    -- Pin offsets: user offset + growth fold, then (pp) nudged onto the physical
+    -- pixel grid — the container-era equivalent of the legacy per-icon
+    -- SnapPointToPixelGrid (see the PIXEL PERFECT block above).
+    local px = (L.offsetX or 0) + G.pinX
+    local py = (L.offsetY or 0) + G.pinY
+    local pinResolved = true
+    if handle._pp then
+        px, py, pinResolved = snapPinOffsets(handle.frame, G.anchor, px, py, scale)
+    end
+    -- /df ppdump ground truth: the last pin decision this handle rendered with.
+    handle._ppDbg = { px = px, py = py, resolved = pinResolved, anchor = G.anchor, pin = G.pinPoint, scale = scale }
+
     pcall(function()
         c:SetScale(scale)
         -- Pin the container to the frame's anchor point + offsets. Directional
@@ -1017,8 +1173,7 @@ local function applyContainerLayout(c, handle)
         -- whose offsets rode the scaled buttons). CENTER growth: the box's
         -- centre-of-edge pins instead (see resolveGrowthLayout).
         c:ClearAllPoints()
-        c:SetPoint(G.pinPoint, handle.frame, G.anchor,
-            (L.offsetX or 0) + G.pinX, (L.offsetY or 0) + G.pinY)
+        c:SetPoint(G.pinPoint, handle.frame, G.anchor, px, py)
         c:SetAuraLayoutAnchorPoint(G.flowAnchor)
         if AnchorUtil and AnchorUtil.FlowDirection then
             local h = resolveEnum(AnchorUtil.FlowDirection, G.hName)
@@ -1031,6 +1186,30 @@ local function applyContainerLayout(c, handle)
             c:SetAuraLayoutPadding(0, 0, padTop, padBottom)
         end
     end)
+
+    -- PIN RETRY (live-caught): at login/reload the containers build BEFORE the
+    -- unit frames' first layout — the anchor rect is nil, the pin snap above
+    -- no-ops, and that one container renders off-grid until any settings pass
+    -- happens to re-run the layout. Poll (self-terminating, one per anchor
+    -- frame, hidden frames don't tick) until the rect resolves, then re-run
+    -- this whole layout so the snap lands. Guarded against a torn-down /
+    -- rebuilt container so a stale closure can't relayout a dead one.
+    if handle._pp and not pinResolved then
+        local f = handle.frame
+        local tries = 0
+        f:SetScript("OnUpdate", function(fr)
+            tries = tries + 1
+            local live = handle.backend and handle.backend.container == c
+            -- GetLeft on our plain window is expected non-secret; guard anyway —
+            -- truthiness on a secret number is the 12.1 taint trap.
+            local gl = fr:GetLeft()
+            if gl and issecretvalue and issecretvalue(gl) then gl = nil end
+            if not live or gl or tries > 600 then
+                fr:SetScript("OnUpdate", nil)
+                if live and gl then applyContainerLayout(c, handle) end
+            end
+        end)
+    end
 end
 
 -- Per-group layout options (stride/spacing). gapX stays 0: the flow advances its
@@ -1046,13 +1225,18 @@ local function buildGroupLayout(config)
     local sy = (L.sizeY or L.size or sx)
     local spX = (L.spacingX or L.spacing or 4)
     local spY = (L.spacingY or L.spacing or 4)
+    -- pp (quantized layout): the reservation joins elementHeight, so it must be
+    -- whole-pixel too or every row stride goes fractional again. _ppQuantized is
+    -- the adoption-time pp marker (no handle in scope here).
+    local resv = stripReservation(config)
+    if resv > 0 and L._ppQuantized then resv = ppSnapScaled(resv, tonumber(L.scale) or 1) end
     return {
         elementWidth    = sx,
         -- + strip reservation: elementHeight overrides the measured button height in
         -- the flow (GetElementSize), so the row stride and the container self-size
         -- both grow by the strip's out-of-rect space (0 for fill / no bar). The
         -- start-side inset half of the reservation lives in applyContainerLayout.
-        elementHeight   = sy + stripReservation(config),
+        elementHeight   = sy + resv,
         elementSpacingX = spX,
         elementSpacingY = spY,
         gapX            = 0,
@@ -1096,6 +1280,12 @@ local function layoutRow(handle)
         local row = math.floor(idx / wrap)
         local x = (L.offsetX or 0) + (pAxis.x * col + sAxis.x * row) * stepX
         local y = (L.offsetY or 0) + (pAxis.y * col + sAxis.y * row) * stepY
+        -- pp: whole-pixel offsets relative to the (grid-snapped) anchor frame.
+        -- Offsets here live in the BUTTON's scaled space (b:SetScale below).
+        if handle._pp then
+            x = ppSnapScaled(x, scale)
+            y = ppSnapScaled(y, scale)
+        end
         b:SetScale(scale)
         b:ClearAllPoints()
         b:SetPoint(anchor, handle.frame, anchor, x, y)
@@ -1131,6 +1321,18 @@ end
 -- state parks the badge exactly on the window. Also the extra cell width beyond the
 -- badge, so the pushed badge clears the window with margin.
 local MISSING_PAD = 2
+-- An EMPTY container is NOT zero-sized: AnchorUtil.ApplyFlowLayout reports
+-- math.max(layoutWidth, 1) to OnLayoutComplete, and the secure SetSize floors
+-- every empty container at 1x1 units (Blizzard_SharedXMLBase/AnchorUtil.lua,
+-- 12.1; padding defaults are all 0 so the floor always wins when empty). The
+-- parked missing badge rides the container's TOPLEFT = pin - selfWidth, so that
+-- 1 unit re-entered the badge position as a FRACTIONAL-pixel drift (1 unit is
+-- rarely a whole physical pixel) — field-caught as the missing badge's border
+-- rendering thicker on one side under pixel perfect, surviving every other
+-- quantization fix. Compensate it EXACTLY in the badge offset; the push's
+-- evacuation margin becomes MISSING_PAD - MISSING_EMPTY_W (= 1 unit, still
+-- clear of the window even with the animation spill, which cancels out).
+local MISSING_EMPTY_W = 1
 
 local NativeBackend = {}
 NativeBackend.__index = NativeBackend
@@ -1256,6 +1458,7 @@ function NativeBackend:build()
     end
     self.groupKeys = {}
     self.slotButtons = isOverlay and {} or nil   -- overlay: key -> native slot button (consumer styling)
+    handle._idGateVulnerable = nil   -- re-derived from this build's records (see the record loop)
     if testMode and not isOverlay and not isMissing then
         -- PER-SLOT TEST GROUPS (P5). Two hard-won facts drive this shape:
         --  * The flow lays buttons out by the container's own aura ordering, NOT
@@ -1290,6 +1493,9 @@ function NativeBackend:build()
     for i, rec in ipairs(filters) do
         local f = rec.f
         local cf = (not testMode) and recordCandidateFilters(rec, config) or nil
+        if cf and filterVulnerableToIdentityGate(f, cf) then
+            handle._idGateVulnerable = true
+        end
         if AuraUtil and AuraUtil.IsValidFilterString and not AuraUtil.IsValidFilterString(f) then
             DF:DebugWarn(DBG, "filter rejected by IsValidFilterString: %s (group skipped)", tostring(f))
         else
@@ -1339,9 +1545,13 @@ function NativeBackend:build()
         -- Centre the badge in the (badge + 2*spill) window: the -MISSING_PAD container pin
         -- and the +MISSING_PAD badge inset still cancel to park it on the window when empty;
         -- the +spill / -spill centres it inside the enlarged window.
+        -- _badgeParkDebug (/df ppbadge): force the WINDOW anchor live — the parked badge
+        -- position then can't inherit the empty container's SECRET (and field-measured
+        -- fractional) self-width. DIAGNOSTIC ONLY: the layout-push cannot move a
+        -- window-anchored badge, so presence no longer hides it while the flag is on.
         local sp = (handle.config.badge and handle.config.badge.spill) or 0
         handle.badge:ClearAllPoints()
-        if testMode then
+        if testMode or AuraContainer._badgeParkDebug then
             -- P5 preview: the container stays DISABLED all test session (the
             -- bounce skips missing mode) and a never-laid-out container has NO
             -- resolvable rect (its secret SetSize only runs while enabled) — a
@@ -1349,13 +1559,19 @@ function NativeBackend:build()
             -- badge on the WINDOW instead: that IS the "missing" position.
             handle.badge:SetPoint("TOPLEFT", handle.frame, "TOPLEFT", sp, -sp)
         else
-            handle.badge:SetPoint("TOPLEFT", c, "TOPLEFT", MISSING_PAD + sp, -sp)
+            -- +MISSING_EMPTY_W: cancel the empty container's 1-unit size floor so the
+            -- parked badge lands EXACTLY at window TOPLEFT + spill (see the constant).
+            handle.badge:SetPoint("TOPLEFT", c, "TOPLEFT", MISSING_PAD + sp + MISSING_EMPTY_W, -sp)
         end
         handle.badge:Show()
     end
 
     DF:Debug(DBG, "built (native) unit=%s mode=%s groups=%d",
         tostring(config.unit), tostring(config.mode or "row"), #filters)
+
+    -- Initial identity-gate state for this build's unit (see _applyIdentityGate);
+    -- the module watcher re-evaluates on faction/phase/roster/world changes.
+    handle:_applyIdentityGate()
 end
 
 function NativeBackend:setUnit(unit)
@@ -1967,7 +2183,13 @@ end
 -- fine: the push only matters once the buff is present (the badge is hidden then anyway).
 function Handle:SetBadgeSpill(sp)
     if self.config.mode ~= "missing" or not self.badge then return end
-    sp = math.max(0, math.floor(sp or 0))
+    -- Do NOT floor: the caller pixel-quantizes the spill (whole PHYSICAL px =
+    -- fractional UNITS) and uses the SAME value to shift the strip cell by
+    -- -spill — flooring here desynced the two by the fractional part, so the
+    -- window-grows/cell-shifts cancellation broke and the badge visibly
+    -- wiggled/shifted while dragging the animation inset/offset sliders
+    -- (live-caught). The value must survive this round trip bit-exact.
+    sp = math.max(0, tonumber(sp) or 0)
     local badge = self.config.badge or {}
     self.config.badge = badge
     if (badge.spill or 0) == sp then return end
@@ -1978,7 +2200,8 @@ function Handle:SetBadgeSpill(sp)
     local backend = self.backend
     local c = backend and backend.container
     if c then
-        self.badge:SetPoint("TOPLEFT", c, "TOPLEFT", MISSING_PAD + sp, -sp)
+        -- +MISSING_EMPTY_W: same empty-size-floor compensation as the build anchor.
+        self.badge:SetPoint("TOPLEFT", c, "TOPLEFT", MISSING_PAD + sp + MISSING_EMPTY_W, -sp)
         if backend.groupKeys and c.SetAuraGroupLayout then
             local cellLayout = { elementWidth = bw + 2 * sp + MISSING_PAD, elementHeight = bh }
             for _, key in ipairs(backend.groupKeys) do
@@ -2003,8 +2226,83 @@ function Handle:Enable() self:_applyEnabled(true) end
 function Handle:Disable() self:_applyEnabled(false) end
 function Handle:SetShown(shown)
     shown = shown and true or false
-    self.frame:SetShown(shown)          -- plain anchor frame; safe in combat
+    self._intendedShown = shown          -- consumer INTENT; the identity gate composes on top
+    self:_applyVisibility()
     self:_applyEnabled(shown)
+end
+
+-- Single writer for the window's shown state (consumer intent composed with the
+-- identity gate). NEVER flip visibility while the cursor is inside the window:
+-- hiding/showing it runs the hovered native button's tooltip intrinsics
+-- (Blizzard_AuraButton OnEnter/OnLeave -> Show/HideTooltip) synchronously INSIDE
+-- our tainted execution, and those index secret aura data. That error class is
+-- REPORTED to the user even when caught by pcall, so hover avoidance is the
+-- defence and pcall only a backstop. While hovered (or after a failed write)
+-- park a short retry; the flip lands as soon as the cursor moves off. Verified
+-- against IsShown, so an aborted write can never strand the gate out of sync
+-- (the original stranded-fail-open field bug).
+function Handle:_applyVisibility()
+    if self._destroyed then return end
+    local want = (self._intendedShown ~= false) and not self._idGateHidden
+    -- Respect the fake-data park (Edit Mode etc.): while parked, this handle is
+    -- hidden regardless of intent/gate — otherwise a hover-deferred retry could
+    -- ping-pong against the park's own deferred hide.
+    local watch = AuraContainer._providerWatch
+    if watch and watch._fakeActive and watch._hidden[self] then want = false end
+    if self.frame:IsShown() == want then self._visRetry = nil; return end
+    local okOver, over = pcall(self.frame.IsMouseOver, self.frame)
+    local blocked = (okOver and over)
+        or not pcall(self.frame.SetShown, self.frame, want)
+        or self.frame:IsShown() ~= want
+    if not blocked then
+        self._visRetry = nil
+    elseif not self._visRetry then
+        self._visRetry = true
+        C_Timer.After(0.25, function()
+            self._visRetry = nil
+            self:_applyVisibility()
+        end)
+    end
+end
+
+-- Hover-safe Hide for windows leaving the handle bookkeeping (destroy / the
+-- fake-data park): same hazard + deferral as _applyVisibility, minus the intent
+-- composition. `stillWanted` (optional) is re-checked on each retry so a
+-- deferred hide can't clobber a window someone legitimately re-showed meanwhile.
+local function safeHideWindow(frame, stillWanted)
+    if not frame or not frame:IsShown() then return end
+    if stillWanted and not stillWanted() then return end
+    local okOver, over = pcall(frame.IsMouseOver, frame)
+    if (okOver and over) or not pcall(frame.Hide, frame) or frame:IsShown() then
+        C_Timer.After(0.25, function() safeHideWindow(frame, stillWanted) end)
+    end
+end
+
+-- Hide this handle while the 12.1 identity gate would fail open on its unit (see
+-- filterVulnerableToIdentityGate — HELPFUL includeSpellIDs pools render every
+-- buff for a unit failing UnitCanAssist, e.g. a cross-faction group member
+-- outside instanced content or a duel partner). RENDER-SIDE ONLY: hides the
+-- plain anchor frame (combat-safe), never touches the secure enabled state —
+-- that stays owned by SetShown/_applyEnabled. Composes with consumer intent:
+-- a consumer-hidden handle stays hidden when the gate lifts. Fail-safe on any
+-- doubt (secret value, pcall failure, missing unit): SHOW — a wrongly-hidden
+-- row is worse than one garbage frame. Always recomputes (no vulnerable
+-- early-out) so a handle rebuilt onto a non-vulnerable filter clears a stale
+-- hidden flag instead of staying hidden forever.
+function Handle:_applyIdentityGate()
+    local hide = false
+    if self._idGateVulnerable and not AuraContainer._testMode then
+        local unit = self.config and self.config.unit
+        if type(unit) == "string" and unit ~= "player" and UnitExists(unit) then
+            local ok, can = pcall(UnitCanAssist, "player", unit)
+            if ok then
+                if issecretvalue and issecretvalue(can) then can = true end
+                hide = not can
+            end
+        end
+    end
+    self._idGateHidden = hide or nil
+    self:_applyVisibility()
 end
 
 -- Enable/disable the (secure) container's parse+bind. COMBAT-GUARDED: SetEnabled
@@ -2022,6 +2320,7 @@ end
 function Handle:SetUnit(unit)
     self.config.unit = unit
     self:_updateDynRefresh()   -- re-evaluate dynamic-unit auto-refresh for the new token
+    self:_applyIdentityGate()  -- the last gate verdict was for the OLD unit (plain frame; combat-safe)
     -- In combat, defer JUST the retarget (a full rebuild would leak a container + N
     -- buttons every combat on roster churn); "retarget" re-runs SetUnit at regen.
     if InCombatLockdown() then self:_queueOp("retarget"); return end
@@ -2034,6 +2333,22 @@ end
 -- expiredText/zeroText/updateInterval/colorCurve, bar interpolation/direction, dispel show flags). To toggle a
 -- region on/off or change a frozen opt, use Rebuild(). pcall-guarded so a restyle fault
 -- can't escape into a GUI callback.
+-- Resolve + cache the pixel-perfect flag and (when on) swap config.layout for a
+-- pixel-quantized copy (see the PIXEL PERFECT block above applyContainerLayout).
+-- Runs at every config/layout adoption: _build (covers Create + Rebuild) and
+-- ApplyStyle. Pure table math + a db read — combat-safe.
+function Handle:_ppPrepare()
+    self._pp = resolvePixelPerfect(self)
+    -- /df ppdump discriminator: the pixel-scale CACHE value this handle's layout
+    -- was quantized with. UIParent's scale can settle AFTER login builds — a
+    -- stale cache here bakes every snapped size subtly wrong until a restyle.
+    self._ppCacheAt = (DF.GetPixelScale and DF:GetPixelScale()) or nil
+    local L = self.config and self.config.layout
+    if self._pp and type(L) == "table" and not L._ppQuantized then
+        self.config.layout = quantizeLayout(L)
+    end
+end
+
 function Handle:ApplyStyle(style, layout)
     if type(style) == "table" then
         self.config.style = style
@@ -2041,6 +2356,7 @@ function Handle:ApplyStyle(style, layout)
     if type(layout) == "table" then
         self.config.layout = layout   -- optional geometry swap (size/scale/spacing/growth/offsets)
     end
+    self:_ppPrepare()
     -- BUILD-ONCE-LEAVE-IT (combat parity with the proven DF_AuraLab pattern): a live
     -- native container's buttons are NEVER re-touched in combat. The lab builds once,
     -- lets Blizzard drive, and only restyles on explicit OOC user action; restyling
@@ -2234,7 +2550,10 @@ function Handle:Destroy()
     if AuraContainer._dyn then AuraContainer._dyn._handles[self] = nil end
     if AuraContainer._handles then AuraContainer._handles[self] = nil end
     self._destroyed = true
-    if self.frame then self.frame:Hide() end   -- plain frame; safe in combat, hides the container child too
+    -- Plain frame; safe in combat, hides the container child too. Hover-safe:
+    -- hiding while a native button is under the cursor runs its tooltip
+    -- intrinsic under our taint (see _applyVisibility).
+    if self.frame then safeHideWindow(self.frame) end
     if InCombatLockdown() then
         -- Can't tear down secure container state in lockdown; defer to regen.
         self:_queueOp("destroy")
@@ -2338,6 +2657,7 @@ end
 -- (see AuraContainer.SetTestMode). The backend owns the container + slot
 -- production; the handle owns styling/layout/lifecycle.
 function Handle:_build()
+    self:_ppPrepare()          -- pp flag + quantized layout BEFORE any geometry runs
     self.backend = NativeBackend.new(self)
     self.backend:build()
     self:_updateDynRefresh()   -- auto-bounce on target/focus/mouseover change
@@ -2389,7 +2709,10 @@ local function ensureProviderWatch()
             for h in pairs(self._hidden) do
                 self._hidden[h] = nil
                 if not h._destroyed then
-                    h:GetFrame():Show()
+                    -- Restore through the visibility channel: hover-safe, and
+                    -- composes intent + identity gate (a bare Show() re-opened
+                    -- gate-hidden windows on Edit Mode exit).
+                    h:_applyVisibility()
                     h:Refresh()        -- re-parse real data (Edit Mode exit is OOC)
                 end
             end
@@ -2398,7 +2721,7 @@ local function ensureProviderWatch()
             for h in pairs(AuraContainer._handles or {}) do
                 if not h._destroyed and h:GetFrame():IsShown() then
                     self._hidden[h] = true
-                    h:GetFrame():Hide()
+                    safeHideWindow(h:GetFrame(), function() return self._hidden[h] end)
                 end
             end
         end
@@ -2494,6 +2817,18 @@ function AuraContainer:Create(parent, config)
         -- Row/overlay: h.frame occupies the unit-frame rect (row layout anchors are
         -- relative to it; overlay covers it). Reposition: h:ClearAllPoints() + h:SetPoint(...).
         h.frame:SetAllPoints(parent)
+        -- pp: the pin snap depends on this rect (position AND width/height — centre
+        -- and right-side anchors reference them), so a resize invalidates it. This
+        -- also fires on the frame's FIRST layout (size resolving 0 -> WxH), making
+        -- it the primary late-login re-pin path; the OnUpdate poll in
+        -- applyContainerLayout is the belt-and-braces fallback. No-op for non-pp
+        -- users and for overlay mode (no pin — the container covers the host).
+        if cfg.mode ~= "overlay" then
+            h.frame:SetScript("OnSizeChanged", function()
+                local c = h._pp and h.backend and h.backend.container
+                if c then pcall(applyContainerLayout, c, h) end
+            end)
+        end
     end
     -- Z-order: legacy renders host aura icons ABOVE contentOverlay (parent+25, name/health
     -- text). Raising h.frame raises the whole subtree — the native container + AuraButtons +
@@ -2512,7 +2847,9 @@ function AuraContainer:Create(parent, config)
     local watch = AuraContainer._providerWatch
     if watch and watch._fakeActive then
         watch._hidden[h] = true
-        h.frame:Hide()
+        -- Hover-safe + self-cancelling: if the fake period ends before a deferred
+        -- hide lands, the retry sees _hidden cleared and stands down.
+        safeHideWindow(h.frame, function() return watch._hidden[h] end)
     end
     return h
 end
@@ -2524,6 +2861,210 @@ end
 -- its preview IS the factory's own rendering. No container, no aura
 -- data: styling + the curated entry only.
 -- ============================================================
+
+-- IDENTITY-GATE WATCHER: re-evaluate the gate for every vulnerable handle when
+-- assistability can flip — faction changes (cross-faction membership + duels),
+-- phasing, roster/member-data changes, zoning, and retargets (dynamic-unit
+-- handles on target/focus frames). The per-handle check is a couple of API
+-- calls and the vulnerable set is small; sweeps coalesce onto a short timer so
+-- event bursts (name/roster spam on joins) run once.
+-- Field lesson (cross-faction party + /reload): UnitCanAssist can still report
+-- the pre-load answer while the world streams in, and in the steady state no
+-- watched event fires after it settles — the wrong verdict stuck until a real
+-- invite. So member-data events are watched too, and PLAYER_ENTERING_WORLD
+-- additionally parks two delayed sweeps to catch the settled value.
+local idGateWatch = CreateFrame("Frame")
+idGateWatch:RegisterEvent("UNIT_FACTION")
+idGateWatch:RegisterEvent("UNIT_PHASE")
+idGateWatch:RegisterEvent("UNIT_NAME_UPDATE")      -- member data streaming in post-load
+idGateWatch:RegisterEvent("PARTY_MEMBER_ENABLE")   -- member connect/instance-state settle
+idGateWatch:RegisterEvent("PARTY_MEMBER_DISABLE")
+idGateWatch:RegisterEvent("GROUP_ROSTER_UPDATE")
+idGateWatch:RegisterEvent("PLAYER_ENTERING_WORLD")
+idGateWatch:RegisterEvent("PLAYER_TARGET_CHANGED")
+idGateWatch:RegisterEvent("PLAYER_FOCUS_CHANGED")
+local gateSweepQueued
+local function IdentityGateSweep()
+    gateSweepQueued = nil
+    for h in pairs(AuraContainer._handles or {}) do
+        if h._idGateVulnerable then
+            pcall(function() h:_applyIdentityGate() end)
+        end
+    end
+end
+idGateWatch:SetScript("OnEvent", function(_, event)
+    if not gateSweepQueued then
+        gateSweepQueued = true
+        C_Timer.After(0.05, IdentityGateSweep)
+    end
+    if event == "PLAYER_ENTERING_WORLD" then
+        C_Timer.After(2, IdentityGateSweep)
+        C_Timer.After(6, IdentityGateSweep)
+    end
+end)
+
+-- /df idgate — identity-gate ground truth: EVERY handle (not just the
+-- vulnerable ones — an under-flagged handle is exactly the failure this dump
+-- must expose), with its unit, vulnerability flag, the LIVE UnitCanAssist
+-- answer, the stored gate verdict, and the window's actual visibility
+-- (+ whether a hover-deferred flip is parked). Developer diagnostic: plain
+-- print by project convention.
+function AuraContainer.DebugDumpIdentityGate()
+    local CAP = 30
+    local n, vuln = 0, 0
+    for h in pairs(AuraContainer._handles or {}) do
+        n = n + 1
+        if h._idGateVulnerable then vuln = vuln + 1 end
+        if n <= CAP then
+            local cfg = h.config or {}
+            local unit = cfg.unit
+            local canTxt = "-"
+            if type(unit) == "string" and UnitExists(unit) then
+                local ok, can = pcall(UnitCanAssist, "player", unit)
+                if not ok then canTxt = "ERR"
+                elseif issecretvalue and issecretvalue(can) then canTxt = "SECRET"
+                else canTxt = tostring(can) end
+            end
+            -- Filter + cf summary: distinct record filter strings, and whether ANY
+            -- record carries an include/exclude spell map — the fields the
+            -- vulnerability classification is derived from.
+            local fParts, seenF, inc, exc = {}, {}, false, false
+            for _, rec in ipairs(normalizeFilters(cfg.filter)) do
+                if not seenF[rec.f] then
+                    seenF[rec.f] = true
+                    fParts[#fParts + 1] = rec.f
+                end
+                local cf = recordCandidateFilters(rec, cfg)
+                if cf and cf.includeSpellIDs then inc = true end
+                if cf and cf.excludeSpellIDs then exc = true end
+            end
+            print(("|cff33ff99[idgate %d]|r mode=%s unit=%s filter=%s inc=%s exc=%s vuln=%s exists=%s canAssist=%s gateHidden=%s intent=%s shown=%s retry=%s"):format(
+                n, tostring(cfg.mode or "row"), tostring(unit),
+                table.concat(fParts, "&"), tostring(inc), tostring(exc),
+                tostring(h._idGateVulnerable or false),
+                tostring(type(unit) == "string" and UnitExists(unit) or false), canTxt,
+                tostring(h._idGateHidden or false),
+                tostring(h._intendedShown ~= false),
+                tostring(h.frame and h.frame:IsShown() or false),
+                tostring(h._visRetry or false)))
+        end
+    end
+    if n > CAP then
+        print(("|cff33ff99[idgate]|r (capped at %d lines)"):format(CAP))
+    end
+    print(("|cff33ff99[idgate]|r %d handle(s), %d gate-vulnerable; testMode=%s"):format(
+        n, vuln, tostring(AuraContainer._testMode or false)))
+end
+
+-- /df ppbadge — diagnostic toggle: park missing badges on the WINDOW instead of
+-- the container (see _badgeParkDebug at the build). Border renders perfect =>
+-- the empty container's secret fractional self-width is confirmed as the last
+-- off-grid source. Rebuilds every missing handle on toggle. NOT a fix: the
+-- layout-push can't hide a window-anchored badge, so present buffs still show
+-- their badge while this is on.
+function AuraContainer.ToggleBadgeParkDebug()
+    AuraContainer._badgeParkDebug = not AuraContainer._badgeParkDebug or nil
+    local n = 0
+    for h in pairs(AuraContainer._handles or {}) do
+        if h.config and h.config.mode == "missing" then
+            n = n + 1
+            pcall(function() h:_rebuild() end)
+        end
+    end
+    print(("|cff33ff99[ppbadge]|r window-anchored badge park: %s (%d missing container(s) rebuilt). Push is %s while on."):format(
+        AuraContainer._badgeParkDebug and "ON" or "OFF", n,
+        AuraContainer._badgeParkDebug and "DISABLED (badge stays visible even when the buff is present)" or "restored"))
+end
+
+-- /df ppdump — pixel-perfect geometry ground truth (the resource-bar lesson:
+-- field numbers beat source-theorising for pixel bugs). For each visible row /
+-- missing handle: the anchor chain's rects in PHYSICAL pixels with the signed
+-- distance to the nearest pixel grid line ("frac", 0.000 = on-grid), effective
+-- scales, and the pin snap's last inputs/outcome. Every rect read is pcall'd —
+-- SECRET rects print as such instead of erroring.
+function AuraContainer.DebugDumpPP()
+    local _, physH = GetPhysicalScreenSize()
+    local uiEff = UIParent:GetEffectiveScale()
+    print(("|cff33ff99[ppdump]|r physH=%d UIParent eff=%.4f (1px = %.4f UIParent-units)"):format(
+        physH, uiEff, (768 / physH) / uiEff))
+    local function frac(v, ppu)
+        local p = v * ppu
+        return p - math.floor(p + 0.5)
+    end
+    local function row(label, fr)
+        if not fr then print("      " .. label .. ": nil") return end
+        local ok, l, b, w, h, eff = pcall(function()
+            return fr:GetLeft(), fr:GetBottom(), fr:GetWidth(), fr:GetHeight(), fr:GetEffectiveScale()
+        end)
+        if not ok then print("      " .. label .. ": forbidden (getter threw)") return end
+        -- 12.1: rect getters can RETURN secret numbers rather than throw (the
+        -- container self-size is secret-derived even in town) — arithmetic or
+        -- truthiness on them taints, so detect and report per component instead.
+        if issecretvalue then
+            local sec = {}
+            if issecretvalue(l) then sec[#sec + 1] = "L" end
+            if issecretvalue(b) then sec[#sec + 1] = "B" end
+            if issecretvalue(w) then sec[#sec + 1] = "W" end
+            if issecretvalue(h) then sec[#sec + 1] = "H" end
+            if issecretvalue(eff) then sec[#sec + 1] = "eff" end
+            if #sec > 0 then
+                print(("      %s: SECRET rect components (%s)"):format(label, table.concat(sec, ",")))
+                return
+            end
+        end
+        if not (l and b and w and h and eff) then print("      " .. label .. ": no rect (unlaid)") return end
+        local ppu = eff * physH / 768
+        print(("      %s: eff=%.4f  physW=%.2f physH=%.2f | frac L=%+.3f B=%+.3f R=%+.3f T=%+.3f"):format(
+            label, eff, w * ppu, h * ppu,
+            frac(l, ppu), frac(b, ppu), frac(l + w, ppu), frac(b + h, ppu)))
+    end
+    local n = 0
+    for h in pairs(AuraContainer._handles or {}) do
+        local cfg = h.config
+        if cfg and cfg.mode ~= "overlay" and h.frame and h.frame.IsVisible and h.frame:IsVisible() then
+            n = n + 1
+            if n > 12 then print("|cff33ff99[ppdump]|r (capped at 12 handles)") break end
+            local L = cfg.layout or {}
+            print(("|cff33ff99[%d]|r mode=%s unit=%s pp=%s layoutScale=%s anchor=%s quantized=%s"):format(
+                n, tostring(cfg.mode), tostring(cfg.unit), tostring(h._pp),
+                tostring(L.scale), tostring(L.anchor), tostring(L._ppQuantized)))
+            local d = h._ppDbg
+            if d then
+                print(("      pin: %s -> frame %s  px=%.3f py=%.3f snapResolved=%s"):format(
+                    tostring(d.pin), tostring(d.anchor), d.px or 0, d.py or 0, tostring(d.resolved)))
+            end
+            -- Baked style numbers + the pixel-scale cache they were computed under.
+            -- cacheAt != now after a reload = the login builds baked with a stale
+            -- cache (UIParent scale settled later) — the "wrong until any toggle"
+            -- signature. Values are container-local units, raw as baked.
+            local st = cfg.style or {}
+            local bs = st.border and st.border.spec
+            print(("      baked: cacheAt=%s now=%s | iconInset=%s borderSize=%s qSize=%s"):format(
+                tostring(h._ppCacheAt), tostring((DF.GetPixelScale and DF:GetPixelScale()) or "?"),
+                tostring(st.icon and st.icon.inset),
+                tostring(bs and bs.size or (st.border and "db-path" or "none")),
+                tostring(L.size or L.sizeX)))
+            if cfg.mode == "missing" and cfg.badge then
+                -- spill enters the badge anchor offsets; badge position otherwise
+                -- rides the container's SECRET self-size (the layout-push design)
+                print(("      missing: badge=%sx%s spill=%s"):format(
+                    tostring(cfg.badge.w), tostring(cfg.badge.h), tostring(cfg.badge.spill or 0)))
+            end
+            row("host  ", h.frame:GetParent())
+            row("window", h.frame)
+            row("contnr", h.backend and h.backend.container)
+            local b1 = (cfg.mode == "missing") and h.badge or (h.buttons and h.buttons[1])
+            row((cfg.mode == "missing") and "badge " or "button", b1)
+            local bw = b1 and (b1.dfBorder or b1.dfADBorder)
+            if bw then
+                row("border", bw)
+                if bw.top then row("b.top ", bw.top) end
+                if bw.left then row("b.left", bw.left) end
+            end
+        end
+    end
+    if n == 0 then print("|cff33ff99[ppdump]|r no visible row/missing containers found") end
+end
 
 function AuraContainer.StylePreviewSlot(slot, config)
     styleButton_regions(slot, config)
