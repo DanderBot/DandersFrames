@@ -3126,6 +3126,9 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1, ...)
                         local set = GetSetDB(i)
                         if set then PinnedFrames:SetEnabled(i, set.enabled) end
                     end
+                    -- And the hide side of the invariant: reap strays/disabled
+                    -- chrome on every zone-in, not just logins and mode changes.
+                    PinnedFrames:PruneOrphanedSets()
                     PinnedFrames:RequestProcessAllSets()
                 end
             end
