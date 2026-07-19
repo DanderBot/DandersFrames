@@ -29,7 +29,10 @@ R.DBStamp = { harvest = "2026-07-12", gameBuild = 68569 }
 -- to let the next regeneration re-add the spell.
 R.Excluded = {
     -- Maintainer curation 2026-07-19 (Krathe filter pass; kept in sync via lab discussion)
-    [363502]  = "Dream Flight (Healing aura id) - we track the raid-cooldown id 359816; drop the Healing duplicate",
+    [120517]  = "Halo - does not leave an aura on the unit",
+    [120644]  = "Halo (variant) - does not leave an aura",
+    [453094]  = "Halo (variant) - does not leave an aura",
+    [449840]  = "Halo (variant) - does not leave an aura",
     [108280]  = "Healing Tide Totem - totem, not an aura on the unit",
     [5394]    = "Healing Stream Totem - totem, not an aura on the unit",
     [198103]  = "Earth Elemental - guardian/pet, not an aura on the unit",
@@ -55,6 +58,14 @@ R.CategoryPatch = {
     -- kept in the DB/picker but in no preset (empty final category set):
     [1278914] = {},  -- Dream Guide (out of Healing)
     [388513]  = {},  -- Overflowing Mists (out of Healing)
+    -- Dream Flight: all three same-named ids under Raid Cooldowns (ally HoT 363502 + self-buff 359816/362361), never split into Healing
+    [363502]  = { raidDefensives = true },
+    [359816]  = { raidDefensives = true },
+    [362361]  = { raidDefensives = true },
+    -- Moved into Healing (Holy Paladin healing-adjacent auras):
+    [1241717] = { healing = true },  -- Seraphic Barrier
+    [378412]  = { healing = true },  -- Light of the Titans
+    [157128]  = { healing = true },  -- Saved by the Light
     [370889]  = { utility = true, movement = true },  -- Twin Guardian (moved off External Defensives)
     [370888]  = { utility = true, movement = true },
     [406732]  = { movement = true, utility = true },  -- Spatial Paradox (also copied into Utility)
@@ -195,21 +206,20 @@ R.Spells = {
     { id = 209426,   alts = { 196718 }, n = "Darkness", class = "DEMONHUNTER", cats = { raidDefensives = true } },
     { id = 81782,    alts = { 62618 }, n = "Power Word: Barrier", class = "PRIEST", cats = { raidDefensives = true } },
     { id = 64843,    alts = { 64844 }, n = "Divine Hymn", class = "PRIEST", cats = { raidDefensives = true } },
-    { id = 200183,   n = "Apotheosis",                class = "PRIEST",        cats = { raidDefensives = true } },
-    { id = 15286,    n = "Vampiric Embrace",          class = "PRIEST",        cats = { raidDefensives = true } },
-    { id = 421453,   n = "Ultimate Penitence",        class = "PRIEST",        cats = { raidDefensives = true } },
-    { id = 120517,   alts = { 120644, 453094, 449840 }, n = "Halo", class = "PRIEST", cats = { raidDefensives = true } },
+    { id = 200183,   n = "Apotheosis",                class = "PRIEST",        off = true, cats = { raidDefensives = true } },
+    { id = 15286,    n = "Vampiric Embrace",          class = "PRIEST",        off = true, cats = { raidDefensives = true } },
+    { id = 421453,   n = "Ultimate Penitence",        class = "PRIEST",        off = true, cats = { raidDefensives = true } },
     { id = 31821,    alts = { 317929 }, n = "Aura Mastery", class = "PALADIN", cats = { raidDefensives = true } },
     { id = 31884,    alts = { 454351 }, n = "Avenging Wrath", class = "PALADIN", off = true, cats = { raidDefensives = true } },
     { id = 216331,   n = "Avenging Crusader",         class = "PALADIN",       off = true, cats = { raidDefensives = true } },
     { id = 200652,   alts = { 200654 }, n = "Tyr's Deliverance", class = "PALADIN", cats = { raidDefensives = true } },
     { id = 325174,   alts = { 98008 }, n = "Spirit Link Totem", class = "SHAMAN", cats = { raidDefensives = true } },
-    { id = 114052,   n = "Ascendance",                class = "SHAMAN",        cats = { raidDefensives = true } },
-    { id = 740,      alts = { 157982, 1264623 }, n = "Tranquility", class = "DRUID", cats = { raidDefensives = true } },
+    { id = 114052,   n = "Ascendance",                class = "SHAMAN",        off = true, cats = { raidDefensives = true } },
+    { id = 740,      alts = { 157982, 1264623 }, n = "Tranquility", class = "DRUID", off = true, cats = { raidDefensives = true } },
     { id = 374227,   n = "Zephyr",                    class = "EVOKER",        cats = { raidDefensives = true } },
-    { id = 359816,   alts = { 362361 }, n = "Dream Flight", class = "EVOKER", cats = { raidDefensives = true } },
+    { id = 359816,   alts = { 362361, 363502 }, n = "Dream Flight", class = "EVOKER", cats = { raidDefensives = true } },
     { id = 322118,   n = "Invoke Yu'lon",             class = "MONK",          cats = { raidDefensives = true } },
-    { id = 325197,   n = "Invoke Chi-Ji",             class = "MONK",          cats = { raidDefensives = true } },
+    { id = 325197,   n = "Invoke Chi-Ji",             class = "MONK",          off = true, cats = { raidDefensives = true } },
     { id = 443028,   alts = { 1248992 }, n = "Celestial Conduit", class = "MONK", cats = { raidDefensives = true } },
     { id = 462568,   n = "Elemental Resistance",      class = "SHAMAN",        off = true, cats = { raidDefensives = true } },
     { id = 1260681,  alts = { 406139, 406220, 451299 }, n = "Chi Cocoon", class = "MONK", cats = { raidDefensives = true } },
@@ -286,7 +296,7 @@ R.Spells = {
     { id = 387804,   n = "Echoing Protection",        class = "PALADIN",       cats = { externalDefensives = true } },
     { id = 53480,    n = "Roar of Sacrifice",         class = "HUNTER",        cats = { externalDefensives = true } },
     { id = 370889,   alts = { 370888 }, n = "Twin Guardian", class = "EVOKER", cats = { utility = true, movement = true } },
-    { id = 1241717,  n = "Seraphic Barrier",          class = "PALADIN",       cats = { externalDefensives = true } },
+    { id = 1241717,  n = "Seraphic Barrier",          class = "PALADIN",       off = true, cats = { healing = true } },
     { id = 454863,   n = "Lesser Anti-Magic Shell",   class = "DEATHKNIGHT",   cats = { externalDefensives = true } },
     { id = 461499,   n = "Overflowing Light",         class = "PALADIN",       cats = { externalDefensives = true } },
     { id = 387792,   n = "Empyreal Ward",             class = "PALADIN",       cats = { externalDefensives = true } },
@@ -303,9 +313,9 @@ R.Spells = {
     { id = 642,      n = "Divine Shield",             class = "PALADIN",       cats = { defensives = true } },
     { id = 498,      alts = { 403876 }, n = "Divine Protection", class = "PALADIN", cats = { defensives = true } },
     { id = 184662,   n = "Shield of Vengeance",       class = "PALADIN",       cats = { defensives = true } },
-    { id = 461867,   n = "Sacrosanct Crusade",        class = "PALADIN",       cats = { defensives = true } },
-    { id = 209388,   alts = { 453043 }, n = "Bulwark of Order", class = "PALADIN", cats = { defensives = true } },
-    { id = 157128,   n = "Saved by the Light",        class = "PALADIN",       cats = { defensives = true } },
+    { id = 461867,   n = "Sacrosanct Crusade",        class = "PALADIN",       off = true, cats = { defensives = true } },
+    { id = 209388,   alts = { 453043 }, n = "Bulwark of Order", class = "PALADIN", off = true, cats = { defensives = true } },
+    { id = 157128,   n = "Saved by the Light",        class = "PALADIN",       off = true, cats = { healing = true } },
     { id = 48792,    n = "Icebound Fortitude",        class = "DEATHKNIGHT",   cats = { defensives = true } },
     { id = 48707,    alts = { 444741 }, n = "Anti-Magic Shell", class = "DEATHKNIGHT", cats = { defensives = true } },
     { id = 49039,    n = "Lichborne",                 class = "DEATHKNIGHT",   cats = { defensives = true } },
@@ -352,7 +362,7 @@ R.Spells = {
     { id = 404381,   n = "Defy Fate",                 class = "EVOKER",        cats = { defensives = true } },
     { id = 374349,   n = "Renewing Blaze",            class = "EVOKER",        cats = { defensives = true } },
     { id = 455179,   n = "Elixir of Determination",   class = "MONK",          cats = { defensives = true } },
-    { id = 378412,   n = "Light of the Titans",       class = "PALADIN",       cats = { defensives = true } },
+    { id = 378412,   n = "Light of the Titans",       class = "PALADIN",       cats = { healing = true } },
 
     -- ------------------------------------------------------------
     -- Utility
