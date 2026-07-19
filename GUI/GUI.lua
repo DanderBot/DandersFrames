@@ -9847,6 +9847,7 @@ function DF:CreateGUI()
         -- width instead of building narrow then staying squashed until a resize.
         local WIDE_PAGES = {
             auras_auradesigner = true,    -- two-panel preview + controls
+            auras_filterdesigner = true,  -- two-column preset list + spell list
             text_designer = true,         -- two-panel preview + controls
             general_pinnedframes = true,  -- tab strip + active-set meter
             general_nicknames = true,     -- wide add-row (Match+Char+Nick+Add) + list columns
