@@ -29,9 +29,7 @@ R.DBStamp = { harvest = "2026-07-12", gameBuild = 68569 }
 -- to let the next regeneration re-add the spell.
 R.Excluded = {
     -- Maintainer curation 2026-07-19 (Krathe filter pass; kept in sync via lab discussion)
-    [1278914] = "Dream Guide - Guardian Druid self-buff, not a heal (removed from Healing)",
     [363502]  = "Dream Flight (Healing aura id) - we track the raid-cooldown id 359816; drop the Healing duplicate",
-    [388513]  = "Overflowing Mists - Mistweaver proc (removed from Healing)",
     [108280]  = "Healing Tide Totem - totem, not an aura on the unit",
     [5394]    = "Healing Stream Totem - totem, not an aura on the unit",
     [198103]  = "Earth Elemental - guardian/pet, not an aura on the unit",
@@ -54,6 +52,9 @@ R.Excluded = {
 -- of the spell. Remove an entry to return to the harvest's placement.
 R.CategoryPatch = {
     -- Maintainer curation 2026-07-19 (Krathe filter pass; kept in sync via lab discussion)
+    -- kept in the DB/picker but in no preset (empty final category set):
+    [1278914] = {},  -- Dream Guide (out of Healing)
+    [388513]  = {},  -- Overflowing Mists (out of Healing)
     [370889]  = { utility = true, movement = true },  -- Twin Guardian (moved off External Defensives)
     [370888]  = { utility = true, movement = true },
     [406732]  = { movement = true, utility = true },  -- Spatial Paradox (also copied into Utility)
@@ -156,6 +157,7 @@ R.Spells = {
     { id = 373862,   n = "Temporal Anomaly",          class = "EVOKER",        cats = { healing = true } },
     { id = 409678,   n = "Chrono Ward",               class = "EVOKER",        cats = { healing = true } },
     { id = 431415,   n = "Sun Sear",                  class = "PALADIN",       off = true, cats = { healing = true } },
+    { id = 1278914,  n = "Dream Guide",               class = "DRUID",         cats = {} },  -- DB-only: out of Healing preset, still addable via the picker
     { id = 390677,   n = "Inspiration",               class = "PRIEST",        off = true, cats = { healing = true } },
     { id = 1301739,  n = "Blessed Word",              class = "PALADIN",       cats = { healing = true } },
     { id = 1239091,  n = "Lesser Weapon",             class = "PALADIN",       off = true, cats = { healing = true } },
@@ -167,6 +169,7 @@ R.Spells = {
     { id = 469703,   n = "Tempered in Battle",        class = "PALADIN",       cats = { healing = true } },
     { id = 1292922,  n = "Coalescence",               class = "MONK",          cats = { healing = true } },
     { id = 450805,   n = "Purified Spirit",           class = "MONK",          cats = { healing = true } },
+    { id = 388513,   n = "Overflowing Mists",         class = "MONK",          cats = {} },  -- DB-only: out of Healing preset, still addable via the picker
     { id = 467281,   alts = { 427296 }, n = "Healing Elixir", class = "MONK", cats = { healing = true } },
     { id = 54149,    n = "Infusion of Light",         class = "PALADIN",       off = true, cats = { healing = true } },
 
