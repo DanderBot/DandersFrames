@@ -2582,7 +2582,49 @@ function PinnedFrames:Initialize()
     DF:Debug("PINNED", "Initialized pinned frames")
 end
 
--- Reinitialize for mode change (party <-> raid)
+-- Hide + untrack any pinned frame whose set no longer exists in the current
+-- profile/mode. Pinned containers/movers/labels are parented to UIParent under
+-- fixed global names and outlive the module's self.containers references, so a
+-- set-count drop can strand them: the classic case is switching from a profile
+-- with two sets to one with a single set — the index-2 frame stays live but
+-- untracked, and every hide path gates on GetSetDB (now nil for that index), so
+-- nothing ever hides it (the "stuck orange box" reports). This reaps both the
+-- tracked leftovers and any untracked orphan, across BOTH mode suffixes and the
+-- suffix-less mover/label, for every index the current profile/mode no longer
+-- defines. Combat-safe (Hide + attribute-free).
+function PinnedFrames:PruneOrphanedSets()
+    local inCombat = InCombatLockdown()
+    for i = 1, PinnedFrames.MAX_SETS do
+        if not GetSetDB(i) then
+            -- The header is a SecureGroupHeaderTemplate — its Hide() is protected
+            -- in combat. It renders nothing for an orphan (no members), so the
+            -- visible box is always the non-secure mover/container; defer the
+            -- header hide to the next out-of-combat prune if we're locked.
+            if self.headers[i] and not inCombat then
+                self.headers[i]:Hide()
+                self.headers[i] = nil
+            end
+            -- Non-secure frames (plain UIParent children) — safe to hide anytime.
+            if self.containers[i] then
+                if self.containers[i].mover then self.containers[i].mover:Hide() end
+                self.containers[i]:Hide()
+                self.containers[i] = nil
+            end
+            if self.labels[i] then self.labels[i]:Hide(); self.labels[i] = nil end
+
+            -- Untracked orphans by global name (mover/label have no mode suffix).
+            local mover = _G["DandersPinned" .. i .. "Mover"]
+            if mover then mover:Hide() end
+            local label = _G["DandersPinned" .. i .. "Label"]
+            if label then label:Hide() end
+            local partyC = _G["DandersPinned" .. i .. "PartyContainer"]
+            if partyC then partyC:Hide() end
+            local raidC = _G["DandersPinned" .. i .. "RaidContainer"]
+            if raidC then raidC:Hide() end
+        end
+    end
+end
+
 function PinnedFrames:Reinitialize()
     -- Cannot reinitialize during combat
     if InCombatLockdown() then
@@ -2641,9 +2683,15 @@ function PinnedFrames:Reinitialize()
         end
         self.labels[i] = nil
     end
-    
+
     self.initialized = false
     self:Initialize()
+
+    -- Belt for stranded frames the tracked teardown above cannot reach: an
+    -- index whose set no longer exists in the current profile/mode, whose
+    -- container/mover was orphaned (e.g. by a profile switch to a
+    -- fewer-set profile) and left untracked. See PruneOrphanedSets.
+    self:PruneOrphanedSets()
 
     -- If Test Mode was active before Reinitialize (e.g. user changed
     -- frame type in the settings panel while test mode was on), re-enter

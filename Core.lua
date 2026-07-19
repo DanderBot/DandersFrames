@@ -6055,6 +6055,16 @@ function DF:FullProfileRefresh()
     
     -- === REFRESH PINNED FRAMES IF ACTIVE ===
     if DF.PinnedFrames and DF.PinnedFrames.initialized then
+        -- Reap sets the NEW profile no longer defines. Profile switching does
+        -- NOT rebuild pinned frames (this function refreshes headers in place),
+        -- so switching from a profile with more sets to one with fewer leaves
+        -- the extra containers/movers live but untracked, and every hide path
+        -- gates on the current profile's GetSetDB — so nothing removes them
+        -- (the "stuck pinned box that survives everything" reports). Prune them
+        -- before refreshing the survivors.
+        if DF.PinnedFrames.PruneOrphanedSets then
+            DF.PinnedFrames:PruneOrphanedSets()
+        end
         -- Sync each set's visibility to the NEW profile FIRST — hide sets it
         -- disables, show/create sets it enables — so a set shown under the
         -- previous profile doesn't linger in a stale state after the switch.

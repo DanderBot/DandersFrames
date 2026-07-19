@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Bug Fixes
+
+* (Pinned Frames) Fixed a leftover pinned-frame handle (an empty "drag to move" box, often orange) that could stay stuck on screen and survive reloads. It appeared after switching to a profile with fewer pinned sets than the previous one — the extra set's frame was left behind with no way to hide it. Pinned frames now clean up sets the active profile no longer has. (by Krathe)
+
 ### Improvements
 
 * (Click Casting) Enabling a targeting fallback (Global, Target, Self or Always Cast) on a key that already does something in WoW now asks for confirmation and names exactly what the key will stop doing — these options make the key active everywhere, not just over the frames. The fallback tooltips explain this too.
