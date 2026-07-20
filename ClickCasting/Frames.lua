@@ -378,6 +378,15 @@ function CC:InitializeSecureFrames()
     -- combat OnCombatEnd picks the queue up. Covers third-party frames using
     -- the same template for free. hooksecurefunc post-hooks run insecurely,
     -- so this never taints the secure path.
+    --
+    -- SCOPE (traced 2026-07-20): this only fires for frames whose unit is set
+    -- via CompactUnitFrame_SetUnit — i.e. Blizzard's own raid/party frames.
+    -- DandersFrames' own children do NOT go through it: they are
+    -- SecureUnitButtonTemplate frames whose clicks are registered once in
+    -- InitializeHeaderChild (the template OnLoad, dfInitialized-guarded, runs
+    -- once ever), and a roster shuffle only reassigns their `unit` attribute —
+    -- RegisterForClicks and the click-cast attributes persist untouched. So DF
+    -- frames need no reassert, and correctly get none.
     if not self.reassertHookInstalled then
         self.reassertHookInstalled = true
         hooksecurefunc("SecureUnitButton_OnLoad", function(frame)
