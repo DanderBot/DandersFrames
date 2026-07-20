@@ -650,12 +650,12 @@ CC.globalBindingCount = CC.globalBindingCount or 0
 function CC:CreateHovercastButton()
     if self.hovercastButton then return end
     
-    -- Don't create during combat
+    -- Don't create during combat. Keep retrying while combat lasts: the old
+    -- single 1s retry gave up silently if combat was still active, leaving
+    -- the hovercast button uncreated for the rest of the session.
     if InCombatLockdown() then
-        C_Timer.After(1, function()
-            if not InCombatLockdown() then
-                self:CreateHovercastButton()
-            end
+        CC:DeferAfter("createHovercastButton", 1, function()
+            CC:CreateHovercastButton()
         end)
         return
     end

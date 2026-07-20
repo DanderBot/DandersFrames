@@ -52,16 +52,12 @@ function CC:RegisterEvents()
             -- Loadout/talent changed - check for profile switch and reapply bindings (with debounce)
             if not InCombatLockdown() then
                 -- Debounce: wait before checking to ensure API data is ready
-                if CC.loadoutCheckTimer then
-                    CC.loadoutCheckTimer:Cancel()
-                end
-                CC.loadoutCheckTimer = C_Timer.NewTimer(0.5, function()
-                    CC.loadoutCheckTimer = nil
+                CC:DeferAfter("loadoutCheck", 0.5, function()
                     CC:CheckLoadoutProfileSwitch()
                     -- Reapply bindings to pick up spell overrides from talent changes
                     CC:ApplyBindings()
                     -- Also refresh UI in case talents changed
-                    C_Timer.After(0.3, function()
+                    CC:DeferAfter("uiRefresh", 0.3, function()
                         CC:RefreshClickCastingUI()
                     end)
                 end)
@@ -73,7 +69,7 @@ function CC:RegisterEvents()
             -- Level up - may have learned new spells, reapply bindings
             if not InCombatLockdown() then
                 CC:ApplyBindings()
-                C_Timer.After(0.2, function()
+                CC:DeferAfter("uiRefresh", 0.2, function()
                     CC:RefreshClickCastingUI()
                 end)
             else
@@ -85,8 +81,9 @@ function CC:RegisterEvents()
                 CC:RefreshSpellGrid()
             end
         elseif event == "PLAYER_ENTERING_WORLD" then
-            -- Initial load or reload
-            C_Timer.After(0.5, function()
+            -- Initial load or reload. Keyed: back-to-back loading screens
+            -- would otherwise stack several settle passes over each other.
+            CC:DeferAfter("zoneSettle", 0.5, function()
                 -- Run one-time migration to convert bindings to root spells
                 CC:MigrateBindingsToRootSpells()
                 
@@ -111,13 +108,14 @@ function CC:RegisterEvents()
                 -- arena/dungeon of the session, not only after a /reload
                 CC:ResolveProvisionalMap("zone-in")
 
-                -- Check for loadout-based profile on initial load. No combat
-                -- guard here: CheckLoadoutProfileSwitch defers itself via
-                -- pendingLoadoutCheck in lockdown — the old call-site guard
-                -- silently DROPPED the check when zone-in+1s landed in combat
-                -- (the arena-load race), leaving the previous spec's profile
-                -- active for the whole match.
-                C_Timer.After(1, function()
+                -- Check for loadout-based profile on initial load. Keyed so
+                -- back-to-back loading screens reuse one pending pass, and
+                -- called unconditionally: CheckLoadoutProfileSwitch defers
+                -- itself onto the "loadoutCheck" queue job in lockdown, so a
+                -- guard here would only duplicate that one decision point.
+                -- (The original call-site guard DROPPED the check outright
+                -- when zone-in+1s landed in combat — the arena-load race.)
+                CC:DeferAfter("loadoutCheck", 1, function()
                     CC:CheckLoadoutProfileSwitch()
                 end)
             end)
@@ -301,9 +299,40 @@ function CC:DrainDeferred(onlyJob)
 
     -- Refresh UI if needed (after a short delay for everything to settle)
     if needsUIRefresh then
-        C_Timer.After(0.2, function()
-            self:RefreshClickCastingUI()
+        self:DeferAfter("uiRefresh", 0.2, function()
+            CC:RefreshClickCastingUI()
         end)
+    end
+end
+
+-- ============================================================
+-- KEYED SETTLE TIMERS
+-- ============================================================
+-- Click casting settles state after events (loading screens, spec changes,
+-- arena prep) using short timers. Several of those events fire in bursts, and
+-- with bare C_Timer.After each burst stacked another timer -- so a callback
+-- could run with state captured before the previous one had finished, and
+-- retry chains could fork into several concurrent chains.
+--
+-- DeferAfter keys each timer: scheduling the same key again cancels the
+-- pending one, so there is always at most one run in flight per key.
+
+function CC:DeferAfter(key, delay, fn)
+    self.timers = self.timers or {}
+    local existing = self.timers[key]
+    if existing then existing:Cancel() end
+    self.timers[key] = C_Timer.NewTimer(delay, function()
+        if CC.timers then CC.timers[key] = nil end
+        fn()
+    end)
+end
+
+-- Cancel a pending DeferAfter timer (no-op if there is none)
+function CC:CancelDeferAfter(key)
+    local t = self.timers and self.timers[key]
+    if t then
+        t:Cancel()
+        self.timers[key] = nil
     end
 end
 
@@ -327,8 +356,8 @@ function CC:OnSpecChanged()
         self:CheckLoadoutProfileSwitch()
         self:ApplyBindings()
         -- Refresh UI after a short delay to ensure spell data is ready
-        C_Timer.After(0.3, function()
-            self:RefreshClickCastingUI()
+        self:DeferAfter("uiRefresh", 0.3, function()
+            CC:RefreshClickCastingUI()
         end)
     else
         self:Defer("loadoutCheck")
@@ -338,12 +367,12 @@ end
 
 function CC:OnArenaPrep()
     if self.db.options.globalEnabled then
-        -- Arena frames should now exist, try to register
-        C_Timer.After(0.1, function()
-            if not InCombatLockdown() then
-                self:RegisterBlizzardFrames()
-            else
-                self:Defer("blizzardRegister")
+        -- Arena frames should now exist, try to register.
+        -- Keyed: ARENA_PREP fires once per opponent, so this would otherwise
+        -- schedule several identical registration passes.
+        self:DeferAfter("dynamicFrameRegister", 0.1, function()
+            if not CC:CombatGuard("blizzardRegister") then
+                CC:RegisterBlizzardFrames()
             end
         end)
     end
@@ -351,12 +380,12 @@ end
 
 function CC:OnBossEngage()
     if self.db.options.globalEnabled then
-        -- Boss frames should now exist
-        C_Timer.After(0.1, function()
-            if not InCombatLockdown() then
-                self:RegisterBlizzardFrames()
-            else
-                self:Defer("blizzardRegister")
+        -- Boss frames should now exist.
+        -- Keyed: INSTANCE_ENCOUNTER_ENGAGE_UNIT fires repeatedly during an
+        -- encounter, so this would otherwise stack a timer per fire.
+        self:DeferAfter("dynamicFrameRegister", 0.1, function()
+            if not CC:CombatGuard("blizzardRegister") then
+                CC:RegisterBlizzardFrames()
             end
         end)
     end

@@ -404,10 +404,10 @@ function CC:CreateClickCastHeader()
     
     -- Don't create during combat
     if InCombatLockdown() then
-        C_Timer.After(1, function()
-            if not InCombatLockdown() then
-                self:CreateClickCastHeader()
-            end
+        -- Keep retrying while combat lasts rather than giving up after one
+        -- attempt; the header is required for every hover bind.
+        CC:DeferAfter("createClickCastHeader", 1, function()
+            CC:CreateClickCastHeader()
         end)
         return
     end
@@ -590,10 +590,12 @@ function CC:DisableBlizzardClickCasting()
                             CC:ApplyBindingsToFrameUnified(frame)
                             -- And again on next frame in case Blizzard does something after
                             C_Timer.After(0, function()
+                                -- ApplyBindingsToFrameUnified defers itself in
+                                -- combat, so this no longer drops the work
                                 if not InCombatLockdown() then
                                     CC:ClearBlizzardClickCastFromFrame(frame)
-                                    CC:ApplyBindingsToFrameUnified(frame)
                                 end
+                                CC:ApplyBindingsToFrameUnified(frame)
                             end)
                         end
                     end
@@ -645,9 +647,9 @@ function CC:DisableBlizzardClickCasting()
     -- Re-apply our bindings to ensure they take precedence
     if self.secureFramesInitialized then
         C_Timer.After(0.1, function()
-            if not InCombatLockdown() then
-                CC:ApplyBindings()
-            end
+            -- ApplyBindings defers itself in combat, so the refresh is queued
+            -- rather than dropped
+            CC:ApplyBindings()
         end)
     end
 end
@@ -813,14 +815,14 @@ function CC:SetupClickCastFramesGlobal()
     -- Global reference for addon compatibility (like Clique)
     ClickCastHeader = self.header
     
-    -- Schedule a delayed scan for third-party frames that might have been created
-    -- This catches frames from addons that loaded before us or used different registration methods
-    C_Timer.After(1, function()
+    -- Schedule delayed scans for third-party frames that might have been created.
+    -- This catches frames from addons that loaded before us or used different
+    -- registration methods. Keyed separately so the early and late pass both
+    -- run, but a second init cannot fork extra chains.
+    CC:DeferAfter("thirdPartyScanEarly", 1, function()
         CC:ScanForThirdPartyFrames()
     end)
-    
-    -- Also scan when player enters world (in case frames are created late)
-    C_Timer.After(3, function()
+    CC:DeferAfter("thirdPartyScanLate", 3, function()
         CC:ScanForThirdPartyFrames()
     end)
 end
@@ -828,7 +830,11 @@ end
 -- Scan for known third-party unit frame addons and register their frames
 function CC:ScanForThirdPartyFrames()
     if InCombatLockdown() then
-        C_Timer.After(1, function() CC:ScanForThirdPartyFrames() end)
+        -- Keyed: previously every blocked call started its own 1s retry chain,
+        -- so a long fight could leave several chains running in parallel.
+        CC:DeferAfter("thirdPartyScanRetry", 1, function()
+            CC:ScanForThirdPartyFrames()
+        end)
         return
     end
     
@@ -1200,10 +1206,27 @@ function CC:SetupDynamicFrameHooks()
         end
     end
     
-    -- Also try again after a delay (frames may load later)
-    C_Timer.After(2, function()
-        CC:SetupDynamicFrameHooks()
-    end)
+    -- Boss and arena frames are created lazily, so retry while any are still
+    -- unhooked. This previously re-armed unconditionally every 2 seconds for
+    -- the entire session, and because the timer was not keyed, a second call
+    -- to this function forked another chain that also ran forever.
+    local pending = false
+    for _, list in ipairs({ BLIZZARD_BOSS_FRAMES, BLIZZARD_ARENA_FRAMES }) do
+        for _, frameName in ipairs(list) do
+            local frame = _G[frameName]
+            if not frame or not frame.dfHooked then
+                pending = true
+                break
+            end
+        end
+        if pending then break end
+    end
+
+    if pending then
+        CC:DeferAfter("dynamicFrameHooks", 2, function()
+            CC:SetupDynamicFrameHooks()
+        end)
+    end
 end
 
 -- Build a virtual button name from binding (like Cell's approach: "shiftQ", "ctrlF1", etc.)
