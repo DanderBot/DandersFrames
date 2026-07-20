@@ -72,8 +72,13 @@ function CC:RouteProxyAction(frame, typeAttr, clickbuttonAttr, realAction, comba
     if not proxy then
         -- In combat the proxy can't be created. Emit the (gated) direct action
         -- as a fallback; the whole binding set is reapplied after combat, which
-        -- installs the proxy and replaces this.
+        -- installs the proxy and replaces this. Record the write in the
+        -- manifest so the next clear removes it (the apply loop is combat-
+        -- guarded so this leg should be unreachable, but if it ever runs the
+        -- attribute must not escape the bookkeeping).
         frame:SetAttribute(typeAttr, realAction)
+        frame.dfWrittenAttrs = frame.dfWrittenAttrs or {}
+        frame.dfWrittenAttrs[typeAttr] = true
         if combatCond then AddCombatConditional(frame, typeAttr, realAction, combatCond) end
         return
     end
@@ -428,6 +433,7 @@ function CC:ScrubAllClickAttributes(frame)
         for btn = 1, 5 do
             frame:SetAttribute(mod .. "type" .. btn, nil)
             frame:SetAttribute(mod .. "spell" .. btn, nil)
+            frame:SetAttribute(mod .. "macro" .. btn, nil)
             frame:SetAttribute(mod .. "macrotext" .. btn, nil)
             frame:SetAttribute(mod .. "unit" .. btn, nil)
             frame:SetAttribute(mod .. "clickbutton" .. btn, nil)
