@@ -7286,7 +7286,7 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
         -- Duration bar strip (Wave 3) — mirrors the row pages' defaults
         -- (Config.lua buffDurationBar*). OFF until the user enables it.
         durationBarEnabled = false, durationBarPosition = "BOTTOM",
-        durationBarHeight = 4, durationBarGap = 2,
+        durationBarHeight = 4, durationBarGap = 1, durationBarColorMode = "STATIC",
         durationBarTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Minimalist",
         durationBarColor = { r = 0.2, g = 0.9, b = 0.3, a = 1 },
         durationBarBGColor = { r = 0, g = 0, b = 0, a = 0.8 },
@@ -7452,8 +7452,15 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
         barChild(GUI:CreateDropdown(body, L["Position"], { BOTTOM = L["Bottom"], TOP = L["Top"] }, proxy, "durationBarPosition", refresh), 54)
         barChild(GUI:CreateSlider(body, L["Height"], 1, 12, 1, proxy, "durationBarHeight", refresh, refresh, true), 54)
         barChild(GUI:CreateSlider(body, L["Gap"], 0, 10, 1, proxy, "durationBarGap", refresh, refresh, true), 54)
-        barChild(GUI:CreateTextureDropdown(body, L["Bar Texture"], proxy, "durationBarTexture", refresh), 54)
-        barChild(GUI:CreateColorPicker(body, L["Bar Color"], proxy, "durationBarColor", true, refresh, refresh, true), 28)
+        barChild(GUI:CreateDropdown(body, L["Color Mode"],
+            { STATIC = L["Static"], DF = L["DF Curve"], CLASSIC = L["Classic Curve"] },
+            proxy, "durationBarColorMode", refresh), 54)
+        -- A curve mode brings its own ramp texture and forces a white tint, so these two
+        -- do nothing while it is selected - dim them rather than leave dead controls live.
+        local adBarTex = barChild(GUI:CreateTextureDropdown(body, L["Bar Texture"], proxy, "durationBarTexture", refresh), 54)
+        local adBarCol = barChild(GUI:CreateColorPicker(body, L["Bar Color"], proxy, "durationBarColor", true, refresh, refresh, true), 28)
+        adBarTex.disableOn = function() return DF:IsDurationBarCurveMode(proxy.durationBarColorMode) end
+        adBarCol.disableOn = adBarTex.disableOn
         barChild(GUI:CreateColorPicker(body, L["Background Color"], proxy, "durationBarBGColor", true, refresh, refresh, true), 28)
         barChild(GUI:CreateCheckbox(body, L["Reverse Fill"], proxy, "durationBarReverseFill", refresh), 28)
         UpdateBarGrey()

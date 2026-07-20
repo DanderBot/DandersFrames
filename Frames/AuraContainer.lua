@@ -428,7 +428,16 @@ local function styleBarShared(slot, sb, barSpec, dr, dg, db2, da)
     elseif slot.dfBarBG then
         slot.dfBarBG:SetColorTexture(0, 0, 0, 0)   -- background cleared
     end
-    sb:SetStatusBarColor(readColor(barSpec.color, dr, dg, db2, da))
+    -- Curve colour modes: the ramp IMAGE carries the colour, so the fill must stay
+    -- untinted — SetStatusBarColor multiplies the texture, and anything but white
+    -- would muddy the ramp. (BuildDurationBarSpec sets .curve when it swapped the
+    -- texture for a ramp; the configured .color is left alone so switching back to
+    -- Static restores it without a round trip through the GUI.)
+    if barSpec.curve then
+        sb:SetStatusBarColor(1, 1, 1, 1)
+    else
+        sb:SetStatusBarColor(readColor(barSpec.color, dr, dg, db2, da))
+    end
 end
 
 -- ============================================================

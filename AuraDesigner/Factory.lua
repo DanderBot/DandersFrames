@@ -1668,7 +1668,8 @@ local function groupStyleStructSig(group)
         .. "|" .. (s.durationBarEnabled == true
             and ("bar" .. (s.durationBarPosition == "TOP" and "TOP" or "BOTTOM") .. ":"
                 .. tostring(tonumber(s.durationBarHeight) or 4) .. ":"
-                .. tostring(tonumber(s.durationBarGap) or 2))
+                .. tostring(tonumber(s.durationBarGap) or 1) .. ":"
+                .. tostring(s.durationBarColorMode or "STATIC"))
             or "")
 end
 

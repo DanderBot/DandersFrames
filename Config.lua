@@ -1095,7 +1095,8 @@ DF.PartyDefaults = {
     buffDurationBarEnabled = false,
     buffDurationBarPosition = "BOTTOM",       -- "BOTTOM" / "TOP"
     buffDurationBarHeight = 4,
-    buffDurationBarGap = 2,
+    buffDurationBarGap = 1,
+    buffDurationBarColorMode = "STATIC",      -- STATIC / DF / CLASSIC (see BuildDurationBarSpec)
     buffDurationBarTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Minimalist",
     buffDurationBarColor = {r = 0.2, g = 0.9, b = 0.3, a = 1},
     buffDurationBarBGColor = {r = 0, g = 0, b = 0, a = 0.8},
@@ -1272,7 +1273,8 @@ DF.PartyDefaults = {
     debuffDurationBarEnabled = false,
     debuffDurationBarPosition = "BOTTOM",     -- "BOTTOM" / "TOP"
     debuffDurationBarHeight = 4,
-    debuffDurationBarGap = 2,
+    debuffDurationBarGap = 1,
+    debuffDurationBarColorMode = "STATIC",
     debuffDurationBarTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Minimalist",
     debuffDurationBarColor = {r = 0.2, g = 0.9, b = 0.3, a = 1},
     debuffDurationBarBGColor = {r = 0, g = 0, b = 0, a = 0.8},
@@ -1318,7 +1320,8 @@ DF.PartyDefaults = {
     defensiveDurationBarEnabled = false,
     defensiveDurationBarPosition = "BOTTOM",  -- "BOTTOM" / "TOP"
     defensiveDurationBarHeight = 4,
-    defensiveDurationBarGap = 2,
+    defensiveDurationBarGap = 1,
+    defensiveDurationBarColorMode = "STATIC",
     defensiveDurationBarTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Minimalist",
     defensiveDurationBarColor = {r = 0.2, g = 0.9, b = 0.3, a = 1},
     defensiveDurationBarBGColor = {r = 0, g = 0, b = 0, a = 0.8},
@@ -2243,7 +2246,14 @@ DF.PartyDefaults = {
     -- testShowTargetedList drives the Targeted List demo bars in party
     -- test mode. There is no raid-mode equivalent because the
     -- Targeted List itself is party-only.
-    testShowTargetedList = false,
+    --
+    -- The toggle defaults below MIRROR TEST_PRESETS.STATIC (TestMode/TestMode.lua),
+    -- so a fresh profile actually matches the preset the panel shows as selected
+    -- (testPreset = "STATIC"). They drifted apart once; if STATIC changes, change
+    -- these to match. The sliders (testBuffCount/testDebuffCount/testFrameCount)
+    -- are deliberately outside the preset - a working preference, not part of its
+    -- visual identity - so they have no STATIC counterpart.
+    testShowTargetedList = true,
     testAnimateTargetedList = true,
     testAnimateHealth = false,
     testBuffCount = 2,
@@ -2252,19 +2262,19 @@ DF.PartyDefaults = {
     testPreset = "STATIC",
     testShowAbsorbs = false,
     testShowAggro = false,
-    testShowAuras = false,
-    testShowDispelGlow = false,
+    testShowAuras = true,
+    testShowDispelGlow = true,
     testShowExternalDef = false,
     testShowHealPrediction = false,
     testShowMissingBuff = false,
     testShowOutOfRange = false,
     testShowPets = true,
-    testShowReducedMaxHealth = true,
+    testShowReducedMaxHealth = false,
     testShowSelection = false,
     testShowStatusIcons = true,
     testShowTargetedSpell = true,
     testShowPersonalTargeted = true,
-    testShowAuraDesigner = false,
+    testShowAuraDesigner = true,
     testShowTextDesigner = true,
 
     -- Tooltip settings

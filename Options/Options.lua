@@ -8,6 +8,15 @@ local format = string.format
 function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     local L = DF.L
 
+    -- Duration-bar colour modes, shared by the buff / debuff / defensive Bar Style
+    -- groups (the Aura Designer group cards mirror it). A curve mode swaps the fill
+    -- for a baked ramp image and forces a white tint, so Texture / Bar Color are dimmed
+    -- while one is active. Colours by FRACTION remaining, not seconds - the ramp is a
+    -- fixed image and is not driven by the colour pickers. See DF:BuildDurationBarSpec.
+    local function DurationBarColorModes()
+        return { STATIC = L["Static"], DF = L["DF Curve"], CLASSIC = L["Classic Curve"] }
+    end
+
     -- Small info banner with a hyperlink to the Colors page, dropped in under a
     -- "Color by Time Remaining" toggle so users can jump to where the shared,
     -- account-wide breakpoint colours actually live. Mirrors the Aura Filters
@@ -6138,8 +6147,16 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local durBarStyleGroup = GUI:CreateSettingsGroup(self.child, 260)
         durBarStyleGroup.hideOn = durBarSection.hideOn
         durBarStyleGroup:AddWidget(GUI:CreateHeader(self.child, L["Bar Style"]), 40)
-        durBarStyleGroup:AddWidget(GUI:CreateTextureDropdown(self.child, L["Texture"], db, "buffDurationBarTexture", BuffBarChanged), 55)
-        durBarStyleGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Bar Color"], db, "buffDurationBarColor", true, BuffBarChanged), 30)
+        durBarStyleGroup:AddWidget(GUI:CreateDropdown(self.child, L["Color Mode"], DurationBarColorModes(), db, "buffDurationBarColorMode", function()
+            self:RefreshStates()
+            BuffBarChanged()
+        end), 55)
+        local buffBarTex = durBarStyleGroup:AddWidget(GUI:CreateTextureDropdown(self.child, L["Texture"], db, "buffDurationBarTexture", BuffBarChanged), 55)
+        local buffBarCol = durBarStyleGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Bar Color"], db, "buffDurationBarColor", true, BuffBarChanged), 30)
+        -- A curve mode brings its own ramp texture and forces white, so these two do
+        -- nothing while it is selected - dim them rather than leave dead controls live.
+        buffBarTex.disableOn = function(d) return DF:IsDurationBarCurveMode(d.buffDurationBarColorMode) end
+        buffBarCol.disableOn = buffBarTex.disableOn
         durBarStyleGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Background Color"], db, "buffDurationBarBGColor", true, BuffBarChanged), 30)
         durBarStyleGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Reverse Fill"], db, "buffDurationBarReverseFill", BuffBarChanged), 30)
         durBarStyleGroup.disableChildrenOn = durBarGroup.disableChildrenOn
@@ -6415,8 +6432,16 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local durBarStyleGroup = GUI:CreateSettingsGroup(self.child, 260)
         durBarStyleGroup.hideOn = durBarSection.hideOn
         durBarStyleGroup:AddWidget(GUI:CreateHeader(self.child, L["Bar Style"]), 40)
-        durBarStyleGroup:AddWidget(GUI:CreateTextureDropdown(self.child, L["Texture"], db, "debuffDurationBarTexture", DebuffBarChanged), 55)
-        durBarStyleGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Bar Color"], db, "debuffDurationBarColor", true, DebuffBarChanged), 30)
+        durBarStyleGroup:AddWidget(GUI:CreateDropdown(self.child, L["Color Mode"], DurationBarColorModes(), db, "debuffDurationBarColorMode", function()
+            self:RefreshStates()
+            DebuffBarChanged()
+        end), 55)
+        local debuffBarTex = durBarStyleGroup:AddWidget(GUI:CreateTextureDropdown(self.child, L["Texture"], db, "debuffDurationBarTexture", DebuffBarChanged), 55)
+        local debuffBarCol = durBarStyleGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Bar Color"], db, "debuffDurationBarColor", true, DebuffBarChanged), 30)
+        -- A curve mode brings its own ramp texture and forces white, so these two do
+        -- nothing while it is selected - dim them rather than leave dead controls live.
+        debuffBarTex.disableOn = function(d) return DF:IsDurationBarCurveMode(d.debuffDurationBarColorMode) end
+        debuffBarCol.disableOn = debuffBarTex.disableOn
         durBarStyleGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Background Color"], db, "debuffDurationBarBGColor", true, DebuffBarChanged), 30)
         durBarStyleGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Reverse Fill"], db, "debuffDurationBarReverseFill", DebuffBarChanged), 30)
         durBarStyleGroup.disableChildrenOn = durBarGroup.disableChildrenOn
@@ -6926,8 +6951,16 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         durBarGroup:AddWidget(GUI:CreateDropdown(self.child, L["Position"], { BOTTOM = L["Bottom"], TOP = L["Top"] }, db, "defensiveDurationBarPosition", DefBarChanged), 55)
         durBarGroup:AddWidget(GUI:CreateSlider(self.child, L["Height"], 1, 12, 1, db, "defensiveDurationBarHeight", nil, DefBarChanged, true), 55)
         durBarGroup:AddWidget(GUI:CreateSlider(self.child, L["Gap"], 0, 10, 1, db, "defensiveDurationBarGap", nil, DefBarChanged, true), 55)
-        durBarGroup:AddWidget(GUI:CreateTextureDropdown(self.child, L["Texture"], db, "defensiveDurationBarTexture", DefBarChanged), 55)
-        durBarGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Bar Color"], db, "defensiveDurationBarColor", true, DefBarChanged), 30)
+        durBarGroup:AddWidget(GUI:CreateDropdown(self.child, L["Color Mode"], DurationBarColorModes(), db, "defensiveDurationBarColorMode", function()
+            self:RefreshStates()
+            DefBarChanged()
+        end), 55)
+        local defBarTex = durBarGroup:AddWidget(GUI:CreateTextureDropdown(self.child, L["Texture"], db, "defensiveDurationBarTexture", DefBarChanged), 55)
+        local defBarCol = durBarGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Bar Color"], db, "defensiveDurationBarColor", true, DefBarChanged), 30)
+        -- A curve mode brings its own ramp texture and forces white, so these two do
+        -- nothing while it is selected - dim them rather than leave dead controls live.
+        defBarTex.disableOn = function(d) return DF:IsDurationBarCurveMode(d.defensiveDurationBarColorMode) end
+        defBarCol.disableOn = defBarTex.disableOn
         durBarGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Background Color"], db, "defensiveDurationBarBGColor", true, DefBarChanged), 30)
         durBarGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Reverse Fill"], db, "defensiveDurationBarReverseFill", DefBarChanged), 30)
         Add(durBarGroup, nil, 1)

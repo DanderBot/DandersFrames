@@ -743,28 +743,64 @@ function DF:BuildAuraSort(order, mineFirst, reverse)
     return { method = method, direction = reverse and "Reverse" or nil }
 end
 
+-- Colour-mode ramps. A StatusBar CROPS its fill texture to the filled fraction, so a
+-- baked colour RAMP as the texture makes the visible tip colour walk the ramp as the
+-- native fill drains: colour-by-remaining with ZERO reads, which is the only way to do
+-- it in 12.1 (remaining time is secret). Two hard constraints, both probe-confirmed
+-- 2026-07-20 (see the 12.1 lockdown notes + DF_AuraLab "Duration bar" verdicts):
+--   * it keys off FRACTION remaining, never seconds — so it CANNOT mirror the
+--     seconds-based durationColorByTimeBreakpoints thresholds, only their palette;
+--   * the ramps are baked images and deliberately NOT driven by the colour pickers.
+--     The fill crop clips only the statusbar's own texture (children are untouched),
+--     and GetValue() returns a SECRET number, so neither a segmented ramp nor a
+--     self-tinted one is possible. Don't re-litigate this without a new probe.
+-- One orientation per curve. The ramp is painted for the DRAIN case: red at the left
+-- end, green at the right, so the tip walks green -> red as the bar empties. That is
+-- the only case there is - the bar always drains (see `direction` below), and Reverse
+-- Fill needs NO mirrored art [confirmed in-game 2026-07-20]: the StatusBar flips the
+-- texture along with the fill, so the ramp's relationship to the tip already survives.
+local CURVE_TEXTURES = {
+    DF      = "Interface\\AddOns\\DandersFrames\\Media\\DF_Curve",
+    CLASSIC = "Interface\\AddOns\\DandersFrames\\Media\\Classic_Curve",
+}
+
+-- Shared predicate: does this colour mode swap the fill texture for a ramp? The GUI
+-- uses it to dim Texture / Bar Color, both of which a curve mode overrides. One source
+-- of truth: add a ramp to CURVE_TEXTURES above and every consumer follows.
+function DF:IsDurationBarCurveMode(mode) return CURVE_TEXTURES[mode] ~= nil end
+
 -- Duration bar (Wave 3, #205): prefixed key block -> the engine's style.bar
 -- STRIP spec (fill = false; the fill shape is AD-only). Returns nil when the
 -- Enabled key is off/absent, so disabled configs stay byte-identical to
 -- pre-Wave-3 output (no style.bar key at all). The tonumber clamps are
 -- load-bearing: they guarantee styling (styleBarShared / strip geometry) and
 -- the layout reservation (stripReservation) see the SAME number for height/gap
--- even if a profile carries garbage — both engine defaults are 4/2.
+-- even if a profile carries garbage — both engine defaults are 4/1.
 -- SHARED: rows pass (db, "buffDurationBar"/"debuffDurationBar"/
 -- "defensiveDurationBar"); the AD group families pass (group.style,
 -- "durationBar") — one builder, callers feed their own storage.
 function DF:BuildDurationBarSpec(store, keyPrefix)
     if not store or store[keyPrefix .. "Enabled"] ~= true then return nil end
+    local curve = CURVE_TEXTURES[store[keyPrefix .. "ColorMode"]]
     return {
         show        = true,
         fill        = false,   -- strip shape (out-of-rect; the engine reserves wrap space)
         position    = (store[keyPrefix .. "Position"] == "TOP") and "TOP" or "BOTTOM",
         height      = tonumber(store[keyPrefix .. "Height"]) or 4,
-        gap         = tonumber(store[keyPrefix .. "Gap"]) or 2,
-        texture     = store[keyPrefix .. "Texture"],
+        gap         = tonumber(store[keyPrefix .. "Gap"]) or 1,
+        -- Curve mode overrides the configured texture; `curve` tells styleBarShared to
+        -- force a white tint, since any colour would multiply the ramp and muddy it.
+        texture     = curve or store[keyPrefix .. "Texture"],
+        curve       = curve and true or nil,
         color       = store[keyPrefix .. "Color"],
         bgColor     = store[keyPrefix .. "BGColor"],
         reverseFill = store[keyPrefix .. "ReverseFill"] and true or false,
+        -- Enum.StatusBarTimerDirection MEMBER NAME, and deliberately NOT a setting.
+        -- RemainingTime = the bar DRAINS; ElapsedTime (Blizzard's default, hence the
+        -- explicit pass) fills from empty as the aura runs, which contradicts what a
+        -- "duration bar" means and runs the colour curve backwards. Nobody wants that,
+        -- so we don't expose it. Reverse Fill still flips which END it drains toward.
+        direction   = "RemainingTime",
     }
 end
 
