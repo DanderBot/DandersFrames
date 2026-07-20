@@ -949,7 +949,7 @@ end
 -- (nothing to count down while the buff is absent).
 local function alertElemMode(indicator)
     local m = indicator.expiryAlertMode
-    if m == "TEXT" or m == "GLYPH" then return m end
+    if m == "TEXT" or m == "GLYPH" or m == "BORDER" then return m end
     return nil
 end
 
@@ -959,15 +959,55 @@ end
 -- formatter is bind-frozen and its text placement is a button-child write —
 -- forbidden post-init while auras are secret (PTR-5) — so any change Rebuilds
 -- the companion slot (positioning is applied at init, bind-frozen thereafter).
+-- BORDER mode AUTO-MATCHES the icon (a frame should track the icon, not a hand-tuned
+-- number). Calibration: a |T inline texture inside a fontstring measures ~0.75x the icon
+-- container's pixels for the same on-screen size — a fixed rendering offset, not scale-
+-- dependent (both ride the same UI scale). Inset (px, DF.Border convention: +inward)
+-- shrinks/grows the frame off the icon edge. Match off, or TEXT/GLYPH mode, uses the
+-- manual expiryAlertSize slider. One source — struct key + companion + preview — so the
+-- baked |T size and the rebuild trigger can never disagree.
+local BORDER_ICON_RATIO = 0.75
+local function effectiveAlertSize(indicator)
+    if alertElemMode(indicator) ~= "BORDER" then
+        return math.max(1, math.floor(tonumber(indicator.expiryAlertSize) or 14))
+    end
+    local base = (indicator.expiryAlertBorderMatchIcon ~= false)
+        and ((tonumber(indicator.size) or 24) * BORDER_ICON_RATIO)
+        or (tonumber(indicator.expiryAlertSize) or 18)
+    -- Inset nudges the frame off the icon edge (px in |T space ~= 1.3px on screen; +inward).
+    -- 1x, not 2x — a full per-side inset read as too coarse a jump in-game.
+    base = base - (tonumber(indicator.expiryAlertBorderInset) or 0)
+    return math.max(1, math.floor(base + 0.5))
+end
+
+-- BORDER frames the icon, so it is ALWAYS centred (the Anchor control is greyed for it —
+-- any other anchor just de-centres the frame). TEXT/GLYPH keep the user's chosen anchor.
+local function effectiveAlertAnchor(indicator)
+    if alertElemMode(indicator) == "BORDER" then return "CENTER" end
+    return indicator.expiryAlertAnchor or "TOP"
+end
+
 local function alertElemStructKey(indicator)
     local mode = alertElemMode(indicator)
     if not mode then return "" end
-    return (DF.GetExpiryAlertFmtKey and DF:GetExpiryAlertFmtKey(mode,
+    -- effectiveAlertSize folds indicator.size + border match/inset, so resizing the icon
+    -- moves this key and Rebuilds the companion (the |T size is bind-frozen in the band).
+    local key = (DF.GetExpiryAlertFmtKey and DF:GetExpiryAlertFmtKey(mode,
             indicator.expiryAlertThreshold, indicator.expiryAlertText, indicator.expiryAlertGlyph) or "")
-        .. ":S" .. tostring(math.floor(tonumber(indicator.expiryAlertSize) or 14))
-        .. ":P" .. tostring(indicator.expiryAlertAnchor or "TOP")
+        .. ":S" .. tostring(effectiveAlertSize(indicator))
+        .. ":P" .. effectiveAlertAnchor(indicator)
         .. "," .. tostring(tonumber(indicator.expiryAlertOffsetX) or 0)
         .. "," .. tostring(tonumber(indicator.expiryAlertOffsetY) or 0)
+    if mode == "BORDER" then
+        -- Colour identity: the static colour, or the breakpoints sig for by-time (a Colours-
+        -- page edit must rebuild the bind-frozen formatter). Size/inset/match ride :S above.
+        local cm = indicator.expiryAlertBorderColorMode or "STATIC"
+        key = key .. ":B" .. cm .. ":" .. ((cm == "BYTIME")
+            and (DF.GetDurationBreakpointsSig and DF:GetDurationBreakpointsSig() or "")
+            or colSig(indicator.expiryAlertBorderColor))
+            .. ":T" .. tostring(indicator.expiryAlertBorderThickness or "MEDIUM")
+    end
+    return key
 end
 
 -- Resolve the profile's GLOBAL colour-by-time default for placed/bar duration text:
@@ -1045,6 +1085,13 @@ local function buildPlacedStyle(indicator, isSquare, borderSpec, defCBT)
 
     if borderSpec then style.border = { spec = borderSpec } end
 
+    -- Duration bar strip: the ROW's shared spec builder over the indicator's own
+    -- durationBar* keys (identical keying to filter groups and the buff/debuff
+    -- rows). nil when disabled/absent, so a bar-less indicator's style is
+    -- byte-identical to the pre-feature output. Icon AND square both carry it —
+    -- the strip hangs off the slot edge regardless of the slot's content shape.
+    style.bar = DF.BuildDurationBarSpec and DF:BuildDurationBarSpec(indicator, "durationBar") or nil
+
     -- Expiry Alert element: rendered by a separate COMPANION SLOT, never by this
     -- button (one duration binding per button — see EXPIRY ALERT COMPANION SLOT).
     return style
@@ -1114,6 +1161,17 @@ local function placedStructSig(map, isSquare, hideIcon, showStacks, showDuration
         -- (No alert keys: the expiry alert lives on the COMPANION slot, whose own
         -- structSig carries alertElemStructKey — an alert edit rebuilds only it.)
         .. "|f=" .. poolFilter(indicator, mine)   -- filter string binds at build (pool/othersOnly change -> Rebuild)
+        -- Duration bar presence + GEOMETRY (mirror groupStyleStructSig): the strip
+        -- region is create-once and reserves wrap space outside the button rect, so
+        -- enable/position/height/gap/colorMode ride the struct sig (Rebuild). Cosmetics
+        -- (texture/colour/reverseFill) hot-apply — they live in placedCoSig. "" when
+        -- disabled/absent, so a bar-less indicator sigs identically to pre-feature.
+        .. "|" .. (indicator.durationBarEnabled == true
+            and ("bar" .. (indicator.durationBarPosition == "TOP" and "TOP" or "BOTTOM") .. ":"
+                .. tostring(tonumber(indicator.durationBarHeight) or 4) .. ":"
+                .. tostring(tonumber(indicator.durationBarGap) or 1) .. ":"
+                .. tostring(indicator.durationBarColorMode or "STATIC"))
+            or "")
 end
 
 -- COSMETIC signature: size/anchor/offset/scale/alpha, swipe, duration/stack styling, square
@@ -1143,6 +1201,15 @@ local function placedCoSig(indicator, isSquare, borderOn, alpha)
             colSig(indicator.stackColor),
         }, ","),
         "bd=" .. placedBorderRawSig(indicator, borderOn),
+        -- Duration-bar COSMETICS (texture / colour / bg / reverse-fill) hot-apply via
+        -- styleBarShared; geometry/presence is structural (placedStructSig). Serialised
+        -- only when the bar is on — an off bar contributes nothing, matching the sig.
+        "bar=" .. (indicator.durationBarEnabled == true and tconcat({
+            tostring(indicator.durationBarTexture),
+            tostring(indicator.durationBarColorMode or "STATIC"),
+            colSig(indicator.durationBarColor), colSig(indicator.durationBarBGColor),
+            tostring(indicator.durationBarReverseFill and 1 or 0),
+        }, ",") or ""),
         -- (No alert entry: the expiry alert renders on its COMPANION slot with
         -- its own struct/cosmetic sigs — this container never carries it.)
     }
@@ -1312,12 +1379,20 @@ end
 local function buildAlertCompanionConfig(unit, map, indicator, layout, mine)
     local mode = alertElemMode(indicator)
     if not mode then return nil end
-    local formatter = DF.GetExpiryAlertElementFormatter
-        and DF:GetExpiryAlertElementFormatter(mode, indicator.expiryAlertThreshold,
-            indicator.expiryAlertText, indicator.expiryAlertGlyph, indicator.expiryAlertSize)
+    -- effectiveAlertSize auto-matches BORDER to the icon; atlas GLYPH / TEXT use the slider.
+    local size = effectiveAlertSize(indicator)
+    local formatter
+    if mode == "BORDER" then
+        formatter = DF.GetExpiryBorderElementFormatter and DF:GetExpiryBorderElementFormatter(
+            indicator.expiryAlertThreshold, size,
+            indicator.expiryAlertBorderColorMode, indicator.expiryAlertBorderColor,
+            indicator.expiryAlertBorderThickness)
+    else
+        formatter = DF.GetExpiryAlertElementFormatter and DF:GetExpiryAlertElementFormatter(
+            mode, indicator.expiryAlertThreshold,
+            indicator.expiryAlertText, indicator.expiryAlertGlyph, size)
+    end
     if not formatter then return nil end   -- pre-12.1 formatter API missing: no companion
-    local size = math.floor(tonumber(indicator.expiryAlertSize) or 14)
-    if size < 1 then size = 1 end
     return {
         unit = unit,
         mode = "row",
@@ -1349,7 +1424,7 @@ local function buildAlertCompanionConfig(unit, map, indicator, layout, mine)
                 font      = indicator.durationFont,
                 size      = size,
                 outline   = "OUTLINE",
-                anchor    = indicator.expiryAlertAnchor or "TOP",
+                anchor    = effectiveAlertAnchor(indicator),
                 offsetX   = tonumber(indicator.expiryAlertOffsetX) or 0,
                 offsetY   = tonumber(indicator.expiryAlertOffsetY) or 0,
                 level     = 7,
@@ -1453,13 +1528,22 @@ end
 local function buildAlertPreview(indicator)
     local mode = alertElemMode(indicator)
     if indicator.showWhenMissing then return nil end
-    if not mode or not DF.GetExpiryAlertPayload then return nil end
-    local size = math.floor(tonumber(indicator.expiryAlertSize) or 14)
-    if size < 1 then size = 1 end
+    if not mode then return nil end
+    local size = effectiveAlertSize(indicator)   -- BORDER auto-matches the icon
+    local payload
+    if mode == "BORDER" then
+        -- Static: the picked colour. By-time: the canvas is one still frame, so show the
+        -- "about to expire" end (red) — the most representative moment.
+        local col = (indicator.expiryAlertBorderColorMode == "BYTIME")
+            and { r = 1, g = 0.2, b = 0.2 } or indicator.expiryAlertBorderColor
+        payload = DF.GetExpiryBorderEscape and DF:GetExpiryBorderEscape(size, col, indicator.expiryAlertBorderThickness)
+    elseif DF.GetExpiryAlertPayload then
+        payload = DF:GetExpiryAlertPayload(mode, indicator.expiryAlertText, indicator.expiryAlertGlyph, size)
+    end
+    if not payload then return nil end
     return {
-        payload = DF:GetExpiryAlertPayload(mode, indicator.expiryAlertText,
-            indicator.expiryAlertGlyph, size),
-        anchor  = indicator.expiryAlertAnchor or "TOP",
+        payload = payload,
+        anchor  = effectiveAlertAnchor(indicator),
         offsetX = tonumber(indicator.expiryAlertOffsetX) or 0,
         offsetY = tonumber(indicator.expiryAlertOffsetY) or 0,
         size    = size,

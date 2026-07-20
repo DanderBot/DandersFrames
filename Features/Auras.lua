@@ -295,21 +295,48 @@ DF.ExpiryAlertGlyphs = {
     { key = "WARNING",      atlas = "services-icon-warning",      name = "Warning Sign" },
     { key = "PING_WARNING", atlas = "Ping_Marker_Icon_Warning",   name = "Warning Ping" },
     { key = "PING_ATTACK",  atlas = "Ping_Marker_Icon_Attack",    name = "Attack Ping" },
-    { key = "RED_ALERT",    atlas = "UI-HUD-MicroMenu-RedAlert",  name = "Red Alert" },
     { key = "RED_X",        atlas = "UI-LFG-DeclineMark",         name = "Red X" },
     { key = "EXCLAMATION",  atlas = "QuestNormal",                name = "Exclamation Mark" },
     { key = "CLOCK",        atlas = "auctionhouse-icon-clock",    name = "Clock" },
     { key = "STAR",         atlas = "auctionhouse-icon-favorite", name = "Star" },
 }
 
--- Stored glyph key -> atlas name; unknown/missing keys fall back to entry 1 so a
--- stale profile value still renders SOMETHING rather than a broken escape.
-function DF:GetExpiryAlertAtlas(key)
+-- Expiry BORDER mode art: white-mask frame TGAs, revealed below the alert threshold via a |T
+-- band and vertex-tinted (0-255) so one asset serves any colour. A scaled bitmap can't vary
+-- its line weight, so THICKNESS is three separate arts (same 64px sheet, different band px).
+-- NOT a glyph — Border is its own alert mode (own size/inset/colour/thickness controls).
+local EXPIRE_BORDER_TEXSIZE = 64
+local EXPIRE_BORDER_TEXTURES = {
+    THIN   = "Interface\\AddOns\\DandersFrames\\Media\\DF_ExpireBorder_Thin",
+    MEDIUM = "Interface\\AddOns\\DandersFrames\\Media\\DF_ExpireBorder",
+    THICK  = "Interface\\AddOns\\DandersFrames\\Media\\DF_ExpireBorder_Thick",
+}
+local function borderTexture(thickness) return EXPIRE_BORDER_TEXTURES[thickness] or EXPIRE_BORDER_TEXTURES.MEDIUM end
+
+-- Resolve a glyph key -> its entry (atlas OR texture). Unknown/missing keys fall back to
+-- entry 1 so a stale profile value still renders SOMETHING rather than a broken escape.
+function DF:GetExpiryAlertGlyph(key)
     local list = DF.ExpiryAlertGlyphs
     for i = 1, #list do
-        if list[i].key == key then return list[i].atlas end
+        if list[i].key == key then return list[i] end
     end
-    return list[1].atlas
+    return list[1]
+end
+
+-- Cache-key token for a glyph: its atlas name (uniquely identifies the art). Used only to
+-- key the formatter cache.
+function DF:GetExpiryAlertAtlas(key)
+    return DF:GetExpiryAlertGlyph(key).atlas
+end
+
+-- SINGLE source for the inline glyph escape, shared by the live alert band (element + inline
+-- prefix) and the editor dropdown/preview so none can drift. `size` bakes into the escape —
+-- the caller treats an alert change as structural.
+function DF:GetExpiryAlertGlyphEscape(key, size)
+    local gl = DF:GetExpiryAlertGlyph(key)
+    local s = math.floor(tonumber(size) or 16)
+    if s < 1 then s = 1 end
+    return "|A:" .. tostring(gl.atlas) .. ":" .. s .. ":" .. s .. "|a"
 end
 
 -- Sanitize user alert text for use as a NumericRuleFormatter band format string.
@@ -326,9 +353,12 @@ end
 -- must move the slot signature -> Rebuild. Used by the Aura Designer factory
 -- (its expiry-alert struct sigs append this).
 function DF:GetExpiryAlertFmtKey(mode, threshold, text, glyphKey)
-    if mode ~= "TEXT" and mode ~= "GLYPH" then return "" end
-    return ":X" .. mode .. ":" .. tostring(tonumber(threshold) or 5) .. ":"
-        .. (mode == "GLYPH" and tostring(glyphKey or "") or tostring(text or ""))
+    if mode ~= "TEXT" and mode ~= "GLYPH" and mode ~= "BORDER" then return "" end
+    -- BORDER identity (colour mode / colour / inset / size) rides the struct key in the
+    -- factory (alertElemStructKey), so the base key here is just mode + threshold.
+    local tail = (mode == "GLYPH" and tostring(glyphKey or ""))
+        or (mode == "TEXT" and tostring(text or "")) or ""
+    return ":X" .. mode .. ":" .. tostring(tonumber(threshold) or 5) .. ":" .. tail
 end
 
 -- Display payload for one Expiry Alert band/preview: the sized |A atlas escape
@@ -337,9 +367,7 @@ end
 -- formatter below and the AD editor's canvas preview so the two can never drift.
 function DF:GetExpiryAlertPayload(mode, text, glyphKey, size)
     if mode == "GLYPH" then
-        local s = math.floor(tonumber(size) or 14)
-        if s < 1 then s = 1 end
-        return "|A:" .. DF:GetExpiryAlertAtlas(glyphKey) .. ":" .. s .. ":" .. s .. "|a"
+        return DF:GetExpiryAlertGlyphEscape(glyphKey, tonumber(size) or 14)
     end
     local txt = SanitizeAlertText(text)
     if txt ~= "" and not txt:find("|c", 1, true) then txt = "|cffff0000" .. txt .. "|r" end
@@ -356,6 +384,28 @@ end
 local function colorToHex(c)
     local function b255(x) return math.max(0, math.min(255, math.floor((tonumber(x) or 1) * 255 + 0.5))) end
     return string.format("%02x%02x%02x", b255(c.r or c[1]), b255(c.g or c[2]), b255(c.b or c[3]))
+end
+
+-- Expiry BORDER escape: the full |T inline-texture form tinting the white-mask frame TGA to
+-- (r,g,b from `hex`) at `size` px. path:h:w:offX:offY:texW:texH:l:r:t:b:R:G:B — the trailing
+-- vertex-colour args (0-255) do the tint, texW/texH + full texel range from the texture size.
+-- [LIVE 2026-07-20] |T renders + tints inside the secret-safe band formatter. Defined after
+-- colorToHex so the public wrapper below can reach it (a local isn't in scope for earlier fns).
+local function borderEscapeHex(size, hex, texture)
+    local ts = EXPIRE_BORDER_TEXSIZE
+    local r = tonumber(hex:sub(1, 2), 16) or 255
+    local g = tonumber(hex:sub(3, 4), 16) or 255
+    local b = tonumber(hex:sub(5, 6), 16) or 255
+    return "|T" .. texture .. ":" .. size .. ":" .. size .. ":0:0:" .. ts .. ":" .. ts
+        .. ":0:" .. ts .. ":0:" .. ts .. ":" .. r .. ":" .. g .. ":" .. b .. "|t"
+end
+
+-- Public: one tinted border escape at `size` (px) / `color` ({r,g,b} 0-1) / `thickness`
+-- (THIN/MEDIUM/THICK). The AD editor's canvas preview uses this; the live formatter calls
+-- borderEscapeHex per band.
+function DF:GetExpiryBorderEscape(size, color, thickness)
+    local s = math.max(1, math.floor(tonumber(size) or 18))
+    return borderEscapeHex(s, colorToHex(color or { r = 1, g = 0.2, b = 0.2 }), borderTexture(thickness))
 end
 
 -- Account-wide colour-by-time breakpoints (editable on the Colours page). Resolve to a
@@ -465,7 +515,7 @@ local function BuildDurationFormatter(format, hideAboveT, colorByTime, alertMode
             -- inside the alert region. Fixed size: the formatter is CACHED + bind-frozen
             -- while font size changes ride the LIGHTWEIGHT text update, so a font-derived
             -- size would go stale on a scale drag.
-            local glyphPfx = (alertMode == "GLYPH") and ("|A:" .. (alertAtlas or "") .. ":16:16|a ") or nil
+            local glyphPfx = (alertMode == "GLYPH") and (DF:GetExpiryAlertGlyphEscape(alertGlyphKey, 16) .. " ") or nil
             local cuts = {}    -- thresholds already holding a band
             local bands = {}   -- buffered: emitted ASCENDING below (the resume band
                                -- can be composed out of order; the pre-alert code
@@ -665,6 +715,50 @@ function DF:GetExpiryAlertElementFormatter(mode, threshold, text, glyphKey, size
     if durationFormatterCache[key] == nil then
         durationFormatterCache[key] = BuildDurationFormatter(nil, nil, nil,
             mode, threshold, text, alertAtlas, true, size, glyphKey) or false
+    end
+    return durationFormatterCache[key] or nil
+end
+
+-- Expiry BORDER element formatter (AD placed indicators): the |T frame TGA revealed below
+-- the alert threshold, empty above. Two colour modes, both secret-safe (Blizzard picks the
+-- band from the SECRET remaining time):
+--   STATIC  -> one band, |T tinted to `staticColor`.
+--   BYTIME  -> one band per GetDurationColorBreakpoints() step below the threshold, each |T
+--              tinted to that breakpoint's colour — the SAME palette the duration TEXT uses,
+--              so border and text escalate together. Breakpoints sig keys the cache (and the
+--              factory struct key) so a Colours-page edit rebuilds the bind-frozen formatter.
+-- Cached under an "XBEL|" prefix (duration-text keys start with the format name, never "X").
+function DF:GetExpiryBorderElementFormatter(threshold, size, colorMode, staticColor, thickness)
+    if not (C_StringUtil and C_StringUtil.CreateNumericRuleFormatter and Enum and Enum.NumericRuleFormatRounding) then return nil end
+    local alertT = tonumber(threshold) or 5
+    if alertT < 1 then alertT = 1 end
+    local s = math.max(1, math.floor(tonumber(size) or 18))
+    local tex = borderTexture(thickness)
+    local byTime = (colorMode == "BYTIME")
+    local key = "XBEL|" .. tostring(alertT) .. ":" .. tostring(s) .. ":" .. tostring(thickness or "MEDIUM") .. ":"
+        .. (byTime and ("T:" .. DF:GetDurationBreakpointsSig()) or ("S:" .. colorToHex(staticColor or { r = 1, g = 0.2, b = 0.2 })))
+    if durationFormatterCache[key] == nil then
+        local ok, f = pcall(function()
+            local down = Enum.NumericRuleFormatRounding.Down
+            local fmt = C_StringUtil.CreateNumericRuleFormatter()
+            if byTime then
+                -- One coloured band per breakpoint BELOW the threshold (a bp AT/above the
+                -- threshold never renders — the empty band covers it). The band starting at
+                -- bp.threshold holds bp's colour up to the next-higher band (mirrors colorHexAt).
+                for _, bp in ipairs(GetDurationColorBreakpoints()) do
+                    if bp.threshold < alertT then
+                        fmt:AddBreakpoint({ threshold = bp.threshold, step = 1, rounding = down, min = 1,
+                            format = borderEscapeHex(s, bp.hex, tex) })
+                    end
+                end
+            else
+                fmt:AddBreakpoint({ threshold = 0, step = 1, rounding = down, min = 1,
+                    format = borderEscapeHex(s, colorToHex(staticColor or { r = 1, g = 0.2, b = 0.2 }), tex) })
+            end
+            fmt:AddBreakpoint({ threshold = alertT, step = 1, rounding = down, format = "" })   -- empty above threshold
+            return fmt
+        end)
+        durationFormatterCache[key] = (ok and f) or false
     end
     return durationFormatterCache[key] or nil
 end

@@ -1263,6 +1263,10 @@ local TYPE_DEFAULTS = {
         expiryAlertText = "", expiryAlertGlyph = "WARNING",
         expiryAlertAnchor = "TOP", expiryAlertOffsetX = 0, expiryAlertOffsetY = 0,
         expiryAlertSize = 14,
+        -- Expiry Alert BORDER mode (secret-safe expiring frame): colour + auto-match + inset.
+        expiryAlertBorderMatchIcon = true, expiryAlertBorderInset = 0,
+        expiryAlertBorderColorMode = "STATIC", expiryAlertBorderThickness = "MEDIUM",
+        expiryAlertBorderColor = {r = 1, g = 0.2, b = 0.2, a = 1},
         showStacks = true, stackMinimum = 2,
         stackFont = "DF Roboto SemiBold", stackScale = 1.0,
         stackOutline = "SHADOW;OUTLINE", stackAnchor = "BOTTOMRIGHT",
@@ -1311,6 +1315,15 @@ local TYPE_DEFAULTS = {
         ExpiringBorderSize  = 1,
         ExpiringBorderAlpha = 1,
         expiringWholeAlphaPulse = false, expiringBounce = false,
+        -- Duration bar strip (mirrors the buff/debuff rows + filter-group cards):
+        -- a native SetDurationBar-driven strip under/over the icon. OFF by default;
+        -- render fallbacks live in DF:BuildDurationBarSpec — these seed the editor.
+        durationBarEnabled = false, durationBarPosition = "BOTTOM",
+        durationBarHeight = 4, durationBarGap = 1, durationBarColorMode = "STATIC",
+        durationBarTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Minimalist",
+        durationBarColor = {r = 0.2, g = 0.9, b = 0.3, a = 1},
+        durationBarBGColor = {r = 0, g = 0, b = 0, a = 0.8},
+        durationBarReverseFill = false,
         frameLevel = 30, frameStrata = "INHERIT",
         showWhenMissing = false, missingDesaturate = false,
     },
@@ -1362,6 +1375,10 @@ local TYPE_DEFAULTS = {
         expiryAlertText = "", expiryAlertGlyph = "WARNING",
         expiryAlertAnchor = "TOP", expiryAlertOffsetX = 0, expiryAlertOffsetY = 0,
         expiryAlertSize = 14,
+        -- Expiry Alert BORDER mode (secret-safe expiring frame): colour + auto-match + inset.
+        expiryAlertBorderMatchIcon = true, expiryAlertBorderInset = 0,
+        expiryAlertBorderColorMode = "STATIC", expiryAlertBorderThickness = "MEDIUM",
+        expiryAlertBorderColor = {r = 1, g = 0.2, b = 0.2, a = 1},
         showStacks = true, stackMinimum = 2,
         stackFont = "DF Roboto SemiBold", stackScale = 1.0,
         stackOutline = "SHADOW;OUTLINE", stackAnchor = "BOTTOMRIGHT",
@@ -1396,6 +1413,15 @@ local TYPE_DEFAULTS = {
         ExpiringAnimationSidesAxis    = "HORIZONTAL",
         ExpiringAnimationCornerLength = 10,
         expiringWholeAlphaPulse = false, expiringBounce = false,
+        -- Duration bar strip (mirrors the icon card): a native SetDurationBar-driven
+        -- strip under/over the square. OFF by default; render fallbacks live in
+        -- DF:BuildDurationBarSpec — these seed the editor.
+        durationBarEnabled = false, durationBarPosition = "BOTTOM",
+        durationBarHeight = 4, durationBarGap = 1, durationBarColorMode = "STATIC",
+        durationBarTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Minimalist",
+        durationBarColor = {r = 0.2, g = 0.9, b = 0.3, a = 1},
+        durationBarBGColor = {r = 0, g = 0, b = 0, a = 0.8},
+        durationBarReverseFill = false,
         frameLevel = 30, frameStrata = "INHERIT",
         showWhenMissing = false,
     },
@@ -1722,37 +1748,81 @@ local GLOBAL_DEFAULT_MAP = {
 -- can't be animated while auras are secret (PTR-5), and out-of-combat-only
 -- animation is worthless for an expiry warning.
 local function AddExpiryAlertControls(g, parent, proxy)
-    local textBox, glyphDrop, dependents
+    local textBox, glyphDrop, matchCb, colorModeDrop, colorPick, insetSlider, thicknessDrop, anchorDrop, sizeSlider, dependents
+    -- Sub-table colour writes skip the proxy __newindex, so drive the refresh by hand
+    -- (mirrors BuildTypeContent's RPL; RefreshPreviewLightweight is assigned by editor open).
+    local function refresh()
+        if RefreshPreviewLightweight then RefreshPreviewLightweight() end
+        RefreshLiveFramesThrottled()
+    end
     local function UpdateState()
         local mode = proxy.expiryAlertMode or "OFF"
+        local on = mode ~= "OFF"
+        local isBorder = mode == "BORDER"
         if textBox then textBox:SetEnabled(mode == "TEXT") end
         if glyphDrop then glyphDrop:SetEnabled(mode == "GLYPH") end
-        if dependents then
-            for _, w in ipairs(dependents) do w:SetEnabled(mode ~= "OFF") end
-        end
+        if matchCb then matchCb:SetEnabled(isBorder) end
+        if colorModeDrop then colorModeDrop:SetEnabled(isBorder) end
+        -- By-time follows the Colours page, so the static picker is dead then.
+        if colorPick then colorPick:SetEnabled(isBorder and proxy.expiryAlertBorderColorMode ~= "BYTIME") end
+        if insetSlider then insetSlider:SetEnabled(isBorder) end
+        if thicknessDrop then thicknessDrop:SetEnabled(isBorder) end
+        -- A Border always frames the icon (centred), so its Anchor is fixed — grey it there.
+        if anchorDrop then anchorDrop:SetEnabled(on and not isBorder) end
+        -- Manual Size applies for every mode EXCEPT a Border that's matching the icon (auto).
+        if sizeSlider then sizeSlider:SetEnabled(on and not (isBorder and proxy.expiryAlertBorderMatchIcon ~= false)) end
+        if dependents then for _, w in ipairs(dependents) do w:SetEnabled(on) end end
     end
-    local modeOptions = { OFF = L["Off"], TEXT = L["Custom Text"], GLYPH = L["Glyph"],
-                          _order = { "OFF", "TEXT", "GLYPH" } }
+    local modeOptions = { OFF = L["Off"], TEXT = L["Custom Text"], GLYPH = L["Glyph"], BORDER = L["Border"],
+                          _order = { "OFF", "TEXT", "GLYPH", "BORDER" } }
     g:AddWidget(GUI:CreateDropdown(parent, L["Expiry Alert"], modeOptions, proxy, "expiryAlertMode",
         UpdateState), 54)
     textBox = GUI:CreateEditBox(parent, L["Alert Text"], proxy, "expiryAlertText")
     g:AddWidget(textBox, 48)
     local glyphOptions = { _order = {} }
     for i, gl in ipairs(DF.ExpiryAlertGlyphs) do
-        glyphOptions[gl.key] = "|A:" .. gl.atlas .. ":16:16|a " .. L[gl.name]
+        -- Shared escape builder (atlas -> |A, texture -> |T) so the dropdown preview
+        -- can never drift from the live band string.
+        glyphOptions[gl.key] = DF:GetExpiryAlertGlyphEscape(gl.key, 16) .. " " .. L[gl.name]
         glyphOptions._order[i] = gl.key
     end
     glyphDrop = GUI:CreateDropdown(parent, L["Glyph"], glyphOptions, proxy, "expiryAlertGlyph")
     g:AddWidget(glyphDrop, 54)
+    -- ── BORDER controls (greyed unless mode = Border) — a secret-safe expiring frame:
+    -- an addon TGA revealed below the threshold via a |T band, tinted statically OR stepped
+    -- through the same Colours-page breakpoints the duration text uses.
+    matchCb = GUI:CreateCheckbox(parent, L["Match Icon Size"], proxy, "expiryAlertBorderMatchIcon", UpdateState)
+    g:AddWidget(matchCb, 28)
+    colorModeDrop = GUI:CreateDropdown(parent, L["Color Mode"],
+        { STATIC = L["Static"], BYTIME = L["Color by Time Remaining"] }, proxy, "expiryAlertBorderColorMode", UpdateState)
+    g:AddWidget(colorModeDrop, 54)
+    colorPick = GUI:CreateColorPicker(parent, L["Border Color"], proxy, "expiryAlertBorderColor", false, refresh, refresh, true)
+    g:AddWidget(colorPick, 28)
+    insetSlider = GUI:CreateSlider(parent, L["Inset"], -10, 10, 1, proxy, "expiryAlertBorderInset")
+    g:AddWidget(insetSlider, 54)
+    -- Thickness = which frame art (a scaled bitmap can't vary its own line weight).
+    thicknessDrop = GUI:CreateDropdown(parent, L["Thickness"],
+        { THIN = L["Thin"], MEDIUM = L["Medium"], THICK = L["Thick"], _order = { "THIN", "MEDIUM", "THICK" } },
+        proxy, "expiryAlertBorderThickness")
+    g:AddWidget(thicknessDrop, 54)
     dependents = {}
     local function dep(w, h) g:AddWidget(w, h); dependents[#dependents + 1] = w; return w end
     dep(GUI:CreateSlider(parent, L["Alert Below (seconds)"], 1, 60, 1, proxy, "expiryAlertThreshold"), 54)
     -- Element placement: anchored to the INDICATOR's rect (the companion slot
     -- coincides with it; the a243064 probe ruled out frame-anchored placement).
-    dep(GUI:CreateDropdown(parent, L["Anchor"], OPTS.ANCHOR_OPTIONS, proxy, "expiryAlertAnchor"), 54)
-    dep(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 1, proxy, "expiryAlertOffsetX"), 54)
-    dep(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, proxy, "expiryAlertOffsetY"), 54)
-    dep(GUI:CreateSlider(parent, L["Size"], 6, 48, 1, proxy, "expiryAlertSize"), 54)
+    -- Anchor is NOT a plain dependent: a Border is always centred, so UpdateState greys it
+    -- in that mode (Text/Glyph keep it).
+    anchorDrop = GUI:CreateDropdown(parent, L["Anchor"], OPTS.ANCHOR_OPTIONS, proxy, "expiryAlertAnchor")
+    g:AddWidget(anchorDrop, 54)
+    -- 0.5 step: the alert element (esp. a Border) rides the text engine, which sub-pixel-
+    -- positions in a way we can't snap — so half-steps let the user split a stubborn
+    -- half-pixel offset that integer steps can only jump over.
+    dep(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 0.5, proxy, "expiryAlertOffsetX"), 54)
+    dep(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 0.5, proxy, "expiryAlertOffsetY"), 54)
+    -- Size is NOT a plain dependent: a Border matching the icon auto-sizes, so UpdateState
+    -- greys it in that one case (every other mode uses it).
+    sizeSlider = GUI:CreateSlider(parent, L["Size"], 6, 48, 1, proxy, "expiryAlertSize")
+    g:AddWidget(sizeSlider, 54)
     UpdateState()
 end
 
@@ -3898,6 +3968,51 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
     -- Color picker callback shorthand — refreshes both the AD preview and live frames
     local function RPL() if RefreshPreviewLightweight then RefreshPreviewLightweight() end RefreshLiveFramesThrottled() end
 
+    -- Shared Duration Bar section for the icon / square placed indicators — both carry
+    -- durationBar* keys and the strip hangs off the slot edge regardless of shape. Same
+    -- control set as the filter-group card and the buff/debuff rows (one shared spec
+    -- builder, DF:BuildDurationBarSpec, reads these keys). Greys IMPERATIVELY: AD cards
+    -- have no disableOn/RefreshStates loop (unlike the row pages), so the enable gate
+    -- AND the curve-mode dimming of Texture/Bar Color are driven by hand from the Enable
+    -- and Color Mode callbacks. Structural writes (enable/position/height/gap/colorMode)
+    -- rebuild via the proxy's __newindex → RefreshLiveFramesThrottled, exactly like the
+    -- Show Duration toggle; only the colour pickers need RPL (sub-table writes skip
+    -- __newindex — see the Border group's note).
+    local function AddDurationBarGroup()
+        AddGroup(L["Duration Bar"], function(g)
+            local dbWidgets, curveGated = {}, {}
+            local function UpdateBarGrey()
+                local on = proxy.durationBarEnabled and true or false
+                local curve = DF:IsDurationBarCurveMode(proxy.durationBarColorMode)
+                for i = 1, #dbWidgets do
+                    local w = dbWidgets[i]
+                    local enable = on and not (curveGated[w] and curve)
+                    if w.SetEnabled then w:SetEnabled(enable)
+                    else
+                        w:SetAlpha(enable and 1 or 0.4)
+                        if w.EnableMouse then w:EnableMouse(enable) end
+                    end
+                end
+            end
+            g:AddWidget(GUI:CreateCheckbox(parent, L["Enable Duration Bar"], proxy, "durationBarEnabled", UpdateBarGrey), 28)
+            local function barChild(widget, h) g:AddWidget(widget, h); dbWidgets[#dbWidgets + 1] = widget; return widget end
+            barChild(GUI:CreateDropdown(parent, L["Position"], { BOTTOM = L["Bottom"], TOP = L["Top"] }, proxy, "durationBarPosition"), 54)
+            barChild(GUI:CreateSlider(parent, L["Height"], 1, 12, 1, proxy, "durationBarHeight"), 54)
+            barChild(GUI:CreateSlider(parent, L["Gap"], 0, 10, 1, proxy, "durationBarGap"), 54)
+            barChild(GUI:CreateDropdown(parent, L["Color Mode"],
+                { STATIC = L["Static"], DF = L["DF Curve"], CLASSIC = L["Classic Curve"] },
+                proxy, "durationBarColorMode", UpdateBarGrey), 54)
+            -- A curve mode brings its own ramp texture and forces a white tint, so these
+            -- two do nothing while it is selected — grey them (curveGated) when it is.
+            local texW = barChild(GUI:CreateTextureDropdown(parent, L["Bar Texture"], proxy, "durationBarTexture"), 54)
+            local colW = barChild(GUI:CreateColorPicker(parent, L["Bar Color"], proxy, "durationBarColor", true, RPL, RPL, true), 28)
+            curveGated[texW] = true; curveGated[colW] = true
+            barChild(GUI:CreateColorPicker(parent, L["Background Color"], proxy, "durationBarBGColor", true, RPL, RPL, true), 28)
+            barChild(GUI:CreateCheckbox(parent, L["Reverse Fill"], proxy, "durationBarReverseFill"), 28)
+            UpdateBarGrey()
+        end)
+    end
+
     -- Shared Expiring "State Overrides" panel for the BORDERED placed indicators
     -- (icon / square / bar).  These three blocks were near-identical; this
     -- collapses them to one builder parameterised by the few real differences
@@ -4151,6 +4266,8 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, proxy, "stackY"), 54)
             g:AddWidget(GUI:CreateColorPicker(parent, L["Stack Text Color"], proxy, "stackColor", true, RPL, RPL, true), 28)
         end)
+        -- Duration Bar (native SetDurationBar strip — shared with the square card)
+        AddDurationBarGroup()
 
     elseif typeKey == "square" then
         -- Position
@@ -4270,6 +4387,8 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, proxy, "stackY"), 54)
             g:AddWidget(GUI:CreateColorPicker(parent, L["Stack Text Color"], proxy, "stackColor", true, RPL, RPL, true), 28)
         end)
+        -- Duration Bar (native SetDurationBar strip — shared with the icon card)
+        AddDurationBarGroup()
 
     elseif typeKey == "bar" then
         -- Position
@@ -7428,15 +7547,22 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
     -- mirror the row pages' buffDurationBar* block; enable/position/height/gap
     -- are structural (group struct sig -> Rebuild), texture/colours hot-apply.)
     AddSection(L["Duration Bar"], "durationbar", function(g)
-        local dbWidgets = {}
+        -- Greys IMPERATIVELY, not via widget.disableOn: this is an AD editor card, which
+        -- has no disableOn/RefreshStates loop (that seam only runs on the SettingsGroup
+        -- row pages). The enable gate AND the curve-mode dimming of Texture/Bar Color are
+        -- driven by hand from the Enable + Color Mode callbacks. curveGated flags the two
+        -- controls a curve mode overrides.
+        local dbWidgets, curveGated = {}, {}
         local function UpdateBarGrey()
             local on = proxy.durationBarEnabled and true or false
+            local curve = DF:IsDurationBarCurveMode(proxy.durationBarColorMode)
             for i = 1, #dbWidgets do
                 local w = dbWidgets[i]
-                if w.SetEnabled then w:SetEnabled(on)
+                local enable = on and not (curveGated[w] and curve)
+                if w.SetEnabled then w:SetEnabled(enable)
                 else
-                    w:SetAlpha(on and 1 or 0.4)
-                    if w.EnableMouse then w:EnableMouse(on) end
+                    w:SetAlpha(enable and 1 or 0.4)
+                    if w.EnableMouse then w:EnableMouse(enable) end
                 end
             end
         end
@@ -7454,13 +7580,13 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
         barChild(GUI:CreateSlider(body, L["Gap"], 0, 10, 1, proxy, "durationBarGap", refresh, refresh, true), 54)
         barChild(GUI:CreateDropdown(body, L["Color Mode"],
             { STATIC = L["Static"], DF = L["DF Curve"], CLASSIC = L["Classic Curve"] },
-            proxy, "durationBarColorMode", refresh), 54)
+            proxy, "durationBarColorMode", function() UpdateBarGrey(); refresh() end), 54)
         -- A curve mode brings its own ramp texture and forces a white tint, so these two
-        -- do nothing while it is selected - dim them rather than leave dead controls live.
+        -- do nothing while it is selected - dim them (curveGated) rather than leave dead
+        -- controls live.
         local adBarTex = barChild(GUI:CreateTextureDropdown(body, L["Bar Texture"], proxy, "durationBarTexture", refresh), 54)
         local adBarCol = barChild(GUI:CreateColorPicker(body, L["Bar Color"], proxy, "durationBarColor", true, refresh, refresh, true), 28)
-        adBarTex.disableOn = function() return DF:IsDurationBarCurveMode(proxy.durationBarColorMode) end
-        adBarCol.disableOn = adBarTex.disableOn
+        curveGated[adBarTex] = true; curveGated[adBarCol] = true
         barChild(GUI:CreateColorPicker(body, L["Background Color"], proxy, "durationBarBGColor", true, refresh, refresh, true), 28)
         barChild(GUI:CreateCheckbox(body, L["Reverse Fill"], proxy, "durationBarReverseFill", refresh), 28)
         UpdateBarGrey()
