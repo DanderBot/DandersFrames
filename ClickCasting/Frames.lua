@@ -1609,6 +1609,18 @@ function CC:SetupSecureHandlers(frame)
             end
         ]]
 
+        -- Keep the snippets for re-wrapping: a frame's wrap can DIE mid-session
+        -- (field-verified 2026-07-20: after a player-housing session, the party
+        -- buttons' OnEnter wraps stopped executing entirely — enterCount stayed
+        -- 0 while the insecure hooks still fired — so hover keybinds fell
+        -- through to the action bars until /reload). RewrapSecureHandlers
+        -- reuses these to unwrap + re-wrap; the repair path calls it.
+        self.wrapSnippets = {
+            enter = onEnterSnippet,
+            leave = onLeaveSnippet,
+            hide  = onHideSnippet,
+        }
+
         local wrapSuccess = pcall(function()
             -- Standard WrapScript - our bindings run in pre script (before other handlers)
             -- Note: Previously tried post parameter for Clicked compatibility, but it broke
@@ -1617,12 +1629,20 @@ function CC:SetupSecureHandlers(frame)
             self.header:WrapScript(frame, "OnLeave", onLeaveSnippet)
             self.header:WrapScript(frame, "OnHide", onHideSnippet)
         end)
-        
+
         if not wrapSuccess then
-            -- WrapScript failed
-            frame.dfKeyboardHandlersSetup = true
+            -- WrapScript failed. This used to mark the frame as set up anyway,
+            -- which made the failure PERMANENT for the session — the guard at
+            -- the top of this function blocked every later attempt. Retry
+            -- instead: leave the flag unset so the retry re-runs the full
+            -- setup (hooks included, since we return before installing them).
+            DF:DebugWarn("CLICK", "WrapScript failed for %s — retrying in 2s", frameName)
+            self:DeferAfter("wrapRetry:" .. frameName, 2, function()
+                CC:SetupSecureHandlers(frame)
+            end)
             return
         end
+        frame.dfWrapApplied = true
     end
     
     -- Diagnostic logging for OnHide (insecure side)
@@ -2033,6 +2053,32 @@ end
 local REPAIR_COOLDOWN = 5  -- seconds between repair attempts
 
 -- Safe to call from anywhere, including combat and secure-hook callbacks
+-- Unwrap + re-wrap a frame's secure OnEnter/OnLeave/OnHide handlers using the
+-- snippets kept by SetupSecureHandlers. WrapScript STACKS, so the unwrap must
+-- come first or repeated repairs would layer duplicate wraps (guide: Clique
+-- does exactly this unwrap-then-wrap dance to stay idempotent). Both
+-- directions are pcall'd: unwrapping a frame that lost its wrap, or wrapping
+-- one that cannot be wrapped right now, must never abort the repair loop.
+-- Returns true when the frame ends up wrapped.
+function CC:RewrapSecureHandlers(frame)
+    if not frame or InCombatLockdown() then return false end
+    if not (self.header and self.header.WrapScript) then return false end
+    local snippets = self.wrapSnippets
+    if not snippets then return false end
+
+    pcall(function() self.header:UnwrapScript(frame, "OnEnter") end)
+    pcall(function() self.header:UnwrapScript(frame, "OnLeave") end)
+    pcall(function() self.header:UnwrapScript(frame, "OnHide") end)
+
+    local ok = pcall(function()
+        self.header:WrapScript(frame, "OnEnter", snippets.enter)
+        self.header:WrapScript(frame, "OnLeave", snippets.leave)
+        self.header:WrapScript(frame, "OnHide", snippets.hide)
+    end)
+    frame.dfWrapApplied = ok or nil
+    return ok
+end
+
 function CC:RequestBindingRepair(reason)
     if InCombatLockdown() then
         if not (self.deferred and self.deferred.bindingRepair) then
@@ -2092,6 +2138,37 @@ function CC:RunBindingRepair(reason, force)
         for _, frame in pairs(DF.unitFrames) do
             scrub(frame)
         end
+    end
+
+    -- 2b. Re-wrap the secure OnEnter/OnLeave/OnHide handlers on every frame
+    --     that has them. A wrap can DIE mid-session while the frame's insecure
+    --     hooks keep firing (field case 2026-07-20: after a player-housing
+    --     session the party buttons' wraps stopped executing — enterCount
+    --     stuck at 0 — so hover keybinds fell through to the action bars, and
+    --     the old repair rebuilt snippets but never re-wrapped, so it could
+    --     detect this exact state yet not fix it). WrapScript stacks, so
+    --     RewrapSecureHandlers unwraps first; both directions are pcall'd.
+    local rewrapped = 0
+    local rewrapSeen = {}
+    local function rewrap(frame)
+        if rewrapSeen[frame] then return end
+        rewrapSeen[frame] = true
+        if frame.dfKeyboardHandlersSetup and self:RewrapSecureHandlers(frame) then
+            rewrapped = rewrapped + 1
+        end
+    end
+    if self.registeredFrames then
+        for frame in pairs(self.registeredFrames) do
+            rewrap(frame)
+        end
+    end
+    if DF.unitFrames then
+        for _, frame in pairs(DF.unitFrames) do
+            rewrap(frame)
+        end
+    end
+    if rewrapped > 0 then
+        DF:Debug("CLICK", "Repair re-wrapped secure handlers on %d frame(s)", rewrapped)
     end
 
     -- 3. Rebuild the macro map and every frame's snippet, in case snippets

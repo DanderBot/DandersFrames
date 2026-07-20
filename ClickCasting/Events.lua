@@ -32,6 +32,13 @@ function CC:RegisterEvents()
 
     -- Spell data arrival — resolves a provisional (cold-start) binding map
     eventFrame:RegisterEvent("SPELLS_CHANGED")
+
+    -- Player housing can invalidate secure wraps on unit frames
+    -- (field case 2026-07-20: hover keybinds dead after a housing session,
+    -- wraps no longer executing). The repair re-wraps, so run it on every
+    -- editor-mode change. pcall'd: the event only exists on clients with
+    -- housing.
+    pcall(function() eventFrame:RegisterEvent("HOUSE_EDITOR_MODE_CHANGED") end)
     
     eventFrame:SetScript("OnEvent", function(_, event, ...)
         if event == "PLAYER_REGEN_ENABLED" then
@@ -135,6 +142,10 @@ function CC:RegisterEvents()
             -- A nameplate was removed
             local unitToken = ...
             CC:OnNamePlateRemoved(unitToken)
+        elseif event == "HOUSE_EDITOR_MODE_CHANGED" then
+            -- Housing mode transitions can kill secure wraps; the repair
+            -- re-wraps every frame (self-defers in combat, cooldown-limited)
+            CC:RequestBindingRepair("housing-mode")
         end
     end)
 end
