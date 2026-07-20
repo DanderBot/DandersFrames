@@ -367,10 +367,6 @@ function CC:ClearBindingsFromFrame(frame)
         DF:Debug("CLICK", "ClearBindings %s", frameName)
     end
     
-    -- Check if this is a Blizzard frame - we need to preserve default behavior for these
-    local isBlizzardFrame = frame.dfIsBlizzardFrame == true
-    local isDandersFrame = frame.dfIsDandersFrame == true
-    
     -- Clear the binding snippet used by secure handlers
     -- BUT: if frame is currently hovered, DON'T clear - we want to preserve bindings
     if not isCurrentlyHovered then
