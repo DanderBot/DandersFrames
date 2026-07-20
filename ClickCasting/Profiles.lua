@@ -307,7 +307,7 @@ end
 function CC:SetActiveProfile(profileName)
     if InCombatLockdown() then
         -- Queue the switch for after combat
-        self.pendingProfileSwitch = profileName
+        self:Defer("profileSwitch", profileName)
         print("|cffff9900DandersFrames:|r Profile switch to '" .. profileName .. "' queued (in combat)")
         return false
     end

@@ -13,6 +13,9 @@
 
 * (Click Casting) Enabling a targeting fallback on a key that already does something now asks for confirmation and names what the key will stop doing.
 * (Click Casting) "Clear Blizzard Bindings" now warns that clearing is permanent, and only clears when you press it.
+* (Click Casting) Enabling a targeting fallback (Global, Target, Self or Always Cast) on a key that already does something in WoW now asks for confirmation and names exactly what the key will stop doing — these options make the key active everywhere, not just over the frames. The fallback tooltips explain this too.
+* (Click Casting) The "Clear Blizzard Bindings" button now warns that clearing is permanent, and it no longer silently re-clears Blizzard's click-casting profile every time click casting is enabled — clearing only happens when you press the button.
+* (Click Casting) Work that has to wait for combat to end — profile switches, frame registration, binding refreshes and keyboard-bind rebuilds — now runs from a single queue that always drains when you leave combat, instead of ten separate flags that each had to be emptied by hand. A keyboard-bind refresh asked for during combat was being dropped entirely, and hovercast keys could be lost if a loading screen landed mid-combat; both now always apply. (by Krathe)
 
 ## [4.7.5]
 

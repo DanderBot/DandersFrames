@@ -49,6 +49,8 @@ end
 -- targeting keeps working at any range. Returns nil if we're in combat.
 function CC:EnsureClickProxy(frame)
     if frame.dfClickProxy then return frame.dfClickProxy end
+    -- Returns nil by contract (caller falls back to the @mouseover path);
+    -- the proxy is created on the next out-of-combat binding pass.
     if InCombatLockdown() then return nil end
     local proxy = CreateFrame("Button", nil, frame, "SecureActionButtonTemplate")
     proxy:EnableMouse(false)              -- only ever clicked programmatically
@@ -345,6 +347,8 @@ end
 -- Clear all click-cast bindings from a frame
 function CC:ClearBindingsFromFrame(frame)
     if not frame then return end
+    -- Combat-safe by contract: only reached from ApplyBindingsToFrameUnified,
+    -- which defers "bindingRefresh". Do not add a bare return here without one.
     if InCombatLockdown() then return end
 
     -- Check if this frame is currently being hovered
@@ -438,6 +442,8 @@ end
 -- Restore Blizzard default click behavior to a frame
 function CC:RestoreBlizzardDefaults(frame)
     if not frame then return end
+    -- Combat-safe by contract: callers (ApplyBindingsToFrameUnified,
+    -- UnregisterFrame) defer on our behalf.
     if InCombatLockdown() then return end
     
     -- Clear any custom bindings tracking first
@@ -530,7 +536,7 @@ end
 -- and highlight headers pre-create up to 40 frames each (80 total).
 function CC:ApplyBindings()
     if InCombatLockdown() then
-        self.needsBindingRefresh = true
+        self:Defer("bindingRefresh")
         return
     end
 
@@ -593,7 +599,7 @@ function CC:ApplyBindings()
             local function ProcessNextBatch()
                 if InCombatLockdown() then
                     -- Combat started during batch - flag for retry after combat
-                    CC.needsBindingRefresh = true
+                    CC:Defer("bindingRefresh")
                     CC.batchBindingTimer = nil
                     return
                 end
@@ -704,6 +710,7 @@ end
 -- This is called after bindings are built so the hovercast button can handle redirected clicks
 function CC:SetupHovercastButtonAttributes()
     if not self.hovercastButton then return end
+    -- Combat-safe by contract: only reached from ApplyBindings, which defers.
     if InCombatLockdown() then return end
     
     local btn = self.hovercastButton
@@ -908,7 +915,9 @@ end
 -- Apply global keybindings (for "onhover" and "targetcast" scopes)
 -- Uses exact Clique-style approach: Execute() to set both attributes and bindings
 function CC:ApplyGlobalBindings()
-    if InCombatLockdown() then return end
+    -- Reached unguarded from PLAYER_ENTERING_WORLD, so defer rather than drop:
+    -- ApplyBindings() re-runs this as part of the refresh.
+    if self:CombatGuard("bindingRefresh") then return end
     
     if not self.db or not self.db.enabled then 
         self:ClearGlobalBindings()
@@ -978,6 +987,7 @@ end
 
 -- Clear all global bindings
 function CC:ClearGlobalBindings()
+    -- Combat-safe by contract: only reached from ApplyGlobalBindings, which defers.
     if InCombatLockdown() then return end
     
     -- Clear using the hovercast button's Execute
@@ -2557,7 +2567,7 @@ end
 -- skipKeyboardUpdate: when true, skip UpdateFrameBindingAttributes (caller will batch it)
 function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate)
     if not frame then return end
-    if InCombatLockdown() then return end
+    if self:CombatGuard("bindingRefresh") then return end
     
     -- If click-casting is disabled, restore Blizzard defaults
     if not self.db.enabled then

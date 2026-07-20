@@ -66,8 +66,8 @@ function CC:RegisterEvents()
                     end)
                 end)
             else
-                CC.pendingLoadoutCheck = true
-                CC.needsBindingRefresh = true
+                CC:Defer("loadoutCheck")
+                CC:Defer("bindingRefresh")
             end
         elseif event == "PLAYER_LEVEL_UP" then
             -- Level up - may have learned new spells, reapply bindings
@@ -77,7 +77,7 @@ function CC:RegisterEvents()
                     CC:RefreshClickCastingUI()
                 end)
             else
-                CC.needsBindingRefresh = true
+                CC:Defer("bindingRefresh")
             end
         elseif event == "PLAYER_EQUIPMENT_CHANGED" then
             -- Equipment changed - refresh items tab if visible
@@ -141,80 +141,184 @@ function CC:RegisterEvents()
     end)
 end
 
-function CC:OnCombatEnd()
-    local needsUIRefresh = false
-    
-    -- Process pending profile switch first
-    if self.pendingProfileSwitch then
-        local profileName = self.pendingProfileSwitch
-        self.pendingProfileSwitch = nil
-        if self:SetActiveProfile(profileName) then
+-- ============================================================
+-- DEFERRED WORK QUEUE
+-- ============================================================
+-- Click casting cannot touch secure state in combat, so work blocked by
+-- combat lockdown has to be replayed afterwards. This used to be ten
+-- separate self.needsX / self.pendingX flags, each with its own set-site and
+-- its own hand-written drain line in OnCombatEnd. Adding a deferral meant
+-- remembering to add a matching drain; forgetting silently dropped the work
+-- for the rest of the session (that is how the arena cold-start bug and the
+-- keyboard-refresh drop both happened).
+--
+-- Now there is one queue. Register the job here, call CC:Defer("job"), and
+-- the drain is automatic and ordered. Three job kinds:
+--   flag  - "do this thing later", no payload, dedupes to a single run
+--   value - carries one value (a profile name, a repair reason); policy
+--           "first" keeps the earliest, "last" keeps the most recent
+--   set   - accumulates a set of items (frames) and runs once over all
+--
+-- A job's run() returns true to request a UI refresh once the drain settles.
+-- DRAIN_ORDER is load-bearing: it reproduces the exact sequence the old
+-- OnCombatEnd used. Do not reorder without checking that dependency chain
+-- (profile switch must precede binding work; registration must precede the
+-- binding refresh that walks registered frames).
+
+local DRAIN_ORDER = {
+    "profileSwitch",
+    "loadoutCheck",
+    "register",
+    "unregister",
+    "fullRegistration",
+    "bindingRepair",
+    "bindingRefresh",
+    "blizzardRegister",
+    "blizzardUnregister",
+    "keyboardRefresh",
+}
+
+local DEFERRED_JOBS = {
+    profileSwitch = {
+        kind = "value", policy = "last",
+        run = function(self, profileName)
+            if self:SetActiveProfile(profileName) then
+                self:ApplyBindings()
+                return true
+            end
+        end,
+    },
+    loadoutCheck = {
+        kind = "flag",
+        run = function(self)
+            self:CheckLoadoutProfileSwitch()
+            return true
+        end,
+    },
+    register = {
+        kind = "set",
+        run = function(self, frames)
+            for frame in pairs(frames) do
+                self:RegisterFrame(frame)
+            end
+        end,
+    },
+    unregister = {
+        kind = "set",
+        run = function(self, frames)
+            for frame in pairs(frames) do
+                self:UnregisterFrame(frame)
+            end
+        end,
+    },
+    fullRegistration = {
+        kind = "flag",
+        run = function(self) self:RegisterAllFrames() end,
+    },
+    bindingRepair = {
+        -- first-write-wins: the earliest reason is the one that diagnosed the
+        -- breakage; later requeues during the same combat are the same repair
+        kind = "value", policy = "first",
+        run = function(self, reason) self:RunBindingRepair(reason) end,
+    },
+    bindingRefresh = {
+        kind = "flag",
+        run = function(self)
             self:ApplyBindings()
-            needsUIRefresh = true
-        end
-    end
-    
-    -- Check for pending loadout-based profile switch
-    if self.pendingLoadoutCheck then
-        self.pendingLoadoutCheck = nil
-        self:CheckLoadoutProfileSwitch()
-        needsUIRefresh = true
-    end
-    
-    -- Process pending registrations
-    if self.pendingRegistrations then
-        for frame in pairs(self.pendingRegistrations) do
-            self:RegisterFrame(frame)
-        end
-        self.pendingRegistrations = nil
-    end
-    
-    -- Process pending unregistrations
-    if self.pendingUnregistrations then
-        for frame in pairs(self.pendingUnregistrations) do
-            self:UnregisterFrame(frame)
-        end
-        self.pendingUnregistrations = nil
-    end
-    
-    -- Full registration if needed
-    if self.needsFullRegistration then
-        self:RegisterAllFrames()
-        self.needsFullRegistration = nil
-    end
-    
-    -- Self-heal repair queued during combat (bug #976)
-    if self.pendingBindingRepair then
-        local reason = self.pendingBindingRepair
-        self.pendingBindingRepair = nil
-        self:RunBindingRepair(reason)
+            return true
+        end,
+    },
+    blizzardRegister = {
+        kind = "flag",
+        run = function(self) self:RegisterBlizzardFrames() end,
+    },
+    blizzardUnregister = {
+        kind = "flag",
+        run = function(self) self:UnregisterBlizzardFrames() end,
+    },
+    keyboardRefresh = {
+        kind = "flag",
+        run = function(self) self:RefreshKeyboardBindings() end,
+    },
+}
+
+-- Queue work for the next time we are out of combat.
+-- Safe to call repeatedly: flags dedupe, values follow their policy, sets accumulate.
+function CC:Defer(job, payload)
+    local def = DEFERRED_JOBS[job]
+    if not def then
+        DF:Debug("CLICK", "Defer: unknown job '%s'", tostring(job))
+        return
     end
 
-    -- Refresh bindings if needed
-    if self.needsBindingRefresh then
-        self:ApplyBindings()
-        self.needsBindingRefresh = nil
-        needsUIRefresh = true
+    self.deferred = self.deferred or {}
+
+    if def.kind == "set" then
+        local set = self.deferred[job]
+        if type(set) ~= "table" then
+            set = {}
+            self.deferred[job] = set
+        end
+        if payload ~= nil then set[payload] = true end
+    elseif def.kind == "value" then
+        if def.policy == "first" and self.deferred[job] ~= nil then
+            return  -- keep the earliest value
+        end
+        self.deferred[job] = payload
+    else
+        self.deferred[job] = true
     end
-    
-    -- Blizzard frame registration if needed
-    if self.needsBlizzardRegistration then
-        self:RegisterBlizzardFrames()
-        self.needsBlizzardRegistration = nil
+end
+
+-- Run queued work. Pass a job name to drain only that job (used at init, where
+-- only frame registration is safe to replay); omit it to drain everything.
+function CC:DrainDeferred(onlyJob)
+    if InCombatLockdown() then return end
+
+    local queue = self.deferred
+    if not queue then return end
+
+    local needsUIRefresh = false
+
+    for _, job in ipairs(DRAIN_ORDER) do
+        if not onlyJob or onlyJob == job then
+            local payload = queue[job]
+            if payload ~= nil then
+                -- clear before running: a job that re-defers itself (a repair
+                -- that finds more work) must queue for the NEXT drain, not be
+                -- wiped by this one
+                queue[job] = nil
+                if DEFERRED_JOBS[job].run(self, payload) then
+                    needsUIRefresh = true
+                end
+            end
+        end
     end
-    
-    -- Blizzard frame unregistration if needed
-    if self.needsBlizzardUnregistration then
-        self:UnregisterBlizzardFrames()
-        self.needsBlizzardUnregistration = nil
+
+    if next(queue) == nil then
+        self.deferred = nil
     end
-    
+
     -- Refresh UI if needed (after a short delay for everything to settle)
     if needsUIRefresh then
         C_Timer.After(0.2, function()
             self:RefreshClickCastingUI()
         end)
     end
+end
+
+-- Guard for functions that must not touch secure state in combat.
+-- Returns true if the caller should abort; the work is queued as `job` so it
+-- cannot be silently lost. Defer at the point of blocking rather than trusting
+-- a caller further up the stack to have set a flag.
+function CC:CombatGuard(job, payload)
+    if not InCombatLockdown() then return false end
+    self:Defer(job, payload)
+    return true
+end
+
+function CC:OnCombatEnd()
+    self:DrainDeferred()
 end
 
 function CC:OnSpecChanged()
@@ -227,8 +331,8 @@ function CC:OnSpecChanged()
             self:RefreshClickCastingUI()
         end)
     else
-        self.pendingLoadoutCheck = true
-        self.needsBindingRefresh = true
+        self:Defer("loadoutCheck")
+        self:Defer("bindingRefresh")
     end
 end
 
@@ -239,7 +343,7 @@ function CC:OnArenaPrep()
             if not InCombatLockdown() then
                 self:RegisterBlizzardFrames()
             else
-                self.needsBlizzardRegistration = true
+                self:Defer("blizzardRegister")
             end
         end)
     end
@@ -252,7 +356,7 @@ function CC:OnBossEngage()
             if not InCombatLockdown() then
                 self:RegisterBlizzardFrames()
             else
-                self.needsBlizzardRegistration = true
+                self:Defer("blizzardRegister")
             end
         end)
     end
@@ -303,8 +407,7 @@ function CC:OnNamePlateAdded(unitToken)
             end
         else
             -- Queue for after combat
-            self.pendingRegistrations = self.pendingRegistrations or {}
-            self.pendingRegistrations[clickableFrame] = true
+            self:Defer("register", clickableFrame)
         end
     else
         if self.db.options.debugBindings then
@@ -327,8 +430,7 @@ function CC:OnNamePlateRemoved(unitToken)
             self:UnregisterFrame(frame)
         else
             -- Queue for after combat
-            self.pendingUnregistrations = self.pendingUnregistrations or {}
-            self.pendingUnregistrations[frame] = true
+            self:Defer("unregister", frame)
         end
         
         self.registeredNameplates[unitToken] = nil

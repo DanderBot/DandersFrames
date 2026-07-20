@@ -260,7 +260,7 @@ function CC:CreateProfilesPanelContent()
         if not InCombatLockdown() then
             CC:ApplyBindings()
         else
-            CC.needsBindingRefresh = true
+            CC:Defer("bindingRefresh")
         end
     end)
 
@@ -319,7 +319,7 @@ function CC:CreateProfilesPanelContent()
         if not InCombatLockdown() then
             CC:ApplyBindings()
         else
-            CC.needsBindingRefresh = true
+            CC:Defer("bindingRefresh")
         end
     end)
 
@@ -369,7 +369,7 @@ function CC:CreateProfilesPanelContent()
         if not InCombatLockdown() then
             CC:ApplyBindings()
         else
-            CC.needsBindingRefresh = true
+            CC:Defer("bindingRefresh")
         end
     end)
 

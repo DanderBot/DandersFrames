@@ -2247,9 +2247,45 @@ SlashCmdList["DFCCGLOBAL"] = function(msg)
         else
             print("  Smart res would NOT be added to spells (mode disabled or no spells)")
         end
+    elseif msg == "deferred" then
+        -- Inspect the combat-deferred work queue (see CC:Defer in Events.lua).
+        -- Anything listed here was blocked by combat lockdown and runs on
+        -- PLAYER_REGEN_ENABLED. A non-empty queue OUT of combat means the
+        -- drain did not fire, which is a bug.
+        print("|cff33cc66Deferred work queue:|r")
+        print("  In combat: " .. tostring(InCombatLockdown()))
+        local q = CC.deferred
+        if not q or next(q) == nil then
+            print("  (empty)")
+        else
+            for job, payload in pairs(q) do
+                local detail
+                if type(payload) == "table" then
+                    local n = 0
+                    for _ in pairs(payload) do n = n + 1 end
+                    detail = n .. " item(s)"
+                elseif payload == true then
+                    detail = "queued"
+                else
+                    detail = tostring(payload)
+                end
+                print("  " .. job .. ": " .. detail)
+            end
+            if not InCombatLockdown() then
+                print("  |cffff6666Queue is non-empty out of combat - drain did not run.|r")
+            end
+        end
+    elseif msg == "drain" then
+        -- Force a drain, to test the queue without waiting for combat to end
+        print("|cff33cc66Forcing deferred drain...|r")
+        CC:DrainDeferred()
+        local left = CC.deferred and next(CC.deferred)
+        print("  Done. Queue is now " .. (left and "non-empty" or "empty") .. ".")
     else
         print("|cff33cc66/dfccglobal commands:|r")
         print("  debug - Toggle debug output")
+        print("  deferred - Show the combat-deferred work queue")
+        print("  drain - Force the deferred queue to drain now")
         print("  apply - Reapply all bindings")
         print("  list - Show binding counts and status")
         print("  inspect - Inspect frame under mouse cursor")

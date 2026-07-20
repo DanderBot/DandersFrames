@@ -370,13 +370,9 @@ function CC:InitializeSecureFrames()
     -- Mark as initialized BEFORE processing pending registrations
     self.secureFramesInitialized = true
     
-    -- Process any pending frame registrations (from reload in combat)
-    if self.pendingRegistrations then
-        for frame in pairs(self.pendingRegistrations) do
-            self:RegisterFrame(frame)
-        end
-        self.pendingRegistrations = nil
-    end
+    -- Process any frame registrations queued before init completed
+    -- (reload in combat, or frames that showed up before secureFramesInitialized)
+    self:DrainDeferred("register")
     
     -- Apply bindings
     self:ApplyBindings()
@@ -1052,7 +1048,7 @@ end
 
 function CC:RegisterBlizzardFrames()
     if InCombatLockdown() then
-        self.needsBlizzardRegistration = true
+        self:Defer("blizzardRegister")
         return
     end
     
@@ -1111,7 +1107,7 @@ end
 
 function CC:UnregisterBlizzardFrames()
     if InCombatLockdown() then
-        self.needsBlizzardUnregistration = true
+        self:Defer("blizzardUnregister")
         return
     end
     
@@ -1150,13 +1146,13 @@ function CC:UpdateBlizzardFrameRegistration()
         if not InCombatLockdown() then
             self:RegisterBlizzardFrames()
         else
-            self.needsBlizzardRegistration = true
+            self:Defer("blizzardRegister")
         end
     elseif not needsBlizzard and self.blizzardFramesRegistered then
         if not InCombatLockdown() then
             self:UnregisterBlizzardFrames()
         else
-            self.needsBlizzardUnregistration = true
+            self:Defer("blizzardUnregister")
         end
     end
     
@@ -1180,10 +1176,7 @@ function CC:SetupDynamicFrameHooks()
         if frame and not frame.dfHooked then
             frame:HookScript("OnShow", function(self)
                 if CC.db.options.globalEnabled then
-                    if InCombatLockdown() then
-                        CC.pendingRegistrations = CC.pendingRegistrations or {}
-                        CC.pendingRegistrations[self] = true
-                    else
+                    if not CC:CombatGuard("register", self) then
                         CC:RegisterFrame(self)
                     end
                 end
@@ -1198,10 +1191,7 @@ function CC:SetupDynamicFrameHooks()
         if frame and not frame.dfHooked then
             frame:HookScript("OnShow", function(self)
                 if CC.db.options.globalEnabled then
-                    if InCombatLockdown() then
-                        CC.pendingRegistrations = CC.pendingRegistrations or {}
-                        CC.pendingRegistrations[self] = true
-                    else
+                    if not CC:CombatGuard("register", self) then
                         CC:RegisterFrame(self)
                     end
                 end
@@ -1288,10 +1278,9 @@ function CC:RegisterFrame(frame)
     if self.registeredFrames[frame] then return end
 
     -- Don't register during combat OR if secure frames aren't initialized yet
+    -- (init drains the "register" job once secureFramesInitialized flips)
     if InCombatLockdown() or not self.secureFramesInitialized then
-        -- Queue for later
-        self.pendingRegistrations = self.pendingRegistrations or {}
-        self.pendingRegistrations[frame] = true
+        self:Defer("register", frame)
         return
     end
     
@@ -1956,7 +1945,7 @@ end
 -- Call this when bindings change
 function CC:RefreshKeyboardBindings()
     if InCombatLockdown() then 
-        self.pendingKeyboardRefresh = true
+        self:Defer("keyboardRefresh")
         return 
     end
     
@@ -1977,8 +1966,6 @@ function CC:RefreshKeyboardBindings()
             end
         end
     end
-    
-    self.pendingKeyboardRefresh = false
 end
 
 -- ============================================================
@@ -2000,20 +1987,17 @@ local REPAIR_COOLDOWN = 5  -- seconds between repair attempts
 -- Safe to call from anywhere, including combat and secure-hook callbacks
 function CC:RequestBindingRepair(reason)
     if InCombatLockdown() then
-        if not self.pendingBindingRepair then
+        if not (self.deferred and self.deferred.bindingRepair) then
             DF:DebugWarn("CLICK", "Binding repair queued for combat end (%s)", tostring(reason))
         end
-        self.pendingBindingRepair = reason
+        self:Defer("bindingRepair", reason)
         return
     end
     self:RunBindingRepair(reason)
 end
 
 function CC:RunBindingRepair(reason, force)
-    if InCombatLockdown() then
-        self.pendingBindingRepair = reason
-        return
-    end
+    if self:CombatGuard("bindingRepair", reason) then return end
     if not self.db or not self.db.enabled then return end
 
     if not force then
@@ -2103,11 +2087,7 @@ function CC:UnregisterFrame(frame)
     if not self.registeredFrames[frame] then return end
     
     -- Don't unregister during combat
-    if InCombatLockdown() then
-        self.pendingUnregistrations = self.pendingUnregistrations or {}
-        self.pendingUnregistrations[frame] = true
-        return
-    end
+    if self:CombatGuard("unregister", frame) then return end
     
     -- Restore Blizzard default behavior
     self:RestoreBlizzardDefaults(frame)
@@ -2120,7 +2100,7 @@ end
 -- Register all DandersFrames unit frames
 function CC:RegisterAllFrames()
     if InCombatLockdown() then
-        self.needsFullRegistration = true
+        self:Defer("fullRegistration")
         return
     end
     
