@@ -169,6 +169,7 @@ local DRAIN_ORDER = {
     "register",
     "unregister",
     "fullRegistration",
+    "reassert",
     "bindingRepair",
     "bindingRefresh",
     "blizzardRegister",
@@ -206,6 +207,21 @@ local DEFERRED_JOBS = {
         run = function(self, frames)
             for frame in pairs(frames) do
                 self:UnregisterFrame(frame)
+            end
+        end,
+    },
+    reassert = {
+        -- Blizzard's SecureUnitButton_OnLoad reset these frames' click
+        -- registration (see the hook in InitializeSecureFrames) — it runs on
+        -- every CompactUnitFrame_SetUnit roster shuffle and stomps
+        -- RegisterForClicks back to AnyUp plus the wildcard click actions.
+        -- Re-apply our bindings on exactly the frames that were touched.
+        kind = "set",
+        run = function(self, frames)
+            for frame in pairs(frames) do
+                if self.registeredFrames and self.registeredFrames[frame] then
+                    self:ApplyBindingsToFrameUnified(frame)
+                end
             end
         end,
     },

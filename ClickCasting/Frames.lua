@@ -366,7 +366,32 @@ function CC:InitializeSecureFrames()
     
     -- Set up hooks for dynamic Blizzard frames (boss/arena)
     self:SetupDynamicFrameHooks()
-    
+
+    -- Heal Blizzard click-setup clobbering (guided by Clique's reassert
+    -- queue). SecureUnitButton_OnLoad runs on every CompactUnitFrame_SetUnit
+    -- (roster shuffles, including during combat) and resets
+    -- RegisterForClicks to "AnyUp" plus the *type1/*type2 wildcard actions —
+    -- verified in Blizzard_FrameXML/SecureTemplates.lua 12.0.7. Down-click
+    -- casting on Blizzard frames silently died on every roster change until
+    -- something happened to reapply. Queue exactly the frames that were
+    -- touched: out of combat a debounced drain re-applies right away, in
+    -- combat OnCombatEnd picks the queue up. Covers third-party frames using
+    -- the same template for free. hooksecurefunc post-hooks run insecurely,
+    -- so this never taints the secure path.
+    if not self.reassertHookInstalled then
+        self.reassertHookInstalled = true
+        hooksecurefunc("SecureUnitButton_OnLoad", function(frame)
+            if not CC.registeredFrames or not CC.registeredFrames[frame] then return end
+            if not (CC.db and CC.db.enabled) then return end
+            CC:Defer("reassert", frame)
+            if not InCombatLockdown() then
+                CC:DeferAfter("reassertDrain", 0.2, function()
+                    CC:DrainDeferred("reassert")
+                end)
+            end
+        end)
+    end
+
     -- Mark as initialized BEFORE processing pending registrations
     self.secureFramesInitialized = true
     
