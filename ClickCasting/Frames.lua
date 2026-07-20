@@ -2076,11 +2076,6 @@ function CC:RunBindingRepair(reason, force)
     self:RefreshKeyboardBindings()
 end
 
--- Legacy function - now calls RefreshKeyboardBindings
-function CC:BuildKeyboardBindingSnippets()
-    self:RefreshKeyboardBindings()
-end
-
 -- Build a WoW binding key string from modifiers and key
 function CC:BuildBindingKey(modifiers, key)
     if not modifiers or modifiers == "" then

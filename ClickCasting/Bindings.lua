@@ -344,6 +344,16 @@ function CC:ShouldBindingLoad(binding)
     return true
 end
 
+-- Every modifier prefix combination we ever write, in SecureActionButtonTemplate
+-- canonical order (alt-ctrl-shift-meta). Shared by the clear paths; the apply
+-- path derives prefixes per binding via BuildModifierPrefix.
+local MODIFIER_COMBOS = {
+    "alt-", "ctrl-", "shift-", "meta-",
+    "alt-ctrl-", "alt-shift-", "alt-meta-", "ctrl-shift-", "ctrl-meta-", "shift-meta-",
+    "alt-ctrl-shift-", "alt-ctrl-meta-", "alt-shift-meta-", "ctrl-shift-meta-",
+    "alt-ctrl-shift-meta-",
+}
+
 -- Clear all click-cast bindings from a frame
 function CC:ClearBindingsFromFrame(frame)
     if not frame then return end
@@ -378,38 +388,17 @@ function CC:ClearBindingsFromFrame(frame)
         pcall(function() frame:ClearBindings() end)
     end
     
-    -- Clear applied bindings
-    if frame.dfAppliedBindings then
-        for _, attrs in pairs(frame.dfAppliedBindings) do
-            if attrs.typeAttr then frame:SetAttribute(attrs.typeAttr, "") end
-            if attrs.spellAttr then frame:SetAttribute(attrs.spellAttr, nil) end
-            if attrs.macroAttr then frame:SetAttribute(attrs.macroAttr, nil) end
-            if attrs.helpbuttonAttr then frame:SetAttribute(attrs.helpbuttonAttr, nil) end
-            if attrs.harmbuttonAttr then frame:SetAttribute(attrs.harmbuttonAttr, nil) end
-        end
-        frame.dfAppliedBindings = nil
-    end
-    
-    -- Clear virtual button attributes (6-50 for keyboard bindings)
-    for btn = 6, 50 do
-        frame:SetAttribute("type" .. btn, "")
-        frame:SetAttribute("spell" .. btn, nil)
-        frame:SetAttribute("macro" .. btn, nil)
-        frame:SetAttribute("macrotext" .. btn, nil)
-    end
-    
     -- Clear modifier combinations for mouse buttons (1-5)
     -- Order must be: alt-ctrl-shift-meta (per WoW SecureActionButtonTemplate)
     -- Only DandersFrames should have base type1/type2 cleared.
     -- Blizzard frames AND third-party addon frames (QUI, ElvUI, etc.) must preserve
     -- their base type1/type2 so click-to-target continues to work.
-    local modifiers
+    -- DandersFrames also clear the base (unprefixed) bindings; Blizzard and
+    -- third-party frames keep base type1/type2 so click-to-target still works.
+    local modifiers = MODIFIER_COMBOS
     if isDandersFrame then
-        -- For DandersFrames, clear everything including base bindings
-        modifiers = {"alt-", "ctrl-", "shift-", "meta-", "alt-ctrl-", "alt-shift-", "alt-meta-", "ctrl-shift-", "ctrl-meta-", "shift-meta-", "alt-ctrl-shift-", "alt-ctrl-meta-", "alt-shift-meta-", "ctrl-shift-meta-", "alt-ctrl-shift-meta-", ""}
-    else
-        -- For Blizzard and third-party frames, only clear modifier combinations, not base button bindings
-        modifiers = {"alt-", "ctrl-", "shift-", "meta-", "alt-ctrl-", "alt-shift-", "alt-meta-", "ctrl-shift-", "ctrl-meta-", "shift-meta-", "alt-ctrl-shift-", "alt-ctrl-meta-", "alt-shift-meta-", "ctrl-shift-meta-", "alt-ctrl-shift-meta-"}
+        modifiers = { "" }
+        for _, m in ipairs(MODIFIER_COMBOS) do modifiers[#modifiers + 1] = m end
     end
     local buttons = {"1", "2", "3", "4", "5"}
     
@@ -446,15 +435,11 @@ function CC:RestoreBlizzardDefaults(frame)
     -- UnregisterFrame) defer on our behalf.
     if InCombatLockdown() then return end
     
-    -- Clear any custom bindings tracking first
-    frame.dfAppliedBindings = nil
-
     -- 12.0.7 gate workaround: drop any proxy click-action routes too.
     self:ClearClickProxyRoutes(frame)
 
     -- Clear ALL modifier combinations we may have set (but NOT the base type1/type2)
-    -- Order must be: alt-ctrl-shift-meta (per WoW SecureActionButtonTemplate)
-    local modifiers = {"alt-", "ctrl-", "shift-", "meta-", "alt-ctrl-", "alt-shift-", "alt-meta-", "ctrl-shift-", "ctrl-meta-", "shift-meta-", "alt-ctrl-shift-", "alt-ctrl-meta-", "alt-shift-meta-", "ctrl-shift-meta-", "alt-ctrl-shift-meta-"}
+    local modifiers = MODIFIER_COMBOS
     local buttons = {"1", "2", "3", "4", "5"}
     
     for _, mod in ipairs(modifiers) do
@@ -481,14 +466,6 @@ function CC:RestoreBlizzardDefaults(frame)
     frame:SetAttribute("macro2", nil)
     frame:SetAttribute("macrotext1", nil)
     frame:SetAttribute("macrotext2", nil)
-    
-    -- Clear virtual button attributes (6-50 for keyboard bindings)
-    for btn = 6, 50 do
-        frame:SetAttribute("type" .. btn, nil)
-        frame:SetAttribute("spell" .. btn, nil)
-        frame:SetAttribute("macro" .. btn, nil)
-        frame:SetAttribute("macrotext" .. btn, nil)
-    end
     
     -- Clear override bindings
     ClearOverrideBindings(frame)

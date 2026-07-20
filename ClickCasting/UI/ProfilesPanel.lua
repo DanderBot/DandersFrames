@@ -980,7 +980,7 @@ function CC:ResetBindingsToDefaults()
     })
     
     -- Rebuild secure bindings
-    self:BuildKeyboardBindingSnippets()
+    self:RefreshKeyboardBindings()
     
     -- Re-apply to all frames
     if not InCombatLockdown() then
