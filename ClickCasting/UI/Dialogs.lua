@@ -2275,6 +2275,24 @@ SlashCmdList["DFCCGLOBAL"] = function(msg)
                 print("  |cffff6666Queue is non-empty out of combat - drain did not run.|r")
             end
         end
+    elseif msg == "scrub" then
+        -- Manual recovery: full attribute sweep on every registered frame,
+        -- then a complete reapply. Use if a binding seems stuck in a way
+        -- /dfccglobal apply does not fix (suspected stale manifest).
+        if InCombatLockdown() then
+            print("|cffff6666Cannot scrub in combat.|r")
+        else
+            local n = 0
+            if CC.registeredFrames then
+                for frame in pairs(CC.registeredFrames) do
+                    CC:ScrubAllClickAttributes(frame)
+                    n = n + 1
+                end
+            end
+            print("|cff33cc66Scrubbed " .. n .. " frame(s); reapplying bindings...|r")
+            CC.unifiedMacroMap = nil
+            CC:ApplyBindings()
+        end
     elseif msg == "drain" then
         -- Force a drain, to test the queue without waiting for combat to end
         print("|cff33cc66Forcing deferred drain...|r")
@@ -2286,6 +2304,7 @@ SlashCmdList["DFCCGLOBAL"] = function(msg)
         print("  debug - Toggle debug output")
         print("  deferred - Show the combat-deferred work queue")
         print("  drain - Force the deferred queue to drain now")
+        print("  scrub - Full attribute sweep + reapply (manifest recovery)")
         print("  apply - Reapply all bindings")
         print("  list - Show binding counts and status")
         print("  inspect - Inspect frame under mouse cursor")

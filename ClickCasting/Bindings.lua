@@ -388,29 +388,24 @@ function CC:ClearBindingsFromFrame(frame)
         pcall(function() frame:ClearBindings() end)
     end
     
-    -- Clear modifier combinations for mouse buttons (1-5)
-    -- Order must be: alt-ctrl-shift-meta (per WoW SecureActionButtonTemplate)
-    -- Only DandersFrames should have base type1/type2 cleared.
-    -- Blizzard frames AND third-party addon frames (QUI, ElvUI, etc.) must preserve
-    -- their base type1/type2 so click-to-target continues to work.
-    -- DandersFrames also clear the base (unprefixed) bindings; Blizzard and
-    -- third-party frames keep base type1/type2 so click-to-target still works.
-    local modifiers = MODIFIER_COMBOS
-    if isDandersFrame then
-        modifiers = { "" }
-        for _, m in ipairs(MODIFIER_COMBOS) do modifiers[#modifiers + 1] = m end
-    end
-    local buttons = {"1", "2", "3", "4", "5"}
-    
-    for _, mod in ipairs(modifiers) do
-        for _, btn in ipairs(buttons) do
-            frame:SetAttribute(mod .. "type" .. btn, "")
-            frame:SetAttribute(mod .. "spell" .. btn, nil)
-            frame:SetAttribute(mod .. "macro" .. btn, nil)
-            frame:SetAttribute(mod .. "macrotext" .. btn, nil)
+    -- Clear exactly the attributes the last apply wrote (see WriteAttr).
+    -- type attributes are cleared to "": a nil type lets the click fall
+    -- through to wildcard *type<N> attributes or Blizzard's native
+    -- interaction bindings, while an empty string suppresses both. Everything
+    -- else clears to nil. The caller (ApplyBindingsToFrameUnified) rewrites
+    -- current bindings right after, and its uncovered-base-button pass
+    -- restores target/togglemenu defaults on non-DandersFrames.
+    if frame.dfWrittenAttrs then
+        for attr in pairs(frame.dfWrittenAttrs) do
+            if attr:find("type", 1, true) then
+                frame:SetAttribute(attr, "")
+            else
+                frame:SetAttribute(attr, nil)
+            end
         end
+        frame.dfWrittenAttrs = nil
     end
-    
+
     -- BUG #10 / #860 FIX: Unregister any combat-conditional attribute drivers.
     if frame.dfAttrDriverList then
         for _, attr in ipairs(frame.dfAttrDriverList) do
@@ -428,6 +423,37 @@ function CC:ClearBindingsFromFrame(frame)
     end
 end
 
+-- Last-resort full attribute scrub. The normal clear paths walk the
+-- dfWrittenAttrs manifest; this sweeps every modifier/button combination we
+-- could ever have written, for recovery when the manifest is suspected wrong
+-- (it is plain Lua bookkeeping, so that means a code bug -- but binding state
+-- has burned us enough times to keep the escape hatch). Reached only from
+-- /dfccglobal scrub; NOT from the automatic repair path, because a scrub
+-- without an immediate reapply strips every mouse binding on the frame.
+function CC:ScrubAllClickAttributes(frame)
+    if not frame or InCombatLockdown() then return end
+    local combos = { "" }
+    for _, m in ipairs(MODIFIER_COMBOS) do combos[#combos + 1] = m end
+    for _, mod in ipairs(combos) do
+        for btn = 1, 5 do
+            frame:SetAttribute(mod .. "type" .. btn, nil)
+            frame:SetAttribute(mod .. "spell" .. btn, nil)
+            frame:SetAttribute(mod .. "macrotext" .. btn, nil)
+            frame:SetAttribute(mod .. "unit" .. btn, nil)
+            frame:SetAttribute(mod .. "clickbutton" .. btn, nil)
+        end
+    end
+    frame.dfWrittenAttrs = nil
+    if frame.dfAttrDriverList then
+        for _, attr in ipairs(frame.dfAttrDriverList) do
+            UnregisterAttributeDriver(frame, attr)
+        end
+        frame.dfAttrDriverList = nil
+    end
+    self:ClearClickProxyRoutes(frame)
+    pcall(ClearOverrideBindings, frame)
+end
+
 -- Restore Blizzard default click behavior to a frame
 function CC:RestoreBlizzardDefaults(frame)
     if not frame then return end
@@ -438,35 +464,27 @@ function CC:RestoreBlizzardDefaults(frame)
     -- 12.0.7 gate workaround: drop any proxy click-action routes too.
     self:ClearClickProxyRoutes(frame)
 
-    -- Clear ALL modifier combinations we may have set (but NOT the base type1/type2)
-    local modifiers = MODIFIER_COMBOS
-    local buttons = {"1", "2", "3", "4", "5"}
-    
-    for _, mod in ipairs(modifiers) do
-        for _, btn in ipairs(buttons) do
-            frame:SetAttribute(mod .. "type" .. btn, nil)
-            frame:SetAttribute(mod .. "spell" .. btn, nil)
-            frame:SetAttribute(mod .. "macro" .. btn, nil)
-            frame:SetAttribute(mod .. "macrotext" .. btn, nil)
+    -- Clear exactly the attributes the last apply wrote (see WriteAttr).
+    -- nil semantics here (not ""): the base type1/type2 defaults are written
+    -- right below, and everything else should fall back to Blizzard behavior.
+    if frame.dfWrittenAttrs then
+        for attr in pairs(frame.dfWrittenAttrs) do
+            frame:SetAttribute(attr, nil)
         end
+        frame.dfWrittenAttrs = nil
     end
-    
-    -- Clear non-modified buttons 3, 4, 5 (but not 1 and 2 which we'll set to defaults)
-    for _, btn in ipairs({"3", "4", "5"}) do
-        frame:SetAttribute("type" .. btn, nil)
-        frame:SetAttribute("spell" .. btn, nil)
-        frame:SetAttribute("macro" .. btn, nil)
-        frame:SetAttribute("macrotext" .. btn, nil)
+
+    -- Unregister any frame-side combat-conditional drivers. The old sweep
+    -- missed these (only ClearBindingsFromFrame handled them), so a driver
+    -- could rewrite its type attribute on the next combat transition after
+    -- the frame was restored.
+    if frame.dfAttrDriverList then
+        for _, attr in ipairs(frame.dfAttrDriverList) do
+            UnregisterAttributeDriver(frame, attr)
+        end
+        frame.dfAttrDriverList = nil
     end
-    
-    -- Also clear spell/macro for buttons 1 and 2
-    frame:SetAttribute("spell1", nil)
-    frame:SetAttribute("spell2", nil)
-    frame:SetAttribute("macro1", nil)
-    frame:SetAttribute("macro2", nil)
-    frame:SetAttribute("macrotext1", nil)
-    frame:SetAttribute("macrotext2", nil)
-    
+
     -- Clear override bindings
     ClearOverrideBindings(frame)
     
@@ -2540,6 +2558,91 @@ end
 -- SIMPLIFIED BINDING APPLICATION
 -- ============================================================
 
+-- Manifest-tracked attribute writer. Every attribute the binding loop writes
+-- on a frame is recorded in frame.dfWrittenAttrs, so ClearBindingsFromFrame /
+-- RestoreBlizzardDefaults can clear exactly what was written instead of
+-- sweeping every combination that could ever exist (~500 SetAttribute calls
+-- per frame per clear). The proxy path keeps its own dfProxyRoutes
+-- bookkeeping and combat drivers keep dfAttrDriverList; this manifest covers
+-- only direct frame attributes.
+local function WriteAttr(frame, attr, value)
+    frame:SetAttribute(attr, value)
+    frame.dfWrittenAttrs = frame.dfWrittenAttrs or {}
+    frame.dfWrittenAttrs[attr] = true
+end
+
+-- An attribute slot: where one action lands on a frame. Mouse slots spell
+-- their attributes "shift-macrotext2" style (prefix..name..button); virtual
+-- slots (keyboard, scroll, meta-mouse, third-party copies) use the named
+-- "macrotext-<vbtn>" style.
+local function MouseSlot(modPrefix, buttonNum)
+    return {
+        typeAttr  = modPrefix .. "type" .. buttonNum,
+        macroAttr = modPrefix .. "macrotext" .. buttonNum,
+        unitAttr  = modPrefix .. "unit" .. buttonNum,
+        clickAttr = modPrefix .. "clickbutton" .. buttonNum,
+    }
+end
+
+local function VirtualSlot(virtualBtn)
+    return {
+        typeAttr  = "type-" .. virtualBtn,
+        macroAttr = "macrotext-" .. virtualBtn,
+        unitAttr  = "unit-" .. virtualBtn,
+        clickAttr = "clickbutton-" .. virtualBtn,
+        isVirtual = true,
+    }
+end
+
+-- Write one resolved action into one slot. Single dispatch replacing four
+-- near-identical copies (mouse/key x special/macro, each with proxy / direct /
+-- combat-conditional variants). Behavior preserved from the originals:
+--   * menu/target route through the 12.0.7 gate proxy when useProxy, EXCEPT
+--     plain unmodified left-click target on the mouse slot (passes the gate
+--     natively, stays direct).
+--   * direct target sets unit="mouseover" on virtual slots only. The old
+--     mouse-path variant gated it on dfIsBlizzardFrame, but Blizzard frames
+--     always take the proxy route since the gate workaround shipped, so that
+--     leg was unreachable and is not reproduced.
+--   * focus/assist are never gated and never proxied; no combat drivers.
+--   * spell/macro actions carry combat conditionals inside the macro text;
+--     menu/target use attribute drivers (AddCombatConditional).
+function CC:ApplyActionToSlot(frame, slot, ctx)
+    local actionType = ctx.actionType
+    if not ctx.isSpecialAction then
+        WriteAttr(frame, slot.typeAttr, "macro")
+        WriteAttr(frame, slot.macroAttr, ctx.macroText)
+        return
+    end
+
+    if actionType == "menu" or actionType == self.ACTION_TYPES.MENU then
+        if ctx.useProxy then
+            self:RouteProxyAction(frame, slot.typeAttr, slot.clickAttr, "togglemenu", ctx.combatCond)
+        else
+            WriteAttr(frame, slot.typeAttr, "togglemenu")
+            if ctx.combatCond then
+                AddCombatConditional(frame, slot.typeAttr, "togglemenu", ctx.combatCond)
+            end
+        end
+    elseif actionType == "target" then
+        if ctx.useProxy and not (ctx.plainLeftClick and not slot.isVirtual) then
+            self:RouteProxyAction(frame, slot.typeAttr, slot.clickAttr, "target", ctx.combatCond)
+        else
+            WriteAttr(frame, slot.typeAttr, "target")
+            if slot.isVirtual then
+                WriteAttr(frame, slot.unitAttr, "mouseover")
+            end
+            if ctx.combatCond then
+                AddCombatConditional(frame, slot.typeAttr, "target", ctx.combatCond)
+            end
+        end
+    elseif actionType == "focus" or actionType == self.ACTION_TYPES.FOCUS then
+        WriteAttr(frame, slot.typeAttr, "focus")
+    elseif actionType == "assist" or actionType == self.ACTION_TYPES.ASSIST then
+        WriteAttr(frame, slot.typeAttr, "assist")
+    end
+end
+
 -- Apply all bindings to a frame using unified macro approach
 -- skipKeyboardUpdate: when true, skip UpdateFrameBindingAttributes (caller will batch it)
 function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate)
@@ -2647,14 +2750,15 @@ function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate)
     local coveredBaseButtons = {}
 
     -- Apply each macro binding (these will override defaults where bindings exist)
+    local isThirdPartyFrame = not frame.dfIsDandersFrame and not frame.dfIsBlizzardFrame
     for keyString, data in pairs(self.unifiedMacroMap) do
         local binding = data.templateBinding
-        
+
         -- Check if this binding should apply to this frame
         if self:ShouldBindingApplyToFrame(binding, frame) then
             local bindType = binding.bindType or "mouse"
             local actionType = binding.actionType or self.ACTION_TYPES.SPELL
-            
+
             -- Check if this should be treated as a special action
             -- If macroMap has macroText for target (smart res), treat it like a spell macro
             local isSpecialAction = data.isSpecialAction
@@ -2662,19 +2766,20 @@ function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate)
                 -- Fallback for backwards compatibility
                 isSpecialAction = (actionType == "menu" or actionType == "target" or
                                    actionType == "focus" or actionType == "assist" or
-                                   actionType == self.ACTION_TYPES.MENU or 
+                                   actionType == self.ACTION_TYPES.MENU or
                                    actionType == self.ACTION_TYPES.FOCUS or
                                    actionType == self.ACTION_TYPES.ASSIST)
             end
-            
-            -- Check if this is a third-party frame (not DandersFrames or Blizzard)
-            local isThirdPartyFrame = not frame.dfIsDandersFrame and not frame.dfIsBlizzardFrame
-            
-            -- Check if this is a third-party frame that needs virtual button approach
-            local needsVirtualBtn = isThirdPartyFrame
-            
+
+            local ctx = {
+                actionType = actionType,
+                isSpecialAction = isSpecialAction,
+                macroText = data.macroText,
+                combatCond = GetCombatCondition(binding),
+                useProxy = useProxy,
+            }
+
             if bindType == "mouse" then
-                -- Mouse binding: use frame attributes
                 local buttonNum = GetButtonNumber(binding.button)
                 local modPrefix = BuildModifierPrefix(binding.modifiers)
 
@@ -2682,171 +2787,31 @@ function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate)
                 if modPrefix == "" then
                     coveredBaseButtons[buttonNum] = true
                 end
+                ctx.plainLeftClick = (buttonNum == 1 and modPrefix == "")
 
-                local typeAttr = modPrefix .. "type" .. buttonNum
-                local spellAttr = modPrefix .. "spell" .. buttonNum
-                local macroAttr = modPrefix .. "macrotext" .. buttonNum
-                
-                -- Check if this is a third-party frame that needs virtual button approach
-                local needsVirtualBtn = isThirdPartyFrame
-                
-                -- Also need virtual button for META bindings (Mac Command key)
-                -- because meta- frame attributes don't work properly on Mac
+                self:ApplyActionToSlot(frame, MouseSlot(modPrefix, buttonNum), ctx)
+
+                -- Named-attribute copy of the same action:
+                --  * meta- (Mac Command) bindings always need one, because meta-
+                --    frame attributes do not work on Mac;
+                --  * third-party frames need one on the DIRECT paths. When
+                --    menu/target go through the gate proxy, only the meta copy
+                --    is made (matching the pre-refactor behavior).
                 local hasMetaMod = binding.modifiers and binding.modifiers:lower():find("meta")
-                local needsMetaVirtualBtn = hasMetaMod
-                
-                if isSpecialAction then
-                    -- Use direct attribute types for special actions
-                    if actionType == "menu" or actionType == self.ACTION_TYPES.MENU then
-                        if useProxy then
-                            -- 12.0.7 gate workaround: route menu through the ungated proxy
-                            local combatCond = GetCombatCondition(binding)
-                            self:RouteProxyAction(frame, typeAttr, modPrefix .. "clickbutton" .. buttonNum, "togglemenu", combatCond)
-                            if needsMetaVirtualBtn then
-                                local vBtn = self:GetVirtualButtonName(binding)
-                                self:RouteProxyAction(frame, "type-" .. vBtn, "clickbutton-" .. vBtn, "togglemenu", combatCond)
-                            end
-                        else
-                            frame:SetAttribute(typeAttr, "togglemenu")
-                            local vBtn
-                            if needsVirtualBtn or needsMetaVirtualBtn then
-                                vBtn = self:GetVirtualButtonName(binding)
-                                frame:SetAttribute("type-" .. vBtn, "togglemenu")
-                            end
-                            -- BUG #10 FIX: state-driver-based combat conditional
-                            local combatCond = GetCombatCondition(binding)
-                            if combatCond then
-                                AddCombatConditional(frame, typeAttr, "togglemenu", combatCond)
-                                if vBtn then
-                                    AddCombatConditional(frame, "type-" .. vBtn, "togglemenu", combatCond)
-                                end
-                            end
-                        end
-                    elseif actionType == "target" then
-                        if useProxy then
-                            -- 12.0.7 gate workaround: route target through the ungated proxy.
-                            -- The proxy inherits the frame's unit token via useparent-unit,
-                            -- so targeting still works at any range (no /target name limit).
-                            -- Plain unmodified left-click passes the gate natively (it has a
-                            -- default interaction binding), so leave it direct and only proxy
-                            -- the rebound cases.
-                            local combatCond = GetCombatCondition(binding)
-                            if buttonNum == 1 and modPrefix == "" then
-                                frame:SetAttribute(typeAttr, "target")
-                                if combatCond then
-                                    AddCombatConditional(frame, typeAttr, "target", combatCond)
-                                end
-                            else
-                                self:RouteProxyAction(frame, typeAttr, modPrefix .. "clickbutton" .. buttonNum, "target", combatCond)
-                            end
-                            if needsMetaVirtualBtn then
-                                local vBtn = self:GetVirtualButtonName(binding)
-                                self:RouteProxyAction(frame, "type-" .. vBtn, "clickbutton-" .. vBtn, "target", combatCond)
-                            end
-                        else
-                            frame:SetAttribute(typeAttr, "target")
-                            -- For Blizzard frames, also set unit="mouseover" to ensure targeting works.
-                            -- Native type="target" uses the frame's unit attribute, but some frames
-                            -- may not have it properly accessible.
-                            if frame.dfIsBlizzardFrame then
-                                local unitAttr = modPrefix .. "unit" .. buttonNum
-                                frame:SetAttribute(unitAttr, "mouseover")
-                            end
-                            local vBtn
-                            if needsVirtualBtn or needsMetaVirtualBtn then
-                                vBtn = self:GetVirtualButtonName(binding)
-                                frame:SetAttribute("type-" .. vBtn, "target")
-                                frame:SetAttribute("unit-" .. vBtn, "mouseover")
-                            end
-                            -- BUG #860 FIX: state-driver-based combat conditional
-                            local combatCond = GetCombatCondition(binding)
-                            if combatCond then
-                                AddCombatConditional(frame, typeAttr, "target", combatCond)
-                                if vBtn then
-                                    AddCombatConditional(frame, "type-" .. vBtn, "target", combatCond)
-                                end
-                            end
-                        end
-                    elseif actionType == "focus" or actionType == self.ACTION_TYPES.FOCUS then
-                        frame:SetAttribute(typeAttr, "focus")
-                        if needsVirtualBtn or needsMetaVirtualBtn then
-                            local virtualBtn = self:GetVirtualButtonName(binding)
-                            frame:SetAttribute("type-" .. virtualBtn, "focus")
-                        end
-                    elseif actionType == "assist" or actionType == self.ACTION_TYPES.ASSIST then
-                        frame:SetAttribute(typeAttr, "assist")
-                        if needsVirtualBtn or needsMetaVirtualBtn then
-                            local virtualBtn = self:GetVirtualButtonName(binding)
-                            frame:SetAttribute("type-" .. virtualBtn, "assist")
-                        end
-                    end
-                else
-                    -- Use macro for all spell/macro/target bindings
-                    -- This supports smart res, combat conditionals, fallbacks, etc.
-                    frame:SetAttribute(typeAttr, "macro")
-                    frame:SetAttribute(macroAttr, data.macroText)
-                    
-                    -- For third-party frames OR META bindings, also set virtual button attributes
-                    -- META bindings need this because meta- frame attributes don't work on Mac
-                    if needsVirtualBtn or needsMetaVirtualBtn then
-                        local virtualBtn = self:GetVirtualButtonName(binding)
-                        frame:SetAttribute("type-" .. virtualBtn, "macro")
-                        frame:SetAttribute("macrotext-" .. virtualBtn, data.macroText)
-                    end
+                local specialViaProxy = isSpecialAction and useProxy and
+                    (actionType == "target" or actionType == "menu" or actionType == self.ACTION_TYPES.MENU)
+                local wantVirtual = hasMetaMod or (not specialViaProxy and isThirdPartyFrame)
+                if wantVirtual then
+                    self:ApplyActionToSlot(frame, VirtualSlot(self:GetVirtualButtonName(binding)), ctx)
                 end
-                
+
             elseif bindType == "key" or bindType == "scroll" then
-                -- Keyboard/scroll: use virtual button approach
-                local virtualBtn = self:GetVirtualButtonName(binding)
-                
-                if isSpecialAction then
-                    if actionType == "menu" or actionType == self.ACTION_TYPES.MENU then
-                        local typeAttr = "type-" .. virtualBtn
-                        if useProxy then
-                            -- 12.0.7 gate workaround: route menu through the ungated proxy
-                            self:RouteProxyAction(frame, typeAttr, "clickbutton-" .. virtualBtn, "togglemenu", GetCombatCondition(binding))
-                        else
-                            frame:SetAttribute(typeAttr, "togglemenu")
-                            -- BUG #10 FIX: state-driver-based combat conditional
-                            local combatCond = GetCombatCondition(binding)
-                            if combatCond then
-                                AddCombatConditional(frame, typeAttr, "togglemenu", combatCond)
-                            end
-                        end
-                    elseif actionType == "target" then
-                        local typeAttr = "type-" .. virtualBtn
-                        if useProxy then
-                            -- 12.0.7 gate workaround: route target through the ungated proxy.
-                            -- The proxy inherits the frame's real unit token (party1,
-                            -- raid3, etc.) via useparent-unit, so targeting works at any
-                            -- range (no /target name-based out-of-range limitation).
-                            self:RouteProxyAction(frame, typeAttr, "clickbutton-" .. virtualBtn, "target", GetCombatCondition(binding))
-                        else
-                            frame:SetAttribute(typeAttr, "target")
-                            -- Mirror the mouse path: set unit="mouseover" on Blizzard /
-                            -- third-party frames, where the frame's main "unit" attribute
-                            -- may not be reliably exposed.
-                            frame:SetAttribute("unit-" .. virtualBtn, "mouseover")
-                            -- BUG #860 FIX: state-driver-based combat conditional
-                            local combatCond = GetCombatCondition(binding)
-                            if combatCond then
-                                AddCombatConditional(frame, typeAttr, "target", combatCond)
-                            end
-                        end
-                    elseif actionType == "focus" or actionType == self.ACTION_TYPES.FOCUS then
-                        frame:SetAttribute("type-" .. virtualBtn, "focus")
-                    elseif actionType == "assist" or actionType == self.ACTION_TYPES.ASSIST then
-                        frame:SetAttribute("type-" .. virtualBtn, "assist")
-                    end
-                else
-                    -- Use macro for all spell/macro bindings
-                    frame:SetAttribute("type-" .. virtualBtn, "macro")
-                    frame:SetAttribute("macrotext-" .. virtualBtn, data.macroText)
-                end
+                -- Keyboard/scroll: the virtual named slot is the primary
+                self:ApplyActionToSlot(frame, VirtualSlot(self:GetVirtualButtonName(binding)), ctx)
             end
         end
     end
-    
+
     -- For non-DandersFrames, restore default behavior for any base mouse buttons
     -- that weren't covered by a binding on this frame. ClearBlizzardClickCastFromFrame
     -- wipes type1/type2 to "" when ANY binding targets other frames, but individual
@@ -2863,9 +2828,6 @@ function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate)
             end
         end
     end
-
-    -- Mark this frame as having had bindings applied (for optimization in ClearBindingsFromFrame)
-    frame.dfBindingsEverApplied = true
 
     -- Debug: confirm final attribute state after apply
     local finalType1 = frame:GetAttribute("type1")
