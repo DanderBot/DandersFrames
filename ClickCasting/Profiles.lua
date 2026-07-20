@@ -848,10 +848,4 @@ function CC:GetSpellValidityStatus(spellName)
     return "invalid"
 end
 
--- Legacy function for compatibility
-local function IsSpellValidForCurrentClass(spellName)
-    local status = CC:GetSpellValidityStatus(spellName)
-    return status == "valid_spec" or status == "valid_class"
-end
-
 -- ============================================================

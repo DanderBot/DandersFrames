@@ -1396,11 +1396,15 @@ function CC:RegisterFrame(frame)
 end
 
 -- ============================================================
--- BINDING STATE DIAGNOSTIC TICKER
--- Read-only observer that polls dfBindingsActive every 200ms while hovering.
--- Logs the exact moment bindings transition from active to cleared,
--- helping pinpoint the Blizzard WrapScript bug.
--- No protected function calls — purely reads attributes and logs.
+-- BINDING STATE WATCHDOG TICKER
+-- Polls dfBindingsActive every 200ms while a keyboard-bound frame is hovered.
+-- NOT purely diagnostic: as well as logging the moment binds vanish or the
+-- mouseoverbutton desyncs, it TRIGGERS RunBindingRepair for both — this is a
+-- live self-heal path (the "mouseover-desync" repair fires from here in the
+-- field). Do not gate it behind debug mode or remove it as "just logging":
+-- the verbose logging no-ops out of debug, but the repair triggers must run
+-- for everyone. It makes no protected calls itself (attribute reads only);
+-- RequestBindingRepair defers/cooldowns the actual secure work.
 -- ============================================================
 
 local DIAG_INTERVAL = 0.2  -- seconds between polls

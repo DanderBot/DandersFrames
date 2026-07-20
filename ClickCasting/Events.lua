@@ -354,15 +354,6 @@ function CC:DeferAfter(key, delay, fn)
     end)
 end
 
--- Cancel a pending DeferAfter timer (no-op if there is none)
-function CC:CancelDeferAfter(key)
-    local t = self.timers and self.timers[key]
-    if t then
-        t:Cancel()
-        self.timers[key] = nil
-    end
-end
-
 -- Guard for functions that must not touch secure state in combat.
 -- Returns true if the caller should abort; the work is queued as `job` so it
 -- cannot be silently lost. Defer at the point of blocking rather than trusting
