@@ -306,7 +306,8 @@ local DEFAULT_BINDING = {
         alwaysCast = false,
     },
     -- Load conditions
-    loadSpec = nil, -- nil = all specs, or table of spec IDs
+    -- (loadSpec, the per-binding spec gate, was retired: no UI ever wrote it
+    --  and per-spec click casting is done via loadout-assigned profiles)
     loadCombat = nil, -- nil = always, "combat" = in combat only, "nocombat" = out of combat only
 }
 CC.DEFAULT_BINDING = DEFAULT_BINDING

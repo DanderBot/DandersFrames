@@ -323,25 +323,15 @@ end
 
 -- Check if a binding should be active based on load conditions
 function CC:ShouldBindingLoad(binding)
-    if not binding.enabled then return false end
-    
-    -- Check spec condition
-    if binding.loadSpec then
-        local currentSpec = GetSpecialization()
-        local specMatch = false
-        for _, specId in ipairs(binding.loadSpec) do
-            if specId == currentSpec then
-                specMatch = true
-                break
-            end
-        end
-        if not specMatch then return false end
-    end
-    
-    -- Combat conditions are checked dynamically via state drivers
-    -- For now, we apply all bindings and let the macro conditionals handle combat
-    
-    return true
+    -- Per-spec click casting is done via loadout-assigned profiles. The old
+    -- per-binding loadSpec field was config no UI ever wrote (import-only),
+    -- and reading GetSpecialization() here made the binding list silently
+    -- wrong whenever spec data was not resolved yet (cold login) -- retired
+    -- in favor of the profile system.
+    --
+    -- Combat conditions are checked dynamically via state drivers / macro
+    -- conditionals, not here.
+    return not not binding.enabled
 end
 
 -- Every modifier prefix combination we ever write, in SecureActionButtonTemplate
