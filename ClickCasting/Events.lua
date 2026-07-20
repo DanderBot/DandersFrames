@@ -111,11 +111,14 @@ function CC:RegisterEvents()
                 -- arena/dungeon of the session, not only after a /reload
                 CC:ResolveProvisionalMap("zone-in")
 
-                -- Check for loadout-based profile on initial load
+                -- Check for loadout-based profile on initial load. No combat
+                -- guard here: CheckLoadoutProfileSwitch defers itself via
+                -- pendingLoadoutCheck in lockdown — the old call-site guard
+                -- silently DROPPED the check when zone-in+1s landed in combat
+                -- (the arena-load race), leaving the previous spec's profile
+                -- active for the whole match.
                 C_Timer.After(1, function()
-                    if not InCombatLockdown() then
-                        CC:CheckLoadoutProfileSwitch()
-                    end
+                    CC:CheckLoadoutProfileSwitch()
                 end)
             end)
         elseif event == "ARENA_PREP_OPPONENT_SPECIALIZATIONS" then
