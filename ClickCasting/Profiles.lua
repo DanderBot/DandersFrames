@@ -492,10 +492,27 @@ end
 -- Check and auto-switch profile based on current loadout
 function CC:CheckLoadoutProfileSwitch()
     if InCombatLockdown() then
-        -- Will be called again when combat ends
+        -- Defer, don't drop: entering an arena/dungeon starts combat quickly,
+        -- and silently losing the check leaves the previous spec's profile
+        -- active for the whole match. OnCombatEnd drains pendingLoadoutCheck.
+        self.pendingLoadoutCheck = true
         return
     end
-    
+
+    -- Cold-start guard: at the first login of a session this can run BEFORE
+    -- GetSpecialization() resolves. GetCurrentSpec()'s `or 1` fallback would
+    -- then MASK the missing data and switch to spec 1's profile — the wrong
+    -- profile for anyone whose actual spec is 2+ ("none of my binds work in
+    -- my first arena of the day until I reload"). Record the unresolved state
+    -- and let the resolve watchers (spec/spell events, loading screens, arena
+    -- prep) re-run this check once real data arrives.
+    if not GetSpecialization() then
+        self.loadoutCheckUnresolved = true
+        DF:Debug("CLICK", "CheckLoadoutProfileSwitch: spec data not ready — deferred to resolve watchers")
+        return
+    end
+    self.loadoutCheckUnresolved = nil
+
     local specIndex = GetCurrentSpec()
     local loadoutID = GetCurrentLoadoutConfigID()
     local assignedProfile, isSpecific = self:GetProfileForLoadout(specIndex, loadoutID)

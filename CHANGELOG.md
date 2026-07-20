@@ -4,6 +4,7 @@
 
 ### Bug Fixes
 
+* (Click Casting) **Fixed all binds being dead in the first arena/dungeon of a fresh session until a reload.** At the first login of a session, the per-spec profile auto-switch could run before the game had your specialization ready — and instead of waiting, it fell back to spec 1 and switched your click-casting to the wrong spec's profile for the rest of the session. The check now recognises when spec data isn't ready yet and re-runs automatically as soon as it arrives (and again at loading screens and arena preparation as a safety net); it is also deferred instead of skipped when it lands during combat. (by Krathe)
 * (Pinned Frames) Fixed a leftover pinned-frame handle (an empty "drag to move" box, often orange) that could stay stuck on screen and survive reloads. The confirmed trigger was switching to a profile with fewer pinned sets than the previous one — the extra set's frame was left behind with no way to hide it. The cleanup now enforces the full rule at every login, profile switch and party/raid change: any pinned frame that the active profile doesn't define, has disabled, or that belongs to the other mode is hidden — so a stuck box is cleaned up no matter how it got stranded. (by Krathe)
 
 ### Improvements
