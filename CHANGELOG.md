@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Bug Fixes
+
+* (Click Casting) **Fixed all binds being dead in the first arena/dungeon of a fresh session until a reload.** At the first login of a session, the per-spec profile auto-switch could run before the game had your specialization ready — and instead of waiting, it fell back to spec 1 and switched your click-casting to the wrong spec's profile for the rest of the session. The check now recognises when spec data isn't ready yet and re-runs automatically as soon as it arrives (and again at loading screens and arena preparation as a safety net); it is also deferred instead of skipped when it lands during combat. (by Krathe)
+
 ### Improvements
 
 * (Click Casting) Enabling a targeting fallback (Global, Target, Self or Always Cast) on a key that already does something in WoW now asks for confirmation and names exactly what the key will stop doing — these options make the key active everywhere, not just over the frames. The fallback tooltips explain this too.

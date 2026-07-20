@@ -2408,13 +2408,55 @@ end
 
 -- Process all bindings and build unified macro map
 -- Returns: { [keyString] = { macroText = "...", templateBinding = binding } }
+-- Re-resolve click-casting state once cold-start data becomes available. Two
+-- things can be built before GetSpecialization() resolves at the first login
+-- of a session, and both used to stay wrong all day until a /reload:
+--   * loadoutCheckUnresolved (CheckLoadoutProfileSwitch): the spec→profile
+--     auto-switch could not run (or, before the guard, ran with the `or 1`
+--     spec fallback and switched to the WRONG spec's profile) — the field
+--     report: "none of my binds work in my first arena of the day"
+--   * macroMapUnresolved (BuildUnifiedMacroMap): loadSpec-scoped bindings
+--     were dropped from the map (legacy/import-only config; belt)
+-- Debounced; each resolver clears its own flag on success and self-defers in
+-- combat (pendingLoadoutCheck / needsBindingRefresh). No-op in steady state,
+-- so the extra triggers cost nothing.
+function CC:ResolveProvisionalMap(reason)
+    if not (self.macroMapUnresolved or self.loadoutCheckUnresolved) then return end
+    if not (self.db and self.db.enabled) then return end
+    if self.provisionalResolveTimer then self.provisionalResolveTimer:Cancel() end
+    self.provisionalResolveTimer = C_Timer.NewTimer(0.5, function()
+        CC.provisionalResolveTimer = nil
+        if CC.loadoutCheckUnresolved then
+            DF:Debug("CLICK", "Re-running deferred loadout profile check (%s)", tostring(reason))
+            CC:CheckLoadoutProfileSwitch()
+        end
+        if CC.macroMapUnresolved then
+            DF:Debug("CLICK", "Rebuilding provisional binding map (%s)", tostring(reason))
+            CC:ApplyBindings()
+        end
+    end)
+end
+
 function CC:BuildUnifiedMacroMap()
     local macroMap = {}
-    
+
+    -- Cold-start guard: ShouldBindingLoad drops every loadSpec-scoped binding
+    -- while GetSpecialization() is still nil (first login of a session, before
+    -- spec data resolves). The map is built once and cached, so a map built in
+    -- that window silently loses those bindings — and an all-spec-scoped setup
+    -- comes up EMPTY, which downstream disables clicks on our frames entirely
+    -- ("none of my binds work in my first arena of the day until I reload").
+    -- Record the condition on the module; the resolve watchers (SPELLS_CHANGED /
+    -- PLAYER_SPECIALIZATION_CHANGED / arena prep) rebuild when data arrives, and
+    -- ApplyBindingsToFrameUnified refuses to wipe a frame off a suspect map.
+    local specKnown = GetSpecialization() ~= nil
+    local anySpecScoped = false
+
     -- Group all bindings by their key string
     local keyGroups = {}
     for i, binding in ipairs(self.db.bindings) do
         if binding.enabled ~= false then
+            if binding.loadSpec then anySpecScoped = true end
             local keyString = self:GetBindingKeyString(binding)
             if keyString then
                 if not keyGroups[keyString] then
@@ -2423,6 +2465,11 @@ function CC:BuildUnifiedMacroMap()
                 table.insert(keyGroups[keyString], {binding = binding, index = i})
             end
         end
+    end
+
+    self.macroMapUnresolved = (anySpecScoped and not specKnown) or nil
+    if self.macroMapUnresolved then
+        DF:DebugWarn("CLICK", "BuildUnifiedMacroMap: spec unknown with spec-scoped bindings — map is provisional")
     end
     
     -- Build macro for each key group
@@ -2529,17 +2576,16 @@ function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate)
             frameName, debugstack(2, 1, 0) or "unknown")
     end
 
-    -- Clear existing bindings first
-    self:ClearBindingsFromFrame(frame)
-    
     -- Build unified macro map if not already built
     if not self.unifiedMacroMap then
         self.unifiedMacroMap = self:BuildUnifiedMacroMap()
         -- Refresh keyboard bindings on all frames since map was just built
         self:RefreshKeyboardBindings()
     end
-    
-    -- Check if this frame has ANY bindings that apply to it
+
+    -- Check if this frame has ANY bindings that apply to it — BEFORE the
+    -- destructive clear below, so a provisional (cold-start) map can bail out
+    -- without touching the frame's existing state.
     local hasAnyBindings = false
     local isDandersFrame = frame.dfIsDandersFrame == true
     local isBlizzardFrame = frame.dfIsBlizzardFrame == true
@@ -2565,6 +2611,16 @@ function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate)
 
     -- If no bindings apply to this frame
     if not hasAnyBindings then
+        -- Provisional map (spec not yet resolved at build time): the emptiness
+        -- is almost certainly the cold-start drop, not the user's config. Do
+        -- NOT clear/disable anything — leave the frame exactly as it is; the
+        -- resolve watchers rebuild and re-apply once spec data arrives.
+        if self.macroMapUnresolved then
+            DF:Debug("CLICK", "ApplyBindings %s deferred — provisional map (spec unresolved)", frameName)
+            return
+        end
+        -- Genuinely no bindings for this frame: clean it up.
+        self:ClearBindingsFromFrame(frame)
         if isDandersFrame then
             -- For DandersFrames, completely disable clicks when no bindings apply
             -- Our own frames get type1/type2 set in InitializeHeaderChild as a safety net
@@ -2579,7 +2635,11 @@ function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate)
         end
         return
     end
-    
+
+    -- Clear existing bindings first (moved below the applicability check so a
+    -- provisional-map bailout above never strips a frame's working state)
+    self:ClearBindingsFromFrame(frame)
+
     -- Register for clicks based on castOnDown option
     if frame.RegisterForClicks then
         local castOnDown = self.profile and self.profile.options and self.profile.options.castOnDown
