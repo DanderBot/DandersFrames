@@ -1847,6 +1847,10 @@ end
 --                      first sizes the frame (then it stops — no re-flow loop).
 --   fontTemplate       body font (default DFFontHighlightSmall — the note look).
 --   lineHeight         per-line height (default 14).
+--   padTop/padBottom   vertical breathing room baked into layoutHeight (default 2 / 8) so a note
+--                      isn't glued to the controls above/below it — the measured height (and thus
+--                      the slot a caller gives it) already includes it. More below than above so
+--                      the note reads as annotating the control above while clearing the next one.
 -- Returns the frame; frame.layoutHeight is the measured height after flow; frame:Reflow(w)
 -- re-flows at a new width if a caller ever needs it.
 -- ============================================================
@@ -1855,6 +1859,8 @@ function GUI:CreateLink(parent, text, opts)
     local onLinkClick = opts.onLinkClick
     local fontTemplate = opts.fontTemplate or "DFFontHighlightSmall"
     local LINE_H = opts.lineHeight or 14
+    local PAD_TOP = opts.padTop or 2
+    local PAD_BOTTOM = opts.padBottom or 8
     local frame = CreateFrame("Frame", nil, parent)
     frame:SetHeight(LINE_H)
 
@@ -1904,7 +1910,7 @@ function GUI:CreateLink(parent, text, opts)
     local function doFlow(w)
         w = w or frame:GetWidth() or 0
         if w < 20 then return LINE_H end
-        local x, lineY = 0, 0
+        local x, lineY = 0, -PAD_TOP   -- start below the top so the first line isn't glued up
         for _, seg in ipairs(segs) do
             if seg.type == "newline" then
                 x = 0; lineY = lineY - LINE_H - 2
@@ -1922,7 +1928,7 @@ function GUI:CreateLink(parent, text, opts)
                 x = x + gap + seg._w
             end
         end
-        local h = math.abs(lineY) + LINE_H
+        local h = math.abs(lineY) + LINE_H + PAD_BOTTOM
         frame:SetHeight(h); frame.layoutHeight = h
         return h
     end
