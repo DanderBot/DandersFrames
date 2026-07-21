@@ -4508,7 +4508,8 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                     -- Scroll the section into view, but FLASH the specific Color Mode widget
                     -- (LinkToSetting flashes target.widget — pass the group instead to flash the
                     -- whole section).
-                    GUI:LinkToSetting({ widget = colorModeDrop or texColorsGroup, scrollTo = scrollToTexColors })
+                    GUI:LinkToSetting({ widget = colorModeDrop or texColorsGroup, scrollTo = scrollToTexColors,
+                        flash = { border = true } })   -- a single control: fill + outline
                 end,
             })
             g:AddWidget(note, note.layoutHeight or 34)

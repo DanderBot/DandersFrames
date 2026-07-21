@@ -1874,21 +1874,41 @@ function GUI:CreateLink(parent, text, opts)
 end
 
 -- GUI:FlashWidget — the "show me" pulse (revived from the pre-12.1 boss-debuffs jump): briefly
--- wash a widget/section in the theme colour so the eye lands on it after a jump. One reused
--- overlay per widget; the colour refreshes each call (party blue / raid orange). Subtle — peaks
--- ~35% alpha via UIFrameFlash — so the control stays readable underneath.
+-- highlight a widget/section in the theme colour so the eye lands on it after a jump. One reused
+-- overlay per target; the colour refreshes each call (party blue / raid orange).
+-- opts (all opt-in / out):
+--   fill    (default true)  — a soft theme-coloured WASH (peaks ~35% alpha, control stays legible).
+--   border  (default false) — a theme-coloured OUTLINE. Mix per call: a whole section reads well
+--                             as border-only; a single control as fill + border.
+--   alpha       fill peak alpha (default 0.35).   borderSize  outline thickness px (default 2).
+-- The overlay is a backdrop frame parented to the target's parent + anchored to the target, so
+-- it works whether the target is a Frame or a raw FontString (section headers).
 function GUI:FlashWidget(widget, opts)
-    if not widget or not widget.CreateTexture then return end
+    if not widget or not widget.GetParent then return end
     opts = opts or {}
+    local doFill   = opts.fill ~= false
+    local doBorder = opts.border and true or false
+    if not doFill and not doBorder then doFill = true end   -- something has to show
     local hl = widget._dfFlashHL
     if not hl then
-        hl = widget:CreateTexture(nil, "OVERLAY")
-        hl:SetPoint("TOPLEFT", -3, 3)
-        hl:SetPoint("BOTTOMRIGHT", 3, -3)
+        local host = widget:GetParent() or widget
+        hl = CreateFrame("Frame", nil, host, "BackdropTemplate")
+        if not hl.SetBackdrop then Mixin(hl, BackdropTemplateMixin) end
+        hl:SetPoint("TOPLEFT", widget, "TOPLEFT", -3, 3)
+        hl:SetPoint("BOTTOMRIGHT", widget, "BOTTOMRIGHT", 3, -3)
+        local wl = (widget.GetFrameLevel and widget:GetFrameLevel())
+            or (host.GetFrameLevel and host:GetFrameLevel()) or 1
+        hl:SetFrameLevel(wl + 4)   -- draw over the target
         widget._dfFlashHL = hl
     end
     local c = (GUI.GetThemeColor and GUI.GetThemeColor()) or { r = 1, g = 0.82, b = 0 }
-    hl:SetColorTexture(c.r, c.g, c.b, opts.alpha or 0.35)
+    hl:SetBackdrop({
+        bgFile   = doFill and "Interface\\Buttons\\WHITE8x8" or nil,
+        edgeFile = doBorder and "Interface\\Buttons\\WHITE8x8" or nil,
+        edgeSize = doBorder and (opts.borderSize or 2) or nil,
+    })
+    hl:SetBackdropColor(c.r, c.g, c.b, doFill and (opts.alpha or 0.35) or 0)
+    if doBorder then hl:SetBackdropBorderColor(c.r, c.g, c.b, 1) end
     hl:SetAlpha(1)
     hl:Show()
     if UIFrameFlash then
@@ -1906,7 +1926,8 @@ end
 --   widget    explicit widget to flash (overrides the section-header lookup).
 --   scrollTo  optional function() that scrolls a CUSTOM container (e.g. an Aura Designer card)
 --             to the target — used instead of the page section scroll.
---   flash     set false to skip the pulse (default on).
+--   flash     false = no pulse; a table = FlashWidget opts (fill / border / …) so a link picks
+--             its own highlight style; nil or true = the default flash.
 function GUI:LinkToSetting(target)
     if type(target) ~= "table" then return end
     local function go()
@@ -1917,7 +1938,8 @@ function GUI:LinkToSetting(target)
             w = DF.Search:ScrollToSection(target.page, target.section) or w
         end
         if w and target.flash ~= false then
-            C_Timer.After(0.05, function() GUI:FlashWidget(w) end)   -- after the scroll settles
+            local fopts = type(target.flash) == "table" and target.flash or nil
+            C_Timer.After(0.05, function() GUI:FlashWidget(w, fopts) end)   -- after the scroll settles
         end
     end
     if target.page and GUI.SelectTab then
