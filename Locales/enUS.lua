@@ -1931,6 +1931,7 @@ L["Timing"] = true
 L["Tint"] = true
 L["Tint Entire Bar"] = true
 L["Track Highest Duration"] = true
+L["Type"] = true
 L["Track Lowest Duration"] = true
 L["Trigger Mode"] = true
 L["Uses a single border per frame. Highest priority wins."] = true

@@ -1259,7 +1259,7 @@ local TYPE_DEFAULTS = {
         durationColor = {r = 1, g = 1, b = 1, a = 1},
         durationHideAboveEnabled = false, durationHideAboveThreshold = 10,
         durationHideOnPermanent = true,   -- Wave 4: no timer text on permanent auras
-        expiryAlertMode = "OFF", expiryAlertThreshold = 5,
+        expiryAlertEnabled = false, expiryAlertMode = "BORDER", expiryAlertThreshold = 5,
         expiryAlertText = "", expiryAlertGlyph = "WARNING",
         expiryAlertAnchor = "TOP", expiryAlertOffsetX = 0, expiryAlertOffsetY = 0,
         expiryAlertSize = 14,
@@ -1372,7 +1372,7 @@ local TYPE_DEFAULTS = {
         durationColor = {r = 1, g = 1, b = 1, a = 1},
         durationHideAboveEnabled = false, durationHideAboveThreshold = 10,
         durationHideOnPermanent = true,   -- Wave 4: no timer text on permanent auras
-        expiryAlertMode = "OFF", expiryAlertThreshold = 5,
+        expiryAlertEnabled = false, expiryAlertMode = "BORDER", expiryAlertThreshold = 5,
         expiryAlertText = "", expiryAlertGlyph = "WARNING",
         expiryAlertAnchor = "TOP", expiryAlertOffsetX = 0, expiryAlertOffsetY = 0,
         expiryAlertSize = 14,
@@ -1475,7 +1475,7 @@ local TYPE_DEFAULTS = {
         durationColorByTime = true,
         durationHideAboveEnabled = false, durationHideAboveThreshold = 10,
         durationHideOnPermanent = true,   -- Wave 4: no timer text on permanent auras
-        expiryAlertMode = "OFF", expiryAlertThreshold = 5,
+        expiryAlertEnabled = false, expiryAlertMode = "BORDER", expiryAlertThreshold = 5,
         expiryAlertText = "", expiryAlertGlyph = "WARNING",
         expiryAlertAnchor = "TOP", expiryAlertOffsetX = 0, expiryAlertOffsetY = 0,
         expiryAlertSize = 14,

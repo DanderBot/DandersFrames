@@ -56,10 +56,12 @@ end
 DF.Expiration = DF.Expiration or {}
 local Expiration = DF.Expiration
 
--- Active alert mode or nil. TEXT / GLYPH / BORDER (a frame outline) / TINT (a solid wash).
--- Anything else (OFF, or a missing key) = nil: no companion, nothing to reveal.
+-- Active reveal type or nil. Gated by the master expiryAlertEnabled toggle first (off = nil =
+-- no companion), then the stored type: TEXT / GLYPH / BORDER (a frame outline) / TINT (a solid
+-- wash). A missing/unknown type also yields nil.
 function Expiration:Mode(cfg)
-    local m = cfg and cfg.expiryAlertMode
+    if not (cfg and cfg.expiryAlertEnabled) then return nil end
+    local m = cfg.expiryAlertMode
     if m == "TEXT" or m == "GLYPH" or m == "BORDER" or m == "TINT" then return m end
     return nil
 end
