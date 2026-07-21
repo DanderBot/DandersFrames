@@ -390,26 +390,29 @@ local function colorToHex(c)
     return string.format("%02x%02x%02x", b255(c.r or c[1]), b255(c.g or c[2]), b255(c.b or c[3]))
 end
 
--- Expiry BORDER escape: the full |T inline-texture form tinting the white-mask frame TGA to
--- (r,g,b from `hex`) at `size` px. path:h:w:offX:offY:texW:texH:l:r:t:b:R:G:B — the trailing
--- vertex-colour args (0-255) do the tint, texW/texH + full texel range from the texture size.
--- [LIVE 2026-07-20] |T renders + tints inside the secret-safe band formatter. Defined after
--- colorToHex so the public wrapper below can reach it (a local isn't in scope for earlier fns).
-local function borderEscapeHex(size, hex, texture)
+-- Expiry BORDER/TINT escape: the full |T inline-texture form tinting the white-mask TGA to
+-- (r,g,b from `hex`) at `width` x `height` px. |T wants HEIGHT then WIDTH:
+-- path:h:w:offX:offY:texW:texH:l:r:t:b:R:G:B — trailing vertex-colour args (0-255) do the tint,
+-- texW/texH + full texel range from the texture size. The art is a 64x64 square: h==w gives an
+-- even frame/wash (icons); h~=w stretches it — a solid TINT fills any rectangle cleanly, a
+-- frame would distort, so only TINT is ever fed a non-square rect. [LIVE 2026-07-20] Defined
+-- after colorToHex so the public wrapper below can reach it (a local isn't in scope earlier).
+local function borderEscapeHex(width, height, hex, texture)
     local ts = EXPIRE_BORDER_TEXSIZE
     local r = tonumber(hex:sub(1, 2), 16) or 255
     local g = tonumber(hex:sub(3, 4), 16) or 255
     local b = tonumber(hex:sub(5, 6), 16) or 255
-    return "|T" .. texture .. ":" .. size .. ":" .. size .. ":0:0:" .. ts .. ":" .. ts
+    return "|T" .. texture .. ":" .. height .. ":" .. width .. ":0:0:" .. ts .. ":" .. ts
         .. ":0:" .. ts .. ":0:" .. ts .. ":" .. r .. ":" .. g .. ":" .. b .. "|t"
 end
 
--- Public: one tinted border escape at `size` (px) / `color` ({r,g,b} 0-1) / `thickness`
--- (THIN/MEDIUM/THICK). The AD editor's canvas preview uses this; the live formatter calls
--- borderEscapeHex per band.
-function DF:GetExpiryBorderEscape(size, color, thickness)
-    local s = math.max(1, math.floor(tonumber(size) or 18))
-    return borderEscapeHex(s, colorToHex(color or { r = 1, g = 0.2, b = 0.2 }), borderTexture(thickness))
+-- Public: one tinted escape at `width` x `height` px (height defaults to width = square) /
+-- `color` ({r,g,b} 0-1) / `thickness` (THIN/MEDIUM/THICK/FILL). The AD editor's canvas preview
+-- uses this; the live formatter calls borderEscapeHex per band.
+function DF:GetExpiryBorderEscape(width, height, color, thickness)
+    local w = math.max(1, math.floor(tonumber(width) or 18))
+    local h = math.max(1, math.floor(tonumber(height) or tonumber(width) or 18))
+    return borderEscapeHex(w, h, colorToHex(color or { r = 1, g = 0.2, b = 0.2 }), borderTexture(thickness))
 end
 
 -- Account-wide colour-by-time breakpoints (editable on the Colours page). Resolve to a
@@ -732,14 +735,15 @@ end
 --              so border and text escalate together. Breakpoints sig keys the cache (and the
 --              factory struct key) so a Colours-page edit rebuilds the bind-frozen formatter.
 -- Cached under an "XBEL|" prefix (duration-text keys start with the format name, never "X").
-function DF:GetExpiryBorderElementFormatter(threshold, size, colorMode, staticColor, thickness)
+function DF:GetExpiryBorderElementFormatter(threshold, width, height, colorMode, staticColor, thickness)
     if not (C_StringUtil and C_StringUtil.CreateNumericRuleFormatter and Enum and Enum.NumericRuleFormatRounding) then return nil end
     local alertT = tonumber(threshold) or 5
     if alertT < 1 then alertT = 1 end
-    local s = math.max(1, math.floor(tonumber(size) or 18))
+    local w = math.max(1, math.floor(tonumber(width) or 18))
+    local h = math.max(1, math.floor(tonumber(height) or tonumber(width) or 18))
     local tex = borderTexture(thickness)
     local byTime = (colorMode == "BYTIME")
-    local key = "XBEL|" .. tostring(alertT) .. ":" .. tostring(s) .. ":" .. tostring(thickness or "MEDIUM") .. ":"
+    local key = "XBEL|" .. tostring(alertT) .. ":" .. tostring(w) .. "x" .. tostring(h) .. ":" .. tostring(thickness or "MEDIUM") .. ":"
         .. (byTime and ("T:" .. DF:GetDurationBreakpointsSig()) or ("S:" .. colorToHex(staticColor or { r = 1, g = 0.2, b = 0.2 })))
     if durationFormatterCache[key] == nil then
         local ok, f = pcall(function()
@@ -752,12 +756,12 @@ function DF:GetExpiryBorderElementFormatter(threshold, size, colorMode, staticCo
                 for _, bp in ipairs(GetDurationColorBreakpoints()) do
                     if bp.threshold < alertT then
                         fmt:AddBreakpoint({ threshold = bp.threshold, step = 1, rounding = down, min = 1,
-                            format = borderEscapeHex(s, bp.hex, tex) })
+                            format = borderEscapeHex(w, h, bp.hex, tex) })
                     end
                 end
             else
                 fmt:AddBreakpoint({ threshold = 0, step = 1, rounding = down, min = 1,
-                    format = borderEscapeHex(s, colorToHex(staticColor or { r = 1, g = 0.2, b = 0.2 }), tex) })
+                    format = borderEscapeHex(w, h, colorToHex(staticColor or { r = 1, g = 0.2, b = 0.2 }), tex) })
             end
             fmt:AddBreakpoint({ threshold = alertT, step = 1, rounding = down, format = "" })   -- empty above threshold
             return fmt

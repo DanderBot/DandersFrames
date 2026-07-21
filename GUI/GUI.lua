@@ -5647,6 +5647,10 @@ function GUI:CreateExpirationControls(group, dbTable, opts)
     local refreshStates = opts.refreshStates or function() end
     local L = DF.L
 
+    -- include.match (default true): square consumers (icon/square) offer Match Icon Size + a
+    -- manual Size for frame modes. A RECTANGULAR consumer (bar/health) passes match=false — its
+    -- Tint always fills the target, so there's no Match toggle and no manual Size for it.
+    local includeMatch = include.match ~= false
     local function enabled() return dbTable.expiryAlertEnabled and true or false end
     local function mode() return dbTable.expiryAlertMode or "BORDER" end
     local function isFrame() local m = mode(); return m == "BORDER" or m == "TINT" end
@@ -5728,15 +5732,20 @@ function GUI:CreateExpirationControls(group, dbTable, opts)
     w.opacity.hideOn = hideNonFrame
 
     -- ── Size: Match Icon Size (auto) sits directly above Size (manual). Match is the auto/manual
-    -- switch and Size greys under it, so their adjacency shows the relationship.
-    w.match = group:AddWidget(GUI:CreateCheckbox(parent, L["Match Icon Size"], dbTable,
-        "expiryAlertBorderMatchIcon", onStructural), 28)   -- BORDER/TINT only
-    w.match.hideOn = hideNonFrame
+    -- switch and Size greys under it, so their adjacency shows the relationship. A rectangular
+    -- consumer (include.match = false) has no Match — its Tint always fills the target.
+    if includeMatch then
+        w.match = group:AddWidget(GUI:CreateCheckbox(parent, L["Match Icon Size"], dbTable,
+            "expiryAlertBorderMatchIcon", onStructural), 28)   -- BORDER/TINT only
+        w.match.hideOn = hideNonFrame
+    end
 
-    -- Size: every type uses it EXCEPT a frame/tint that's matching the icon (auto-sized) — there
-    -- it GREYS (belongs, but inactive).
+    -- Size: TEXT/GLYPH use it as the font/glyph size. For a frame/tint it's the manual square
+    -- size — HIDDEN for a rectangular consumer (the tint auto-fills), and GREYED for a square
+    -- one while Match is on (auto-sized).
     w.size = group:AddWidget(GUI:CreateSlider(parent, L["Size"], 6, 48, 1, dbTable, "expiryAlertSize"), 54)
-    w.size.disableOn = function() return isFrame() and dbTable.expiryAlertBorderMatchIcon ~= false end
+    w.size.hideOn = function() return not includeMatch and isFrame() end
+    w.size.disableOn = function() return includeMatch and isFrame() and dbTable.expiryAlertBorderMatchIcon ~= false end
 
     -- ── Placement: Inset (a frame/tint's fit off the icon edge), Anchor (Text/Glyph), Offsets.
     w.inset = group:AddWidget(GUI:CreateSlider(parent, L["Inset"], -10, 10, 1, dbTable, "expiryAlertBorderInset"), 54)

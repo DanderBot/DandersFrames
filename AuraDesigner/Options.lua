@@ -1475,10 +1475,13 @@ local TYPE_DEFAULTS = {
         durationColorByTime = true,
         durationHideAboveEnabled = false, durationHideAboveThreshold = 10,
         durationHideOnPermanent = true,   -- Wave 4: no timer text on permanent auras
-        expiryAlertEnabled = false, expiryAlertMode = "BORDER", expiryAlertThreshold = 5,
+        -- A bar defaults to TINT (Border distorts off-square, so it isn't offered here).
+        expiryAlertEnabled = false, expiryAlertMode = "TINT", expiryAlertThreshold = 5,
         expiryAlertText = "", expiryAlertGlyph = "WARNING",
         expiryAlertAnchor = "TOP", expiryAlertOffsetX = 0, expiryAlertOffsetY = 0,
         expiryAlertSize = 14,
+        expiryAlertBorderColorMode = "STATIC", expiryAlertBorderAlpha = 1,
+        expiryAlertBorderInset = 0, expiryAlertBorderColor = {r = 1, g = 0.2, b = 0.2, a = 1},
         frameLevel = 30, frameStrata = "INHERIT",
     },
     -- Frame-level types: mirror the inline literals in EnsureTypeConfig so the
@@ -1743,10 +1746,15 @@ local GLOBAL_DEFAULT_MAP = {
 -- don't apply to the current mode HIDE (rows collapse + the card reflows); ones that apply but
 -- are inactive GREY. No animation control: a button-child region can't be animated while auras
 -- are secret (PTR-5), and out-of-combat-only animation is worthless for an expiry warning.
-local function AddExpiryAlertControls(g, parent, proxy)
+-- `include` (optional) selects which reveal types + controls apply to this indicator's shape:
+-- square indicators (icon/square) pass nil (Border + Tint + Match); a rectangular one (bar)
+-- passes { border = false, match = false } — Border distorts off-square, and a Tint auto-fills
+-- so there's no Match / manual Size.
+local function AddExpiryAlertControls(g, parent, proxy, include)
     GUI:CreateExpirationControls(g, proxy, {
         parent        = parent,
         anchorOptions = OPTS.ANCHOR_OPTIONS,
+        include       = include,
         -- Sub-table colour / alpha writes skip the proxy __newindex, so drive the refresh by
         -- hand (RefreshPreviewLightweight is assigned by editor open; mirrors the card's RPL).
         fullUpdate    = function()
@@ -4461,10 +4469,10 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Duration on Permanent Auras"], proxy, "durationHideOnPermanent"), 28)
             UpdateHideAboveState()
         end)
-        -- Expiration: the frame-anchored Expiry Alert ELEMENT (own section —
-        -- distinct from the sound "Expire Alert" group on the sound card).
+        -- Expiration: a bar is a RECTANGLE — no Border (a frame distorts off-square) and no
+        -- Match / manual Size (its Tint auto-fills the bar), so the reveal is Tint / Text / Glyph.
         AddGroup(L["Expiration"], function(g)
-            AddExpiryAlertControls(g, parent, proxy)
+            AddExpiryAlertControls(g, parent, proxy, { border = false, match = false })
         end)
 
     elseif typeKey == "border" then

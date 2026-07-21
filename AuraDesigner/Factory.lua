@@ -952,8 +952,11 @@ end
 -- it). Size/anchor are computed inside the engine's StructSig / BuildDurationSpec /
 -- BuildPreview, so the factory no longer needs its own effectiveAlertSize/Anchor.
 local function alertElemMode(indicator) return DF.Expiration:Mode(indicator) end
-local function alertElemStructKey(indicator)
-    return DF.Expiration:StructSig(indicator, { baseSize = indicator.size })
+-- geom (from alertGeometry, defined after resolveBarSize) carries the target's shape: a square
+-- { baseSize } for icons/squares, or a rectangular { width, height } for bars. Defaults to the
+-- square icon path when a caller has none.
+local function alertElemStructKey(indicator, geom)
+    return DF.Expiration:StructSig(indicator, geom or { baseSize = indicator.size })
 end
 
 -- Resolve the profile's GLOBAL colour-by-time default for placed/bar duration text:
@@ -1245,6 +1248,18 @@ local function buildBarLayout(frame, indicator)
     }
 end
 
+-- Geometry for the expiry-reveal companion (DF.Expiration): the shape it overlays. A bar is a
+-- RECTANGLE (width x height from resolveBarSize) so a Tint stretches to fill it; an icon/square
+-- is SQUARE (baseSize). font follows the indicator's duration font. The engine does the x0.75
+-- |T calibration + inset/match from here, so callers never repeat it.
+local function alertGeometry(frame, indicator, isBar)
+    if isBar then
+        local w, h = resolveBarSize(frame, indicator)
+        return { width = w, height = h, font = indicator.durationFont }
+    end
+    return { baseSize = indicator.size, font = indicator.durationFont }
+end
+
 -- Bar style: the StatusBar fills the slot (no icon / no square / no cooldown swipe — the fill
 -- IS the countdown). Fill colour / texture / orientation / reverse-fill / background from
 -- config; native SetDurationBar (bindNative) drives the value. Duration text via the shared
@@ -1322,14 +1337,13 @@ end
 -- (GetADTrackedSpellIDs) is built from the CONFIG records, not from live
 -- handles — the companion adds nothing to it.
 -- ============================================================
-local function buildAlertCompanionConfig(unit, map, indicator, layout, mine)
-    -- The reveal's duration spec (formatter + placement + opacity) is engine-owned; the
-    -- factory only wraps it in the AuraContainer plumbing. nil = alert off, or the pre-12.1
-    -- formatter API is missing (no companion). geometry.baseSize = the icon side so the
-    -- engine can auto-match a BORDER; geometry.font = the indicator's own duration font so
-    -- the alert reads as part of the same indicator.
+local function buildAlertCompanionConfig(unit, map, indicator, layout, mine, geom)
+    -- The reveal's duration spec (formatter + placement + opacity) is engine-owned; the factory
+    -- only wraps it in the AuraContainer plumbing. nil = alert off, or the pre-12.1 formatter
+    -- API is missing (no companion). geom (alertGeometry) is the target's shape — a square for
+    -- an icon (auto-match), a rectangle for a bar (Tint fills it).
     local dur = DF.Expiration:BuildDurationSpec(indicator,
-        { baseSize = indicator.size, font = indicator.durationFont })
+        geom or { baseSize = indicator.size, font = indicator.durationFont })
     if not dur then return nil end
     return {
         unit = unit,
@@ -1359,10 +1373,10 @@ end
 -- geometry — dragging / resizing the indicator hot-moves its companion — plus
 -- font and alpha. Raw-config, alloc-light, computed per pass like the other
 -- placed sigs (FIX C discipline).
-local function alertCompanionStructSig(map, indicator, mine)
+local function alertCompanionStructSig(map, indicator, mine, geom)
     return includeSig(map)
         .. "|xalert"
-        .. "|xa=" .. alertElemStructKey(indicator)
+        .. "|xa=" .. alertElemStructKey(indicator, geom)
         .. "|fl=" .. tostring(tonumber(indicator.frameLevel) or 0)
         .. "|f=" .. poolFilter(indicator, mine)
 end
@@ -1396,7 +1410,8 @@ end
 local function syncAlertCompanion(frame, placed, live, key, map, indicator, isBar, alpha, mine)
     if not alertElemMode(indicator) then return end
     local akey = key .. ":alert"
-    local structSig = alertCompanionStructSig(map, indicator, mine)
+    local geom = alertGeometry(frame, indicator, isBar)   -- square (icon) or rect (bar)
+    local structSig = alertCompanionStructSig(map, indicator, mine, geom)
     local coSig = alertCompanionCoSig(frame, indicator, isBar, alpha)
     local entry = placed[akey]
     if entry and entry.structSig == structSig and entry.coSig == coSig then
@@ -1404,7 +1419,7 @@ local function syncAlertCompanion(frame, placed, live, key, map, indicator, isBa
         return
     end
     local layout = isBar and buildBarLayout(frame, indicator) or buildPlacedLayout(indicator)
-    local cfg = buildAlertCompanionConfig(frame.unit, map, indicator, layout, mine)
+    local cfg = buildAlertCompanionConfig(frame.unit, map, indicator, layout, mine, geom)
     if not cfg then return end   -- formatter unavailable: key stays dead -> sweep
     if not entry then
         local handle = DF.AuraContainer:Create(frame, cfg)
@@ -1445,9 +1460,9 @@ end
 -- alert is off OR the indicator is in show-when-missing mode (the factory
 -- builds no companion for missing-mode indicators — nothing to count down —
 -- so the canvas must not show one).
-local function buildAlertPreview(indicator)
+local function buildAlertPreview(indicator, geom)
     return DF.Expiration:BuildPreview(indicator,
-        { baseSize = indicator.size, font = indicator.durationFont })
+        geom or { baseSize = indicator.size, font = indicator.durationFont })
 end
 
 function Factory:BuildPreviewConfig(frame, indicator, typeKey, spellID, defCBT)
@@ -1462,7 +1477,7 @@ function Factory:BuildPreviewConfig(frame, indicator, typeKey, spellID, defCBT)
             layout = buildBarLayout(frame, indicator),
             style = buildBarStyle(indicator, borderSpec, defCBT),
             testEntries = entries,
-            alertPreview = buildAlertPreview(indicator),
+            alertPreview = buildAlertPreview(indicator, alertGeometry(frame, indicator, true)),
         }
         local sig = "bar|" .. tostring(borderSpec ~= nil)
             .. "|" .. tostring(cfg.style.duration ~= nil)

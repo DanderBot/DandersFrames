@@ -76,19 +76,30 @@ local function resolveThickness(cfg, mode)
     return cfg.expiryAlertBorderThickness or "MEDIUM"
 end
 
--- Baked |T / font size for the reveal. TEXT/GLYPH use the manual size slider. BORDER
--- auto-matches the icon (baseSize x 0.75) unless Match is off, then nudged by Inset
--- (px, +inward). One source so the struct key, companion and preview never disagree.
+-- Baked |T width, height for the reveal — TWO values (equal for a square target). TEXT/GLYPH
+-- use the manual square Size. Frame modes (BORDER/TINT):
+--   * RECTANGULAR target (geometry.width + .height, e.g. a bar / health bar): always fit its
+--     dimensions x0.75 (a square manual Size is meaningless there — only TINT is offered).
+--   * SQUARE target (geometry.baseSize, an icon): match baseSize x0.75, or the manual Size when
+--     Match is off.
+-- Inset nudges every edge inward. One source so the struct key, companion and preview agree.
 function Expiration:EffectiveSize(cfg, geometry)
     if not isFrameMode(self:Mode(cfg)) then
-        return mmax(1, mfloor(tonumber(cfg.expiryAlertSize) or 14))
+        local s = mmax(1, mfloor(tonumber(cfg.expiryAlertSize) or 14))
+        return s, s
+    end
+    local inset = tonumber(cfg.expiryAlertBorderInset) or 0
+    local gw = tonumber(geometry and geometry.width)
+    local gh = tonumber(geometry and geometry.height)
+    if gw and gh then
+        return mmax(1, mfloor(gw * BORDER_ICON_RATIO - inset + 0.5)),
+               mmax(1, mfloor(gh * BORDER_ICON_RATIO - inset + 0.5))
     end
     local base = (cfg.expiryAlertBorderMatchIcon ~= false)
         and ((tonumber(geometry and geometry.baseSize) or 24) * BORDER_ICON_RATIO)
         or (tonumber(cfg.expiryAlertSize) or 18)
-    -- Inset nudges the frame off the icon edge (px in |T space ~= 1.3px on screen; +inward).
-    base = base - (tonumber(cfg.expiryAlertBorderInset) or 0)
-    return mmax(1, mfloor(base + 0.5))
+    local s = mmax(1, mfloor(base - inset + 0.5))
+    return s, s
 end
 
 -- A frame/tint overlays the icon concentrically, so it is ALWAYS centred (its Anchor control
@@ -107,9 +118,10 @@ end
 function Expiration:StructSig(cfg, geometry)
     local mode = self:Mode(cfg)
     if not mode then return "" end
+    local sw, sh = self:EffectiveSize(cfg, geometry)
     local key = (DF.GetExpiryAlertFmtKey and DF:GetExpiryAlertFmtKey(mode,
             cfg.expiryAlertThreshold, cfg.expiryAlertText, cfg.expiryAlertGlyph) or "")
-        .. ":S" .. tostring(self:EffectiveSize(cfg, geometry))
+        .. ":S" .. tostring(sw) .. "x" .. tostring(sh)
         .. ":P" .. self:EffectiveAnchor(cfg)
         .. "," .. tostring(tonumber(cfg.expiryAlertOffsetX) or 0)
         .. "," .. tostring(tonumber(cfg.expiryAlertOffsetY) or 0)
@@ -133,24 +145,24 @@ end
 function Expiration:BuildDurationSpec(cfg, geometry)
     local mode = self:Mode(cfg)
     if not mode then return nil end
-    local size = self:EffectiveSize(cfg, geometry)
+    local w, h = self:EffectiveSize(cfg, geometry)
     local formatter
     if isFrameMode(mode) then
         formatter = DF.GetExpiryBorderElementFormatter and DF:GetExpiryBorderElementFormatter(
-            cfg.expiryAlertThreshold, size,
+            cfg.expiryAlertThreshold, w, h,
             cfg.expiryAlertBorderColorMode, cfg.expiryAlertBorderColor,
             resolveThickness(cfg, mode))
     else
         formatter = DF.GetExpiryAlertElementFormatter and DF:GetExpiryAlertElementFormatter(
             mode, cfg.expiryAlertThreshold,
-            cfg.expiryAlertText, cfg.expiryAlertGlyph, size)
+            cfg.expiryAlertText, cfg.expiryAlertGlyph, w)   -- TEXT/GLYPH: square, w == h
     end
     if not formatter then return nil end   -- pre-12.1 formatter API missing: no companion
     return {
         show      = true,
         formatter = formatter,
         font      = (geometry and geometry.font) or cfg.durationFont,
-        size      = size,
+        size      = h,   -- font / line-box size; == the square size for icons and text/glyph
         outline   = "OUTLINE",
         anchor    = self:EffectiveAnchor(cfg),
         offsetX   = tonumber(cfg.expiryAlertOffsetX) or 0,
@@ -168,16 +180,16 @@ function Expiration:BuildPreview(cfg, geometry)
     local mode = self:Mode(cfg)
     if cfg.showWhenMissing then return nil end
     if not mode then return nil end
-    local size = self:EffectiveSize(cfg, geometry)
+    local w, h = self:EffectiveSize(cfg, geometry)
     local payload
     if isFrameMode(mode) then
         -- Static: the picked colour. By-time: the canvas is one still frame, so show the
         -- "about to expire" end (red) — the most representative moment.
         local col = (cfg.expiryAlertBorderColorMode == "BYTIME")
             and { r = 1, g = 0.2, b = 0.2 } or cfg.expiryAlertBorderColor
-        payload = DF.GetExpiryBorderEscape and DF:GetExpiryBorderEscape(size, col, resolveThickness(cfg, mode))
+        payload = DF.GetExpiryBorderEscape and DF:GetExpiryBorderEscape(w, h, col, resolveThickness(cfg, mode))
     elseif DF.GetExpiryAlertPayload then
-        payload = DF:GetExpiryAlertPayload(mode, cfg.expiryAlertText, cfg.expiryAlertGlyph, size)
+        payload = DF:GetExpiryAlertPayload(mode, cfg.expiryAlertText, cfg.expiryAlertGlyph, w)
     end
     if not payload then return nil end
     return {
@@ -185,7 +197,7 @@ function Expiration:BuildPreview(cfg, geometry)
         anchor  = self:EffectiveAnchor(cfg),
         offsetX = tonumber(cfg.expiryAlertOffsetX) or 0,
         offsetY = tonumber(cfg.expiryAlertOffsetY) or 0,
-        size    = size,
+        size    = h,
         alpha   = isFrameMode(mode) and (tonumber(cfg.expiryAlertBorderAlpha) or 1) or nil,
         font    = (geometry and geometry.font) or cfg.durationFont,
     }
