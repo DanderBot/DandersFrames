@@ -1735,7 +1735,7 @@ local GLOBAL_DEFAULT_MAP = {
     },
 }
 
--- "Expiry Warning" section for the placed icon/square cards: the per-indicator EXPIRY ALERT
+-- "Expiration" section for the placed icon/square cards: the per-indicator EXPIRY ALERT
 -- ELEMENT (text / glyph / border / tint shown only below the threshold, natively driven on an
 -- invisible COMPANION SLOT over the indicator — see Factory.lua's EXPIRY ALERT COMPANION SLOT
 -- section). Built by the shared GUI:CreateExpirationControls helper (engine-driven via
@@ -4187,9 +4187,9 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Duration on Permanent Auras"], proxy, "durationHideOnPermanent"), 28)
             UpdateHideAboveState()
         end)
-        -- Expiry Warning: the frame-anchored Expiry Alert ELEMENT (own section —
+        -- Expiration: the frame-anchored Expiry Alert ELEMENT (own section —
         -- distinct from the sound "Expire Alert" group on the sound card).
-        AddGroup(L["Expiry Warning"], function(g)
+        AddGroup(L["Expiration"], function(g)
             AddExpiryAlertControls(g, parent, proxy)
         end)
         -- Stack Count
@@ -4308,9 +4308,9 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Duration on Permanent Auras"], proxy, "durationHideOnPermanent"), 28)
             UpdateHideAboveState()
         end)
-        -- Expiry Warning: the frame-anchored Expiry Alert ELEMENT (own section —
+        -- Expiration: the frame-anchored Expiry Alert ELEMENT (own section —
         -- distinct from the sound "Expire Alert" group on the sound card).
-        AddGroup(L["Expiry Warning"], function(g)
+        AddGroup(L["Expiration"], function(g)
             AddExpiryAlertControls(g, parent, proxy)
         end)
         -- Stack Count
@@ -4461,9 +4461,9 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Duration on Permanent Auras"], proxy, "durationHideOnPermanent"), 28)
             UpdateHideAboveState()
         end)
-        -- Expiry Warning: the frame-anchored Expiry Alert ELEMENT (own section —
+        -- Expiration: the frame-anchored Expiry Alert ELEMENT (own section —
         -- distinct from the sound "Expire Alert" group on the sound card).
-        AddGroup(L["Expiry Warning"], function(g)
+        AddGroup(L["Expiration"], function(g)
             AddExpiryAlertControls(g, parent, proxy)
         end)
 

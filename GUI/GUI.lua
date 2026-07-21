@@ -5603,7 +5603,7 @@ function GUI:CreateTextControls(group, dbTable, prefix, opts)
 end
 
 -- ============================================================
--- EXPIRATION CONTROLS (shared) — the 12.1-safe Expiry Warning panel. Pairs with the
+-- EXPIRATION CONTROLS (shared) — the 12.1-safe Expiration panel. Pairs with the
 -- DF.Expiration engine (Features/Expiration.lua): the engine turns the expiryAlert* keys
 -- into a secret-safe reveal, this builds the UI for them, so every consumer (AD icon/square
 -- now; frame-level indicators later) renders the same flow with no hand-rolled copy.
@@ -5659,10 +5659,11 @@ function GUI:CreateExpirationControls(group, dbTable, opts)
         modeOptions[key] = label
         modeOptions._order[#modeOptions._order + 1] = key
     end
-    addMode("TEXT", L["Custom Text"], include.text)
-    addMode("GLYPH", L["Glyph"], include.glyph)
+    -- Border / Tint lead the list (the primary reveals), then the Text / Glyph payloads.
     addMode("BORDER", L["Border"], include.border)
     addMode("TINT", L["Tint"], include.tint)
+    addMode("TEXT", L["Custom Text"], include.text)
+    addMode("GLYPH", L["Glyph"], include.glyph)
     w.mode = group:AddWidget(GUI:CreateDropdown(parent, L["Expiry Alert"], modeOptions,
         dbTable, "expiryAlertMode", onStructural), 54)
 
