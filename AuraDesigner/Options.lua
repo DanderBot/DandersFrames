@@ -4370,8 +4370,8 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateCheckbox(parent, L["Match Frame Width"], proxy, "matchFrameWidth"), 28)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Match Frame Height"], proxy, "matchFrameHeight"), 28)
         end)
-        -- Texture & Colors
-        AddGroup(L["Texture & Colors"], function(g)
+        -- Texture & Colors  (captured so the Expiration note below can jump-scroll to it)
+        local texColorsGroup = AddGroup(L["Texture & Colors"], function(g)
             -- Colour Mode: Static uses Bar Texture + Fill Color; a curve (DF / Classic) swaps in a
             -- green->red ramp the drain reveals — so the bar reddens as the aura expires — and
             -- forces a white tint, so those two grey out (curveGated) while a curve is selected.
@@ -4482,14 +4482,27 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Duration on Permanent Auras"], proxy, "durationHideOnPermanent"), 28)
             UpdateHideAboveState()
         end)
-        -- Expiration: a bar carries its own colour-by-remaining-time — the Duration Bar Color
-        -- Mode (DF / Classic Curve) reddens the fill as it drains, secret-safe and full-size. So
-        -- the |T reveal's Border/Tint are redundant here (and can't fill a bar cleanly anyway —
-        -- the reveal scales with the fontstring's font). This section offers a hard-threshold
-        -- Text / Glyph alert; a subheader points at the Color Mode for colour.
+        -- Expiration: a bar carries its own colour-by-remaining-time (the Duration Bar Color Mode
+        -- reddens the fill as it drains, secret-safe and full-size), so the |T Border/Tint aren't
+        -- offered here — only a Text/Glyph alert. A note whose click jump-scrolls the card up to
+        -- the Color Mode. (A full InfoBanner link-banner can't live in this AD card — html needs
+        -- a post-SetWidth reflow the card's static-height path disables — so the whole note is the
+        -- click target, with "Color Mode" tinted to signal it, like the cross-page links.)
         AddGroup(L["Expiration"], function(g)
-            g:AddWidget(GUI:CreateExpiringSubheader(parent,
-                L["For expiry colour, set the Color Mode in Texture & Colors."]), 22)
+            local tc = (GUI.GetThemeColor and GUI.GetThemeColor()) or { r = 1, g = 1, b = 1 }
+            local link = format("|cFF%02X%02X%02X%s|r",
+                math.floor((tc.r or 1) * 255), math.floor((tc.g or 1) * 255), math.floor((tc.b or 1) * 255), L["Color Mode"])
+            local note = GUI:CreateNote(parent, format(L["For expiry colour, set the %s in Texture & Colors."], link))
+            note:EnableMouse(true)
+            note:SetScript("OnMouseUp", function()
+                if not (tabScrollFrame and texColorsGroup and texColorsGroup.GetTop) then return end
+                local sfTop, gTop = tabScrollFrame:GetTop(), texColorsGroup:GetTop()
+                if not (sfTop and gTop) then return end
+                local target = tabScrollFrame:GetVerticalScroll() + (sfTop - gTop) - 8
+                local maxS = tabScrollFrame:GetVerticalScrollRange() or 0
+                tabScrollFrame:SetVerticalScroll(math.max(0, math.min(maxS, target)))
+            end)
+            g:AddWidget(note, 34)
             AddExpiryAlertControls(g, parent, proxy, { border = false, tint = false, match = false })
         end)
 
