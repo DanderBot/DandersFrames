@@ -304,6 +304,7 @@ function CC:DrainDeferred(onlyJob)
     if not queue then return end
 
     local needsUIRefresh = false
+    local ran  -- diagnostic: which jobs actually ran this drain
 
     for _, job in ipairs(DRAIN_ORDER) do
         if not onlyJob or onlyJob == job then
@@ -313,11 +314,18 @@ function CC:DrainDeferred(onlyJob)
                 -- that finds more work) must queue for the NEXT drain, not be
                 -- wiped by this one
                 queue[job] = nil
+                ran = ran and (ran .. "," .. job) or job
                 if DEFERRED_JOBS[job].run(self, payload) then
                     needsUIRefresh = true
                 end
             end
         end
+    end
+
+    -- Surface what recovered at combat end / init. Previously silent, so a log
+    -- showed "queued for combat end" with no confirmation the work ever ran.
+    if ran then
+        DF:Debug("CLICK", "DrainDeferred ran: %s", ran)
     end
 
     if next(queue) == nil then

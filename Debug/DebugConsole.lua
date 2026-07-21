@@ -278,6 +278,23 @@ end
 function DebugConsole:PruneLog()
     if not debugLog or not debugDb then return end
     local maxLines = debugDb.maxLines or 500
+    if #debugLog <= maxLines then return end
+
+    -- Level-aware eviction. The old policy removed the oldest entry regardless
+    -- of level, so a flood of routine INFO (e.g. per-hover OnEnter/OnLeave
+    -- during a raid) would bury and then EVICT the rare WARN/ERROR entries that
+    -- actually diagnose a problem — the failure would be gone by the time the
+    -- log was read. Evict oldest INFO first; only fall back to evicting
+    -- WARN/ERROR if the buffer is entirely warnings/errors and still over cap.
+    local i = 1
+    while #debugLog > maxLines and i <= #debugLog do
+        if debugLog[i][2] == "INFO" then
+            tremove(debugLog, i)
+        else
+            i = i + 1
+        end
+    end
+    -- Safety: if still over cap (all WARN/ERROR), evict oldest.
     while #debugLog > maxLines do
         tremove(debugLog, 1)
     end

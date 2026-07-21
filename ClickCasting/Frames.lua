@@ -393,6 +393,9 @@ function CC:InitializeSecureFrames()
             if not CC.registeredFrames or not CC.registeredFrames[frame] then return end
             if not (CC.db and CC.db.enabled) then return end
             CC:Defer("reassert", frame)
+            -- Visible so a roster-reset reapply can be seen in the log (was silent)
+            DF:Debug("CLICK", "Reassert queued for %s (SecureUnitButton_OnLoad, combat=%s)",
+                frame:GetName() or "unnamed", tostring(InCombatLockdown()))
             if not InCombatLockdown() then
                 CC:DeferAfter("reassertDrain", 0.2, function()
                     CC:DrainDeferred("reassert")
