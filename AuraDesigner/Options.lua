@@ -4489,27 +4489,25 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- a post-SetWidth reflow the card's static-height path disables — so the whole note is the
         -- click target, with "Color Mode" tinted to signal it, like the cross-page links.)
         AddGroup(L["Expiration"], function(g)
-            local tc = (GUI.GetThemeColor and GUI.GetThemeColor()) or { r = 1, g = 1, b = 1 }
-            local hc = GUI:LinkHoverColor(tc)   -- lightened theme accent, shared link hover
-            local function linkText(col)
-                return format("|cFF%02X%02X%02X%s|r",
-                    math.floor((col.r or 1) * 255), math.floor((col.g or 1) * 255), math.floor((col.b or 1) * 255), L["Color Mode"])
-            end
-            local restStr  = format(L["For expiry colour, set the %s in Texture & Colors."], linkText(tc))
-            local hoverStr = format(L["For expiry colour, set the %s in Texture & Colors."], linkText(hc))
-            local note = GUI:CreateNote(parent, restStr)
-            note:EnableMouse(true)
-            note:SetScript("OnEnter", function() note:SetText(hoverStr) end)
-            note:SetScript("OnLeave", function() note:SetText(restStr) end)
-            note:SetScript("OnMouseUp", function()
+            -- Note with a jump-link: only "Color Mode" is clickable — clicking scrolls the card
+            -- up to Texture & Colors and flashes it. GUI:CreateLink = fixed-layout inline links
+            -- (safe in the reflowing card); GUI:LinkToSetting = scroll + "show me" flash. The |c
+            -- placeholder only satisfies the markup parser; CreateLink themes the link itself.
+            local function scrollToTexColors()
                 if not (tabScrollFrame and texColorsGroup and texColorsGroup.GetTop) then return end
                 local sfTop, gTop = tabScrollFrame:GetTop(), texColorsGroup:GetTop()
                 if not (sfTop and gTop) then return end
                 local target = tabScrollFrame:GetVerticalScroll() + (sfTop - gTop) - 8
                 local maxS = tabScrollFrame:GetVerticalScrollRange() or 0
                 tabScrollFrame:SetVerticalScroll(math.max(0, math.min(maxS, target)))
-            end)
-            g:AddWidget(note, 34)
+            end
+            local link = format("|cffffffff|HdfADScroll:texcolors|h%s|h|r", L["Color Mode"])
+            local note = GUI:CreateLink(parent, format(L["For expiry colour, set the %s in Texture & Colors."], link), {
+                onLinkClick = function()
+                    GUI:LinkToSetting({ widget = texColorsGroup, scrollTo = scrollToTexColors })
+                end,
+            })
+            g:AddWidget(note, note.layoutHeight or 34)
             AddExpiryAlertControls(g, parent, proxy, { border = false, tint = false, match = false })
         end)
 
