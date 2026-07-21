@@ -783,28 +783,45 @@ end
 
 function Search:ScrollToSection(tabName, sectionName)
     if not DF.GUI or not DF.GUI.Pages then return end
-    
+
     local page = DF.GUI.Pages[tabName]
     if not page or not page.children then return end
-    
-    -- Find the header matching the section name
+
+    -- Find the header matching the section name — either a top-level page child OR one
+    -- nested inside a settings group. Grouped pages (e.g. Colors) keep their headers in
+    -- group.groupChildren, not directly in page.children, so scan both. When the header
+    -- is nested, the whole group IS the section, so return the group to flash (the group
+    -- frame is sized to its content in LayoutChildren) — a top-level header returns itself.
+    local function matches(widget)
+        return widget and widget.GetText and widget:GetText() == sectionName
+    end
+    local scrollTo, flashTarget
     for _, widget in ipairs(page.children) do
-        -- Check if this is a header with matching text
-        if widget.GetText and widget:GetText() == sectionName then
-            -- Try to scroll to this widget
-            local widgetTop = widget:GetTop()
-            local pageTop = page:GetTop()
-            
-            if widgetTop and pageTop then
-                local offset = pageTop - widgetTop - 20
-                if offset > 0 and page.SetVerticalScroll then
-                    local maxScroll = page.child:GetHeight() - page:GetHeight()
-                    page:SetVerticalScroll(math.min(offset, math.max(0, maxScroll)))
+        if matches(widget) then
+            scrollTo, flashTarget = widget, widget
+        elseif widget.isSettingsGroup and widget.groupChildren then
+            for _, entry in ipairs(widget.groupChildren) do
+                if matches(entry.widget) then
+                    scrollTo, flashTarget = entry.widget, widget   -- flash the whole group/section
+                    break
                 end
             end
-            return widget   -- the section header, so callers (GUI:LinkToSetting) can flash it
+        end
+        if flashTarget then break end
+    end
+    if not flashTarget then return end
+
+    -- Try to scroll the section header into view.
+    local widgetTop = scrollTo:GetTop()
+    local pageTop = page:GetTop()
+    if widgetTop and pageTop then
+        local offset = pageTop - widgetTop - 20
+        if offset > 0 and page.SetVerticalScroll then
+            local maxScroll = page.child:GetHeight() - page:GetHeight()
+            page:SetVerticalScroll(math.min(offset, math.max(0, maxScroll)))
         end
     end
+    return flashTarget   -- the section (group or header), so GUI:LinkToSetting can flash it
 end
 
 -- ============================================================

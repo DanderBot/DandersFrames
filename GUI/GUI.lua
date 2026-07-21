@@ -1345,6 +1345,34 @@ local function ParseHTMLSegments(s)
     return segs
 end
 
+-- FlowSpaceWidth — the font's OWN space advance, so a word-per-FontString flow
+-- (CreateLink / InfoBanner) spaces exactly like a single wrapped FontString. A
+-- fixed pixel gap reads too loose at small sizes; measuring "m m" minus "mm"
+-- isolates one space advance. `sizePx` set → measure the user's settings font at
+-- that px (matches a banner word, which is SetSettingsFont'd); nil → measure the
+-- template's own font object (a CreateLink / template-fonted word). One reused
+-- probe (no per-call FontString churn); measured fresh so a font-family change is
+-- always reflected. Result is pixel-rounded so every word stays crisp.
+local _flowProbe
+local function FlowSpaceWidth(tmpl, sizePx)
+    tmpl = tmpl or "DFFontHighlightSmall"
+    if not _flowProbe then
+        _flowProbe = UIParent:CreateFontString(nil, "OVERLAY")
+    end
+    if sizePx and DF.SafeSetFont then
+        local fontName = (DF.db and DF.db.settingsFont) or "DF Roboto SemiBold"
+        DF:SafeSetFont(_flowProbe, fontName, sizePx, "")
+    else
+        _flowProbe:SetFontObject(_G[tmpl] or _G.GameFontHighlight)
+    end
+    _flowProbe:SetText("m m"); local w2 = _flowProbe:GetStringWidth()
+    _flowProbe:SetText("mm");  local w0 = _flowProbe:GetStringWidth()
+    _flowProbe:SetText("")
+    local sp = w2 - w0
+    if not sp or sp <= 0 then sp = 3 end
+    return math.floor(sp + 0.5)   -- keep every word pixel-aligned (one shared value per line)
+end
+
 function GUI:CreateInfoBanner(parent, opts)
     opts = opts or {}
 
@@ -1653,6 +1681,9 @@ function GUI:CreateInfoBanner(parent, opts)
     -- content height. Punctuation tokens attach to the preceding element
     -- with no leading gap so "Foo," renders without extra space before the comma.
     local FLOW_LINE_H = 14
+    -- Banner words are SetSettingsFont'd to 11px unless a custom template is given; measure the
+    -- space advance at that same font so the flow spaces like native text (see FlowSpaceWidth).
+    local flowSpaceW = FlowSpaceWidth(fontTemplate, (not opts.fontTemplate) and 11 or nil)
     local function DoFlowLayout()
         if not banner._flowSegs then return 0 end
         local availW = banner:GetWidth() - (12 + 18 + 8) - 12
@@ -1663,8 +1694,11 @@ function GUI:CreateInfoBanner(parent, opts)
                 x = 0; lineY = lineY - FLOW_LINE_H - 2
             elseif seg._widget then
                 local w = seg._w
-                local isPunct = seg.type == "word" and seg.text:match("^[%p]") and true or false
-                local gap = (x > 0 and not isPunct) and 3 or 0
+                -- Only a token that is ENTIRELY trailing punctuation (a lone "." or "," after a
+                -- link) hugs the preceding word. Connectors like & / - are whole words and keep
+                -- normal spacing on both sides — else "Texture & Colors" renders as "Texture& …".
+                local isPunct = seg.type == "word" and seg.text:match("^[%.%,%;%:%!%?%)%]%}]+$") and true or false
+                local gap = (x > 0 and not isPunct) and flowSpaceW or 0
                 if x > 0 and (x + gap + w) > availW then
                     x = 0; lineY = lineY - FLOW_LINE_H - 2; gap = 0
                 end
@@ -1728,9 +1762,10 @@ function GUI:CreateInfoBanner(parent, opts)
                 local fs = btn:CreateFontString(nil, "OVERLAY", fontTemplate)
                 if not opts.fontTemplate then GUI:SetSettingsFont(fs, 11, "") end  -- match the 11px plain body
                 fs:SetAllPoints()
+                fs:SetJustifyH("LEFT")   -- ink flush-left so the link spaces like a plain word
                 fs:SetText(seg.text)
                 fs:SetTextColor(tc.r, tc.g, tc.b)
-                local w = fs:GetStringWidth() + 2
+                local w = math.ceil(fs:GetStringWidth())   -- ceil guards last-glyph clip; no extra pad
                 btn:SetSize(w, FLOW_LINE_H)
                 btn:SetScript("OnEnter", function()
                     local h = GUI:LinkHoverColor((GUI.GetThemeColor and GUI.GetThemeColor()) or tc)
@@ -1813,9 +1848,10 @@ function GUI:CreateLink(parent, text, opts)
             local btn = CreateFrame("Button", nil, frame)
             local fs = btn:CreateFontString(nil, "OVERLAY", fontTemplate)
             fs:SetAllPoints()
+            fs:SetJustifyH("LEFT")   -- ink flush-left so the link spaces like a plain word
             fs:SetText(seg.text)
             fs:SetTextColor(tc.r, tc.g, tc.b)
-            local w = fs:GetStringWidth() + 2
+            local w = math.ceil(fs:GetStringWidth())   -- ceil guards last-glyph clip; no extra pad
             btn:SetSize(w, LINE_H)
             btn:SetScript("OnEnter", function()
                 local h = GUI:LinkHoverColor((GUI.GetThemeColor and GUI.GetThemeColor()) or tc)
@@ -1832,6 +1868,12 @@ function GUI:CreateLink(parent, text, opts)
         end
     end
 
+    -- Match native inter-word spacing: the flow gap is the font's own space advance, so a
+    -- word-per-FontString line reads exactly like a single wrapped FontString (a fixed pixel
+    -- gap looks too loose at small sizes). Words here use the raw template font (no
+    -- SetSettingsFont resize), so measure the template object directly.
+    local SPACE_W = FlowSpaceWidth(fontTemplate)
+
     -- Wrap the tokens left-to-right at `w`; punctuation hugs the preceding token. Sets the
     -- frame height to fit. Fixed layout — never re-flows on its own, so no host feedback loop.
     local function doFlow(w)
@@ -1842,8 +1884,11 @@ function GUI:CreateLink(parent, text, opts)
             if seg.type == "newline" then
                 x = 0; lineY = lineY - LINE_H - 2
             elseif seg._widget then
-                local isPunct = seg.type == "word" and seg.text:match("^[%p]") and true or false
-                local gap = (x > 0 and not isPunct) and 3 or 0
+                -- Only a token that is ENTIRELY trailing punctuation (a lone "." or "," after a
+                -- link) hugs the preceding word. Connectors like & / - are whole words and keep
+                -- normal spacing on both sides — else "Texture & Colors" renders as "Texture& …".
+                local isPunct = seg.type == "word" and seg.text:match("^[%.%,%;%:%!%?%)%]%}]+$") and true or false
+                local gap = (x > 0 and not isPunct) and SPACE_W or 0
                 if x > 0 and (x + gap + seg._w) > w then
                     x = 0; lineY = lineY - LINE_H - 2; gap = 0
                 end
@@ -1909,14 +1954,33 @@ function GUI:FlashWidget(widget, opts)
     })
     hl:SetBackdropColor(c.r, c.g, c.b, doFill and (opts.alpha or 0.35) or 0)
     if doBorder then hl:SetBackdropBorderColor(c.r, c.g, c.b, 1) end
+
+    -- Gentle alpha pulse (mirrors the live "show me" highlight): a few soft
+    -- fade in/out cycles then a slow fade to nothing — a calm breathe rather
+    -- than a hard flash. The group drives hl's frame alpha; the backdrop keeps
+    -- its own tint alpha, so the two multiply into a subtle pulse.
+    local pulse = hl._dfPulse
+    if not pulse then
+        pulse = hl:CreateAnimationGroup()
+        local PULSES, HALF = 4, 0.4
+        for i = 1, PULSES do
+            local up = pulse:CreateAnimation("Alpha")
+            up:SetFromAlpha(0.3); up:SetToAlpha(1)
+            up:SetDuration(HALF); up:SetOrder(i * 2 - 1)
+            local down = pulse:CreateAnimation("Alpha")
+            down:SetFromAlpha(1); down:SetToAlpha(0.3)
+            down:SetDuration(HALF); down:SetOrder(i * 2)
+        end
+        local out = pulse:CreateAnimation("Alpha")
+        out:SetFromAlpha(0.3); out:SetToAlpha(0)
+        out:SetDuration(0.6); out:SetOrder(PULSES * 2 + 1)
+        pulse:SetScript("OnFinished", function() hl:SetAlpha(0); hl:Hide() end)
+        hl._dfPulse = pulse
+    end
+    pulse:Stop()
     hl:SetAlpha(1)
     hl:Show()
-    if UIFrameFlash then
-        UIFrameFlash(hl, 0.2, 0.35, 1.3, false, 0.1, 0.12)   -- fade in/out ~twice over ~1.3s
-        C_Timer.After(1.5, function() if hl then hl:Hide() end end)
-    else
-        C_Timer.After(0.9, function() if hl then hl:Hide() end end)   -- no-flash fallback
-    end
+    pulse:Play()
 end
 
 -- GUI:LinkToSetting — the click action for a settings-link: jump to a setting and flash it.
@@ -1948,6 +2012,30 @@ function GUI:LinkToSetting(target)
     else
         go()
     end
+end
+
+-- GUI:CreateColorsPageLink — the shared "Customize duration colors on the Colors page."
+-- note (GUI:CreateLink, note style — not a banner). Its only link jumps to the shared,
+-- account-wide Color-by-Time editor on the Colors page and border-flashes that whole
+-- section so the eye lands on it. Used by the aura pages (buffs/debuffs/defensives) AND
+-- the Aura Designer wherever a "Color by Time Remaining" control (text, or the expiry
+-- Border/Tint modes) draws from those breakpoints — one cross-link, defined once.
+--   `width`  flows the fixed-layout note up front (see GUI:CreateLink); the caller then
+--            AddWidget's it at note.layoutHeight. The |cffffffff is a parser placeholder —
+--            CreateLink re-tints the link itself.
+function GUI:CreateColorsPageLink(parent, width)
+    local link = string.format("|cffffffff|HdfColors|h%s|h|r", L["Colors page"])
+    local text = string.format(L["Customize duration colors on the %s."], link)
+    return GUI:CreateLink(parent, text, {
+        width = width,
+        onLinkClick = function()
+            GUI:LinkToSetting({
+                page    = "display_classcolors",
+                section = L["Color by Time"],
+                flash   = { border = true, fill = false },   -- whole section → outline only
+            })
+        end,
+    })
 end
 
 -- Apply the standard button look to an existing Button frame — the single
@@ -5908,6 +5996,14 @@ function GUI:CreateExpirationControls(group, dbTable, opts)
         { STATIC = L["Static"], BYTIME = L["Color by Time Remaining"] },
         dbTable, "expiryAlertBorderColorMode", onStructural), 54)   -- By-Time greys the picker
     w.colorMode.hideOn = hideNonFrame
+
+    -- Cross-link to the shared Colours-page editor those By-Time breakpoints live in. Frame
+    -- modes only (like Color Mode itself) — a rectangular consumer with no Border/Tint (bar)
+    -- never reaches here, so its fixed ramp gets no link. Fixed-layout note, so size it up front.
+    local expLinkW = math.max(40, (group:GetWidth() or 260) - 2 * (group.padding or 10))
+    w.colorsLink = GUI:CreateColorsPageLink(parent, expLinkW)
+    group:AddWidget(w.colorsLink, (w.colorsLink.layoutHeight or 16) + 2)
+    w.colorsLink.hideOn = hideNonFrame
 
     w.color = group:AddWidget(GUI:CreateColorPicker(parent, L["Border Color"], dbTable,
         "expiryAlertBorderColor", false, fullUpdate, fullUpdate, true), 28)

@@ -1773,6 +1773,18 @@ local function AddExpiryAlertControls(g, parent, proxy, include)
     g:RefreshChildStates()   -- initial grey (the initial hide rides AddGroup's LayoutChildren)
 end
 
+-- Colours-page cross-link placed under an AD "Color by Time Remaining" TEXT control, matching
+-- the aura pages' duration link (jump + whole-section flash). The duration text's By-Time colour
+-- draws from the shared Colours-page breakpoints, so the link points there. Fixed-layout note, so
+-- size it to the group's inner width up front (the group advances Y by the height we pass).
+-- Built once in GUI:CreateColorsPageLink. NOT for the bar FILL colour (fixed ramp, immutable).
+local function AddDurationColorsLink(g, parent)
+    local innerW = math.max(40, (g:GetWidth() or 260) - 2 * (g.padding or 10))
+    local note = GUI:CreateColorsPageLink(parent, innerW)
+    g:AddWidget(note, (note.layoutHeight or 16) + 2)
+    return note
+end
+
 -- Create a proxy table that maps flat key access to an indicator instance
 -- Fallback chain: instance value → global defaults → TYPE_DEFAULTS
 local function CreateInstanceProxy(auraName, indicatorID)
@@ -4177,6 +4189,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, proxy, "durationY"), 54)
             durColorByTimeCtl = GUI:CreateCheckbox(parent, L["Color by Time Remaining"], proxy, "durationColorByTime")
             g:AddWidget(durColorByTimeCtl, 28)
+            AddDurationColorsLink(g, parent)
             g:AddWidget(GUI:CreateColorPicker(parent, L["Duration Text Color"], proxy, "durationColor", true, RPL, RPL, true), 28)
             local hideAboveSlider
             local function UpdateHideAboveState()
@@ -4298,6 +4311,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, proxy, "durationY"), 54)
             durColorByTimeCtl = GUI:CreateCheckbox(parent, L["Color by Time Remaining"], proxy, "durationColorByTime")
             g:AddWidget(durColorByTimeCtl, 28)
+            AddDurationColorsLink(g, parent)
             g:AddWidget(GUI:CreateColorPicker(parent, L["Duration Text Color"], proxy, "durationColor", true, RPL, RPL, true), 28)
             local hideAboveSlider
             local function UpdateHideAboveState()
@@ -4466,6 +4480,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, proxy, "durationY"), 54)
             durColorByTimeCtl = GUI:CreateCheckbox(parent, L["Color by Time Remaining"], proxy, "durationColorByTime")
             g:AddWidget(durColorByTimeCtl, 28)
+            AddDurationColorsLink(g, parent)
             local hideAboveSlider
             local function UpdateHideAboveState()
                 if not hideAboveSlider then return end
@@ -5220,6 +5235,7 @@ local function BuildGlobalView(parent)
         g:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 1, defaults, "durationX"), 50)
         g:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, defaults, "durationY"), 50)
         g:AddWidget(GUI:CreateCheckbox(parent, L["Color by Time Remaining"], defaults, "durationColorByTime"), 24)
+        AddDurationColorsLink(g, parent)
         g:AddWidget(GUI:CreateColorPicker(parent, L["Duration Text Color"], defaults, "durationColor", true, RPL, RPL, true), 32)
         local hideAboveSlider
         local function UpdateHideAboveState()
@@ -7498,6 +7514,7 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
             onChange = refresh, onDrag = refresh,
         })
         g:AddWidget(GUI:CreateCheckbox(body, L["Color by Time Remaining"], proxy, "durationColorByTime", refresh), 28)
+        AddDurationColorsLink(g, body)
         local hideAboveSlider
         local function UpdateHideAboveState()
             if not hideAboveSlider then return end

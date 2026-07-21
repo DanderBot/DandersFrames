@@ -17,31 +17,19 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         return { STATIC = L["Static"], DF = L["DF Curve"], CLASSIC = L["Classic Curve"] }
     end
 
-    -- Small info banner with a hyperlink to the Colors page, dropped in under a
-    -- "Color by Time Remaining" toggle so users can jump to where the shared,
-    -- account-wide breakpoint colours actually live. Mirrors the Aura Filters
-    -- cross-links (|HdfPage:<id>| markup + onLinkClick -> GUI.SelectTab). `group`
-    -- is the settings group the toggle sits in; `parent` is the page child frame.
+    -- Note-style cross-link dropped in under a "Color by Time Remaining" toggle so users can
+    -- jump to where the shared, account-wide breakpoint colours actually live (and see that
+    -- section highlighted on arrival). `group` is the settings group the toggle sits in; `parent`
+    -- is the page child frame. The link itself is GUI:CreateColorsPageLink (shared with the Aura Designer).
     local function AddColorsPageLink(group, parent)
-        local tc = (GUI.GetThemeColor and GUI.GetThemeColor()) or { r = 1, g = 1, b = 1 }
-        local linkColor = format("|cFF%02X%02X%02X",
-            math.floor((tc.r or 1) * 255), math.floor((tc.g or 1) * 255), math.floor((tc.b or 1) * 255))
-        -- Plain hint with only "Colors page" as the clickable link (jumps to the shared,
-        -- account-wide breakpoint editor). One format-string key so the link can move for
-        -- other locales' word order. No arrow glyph — the DF font renders it as a box.
-        local link = linkColor .. "|HdfPage:display_classcolors|h" .. L["Colors page"] .. "|h|r"
-        local text = format(L["Customize duration colors on the %s."], link)
-        local banner = GUI:CreateInfoBanner(parent, {
-            tone = "info",
-            html = true,
-            text = text,
-            onLinkClick = function(pageId)
-                if GUI.SelectTab then GUI.SelectTab(pageId) end
-            end,
-            minHeight = 28,
-        })
-        group:AddWidget(banner, banner.layoutHeight or 32)
-        return banner
+        -- Shared note-style cross-link to the Colors page Color-by-Time section (jump + whole-
+        -- section border flash). CreateLink is fixed-layout, so hand it the group's inner width
+        -- up front — its wrapped height is then known before AddWidget (the group advances Y by
+        -- the height we pass). Defined once in GUI:CreateColorsPageLink; shared with the Aura Designer.
+        local innerW = math.max(40, (group:GetWidth() or 260) - 2 * (group.padding or 10))
+        local note = GUI:CreateColorsPageLink(parent, innerW)
+        group:AddWidget(note, (note.layoutHeight or 16) + 2)
+        return note
     end
 
     -- Helper function to create a themed "Copy to Raid/Party" button for a section.
