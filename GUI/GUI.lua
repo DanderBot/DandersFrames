@@ -5602,6 +5602,151 @@ function GUI:CreateTextControls(group, dbTable, prefix, opts)
     return widgets
 end
 
+-- ============================================================
+-- EXPIRATION CONTROLS (shared) — the 12.1-safe Expiry Warning panel. Pairs with the
+-- DF.Expiration engine (Features/Expiration.lua): the engine turns the expiryAlert* keys
+-- into a secret-safe reveal, this builds the UI for them, so every consumer (AD icon/square
+-- now; frame-level indicators later) renders the same flow with no hand-rolled copy.
+--
+-- HIDE-vs-GREY policy (the rework rule): a control that does NOT belong to the current mode
+-- is HIDDEN (its row collapses via hideOn + the group's LayoutChildren + the caller's reflow);
+-- a control that belongs but is momentarily inactive is GREYED via disableOn (the standard
+-- grey-out). So:
+--   OFF        -> only the mode dropdown.
+--   TEXT/GLYPH -> the text box / glyph dropdown, Anchor, Threshold, Offsets, Size.
+--   BORDER     -> Match, Colour Mode, Colour (GREY under By-Time), Style, Inset, Opacity,
+--                 Threshold, Offsets, Size (GREY under Match). No Anchor (a frame centres).
+--   TINT       -> as BORDER but no Style (a wash has no thickness).
+--
+-- Keys are the fixed expiryAlert* set on the passed dbTable (the AD per-aura proxy, or any
+-- consumer's table) — every consumer stores the same keys, so no key map is needed. hideOn/
+-- disableOn predicates read dbTable directly (ignoring the arg LayoutChildren/RefreshChildStates
+-- pass, which is DF.db[SelectedMode]) — the CreateBorderControls convention, and the only way
+-- a per-aura proxy's state is seen.
+--
+-- opts:
+--   parent         REQUIRED — the card/page scroll child (widgets parent to it).
+--   fullUpdate     value-change callback (re-render preview + live frames).
+--   refreshStates  relayout callback — MUST re-run hideOn (LayoutChildren), disableOn
+--                  (RefreshChildStates) and the sibling reflow so a mode change collapses the
+--                  now-irrelevant rows and slides neighbours. The mode / match / colour-mode
+--                  controls fire it. Called once by the caller after build for the initial state.
+--   include        { text, glyph, border, tint } — default all true; a consumer can drop modes.
+--   anchorOptions  the Anchor dropdown's option table (default: the standard 9-anchor set).
+-- Returns the widget table keyed by role so a consumer can attach extra gates.
+-- ============================================================
+function GUI:CreateExpirationControls(group, dbTable, opts)
+    opts = opts or {}
+    local parent        = opts.parent
+    local include       = opts.include or {}
+    local fullUpdate    = opts.fullUpdate or function() end
+    local refreshStates = opts.refreshStates or function() end
+    local L = DF.L
+
+    local function mode() return dbTable.expiryAlertMode or "OFF" end
+    local function isFrame() local m = mode(); return m == "BORDER" or m == "TINT" end
+    -- A mode / match / colour-mode change alters which rows show and which grey, so it must
+    -- relayout + reflow AND re-render. (Value-only edits ride fullUpdate alone.)
+    local function onStructural() refreshStates(); fullUpdate() end
+
+    local w = {}
+
+    -- Mode dropdown — always visible. Off / Text / Glyph / Border / Tint (consumers can drop
+    -- modes via include; Border and Tint are the two frame-ish reveals).
+    local modeOptions = { OFF = L["Off"], _order = { "OFF" } }
+    local function addMode(key, label, on)
+        if on == false then return end
+        modeOptions[key] = label
+        modeOptions._order[#modeOptions._order + 1] = key
+    end
+    addMode("TEXT", L["Custom Text"], include.text)
+    addMode("GLYPH", L["Glyph"], include.glyph)
+    addMode("BORDER", L["Border"], include.border)
+    addMode("TINT", L["Tint"], include.tint)
+    w.mode = group:AddWidget(GUI:CreateDropdown(parent, L["Expiry Alert"], modeOptions,
+        dbTable, "expiryAlertMode", onStructural), 54)
+
+    -- TEXT: the custom alert string.
+    w.text = group:AddWidget(GUI:CreateEditBox(parent, L["Alert Text"], dbTable, "expiryAlertText"), 48)
+    w.text.hideOn = function() return mode() ~= "TEXT" end
+
+    -- GLYPH: the glyph dropdown. Labels embed the atlas escape as a live preview via the
+    -- shared escape builder, so the dropdown can never drift from the live band string.
+    local glyphOptions = { _order = {} }
+    for i, gl in ipairs(DF.ExpiryAlertGlyphs) do
+        glyphOptions[gl.key] = DF:GetExpiryAlertGlyphEscape(gl.key, 16) .. " " .. L[gl.name]
+        glyphOptions._order[i] = gl.key
+    end
+    w.glyph = group:AddWidget(GUI:CreateDropdown(parent, L["Glyph"], glyphOptions, dbTable, "expiryAlertGlyph"), 54)
+    w.glyph.hideOn = function() return mode() ~= "GLYPH" end
+
+    -- ── BORDER / TINT block: a secret-safe |T overlay revealed below the threshold, tinted
+    -- statically OR stepped through the same Colours-page breakpoints the duration text uses.
+    -- Every row here hides outside the two frame modes.
+    local function hideNonFrame() return not isFrame() end
+
+    w.match = group:AddWidget(GUI:CreateCheckbox(parent, L["Match Icon Size"], dbTable,
+        "expiryAlertBorderMatchIcon", onStructural), 28)   -- toggling Match greys/ungreys Size
+    w.match.hideOn = hideNonFrame
+
+    w.colorMode = group:AddWidget(GUI:CreateDropdown(parent, L["Color Mode"],
+        { STATIC = L["Static"], BYTIME = L["Color by Time Remaining"] },
+        dbTable, "expiryAlertBorderColorMode", onStructural), 54)   -- By-Time greys the picker
+    w.colorMode.hideOn = hideNonFrame
+
+    w.color = group:AddWidget(GUI:CreateColorPicker(parent, L["Border Color"], dbTable,
+        "expiryAlertBorderColor", false, fullUpdate, fullUpdate, true), 28)
+    w.color.hideOn = hideNonFrame
+    -- By-Time follows the Colours page, so the static picker is inert then — GREY (not hide)
+    -- so it reads as "switch to Static to use this".
+    w.color.disableOn = function() return dbTable.expiryAlertBorderColorMode == "BYTIME" end
+
+    -- Style = the frame outline art (Thin/Medium/Thick — a scaled bitmap can't vary its own
+    -- line weight, hence discrete arts). BORDER only; a Tint is a solid wash with no thickness.
+    w.style = group:AddWidget(GUI:CreateDropdown(parent, L["Style"],
+        { THIN = L["Thin"], MEDIUM = L["Medium"], THICK = L["Thick"], _order = { "THIN", "MEDIUM", "THICK" } },
+        dbTable, "expiryAlertBorderThickness"), 54)
+    w.style.hideOn = function() return mode() ~= "BORDER" end
+
+    w.inset = group:AddWidget(GUI:CreateSlider(parent, L["Inset"], -10, 10, 1, dbTable, "expiryAlertBorderInset"), 54)
+    w.inset.hideOn = hideNonFrame
+
+    -- Opacity: region alpha on the |T overlay (0 = invisible, 1 = full). Multiplies the art's
+    -- own alpha, so a Tint (50% art) tops out at a 50% wash while a frame can be fully opaque.
+    w.opacity = group:AddWidget(GUI:CreateSlider(parent, L["Opacity"], 0, 1, 0.05, dbTable, "expiryAlertBorderAlpha"), 54)
+    w.opacity.hideOn = hideNonFrame
+
+    -- ── Common placement (all active modes): Threshold, Anchor (Text/Glyph only), Offsets, Size.
+    w.threshold = group:AddWidget(GUI:CreateSlider(parent, L["Alert Below (seconds)"], 1, 60, 1,
+        dbTable, "expiryAlertThreshold"), 54)
+    w.threshold.hideOn = function() return mode() == "OFF" end
+
+    -- Anchor: Text/Glyph only — a frame/tint always centres (the engine forces CENTER), so
+    -- hide it in those modes rather than let a stale anchor de-centre the overlay.
+    w.anchor = group:AddWidget(GUI:CreateDropdown(parent, L["Anchor"],
+        opts.anchorOptions or {
+            CENTER = L["Center"], TOP = L["Top"], BOTTOM = L["Bottom"], LEFT = L["Left"], RIGHT = L["Right"],
+            TOPLEFT = L["Top Left"], TOPRIGHT = L["Top Right"], BOTTOMLEFT = L["Bottom Left"], BOTTOMRIGHT = L["Bottom Right"],
+            _order = { "TOPLEFT", "TOP", "TOPRIGHT", "LEFT", "CENTER", "RIGHT", "BOTTOMLEFT", "BOTTOM", "BOTTOMRIGHT" },
+        }, dbTable, "expiryAlertAnchor"), 54)
+    w.anchor.hideOn = function() local m = mode(); return m ~= "TEXT" and m ~= "GLYPH" end
+
+    -- 0.5 step: the reveal rides the text engine (sub-pixel positioning we can't snap), so
+    -- half-steps let the user split a stubborn half-pixel offset integer steps jump over.
+    w.offsetX = group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 0.5, dbTable, "expiryAlertOffsetX"), 54)
+    w.offsetX.hideOn = function() return mode() == "OFF" end
+    w.offsetY = group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 0.5, dbTable, "expiryAlertOffsetY"), 54)
+    w.offsetY.hideOn = function() return mode() == "OFF" end
+
+    -- Size: every active mode uses it EXCEPT a frame/tint that's matching the icon (auto-sized)
+    -- — there it GREYS (belongs, but inactive), so it only HIDES when the alert is off.
+    w.size = group:AddWidget(GUI:CreateSlider(parent, L["Size"], 6, 48, 1, dbTable, "expiryAlertSize"), 54)
+    w.size.hideOn = function() return mode() == "OFF" end
+    w.size.disableOn = function() return isFrame() and dbTable.expiryAlertBorderMatchIcon ~= false end
+
+    return w
+end
+
 -- Small dim inline subheader (section divider inside a SettingsGroup), matching
 -- AD's "State Overrides" / "Icon Effects" dividers.
 function GUI:CreateExpiringSubheader(parent, text)

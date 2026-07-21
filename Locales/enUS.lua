@@ -835,7 +835,6 @@ L["Faction"] = true
 L["Fade Out Duration"] = true
 L["Fade frames or elements when a unit's health is above the set threshold (e.g. 100% or 80%)."] = true
 L["Fading"] = true
-L["Fill (Tint)"] = true
 L["Fill Direction"] = true
 L["Filter Designer"] = true
 L["First Unit"] = true

@@ -357,9 +357,9 @@ end
 -- must move the slot signature -> Rebuild. Used by the Aura Designer factory
 -- (its expiry-alert struct sigs append this).
 function DF:GetExpiryAlertFmtKey(mode, threshold, text, glyphKey)
-    if mode ~= "TEXT" and mode ~= "GLYPH" and mode ~= "BORDER" then return "" end
-    -- BORDER identity (colour mode / colour / inset / size) rides the struct key in the
-    -- factory (alertElemStructKey), so the base key here is just mode + threshold.
+    if mode ~= "TEXT" and mode ~= "GLYPH" and mode ~= "BORDER" and mode ~= "TINT" then return "" end
+    -- BORDER/TINT identity (colour mode / colour / inset / size / thickness) rides the struct
+    -- key in DF.Expiration:StructSig, so the base key here is just mode + threshold.
     local tail = (mode == "GLYPH" and tostring(glyphKey or ""))
         or (mode == "TEXT" and tostring(text or "")) or ""
     return ":X" .. mode .. ":" .. tostring(tonumber(threshold) or 5) .. ":" .. tail

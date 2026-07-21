@@ -1735,105 +1735,34 @@ local GLOBAL_DEFAULT_MAP = {
     },
 }
 
--- "Expiry Warning" section for the placed icon/square/bar cards: the per-
--- indicator EXPIRY ALERT ELEMENT — text/glyph shown only below the threshold,
--- natively driven on an invisible COMPANION SLOT over the indicator (one
--- duration binding per button; see Factory.lua's EXPIRY ALERT COMPANION SLOT
--- section). Mode dropdown, then the mode-dependent payload controls (custom
--- text / glyph picker), threshold, and the element's anchor / offsets / size
--- (relative to the indicator's rect). Writes ride the proxy's __newindex
--- refresh; EVERY key is structural (the companion's formatter and placement
--- are bind-frozen at init — PTR-5 — so any change Rebuilds the companion).
--- Mode-inapplicable controls grey via SetEnabled — the cards' static-height
--- boxes can't hide rows without re-measuring. Glyph labels embed the atlas
--- escape as a live preview. No animation control: a button-child region
--- can't be animated while auras are secret (PTR-5), and out-of-combat-only
--- animation is worthless for an expiry warning.
+-- "Expiry Warning" section for the placed icon/square cards: the per-indicator EXPIRY ALERT
+-- ELEMENT (text / glyph / border / tint shown only below the threshold, natively driven on an
+-- invisible COMPANION SLOT over the indicator — see Factory.lua's EXPIRY ALERT COMPANION SLOT
+-- section). Built by the shared GUI:CreateExpirationControls helper (engine-driven via
+-- DF.Expiration) so the frame-level indicators can reuse the exact same panel. Controls that
+-- don't apply to the current mode HIDE (rows collapse + the card reflows); ones that apply but
+-- are inactive GREY. No animation control: a button-child region can't be animated while auras
+-- are secret (PTR-5), and out-of-combat-only animation is worthless for an expiry warning.
 local function AddExpiryAlertControls(g, parent, proxy)
-    local textBox, glyphDrop, matchCb, colorModeDrop, colorPick, insetSlider, thicknessDrop, opacitySlider, anchorDrop, sizeSlider, dependents
-    -- Sub-table colour writes skip the proxy __newindex, so drive the refresh by hand
-    -- (mirrors BuildTypeContent's RPL; RefreshPreviewLightweight is assigned by editor open).
-    local function refresh()
-        if RefreshPreviewLightweight then RefreshPreviewLightweight() end
-        RefreshLiveFramesThrottled()
-    end
-    local function UpdateState()
-        local mode = proxy.expiryAlertMode or "OFF"
-        local on = mode ~= "OFF"
-        local isBorder = mode == "BORDER"
-        if textBox then textBox:SetEnabled(mode == "TEXT") end
-        if glyphDrop then glyphDrop:SetEnabled(mode == "GLYPH") end
-        if matchCb then matchCb:SetEnabled(isBorder) end
-        if colorModeDrop then colorModeDrop:SetEnabled(isBorder) end
-        -- By-time follows the Colours page, so the static picker is dead then.
-        if colorPick then colorPick:SetEnabled(isBorder and proxy.expiryAlertBorderColorMode ~= "BYTIME") end
-        if insetSlider then insetSlider:SetEnabled(isBorder) end
-        if thicknessDrop then thicknessDrop:SetEnabled(isBorder) end
-        if opacitySlider then opacitySlider:SetEnabled(isBorder) end
-        -- A Border always frames the icon (centred), so its Anchor is fixed — grey it there.
-        if anchorDrop then anchorDrop:SetEnabled(on and not isBorder) end
-        -- Manual Size applies for every mode EXCEPT a Border that's matching the icon (auto).
-        if sizeSlider then sizeSlider:SetEnabled(on and not (isBorder and proxy.expiryAlertBorderMatchIcon ~= false)) end
-        if dependents then for _, w in ipairs(dependents) do w:SetEnabled(on) end end
-    end
-    local modeOptions = { OFF = L["Off"], TEXT = L["Custom Text"], GLYPH = L["Glyph"], BORDER = L["Border"],
-                          _order = { "OFF", "TEXT", "GLYPH", "BORDER" } }
-    g:AddWidget(GUI:CreateDropdown(parent, L["Expiry Alert"], modeOptions, proxy, "expiryAlertMode",
-        UpdateState), 54)
-    textBox = GUI:CreateEditBox(parent, L["Alert Text"], proxy, "expiryAlertText")
-    g:AddWidget(textBox, 48)
-    local glyphOptions = { _order = {} }
-    for i, gl in ipairs(DF.ExpiryAlertGlyphs) do
-        -- Shared escape builder (atlas -> |A, texture -> |T) so the dropdown preview
-        -- can never drift from the live band string.
-        glyphOptions[gl.key] = DF:GetExpiryAlertGlyphEscape(gl.key, 16) .. " " .. L[gl.name]
-        glyphOptions._order[i] = gl.key
-    end
-    glyphDrop = GUI:CreateDropdown(parent, L["Glyph"], glyphOptions, proxy, "expiryAlertGlyph")
-    g:AddWidget(glyphDrop, 54)
-    -- ── BORDER controls (greyed unless mode = Border) — a secret-safe expiring frame:
-    -- an addon TGA revealed below the threshold via a |T band, tinted statically OR stepped
-    -- through the same Colours-page breakpoints the duration text uses.
-    matchCb = GUI:CreateCheckbox(parent, L["Match Icon Size"], proxy, "expiryAlertBorderMatchIcon", UpdateState)
-    g:AddWidget(matchCb, 28)
-    colorModeDrop = GUI:CreateDropdown(parent, L["Color Mode"],
-        { STATIC = L["Static"], BYTIME = L["Color by Time Remaining"] }, proxy, "expiryAlertBorderColorMode", UpdateState)
-    g:AddWidget(colorModeDrop, 54)
-    colorPick = GUI:CreateColorPicker(parent, L["Border Color"], proxy, "expiryAlertBorderColor", false, refresh, refresh, true)
-    g:AddWidget(colorPick, 28)
-    insetSlider = GUI:CreateSlider(parent, L["Inset"], -10, 10, 1, proxy, "expiryAlertBorderInset")
-    g:AddWidget(insetSlider, 54)
-    -- Style = which overlay art: a frame outline (thin/medium/thick — a scaled bitmap can't
-    -- vary its own line weight, hence discrete arts) OR a solid Fill that tints the whole
-    -- icon (the "expiring tint"). Same |T reveal either way; stored in the thickness key.
-    thicknessDrop = GUI:CreateDropdown(parent, L["Style"],
-        { THIN = L["Thin"], MEDIUM = L["Medium"], THICK = L["Thick"], FILL = L["Fill (Tint)"],
-          _order = { "THIN", "MEDIUM", "THICK", "FILL" } },
-        proxy, "expiryAlertBorderThickness")
-    g:AddWidget(thicknessDrop, 54)
-    -- Opacity: region alpha on the |T overlay (0 = invisible, 1 = full). Multiplies the art's
-    -- own alpha, so a Fill (50% art) tops out at a 50% wash while a frame can be fully opaque.
-    opacitySlider = GUI:CreateSlider(parent, L["Opacity"], 0, 1, 0.05, proxy, "expiryAlertBorderAlpha")
-    g:AddWidget(opacitySlider, 54)
-    dependents = {}
-    local function dep(w, h) g:AddWidget(w, h); dependents[#dependents + 1] = w; return w end
-    dep(GUI:CreateSlider(parent, L["Alert Below (seconds)"], 1, 60, 1, proxy, "expiryAlertThreshold"), 54)
-    -- Element placement: anchored to the INDICATOR's rect (the companion slot
-    -- coincides with it; the a243064 probe ruled out frame-anchored placement).
-    -- Anchor is NOT a plain dependent: a Border is always centred, so UpdateState greys it
-    -- in that mode (Text/Glyph keep it).
-    anchorDrop = GUI:CreateDropdown(parent, L["Anchor"], OPTS.ANCHOR_OPTIONS, proxy, "expiryAlertAnchor")
-    g:AddWidget(anchorDrop, 54)
-    -- 0.5 step: the alert element (esp. a Border) rides the text engine, which sub-pixel-
-    -- positions in a way we can't snap — so half-steps let the user split a stubborn
-    -- half-pixel offset that integer steps can only jump over.
-    dep(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 0.5, proxy, "expiryAlertOffsetX"), 54)
-    dep(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 0.5, proxy, "expiryAlertOffsetY"), 54)
-    -- Size is NOT a plain dependent: a Border matching the icon auto-sizes, so UpdateState
-    -- greys it in that one case (every other mode uses it).
-    sizeSlider = GUI:CreateSlider(parent, L["Size"], 6, 48, 1, proxy, "expiryAlertSize")
-    g:AddWidget(sizeSlider, 54)
-    UpdateState()
+    GUI:CreateExpirationControls(g, proxy, {
+        parent        = parent,
+        anchorOptions = OPTS.ANCHOR_OPTIONS,
+        -- Sub-table colour / alpha writes skip the proxy __newindex, so drive the refresh by
+        -- hand (RefreshPreviewLightweight is assigned by editor open; mirrors the card's RPL).
+        fullUpdate    = function()
+            if RefreshPreviewLightweight then RefreshPreviewLightweight() end
+            RefreshLiveFramesThrottled()
+        end,
+        -- A mode change collapses the now-irrelevant rows: LayoutChildren re-evaluates hideOn,
+        -- RefreshChildStates re-applies the grey, and dfAD_ReflowWidgets slides the sibling
+        -- groups (Duration Text / Stack Count) up or down to track the new height.
+        refreshStates = function()
+            g:LayoutChildren()
+            g:RefreshChildStates()
+            if parent.dfAD_ReflowWidgets then parent.dfAD_ReflowWidgets() end
+        end,
+    })
+    g:RefreshChildStates()   -- initial grey (the initial hide rides AddGroup's LayoutChildren)
 end
 
 -- Create a proxy table that maps flat key access to an indicator instance
