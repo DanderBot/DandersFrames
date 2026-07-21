@@ -945,70 +945,15 @@ end
 -- the alert is ON or OFF.
 -- ============================================================
 
--- Active alert mode or nil. Missing-mode placed indicators never carry one
--- (nothing to count down while the buff is absent).
-local function alertElemMode(indicator)
-    local m = indicator.expiryAlertMode
-    if m == "TEXT" or m == "GLYPH" or m == "BORDER" then return m end
-    return nil
-end
-
--- STRUCTURAL alert key ("" when off): mode/threshold/payload via the shared
--- fmt-key helper, plus size (the GLYPH |A escape bakes size into the band
--- string) AND anchor/offsets. Every alert key is structural: the companion's
--- formatter is bind-frozen and its text placement is a button-child write —
--- forbidden post-init while auras are secret (PTR-5) — so any change Rebuilds
--- the companion slot (positioning is applied at init, bind-frozen thereafter).
--- BORDER mode AUTO-MATCHES the icon (a frame should track the icon, not a hand-tuned
--- number). Calibration: a |T inline texture inside a fontstring measures ~0.75x the icon
--- container's pixels for the same on-screen size — a fixed rendering offset, not scale-
--- dependent (both ride the same UI scale). Inset (px, DF.Border convention: +inward)
--- shrinks/grows the frame off the icon edge. Match off, or TEXT/GLYPH mode, uses the
--- manual expiryAlertSize slider. One source — struct key + companion + preview — so the
--- baked |T size and the rebuild trigger can never disagree.
-local BORDER_ICON_RATIO = 0.75
-local function effectiveAlertSize(indicator)
-    if alertElemMode(indicator) ~= "BORDER" then
-        return math.max(1, math.floor(tonumber(indicator.expiryAlertSize) or 14))
-    end
-    local base = (indicator.expiryAlertBorderMatchIcon ~= false)
-        and ((tonumber(indicator.size) or 24) * BORDER_ICON_RATIO)
-        or (tonumber(indicator.expiryAlertSize) or 18)
-    -- Inset nudges the frame off the icon edge (px in |T space ~= 1.3px on screen; +inward).
-    -- 1x, not 2x — a full per-side inset read as too coarse a jump in-game.
-    base = base - (tonumber(indicator.expiryAlertBorderInset) or 0)
-    return math.max(1, math.floor(base + 0.5))
-end
-
--- BORDER frames the icon, so it is ALWAYS centred (the Anchor control is greyed for it —
--- any other anchor just de-centres the frame). TEXT/GLYPH keep the user's chosen anchor.
-local function effectiveAlertAnchor(indicator)
-    if alertElemMode(indicator) == "BORDER" then return "CENTER" end
-    return indicator.expiryAlertAnchor or "TOP"
-end
-
+-- Expiry-alert MODE / geometry / structural identity now live in the DF.Expiration
+-- engine (Features/Expiration.lua) so the frame-level indicators can share the same
+-- secret-safe reveal. These thin locals keep the factory's own call sites reading the
+-- same, passing the icon side as the engine's geometry.baseSize (BORDER auto-match reads
+-- it). Size/anchor are computed inside the engine's StructSig / BuildDurationSpec /
+-- BuildPreview, so the factory no longer needs its own effectiveAlertSize/Anchor.
+local function alertElemMode(indicator) return DF.Expiration:Mode(indicator) end
 local function alertElemStructKey(indicator)
-    local mode = alertElemMode(indicator)
-    if not mode then return "" end
-    -- effectiveAlertSize folds indicator.size + border match/inset, so resizing the icon
-    -- moves this key and Rebuilds the companion (the |T size is bind-frozen in the band).
-    local key = (DF.GetExpiryAlertFmtKey and DF:GetExpiryAlertFmtKey(mode,
-            indicator.expiryAlertThreshold, indicator.expiryAlertText, indicator.expiryAlertGlyph) or "")
-        .. ":S" .. tostring(effectiveAlertSize(indicator))
-        .. ":P" .. effectiveAlertAnchor(indicator)
-        .. "," .. tostring(tonumber(indicator.expiryAlertOffsetX) or 0)
-        .. "," .. tostring(tonumber(indicator.expiryAlertOffsetY) or 0)
-    if mode == "BORDER" then
-        -- Colour identity: the static colour, or the breakpoints sig for by-time (a Colours-
-        -- page edit must rebuild the bind-frozen formatter). Size/inset/match ride :S above.
-        local cm = indicator.expiryAlertBorderColorMode or "STATIC"
-        key = key .. ":B" .. cm .. ":" .. ((cm == "BYTIME")
-            and (DF.GetDurationBreakpointsSig and DF:GetDurationBreakpointsSig() or "")
-            or colSig(indicator.expiryAlertBorderColor))
-            .. ":T" .. tostring(indicator.expiryAlertBorderThickness or "MEDIUM")
-            .. ":A" .. tostring(tonumber(indicator.expiryAlertBorderAlpha) or 1)
-    end
-    return key
+    return DF.Expiration:StructSig(indicator, { baseSize = indicator.size })
 end
 
 -- Resolve the profile's GLOBAL colour-by-time default for placed/bar duration text:
@@ -1378,22 +1323,14 @@ end
 -- handles — the companion adds nothing to it.
 -- ============================================================
 local function buildAlertCompanionConfig(unit, map, indicator, layout, mine)
-    local mode = alertElemMode(indicator)
-    if not mode then return nil end
-    -- effectiveAlertSize auto-matches BORDER to the icon; atlas GLYPH / TEXT use the slider.
-    local size = effectiveAlertSize(indicator)
-    local formatter
-    if mode == "BORDER" then
-        formatter = DF.GetExpiryBorderElementFormatter and DF:GetExpiryBorderElementFormatter(
-            indicator.expiryAlertThreshold, size,
-            indicator.expiryAlertBorderColorMode, indicator.expiryAlertBorderColor,
-            indicator.expiryAlertBorderThickness)
-    else
-        formatter = DF.GetExpiryAlertElementFormatter and DF:GetExpiryAlertElementFormatter(
-            mode, indicator.expiryAlertThreshold,
-            indicator.expiryAlertText, indicator.expiryAlertGlyph, size)
-    end
-    if not formatter then return nil end   -- pre-12.1 formatter API missing: no companion
+    -- The reveal's duration spec (formatter + placement + opacity) is engine-owned; the
+    -- factory only wraps it in the AuraContainer plumbing. nil = alert off, or the pre-12.1
+    -- formatter API is missing (no companion). geometry.baseSize = the icon side so the
+    -- engine can auto-match a BORDER; geometry.font = the indicator's own duration font so
+    -- the alert reads as part of the same indicator.
+    local dur = DF.Expiration:BuildDurationSpec(indicator,
+        { baseSize = indicator.size, font = indicator.durationFont })
+    if not dur then return nil end
     return {
         unit = unit,
         mode = "row",
@@ -1411,28 +1348,7 @@ local function buildAlertCompanionConfig(unit, map, indicator, layout, mine)
         style = {
             icon     = { show = false },
             cooldown = { show = false },
-            -- The alert IS this button's duration text: alert-element formatter +
-            -- TextStyle placement at the configured anchor point on the invisible
-            -- button, offsets from it. TEXT size via the font, GLYPH size via the
-            -- |A escape (font size still set — harmless). Font follows the
-            -- indicator's duration font so the alert reads as part of the same
-            -- indicator; color nil — the payload's own escapes own it. level 7 =
-            -- one above a normal duration holder (6), preserving the alert's
-            -- established layering.
-            duration = {
-                show      = true,
-                formatter = formatter,
-                font      = indicator.durationFont,
-                size      = size,
-                outline   = "OUTLINE",
-                anchor    = effectiveAlertAnchor(indicator),
-                offsetX   = tonumber(indicator.expiryAlertOffsetX) or 0,
-                offsetY   = tonumber(indicator.expiryAlertOffsetY) or 0,
-                -- BORDER/tint opacity: region alpha on the fontstring scales the |T overlay
-                -- (TEXT/GLYPH leave it nil = opaque). See TextStyle:Apply.
-                alpha     = (mode == "BORDER") and (tonumber(indicator.expiryAlertBorderAlpha) or 1) or nil,
-                level     = 7,
-            },
+            duration = dur,   -- the alert IS this invisible button's duration text
         },
     }
 end
@@ -1530,30 +1446,8 @@ end
 -- builds no companion for missing-mode indicators — nothing to count down —
 -- so the canvas must not show one).
 local function buildAlertPreview(indicator)
-    local mode = alertElemMode(indicator)
-    if indicator.showWhenMissing then return nil end
-    if not mode then return nil end
-    local size = effectiveAlertSize(indicator)   -- BORDER auto-matches the icon
-    local payload
-    if mode == "BORDER" then
-        -- Static: the picked colour. By-time: the canvas is one still frame, so show the
-        -- "about to expire" end (red) — the most representative moment.
-        local col = (indicator.expiryAlertBorderColorMode == "BYTIME")
-            and { r = 1, g = 0.2, b = 0.2 } or indicator.expiryAlertBorderColor
-        payload = DF.GetExpiryBorderEscape and DF:GetExpiryBorderEscape(size, col, indicator.expiryAlertBorderThickness)
-    elseif DF.GetExpiryAlertPayload then
-        payload = DF:GetExpiryAlertPayload(mode, indicator.expiryAlertText, indicator.expiryAlertGlyph, size)
-    end
-    if not payload then return nil end
-    return {
-        payload = payload,
-        anchor  = effectiveAlertAnchor(indicator),
-        offsetX = tonumber(indicator.expiryAlertOffsetX) or 0,
-        offsetY = tonumber(indicator.expiryAlertOffsetY) or 0,
-        size    = size,
-        alpha   = (mode == "BORDER") and (tonumber(indicator.expiryAlertBorderAlpha) or 1) or nil,
-        font    = indicator.durationFont,
-    }
+    return DF.Expiration:BuildPreview(indicator,
+        { baseSize = indicator.size, font = indicator.durationFont })
 end
 
 function Factory:BuildPreviewConfig(frame, indicator, typeKey, spellID, defCBT)
