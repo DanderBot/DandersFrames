@@ -1067,6 +1067,17 @@ function GUI:CreateNote(parent, text, opts)
     return self:CreateLabel(parent, str, opts.width)
 end
 
+-- Shared link HOVER colour: the rest colour (the theme accent — blue in party, orange in
+-- raid) LIGHTENED toward white. Keeps the hue, so a hovered link brightens instead of going
+-- flat white and blending into white body text. One source of truth for every link's hover
+-- (SetHTML links, the page/URL link buttons, and hand-rolled note links). `c` = the link's
+-- rest colour (defaults to the live theme colour); returns {r,g,b}.
+function GUI:LinkHoverColor(c)
+    c = c or (GUI.GetThemeColor and GUI.GetThemeColor()) or { r = 1, g = 1, b = 1 }
+    local t = 0.45   -- lift toward white; tune here to re-key every link at once
+    return { r = c.r + (1 - c.r) * t, g = c.g + (1 - c.g) * t, b = c.b + (1 - c.b) * t }
+end
+
 -- Segmented button group: a row of mutually-exclusive buttons, one selected at
 -- a time. Each option shows a primary label and an optional subtitle on a
 -- second line. Selected button gets a themed border + tinted fill; unselected
@@ -1716,7 +1727,10 @@ function GUI:CreateInfoBanner(parent, opts)
                 fs:SetTextColor(tc.r, tc.g, tc.b)
                 local w = fs:GetStringWidth() + 2
                 btn:SetSize(w, FLOW_LINE_H)
-                btn:SetScript("OnEnter", function() fs:SetTextColor(1, 1, 1) end)
+                btn:SetScript("OnEnter", function()
+                    local h = GUI:LinkHoverColor((GUI.GetThemeColor and GUI.GetThemeColor()) or tc)
+                    fs:SetTextColor(h.r, h.g, h.b)
+                end)
                 btn:SetScript("OnLeave", function()
                     local c = GUI.GetThemeColor and GUI.GetThemeColor() or tc
                     fs:SetTextColor(c.r, c.g, c.b)
@@ -2604,7 +2618,8 @@ function GUI:CreateSeeAlso(parent, links)
         link:SetWidth(link.textWidth)
         
         link:SetScript("OnEnter", function(self)
-            linkText:SetTextColor(1, 1, 1)
+            local h = GUI:LinkHoverColor(c)
+            linkText:SetTextColor(h.r, h.g, h.b)
         end)
         link:SetScript("OnLeave", function(self)
             linkText:SetTextColor(c.r, c.g, c.b)
@@ -9853,7 +9868,8 @@ function DF:CreateGUI()
         btn.label = label
         
         btn:SetScript("OnEnter", function()
-            label:SetTextColor(1, 1, 1)
+            local h = GUI:LinkHoverColor(color)
+            label:SetTextColor(h.r, h.g, h.b)
         end)
         btn:SetScript("OnLeave", function()
             label:SetTextColor(color.r, color.g, color.b)

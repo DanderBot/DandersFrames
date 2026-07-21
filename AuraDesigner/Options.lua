@@ -4490,10 +4490,17 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- click target, with "Color Mode" tinted to signal it, like the cross-page links.)
         AddGroup(L["Expiration"], function(g)
             local tc = (GUI.GetThemeColor and GUI.GetThemeColor()) or { r = 1, g = 1, b = 1 }
-            local link = format("|cFF%02X%02X%02X%s|r",
-                math.floor((tc.r or 1) * 255), math.floor((tc.g or 1) * 255), math.floor((tc.b or 1) * 255), L["Color Mode"])
-            local note = GUI:CreateNote(parent, format(L["For expiry colour, set the %s in Texture & Colors."], link))
+            local hc = GUI:LinkHoverColor(tc)   -- lightened theme accent, shared link hover
+            local function linkText(col)
+                return format("|cFF%02X%02X%02X%s|r",
+                    math.floor((col.r or 1) * 255), math.floor((col.g or 1) * 255), math.floor((col.b or 1) * 255), L["Color Mode"])
+            end
+            local restStr  = format(L["For expiry colour, set the %s in Texture & Colors."], linkText(tc))
+            local hoverStr = format(L["For expiry colour, set the %s in Texture & Colors."], linkText(hc))
+            local note = GUI:CreateNote(parent, restStr)
             note:EnableMouse(true)
+            note:SetScript("OnEnter", function() note:SetText(hoverStr) end)
+            note:SetScript("OnLeave", function() note:SetText(restStr) end)
             note:SetScript("OnMouseUp", function()
                 if not (tabScrollFrame and texColorsGroup and texColorsGroup.GetTop) then return end
                 local sfTop, gTop = tabScrollFrame:GetTop(), texColorsGroup:GetTop()
