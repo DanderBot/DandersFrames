@@ -1475,13 +1475,12 @@ local TYPE_DEFAULTS = {
         durationColorByTime = true,
         durationHideAboveEnabled = false, durationHideAboveThreshold = 10,
         durationHideOnPermanent = true,   -- Wave 4: no timer text on permanent auras
-        -- A bar defaults to TINT (Border distorts off-square, so it isn't offered here).
-        expiryAlertEnabled = false, expiryAlertMode = "TINT", expiryAlertThreshold = 5,
+        -- A bar's expiry COLOUR is its own fill (the Duration Bar Color Mode reddens as it
+        -- drains); the |T reveal only offers Text / Glyph here, so default to a warning Glyph.
+        expiryAlertEnabled = false, expiryAlertMode = "GLYPH", expiryAlertThreshold = 5,
         expiryAlertText = "", expiryAlertGlyph = "WARNING",
         expiryAlertAnchor = "TOP", expiryAlertOffsetX = 0, expiryAlertOffsetY = 0,
         expiryAlertSize = 14,
-        expiryAlertBorderColorMode = "STATIC", expiryAlertBorderAlpha = 1,
-        expiryAlertBorderInset = 0, expiryAlertBorderColor = {r = 1, g = 0.2, b = 0.2, a = 1},
         frameLevel = 30, frameStrata = "INHERIT",
     },
     -- Frame-level types: mirror the inline literals in EnsureTypeConfig so the
@@ -4469,10 +4468,15 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Duration on Permanent Auras"], proxy, "durationHideOnPermanent"), 28)
             UpdateHideAboveState()
         end)
-        -- Expiration: a bar is a RECTANGLE — no Border (a frame distorts off-square) and no
-        -- Match / manual Size (its Tint auto-fills the bar), so the reveal is Tint / Text / Glyph.
+        -- Expiration: a bar carries its own colour-by-remaining-time — the Duration Bar Color
+        -- Mode (DF / Classic Curve) reddens the fill as it drains, secret-safe and full-size. So
+        -- the |T reveal's Border/Tint are redundant here (and can't fill a bar cleanly anyway —
+        -- the reveal scales with the fontstring's font). This section offers a hard-threshold
+        -- Text / Glyph alert; a subheader points at the Color Mode for colour.
         AddGroup(L["Expiration"], function(g)
-            AddExpiryAlertControls(g, parent, proxy, { border = false, match = false })
+            g:AddWidget(GUI:CreateExpiringSubheader(parent,
+                L["For expiry colour, use the Duration Bar's Color Mode."]), 22)
+            AddExpiryAlertControls(g, parent, proxy, { border = false, tint = false, match = false })
         end)
 
     elseif typeKey == "border" then
