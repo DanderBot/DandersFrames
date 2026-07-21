@@ -5697,14 +5697,10 @@ function GUI:CreateExpirationControls(group, dbTable, opts)
     w.glyph = group:AddWidget(GUI:CreateDropdown(parent, L["Glyph"], glyphOptions, dbTable, "expiryAlertGlyph"), 54)
     w.glyph.hideOn = function() return mode() ~= "GLYPH" end
 
-    -- ── BORDER / TINT block: a secret-safe |T overlay revealed below the threshold, tinted
-    -- statically OR stepped through the same Colours-page breakpoints the duration text uses.
-    -- Every row here hides outside the two frame modes.
+    -- ── BORDER / TINT appearance: a secret-safe |T overlay revealed below the threshold,
+    -- tinted statically OR stepped through the same Colours-page breakpoints the duration text
+    -- uses. Colour Mode, Colour, Style, Opacity — every row here hides outside the frame modes.
     local function hideNonFrame() return not isFrame() end
-
-    w.match = group:AddWidget(GUI:CreateCheckbox(parent, L["Match Icon Size"], dbTable,
-        "expiryAlertBorderMatchIcon", onStructural), 28)   -- toggling Match greys/ungreys Size
-    w.match.hideOn = hideNonFrame
 
     w.colorMode = group:AddWidget(GUI:CreateDropdown(parent, L["Color Mode"],
         { STATIC = L["Static"], BYTIME = L["Color by Time Remaining"] },
@@ -5725,15 +5721,27 @@ function GUI:CreateExpirationControls(group, dbTable, opts)
         dbTable, "expiryAlertBorderThickness"), 54)
     w.style.hideOn = function() return mode() ~= "BORDER" end
 
-    w.inset = group:AddWidget(GUI:CreateSlider(parent, L["Inset"], -10, 10, 1, dbTable, "expiryAlertBorderInset"), 54)
-    w.inset.hideOn = hideNonFrame
-
     -- Opacity: region alpha on the |T overlay (0 = invisible, 1 = full). Multiplies the art's
     -- own alpha, so a Tint (50% art) tops out at a 50% wash while a frame can be fully opaque.
+    -- Grouped with the other appearance controls, NOT the placement run further down.
     w.opacity = group:AddWidget(GUI:CreateSlider(parent, L["Opacity"], 0, 1, 0.05, dbTable, "expiryAlertBorderAlpha"), 54)
     w.opacity.hideOn = hideNonFrame
 
-    -- ── Common placement: Anchor (Text/Glyph only), Offsets, Size. (Threshold is up top.)
+    -- ── Size: Match Icon Size (auto) sits directly above Size (manual). Match is the auto/manual
+    -- switch and Size greys under it, so their adjacency shows the relationship.
+    w.match = group:AddWidget(GUI:CreateCheckbox(parent, L["Match Icon Size"], dbTable,
+        "expiryAlertBorderMatchIcon", onStructural), 28)   -- BORDER/TINT only
+    w.match.hideOn = hideNonFrame
+
+    -- Size: every type uses it EXCEPT a frame/tint that's matching the icon (auto-sized) — there
+    -- it GREYS (belongs, but inactive).
+    w.size = group:AddWidget(GUI:CreateSlider(parent, L["Size"], 6, 48, 1, dbTable, "expiryAlertSize"), 54)
+    w.size.disableOn = function() return isFrame() and dbTable.expiryAlertBorderMatchIcon ~= false end
+
+    -- ── Placement: Inset (a frame/tint's fit off the icon edge), Anchor (Text/Glyph), Offsets.
+    w.inset = group:AddWidget(GUI:CreateSlider(parent, L["Inset"], -10, 10, 1, dbTable, "expiryAlertBorderInset"), 54)
+    w.inset.hideOn = hideNonFrame
+
     -- Anchor: Text/Glyph only — a frame/tint always centres (the engine forces CENTER), so
     -- hide it in those modes rather than let a stale anchor de-centre the overlay.
     w.anchor = group:AddWidget(GUI:CreateDropdown(parent, L["Anchor"],
@@ -5748,11 +5756,6 @@ function GUI:CreateExpirationControls(group, dbTable, opts)
     -- half-steps let the user split a stubborn half-pixel offset integer steps jump over.
     w.offsetX = group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 0.5, dbTable, "expiryAlertOffsetX"), 54)
     w.offsetY = group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 0.5, dbTable, "expiryAlertOffsetY"), 54)
-
-    -- Size: every type uses it EXCEPT a frame/tint that's matching the icon (auto-sized) — there
-    -- it GREYS (belongs, but inactive).
-    w.size = group:AddWidget(GUI:CreateSlider(parent, L["Size"], 6, 48, 1, dbTable, "expiryAlertSize"), 54)
-    w.size.disableOn = function() return isFrame() and dbTable.expiryAlertBorderMatchIcon ~= false end
 
     -- Master gate: Enable off greys every control below the toggle (keepEnabled spares it).
     -- Composes with each control's own disableOn (By-Time colour, Match-Icon size).
