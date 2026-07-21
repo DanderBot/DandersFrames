@@ -406,7 +406,14 @@ local function styleBarShared(slot, sb, barSpec, dr, dg, db2, da)
     if barSpec.texture and DF.SafeSetStatusBarTexture then
         DF:SafeSetStatusBarTexture(sb, barSpec.texture)
     end
-    if barSpec.fill and barSpec.orientation and sb.SetOrientation then sb:SetOrientation(barSpec.orientation) end
+    if barSpec.fill and barSpec.orientation and sb.SetOrientation then
+        sb:SetOrientation(barSpec.orientation)
+        -- Rotate the fill texture with a VERTICAL bar (the DF health-bar convention —
+        -- SetRotatesTexture(isVertical)) so a DIRECTIONAL fill like the DF/Classic colour
+        -- ramp runs ALONG the drain, not sideways across the width. Set explicitly both ways
+        -- so a bar flipped back to horizontal clears it.
+        if sb.SetRotatesTexture then sb:SetRotatesTexture(barSpec.orientation == "VERTICAL") end
+    end
     if sb.SetReverseFill then sb:SetReverseFill(barSpec.reverseFill and true or false) end
     -- Background texture child (drawn under the fill). Create-once; recolour live.
     if barSpec.bgColor or barSpec.bgTexture then
