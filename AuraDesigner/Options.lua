@@ -4370,7 +4370,8 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateCheckbox(parent, L["Match Frame Width"], proxy, "matchFrameWidth"), 28)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Match Frame Height"], proxy, "matchFrameHeight"), 28)
         end)
-        -- Texture & Colors  (captured so the Expiration note below can jump-scroll to it)
+        -- Texture & Colors  (group captured to scroll to; the Color Mode widget to flash)
+        local colorModeDrop
         local texColorsGroup = AddGroup(L["Texture & Colors"], function(g)
             -- Colour Mode: Static uses Bar Texture + Fill Color; a curve (DF / Classic) swaps in a
             -- green->red ramp the drain reveals — so the bar reddens as the aura expires — and
@@ -4380,7 +4381,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 local curve = DF:IsDurationBarCurveMode(proxy.barColorMode)
                 for w in pairs(curveGated) do if w.SetEnabled then w:SetEnabled(not curve) end end
             end
-            g:AddWidget(GUI:CreateDropdown(parent, L["Color Mode"],
+            colorModeDrop = g:AddWidget(GUI:CreateDropdown(parent, L["Color Mode"],
                 { STATIC = L["Static"], DF = L["DF Curve"], CLASSIC = L["Classic Curve"],
                   _order = { "STATIC", "DF", "CLASSIC" } }, proxy, "barColorMode", UpdateColorModeGrey), 54)
             local texW = g:AddWidget(GUI:CreateTextureDropdown(parent, L["Bar Texture"], proxy, "texture"), 54)
@@ -4504,7 +4505,10 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             local link = format("|cffffffff|HdfADScroll:texcolors|h%s|h|r", L["Color Mode"])
             local note = GUI:CreateLink(parent, format(L["For expiry colour, set the %s in Texture & Colors."], link), {
                 onLinkClick = function()
-                    GUI:LinkToSetting({ widget = texColorsGroup, scrollTo = scrollToTexColors })
+                    -- Scroll the section into view, but FLASH the specific Color Mode widget
+                    -- (LinkToSetting flashes target.widget — pass the group instead to flash the
+                    -- whole section).
+                    GUI:LinkToSetting({ widget = colorModeDrop or texColorsGroup, scrollTo = scrollToTexColors })
                 end,
             })
             g:AddWidget(note, note.layoutHeight or 34)
