@@ -1660,14 +1660,23 @@ function CC:SetupSecureHandlers(frame)
     
     -- Diagnostic logging for OnHide (insecure side)
     -- Actual binding cleanup is handled by WrapScript OnHide above (secure, works in combat)
+    -- Also counts show/hide flips: pinned boss frames carry a per-frame
+    -- [@bossN,help] visibility state driver that churns during a fight, unlike
+    -- header children which stay shown. dfVisFlips lets the wrap-skip diagnostic
+    -- show whether the failing frame was churning — testing the hypothesis that
+    -- that churn is what desyncs the secure OnEnter/OnLeave wraps.
     frame:HookScript("OnHide", function(self)
+        self.dfVisFlips = (self.dfVisFlips or 0) + 1
         local wasHovered = (CC.currentHoveredFrame == self)
         if wasHovered then
             local clearedBy = self:GetAttribute("dfClearedBy") or "?"
-            DF:DebugWarn("CLICK", "OnHide %s while HOVERED — clearedBy=%s combat=%s",
-                self:GetName() or "unnamed", clearedBy, tostring(InCombatLockdown()))
+            DF:DebugWarn("CLICK", "OnHide %s while HOVERED — clearedBy=%s combat=%s visFlips=%d",
+                self:GetName() or "unnamed", clearedBy, tostring(InCombatLockdown()), self.dfVisFlips)
             CC.currentHoveredFrame = nil
         end
+    end)
+    frame:HookScript("OnShow", function(self)
+        self.dfVisFlips = (self.dfVisFlips or 0) + 1
     end)
     
     -- Set frame type and identity attributes
@@ -1730,11 +1739,17 @@ function CC:SetupSecureHandlers(frame)
                 DF:DebugWarn("CLICK", "  frame visible=%s shown=%s mouseOver=%s combat=%s",
                     tostring(self:IsVisible()), tostring(self:IsShown()),
                     tostring(self:IsMouseOver()), tostring(InCombatLockdown()))
-                -- Check if header still owns this frame
+                -- Pinned-boss wrap-skip hypothesis: is this a visibility-driven
+                -- pinned frame, and how much has it churned? (The old line here
+                -- printed the GLOBAL header's name — which says nothing about
+                -- THIS frame — and was mislabelled "headerRef".) wrapApplied /
+                -- handlersSetup say whether our wrap is even installed; visFlips
+                -- says whether the frame has been show/hide-churning under it.
                 local parent = self:GetParent()
-                DF:DebugWarn("CLICK", "  parent=%s headerRef=%s",
+                DF:DebugWarn("CLICK", "  parent=%s pinnedBoss=%s pinned=%s visFlips=%d wrapApplied=%s",
                     parent and parent:GetName() or "nil",
-                    CC.header and CC.header:GetName() or "nil")
+                    tostring(self.isPinnedBossFrame), tostring(self.isPinnedFrame),
+                    self.dfVisFlips or 0, tostring(self.dfWrapApplied))
             else
                 DF:DebugWarn("CLICK", "  WrapScript fired (enterCount=%d phase=%d) but dfBindingsActive=%s snippet=%d chars",
                     wrapEnterCount, enterPhase, tostring(bindingsActive), #snippet)
