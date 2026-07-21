@@ -5858,7 +5858,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- ===== DEDUPLICATION =====
         AddSpace(10, "both")
-        local dedupGroup = GUI:CreateSettingsGroup(self.child, 280)
+        local dedupGroup = GUI:CreateSettingsGroup(self.child, 260)   -- match the rest of the buff page's column groups (were: 280)
         dedupGroup:AddWidget(GUI:CreateHeader(self.child, L["Deduplication"]), 40)
         -- 12.1: dedup semantics changed (Aura Designer auras only; the Defensive Bar's
         -- contents aren't enumerable read-free, and multi-filter duplicates remain a game
