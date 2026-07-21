@@ -1198,8 +1198,27 @@ local function resolveBarSize(frame, indicator)
     local matchH = indicator.matchFrameHeight and true or false
     local width  = tonumber(indicator.width)  or 60
     local height = tonumber(indicator.height) or 6
-    if matchW then width  = tonumber(fdb.frameWidth)  or width end
-    if matchH then height = tonumber(fdb.frameHeight) or height end
+    if matchW or matchH then
+        -- Match the VISIBLE health bar, not the frame's outer edge: the border band overlaps the
+        -- outer max(padding, borderInset) px on each side, so a full-frameWidth bar overhangs the
+        -- border by one inset per side ("slightly too wide"). Inset it the same amount the resource
+        -- bar's Match Width does (Frames/Bars.lua). Read-free from config; PP-snapped like the frame.
+        local usePP    = fdb.pixelPerfect and DF.PixelPerfect
+        local padding  = tonumber(fdb.framePadding) or 0
+        local border   = (fdb.frameShowBorder ~= false) and (tonumber(fdb.frameBorderSize) or 1) or 0
+        if usePP then padding = DF:PixelPerfect(padding); border = DF:PixelPerfect(border) end
+        local edgeInset = math.max(padding, border)
+        if matchW then
+            local fw = tonumber(fdb.frameWidth) or width
+            if usePP then fw = DF:PixelPerfect(fw) end
+            width = fw - 2 * edgeInset
+        end
+        if matchH then
+            local fh = tonumber(fdb.frameHeight) or height
+            if usePP then fh = DF:PixelPerfect(fh) end
+            height = fh - 2 * edgeInset
+        end
+    end
     return math.max(1, width), math.max(1, height)
 end
 
@@ -1533,6 +1552,9 @@ local function barCoSig(frame, indicator, borderOn, alpha)
         "h="  .. tostring(tonumber(indicator.height) or 6),
         "mw=" .. tostring(indicator.matchFrameWidth ~= false and 1 or 0) .. ":" .. tostring(fdb.frameWidth),
         "mh=" .. tostring(indicator.matchFrameHeight and 1 or 0) .. ":" .. tostring(fdb.frameHeight),
+        -- Match Width/Height now insets by the frame's border+padding (resolveBarSize), so those
+        -- feed the cosmetic size too — a frame border/padding change must re-apply the bar layout.
+        "mi=" .. tostring(fdb.framePadding) .. ":" .. tostring(fdb.frameShowBorder) .. ":" .. tostring(fdb.frameBorderSize) .. ":" .. tostring(fdb.pixelPerfect),
         "an=" .. tostring(indicator.anchor or "BOTTOM"),
         "ox=" .. tostring(tonumber(indicator.offsetX) or 0),
         "oy=" .. tostring(tonumber(indicator.offsetY) or 0),
