@@ -1873,6 +1873,61 @@ function GUI:CreateLink(parent, text, opts)
     return frame
 end
 
+-- GUI:FlashWidget — the "show me" pulse (revived from the pre-12.1 boss-debuffs jump): briefly
+-- wash a widget/section in the theme colour so the eye lands on it after a jump. One reused
+-- overlay per widget; the colour refreshes each call (party blue / raid orange). Subtle — peaks
+-- ~35% alpha via UIFrameFlash — so the control stays readable underneath.
+function GUI:FlashWidget(widget, opts)
+    if not widget or not widget.CreateTexture then return end
+    opts = opts or {}
+    local hl = widget._dfFlashHL
+    if not hl then
+        hl = widget:CreateTexture(nil, "OVERLAY")
+        hl:SetPoint("TOPLEFT", -3, 3)
+        hl:SetPoint("BOTTOMRIGHT", 3, -3)
+        widget._dfFlashHL = hl
+    end
+    local c = (GUI.GetThemeColor and GUI.GetThemeColor()) or { r = 1, g = 0.82, b = 0 }
+    hl:SetColorTexture(c.r, c.g, c.b, opts.alpha or 0.35)
+    hl:SetAlpha(1)
+    hl:Show()
+    if UIFrameFlash then
+        UIFrameFlash(hl, 0.2, 0.35, 1.3, false, 0.1, 0.12)   -- fade in/out ~twice over ~1.3s
+        C_Timer.After(1.5, function() if hl then hl:Hide() end end)
+    else
+        C_Timer.After(0.9, function() if hl then hl:Hide() end end)   -- no-flash fallback
+    end
+end
+
+-- GUI:LinkToSetting — the click action for a settings-link: jump to a setting and flash it.
+-- Unifies same-page and cross-page so every link behaves identically. target:
+--   page      tab to switch to first (nil = stay on the current page).
+--   section   section header text — scrolls to it (Search:ScrollToSection) and flashes it.
+--   widget    explicit widget to flash (overrides the section-header lookup).
+--   scrollTo  optional function() that scrolls a CUSTOM container (e.g. an Aura Designer card)
+--             to the target — used instead of the page section scroll.
+--   flash     set false to skip the pulse (default on).
+function GUI:LinkToSetting(target)
+    if type(target) ~= "table" then return end
+    local function go()
+        local w = target.widget
+        if target.scrollTo then
+            target.scrollTo()
+        elseif target.page and target.section and DF.Search and DF.Search.ScrollToSection then
+            w = DF.Search:ScrollToSection(target.page, target.section) or w
+        end
+        if w and target.flash ~= false then
+            C_Timer.After(0.05, function() GUI:FlashWidget(w) end)   -- after the scroll settles
+        end
+    end
+    if target.page and GUI.SelectTab then
+        GUI.SelectTab(target.page)
+        C_Timer.After(0.12, go)   -- let the tab build + lay out before scroll/flash
+    else
+        go()
+    end
+end
+
 -- Apply the standard button look to an existing Button frame — the single
 -- source of truth for button styling, shared by GUI:CreateButton AND by
 -- hand-rolled buttons that need the same look (the button analogue of

@@ -802,7 +802,7 @@ function Search:ScrollToSection(tabName, sectionName)
                     page:SetVerticalScroll(math.min(offset, math.max(0, maxScroll)))
                 end
             end
-            break
+            return widget   -- the section header, so callers (GUI:LinkToSetting) can flash it
         end
     end
 end
