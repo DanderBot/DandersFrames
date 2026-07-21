@@ -1267,13 +1267,19 @@ end
 -- opts (bind-once) — Immediate + RemainingTime match the legacy bar's SetTimerDuration call.
 local function buildBarStyle(indicator, borderSpec, defCBT)
     local fr, fg, fb, fa = readADColor(indicator.fillColor)
+    -- Colour Mode: a curve (DF / Classic) swaps the fill texture for a green->red ramp the
+    -- native RemainingTime drain reveals, and forces a white tint (styleBarShared honours
+    -- `curve`) so the ramp shows pure — secret-safe, same mechanism as the duration-bar strips.
+    -- Static keeps the configured Bar Texture + Fill Color.
+    local curveTex = DF.GetDurationBarCurveTexture and DF:GetDurationBarCurveTexture(indicator.barColorMode)
     local style = {
         icon     = { show = false },
         cooldown = { show = false },
         bar = {
             show          = true,
             fill          = true,
-            texture       = indicator.texture,
+            texture       = curveTex or indicator.texture,
+            curve         = curveTex and true or nil,
             color         = { fr, fg, fb, fa },
             bgColor       = indicator.bgColor,
             orientation   = (indicator.orientation == "VERTICAL") and "VERTICAL" or "HORIZONTAL",
@@ -1533,6 +1539,7 @@ local function barCoSig(frame, indicator, borderOn, alpha)
         "sc=" .. tostring(tonumber(indicator.scale) or 1),
         "al=" .. tostring(alpha),
         "tex=" .. tostring(indicator.texture),
+        "cm=" .. tostring(indicator.barColorMode or "STATIC"),   -- curve swaps texture+tint (cosmetic)
         "or=" .. tostring(indicator.orientation or "HORIZONTAL"),
         "rf=" .. tostring(indicator.reverseFill and 1 or 0),
         "fc=" .. colSig(indicator.fillColor),

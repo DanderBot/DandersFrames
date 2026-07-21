@@ -870,6 +870,10 @@ local CURVE_TEXTURES = {
 -- uses it to dim Texture / Bar Color, both of which a curve mode overrides. One source
 -- of truth: add a ramp to CURVE_TEXTURES above and every consumer follows.
 function DF:IsDurationBarCurveMode(mode) return CURVE_TEXTURES[mode] ~= nil end
+-- The ramp texture for a curve colour mode (nil for STATIC / unknown). Lets a consumer
+-- outside this file (the AD bar factory) opt a StatusBar's fill into the same green->red
+-- ramp the duration-bar strips use.
+function DF:GetDurationBarCurveTexture(mode) return CURVE_TEXTURES[mode] end
 
 -- Duration bar (Wave 3, #205): prefixed key block -> the engine's style.bar
 -- STRIP spec (fill = false; the fill shape is AD-only). Returns nil when the

@@ -1431,6 +1431,7 @@ local TYPE_DEFAULTS = {
         anchor = "BOTTOM", offsetX = 0, offsetY = 0,
         orientation = "HORIZONTAL", width = 60, height = 6,
         matchFrameWidth = true, matchFrameHeight = false,
+        barColorMode = "STATIC",   -- STATIC / DF / CLASSIC (curve = green->red ramp as it drains)
         texture = "Interface\\TargetingFrame\\UI-StatusBar",
         fillColor = {r = 1, g = 1, b = 1, a = 1},
         bgColor = {r = 0, g = 0, b = 0, a = 0.5},
@@ -4371,8 +4372,20 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         end)
         -- Texture & Colors
         AddGroup(L["Texture & Colors"], function(g)
-            g:AddWidget(GUI:CreateTextureDropdown(parent, L["Bar Texture"], proxy, "texture"), 54)
-            g:AddWidget(GUI:CreateColorPicker(parent, L["Fill Color"], proxy, "fillColor", true, RPL, RPL, true), 28)
+            -- Colour Mode: Static uses Bar Texture + Fill Color; a curve (DF / Classic) swaps in a
+            -- green->red ramp the drain reveals — so the bar reddens as the aura expires — and
+            -- forces a white tint, so those two grey out (curveGated) while a curve is selected.
+            local curveGated = {}
+            local function UpdateColorModeGrey()
+                local curve = DF:IsDurationBarCurveMode(proxy.barColorMode)
+                for w in pairs(curveGated) do if w.SetEnabled then w:SetEnabled(not curve) end end
+            end
+            g:AddWidget(GUI:CreateDropdown(parent, L["Color Mode"],
+                { STATIC = L["Static"], DF = L["DF Curve"], CLASSIC = L["Classic Curve"],
+                  _order = { "STATIC", "DF", "CLASSIC" } }, proxy, "barColorMode", UpdateColorModeGrey), 54)
+            local texW = g:AddWidget(GUI:CreateTextureDropdown(parent, L["Bar Texture"], proxy, "texture"), 54)
+            local colW = g:AddWidget(GUI:CreateColorPicker(parent, L["Fill Color"], proxy, "fillColor", true, RPL, RPL, true), 28)
+            curveGated[texW] = true; curveGated[colW] = true
             g:AddWidget(GUI:CreateColorPicker(parent, L["Background Color"], proxy, "bgColor", true, RPL, RPL, true), 28)
             g:AddWidget(GUI:CreateSlider(parent, L["Alpha"], 0, 1, 0.05, proxy, "alpha"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Frame Level"], -10, 30, 1, proxy, "frameLevel"), 54)
@@ -4382,6 +4395,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             -- container path yet — planned with the z-order polish pass.
             GUI:BlockControl12_1(strataDD, "roadmap", { id = "ad:framestrata", page = L["Aura Designer"],
                 when = function() return DF.AuraContainer and DF.AuraContainer.IsSupported and DF.AuraContainer.IsSupported() end })
+            UpdateColorModeGrey()   -- initial grey for the curve-gated Texture / Fill Color
         end)
         -- Border (Stage 5.3 — unified controls via CreateBorderControls).
         -- Full toolkit (Style / Texture / Colour / Gradient / Shadow / Blend /
@@ -4475,7 +4489,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- Text / Glyph alert; a subheader points at the Color Mode for colour.
         AddGroup(L["Expiration"], function(g)
             g:AddWidget(GUI:CreateExpiringSubheader(parent,
-                L["For expiry colour, use the Duration Bar's Color Mode."]), 22)
+                L["For expiry colour, set the Color Mode in Texture & Colors."]), 22)
             AddExpiryAlertControls(g, parent, proxy, { border = false, tint = false, match = false })
         end)
 
