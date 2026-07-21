@@ -147,4 +147,10 @@ function TextStyle:Apply(fs, spec, anchorFrame)
     if type(c) == "table" then
         fs:SetTextColor(c.r or c[1] or 1, c.g or c[2] or 1, c.b or c[3] or 1, c.a or c[4] or 1)
     end
+
+    -- Region alpha (default opaque, reset each apply so a reused fontstring never keeps a
+    -- stale value). Unlike SetTextColor's alpha — which only fades glyph vertices — region
+    -- alpha scales EVERYTHING the fontstring renders, including inline |T textures. That is
+    -- what lets the expiry-alert border/tint (a |T with no user alpha arg) be opacity-controlled.
+    fs:SetAlpha(spec.alpha or 1)
 end

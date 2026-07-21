@@ -1266,6 +1266,7 @@ local TYPE_DEFAULTS = {
         -- Expiry Alert BORDER mode (secret-safe expiring frame): colour + auto-match + inset.
         expiryAlertBorderMatchIcon = true, expiryAlertBorderInset = 0,
         expiryAlertBorderColorMode = "STATIC", expiryAlertBorderThickness = "MEDIUM",
+        expiryAlertBorderAlpha = 1,
         expiryAlertBorderColor = {r = 1, g = 0.2, b = 0.2, a = 1},
         showStacks = true, stackMinimum = 2,
         stackFont = "DF Roboto SemiBold", stackScale = 1.0,
@@ -1378,6 +1379,7 @@ local TYPE_DEFAULTS = {
         -- Expiry Alert BORDER mode (secret-safe expiring frame): colour + auto-match + inset.
         expiryAlertBorderMatchIcon = true, expiryAlertBorderInset = 0,
         expiryAlertBorderColorMode = "STATIC", expiryAlertBorderThickness = "MEDIUM",
+        expiryAlertBorderAlpha = 1,
         expiryAlertBorderColor = {r = 1, g = 0.2, b = 0.2, a = 1},
         showStacks = true, stackMinimum = 2,
         stackFont = "DF Roboto SemiBold", stackScale = 1.0,
@@ -1748,7 +1750,7 @@ local GLOBAL_DEFAULT_MAP = {
 -- can't be animated while auras are secret (PTR-5), and out-of-combat-only
 -- animation is worthless for an expiry warning.
 local function AddExpiryAlertControls(g, parent, proxy)
-    local textBox, glyphDrop, matchCb, colorModeDrop, colorPick, insetSlider, thicknessDrop, anchorDrop, sizeSlider, dependents
+    local textBox, glyphDrop, matchCb, colorModeDrop, colorPick, insetSlider, thicknessDrop, opacitySlider, anchorDrop, sizeSlider, dependents
     -- Sub-table colour writes skip the proxy __newindex, so drive the refresh by hand
     -- (mirrors BuildTypeContent's RPL; RefreshPreviewLightweight is assigned by editor open).
     local function refresh()
@@ -1767,6 +1769,7 @@ local function AddExpiryAlertControls(g, parent, proxy)
         if colorPick then colorPick:SetEnabled(isBorder and proxy.expiryAlertBorderColorMode ~= "BYTIME") end
         if insetSlider then insetSlider:SetEnabled(isBorder) end
         if thicknessDrop then thicknessDrop:SetEnabled(isBorder) end
+        if opacitySlider then opacitySlider:SetEnabled(isBorder) end
         -- A Border always frames the icon (centred), so its Anchor is fixed — grey it there.
         if anchorDrop then anchorDrop:SetEnabled(on and not isBorder) end
         -- Manual Size applies for every mode EXCEPT a Border that's matching the icon (auto).
@@ -1800,11 +1803,18 @@ local function AddExpiryAlertControls(g, parent, proxy)
     g:AddWidget(colorPick, 28)
     insetSlider = GUI:CreateSlider(parent, L["Inset"], -10, 10, 1, proxy, "expiryAlertBorderInset")
     g:AddWidget(insetSlider, 54)
-    -- Thickness = which frame art (a scaled bitmap can't vary its own line weight).
-    thicknessDrop = GUI:CreateDropdown(parent, L["Thickness"],
-        { THIN = L["Thin"], MEDIUM = L["Medium"], THICK = L["Thick"], _order = { "THIN", "MEDIUM", "THICK" } },
+    -- Style = which overlay art: a frame outline (thin/medium/thick — a scaled bitmap can't
+    -- vary its own line weight, hence discrete arts) OR a solid Fill that tints the whole
+    -- icon (the "expiring tint"). Same |T reveal either way; stored in the thickness key.
+    thicknessDrop = GUI:CreateDropdown(parent, L["Style"],
+        { THIN = L["Thin"], MEDIUM = L["Medium"], THICK = L["Thick"], FILL = L["Fill (Tint)"],
+          _order = { "THIN", "MEDIUM", "THICK", "FILL" } },
         proxy, "expiryAlertBorderThickness")
     g:AddWidget(thicknessDrop, 54)
+    -- Opacity: region alpha on the |T overlay (0 = invisible, 1 = full). Multiplies the art's
+    -- own alpha, so a Fill (50% art) tops out at a 50% wash while a frame can be fully opaque.
+    opacitySlider = GUI:CreateSlider(parent, L["Opacity"], 0, 1, 0.05, proxy, "expiryAlertBorderAlpha")
+    g:AddWidget(opacitySlider, 54)
     dependents = {}
     local function dep(w, h) g:AddWidget(w, h); dependents[#dependents + 1] = w; return w end
     dep(GUI:CreateSlider(parent, L["Alert Below (seconds)"], 1, 60, 1, proxy, "expiryAlertThreshold"), 54)
@@ -2904,6 +2914,7 @@ local function RenderPreviewIndicator(mockFrame, spec, auraName, info, indicator
         ah.fs:ClearAllPoints()
         ah.fs:SetPoint(ap.anchor, ah, ap.anchor, ap.offsetX, ap.offsetY)
         if DF.SafeSetFont then DF:SafeSetFont(ah.fs, ap.font, ap.size, "OUTLINE") end
+        ah.fs:SetAlpha(ap.alpha or 1)   -- border/tint opacity (region alpha scales the |T)
         ah.fs:SetText(ap.payload)
         ah:Show()
     elseif rec.alertHolder then

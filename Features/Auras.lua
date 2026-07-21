@@ -310,6 +310,10 @@ local EXPIRE_BORDER_TEXTURES = {
     THIN   = "Interface\\AddOns\\DandersFrames\\Media\\DF_ExpireBorder_Thin",
     MEDIUM = "Interface\\AddOns\\DandersFrames\\Media\\DF_ExpireBorder",
     THICK  = "Interface\\AddOns\\DandersFrames\\Media\\DF_ExpireBorder_Thick",
+    -- FILL = a solid 50%-alpha wash (not a frame) — same |T reveal, so the expiring
+    -- overlay becomes a TINT over the icon instead of an outline. The whole pipeline is
+    -- texture-agnostic, so this is just another "style" of the border overlay.
+    FILL   = "Interface\\AddOns\\DandersFrames\\Media\\DF_ExpireBorder_Fill",
 }
 local function borderTexture(thickness) return EXPIRE_BORDER_TEXTURES[thickness] or EXPIRE_BORDER_TEXTURES.MEDIUM end
 

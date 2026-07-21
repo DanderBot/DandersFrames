@@ -1006,6 +1006,7 @@ local function alertElemStructKey(indicator)
             and (DF.GetDurationBreakpointsSig and DF:GetDurationBreakpointsSig() or "")
             or colSig(indicator.expiryAlertBorderColor))
             .. ":T" .. tostring(indicator.expiryAlertBorderThickness or "MEDIUM")
+            .. ":A" .. tostring(tonumber(indicator.expiryAlertBorderAlpha) or 1)
     end
     return key
 end
@@ -1427,6 +1428,9 @@ local function buildAlertCompanionConfig(unit, map, indicator, layout, mine)
                 anchor    = effectiveAlertAnchor(indicator),
                 offsetX   = tonumber(indicator.expiryAlertOffsetX) or 0,
                 offsetY   = tonumber(indicator.expiryAlertOffsetY) or 0,
+                -- BORDER/tint opacity: region alpha on the fontstring scales the |T overlay
+                -- (TEXT/GLYPH leave it nil = opaque). See TextStyle:Apply.
+                alpha     = (mode == "BORDER") and (tonumber(indicator.expiryAlertBorderAlpha) or 1) or nil,
                 level     = 7,
             },
         },
@@ -1547,6 +1551,7 @@ local function buildAlertPreview(indicator)
         offsetX = tonumber(indicator.expiryAlertOffsetX) or 0,
         offsetY = tonumber(indicator.expiryAlertOffsetY) or 0,
         size    = size,
+        alpha   = (mode == "BORDER") and (tonumber(indicator.expiryAlertBorderAlpha) or 1) or nil,
         font    = indicator.durationFont,
     }
 end
