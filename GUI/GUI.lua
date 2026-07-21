@@ -1307,6 +1307,44 @@ end
 
 local INFO_BANNER_ICON_PATH = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
 
+-- Shared inline-markup parser: split "…|cCOLOR|HlinkData|hText|h|r…" (WoW hyperlink markup
+-- plus \n line breaks) into a flat token list of { type = "word"/"link"/"newline", text, data,
+-- color }. Used by the InfoBanner's SetHTML flow AND GUI:CreateLink, so both read links the
+-- same way — one parser, no fork.
+local function ParseHTMLSegments(s)
+    local segs = {}
+    local function addWords(chunk)
+        local pos = 1
+        while pos <= #chunk do
+            local nl = chunk:find("\n", pos, true)
+            local line = nl and chunk:sub(pos, nl - 1) or chunk:sub(pos)
+            for _, w in ipairs({ strsplit(" ", line) }) do
+                if #w > 0 then segs[#segs + 1] = { type = "word", text = w } end
+            end
+            if nl then
+                segs[#segs + 1] = { type = "newline" }
+                pos = nl + 1
+            else
+                break
+            end
+        end
+    end
+    local rem = s
+    while #rem > 0 do
+        local pre, color, data, lt, rest =
+            rem:match("^(.-)|c(%x%x%x%x%x%x%x%x)|H([^|]*)|h([^|]*)|h|r(.*)")
+        if pre ~= nil then
+            addWords(pre)
+            segs[#segs + 1] = { type = "link", text = lt, data = data, color = color }
+            rem = rest or ""
+        else
+            addWords(rem)
+            break
+        end
+    end
+    return segs
+end
+
 function GUI:CreateInfoBanner(parent, opts)
     opts = opts or {}
 
@@ -1609,40 +1647,7 @@ function GUI:CreateInfoBanner(parent, opts)
     -- and \n for explicit line breaks. Plain text is word-split so wrapping
     -- occurs at word boundaries when the banner is narrow.
 
-    -- Parse text into a flat list of typed tokens.
-    local function ParseHTMLSegments(s)
-        local segs = {}
-        local function addWords(chunk)
-            local pos = 1
-            while pos <= #chunk do
-                local nl = chunk:find("\n", pos, true)
-                local line = nl and chunk:sub(pos, nl - 1) or chunk:sub(pos)
-                for _, w in ipairs({strsplit(" ", line)}) do
-                    if #w > 0 then segs[#segs + 1] = {type = "word", text = w} end
-                end
-                if nl then
-                    segs[#segs + 1] = {type = "newline"}
-                    pos = nl + 1
-                else
-                    break
-                end
-            end
-        end
-        local rem = s
-        while #rem > 0 do
-            local pre, color, data, lt, rest =
-                rem:match("^(.-)|c(%x%x%x%x%x%x%x%x)|H([^|]*)|h([^|]*)|h|r(.*)")
-            if pre ~= nil then
-                addWords(pre)
-                segs[#segs + 1] = {type = "link", text = lt, data = data, color = color}
-                rem = rest or ""
-            else
-                addWords(rem)
-                break
-            end
-        end
-        return segs
-    end
+    -- (Markup parsing is the file-level ParseHTMLSegments, shared with GUI:CreateLink.)
 
     -- Position all flow widgets left-to-right with wrapping; returns total
     -- content height. Punctuation tokens attach to the preceding element
@@ -1765,6 +1770,107 @@ function GUI:CreateInfoBanner(parent, opts)
     end
 
     return banner
+end
+
+-- ============================================================
+-- GUI:CreateLink — lean inline text + clickable links in a NOTE style (no box), FIXED layout.
+-- The link-capable counterpart to CreateNote: same |cCOLOR|Hdata|hText|h|r markup as the
+-- InfoBanner (shared ParseHTMLSegments), rendered as flowing dim body text with a themed,
+-- hover-lightening Button per link — but WITHOUT the banner's self-resize machinery, so it is
+-- safe inside the Aura Designer's reflowing indicator cards (no OnSizeChanged -> relayout loop
+-- that drops FPS there). Only the link words are clickable/hovered (fixes the old note's
+-- whole-frame click). Named CreateLink (not CreateLinkText) so we can grow other link forms.
+--
+-- opts:
+--   onLinkClick(data)  called with the link's raw data string on click.
+--   width              wrap width; if given, flows immediately. Omit to flow once when the host
+--                      first sizes the frame (then it stops — no re-flow loop).
+--   fontTemplate       body font (default DFFontHighlightSmall — the note look).
+--   lineHeight         per-line height (default 14).
+-- Returns the frame; frame.layoutHeight is the measured height after flow; frame:Reflow(w)
+-- re-flows at a new width if a caller ever needs it.
+-- ============================================================
+function GUI:CreateLink(parent, text, opts)
+    opts = opts or {}
+    local onLinkClick = opts.onLinkClick
+    local fontTemplate = opts.fontTemplate or "DFFontHighlightSmall"
+    local LINE_H = opts.lineHeight or 14
+    local frame = CreateFrame("Frame", nil, parent)
+    frame:SetHeight(LINE_H)
+
+    local segs = ParseHTMLSegments(text or "")
+    local tc = (GUI.GetThemeColor and GUI.GetThemeColor()) or { r = 1, g = 0.82, b = 0 }
+
+    for _, seg in ipairs(segs) do
+        if seg.type == "word" then
+            local fs = frame:CreateFontString(nil, "OVERLAY", fontTemplate)
+            fs:SetText(seg.text)
+            fs:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)   -- dim body, like a note
+            seg._w = fs:GetStringWidth()
+            fs:SetSize(seg._w, LINE_H)
+            seg._widget = fs
+        elseif seg.type == "link" then
+            local btn = CreateFrame("Button", nil, frame)
+            local fs = btn:CreateFontString(nil, "OVERLAY", fontTemplate)
+            fs:SetAllPoints()
+            fs:SetText(seg.text)
+            fs:SetTextColor(tc.r, tc.g, tc.b)
+            local w = fs:GetStringWidth() + 2
+            btn:SetSize(w, LINE_H)
+            btn:SetScript("OnEnter", function()
+                local h = GUI:LinkHoverColor((GUI.GetThemeColor and GUI.GetThemeColor()) or tc)
+                fs:SetTextColor(h.r, h.g, h.b)
+            end)
+            btn:SetScript("OnLeave", function()
+                local c = (GUI.GetThemeColor and GUI.GetThemeColor()) or tc
+                fs:SetTextColor(c.r, c.g, c.b)
+            end)
+            local segData = seg.data
+            btn:SetScript("OnClick", function() if onLinkClick then onLinkClick(segData) end end)
+            seg._w = w
+            seg._widget = btn
+        end
+    end
+
+    -- Wrap the tokens left-to-right at `w`; punctuation hugs the preceding token. Sets the
+    -- frame height to fit. Fixed layout — never re-flows on its own, so no host feedback loop.
+    local function doFlow(w)
+        w = w or frame:GetWidth() or 0
+        if w < 20 then return LINE_H end
+        local x, lineY = 0, 0
+        for _, seg in ipairs(segs) do
+            if seg.type == "newline" then
+                x = 0; lineY = lineY - LINE_H - 2
+            elseif seg._widget then
+                local isPunct = seg.type == "word" and seg.text:match("^[%p]") and true or false
+                local gap = (x > 0 and not isPunct) and 3 or 0
+                if x > 0 and (x + gap + seg._w) > w then
+                    x = 0; lineY = lineY - LINE_H - 2; gap = 0
+                end
+                seg._widget:ClearAllPoints()
+                seg._widget:SetPoint("TOPLEFT", frame, "TOPLEFT", x + gap, lineY)
+                x = x + gap + seg._w
+            end
+        end
+        local h = math.abs(lineY) + LINE_H
+        frame:SetHeight(h); frame.layoutHeight = h
+        return h
+    end
+    frame.Reflow = function(_, w) return doFlow(w) end
+
+    if opts.width then
+        frame:SetWidth(opts.width)
+        doFlow(opts.width)
+    else
+        frame:SetScript("OnSizeChanged", function(self, w)
+            if w and w > 20 and not self._flowed then
+                self._flowed = true
+                self:SetScript("OnSizeChanged", nil)   -- flow once; never re-flow (no loop)
+                doFlow(w)
+            end
+        end)
+    end
+    return frame
 end
 
 -- Apply the standard button look to an existing Button frame — the single
