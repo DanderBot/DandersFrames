@@ -3804,7 +3804,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             collapsible = true,
             showSummary = showSummary or false,
         })
-        group.padding = 6
+        group.padding = 10   -- match the main Options groups' inner padding (airier scale)
         group:AddWidget(GUI:CreateHeader(parent, header), 25)
         buildFn(group)
         local h = group:LayoutChildren()
@@ -5170,7 +5170,7 @@ local function BuildGlobalView(parent)
 
     local function AddGroup(header, buildFn)
         local group = GUI:CreateSettingsGroup(parent, contentWidth - 10)
-        group.padding = 6
+        group.padding = 10   -- match the main Options groups' inner padding (airier scale)
         group:AddWidget(GUI:CreateHeader(parent, header), 25)
         buildFn(group)
         local h = group:LayoutChildren()
@@ -7470,7 +7470,7 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
             collapsible = true,
             collapseKey = "adGroupStyle:" .. tostring(cardKey) .. ":" .. sectionKey,
         })
-        g.padding = 6
+        g.padding = 10   -- match the main Options groups' inner padding (airier scale)
         g:AddWidget(GUI:CreateHeader(body, header), 25)
         buildFn(g)
         local h = g:LayoutChildren()   -- includes the group's own bottom margin

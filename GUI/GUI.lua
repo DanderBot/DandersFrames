@@ -35,6 +35,31 @@ GUI.Colors = {
     warning    = C_WARNING,  -- soft red for behaviour-change / caution notes
 }
 
+-- Canonical row heights (the "airier" scale). A fixed-height widget factory stamps its own slot
+-- height onto the widget (widget.preferredHeight + widget.fixedRowHeight), so the layout uses THAT
+-- and a call-site number can't make the same widget type render at a different height on a different
+-- page. New callers can omit the height entirely; legacy call-site numbers on fixed widgets are
+-- ignored (harmless, strippable later). Variable widgets (labels, headers, spacers) are NOT stamped
+-- and keep whatever height they are given. One place to retune the whole GUI's vertical rhythm.
+GUI.RowHeight = {
+    checkbox    = 30,
+    slider      = 55,
+    dropdown    = 55,
+    colorpicker = 30,   -- match the checkbox row (both ~24px of content) so the rhythm reads even
+    editbox     = 55,
+}
+
+-- Resolve the layout slot height for a widget being added to a group/page. Fixed-height widgets
+-- own their height (drift-proof); everything else uses the height it was handed, then the widget's
+-- own preferred height, then a sane default.
+local function ResolveRowHeight(widget, height)
+    if widget and widget.fixedRowHeight and widget.preferredHeight then
+        return widget.preferredHeight
+    end
+    return height or (widget and widget.preferredHeight) or 55
+end
+GUI.ResolveRowHeight = ResolveRowHeight
+
 DF.SectionRegistry = DF.SectionRegistry or {}
 
 -- ============================================================
@@ -798,7 +823,7 @@ function GUI:CreateSettingsGroup(parent, width, opts)
         widget:SetParent(self)
         table.insert(self.groupChildren, {
             widget = widget,
-            height = height or 55,
+            height = ResolveRowHeight(widget, height),
         })
         -- Mark widget as belonging to this group
         widget.settingsGroup = self
@@ -3441,6 +3466,8 @@ end
 function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, customSet, overrideKey)
     local container = CreateFrame("Frame", nil, parent)
     container:SetSize(220, 24)
+    container.preferredHeight = GUI.RowHeight.checkbox   -- factory-owned slot height (see GUI.RowHeight)
+    container.fixedRowHeight = true
 
     local cb = CreateFrame("CheckButton", nil, container, "BackdropTemplate")
     cb:SetPoint("LEFT", 0, 0)
@@ -3913,6 +3940,8 @@ end
 function GUI:CreateEditBox(parent, label, dbTable, dbKey, callback, width, placeholder)
     local frame = CreateFrame("Frame", nil, parent)
     frame:SetSize(width or 180, 44)
+    frame.preferredHeight = GUI.RowHeight.editbox   -- factory-owned slot height (see GUI.RowHeight)
+    frame.fixedRowHeight = true
     
     local lbl = frame:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     lbl:SetPoint("TOPLEFT", 0, 0)
@@ -4051,6 +4080,8 @@ end
 function GUI:CreateSlider(parent, label, minVal, maxVal, step, dbTable, dbKey, callback, lightweightUpdate, usePreviewMode, customGet, customSet, accentColor)
     local container = CreateFrame("Frame", nil, parent)
     container:SetSize(260, 50)
+    container.preferredHeight = GUI.RowHeight.slider   -- factory-owned slot height (see GUI.RowHeight)
+    container.fixedRowHeight = true
     
     -- Label
     local lbl = container:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
@@ -4488,6 +4519,8 @@ end
 function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback, lightweightCallback, useLightweight)
     local container = CreateFrame("Frame", nil, parent)
     container:SetSize(260, 28)
+    container.preferredHeight = GUI.RowHeight.colorpicker   -- factory-owned slot height (see GUI.RowHeight)
+    container.fixedRowHeight = true
     
     -- Button - use relative anchoring so it resizes with container
     local btn = CreateFrame("Button", nil, container, "BackdropTemplate")
@@ -4731,6 +4764,12 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
 
     local container = CreateFrame("Frame", nil, parent)
     container:SetSize(260, opts.inline and 24 or 50)
+    -- Inline dropdowns embed in a caller-managed layout (label hidden), so only the standalone
+    -- form owns a fixed slot height; inline keeps whatever height its host passes.
+    if not opts.inline then
+        container.preferredHeight = GUI.RowHeight.dropdown   -- factory-owned slot (see GUI.RowHeight)
+        container.fixedRowHeight = true
+    end
 
     -- Label
     local lbl = container:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
@@ -10659,7 +10698,7 @@ function DF:CreateGUI()
             local function Add(widget, height, col)
                 table.insert(self.children, widget)
                 widget:SetParent(parent)
-                widget.layoutHeight = height or 55
+                widget.layoutHeight = ResolveRowHeight(widget, height)
                 widget.layoutCol = col or 1
                 return widget
             end
