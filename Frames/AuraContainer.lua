@@ -285,7 +285,12 @@ local function normalizeFilters(filter)
             if type(f) == "string" then
                 out[#out + 1] = { f = f }
             elseif type(f) == "table" and type(f.filter) == "string" then
-                out[#out + 1] = { f = f.filter, key = f.key, candidateFilters = f.candidateFilters }
+                -- onInit: a consumer secure-init hook (overlay dispel carriers) run
+                -- INSIDE initializeFrame so its regions are created in secure context
+                -- (SetAuraBorder rejects textures created in the tainted style pass —
+                -- children of the secret aura button are access-constrained, cab.lua:15).
+                out[#out + 1] = { f = f.filter, key = f.key, candidateFilters = f.candidateFilters,
+                                  onInit = f.onInit }
             end
         end
     end
@@ -1533,8 +1538,12 @@ function NativeBackend:build()
         else
             local key = rec.key or ("df" .. i)
             if isOverlay then
+                -- Per-slot init when the consumer supplied an onInit hook (overlay
+                -- dispel carriers) so it can create+bind SetAuraBorder in secure
+                -- context; else the shared initFn.
+                local slotInit = rec.onInit and handle:_makeInitializeFrame(handle._gen, nil, rec.onInit) or initFn
                 local okSlot, btn = pcall(function()
-                    return c:AddAuraSlot(key, f, { initializeFrame = initFn, candidateFilters = cf,
+                    return c:AddAuraSlot(key, f, { initializeFrame = slotInit, candidateFilters = cf,
                                                    sortMethod = sortMethod, sortDirection = sortDirection })
                 end)
                 if okSlot and btn then
@@ -2125,7 +2134,7 @@ end
 -- abort Blizzard's batch creation); the gen token drops a callback from a torn-down or
 -- rebuilt container; a running counter mirrors the old per-index slot id (batches append,
 -- so indices stay contiguous -- ipairs(self.buttons) in ApplyStyle/layoutRow still holds).
-function Handle:_makeInitializeFrame(gen, fixedIndex)
+function Handle:_makeInitializeFrame(gen, fixedIndex, onInit)
     local handle = self
     return function(button)
         local ok, err = pcall(function()
@@ -2162,6 +2171,13 @@ function Handle:_makeInitializeFrame(gen, fixedIndex)
                     handle:_paintTestSlot(button, button._dfTestIndex)
                 else
                     handle:_bindNativeSlot(button)     -- native inbound setters
+                    -- Consumer secure init (overlay dispel carriers): runs in THIS
+                    -- securecallfunction pass, so any texture it creates on the button
+                    -- and binds via SetAuraBorder is created in secure context and is
+                    -- NOT access-constrained (the tainted style pass can't do the bind —
+                    -- cab.lua:15). Inside the pcall, so a fault warns and doesn't abort
+                    -- Blizzard's batch build.
+                    if onInit then onInit(button) end
                 end
             end
         end)
