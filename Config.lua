@@ -1401,11 +1401,10 @@ DF.PartyDefaults = {
     defensiveIconY = 0,
     defensiveSortOrder = "EXTERNALS",         -- "DEFAULT" / "TIME" / "EXTERNALS" (EXTERNALS = the shipped BigDefensive order)
 
-    -- Dispel Overlay. Custom per-dispel-type colours REUSE the existing shared set
-    -- debuffBorderColor{Magic,Curse,Disease,Poison,Bleed,None} (Config ~1240) — no
-    -- duplicate palette. This toggle is the overlay's opt-in (the debuff icon opts
-    -- in via "Color by Dispel Type"); colours are edited on the Colors page.
-    dispelOverlayCustomColors = false,
+    -- Dispel Overlay. Dispel-type colours come from the shared account palette
+    -- DF.db.dispelColors (edited on the Colors page; defaults = the game palette),
+    -- applied always — there is no game-vs-custom toggle (Reset on the Colors page
+    -- restores the game colours). The debuff icon opts in via "Color by Dispel Type".
     dispelAnimate = false,
     dispelBorderAlpha = 1,
     dispelBorderInset = 0,

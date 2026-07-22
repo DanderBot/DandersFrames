@@ -3361,7 +3361,9 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- debuffBorderColor* keys are left in place.
                 if type(profile.dispelColors) ~= "table" then
                     local src = profile.party or {}
-                    local D = DF.DispelDefaultColors
+                    -- Defaults = Blizzard's live game palette (GetGameDispelPalette). No
+                    -- None key — the None/Physical border is hidden on no-dispel-type auras.
+                    local D = (DF.GetGameDispelPalette and DF:GetGameDispelPalette()) or DF.DispelDefaultColors
                     local function seedColor(key, d)
                         local c = src[key]
                         if type(c) == "table" and c.r then return { r = c.r, g = c.g, b = c.b } end
@@ -3373,7 +3375,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
                         Disease = seedColor("debuffBorderColorDisease", D.Disease),
                         Poison  = seedColor("debuffBorderColorPoison",  D.Poison),
                         Bleed   = seedColor("debuffBorderColorBleed",   D.Bleed),
-                        None    = seedColor("debuffBorderColorNone",    D.None),
                     }
                 end
                 -- Ensure mode-enable flags exist on every profile
@@ -4662,12 +4663,9 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 local map = DF.GetDispelColorMap and DF:GetDispelColorMap()
                 print("  shared colour map built: " .. (map and "yes" or "no"))
                 print("  GetAuraDispelTypeColor: " .. tostring(C_UnitAuras and C_UnitAuras.GetAuraDispelTypeColor ~= nil))
-                -- Overlay ground truth: the per-mode custom toggle + each SetAuraBorder
-                -- bind site's last attempt ("ok" / the pcall error / never attempted).
-                local pdb = DF.db and DF.db.party
-                local rdb = DF.db and DF.db.raid
-                print(string.format("  overlay custom toggle: party=%s raid=%s",
-                    tostring(pdb and pdb.dispelOverlayCustomColors), tostring(rdb and rdb.dispelOverlayCustomColors)))
+                -- Overlay ground truth: each SetAuraBorder bind site's last attempt
+                -- ("ok" / the pcall error / never attempted). Keyed by slot key
+                -- (main / gameborder / edgeTOP / …).
                 local be = DF._dispelBindErr
                 if be then
                     for site, res in pairs(be) do

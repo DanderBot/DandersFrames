@@ -1390,10 +1390,15 @@ local function FlowSpaceWidth(tmpl, sizePx)
     else
         _flowProbe:SetFontObject(_G[tmpl] or _G.GameFontHighlight)
     end
-    _flowProbe:SetText("m m"); local w2 = _flowProbe:GetStringWidth()
-    _flowProbe:SetText("mm");  local w0 = _flowProbe:GetStringWidth()
+    -- Average over N spaces: each GetStringWidth is pixel-rounded, so a single-space
+    -- "m m" - "mm" diff can inflate the space advance by ~1px (which read as too-loose
+    -- word gaps next to the native-wrapped notes). Isolating N spaces and dividing
+    -- shrinks that rounding error to ~1/N of a pixel, so the flow spaces like real text.
+    local N = 12
+    _flowProbe:SetText("m" .. string.rep(" m", N)); local wA = _flowProbe:GetStringWidth()
+    _flowProbe:SetText("m" .. string.rep("m", N));  local wB = _flowProbe:GetStringWidth()
     _flowProbe:SetText("")
-    local sp = w2 - w0
+    local sp = (wA - wB) / N
     if not sp or sp <= 0 then sp = 3 end
     return math.floor(sp + 0.5)   -- keep every word pixel-aligned (one shared value per line)
 end

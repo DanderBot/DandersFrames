@@ -50,14 +50,17 @@ end
 -- Uses custom colors from db
 -- ============================================================
 
-local function GetTestDispelColor(dispelType, db)
-    -- When the overlay's custom mode is on, use the shared account palette
-    -- (DF.db.dispelColors, Enrage folding into Bleed); else the game palette.
-    if db and db.dispelOverlayCustomColors and DF.db and type(DF.db.dispelColors) == "table" then
-        local c = DF.db.dispelColors[dispelType == "Enrage" and "Bleed" or dispelType]
-        if c then return c.r, c.g, c.b end
+local function GetTestDispelColor(dispelType)
+    -- The overlay ALWAYS uses the shared account palette (DF.db.dispelColors, edited on
+    -- the Colors page, Enrage folding into Bleed). Its defaults ARE the game palette, so
+    -- an untouched palette matches the game exactly — there's no game-vs-custom mode.
+    local key = dispelType == "Enrage" and "Bleed" or dispelType
+    if DF.db and type(DF.db.dispelColors) == "table" then
+        local c = DF.db.dispelColors[key]
+        if c and c.r then return c.r, c.g, c.b end
     end
-    local c = DF.DispelDefaultColors[dispelType]
+    local pal = (DF.GetGameDispelPalette and DF:GetGameDispelPalette()) or DF.DispelDefaultColors
+    local c = pal[key]
     if c then return c.r, c.g, c.b end
     return 0.5, 0.5, 1.0
 end
@@ -70,16 +73,14 @@ local function DispelBorderStyle()
         or (_G.AuraButtonBorderStyle and _G.AuraButtonBorderStyle.Color) or 1
 end
 
--- Custom dispel-colour map for the overlay: when the overlay opts in
--- (db.dispelOverlayCustomColors) recolour ALL carriers from the shared account
--- palette via customDispelColorMap — keyed by dispel NAME, indexed private-side
--- against auraData.dispelName by Blizzard_CustomAuraButton.lua (secret-safe; no
--- enum IDs involved). nil otherwise → Blizzard's native palette. Ignored on
--- clients whose engine predates the field, so it's safe to pass everywhere.
-local function DispelBorderMapFor(db)
-    if db and db.dispelOverlayCustomColors and DF.GetDispelColorMap then
-        return DF:GetDispelColorMap()
-    end
+-- Dispel-colour map for the overlay: ALWAYS recolour the carriers from the shared
+-- account palette via customDispelColorMap — keyed by dispel NAME, indexed private-side
+-- against auraData.dispelName by Blizzard_CustomAuraButton.lua (secret-safe; no enum IDs).
+-- The palette's defaults ARE the game colours, so this matches the game look until edited;
+-- there is no game-vs-custom mode — the Colors page + its "Reset to game defaults" is the
+-- single source of truth. Ignored on clients whose engine predates the field.
+local function DispelBorderMapFor()
+    if DF.GetDispelColorMap then return DF:GetDispelColorMap() end
     return nil
 end
 
@@ -778,11 +779,13 @@ function DF:ApplyDispelOverlayAppearance(frame)
     local dispelType = overlay.currentDispelType
     if not dispelType then return end
     
-    -- Game palette (shared constant). Custom-mode OOR colour is a Stage-4 concern
-    -- (when the overlay's custom toggle is wired); for now the OOR fade uses the
-    -- game colours, matching the in-range overlay's game-mode default.
-    local c = DF.DispelDefaultColors[dispelType]
-    if not c then return end
+    -- Shared account palette (its defaults = the game colours), matching the in-range
+    -- overlay. Enrage folds into Bleed.
+    local key = dispelType == "Enrage" and "Bleed" or dispelType
+    local pal = (DF.db and type(DF.db.dispelColors) == "table" and DF.db.dispelColors)
+        or (DF.GetGameDispelPalette and DF:GetGameDispelPalette()) or DF.DispelDefaultColors
+    local c = pal[key]
+    if not c or not c.r then return end
 
     local r, g, b = c.r, c.g, c.b
     local gradientAlpha = db.dispelGradientAlpha or 0.5
@@ -1235,10 +1238,10 @@ local function dispelFactoryPlanAndSig(db)
     -- the secure init with the right carrier (no tainted re-bind is possible):
     --   gs = gradient style (plain texture file vs the strip textures),
     --   gh = health-tracking flag (StatusBar fill vs plain texture),
-    --   cm = game palette vs the custom map's current generation (a colour edit bumps it).
+    --   cm = the palette generation (a Colors-page colour edit bumps it → re-bind).
     parts[#parts + 1] = "gs=" .. tostring(db.dispelGradientStyle or "FULL")
     parts[#parts + 1] = "gh=" .. tostring(db.dispelGradientOnCurrentHealth ~= false)
-    parts[#parts + 1] = db.dispelOverlayCustomColors and ("cm=" .. tostring(DF.dispelCurveGen or 0)) or "cm=game"
+    parts[#parts + 1] = "cm=" .. tostring(DF.dispelCurveGen or 0)
     return table.concat(parts, ";"), slots, needPolicy
 end
 
@@ -1309,7 +1312,7 @@ local function BindDispelCarrier(btn, carrier, db, key)
     local ok, err = pcall(function()
         btn:SetAuraBorder(carrier, {
             style = DispelBorderStyle(),
-            customDispelColorMap = DispelBorderMapFor(db),
+            customDispelColorMap = DispelBorderMapFor(),
             showWhenHarmful = true,
             showWhenHelpful = false,
             showIcon = false,

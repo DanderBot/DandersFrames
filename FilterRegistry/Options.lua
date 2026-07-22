@@ -365,13 +365,26 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     -- (opt-out — debuffs show until hidden). Naming that flip is what keeps the
     -- Hide/Show rows from reading like the Enable/Disable ones above. Both texts
     -- are ~2 lines, so the swap barely changes the banner height. RefreshRight
-    -- drives the swap; SetText is idempotent so it only recomputes on a real
-    -- buff<->blacklist transition.
-    local BUFF_BANNER = L["Opt-in buff filters — you choose which buffs show. Enable or disable spells in the built-in presets, or create custom filters, then turn them on from the Aura Filters page."]
-    local BLACKLIST_BANNER = L["The reverse of the opt-in buff filters above: instead of choosing what to show, you choose nuisance debuffs to hide from the debuff bar. Only debuffs the game keeps non-secret can be hidden."]
+    -- drives the swap; SetHTML is idempotent so it only recomputes on a real
+    -- buff<->blacklist transition. HTML mode so the buff copy links back to the
+    -- Aura Filters page (which links here) — SetHTML re-tints the link per theme.
+    local function fdBannerLink(text, pageId)
+        local tc = (GUI.GetThemeColor and GUI.GetThemeColor()) or { r = 1, g = 0.82, b = 0 }
+        local col = string.format("|cFF%02X%02X%02X",
+            math.floor((tc.r or 1) * 255), math.floor((tc.g or 1) * 255), math.floor((tc.b or 1) * 255))
+        return col .. "|HdfPage:" .. pageId .. "|h" .. text .. "|h|r"
+    end
+    local function fdBannerLinkClick(pageId)
+        if GUI.SelectTab then GUI.SelectTab(pageId) end
+    end
+    local BUFF_BANNER = L["Opt-in buff filters — you choose which buffs show. Enable or disable spells in the built-in presets, or create custom filters, then turn them on from the"]
+        .. " " .. fdBannerLink(L["Aura Filters"], "auras_filters") .. "."
+    local BLACKLIST_BANNER = L["The reverse of the opt-in buff filters: instead of choosing what to show, you choose nuisance debuffs to hide from the debuff bar. Only debuffs the game keeps non-secret can be hidden."]
     local banner = GUI:CreateInfoBanner(parent, {
         tone = "info",
+        html = true,
         text = BUFF_BANNER,
+        onLinkClick = fdBannerLinkClick,
     })
     banner:SetPoint("TOPLEFT", 10, -10)
     banner:SetPoint("RIGHT", -10, 0)
@@ -1100,10 +1113,10 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         -- blacklist, the default whitelist copy for buff filters.
         if isBlacklist then
             banner:SetTone("caution")
-            banner:SetText(BLACKLIST_BANNER)
+            banner:SetHTML(BLACKLIST_BANNER, fdBannerLinkClick)
         else
             banner:SetTone("info")
-            banner:SetText(BUFF_BANNER)
+            banner:SetHTML(BUFF_BANNER, fdBannerLinkClick)
         end
 
         -- Hide any lingering add-by-ID echo once the selection changes

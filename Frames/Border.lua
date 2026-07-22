@@ -436,11 +436,45 @@ end
 -- custom-colour carrier for both the overlay and the debuff-icon ring. Values are
 -- ColorMixin objects (their code calls color:GetRGBA()). Cached; invalidated with
 -- the curve by DF:InvalidateDispelColorCurve().
+-- Blizzard's LIVE dispel-type border palette, queried from AuraUtil.GetAuraBorderColor
+-- (the exact colours the game paints), cached. Per-type fallback to DF.DispelDefaultColors
+-- (which mirror the classic DebuffTypeColor values) if the API is missing / returns nil.
+-- This is what every default, the Colors-page "Reset", and each fallback resolve to, so an
+-- untouched palette is byte-identical to the game's own dispel colours. None/Physical is
+-- kept only for the map's "" fallback (never user-editable — the border is hidden on
+-- no-dispel-type auras and the overlay never fires on them).
+function DF:GetGameDispelPalette()
+    if DF._gameDispelPalette then return DF._gameDispelPalette end
+    local D = DF.DispelDefaultColors
+    local getC = AuraUtil and AuraUtil.GetAuraBorderColor
+    local function resolve(typeName, fb)
+        if getC then
+            local ok, c = pcall(getC, typeName)
+            if ok and c and c.GetRGB then
+                local r, g, b = c:GetRGB()
+                if r then return { r = r, g = g, b = b } end
+            end
+        end
+        return { r = fb.r, g = fb.g, b = fb.b }
+    end
+    local pal = {
+        Magic   = resolve("Magic",   D.Magic),
+        Curse   = resolve("Curse",   D.Curse),
+        Disease = resolve("Disease", D.Disease),
+        Poison  = resolve("Poison",  D.Poison),
+        Bleed   = resolve("Bleed",   D.Bleed),
+        Enrage  = resolve("Bleed",   D.Enrage),   -- shares Bleed's colour
+        None    = { r = D.None.r, g = D.None.g, b = D.None.b },
+    }
+    if getC then DF._gameDispelPalette = pal end   -- don't cache a pre-AuraUtil fallback
+    return pal
+end
+
 function DF:GetDispelColorMap()
     if DF.dispelColorMap then return DF.dispelColorMap end
     if not CreateColor then return nil end
-    local colors = (DF.db and DF.db.dispelColors) or DF.DispelDefaultColors
-    local D = DF.DispelDefaultColors
+    local D = DF:GetGameDispelPalette()
+    local colors = (DF.db and DF.db.dispelColors) or D
     local function C(c, fb)
         if type(c) ~= "table" or not c.r then c = fb end
         return CreateColor(c.r or 1, c.g or 1, c.b or 1, 1)
@@ -494,7 +528,7 @@ function DF:GetDispelColorCurve()
     if not (C_CurveUtil and C_CurveUtil.CreateColorCurve) then return nil end
     local E = DF:FindDispelTypeEnum()
     if not E then return nil end
-    local colors = (DF.db and DF.db.dispelColors) or DF.DispelDefaultColors
+    local colors = (DF.db and DF.db.dispelColors) or DF:GetGameDispelPalette()
     local candidates = {
         { E.Magic,   colors.Magic },
         { E.Curse,   colors.Curse },

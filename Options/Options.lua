@@ -4224,22 +4224,24 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         Add(col2, nil, 2)
 
         -- ===== Column 1 (cont.): Dispel Colours =====
-        -- Account-wide per-dispel-type palette (DF.db.dispelColors), shared by the
-        -- debuff-icon border and the dispel overlay. Each surface turns these on from
-        -- its own page (the icon's "Color by Dispel Type"; the overlay's custom-colours
-        -- toggle). Editing invalidates the shared colour curve and re-drives frames.
+        -- Account-wide per-dispel-type palette (DF.db.dispelColors), the single source of
+        -- truth for both the debuff-icon border and the dispel overlay. Defaults ARE the
+        -- game palette (GetGameDispelPalette, queried from AuraUtil), so an untouched
+        -- palette matches the game exactly; the overlay always follows it, the icon when
+        -- "Color by Dispel Type" is on. No None/Physical picker — that border is hidden on
+        -- no-dispel-type auras and the overlay never fires on them. Editing re-drives frames.
         local dispelColorsDB = DF.db.dispelColors
         if type(dispelColorsDB) ~= "table" then
             DF.db.dispelColors = {}
             dispelColorsDB = DF.db.dispelColors
         end
+        local dispelGamePalette = DF:GetGameDispelPalette()
         local DISPEL_LIST = {
             { key = "Magic",   name = L["Magic"] },
             { key = "Curse",   name = L["Curse"] },
             { key = "Disease", name = L["Disease"] },
             { key = "Poison",  name = L["Poison"] },
             { key = "Bleed",   name = L["Bleed / Enrage"] },
-            { key = "None",    name = L["None / Physical"] },
         }
         -- Commit: bump the curve generation, rebuild the container rows (fresh
         -- SetAuraBorder binds pick up the new curve) and restyle the overlay
@@ -4259,12 +4261,12 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end
         local dispelCol = GUI:CreateSettingsGroup(self.child, 280)
         dispelCol:AddWidget(GUI:CreateHeader(self.child, L["Dispel Type Colors"]), 40)
-        dispelCol:AddWidget(GUI:CreateLabel(self.child, L["Colours for each dispel type, shared by the debuff-icon border and the dispel overlay. Turn them on from each feature's own page."], 260), 55)
+        dispelCol:AddWidget(GUI:CreateLabel(self.child, L["Colours for each dispel type, used by the dispel overlay and the debuff-icon border (when Color by Dispel Type is on). Reset restores the game's colours."], 260), 55)
         local dispelResetBtn = CreateFrame("Button", nil, self.child, "BackdropTemplate")
         GUI:StyleButton(dispelResetBtn, { width = 260, height = 24, text = L["Reset All to Default"] })
         dispelResetBtn:SetScript("OnClick", function()
             for _, info in ipairs(DISPEL_LIST) do
-                local d = DF.DispelDefaultColors[info.key]
+                local d = dispelGamePalette[info.key]
                 if d then dispelColorsDB[info.key] = { r = d.r, g = d.g, b = d.b } end
             end
             DispelColorChanged()
@@ -4274,7 +4276,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         for i = 1, #DISPEL_LIST do
             local info = DISPEL_LIST[i]
             if type(dispelColorsDB[info.key]) ~= "table" then
-                local d = DF.DispelDefaultColors[info.key]
+                local d = dispelGamePalette[info.key]
                 if d then dispelColorsDB[info.key] = { r = d.r, g = d.g, b = d.b } end
             end
             dispelCol:AddWidget(GUI:CreateColorPicker(self.child, info.name, dispelColorsDB, info.key, false, DispelColorChanged, DispelColorLive, true), 30)
@@ -6343,18 +6345,12 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local dispelInset = borderGroup:AddWidget(GUI:CreateSlider(self.child, L["Dispel Border Inset"], -8, 8, 1, db, "debuffDispelBorderInset", nil, function() DF:LightweightUpdateAuraBorder("debuff") end, true), 55)
         dispelInset.disableOn = function(d) return not d.debuffBorderColorByType end
         dispelInset.hideOn = function(d) return not DF:FactoryOwnsDebuffRow(d) end
-        AddToSection(borderGroup, nil, 1)
-        
-        -- Dispel Colors Group (col2)
-        -- Dispel-type colours moved to the account-wide Colors page (one shared
-        -- palette, also used by the Dispel Overlay). "Color by Dispel Type" above
-        -- draws from that palette; the 12.1 curve API (GetAuraDispelTypeColor) makes
-        -- the custom colours expressible engine-side, so the old limitation is gone.
-        local colorsGroup = GUI:CreateSettingsGroup(self.child, 280)
-        colorsGroup:AddWidget(GUI:CreateHeader(self.child, L["Dispel Type Colors"]), 40)
+        -- Colors-page link right under "Color by Dispel Type": the dispel-type palette
+        -- lives on the account-wide Colors page (one shared set, also used by the Dispel
+        -- Overlay). Co-located with its toggle so it's obvious where to edit the colours.
         local dispelColorsLink = GUI:CreateDispelColorsPageLink(self.child, 260)
-        colorsGroup:AddWidget(dispelColorsLink, dispelColorsLink.layoutHeight or 40)
-        AddToSection(colorsGroup, nil, 2)
+        borderGroup:AddWidget(dispelColorsLink, (dispelColorsLink.layoutHeight or 16) + 2)
+        AddToSection(borderGroup, nil, 1)
 
         -- Dispel Symbol Group (col2) — the native colourblind dispel-type letter,
         -- engine-written per aura (12.1 factory rows only; the legacy renderer has no
@@ -8853,19 +8849,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             OnDispelTypeChanged()
         end), 55)
         dispelIndicatorDropdown.hideOn = HideIfDisabled
-        -- Custom dispel colours (12.1 SetAuraBorder colour curve, secret-safe): when
-        -- on, the overlay recolours from the shared account palette (edited on the
-        -- Colors page, shared with the debuff-icon border) instead of the game
-        -- palette. The colour curve is applied at bind time, so a reload re-colours
-        -- auras already on screen (68824+; a no-op on clients without the field).
-        local customColorsCheck = settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Use Custom Dispel Colors"], db, "dispelOverlayCustomColors", function()
-            if DF.InvalidateDispelColorCurve then DF:InvalidateDispelColorCurve() end
-            if DF.LightweightUpdateDispelOverlay then DF:LightweightUpdateDispelOverlay() end
-        end), 30)
-        customColorsCheck.hideOn = HideIfDisabled
-        customColorsCheck.tooltip = L["Recolour the overlay from your custom dispel-type colours instead of the game's. Colours are set on the Colors page. Reload to apply to auras already showing."]
+        -- Dispel-type colours come from the shared account palette on the Colors page
+        -- (defaults = the game palette; Reset restores it). The overlay always follows
+        -- it — no game-vs-custom toggle — so this is just a link to where you edit them.
         local overlayColorsLink = GUI:CreateDispelColorsPageLink(self.child, 260)
-        settingsGroup:AddWidget(overlayColorsLink, overlayColorsLink.layoutHeight or 40)
+        settingsGroup:AddWidget(overlayColorsLink, (overlayColorsLink.layoutHeight or 16) + 2)
         overlayColorsLink.hideOn = HideIfDisabled
         local overlayNote = settingsGroup:AddWidget(GUI:CreateNote(self.child,
             L["One overlay at a time, colored and switched by the game engine. Includes boss (private) auras."],
