@@ -1195,6 +1195,14 @@ local function EnsureTypeConfig(auraName, typeKey, pool)
                 expireThresholdMode = "SECONDS",
                 expirePlayOnce = false,
                 expireLoopInterval = 3,
+                -- Per-event native sounds (12.1 AddAuraSound triggers). The flat sound
+                -- above is the APPLIED sound (Added trigger). dropped = Removed (buff
+                -- fell off), stackGained = ApplicationsIncreased (stack gained). There is
+                -- no stacks-lost (no ApplicationsDecreased trigger). Distinct from the
+                -- blocked Missing/Expire alerts, which need sealed presence/remaining-time.
+                appliedEnabled = true,
+                dropped     = { enabled = false, soundLSMKey = nil, soundFile = nil },
+                stackGained = { enabled = false, soundLSMKey = nil, soundFile = nil },
             }
         end
     end
@@ -4791,6 +4799,13 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 DF:AuraDesigner_RefreshPage()
             end), 28)
 
+            -- The flat sound below is the APPLIED sound (native Added trigger). This toggle
+            -- silences it independently of the Buff-Dropped / Stack-Gained events below.
+            if proxy.appliedEnabled == nil then proxy.appliedEnabled = true end
+            g:AddWidget(GUI:CreateCheckbox(parent, L["Play when the buff is applied"], proxy, "appliedEnabled", function()
+                DF:AuraDesigner_RefreshPage()
+            end), 28)
+
             -- Sound picker (searchable scrollable dropdown)
             local soundDD = GUI:CreateSoundDropdown(parent, L["Sound"], proxy, "soundLSMKey", function()
                 -- Update soundFile path when LSM key changes
@@ -4838,6 +4853,50 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 volumeSlider:EnableMouse(false)
             end
         end)
+
+        -- Buff-Dropped + Stack-Gained sounds (native Removed / ApplicationsIncreased
+        -- triggers, 12.1). Each has its OWN sound, independently enabled. Distinct from the
+        -- blocked Missing Trigger (fires-while-absent) and Expire Alert (near-expiry
+        -- threshold), which still need sealed presence / remaining-time reads. On a pre-
+        -- rename client the triggers are absent — the group shows a note and the sound no-ops.
+        local newSoundTriggers = (C_UnitAuras and C_UnitAuras.AddAuraSound
+            and Enum and Enum.UnitAuraSoundTrigger) and true or false
+        local function AddEventSoundGroup(header, subKey, enableLabel)
+            AddGroup(header, function(g)
+                proxy[subKey] = proxy[subKey] or {}
+                local ec = proxy[subKey]
+                g:AddWidget(GUI:CreateCheckbox(parent, enableLabel, ec, "enabled", function()
+                    DF:AuraDesigner_RefreshPage()
+                end), 28)
+                local dd = GUI:CreateSoundDropdown(parent, L["Sound"], ec, "soundLSMKey", function()
+                    local path = DF:GetSoundPath(ec.soundLSMKey)
+                    if path then ec.soundFile = path end
+                end)
+                g:AddWidget(dd, 54)
+                local prev = GUI:CreateButton(parent, L["Preview Sound"], 120, 22, function()
+                    local sf = DF:GetSoundPath(ec.soundLSMKey) or ec.soundFile
+                    if not sf or sf == "" then
+                        print("|cffff8033DandersFrames:|r " .. L["No sound file selected. Choose a sound from the dropdown or enter a custom path."])
+                        return
+                    end
+                    if DF.AuraDesigner.SoundEngine then
+                        DF.AuraDesigner.SoundEngine:PlayWithVolume(sf, proxy.volume or 0.8)
+                    end
+                end)
+                g:AddWidget(prev, 28)
+                if not newSoundTriggers then
+                    g:AddWidget(GUI:CreateNote(parent,
+                        L["Needs the current game build — these sound triggers aren't available on this client yet."],
+                        { width = contentWidth - 20 }), 40)
+                end
+                if not (ec.enabled == true) then
+                    dd:SetAlpha(0.4); dd:EnableMouse(false)
+                    prev:SetAlpha(0.4); prev:EnableMouse(false)
+                end
+            end)
+        end
+        AddEventSoundGroup(L["Buff Dropped"], "dropped", L["Enable Buff-Dropped Sound"])
+        AddEventSoundGroup(L["Stack Gained"], "stackGained", L["Enable Stack-Gained Sound"])
 
         -- Missing Trigger
         AddGroup(L["Missing Trigger"], function(g)

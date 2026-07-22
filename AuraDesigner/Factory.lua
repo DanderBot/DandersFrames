@@ -2261,17 +2261,19 @@ local function syncFrameLevelMissing(store, keyName, map, frame, parent, anchorT
 end
 
 -- ============================================================
--- SOUND INDICATOR  (native on-apply)  — P4.5
--- The 12.1 revival of the sound indicator. C_UnitAuras.AddAuraAppliedSound({ unitToken,
--- spellID, soundFileName|soundFileID, outputChannel }) plays a sound when the tracked aura is
--- APPLIED to the unit — the ONLY read-free sound the API supports (there is NO on-fade /
--- AuraRemovedSound hook, and no per-play volume). This REPLACES the legacy read-based
--- SoundEngine on the factory path (which alerted while a buff was MISSING / EXPIRING — both
--- presence/remaining-time driven, sealed on 12.1). Registration is NOT a secure-frame op, but
--- the lab did NOT confirm combat-legality, so (re)registration is DEFERRED out of combat, the
--- same OOC/regen discipline the containers use (consistency over cleverness). Registration
--- handles are tracked per aura and unregistered on every teardown path — a leaked registration
--- is the failure mode this is designed against.
+-- SOUND INDICATOR  (native, event-driven)  — P4.5 + per-event triggers
+-- C_UnitAuras.AddAuraSound(trigger, { unitToken, spellID, soundFileName|soundFileID,
+-- outputChannel }) plays a sound when a native EVENT fires on the tracked aura. Three
+-- triggers (Enum.UnitAuraSoundTrigger): Added (applied), Removed (buff dropped / expired)
+-- and ApplicationsIncreased (stack gained) — each event gets its OWN sound. No per-play
+-- volume (plays at the output channel), and NO ApplicationsDecreased, so stack-LOSS has no
+-- trigger. These are the read-free events the API supports; the legacy read-based alerts
+-- (fire WHILE a buff is missing; fire near an expiry THRESHOLD — presence / remaining-time
+-- driven) stay sealed on 12.1 (the still-blocked Missing / Expire groups). The old build's
+-- apply-only AddAuraAppliedSound is dual-detected as a fallback (Added only). Registration
+-- is NOT a secure-frame op but combat-legality is unconfirmed, so (re)registration DEFERS
+-- out of combat (the container OOC/regen discipline). Handles are tracked per (aura, event)
+-- and unregistered on every teardown path — a leaked registration is the failure mode.
 -- ============================================================
 
 local VALID_SOUND_CHANNELS = { Master = true, SFX = true, Music = true, Ambience = true, Dialog = true }
@@ -2292,42 +2294,85 @@ local function resolveSoundArg(soundCfg)
     return nil
 end
 
-local function registerAppliedSound(unit, spellID, argKey, argVal, channel)
-    local add = C_UnitAuras and C_UnitAuras.AddAuraAppliedSound
-    if type(add) ~= "function" then return nil end
-    local args = { unitToken = unit, spellID = spellID, outputChannel = channel }
-    args[argKey] = argVal
-    local ok, id = pcall(add, args)
-    if ok then return id end
-    DF:DebugWarn(DBG, "AddAuraAppliedSound failed (spell %s): %s", tostring(spellID), tostring(id))
+-- The native sound API was RENAMED on the CustomAuraButton build:
+--   AddAuraAppliedSound(sound)  ->  AddAuraSound(trigger, sound)   (same UnitAuraSoundInfo
+--   struct; the old name is GONE with no alias, so we dual-detect both — the old code went
+--   silently no-op on the renamed build). The new form adds a TRIGGER
+--   (Enum.UnitAuraSoundTrigger): Added (on apply = the old behaviour), Removed (buff dropped /
+--   expired) and ApplicationsIncreased (stack gained). The legacy build is apply-only. There is
+--   NO ApplicationsDecreased — stack LOSS has no native trigger. Source: Gethe fa38386c.
+local TRIGGER_ENUM_NAME = { applied = "Added", dropped = "Removed", stackGained = "ApplicationsIncreased" }
+
+local function soundAPIAvailable()
+    return (C_UnitAuras and (C_UnitAuras.AddAuraSound or C_UnitAuras.AddAuraAppliedSound)) and true or false
+end
+
+-- Register ONE native sound for (event, spell). Returns the handle id, or nil (event
+-- unsupported by this build / call failed). event = "applied" | "dropped" | "stackGained".
+local function registerAuraSound(event, unit, spellID, argKey, argVal, channel)
+    if not C_UnitAuras then return nil end
+    local sound = { unitToken = unit, spellID = spellID, outputChannel = channel }
+    sound[argKey] = argVal
+    if type(C_UnitAuras.AddAuraSound) == "function" then
+        local UAST = Enum and Enum.UnitAuraSoundTrigger
+        local trig = UAST and UAST[TRIGGER_ENUM_NAME[event]]
+        if trig == nil then return nil end   -- this build's enum lacks the trigger
+        local ok, id = pcall(C_UnitAuras.AddAuraSound, trig, sound)
+        if ok then return id end
+        DF:DebugWarn(DBG, "AddAuraSound failed (spell %s, %s): %s", tostring(spellID), tostring(event), tostring(id))
+        return nil
+    end
+    -- Legacy (pre-rename) build: only the on-apply sound exists.
+    if event == "applied" and type(C_UnitAuras.AddAuraAppliedSound) == "function" then
+        local ok, id = pcall(C_UnitAuras.AddAuraAppliedSound, sound)
+        if ok then return id end
+        DF:DebugWarn(DBG, "AddAuraAppliedSound failed (spell %s): %s", tostring(spellID), tostring(id))
+    end
     return nil
 end
 
-local function unregisterAppliedSound(id)
-    local rem = C_UnitAuras and C_UnitAuras.RemoveAuraAppliedSound
-    if id ~= nil and type(rem) == "function" then pcall(rem, id) end
+local function unregisterAuraSound(id)
+    if id == nil or not C_UnitAuras then return end
+    local rem = C_UnitAuras.RemoveAuraSound or C_UnitAuras.RemoveAuraAppliedSound
+    if type(rem) == "function" then pcall(rem, id) end
 end
 
--- Collect the desired applied-sound registrations of ONE aura pool into `desired`
--- (created on first hit; keys are keyPrefix .. auraName so the two pools can never
--- collide in the store). idSpec = the spec for the spec pool, NIL for the Other Buffs
--- pool (spec-independent identity). NOTE: AddAuraAppliedSound has no caster filter, so
--- othersOnly cannot gate sound — an othersOnly aura's sound fires for any caster.
+-- The three per-event sounds of one indicator. The flat sc.soundLSMKey/soundFile is the
+-- APPLIED sound (back-compat with the old single-sound config); dropped / stackGained read
+-- their own sub-tables. Each is independently enabled. (No stacks-lost — no native trigger.)
+local SOUND_EVENTS = {
+    { event = "applied",     enabled = function(sc) return sc.appliedEnabled ~= false end,               cfg = function(sc) return sc end },
+    { event = "dropped",     enabled = function(sc) return sc.dropped and sc.dropped.enabled end,        cfg = function(sc) return sc.dropped end },
+    { event = "stackGained", enabled = function(sc) return sc.stackGained and sc.stackGained.enabled end, cfg = function(sc) return sc.stackGained end },
+}
+
+-- Collect the desired PER-EVENT sound registrations of ONE aura pool into `desired`
+-- (created on first hit; store keys are keyPrefix .. auraName .. "|" .. event so the two
+-- pools AND the three events can never collide). idSpec = the spec for the spec pool, NIL
+-- for the Other Buffs pool. NOTE: the native sound path has no caster filter, so othersOnly
+-- cannot gate sound — an othersOnly aura's sound fires for any caster. On a pre-rename
+-- (apply-only) client the dropped / stackGained triggers simply fail to register (no-op).
 local function collectDesiredSounds(desired, unit, auras, keyPrefix, idSpec, channel)
     for auraName, auraCfg in pairs(auras) do
         local sc = (type(auraCfg) == "table") and auraCfg.sound
         if sc and sc.enabled then
             local ids = DF:BuildADIdentityFilters(idSpec, auraName)
             local map = ids and ids.includeSpellIDs
-            local argKey, argVal = resolveSoundArg(sc)
             if not map and keyPrefix ~= "" then warnOtherUnresolved(auraName) end
-            if map and argKey then
-                desired = desired or {}
-                desired[keyPrefix .. auraName] = {
-                    map = map, argKey = argKey, argVal = argVal, channel = channel,
-                    sig = unit .. "|" .. includeSig(map) .. "|"
-                        .. argKey .. "=" .. tostring(argVal) .. "|" .. channel,
-                }
+            if map then
+                for _, ev in ipairs(SOUND_EVENTS) do
+                    if ev.enabled(sc) then
+                        local argKey, argVal = resolveSoundArg(ev.cfg(sc) or {})
+                        if argKey then
+                            desired = desired or {}
+                            desired[keyPrefix .. auraName .. "|" .. ev.event] = {
+                                event = ev.event, map = map, argKey = argKey, argVal = argVal, channel = channel,
+                                sig = unit .. "|" .. ev.event .. "|" .. includeSig(map) .. "|"
+                                    .. argKey .. "=" .. tostring(argVal) .. "|" .. channel,
+                            }
+                        end
+                    end
+                end
             end
         end
     end
@@ -2341,7 +2386,7 @@ end
 -- handles then re-registers. Gate off / spec nil / config removed -> desired empty -> full
 -- teardown. Idempotent — safe to call repeatedly (SyncFrame tail, regen flush).
 local function reconcileSoundNow(frame)
-    if not (C_UnitAuras and C_UnitAuras.AddAuraAppliedSound) then return end   -- pre-12.1: legacy owns it
+    if not soundAPIAvailable() then return end   -- pre-12.1: legacy owns it
     local store = frame.dfADFactory
     if not store then return end
 
@@ -2376,7 +2421,7 @@ local function reconcileSoundNow(frame)
     for auraName, entry in pairs(soundStore) do
         local d = desired and desired[auraName]
         if not d or d.sig ~= entry.sig then
-            for _, id in ipairs(entry.ids) do unregisterAppliedSound(id) end
+            for _, id in ipairs(entry.ids) do unregisterAuraSound(id) end
             soundStore[auraName] = nil
         end
     end
@@ -2386,7 +2431,7 @@ local function reconcileSoundNow(frame)
             if not soundStore[auraName] then
                 local ids = {}
                 for spellID in pairs(d.map) do
-                    local id = registerAppliedSound(frame.unit, spellID, d.argKey, d.argVal, d.channel)
+                    local id = registerAuraSound(d.event, frame.unit, spellID, d.argKey, d.argVal, d.channel)
                     if id ~= nil then ids[#ids + 1] = id end
                 end
                 soundStore[auraName] = { ids = ids, sig = d.sig }
@@ -2415,7 +2460,7 @@ end
 -- OOC discipline); OOC we reconcile immediately.
 function Factory:SyncSound(frame)
     if not frame or not frame.unit then return end
-    if not (C_UnitAuras and C_UnitAuras.AddAuraAppliedSound) then return end
+    if not soundAPIAvailable() then return end
     if InCombatLockdown() then
         Factory._soundPending[frame] = true
         ensureSoundRegen()
