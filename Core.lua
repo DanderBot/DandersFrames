@@ -3354,6 +3354,28 @@ DF._MainEventDispatcher = function(self, event, arg1)
                         end
                     end
                 end
+                -- Dispel colours are account-wide (per profile, mode-independent —
+                -- edited on the Colors page; sibling of classColors). Seed ONCE from
+                -- the profile's existing per-mode debuff-border palette so any
+                -- customisations carry over; otherwise the game palette. The per-mode
+                -- debuffBorderColor* keys are left in place.
+                if type(profile.dispelColors) ~= "table" then
+                    local src = profile.party or {}
+                    local D = DF.DispelDefaultColors
+                    local function seedColor(key, d)
+                        local c = src[key]
+                        if type(c) == "table" and c.r then return { r = c.r, g = c.g, b = c.b } end
+                        return { r = d.r, g = d.g, b = d.b }
+                    end
+                    profile.dispelColors = {
+                        Magic   = seedColor("debuffBorderColorMagic",   D.Magic),
+                        Curse   = seedColor("debuffBorderColorCurse",   D.Curse),
+                        Disease = seedColor("debuffBorderColorDisease", D.Disease),
+                        Poison  = seedColor("debuffBorderColorPoison",  D.Poison),
+                        Bleed   = seedColor("debuffBorderColorBleed",   D.Bleed),
+                        None    = seedColor("debuffBorderColorNone",    D.None),
+                    }
+                end
                 -- Ensure mode-enable flags exist on every profile
                 if profile.partyEnabled == nil then profile.partyEnabled = true end
                 if profile.raidEnabled == nil then profile.raidEnabled = true end
@@ -4606,6 +4628,54 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- Identity-gate ground truth: per vulnerable handle, live UnitCanAssist
                 -- vs the stored gate verdict vs actual window visibility
                 if DF.AuraContainer and DF.AuraContainer.DebugDumpIdentityGate then DF.AuraContainer.DebugDumpIdentityGate() end
+            elseif msg == "dispelids" then
+                -- Custom dispel colours: the curve's X = the dispel type ID. The enum's
+                -- NAME is build-dependent, so FindDispelTypeEnum scans Enum for the
+                -- Magic/Curse/Disease/Poison shape; this probe shows what it found,
+                -- the SetAuraBorder style enums (Color vs Atlas resolution), and
+                -- whether the shared curve builds.
+                print("|cff00ff00DandersFrames:|r dispel colour probe")
+                DF._dispelTypeEnum = nil   -- force a fresh scan
+                local E = DF.FindDispelTypeEnum and DF:FindDispelTypeEnum()
+                if E then
+                    print("  dispel-type enum: Enum." .. tostring(DF._dispelTypeEnumName))
+                    for name, val in pairs(E) do
+                        print(string.format("    %s = %s", tostring(name), tostring(val)))
+                    end
+                else
+                    print("  |cffff0000no Enum table with Magic/Curse/Disease/Poison found|r")
+                end
+                local function dumpEnum(label, t)
+                    if type(t) == "table" then
+                        local parts = {}
+                        for k, v in pairs(t) do parts[#parts + 1] = tostring(k) .. "=" .. tostring(v) end
+                        print("  " .. label .. ": " .. table.concat(parts, "  "))
+                    else
+                        print("  " .. label .. ": nil")
+                    end
+                end
+                dumpEnum("Enum.CustomAuraButtonBorderStyle", Enum and Enum.CustomAuraButtonBorderStyle)
+                dumpEnum("AuraButtonBorderStyle (legacy global)", _G.AuraButtonBorderStyle)
+                if DF.InvalidateDispelColorCurve then DF:InvalidateDispelColorCurve() end
+                local curve = DF.GetDispelColorCurve and DF:GetDispelColorCurve()
+                print("  shared curve built: " .. (curve and "yes" or "no"))
+                local map = DF.GetDispelColorMap and DF:GetDispelColorMap()
+                print("  shared colour map built: " .. (map and "yes" or "no"))
+                print("  GetAuraDispelTypeColor: " .. tostring(C_UnitAuras and C_UnitAuras.GetAuraDispelTypeColor ~= nil))
+                -- Overlay ground truth: the per-mode custom toggle + each SetAuraBorder
+                -- bind site's last attempt ("ok" / the pcall error / never attempted).
+                local pdb = DF.db and DF.db.party
+                local rdb = DF.db and DF.db.raid
+                print(string.format("  overlay custom toggle: party=%s raid=%s",
+                    tostring(pdb and pdb.dispelOverlayCustomColors), tostring(rdb and rdb.dispelOverlayCustomColors)))
+                local be = DF._dispelBindErr
+                if be then
+                    for site, res in pairs(be) do
+                        print(string.format("  overlay bind [%s]: %s", tostring(site), tostring(res)))
+                    end
+                else
+                    print("  overlay bind: no attempts recorded (no dispellable aura styled since reload?)")
+                end
             elseif msg == "admissing" then
                 -- Diagnostic for the Aura Designer show-when-missing push mechanism
                 if DF.DebugADMissing then DF:DebugADMissing() end

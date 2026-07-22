@@ -872,11 +872,27 @@ local function bindNative(slot, config)
 
     local dispelSpec = style.dispel
     if dispelSpec then
-        if slot.dfAuraBorder and slot.SetAuraBorder and not slot._boundAuraBorder then
+        if slot.dfAuraBorder and slot.SetAuraBorder
+            and (not slot._boundAuraBorder or slot._dfDispelCurveGen ~= DF.dispelCurveGen) then
             slot._boundAuraBorder = true
+            slot._dfDispelCurveGen = DF.dispelCurveGen
+            -- Style enum moved to Enum.CustomAuraButtonBorderStyle in 12.1 (the old
+            -- AuraButtonBorderStyle global was removed — the old `or 0` fallback was
+            -- silently degrading Color to Atlas). Dual-detect by NAME.
+            local styleName = dispelSpec.style or "Atlas"
+            local styleEnum = (Enum and Enum.CustomAuraButtonBorderStyle and Enum.CustomAuraButtonBorderStyle[styleName])
+                or (AuraButtonBorderStyle and AuraButtonBorderStyle[styleName]) or 0
+            -- Custom dispel colours: Color-style rings recolour from the shared
+            -- account palette via customDispelColorMap — keyed by dispel NAME,
+            -- indexed private-side against auraData.dispelName (nil → game palette).
+            local map
+            if styleName == "Color" and DF.GetDispelColorMap then
+                map = DF:GetDispelColorMap()
+            end
             local ok, err = pcall(function()
                 slot:SetAuraBorder(slot.dfAuraBorder, {
-                    style = (AuraButtonBorderStyle and AuraButtonBorderStyle[dispelSpec.style or "Atlas"]) or 0,
+                    style = styleEnum,
+                    customDispelColorMap = map,
                     showWhenHarmful = dispelSpec.showWhenHarmful ~= false,
                     showWhenHelpful = dispelSpec.showWhenHelpful == true,
                     showIcon = false,
@@ -1898,14 +1914,22 @@ function Handle:_paintTestSlot(slot, index)
     if slot.dfBar then slot.dfBar:SetMinMaxValues(0, 1); slot.dfBar:SetValue(barFill) end
     if slot.dfName then slot.dfName:SetText(dispName or "") end
     -- Dispel ring: no native SetAuraBorder bind in test mode -> tint + show it
-    -- ourselves from the game palette (the ring art/thickness were already styled).
+    -- ourselves. Custom palette first (the preview mirrors live, where the shared
+    -- account dispel colours drive Color-style rings), game palette fallback.
     if slot.dfAuraBorder then
         local shown = false
-        if e.debuffType and AuraUtil and AuraUtil.GetAuraBorderColor then
-            shown = pcall(function()
-                local c = AuraUtil.GetAuraBorderColor(e.debuffType)
-                slot.dfAuraBorder:SetVertexColor(c:GetRGB())
-            end)
+        if e.debuffType then
+            local key = (e.debuffType == "Enrage") and "Bleed" or e.debuffType
+            local c = DF.db and DF.db.dispelColors and DF.db.dispelColors[key]
+            if type(c) == "table" and c.r then
+                slot.dfAuraBorder:SetVertexColor(c.r, c.g, c.b)
+                shown = true
+            elseif AuraUtil and AuraUtil.GetAuraBorderColor then
+                shown = pcall(function()
+                    local gc = AuraUtil.GetAuraBorderColor(e.debuffType)
+                    slot.dfAuraBorder:SetVertexColor(gc:GetRGB())
+                end)
+            end
         end
         slot.dfAuraBorder:SetShown(shown and true or false)
     end

@@ -2069,6 +2069,25 @@ function GUI:CreateColorsPageLink(parent, width)
     })
 end
 
+-- Sibling of CreateColorsPageLink for the shared per-dispel-type palette: jumps to
+-- the Colors page and flashes its "Dispel Type Colors" section. Used by the debuff
+-- Border page and the Dispel Overlay page — both of which draw their dispel colours
+-- from that one account-wide set.
+function GUI:CreateDispelColorsPageLink(parent, width)
+    local link = string.format("|cffffffff|HdfColors|h%s|h|r", L["Colors page"])
+    local text = string.format(L["Set the per-dispel-type colours on the %s."], link)
+    return GUI:CreateLink(parent, text, {
+        width = width,
+        onLinkClick = function()
+            GUI:LinkToSetting({
+                page    = "display_classcolors",
+                section = L["Dispel Type Colors"],
+                flash   = { border = true, fill = false },
+            })
+        end,
+    })
+end
+
 -- Apply the standard button look to an existing Button frame — the single
 -- source of truth for button styling, shared by GUI:CreateButton AND by
 -- hand-rolled buttons that need the same look (the button analogue of

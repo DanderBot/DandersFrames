@@ -32,6 +32,11 @@ local EDGE_GRADIENT_TEXTURES = {
 -- change (Frames/Border.lua lazy-rebuilds it on next use).
 function DF:InvalidateDispelColorCurve()
     DF.debuffBorderCurve = nil
+    DF.dispelColorMap = nil
+    -- Generation counter: SetAuraBorder carriers capture the map/curve OBJECT at
+    -- bind time, so a palette edit must force a re-bind. Every bind site records
+    -- the generation it bound with and re-binds when it moves.
+    DF.dispelCurveGen = (DF.dispelCurveGen or 0) + 1
 end
 
 
@@ -41,19 +46,36 @@ end
 -- ============================================================
 
 local function GetTestDispelColor(dispelType, db)
-    local colors = {
-        Magic = db.dispelMagicColor or {r = 0.2, g = 0.6, b = 1.0},
-        Curse = db.dispelCurseColor or {r = 0.6, g = 0.0, b = 1.0},
-        Disease = db.dispelDiseaseColor or {r = 0.6, g = 0.4, b = 0.0},
-        Poison = db.dispelPoisonColor or {r = 0.0, g = 0.6, b = 0.0},
-        Enrage = db.dispelBleedColor or {r = 1.0, g = 0.0, b = 0.0},
-        Bleed = db.dispelBleedColor or {r = 1.0, g = 0.0, b = 0.0},
-    }
-    local color = colors[dispelType]
-    if color then
-        return color.r, color.g, color.b
+    -- When the overlay's custom mode is on, use the shared account palette
+    -- (DF.db.dispelColors, Enrage folding into Bleed); else the game palette.
+    if db and db.dispelOverlayCustomColors and DF.db and type(DF.db.dispelColors) == "table" then
+        local c = DF.db.dispelColors[dispelType == "Enrage" and "Bleed" or dispelType]
+        if c then return c.r, c.g, c.b end
     end
+    local c = DF.DispelDefaultColors[dispelType]
+    if c then return c.r, c.g, c.b end
     return 0.5, 0.5, 1.0
+end
+
+-- SetAuraBorder style enum: moved to Enum.CustomAuraButtonBorderStyle in 12.1 (the
+-- old AuraButtonBorderStyle global was removed) — dual-detect so a configured Color
+-- style can't silently degrade to Atlas.
+local function DispelBorderStyle()
+    return (Enum and Enum.CustomAuraButtonBorderStyle and Enum.CustomAuraButtonBorderStyle.Color)
+        or (_G.AuraButtonBorderStyle and _G.AuraButtonBorderStyle.Color) or 1
+end
+
+-- Custom dispel-colour map for the overlay: when the overlay opts in
+-- (db.dispelOverlayCustomColors) recolour ALL carriers from the shared account
+-- palette via customDispelColorMap — keyed by dispel NAME, indexed private-side
+-- against auraData.dispelName by Blizzard_CustomAuraButton.lua (secret-safe; no
+-- enum IDs involved). nil otherwise → Blizzard's native palette. Ignored on
+-- clients whose engine predates the field, so it's safe to pass everywhere.
+local function DispelBorderMapFor(db)
+    if db and db.dispelOverlayCustomColors and DF.GetDispelColorMap then
+        return DF:GetDispelColorMap()
+    end
+    return nil
 end
 
 -- ============================================================
@@ -736,18 +758,13 @@ function DF:ApplyDispelOverlayAppearance(frame)
     local dispelType = overlay.currentDispelType
     if not dispelType then return end
     
-    local dispelColors = {
-        Magic = {0.2, 0.6, 1.0},
-        Curse = {0.6, 0.0, 1.0},
-        Disease = {0.6, 0.4, 0.0},
-        Poison = {0.0, 0.6, 0.0},
-        Bleed = {0.8, 0.0, 0.0},
-    }
-    
-    local colors = dispelColors[dispelType]
-    if not colors then return end
-    
-    local r, g, b = colors[1], colors[2], colors[3]
+    -- Game palette (shared constant). Custom-mode OOR colour is a Stage-4 concern
+    -- (when the overlay's custom toggle is wired); for now the OOR fade uses the
+    -- game colours, matching the in-range overlay's game-mode default.
+    local c = DF.DispelDefaultColors[dispelType]
+    if not c then return end
+
+    local r, g, b = c.r, c.g, c.b
     local gradientAlpha = db.dispelGradientAlpha or 0.5
     local intensity = db.dispelGradientIntensity or 1.0
     local blendMode = db.dispelGradientBlendMode or "ADD"
@@ -1320,16 +1337,20 @@ local function StyleGameMainSlot(btn, frame, db)
     -- (Re)bind whenever the carrier region changed (style/tracking flip):
     -- SetAuraBorder REPLACES the registered region (Blizzard_CustomAuraButton.lua:82,
     -- single-region), so a stale bind would tint the wrong texture.
-    if btn._dfDispelBoundCarrier ~= carrier and btn.SetAuraBorder then
+    if (btn._dfDispelBoundCarrier ~= carrier or btn._dfDispelCurveGen ~= DF.dispelCurveGen) and btn.SetAuraBorder then
         btn._dfDispelBoundCarrier = carrier
+        btn._dfDispelCurveGen = DF.dispelCurveGen
         local ok, err = pcall(function()
             btn:SetAuraBorder(carrier, {
-                style = (_G.AuraButtonBorderStyle and _G.AuraButtonBorderStyle.Color) or 1,
+                style = DispelBorderStyle(),
+                customDispelColorMap = DispelBorderMapFor(db),
                 showWhenHarmful = true,
                 showWhenHelpful = false,
                 showIcon = false,
             })
         end)
+        DF._dispelBindErr = DF._dispelBindErr or {}
+        DF._dispelBindErr.tint = ok and "ok" or tostring(err)
         if not ok and not warnedTintBind then
             warnedTintBind = true
             if DF.DebugWarn then DF:DebugWarn("Dispel", "SetAuraBorder tint bind failed: %s", tostring(err)) end
@@ -1441,16 +1462,20 @@ local function StyleGameBorderSlot(btn, frame, db)
     end
     local cx, cy = cropFor(rw), cropFor(rh)
     ring:SetTexCoord(cx, 1 - cx, cy, 1 - cy)
-    if btn._dfDispelBoundCarrier ~= ring and btn.SetAuraBorder then
+    if (btn._dfDispelBoundCarrier ~= ring or btn._dfDispelCurveGen ~= DF.dispelCurveGen) and btn.SetAuraBorder then
         btn._dfDispelBoundCarrier = ring
+        btn._dfDispelCurveGen = DF.dispelCurveGen
         local ok, err = pcall(function()
             btn:SetAuraBorder(ring, {
-                style = (_G.AuraButtonBorderStyle and _G.AuraButtonBorderStyle.Color) or 1,
+                style = DispelBorderStyle(),
+                customDispelColorMap = DispelBorderMapFor(db),
                 showWhenHarmful = true,
                 showWhenHelpful = false,
                 showIcon = false,
             })
         end)
+        DF._dispelBindErr = DF._dispelBindErr or {}
+        DF._dispelBindErr.ring = ok and "ok" or tostring(err)
         if not ok and not warnedTintBind then
             warnedTintBind = true
             if DF.DebugWarn then DF:DebugWarn("Dispel", "SetAuraBorder ring bind failed: %s", tostring(err)) end
@@ -1500,16 +1525,20 @@ local function StyleGameEdgeSlot(btn, frame, db, edge)
     end
     tex:SetBlendMode(db.dispelGradientBlendMode or "ADD")
     tex:SetAlpha(db.dispelGradientAlpha or 0.5)
-    if btn._dfDispelBoundCarrier ~= tex and btn.SetAuraBorder then
+    if (btn._dfDispelBoundCarrier ~= tex or btn._dfDispelCurveGen ~= DF.dispelCurveGen) and btn.SetAuraBorder then
         btn._dfDispelBoundCarrier = tex
+        btn._dfDispelCurveGen = DF.dispelCurveGen
         local ok, err = pcall(function()
             btn:SetAuraBorder(tex, {
-                style = (_G.AuraButtonBorderStyle and _G.AuraButtonBorderStyle.Color) or 1,
+                style = DispelBorderStyle(),
+                customDispelColorMap = DispelBorderMapFor(db),
                 showWhenHarmful = true,
                 showWhenHelpful = false,
                 showIcon = false,
             })
         end)
+        DF._dispelBindErr = DF._dispelBindErr or {}
+        DF._dispelBindErr.edge = ok and "ok" or tostring(err)
         if not ok and not warnedTintBind then
             warnedTintBind = true
             if DF.DebugWarn then DF:DebugWarn("Dispel", "SetAuraBorder edge bind failed: %s", tostring(err)) end

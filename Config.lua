@@ -918,6 +918,20 @@ DF.GlobalDefaults = {
 -- DEFAULT SETTINGS (exported from profile v2.9.8)
 -- ============================================================
 
+-- Shared default dispel-type palette (the game colours). One source of truth for
+-- the db colour defaults below, the test/OOR fallbacks (Features/Dispel.lua) and
+-- the custom-colour resolver (Frames/Colors.lua). Enrage defaults to Bleed's red;
+-- both get their own picker so they can be told apart.
+DF.DispelDefaultColors = {
+    Magic   = { r = 0.2, g = 0.6, b = 1.0 },
+    Curse   = { r = 0.6, g = 0.0, b = 1.0 },
+    Disease = { r = 0.6, g = 0.4, b = 0.0 },
+    Poison  = { r = 0.0, g = 0.6, b = 0.0 },
+    Bleed   = { r = 0.8, g = 0.0, b = 0.0 },
+    Enrage  = { r = 0.8, g = 0.0, b = 0.0 },   -- shares Bleed's red
+    None    = { r = 0.0, g = 0.0, b = 0.0 },   -- None / Physical (icon border only)
+}
+
 DF.PartyDefaults = {
     -- Global Font Shadow Settings (applies when outline is SHADOW)
     fontShadowOffsetX = 1,
@@ -1387,8 +1401,11 @@ DF.PartyDefaults = {
     defensiveIconY = 0,
     defensiveSortOrder = "EXTERNALS",         -- "DEFAULT" / "TIME" / "EXTERNALS" (EXTERNALS = the shipped BigDefensive order)
 
-    -- Dispel Overlay (game-palette colours only — the Custom Colors mode and its
-    -- per-type pickers/intensity were removed 2026-07-11; see Features/Dispel.lua)
+    -- Dispel Overlay. Custom per-dispel-type colours REUSE the existing shared set
+    -- debuffBorderColor{Magic,Curse,Disease,Poison,Bleed,None} (Config ~1240) — no
+    -- duplicate palette. This toggle is the overlay's opt-in (the debuff icon opts
+    -- in via "Color by Dispel Type"); colours are edited on the Colors page.
+    dispelOverlayCustomColors = false,
     dispelAnimate = false,
     dispelBorderAlpha = 1,
     dispelBorderInset = 0,

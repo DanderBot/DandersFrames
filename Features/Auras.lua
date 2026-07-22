@@ -1056,10 +1056,12 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
     end
 
     -- Debuff rows: NATIVE dispel border when Color-by-Dispel-Type is on. The colour is
-    -- applied PRIVATE-side from Blizzard's palette (ApplyAuraBorder -> GetAuraBorderColor;
-    -- the dispel type is secret) — DF's custom per-type colours are NOT expressible on
-    -- 12.1 rows (pickers frosted). Shows only on dispellable debuffs; the static
-    -- DF.Border below renders always, so non-dispellable keeps the base border.
+    -- applied PRIVATE-side (the dispel type is secret) — since 68824 the engine bind
+    -- passes customDispelColorCurve built from the shared account palette
+    -- (DF.db.dispelColors, Colors page), so DF's per-type colours ARE expressible;
+    -- pre-68824 clients ignore the field and keep Blizzard's palette. Shows only on
+    -- dispellable debuffs; the static DF.Border below renders always, so
+    -- non-dispellable keeps the base border.
     -- Wave 5b: the spec also hosts the NATIVE dispel-type SYMBOL (colourblind letter,
     -- SetAuraSymbol) — DECOUPLED from the colour ring so either ships alone. Both are
     -- engine-written (zero aura reads); the symbol additionally renders in-game only
