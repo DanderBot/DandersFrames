@@ -1166,6 +1166,7 @@ local function cfSig(cf)
     end
     if cf.includeDispelTypes then parts[#parts + 1] = "incDispel=" .. mapKeys(cf.includeDispelTypes) end
     if cf.excludeDispelTypes then parts[#parts + 1] = "excDispel=" .. mapKeys(cf.excludeDispelTypes) end
+    if cf.excludeSpellIDs then parts[#parts + 1] = "excSpell=" .. mapKeys(cf.excludeSpellIDs) end
     return table.concat(parts, "&")
 end
 
@@ -1420,6 +1421,29 @@ end
 -- park instead: hide the plain anchor frame (combat-safe, no backend op) and
 -- stamp dfDebuffFactoryEmptyVer so steady-state drives return without
 -- rebuilding records. The next version bump re-evaluates the claims.
+-- Merge the debuff blacklist (db.debuffBlacklist) into the debuff row's filter
+-- records as excludeSpellIDs. ROW-ONLY (never the AD debuff-group facade). A nil
+-- filterList (show-all) becomes one HARMFUL record carrying just the exclude; an
+-- empty array (fully claimed) is left parked. Called in DriveDebuffFactory BEFORE
+-- the row signature is taken, so a blacklist toggle moves cfSig and re-tunes the
+-- row (cfSig now serializes excludeSpellIDs). No-op when nothing is blacklisted.
+local function applyDebuffBlacklist(filterList, db)
+    local blMap = DF.AuraBlacklist and DF.AuraBlacklist.BuildExcludeMap
+        and DF.AuraBlacklist.BuildExcludeMap(db.debuffBlacklist)
+    if not blMap then return filterList end
+    if filterList == nil then
+        return { { filter = "HARMFUL", key = "bl", candidateFilters = { excludeSpellIDs = blMap } } }
+    end
+    if #filterList == 0 then return filterList end   -- fully claimed: nothing to exclude from
+    for i = 1, #filterList do
+        local rec = filterList[i]
+        local cf = rec.candidateFilters or {}
+        cf.excludeSpellIDs = blMap
+        rec.candidateFilters = cf
+    end
+    return filterList
+end
+
 function DF:DriveDebuffFactory(frame, db)
     local ver = DF.auraLayoutVersion or 0
     if frame.dfDebuffFactoryEmptyVer then
@@ -1431,6 +1455,7 @@ function DF:DriveDebuffFactory(frame, db)
     if not h then
         local filterList = BuildDirectDebuffFilters(db,
             DF.GetClaimedDebuffCategories and DF:GetClaimedDebuffCategories(frame, db))
+        filterList = applyDebuffBlacklist(filterList, db)
         if filterList and #filterList == 0 then
             frame.dfDebuffFactoryEmptyVer = ver   -- fully claimed: no container at all
             return
@@ -1471,6 +1496,7 @@ function DF:DriveDebuffFactory(frame, db)
         frame.dfDebuffFactoryVersion = ver
         local filterList = BuildDirectDebuffFilters(db,
             DF.GetClaimedDebuffCategories and DF:GetClaimedDebuffCategories(frame, db))
+        filterList = applyDebuffBlacklist(filterList, db)
         if filterList and #filterList == 0 then
             -- Fully claimed while a container stands: park it hidden (plain anchor,
             -- combat-safe) until a version bump changes the claim set.

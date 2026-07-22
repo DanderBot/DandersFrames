@@ -1155,6 +1155,12 @@ DF.PartyDefaults = {
     debuffFilterCrowdControl = true,          -- Crowd control (CROWD_CONTROL token)
     debuffFilterRaid = false,                 -- Other raid-flagged debuffs (RAID token)
     debuffFilterDispellable = true,           -- Dispellable debuffs (mode below)
+    -- Debuff blacklist: hide these non-secret debuffs from the debuff row (12.1
+    -- excludeSpellIDs, friendly-safe — NeverSecret only). Default hides the
+    -- post-Lust family (Sated/Exhaustion/Temporal Displacement/Fatigued/Insanity);
+    -- Deserters + Ride Along are opt-in on the Aura Blacklist page. Buffs are NOT
+    -- here by design — they're opt-in via the Filter Designer.
+    debuffBlacklist = { [57724] = true, [57723] = true, [80354] = true, [160455] = true, [95809] = true },
     directDebuffDispellableMode = "PLAYER",  -- "PLAYER" (dispellable by me) / "ALL" (dispellable type map) / "ANY" (native DISPELLABLE token, PTR-5+)
     debuffMaxDurationEnabled = false,         -- Hide long debuffs
     debuffMaxDurationMinutes = 5,             -- ... threshold (base duration)

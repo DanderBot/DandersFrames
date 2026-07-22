@@ -5429,7 +5429,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             local function L_link(text, pageId)
                 return linkColor .. "|HdfPage:" .. pageId .. "|h" .. text .. "|h|r"
             end
-            local bodyText = L["You have full control over buffs — enable or disable any spell in the presets below, or create your own custom filters. Debuffs are more limited: Blizzard only lets addons filter them by category (boss, dispellable, crowd control, and so on), not by individual spell, so the debuff filters themselves can't be customised."]
+            local bodyText = L["Choose which filters are active here. Customise what they contain — enable or disable individual spells, build your own custom filters, or edit the debuff Blacklist — in the"] .. " "
+                .. L_link(L["Filter Designer"], "auras_filterdesigner") .. ". "
+                .. L["Debuffs are more limited: Blizzard only lets addons filter them by category (boss, dispellable, crowd control, and so on), not by individual spell, so the Blacklist is their only per-spell control."]
                 .. "\n\n"
                 .. L["Aura Filters only affect the"] .. " "
                 .. L_link(L["Buff Bar"], "auras_buffs") .. " "
@@ -5474,6 +5476,18 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         local buffGroup = GUI:CreateSettingsGroup(self.child, 280)
         local buffHeader = buffGroup:AddWidget(GUI:CreateHeader(self.child, L["Buff Filters"]), 40)
+
+        -- Top-of-section link: which filters are active is set here; the spells in
+        -- each preset and your own custom filters are edited in the Filter Designer.
+        local bfManage = buffGroup:AddWidget(GUI:CreateButton(self.child, L["Customise in Filter Designer"], 220, 22, function()
+            if not (GUI.SelectTab and GUI.Pages and GUI.Pages["auras_filterdesigner"]) then return end
+            GUI.SelectTab("auras_filterdesigner")
+            -- Land on a buff filter, not whatever was last open (e.g. the Blacklist
+            -- if the debuff button was used previously).
+            local fdPage = GUI.Pages["auras_filterdesigner"]
+            if fdPage and fdPage._fdSelectBuffs then fdPage._fdSelectBuffs() end
+        end), 30)
+        bfManage.disableOn = function() return not (GUI.Pages and GUI.Pages["auras_filterdesigner"]) end
 
         local bfAll = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["All Buffs"], db, "directBuffShowAll", function()
             DirectFilterChanged()
@@ -5538,15 +5552,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         SelectionCheckbox(L["Uncategorised Buffs"],
             function() return db.buffFilterSelection.uncategorised end,
             function(v) db.buffFilterSelection.uncategorised = v and true or false end)
-
-        local bfManage = buffGroup:AddWidget(GUI:CreateButton(self.child, L["Manage Filters"], 140, 22, function()
-            -- The Filter Designer page ships in a later step; no-op until the
-            -- page id exists so the button can't strand the panel on a blank page.
-            if GUI.SelectTab and GUI.Pages and GUI.Pages["auras_filterdesigner"] then
-                GUI.SelectTab("auras_filterdesigner")
-            end
-        end), 30)
-        bfManage.disableOn = function() return not (GUI.Pages and GUI.Pages["auras_filterdesigner"]) end
 
         -- The page build is cached across tab switches, but preset counts and the
         -- custom-filter list can change while this page is hidden (Filter Designer
@@ -5625,6 +5630,18 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         local debuffGroup = GUI:CreateSettingsGroup(self.child, 280)
         local debuffHeader = debuffGroup:AddWidget(GUI:CreateHeader(self.child, L["Debuff Filters"]), 40)
+
+        -- Top-of-section link: the debuff categories are set here; the one per-spell
+        -- debuff control (the Blacklist) lives in the Filter Designer, so land there.
+        local dfManage = debuffGroup:AddWidget(GUI:CreateButton(self.child, L["Edit debuff Blacklist"], 220, 22, function()
+            if not (GUI.SelectTab and GUI.Pages and GUI.Pages["auras_filterdesigner"]) then return end
+            GUI.SelectTab("auras_filterdesigner")
+            -- Page content builds on first show (inside SelectTab), so the entry
+            -- ref exists now — land on the Blacklist directly.
+            local fdPage = GUI.Pages["auras_filterdesigner"]
+            if fdPage and fdPage._fdSelectBlacklist then fdPage._fdSelectBlacklist() end
+        end), 30)
+        dfManage.disableOn = function() return not (GUI.Pages and GUI.Pages["auras_filterdesigner"]) end
 
         local dfAll = debuffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["All Debuffs"], db, "directDebuffShowAll", function()
             DirectFilterChanged()
@@ -5795,17 +5812,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end
     end)
 
-    -- Auras > Aura Blacklist
-    -- RETIRED: superseded by the filter registry (Aura Filters + Filter Designer);
-    -- the debuff half was already unenforceable on friendly frames. The page stays
-    -- registered and builds a retirement notice with links to the replacements
-    -- (see AuraBlacklist/Options.lua). Stored data is kept but no longer enforced.
-    local pageAuraBlacklist = CreateSubTab("auras", "auras_blacklist", L["Aura Blacklist"])
-    BuildPage(pageAuraBlacklist, function(self, db, Add, AddSpace, AddSyncPoint)
-        if DF.BuildAuraBlacklistPage then
-            DF.BuildAuraBlacklistPage(GUI, self, db)
-        end
-    end)
+    -- Auras > Aura Blacklist: RETIRED as a standalone page. The debuff blacklist
+    -- now lives inside the Filter Designer (Debuffs > Blacklist) — one home for
+    -- all per-spell aura control. Backend unchanged (AuraBlacklist/Config.lua +
+    -- Features/Auras.lua applyDebuffBlacklist); stored data carries over.
 
     -- Auras > Buffs (combined Layout + Appearance with collapsible sections)
     local pageBuffs = CreateSubTab("auras", "auras_buffs", L["Buffs"])
