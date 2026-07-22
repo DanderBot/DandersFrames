@@ -1228,9 +1228,16 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
                     if ok and type(v) == "string" and v ~= "" then name = v end
                 end
                 name = name or e.display
+                -- Icon: use the entry's baked fileID, else resolve it live — lets new
+                -- catalog entries omit a hardcoded icon and still show the real one.
+                local icon = e.icon
+                if not icon and C_Spell and C_Spell.GetSpellTexture then
+                    local okI, t = pcall(C_Spell.GetSpellTexture, e.spellId)
+                    if okI and t then icon = t end
+                end
                 if matches(name) then
                     put("ALL", {
-                        id = e.spellId, name = name, icon = e.icon or FALLBACK_ICON,
+                        id = e.spellId, name = name, icon = icon or FALLBACK_ICON,
                         tooltipID = e.spellId,
                         enabled = not (set and set[e.spellId]),
                         isBlacklist = true,

@@ -11,9 +11,10 @@ local addonName, DF = ...
 --
 -- 12.1: a debuff is only hideable via excludeSpellIDs on friendly frames when
 -- Blizzard flags it NeverSecret. Every ID below was live-confirmed NeverSecret via
--- DF_AuraLab `/al secretscan` on build 68824 (2026-07-22). Secret / ContextuallySecret
--- debuffs (encounter "move now!" debuffs, etc.) CANNOT be hidden — that is the point
--- of the lockdown — and are deliberately absent.
+-- DF_AuraLab `/al secretscan` / `/al secretcensus` on build 68824 (2026-07-22). Secret /
+-- ContextuallySecret debuffs (encounter "move now!" debuffs, etc.) CANNOT be hidden —
+-- that is the point of the lockdown — and are deliberately absent. (The census found
+-- only 62 NeverSecret spells in 1..500000 — a small, deliberate Blizzard whitelist.)
 -- ============================================================
 
 local pairs = pairs
@@ -40,6 +41,10 @@ DF.AuraBlacklist.DebuffSpells = {
     { spellId = 427490, display = "Ride Along Available",   icon = 4640493 },
     { spellId = 447959, display = "Ride Along Active",      icon = 4640493 },
     { spellId = 447960, display = "Ride Along Inactive",    icon = 4640493 },
+    -- Mythic+ keystone scaling debuff. NeverSecret (confirmed via /al secretcensus),
+    -- so it's hideable; opt-in (default off) because it's informative as well as noisy
+    -- — it sits on every player for the whole dungeon. icon omitted → resolved live.
+    { spellId = 206151, display = "Challenger's Burden" },
 }
 
 -- ============================================================
