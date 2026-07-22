@@ -3097,7 +3097,11 @@ function GUI:CreateOverrideMarker(parent, size)
     btn:SetSize(size + 6, size + 6)
     -- Only ever a hover-tooltip target; let clicks fall through so a marker
     -- placed on a clickable parent (e.g. a nav tab) doesn't eat its clicks.
-    if btn.SetPropagateMouseClicks then btn:SetPropagateMouseClicks(true) end
+    -- SetPropagateMouseClicks is PROTECTED on 12.1 (ADDON_ACTION_BLOCKED if called
+    -- under combat lockdown — e.g. opening/refreshing settings in combat); skip it
+    -- there. Only matters when the marker sits on a clickable parent, and combat
+    -- GUI edits are the rare case.
+    if btn.SetPropagateMouseClicks and not InCombatLockdown() then btn:SetPropagateMouseClicks(true) end
     local icon = btn:CreateTexture(nil, "OVERLAY")
     icon:SetPoint("CENTER")
     icon:SetSize(size, size)
