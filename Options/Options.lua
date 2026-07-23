@@ -1392,8 +1392,12 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         renderingGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Pixel-Perfect Scaling"],
             nil, nil, refreshPixelPerfect,
             makeBlizGet("pixelPerfect"), makeBlizSet("pixelPerfect"), "pixelPerfect"), 30)
+        -- Label slots below are sized for the WRAPPED text plus a gap. Labels are
+        -- variable-height widgets (GUI.RowHeight only governs fixed ones), so the
+        -- slot is whatever is passed here — too small and the next widget's label
+        -- sits on the last line of this one.
         renderingGroup:AddWidget(GUI:CreateLabel(self.child,
-            L["Snaps sizes and borders to exact pixels for crisp rendering."], 250), 30)
+            L["Snaps sizes and borders to exact pixels for crisp rendering."], 250), 42)
         -- Pixel-perfect scale hint: at a UI Scale of 768/physicalHeight, one UI unit
         -- equals one physical pixel, so snapping has nothing to round away and borders
         -- are at their crispest. Tell the user that value (and whether they're already
@@ -1421,7 +1425,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                     scaleHint:SetText(t)
                 end
             end
-            renderingGroup:AddWidget(scaleHint, 45)
+            -- 3 wrapped lines (~48px) + a clear gap before the dropdown below.
+            renderingGroup:AddWidget(scaleHint, 72)
         end
         -- Aura duration-text update rate (account-wide, DF.GlobalDefaults). Feeds the
         -- native duration binding at bind time (creation-frozen), so a change is
@@ -1443,7 +1448,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end), 55)
         renderingGroup:AddWidget(GUI:CreateLabel(self.child,
             L["How often aura countdown text refreshes. Smooth updates ten times a second, Performance once a second. Normal keeps the standard rate."],
-            250), 45)
+            250), 52)
         Add(renderingGroup, nil, 1)
 
         -- ===== SETTINGS PANEL APPEARANCE GROUP (Column 2, Top) =====
