@@ -369,6 +369,26 @@ local function filterVulnerableToIdentityGate(filterString, cf)
     return false
 end
 
+-- SOURCE-RELATIVE pools depend on WHO cast each aura: the PLAYER token (only-my-
+-- buffs = "HELPFUL|PLAYER") and the isFromPlayerOrPlayerPet candidateFilter. These
+-- have a SECOND fail-open condition distinct from the UnitCanAssist gate above:
+-- for a unit that isn't in your visible world (a same-faction party member in a
+-- DIFFERENT instance), the engine can't attribute a caster, so "mine" passes every
+-- caster's aura. Spell-ID sub-filters are source-INDEPENDENT and keep working, so
+-- only-my-buffs breaks in isolation while UnitCanAssist stays TRUE — which is why
+-- the assist gate never catches it. Gated on UnitIsVisible (see _applyIdentityGate):
+-- the instance-scoped signal, true for a same-instance member far outside 40yd
+-- range, false only across instances/phases (field-verified 3-case probe 2026-07-23).
+local function filterSourceRelative(filterString, cf)
+    if type(filterString) == "string" then
+        for token in filterString:gmatch("[^|%s]+") do
+            if (token:gsub("^!", "")) == "PLAYER" then return true end
+        end
+    end
+    if cf and cf.isFromPlayerOrPlayerPet ~= nil then return true end
+    return false
+end
+
 -- Dynamic-unit tokens whose underlying unit changes WITHOUT the token changing, so
 -- OnUnitChanged never fires -> they need a Refresh() bounce on the matching event.
 -- Prefix-match so "targettarget"/"focustarget" are covered by their base event too.
@@ -1496,6 +1516,7 @@ function NativeBackend:build()
     self.groupKeys = {}
     self.slotButtons = isOverlay and {} or nil   -- overlay: key -> native slot button (consumer styling)
     handle._idGateVulnerable = nil   -- re-derived from this build's records (see the record loop)
+    handle._idGateSourceRelative = nil   -- PLAYER-token / isFromPlayerOrPlayerPet pools (visibility gate)
     if testMode and not isOverlay and not isMissing then
         -- PER-SLOT TEST GROUPS (P5). Two hard-won facts drive this shape:
         --  * The flow lays buttons out by the container's own aura ordering, NOT
@@ -1532,6 +1553,9 @@ function NativeBackend:build()
         local cf = (not testMode) and recordCandidateFilters(rec, config) or nil
         if cf and filterVulnerableToIdentityGate(f, cf) then
             handle._idGateVulnerable = true
+        end
+        if filterSourceRelative(f, cf) then
+            handle._idGateSourceRelative = true
         end
         if AuraUtil and AuraUtil.IsValidFilterString and not AuraUtil.IsValidFilterString(f) then
             DF:DebugWarn(DBG, "filter rejected by IsValidFilterString: %s (group skipped)", tostring(f))
@@ -2347,13 +2371,28 @@ end
 -- hidden flag instead of staying hidden forever.
 function Handle:_applyIdentityGate()
     local hide = false
-    if self._idGateVulnerable and not AuraContainer._testMode then
+    if (self._idGateVulnerable or self._idGateSourceRelative) and not AuraContainer._testMode then
         local unit = self.config and self.config.unit
         if type(unit) == "string" and unit ~= "player" and UnitExists(unit) then
-            local ok, can = pcall(UnitCanAssist, "player", unit)
-            if ok then
-                if issecretvalue and issecretvalue(can) then can = true end
-                hide = not can
+            -- (1) Cross-faction / non-assistable: includeSpellIDs / category tokens
+            --     fail open. Signal: UnitCanAssist.
+            if self._idGateVulnerable then
+                local ok, can = pcall(UnitCanAssist, "player", unit)
+                if ok then
+                    if issecretvalue and issecretvalue(can) then can = true end
+                    if not can then hide = true end
+                end
+            end
+            -- (2) Not in your visible world (different instance/phase): the
+            --     source-relative "mine" filter (PLAYER token / isFromPlayerOrPlayerPet)
+            --     fails open — the engine can't attribute a caster. Signal: UnitIsVisible.
+            --     Fail-safe (matches the assist gate): only hide on a definite,
+            --     non-secret false; any doubt (pcall fail / secret) SHOWS.
+            if not hide and self._idGateSourceRelative then
+                local okv, vis = pcall(UnitIsVisible, unit)
+                if okv and not (issecretvalue and issecretvalue(vis)) and not vis then
+                    hide = true
+                end
             end
         end
     end
@@ -2943,7 +2982,7 @@ local gateSweepQueued
 local function IdentityGateSweep()
     gateSweepQueued = nil
     for h in pairs(AuraContainer._handles or {}) do
-        if h._idGateVulnerable then
+        if h._idGateVulnerable or h._idGateSourceRelative then
             pcall(function() h:_applyIdentityGate() end)
         end
     end
@@ -2981,6 +3020,14 @@ function AuraContainer.DebugDumpIdentityGate()
                 elseif issecretvalue and issecretvalue(can) then canTxt = "SECRET"
                 else canTxt = tostring(can) end
             end
+            -- UnitIsVisible: the source-relative (PLAYER-token) gate's signal.
+            local visTxt = "-"
+            if type(unit) == "string" and UnitExists(unit) then
+                local okv, vis = pcall(UnitIsVisible, unit)
+                if not okv then visTxt = "ERR"
+                elseif issecretvalue and issecretvalue(vis) then visTxt = "SECRET"
+                else visTxt = tostring(vis) end
+            end
             -- Filter + cf summary: distinct record filter strings, and whether ANY
             -- record carries an include/exclude spell map — the fields the
             -- vulnerability classification is derived from.
@@ -2994,11 +3041,12 @@ function AuraContainer.DebugDumpIdentityGate()
                 if cf and cf.includeSpellIDs then inc = true end
                 if cf and cf.excludeSpellIDs then exc = true end
             end
-            print(("|cff33ff99[idgate %d]|r mode=%s unit=%s filter=%s inc=%s exc=%s vuln=%s exists=%s canAssist=%s gateHidden=%s intent=%s shown=%s retry=%s"):format(
+            print(("|cff33ff99[idgate %d]|r mode=%s unit=%s filter=%s inc=%s exc=%s vuln=%s srcRel=%s exists=%s canAssist=%s vis=%s gateHidden=%s intent=%s shown=%s retry=%s"):format(
                 n, tostring(cfg.mode or "row"), tostring(unit),
                 table.concat(fParts, "&"), tostring(inc), tostring(exc),
                 tostring(h._idGateVulnerable or false),
-                tostring(type(unit) == "string" and UnitExists(unit) or false), canTxt,
+                tostring(h._idGateSourceRelative or false),
+                tostring(type(unit) == "string" and UnitExists(unit) or false), canTxt, visTxt,
                 tostring(h._idGateHidden or false),
                 tostring(h._intendedShown ~= false),
                 tostring(h.frame and h.frame:IsShown() or false),

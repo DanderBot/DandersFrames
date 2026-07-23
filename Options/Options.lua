@@ -5709,15 +5709,18 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end), 30)
         dfAll.tooltip = L["Show every debuff with no filtering."]
 
-        -- ===== INFO BANNER: All Debuffs enabled =====
-        -- Shown while All Debuffs is ON: the curated categories replaced the old
-        -- "enable All Debuffs" advice, so the nudge now points the other way.
+        -- ===== CAUTION BANNER: category filters are incomplete =====
+        -- Shown while All Debuffs is OFF (category mode). Blizzard's category tokens
+        -- (boss/role/priority/CC/raid/dispellable) are not exhaustive — some harmful
+        -- debuffs are tagged with NONE of them, so they're missed even with every
+        -- box below ticked. "All Debuffs" is the only complete option, and we can't
+        -- widen the categories (they're Blizzard-defined).
         local debuffWarningBanner = GUI:CreateInfoBanner(self.child, {
-            tone = "info",
-            text = L["Recommended: use the category filters instead of 'All Debuffs' - they cover the important debuffs without the clutter."],
+            tone = "caution",
+            text = L["Blizzard's debuff categories aren't complete: even with all of them enabled, some debuffs Blizzard doesn't tag are still missed. Only 'All Debuffs' shows every debuff, and the categories can't be changed (they're Blizzard-defined)."],
         })
         debuffWarningBanner.hideOn = function(d)
-            return not d.directDebuffShowAll
+            return d.directDebuffShowAll
         end
         debuffGroup:AddWidget(debuffWarningBanner, debuffWarningBanner.layoutHeight)
 

@@ -1162,7 +1162,7 @@ DF.PartyDefaults = {
     directBuffSortReverse = false,            -- Reverse the sort direction
 
     -- Direct Mode: Debuff Filters
-    directDebuffShowAll = false,              -- Show all debuffs (ignores category filters)
+    directDebuffShowAll = true,               -- Show all debuffs (DEFAULT ON — Blizzard's category tokens miss untagged debuffs even with all enabled, so "all" is the only complete option; category mode stays available)
     debuffFilterBoss = true,                  -- Boss debuffs (native isBossAura)
     debuffFilterRole = true,                  -- Role debuffs (native isRoleAura)
     debuffFilterPriority = true,              -- Priority debuffs (native isPriorityAura)
