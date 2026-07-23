@@ -469,6 +469,7 @@ L["Aura Blacklist"] = true
 L["Aura Designer"] = true
 L["Aura Designer Alpha"] = true
 L["Aura Designer is active alongside Buffs."] = true
+L["Want per-spell control? The Aura Designer lets you place any buff exactly where you want, with advanced indicators — expiry glyphs, duration bars, custom borders and sounds."] = true
 L["Aura Duration Update Rate"] = true
 L["Aura Filters"] = true
 L["The filters you enable here apply to the"] = true

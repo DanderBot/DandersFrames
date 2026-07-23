@@ -5932,6 +5932,29 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         Add(adBanner, 32, "both")
 
+        -- ========================================
+        -- AD DISCOVERY BANNER
+        -- The INVERSE of the coexistence banner above: shown only when the Aura
+        -- Designer is NOT active, to point users who want more than one look for
+        -- every buff at per-slot control + advanced indicators. Its hideOn is the
+        -- exact negation of adBanner's, so precisely one AD banner ever occupies
+        -- this slot (a hidden banner collapses to zero height — no gap).
+        -- success tone (an inviting green), but a "widget" glyph overrides the tone's
+        -- default check so it reads as "advanced indicators available", not a
+        -- completed-state confirmation. Reuses adLink/adOnLink (the openAD path).
+        -- ========================================
+        local adPromoBanner = GUI:CreateInfoBanner(self.child, {tone = "success"})
+        adPromoBanner:SetIconTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\widget_small")
+        adPromoBanner.refreshContent = function(b)
+            b:SetHTML(L["Want per-spell control? The Aura Designer lets you place any buff exactly where you want, with advanced indicators — expiry glyphs, duration bars, custom borders and sounds."] .. " " ..
+                adLink("openAD", L["Open Aura Designer"]), adOnLink)
+        end
+        adPromoBanner.hideOn = function(d)
+            local _adCfg = DF.GetModeAuraDesigner and DF:GetModeAuraDesigner((d == DF.db.raid) and "raid" or "party")
+            return (_adCfg and _adCfg.enabled) and true or false   -- hide when AD IS active
+        end
+        Add(adPromoBanner, 32, "both")
+
         -- Copy button at top right
         Add(CreateCopyButton(self.child, {"buff", "showBuffs"}, L["Buffs"], "auras_buffs"), 25, 2)
 
