@@ -379,7 +379,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     end
     local BUFF_BANNER = L["Opt-in buff filters — you choose which buffs show. Enable or disable spells in the built-in presets, or create custom filters, then turn them on from the"]
         .. " " .. fdBannerLink(L["Aura Filters"], "auras_filters") .. "."
-    local BLACKLIST_BANNER = L["The reverse of the opt-in buff filters: instead of choosing what to show, you choose nuisance debuffs to hide from the debuff bar. Only debuffs the game keeps non-secret can be hidden."]
+    local BLACKLIST_BANNER = L["The reverse of the opt-in buff filters: instead of choosing what to show, you choose nuisance debuffs to hide from the debuff bar. Only debuffs Blizzard keeps non-secret can be hidden."]
     local banner = GUI:CreateInfoBanner(parent, {
         tone = "info",
         html = true,

@@ -800,6 +800,34 @@ local function GetDebuffGroups()
     return groups
 end
 
+-- Default DISPLAY NAME for a new group: one above the HIGHEST number currently in
+-- use for this prefix.
+--
+-- The id counters (nextLayoutGroupID / nextOtherLayoutGroupID / nextDebuffGroupID)
+-- stay strictly monotonic on purpose — ids are stable references (indicator ->
+-- group links), so reusing one would rebind stale links to the wrong group. The
+-- visible LABEL has no such constraint, and deriving it from the raw id made it
+-- climb forever ("Group 7" on an empty designer after six create/deletes).
+--
+-- Why highest+1 and NOT the lowest free number: the list renders in CREATION order
+-- (every site iterates ipairs(groups); nothing sorts them) and new groups are
+-- tinsert-APPENDED. Filling a gap would therefore drop a low number at the BOTTOM
+-- of the list — "Group 2" above "Group 1" — which reads worse than a gap. A gap is
+-- also honest: it says something was deleted. Because this scans the CURRENT set
+-- rather than a persisted counter, an emptied designer still restarts at 1.
+--
+-- Prefixes are distinct and anchored, so "Group" won't match "Filter Group 3" (or
+-- vice versa); none contain Lua pattern magic characters. A user-renamed group drops
+-- out of the numbering pool.
+local function NextGroupName(groups, prefix)
+    local highest = 0
+    for _, g in ipairs(groups or {}) do
+        local n = tonumber(tostring((g and g.name) or ""):match("^" .. prefix .. " (%d+)$"))
+        if n and n > highest then highest = n end
+    end
+    return prefix .. " " .. (highest + 1)
+end
+
 -- Create a new debuff category group (C1 data model; C2 wires the UI). Defaults:
 -- Boss + Role selected (the classic "important debuffs" baseline), everything
 -- else off, Hide Long staged at 5 minutes with Keep Important on. Layout mirrors
@@ -813,7 +841,7 @@ local function CreateDebuffGroup(name)
     adDB.nextDebuffGroupID = id + 1
     local group = {
         id = id,
-        name = name or ("Debuff Group " .. id),
+        name = name or NextGroupName(groups, "Debuff Group"),
         anchor = "TOPLEFT",
         offsetX = 0,
         offsetY = 0,
@@ -2195,7 +2223,7 @@ local function CreateLayoutGroup(name, kind)
     end
     local group = {
         id = id,
-        name = name or ((kind == "filter") and ("Filter Group " .. id) or ("Group " .. id)),
+        name = name or NextGroupName(groups, (kind == "filter") and "Filter Group" or "Group"),
         anchor = "TOPLEFT",
         offsetX = 0,
         offsetY = 0,

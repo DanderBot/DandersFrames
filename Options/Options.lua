@@ -5489,21 +5489,22 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             local function L_link(text, pageId)
                 return linkColor .. "|HdfPage:" .. pageId .. "|h" .. text .. "|h|r"
             end
-            local bodyText = L["Choose which filters are active here. Customise what they contain — enable or disable individual spells, build your own custom filters, or edit the debuff Blacklist — in the"] .. " "
+            local bodyText = L["Choose which filters are active here. Buffs: full control — toggle individual spells or create your own filters in the"] .. " "
                 .. L_link(L["Filter Designer"], "auras_filterdesigner") .. ". "
-                .. L["Debuffs are more limited: Blizzard only lets addons filter them by category (boss, dispellable, crowd control, and so on), not by individual spell, so the Blacklist is their only per-spell control."]
+                .. L["Debuffs: you can only pick from Blizzard's fixed categories (boss, dispellable, crowd control, and so on) — no editing, no custom debuff filters, no per-spell filtering. The debuff Blacklist is the only per-spell control."]
                 .. "\n\n"
-                .. L["Aura Filters only affect the"] .. " "
+                .. L["The filters you enable here apply to the"] .. " "
                 .. L_link(L["Buff Bar"], "auras_buffs") .. " "
                 .. L["and"] .. " "
                 .. L_link(L["Debuff Bar"], "auras_debuffs") .. "."
                 .. "\n"
-                .. L["Auras displayed in the"] .. " "
-                .. L_link(L["Dispel Overlay"], "auras_dispel") .. ", "
-                .. L_link(L["Defensive Icon"], "auras_defensiveicon") .. ", "
+                .. L["Other surfaces choose their own: the"] .. " "
+                .. L_link(L["Defensive Icon"], "auras_defensiveicon") .. " "
                 .. L["and"] .. " "
                 .. L_link(L["Aura Designer"], "auras_auradesigner") .. " "
-                .. L["are independent of Aura Filters."]
+                .. L["(per placed indicator) pick which filters to use on their own pages. The"] .. " "
+                .. L_link(L["Dispel Overlay"], "auras_dispel") .. " "
+                .. L["is fixed and takes no filter selection."]
 
             local infoBanner = GUI:CreateInfoBanner(self.child, {
                 tone = "info",
@@ -8858,10 +8859,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local overlayColorsLink = GUI:CreateDispelColorsPageLink(self.child, 260)
         settingsGroup:AddWidget(overlayColorsLink, (overlayColorsLink.layoutHeight or 16) + 2)
         overlayColorsLink.hideOn = HideIfDisabled
-        local overlayNote = settingsGroup:AddWidget(GUI:CreateNote(self.child,
-            L["One overlay at a time, colored and switched by the game engine. Includes boss (private) auras."],
-            { width = 260 }), 40)
-        overlayNote.hideOn = HideIfDisabled
         Add(settingsGroup, nil, 1)
 
         -- ===== APPEARANCE COLLAPSIBLE SECTION =====
