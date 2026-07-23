@@ -245,7 +245,8 @@ function AuraContainer.SetTestMode(on)
         AuraContainer._ownsProviderSwitch = true
         rebuildAll()
         AuraContainer._queueTestBounce()
-        AuraContainer._startTestTicker()
+        -- No ticker start here: countdowns arm natively per slot (armTestDuration),
+        -- and only a slot that FAILS to arm starts the fallback ticker.
     else
         AuraContainer._stopTestTicker()
         pcall(function()
@@ -1832,6 +1833,87 @@ local function formatTestDuration(handle, rem)
     return s > 0 and (s .. "s") or ""
 end
 
+-- NATIVE test countdown. Test mode has no aura to bind, so it used to FAKE the
+-- countdown on a shared ticker. It doesn't have to: C_DurationUtil.CreateDuration
+-- and CreateDurationTextBinding are addon-callable, and every consumer setter is
+-- AllowedWhenUntainted — which our DF-owned test widgets are. So we build a real
+-- duration object and hand it to the SAME three consumers the live path uses:
+--   bar   -> StatusBar:SetTimerDuration        (live: SetDurationBar -> ApplyDurationBar)
+--   swipe -> Cooldown:SetCooldownFromDurationObject
+--   text  -> our own DurationTextBinding, options mirrored 1:1 from bindNative
+-- The C side then drives all three per-frame with ZERO Lua per frame; the only Lua
+-- left is one re-arm per aura cycle (scheduleTestRearm). Live-verified on 68824 via
+-- /al nativetimer: bars sweep, text honours the binding's own updateInterval, the
+-- loop survives a MUTATE-ONLY re-arm (the native side holds a reference, so
+-- SetTimeFromStart alone restarts everything), and a colour curve applies smoothly.
+-- Returns true when the slot is natively driven; false = caller keeps the ticker.
+local function armTestDuration(handle, slot, d, offset)
+    if not (C_DurationUtil and C_DurationUtil.CreateDuration) then return false end
+    local cfg = handle.config
+    local durSpec = (cfg.style and cfg.style.duration) or {}
+    local barSpec = (cfg.style and cfg.style.bar) or {}
+    local ok, err = pcall(function()
+        local dur = slot._dfTestDurObj
+        if not dur then
+            dur = C_DurationUtil.CreateDuration()
+            slot._dfTestDurObj = dur
+        end
+        -- Start in the PAST by `offset` so the preview keeps its per-slot stagger.
+        dur:SetTimeFromStart(GetTime() - offset, d)
+
+        if slot.dfBar and slot.dfBar.SetTimerDuration then
+            local interp = resolveEnum(Enum and Enum.StatusBarInterpolation, barSpec.interpolation)
+            local dir = resolveEnum(Enum and Enum.StatusBarTimerDirection, barSpec.direction)
+            if interp == nil then interp = Enum.StatusBarInterpolation.Immediate end
+            if dir == nil then dir = Enum.StatusBarTimerDirection.RemainingTime end
+            slot.dfBar:SetTimerDuration(dur, interp, dir)
+        end
+        -- SetCooldownFromDurationObject rides the same object; the plain SetCooldown
+        -- fallback keeps older builds rendering a swipe.
+        if slot.dfCD then
+            if slot.dfCD.SetCooldownFromDurationObject then
+                slot.dfCD:SetCooldownFromDurationObject(dur)
+            elseif slot.dfCD.SetCooldown then
+                slot.dfCD:SetCooldown(GetTime() - offset, d)
+            end
+        end
+        if slot.dfDur then
+            local b = slot._dfTestBinding
+            if not b then
+                b = C_DurationUtil.CreateDurationTextBinding()
+                slot._dfTestBinding = b
+                b:SetFontString(slot.dfDur)
+            end
+            b:SetDuration(dur)
+            -- Options mirrored from bindNative's live SetDurationText block so the
+            -- preview formats identically (same formatter object, same texts, same
+            -- cadence). Guards match live exactly: expiredText ~= "", zeroText nil-vs-set.
+            if durSpec.formatter then b:SetFormatter(durSpec.formatter) end
+            if durSpec.expiredText and durSpec.expiredText ~= "" then b:SetExpiredText(durSpec.expiredText) end
+            if durSpec.zeroText ~= nil then b:SetZeroDurationText(durSpec.zeroText) end
+            if durSpec.updateInterval then b:SetUpdateInterval(durSpec.updateInterval) end
+            b:SetEnabled(true)
+        end
+    end)
+    if not ok then
+        DF:DebugWarn(DBG, "armTestDuration failed (falling back to ticker): %s", tostring(err))
+    end
+    return ok
+end
+
+-- One re-arm per aura cycle, scheduled exactly at expiry — no polling. Mutating the
+-- shared duration restarts bar, swipe and text together (proven in the lab), so this
+-- is the ONLY Lua the native preview costs. `gen` invalidates pending re-arms across
+-- a repaint/teardown: every paint bumps slot._dfTestGen, and a stale closure returns.
+local function scheduleTestRearm(handle, slot, d, gen, delay)
+    C_Timer.After(delay, function()
+        if handle._destroyed or slot._dfTestGen ~= gen then return end
+        if not AuraContainer._testMode or not slot._dfTestDurObj then return end
+        local ok = pcall(function() slot._dfTestDurObj:SetTimeFromStart(GetTime(), d) end)
+        if ok then scheduleTestRearm(handle, slot, d, gen, d) end
+    end)
+end
+
 -- TEST MODE paint (P5 hybrid): push DF's curated preview data onto the regions
 -- styleButton_regions just built — the SAME regions the native binds would drive
 -- live, so the preview is styling-true (borders, fonts, insets, swipe). Harmful
@@ -1901,27 +1983,65 @@ function Handle:_paintTestSlot(slot, index)
         local tex = sid and C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(sid)
         if tex or e.icon then slot.dfIcon:SetTexture(tex or e.icon) end
     end
-    local barFill = 1   -- permanent aura (duration 0): full bar, never drains
+    local barFill = 1       -- permanent aura (duration 0): full bar, never drains
+    local nativeBar = false -- true = the C timer owns dfBar; SetValue must not fight it
     do
         -- Live countdown: stagger per slot AND per unit (digits of the unit token —
         -- party2's row must not mirror party1's; same per-unit-variation idea as
-        -- TestMode's per-index health values) so the preview doesn't tick in unison;
-        -- the shared test ticker (SetTestMode) counts the text down, drains the bar
-        -- and loops timer + swipe at zero. Permanent auras (duration 0) show no timer.
+        -- TestMode's per-index health values) so the preview doesn't tick in unison.
+        -- The stagger is applied by starting the duration `offset` seconds in the
+        -- past; armTestDuration then hands it to the native bar/swipe/text drivers
+        -- and scheduleTestRearm loops it. Permanent auras (duration 0) show no timer.
         local d = e.duration or 0
         if d > 0 then
             local u = self.config.unit
             local useed = (type(u) == "string" and tonumber(u:match("%d+"))) or 0
             local offset = (index * 3 + useed * 5) % math.max(d - 1, 1)
-            slot._dfTestDur = d
-            slot._dfTestExpiry = GetTime() + (d - offset)
             barFill = (d - offset) / d
-            if slot.dfCD and slot.dfCD.SetCooldown then
-                slot.dfCD:SetCooldown(GetTime() - offset, d)
+            -- Invalidate any re-arm still pending from the previous paint.
+            slot._dfTestGen = (slot._dfTestGen or 0) + 1
+            if armTestDuration(self, slot, d, offset) then
+                -- Natively driven: the C side owns bar, swipe and text from here.
+                -- Nothing left for the ticker, so clear its per-slot state.
+                slot._dfTestDur, slot._dfTestExpiry = nil, nil
+                slot._dfTestText, slot._dfTestTextAt = nil, nil
+                slot._dfTestTimed = true
+                nativeBar = slot.dfBar and true or false
+                scheduleTestRearm(self, slot, d, slot._dfTestGen, d - offset)
+            else
+                -- FALLBACK (no C_DurationUtil / a setter threw): the faked ticker path.
+                slot._dfTestDur = d
+                slot._dfTestExpiry = GetTime() + (d - offset)
+                if slot.dfCD and slot.dfCD.SetCooldown then
+                    slot.dfCD:SetCooldown(GetTime() - offset, d)
+                end
+                -- Seed the ticker's text cache with what we just rendered, so its
+                -- change-detection compares against the live string (a recycled
+                -- button would otherwise carry a stale one across the rebuild).
+                if slot.dfDur then
+                    local s = formatTestDuration(self, d - offset)
+                    slot.dfDur:SetText(s)
+                    slot._dfTestText, slot._dfTestTextAt = s, GetTime()
+                end
+                AuraContainer._startTestTicker()
             end
-            if slot.dfDur then slot.dfDur:SetText(formatTestDuration(self, d - offset)) end
         else
             slot._dfTestDur = nil
+            slot._dfTestText, slot._dfTestTextAt = nil, nil
+            slot._dfTestGen = (slot._dfTestGen or 0) + 1   -- kill any pending re-arm
+            -- Permanent aura on a slot that was previously TIMED: the bar is still
+            -- under SetTimerDuration and there is no "clear timer" API, so a plain
+            -- SetValue would be fighting the C timer. Re-arm its own duration with a
+            -- span long enough that the fill stays pinned at full (~1% per 15 min)
+            -- rather than guessing at which write wins.
+            if slot._dfTestTimed and slot._dfTestDurObj and slot.dfBar then
+                pcall(function() slot._dfTestDurObj:SetTimeFromStart(GetTime(), 86400) end)
+                nativeBar = true
+            end
+            -- The binding would keep writing a countdown over the zero text below.
+            if slot._dfTestBinding then
+                pcall(function() slot._dfTestBinding:SetEnabled(false) end)
+            end
             if slot.dfDur then
                 -- Hide-on-permanent (Wave 4): mirror the native zeroDurationText
                 -- route. zeroText set (the "" default) = that text verbatim; unset
@@ -1944,7 +2064,13 @@ function Handle:_paintTestSlot(slot, index)
     -- the value mirrors the staggered countdown above so bar, timer text and swipe
     -- agree, and the test ticker drains it in step. SetReverseFill is styling and
     -- was already applied by styleBarShared — value only here.
-    if slot.dfBar then slot.dfBar:SetMinMaxValues(0, 1); slot.dfBar:SetValue(barFill) end
+    -- nativeBar = the C timer owns the fill (SetTimerDuration); writing SetValue over
+    -- it would fight the sweep. min/max is irrelevant either way on a timer bar
+    -- (lab-verified: an untouched bar sweeps identically), so it stays for the
+    -- fallback path only.
+    if slot.dfBar and not nativeBar then
+        slot.dfBar:SetMinMaxValues(0, 1); slot.dfBar:SetValue(barFill)
+    end
     if slot.dfName then slot.dfName:SetText(dispName or "") end
     -- Dispel ring: no native SetAuraBorder bind in test mode -> tint + show it
     -- ourselves. Custom palette first (the preview mirrors live, where the shared
@@ -2036,15 +2162,31 @@ function Handle:_paintTestSlot(slot, index)
     end
 end
 
--- Shared 1s ticker driving the preview countdowns (test mode only; started and
+-- Shared ticker driving the preview countdowns (test mode only; started and
 -- stopped by SetTestMode). Loops each timer + swipe at zero and drains the
 -- duration bar in step so the preview animates indefinitely. Buttons die with
 -- their containers, so stale state can't outlive a rebuild (handle.buttons is
 -- wiped on teardown).
+--
+-- FALLBACK ONLY as of the native-duration path (armTestDuration): started on demand
+-- by the first slot that fails to arm natively, never by SetTestMode. On a build with
+-- C_DurationUtil it never runs at all — the C side drives every preview countdown.
+-- 10Hz, not the original 1s: the faked bar fill stepped in visible jumps at 1s while
+-- the cooldown swipe beside it swept smoothly. 0.1 is the same cadence the SMOOTH
+-- duration-update-rate option asks of the live binding.
+local TEST_TICK = 0.1
 function AuraContainer._startTestTicker()
     if AuraContainer._testTicker then return end
-    AuraContainer._testTicker = C_Timer.NewTicker(1, function()
+    AuraContainer._testTicker = C_Timer.NewTicker(TEST_TICK, function()
         local now = GetTime()
+        -- Duration TEXT keeps the live cadence: the account-wide update rate is
+        -- forwarded to the native binding live (GetAuraDurationUpdateInterval),
+        -- so PERFORMANCE's 1s text throttle must show up in the preview too or
+        -- the preview lies. NORMAL (native default, cadence undocumented) has no
+        -- number to honour -> reformat every tick and push only when the rendered
+        -- string actually changed, which is what a whole-second format does
+        -- anyway. The bar is unthrottled either way: it's DF-drawn, not bound.
+        local textIv = DF.GetAuraDurationUpdateInterval and DF:GetAuraDurationUpdateInterval()
         for h in pairs(AuraContainer._handles or {}) do
             if not h._destroyed and h.buttons then
                 for _, b in ipairs(h.buttons) do
@@ -2058,7 +2200,15 @@ function AuraContainer._startTestTicker()
                                 pcall(function() b.dfCD:SetCooldown(now, b._dfTestDur) end)
                             end
                         end
-                        if b.dfDur then b.dfDur:SetText(formatTestDuration(h, rem)) end
+                        if b.dfDur and (not textIv or not b._dfTestTextAt
+                            or (now - b._dfTestTextAt) >= textIv) then
+                            local s = formatTestDuration(h, rem)
+                            if s ~= b._dfTestText then
+                                b.dfDur:SetText(s)
+                                b._dfTestText = s
+                            end
+                            b._dfTestTextAt = now
+                        end
                         if b.dfBar then b.dfBar:SetValue(rem / b._dfTestDur) end
                     end
                 end
@@ -2623,6 +2773,16 @@ function Handle:_teardownContainer()
         for _, slot in pairs(self.buttons) do
             if slot and slot.dfBorder then DF.Border:StopAnimation(slot.dfBorder) end
         end
+    end
+    -- Test-mode native countdowns: a DurationTextBinding holds a reference to the
+    -- slot's fontstring and keeps writing to it C-side, so it must be switched off
+    -- before the slot goes — same reasoning as the border animation driver above.
+    -- Bumping the generation also retires any re-arm still pending on a timer.
+    for _, slot in pairs(self.buttons) do
+        if slot and slot._dfTestBinding then
+            pcall(function() slot._dfTestBinding:SetEnabled(false) end)
+        end
+        if slot then slot._dfTestGen = (slot._dfTestGen or 0) + 1 end
     end
     wipe(self.buttons)
     self._slotCounter = 0   -- restart the lazy-batch index for the next build
