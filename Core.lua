@@ -4632,6 +4632,11 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- reveal's threshold + which of its colour bands actually render.
                 -- Optional number = try another reveal threshold ("/df cbt 60").
                 if DF.DebugDumpColorByTime then DF:DebugDumpColorByTime(tonumber(msg:match("(%d+)"))) end
+            elseif msg == "guiwidth" or msg == "guiwidths" then
+                -- Settings-layout ground truth: every frame on the open page with its
+                -- live width, flagging any that lost one. Truncated / non-wrapping label
+                -- text is always a width fault; this says WHICH frame caused it.
+                if DF.GUI and DF.GUI.DebugDumpWidths then DF.GUI:DebugDumpWidths() end
             elseif msg == "idgate" then
                 -- Identity-gate ground truth: per vulnerable handle, live UnitCanAssist
                 -- vs the stored gate verdict vs actual window visibility

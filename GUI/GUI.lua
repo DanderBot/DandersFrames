@@ -77,6 +77,22 @@ GUI.ResolveRowHeight = ResolveRowHeight
 function GUI:RelayoutHost(widget, slotHeight)
     if not widget then return end
     local g = widget.settingsGroup
+    -- RETIRED widgets must not re-flow anything. A measured label arms a next-frame
+    -- converge; if the page rebuilds first (any Refresh — e.g. flipping the Colours
+    -- page's Seconds/Percent tabs), that timer still fires against the PREVIOUS build.
+    -- Its group is by then parented to the trash frame with its anchors cleared, so
+    -- re-laying it out sizes children off a dead frame, and the parent walk below still
+    -- reaches the LIVE page and makes it re-lay out mid-flight. IsShown() does not catch
+    -- this — a frame keeps its own shown flag when an ancestor is hidden — so test the
+    -- ancestry instead.
+    local trash = GUI._trashFrame
+    if trash then
+        local p = (g or widget)
+        while p do
+            if p == trash then return end
+            p = p:GetParent()
+        end
+    end
     if g and g.LayoutChildren then
         for _, entry in ipairs(g.groupChildren or {}) do
             if entry.widget == widget then
@@ -94,6 +110,51 @@ function GUI:RelayoutHost(widget, slotHeight)
         end
         p = p:GetParent()
     end
+end
+
+-- "/df guiwidth" — width ground truth for the page on screen: every top-level child and
+-- every settings-group child with its live width, flagging any that is non-positive or
+-- narrower than its group allows.
+-- Use it to TELL APART the two causes of truncated label text, which look identical:
+--   * a real width fault  -> frames show up flagged here;
+--   * a stale FontString wrap -> every width reads correct and the count is 0, yet the
+--     text is visibly ellipsised (and scrolling the window snaps it back, because that
+--     re-renders the string). That is CreateLabel's Reflow case, not a sizing bug.
+-- Recorded because the second one cost two wrong fixes before this dump ruled out the first.
+function GUI:DebugDumpWidths()
+    local page = GUI.CurrentPageName and GUI.Pages[GUI.CurrentPageName]
+    if not page or not page.children then
+        print("|cff00ff00DandersFrames:|r no built page on screen.")
+        return
+    end
+    local content = GUI.contentFrame and GUI.contentFrame:GetWidth() or -1
+    print(("|cff00ff00DandersFrames|r guiwidth — page '%s', content %.0f, child %.0f")
+        :format(GUI.CurrentPageName, content, page.child and page.child:GetWidth() or -1))
+    local bad = 0
+    local function flag(w, limit)
+        if not w or w <= 0 then bad = bad + 1; return "|cffff4444 <== NON-POSITIVE|r" end
+        if limit and w < limit - 1 then bad = bad + 1; return "|cffffcc00 <== NARROW|r" end
+        return ""
+    end
+    for i, widget in ipairs(page.children) do
+        if widget.isSettingsGroup then
+            local gw = widget:GetWidth() or 0
+            local inner = gw - (widget.padding or 10) * 2
+            print(("  [%d] group  w=%.0f inner=%.0f col=%s shown=%s%s")
+                :format(i, gw, inner, tostring(widget.layoutCol), tostring(widget:IsShown()), flag(gw)))
+            for j, entry in ipairs(widget.groupChildren or {}) do
+                local c = entry.widget
+                local cw = c and c:GetWidth() or 0
+                print(("      (%d) w=%.0f h=%.0f shown=%s%s")
+                    :format(j, cw, entry.height or -1, tostring(c and c:IsShown()), flag(cw, inner)))
+            end
+        else
+            local w = widget:GetWidth() or 0
+            print(("  [%d] widget w=%.0f col=%s shown=%s%s")
+                :format(i, w, tostring(widget.layoutCol), tostring(widget:IsShown()), flag(w)))
+        end
+    end
+    print(("|cff00ff00DandersFrames:|r %d suspect frame(s)."):format(bad))
 end
 
 DF.SectionRegistry = DF.SectionRegistry or {}
@@ -942,7 +1003,15 @@ function GUI:CreateSettingsGroup(parent, width, opts)
     group.LayoutChildren = function(self)
         local y = -self.padding  -- Start with top padding
         local visibleCount = 0
-        local innerWidth = self:GetWidth() - (self.padding * 2)  -- Width for child widgets
+        -- Width for child widgets. A group whose width is not resolved yet (created but
+        -- not laid out, or anchors cleared) yields a non-positive innerWidth. Do NOT
+        -- substitute a guessed width — a group can legitimately be far wider than its
+        -- constructed size (RefreshStates stretches layoutCol "both" groups to the full
+        -- content width), so guessing squeezes those children and truncates their text.
+        -- Skip the sizing instead and let the next pass, with a real width, do it. That
+        -- matches the old behaviour, where a negative SetWidth was silently a no-op.
+        local innerWidth = (self:GetWidth() or 0) - (self.padding * 2)
+        local canSize = innerWidth > 0
 
         for i, entry in ipairs(self.groupChildren) do
             local widget = entry.widget
@@ -964,8 +1033,8 @@ function GUI:CreateSettingsGroup(parent, width, opts)
                 if shouldShow then
                     widget:ClearAllPoints()
                     widget:SetPoint("TOPLEFT", self, "TOPLEFT", self.padding, y)
-                    -- Set width to fit within group padding
-                    widget:SetWidth(innerWidth)
+                    -- Set width to fit within group padding (only once the group has one)
+                    if canSize then widget:SetWidth(innerWidth) end
                     widget:Show()
                     y = y - height
                     visibleCount = visibleCount + 1
@@ -1117,6 +1186,22 @@ function GUI:CreateLabel(parent, text, width, color)
         frame:SetHeight(newH)
         return true
     end
+    -- Force the FontString to re-flow at its CURRENT width. A dual-anchored string
+    -- resolves its wrap lazily, so one that was laid out before its frame reached
+    -- final width keeps the old single-line layout and renders ellipsised
+    -- ("Customize class colors used throughout DandersFra…") even though the frame
+    -- measures a correct 260 — /df guiwidth reports zero suspect frames while the
+    -- text is visibly truncated. Scrolling the settings window dirties it and the
+    -- text snaps back, which is the tell that it is a stale layout, not a bad size.
+    -- Clearing the text first matters: SetText with an unchanged string can early-out
+    -- without marking the string dirty.
+    local function Reflow()
+        local t = lbl:GetText()
+        if t and t ~= "" then
+            lbl:SetText("")
+            lbl:SetText(t)
+        end
+    end
     -- The layout engine resizes this frame to the column's available width (see the
     -- anchor note above), and GetStringHeight can return a stale single-line value until
     -- the FontString has rendered at that final width — so converge ONCE on the next
@@ -1130,14 +1215,28 @@ function GUI:CreateLabel(parent, text, width, color)
         Remeasure()
         if C_Timer and C_Timer.After then
             C_Timer.After(0, function()
-                if frame:IsShown() and frame.settingsGroup and not frame._slotHeightExplicit
-                   and Remeasure() then
+                if not frame:IsShown() then return end
+                -- Re-flow FIRST, and for EVERY label — the height converge below is
+                -- gated (it only runs for labels that own their slot), but a stale
+                -- wrap can strand any label, and the ones with a call-site height are
+                -- exactly the ones nothing else ever touches again.
+                Reflow()
+                if frame.settingsGroup and not frame._slotHeightExplicit and Remeasure() then
                     GUI:RelayoutHost(frame, frame.preferredHeight)
                 end
             end)
         end
     end
     Measure()
+
+    -- A rebuilt page hides then re-shows its widgets, and a label re-shown at a width
+    -- it was not laid out at comes back with the stale single-line wrap. Re-flow on the
+    -- frame AFTER the show settles. Safe against the OnSizeChanged cascade that locked
+    -- up the AD indicator cards: Reflow re-applies the same string and never resizes,
+    -- so it cannot feed itself.
+    frame:SetScript("OnShow", function()
+        if C_Timer and C_Timer.After then C_Timer.After(0, Reflow) end
+    end)
 
     frame.SetText = function(self, newText) lbl:SetText(newText); Measure() end
     return frame
