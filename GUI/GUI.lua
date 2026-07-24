@@ -6259,6 +6259,15 @@ function GUI:CreateExpirationControls(group, dbTable, opts)
     group:AddWidget(w.colorsLink, (w.colorsLink.layoutHeight or 16) + 2)
     w.colorsLink.hideOn = hideNonFrame
 
+    -- Say the blend limitation WHERE the by-time mode is chosen, not only on the
+    -- Colours page: the reveal's |T escapes ignore the vertex colour a curve writes,
+    -- so it steps even while duration text blends.
+    w.stepNote = group:AddWidget(GUI:CreateNote(parent,
+        L["The expiry border and tint always step between colors."], { width = expLinkW }))
+    w.stepNote.hideOn = function()
+        return not isFrame() or dbTable.expiryAlertBorderColorMode ~= "BYTIME"
+    end
+
     w.color = group:AddWidget(GUI:CreateColorPicker(parent, L["Border Color"], dbTable,
         "expiryAlertBorderColor", false, fullUpdate, fullUpdate, true), 28)
     w.color.hideOn = hideNonFrame

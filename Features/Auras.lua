@@ -420,14 +420,17 @@ end
 -- remaining) wins. Falls back to the shipped low ladder if unset/malformed, and always ends
 -- in a threshold-0 base band.
 -- Vivid traffic-light (keep in sync with Config.lua durationColorByTimeBreakpoints).
+-- Both defaults draw the SAME bar — even quarters: 9/6/3 on the seconds strip's 12s
+-- preview domain == 75/50/25 in percent, so flipping the Colours-page tabs shows one
+-- identical default ramp.
 local DEFAULT_DURATION_BREAKPOINTS = {
-    { threshold = 8, hex = "5fe05f" }, { threshold = 5, hex = "ffd23d" },
-    { threshold = 2, hex = "ff9838" }, { threshold = 0, hex = "f75555" },
+    { threshold = 9, hex = "5fe05f" }, { threshold = 6, hex = "ffd23d" },
+    { threshold = 3, hex = "ff9838" }, { threshold = 0, hex = "f75555" },
 }
 -- PERCENT scale (keep in sync with Config.lua durationColorByPercentBreakpoints).
 local DEFAULT_PERCENT_BREAKPOINTS = {
-    { threshold = 60, hex = "5fe05f" }, { threshold = 35, hex = "ffd23d" },
-    { threshold = 15, hex = "ff9838" }, { threshold = 0,  hex = "f75555" },
+    { threshold = 75, hex = "5fe05f" }, { threshold = 50, hex = "ffd23d" },
+    { threshold = 25, hex = "ff9838" }, { threshold = 0,  hex = "f75555" },
 }
 -- TWO account-wide ramps, ONE PER UNIT — seconds remaining and percent of duration —
 -- shared by EVERY colour-by-time consumer: the duration text AND the expiry border/tint

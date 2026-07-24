@@ -4319,22 +4319,14 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         }
         -- ONE RAMP PER UNIT, shared by every colour-by-time consumer — the duration text
         -- AND the expiry border/tint reveal. "Time is running out" is one idea, so it gets
-        -- one set of colours, and a box here is a UNIT rather than a consumer.
-        -- BOTH are live at once: duration text reads whichever its Measure By dial names
-        -- (it has no threshold, so that is account-wide), while each expiry reveal reads
-        -- the one matching ITS OWN Measured In — per indicator, because a reveal's bands
-        -- and its Alert Below threshold are one formatter sampled against one property.
-        local CBT_SECTIONS = {
-            {
-                title = L["Seconds remaining"],
-                unit  = "SECONDS",
-                bpKey = "durationColorByTimeBreakpoints",
-            },
-            {
-                title = L["Percent of duration"],
-                unit  = "PERCENT",
-                bpKey = "durationColorByPercentBreakpoints",
-            },
+        -- one set of colours. BOTH ramps are live at once: duration text reads whichever
+        -- its s/% toggle names (it has no threshold, so that is account-wide), while each
+        -- expiry reveal reads the one matching ITS OWN unit — per indicator, because a
+        -- reveal's bands and its Alert Below threshold are one formatter sampled against
+        -- one property.
+        local CBT_RAMPS = {
+            SECONDS = { bpKey = "durationColorByTimeBreakpoints" },
+            PERCENT = { bpKey = "durationColorByPercentBreakpoints" },
         }
 
         local function ApplyColorByTime()
@@ -4368,23 +4360,29 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- loop so it lands on the page ABOVE the boxes it owns.
         local cbtSection
 
-        -- Build one ramp's editor. Called once per entry in CBT_SECTIONS — one box per
-        -- UNIT, both always shown, because both are always live (see the table above).
-        local function BuildSection(section)
-        local scale = CBT_UNITS[section.unit]
-        local bpKey = section.bpKey
-        -- Blending is a property of the MEDIUM, not of the ramp: duration text can blend
-        -- (the 12.1 colour curve writes a vertex colour), the |T-based reveal cannot. So
-        -- the strip draws a gradient ONLY on the ramp the text actually reads — the other
-        -- one is read exclusively by reveals, which always step.
-        local smooth = (cbtGlobalDB.durationTextColorSmooth ~= false)
-            and (cbtGlobalDB.durationTextColorScale == section.unit)
+        -- ONE box (design "A"): Seconds/Percent TABS pick which unit's stops are being
+        -- EDITED (self._cbtEditUnit — page-local UI state, deliberately not saved), the
+        -- editor strip under them always shows HARD BANDS (the stops are data; how a
+        -- consumer renders them is the legend's job), and the "How this renders" legend
+        -- at the bottom is FIXED: a labelled preview per consumer, with that consumer's
+        -- own dials beside it. The previous layout drew the gradient on whichever ramp
+        -- the text happened to read, so flipping the text's unit visibly moved the
+        -- gradient between boxes — correct data, but it read as a bug.
+        local function BuildSection()
+        local editUnit = (self._cbtEditUnit == "PERCENT") and "PERCENT" or "SECONDS"
+        self._cbtEditUnit = editUnit
+        local scale = CBT_UNITS[editUnit]
+        local bpKey = CBT_RAMPS[editUnit].bpKey
 
-        local bps = cbtGlobalDB[bpKey]
-        if type(bps) ~= "table" or #bps == 0 then
-            bps = DF:DeepCopy(DF.GlobalDefaults[bpKey])
-            cbtGlobalDB[bpKey] = bps
+        -- Seed BOTH ramps: the legend previews can show the non-edited unit (the text
+        -- preview always renders the ramp the text actually reads), so both lists must
+        -- exist whichever tab is up.
+        for _, ramp in pairs(CBT_RAMPS) do
+            if type(cbtGlobalDB[ramp.bpKey]) ~= "table" or #cbtGlobalDB[ramp.bpKey] == 0 then
+                cbtGlobalDB[ramp.bpKey] = DF:DeepCopy(DF.GlobalDefaults[ramp.bpKey])
+            end
         end
+        local bps = cbtGlobalDB[bpKey]
 
         local function cbtT(s) return math.max(0, tonumber(s and s.threshold) or 0) end
         local function cbtSorted(descending)
@@ -4397,52 +4395,69 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end
 
         local cbtGroup = GUI:CreateSettingsGroup(self.child, 280)
-        cbtGroup:AddWidget(GUI:CreateHeader(self.child, section.title), 40)
-        -- Who is on this ramp right now — the dials live once at section level, so each box
-        -- states its own audience instead of repeating them. No slot height: CreateLabel
-        -- measures its own wrapped text (GUI.RowHeight.labelPad for the chrome); a guessed
-        -- number is what left a four-line blurb sitting on the control below it.
-        cbtGroup:AddWidget(GUI:CreateLabel(self.child, (cbtGlobalDB.durationTextColorScale == section.unit)
-            and L["Used by duration text, and by any expiry reveal measured in this unit."]
-            or L["Used by any expiry reveal measured in this unit."], 260))
 
-        -- Preview strip, rendered the way this section actually reads: a gradient when
-        -- blending, hard bands when stepping. Low values left, high right.
+        -- Tabs: which unit's stops are on the editor below. UI state only — flipping a
+        -- tab changes nothing about what renders in the world.
+        cbtGroup:AddWidget(GUI:CreateSegmentToggle(self.child, {
+            { value = "SECONDS", label = L["Seconds"] },
+            { value = "PERCENT", label = L["Percent"] },
+        }, self, "_cbtEditUnit", function()
+            if pageColors and pageColors.Refresh then pageColors:Refresh() end
+        end, { segmentWidth = 127, height = 22 }), 32)
+
+        -- Strip builder, shared by the editor strip and the legend previews. `unit` picks
+        -- which ramp the strip shows — the editor and border previews show the EDITED
+        -- unit, the text preview always shows the ramp the TEXT reads. smoothMode marks
+        -- the strips that render the way the duration text does (gradient while Blend
+        -- Colors Smoothly is on). Low values left, high right.
         local previewW, stripH = 256, 18
-        local asc = cbtSorted(false)
-        local maxT = scale.maxT or math.max(12, cbtT(asc[#asc]) + 2)
-        local strip = CreateFrame("Frame", nil, self.child)
-        strip:SetSize(previewW, stripH)
-        strip.segs = {}
-        for k = 1, #asc do
-            local lo = cbtT(asc[k])
-            local hi = (k < #asc) and cbtT(asc[k + 1]) or maxT
-            if hi > lo then
-                local tex = strip:CreateTexture(nil, "ARTWORK")
-                tex:SetPoint("TOPLEFT", strip, "TOPLEFT", (lo / maxT) * previewW, 0)
-                tex:SetSize(((hi - lo) / maxT) * previewW, stripH)
-                tex:SetColorTexture(1, 1, 1, 1)   -- white base; the gradient tints it
-                strip.segs[#strip.segs + 1] = { tex = tex, from = asc[k], to = asc[k + 1] }
+        local strips = {}
+        local function BuildStrip(w, h, smoothMode, unit)
+            local f = CreateFrame("Frame", nil, self.child)
+            f:SetSize(w, h)
+            f.segs, f.smoothMode = {}, smoothMode
+            local asc = {}
+            for _, s2 in ipairs(cbtGlobalDB[CBT_RAMPS[unit].bpKey]) do asc[#asc + 1] = s2 end
+            table.sort(asc, function(a, b) return cbtT(a) < cbtT(b) end)
+            local maxT = CBT_UNITS[unit].maxT or math.max(12, cbtT(asc[#asc]) + 2)
+            for k = 1, #asc do
+                local lo = cbtT(asc[k])
+                local hi = (k < #asc) and cbtT(asc[k + 1]) or maxT
+                if hi > lo then
+                    local tex = f:CreateTexture(nil, "ARTWORK")
+                    tex:SetPoint("TOPLEFT", f, "TOPLEFT", (lo / maxT) * w, 0)
+                    tex:SetSize(((hi - lo) / maxT) * w, h)
+                    tex:SetColorTexture(1, 1, 1, 1)   -- white base; the gradient tints it
+                    f.segs[#f.segs + 1] = { tex = tex, from = asc[k], to = asc[k + 1] }
+                end
             end
+            strips[#strips + 1] = f
+            return f
         end
-        cbtGroup:AddWidget(strip, 24)
-
         local function RefreshPreview()
-            for _, seg in ipairs(strip.segs) do
-                local a = seg.from.color or { r = 1, g = 1, b = 1 }
-                if smooth then
-                    -- Blend into the next stop. The band ABOVE the final stop stays flat
-                    -- because the curve clamps there (probe-verified), so the preview
-                    -- matches what actually renders rather than approximating it.
-                    local b = (seg.to and seg.to.color) or a
+            for _, f in ipairs(strips) do
+                local sm = f.smoothMode and (cbtGlobalDB.durationTextColorSmooth ~= false)
+                for _, seg in ipairs(f.segs) do
+                    -- ONE path for both modes: reset the base to white, then gradient
+                    -- a->b — stepped is just a->a, a solid band. The mode now flips at
+                    -- RUNTIME (the Blend checkbox retints in place), and SetGradient
+                    -- layered over a texture left as SetColorTexture(band colour)
+                    -- MULTIPLIES the two into mud; the white reset makes every retint
+                    -- idempotent. The band above the final stop stays flat because the
+                    -- curve clamps there (probe-verified).
+                    local a = seg.from.color or { r = 1, g = 1, b = 1 }
+                    local b = (sm and seg.to and seg.to.color) or a
+                    seg.tex:SetColorTexture(1, 1, 1, 1)
                     seg.tex:SetGradient("HORIZONTAL",
                         CreateColor(a.r or 1, a.g or 1, a.b or 1, 1),
                         CreateColor(b.r or 1, b.g or 1, b.b or 1, 1))
-                else
-                    seg.tex:SetColorTexture(a.r or 1, a.g or 1, a.b or 1, 1)
                 end
             end
         end
+
+        -- Editor strip: ALWAYS hard bands. The stops are the data being edited; whether a
+        -- consumer blends them is that consumer's property, previewed in the legend below.
+        cbtGroup:AddWidget(BuildStrip(previewW, stripH, false, editUnit), 24)
         RefreshPreview()
 
         -- One row per stop, freshest (highest threshold) first.
@@ -4579,42 +4594,74 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             if pageColors and pageColors.Refresh then pageColors:Refresh() end
         end)
         cbtGroup:AddWidget(resetStopsBtn, 30)
+
+        -- ── HOW THIS RENDERS ─────────────────────────────────────────────────────
+        -- One labelled preview per consumer, each rendering the EDITED ramp through
+        -- that consumer's lens, with the consumer's own dials on its row. This block
+        -- never changes shape — only the pixels inside the previews.
+        cbtGroup:AddWidget(GUI:CreateExpiringSubheader(self.child, L["How this renders"]), 26)
+
+        -- Duration text: ALWAYS the ramp the text actually reads (its own unit, whatever
+        -- tab is up), gradient while Blend is on. Never dimmed — this row answers "what
+        -- does my countdown text look like right now", and its s/% toggle switches which
+        -- ramp that is, which the preview shows by changing colours, not by greying.
+        local textRow = CreateFrame("Frame", nil, self.child)
+        textRow:SetSize(260, 22)
+        local textLbl = textRow:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+        textLbl:SetPoint("LEFT", 0, 0)
+        textLbl:SetText(L["Duration Text"])
+        textLbl:SetTextColor(0.85, 0.85, 0.85)
+        local textUnitNow = (cbtGlobalDB.durationTextColorScale == "SECONDS") and "SECONDS" or "PERCENT"
+        local textStrip = BuildStrip(108, 14, true, textUnitNow)
+        textStrip:SetParent(textRow)
+        textStrip:SetPoint("LEFT", textRow, "LEFT", 88, 0)
+        local textUnit = GUI:CreateSegmentToggle(self.child, {
+            { value = "SECONDS", label = L["s"], tooltip = L["Seconds"] },
+            { value = "PERCENT", label = L["%"], tooltip = L["Percent"] },
+        }, cbtGlobalDB, "durationTextColorScale", function()
+            ApplyColorByTime()
+            if pageColors and pageColors.Refresh then pageColors:Refresh() end
+        end, { segmentWidth = 26, height = 18 })
+        textUnit:SetParent(textRow)
+        textUnit:SetPoint("RIGHT", textRow, "RIGHT", 0, 0)
+        cbtGroup:AddWidget(textRow, 26)
+
+        cbtGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Blend Colors Smoothly"], cbtGlobalDB,
+            "durationTextColorSmooth", function()
+                ApplyColorByTime()
+                RefreshPreview()   -- rendering-only: retint the text preview in place
+            end), 30)
+
+        -- Border & tint: always hard bands (|T escapes ignore the vertex colour a curve
+        -- writes), reading whichever ramp matches each indicator's own unit.
+        local borderRow = CreateFrame("Frame", nil, self.child)
+        borderRow:SetSize(260, 22)
+        local borderLbl = borderRow:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+        borderLbl:SetPoint("LEFT", 0, 0)
+        borderLbl:SetText(L["Border & Tint"])
+        borderLbl:SetTextColor(0.85, 0.85, 0.85)
+        local borderStrip = BuildStrip(108, 14, false, editUnit)
+        borderStrip:SetParent(borderRow)
+        borderStrip:SetPoint("LEFT", borderRow, "LEFT", 88, 0)
+        local borderTag = borderRow:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+        borderTag:SetPoint("RIGHT", borderRow, "RIGHT", -2, 0)
+        borderTag:SetText(L["steps"])
+        borderTag:SetTextColor(0.55, 0.55, 0.55)
+        cbtGroup:AddWidget(borderRow, 26)
+        cbtGroup:AddWidget(GUI:CreateNote(self.child,
+            L["Borders can't blend colors. Each indicator picks s or % beside its Alert Below slider."],
+            { width = 260 }))
+
+        RefreshPreview()   -- tint the legend strips built after the first pass
         Add(cbtGroup, nil, 2)
         if cbtSection then cbtSection:RegisterChild(cbtGroup) end
         end   -- BuildSection
 
-        -- Column 2, not "both": the header belongs over the boxes it owns rather than
+        -- Column 2, not "both": the header belongs over the box it owns rather than
         -- spanning the page (column 1 holds the dispel palette, which it does not own).
-        -- Width matches the boxes so the rule under the title lines up with them.
+        -- Width matches the box so the rule under the title lines up with it.
         cbtSection = Add(GUI:CreateCollapsibleSection(self.child, L["Color by Time"], true, 280), 36, 2)
-
-        -- The two dials sit ONCE, above both ramps, because neither belongs to a ramp:
-        -- blending is a property of the medium (only text can blend), and Measure By picks
-        -- which ramp the TEXT reads. An expiry reveal picks its own unit on its indicator
-        -- card, which is why both ramps below are always shown and always live.
-        local dialGroup = GUI:CreateSettingsGroup(self.child, 280)
-        dialGroup:AddWidget(GUI:CreateLabel(self.child,
-            L["One set of colors for time running out, shared by duration text and the expiry border and tint. Each expiry reveal picks its own unit on its indicator."], 260))
-        dialGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Blend Colors Smoothly"], cbtGlobalDB,
-            "durationTextColorSmooth", function()
-                ApplyColorByTime()
-                if pageColors and pageColors.Refresh then pageColors:Refresh() end
-            end), 30)
-        -- Blending is a duration-text-only capability — the reveal's |T escapes ignore the
-        -- vertex colour a curve writes — so say so rather than leaving it looking global.
-        dialGroup:AddWidget(GUI:CreateNote(self.child,
-            L["The expiry border and tint always step between colors."], { width = 260 }))
-        dialGroup:AddWidget(GUI:CreateDropdown(self.child, L["Duration Text Measured In"],
-            { _order = { "PERCENT", "SECONDS" },
-              PERCENT = L["Percent of duration"], SECONDS = L["Seconds remaining"] },
-            cbtGlobalDB, "durationTextColorScale", function()
-                ApplyColorByTime()
-                if pageColors and pageColors.Refresh then pageColors:Refresh() end
-            end))
-        Add(dialGroup, nil, 2)
-        cbtSection:RegisterChild(dialGroup)
-
-        for _, section in ipairs(CBT_SECTIONS) do BuildSection(section) end
+        BuildSection()
     end)
 
     -- ========================================

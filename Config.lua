@@ -907,10 +907,12 @@ DF.GlobalDefaults = {
         -- a glance in combat without going pure-primary neon. Keep in sync with
         -- DEFAULT_DURATION_BREAKPOINTS (Features/Auras.lua) so "Reset to Default" and the engine
         -- fallback agree. Hex: 5fe05f/ffd23d/ff9838/f75555.
-        { threshold = 8, color = { r = 0.373, g = 0.878, b = 0.373 } },  -- green  (fresh / healthy, >=8s)
-        { threshold = 5, color = { r = 1.0,   g = 0.824, b = 0.239 } },  -- gold   (5-8s)
-        { threshold = 2, color = { r = 1.0,   g = 0.596, b = 0.22  } },  -- orange (2-5s)
-        { threshold = 0, color = { r = 0.969, g = 0.333, b = 0.333 } },  -- red    (<2s, about to fall off)
+        -- 9/6/3 on the strip's 12s preview domain = EVEN QUARTERS, the same bar the percent
+        -- ramp's 75/50/25 draws — flipping the Colours-page tabs shows one identical default.
+        { threshold = 9, color = { r = 0.373, g = 0.878, b = 0.373 } },  -- green  (fresh / healthy, >=9s)
+        { threshold = 6, color = { r = 1.0,   g = 0.824, b = 0.239 } },  -- gold   (6-9s)
+        { threshold = 3, color = { r = 1.0,   g = 0.596, b = 0.22  } },  -- orange (3-6s)
+        { threshold = 0, color = { r = 0.969, g = 0.333, b = 0.333 } },  -- red    (<3s, about to fall off)
     },
     -- PERCENT ramp for duration TEXT. Thresholds are PERCENT OF TOTAL REMAINING (0-100),
     -- so every aura tells the same relative story regardless of length — a 30-minute raid
@@ -920,10 +922,12 @@ DF.GlobalDefaults = {
     durationColorByPercentBreakpoints = {
         -- Same vivid traffic-light palette as the seconds ladder, spread over the whole
         -- life of the aura. Keep in sync with DEFAULT_PERCENT_BREAKPOINTS (Features/Auras.lua).
-        { threshold = 60, color = { r = 0.373, g = 0.878, b = 0.373 } },  -- green  (>=60% left)
-        { threshold = 35, color = { r = 1.0,   g = 0.824, b = 0.239 } },  -- gold   (35-60%)
-        { threshold = 15, color = { r = 1.0,   g = 0.596, b = 0.22  } },  -- orange (15-35%)
-        { threshold = 0,  color = { r = 0.969, g = 0.333, b = 0.333 } },  -- red    (<15%, about to fall off)
+        -- 75/50/25 = EVEN QUARTERS, mirroring the seconds ladder's 9/6/3 on its 12s
+        -- preview domain — the two default bars are identical.
+        { threshold = 75, color = { r = 0.373, g = 0.878, b = 0.373 } },  -- green  (>=75% left)
+        { threshold = 50, color = { r = 1.0,   g = 0.824, b = 0.239 } },  -- gold   (50-75%)
+        { threshold = 25, color = { r = 1.0,   g = 0.596, b = 0.22  } },  -- orange (25-50%)
+        { threshold = 0,  color = { r = 0.969, g = 0.333, b = 0.333 } },  -- red    (<25%, about to fall off)
     },
     -- ============================================================
     -- HOW the duration-text ramp is READ (account-wide, Colours page)

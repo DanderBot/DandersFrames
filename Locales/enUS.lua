@@ -2233,13 +2233,13 @@ L["is already bound to:"] = true
 L["or "] = true
 L["when switching to this spec"] = true
 
--- Color by Time: one shared ramp per unit (Colours page + per-indicator expiry unit)
-L["Duration Text Measured In"] = true
-L["One set of colors for time running out, shared by duration text and the expiry border and tint. Each expiry reveal picks its own unit on its indicator."] = true
-L["Percent of duration"] = true
+-- Color by Time: one shared ramp per unit (tabbed Colours-page editor + legend,
+-- per-indicator expiry unit)
+L["Border & Tint"] = true
+L["Borders can't blend colors. Each indicator picks s or % beside its Alert Below slider."] = true
+L["How this renders"] = true
+L["steps"] = true
 L["The expiry border and tint always step between colors."] = true
-L["Used by any expiry reveal measured in this unit."] = true
-L["Used by duration text, and by any expiry reveal measured in this unit."] = true
 -- Unit segments on a threshold toggle. Single glyphs, but still localised: the
 -- seconds abbreviation is language-dependent even where the percent sign is not.
 -- Each segment tooltips its full name (L["Seconds"] / L["Percent"]).
