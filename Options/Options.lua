@@ -5863,6 +5863,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             DEFAULT = L["Default (Slot Order)"],
             TIME = L["Time Remaining"],
             NAME = L["Alphabetical"],
+            APPLIED = L["Order Applied"],
+            _order = { "DEFAULT", "TIME", "NAME", "APPLIED" },
         }
         -- Sort works on BOTH paths: legacy rows sort in the Lua scan; factory rows map
         -- the same key onto the native AuraContainerSortMethod (TIME -> ExpirationOnly,
@@ -5876,8 +5878,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Sort refinements (native rows only — the legacy Lua scan doesn't read them)
         local bfSortMine = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["My Auras First"], db, "directBuffSortMineFirst", DirectFilterChanged), 30)
         bfSortMine.hideOn = function(d) return not DF:FactoryOwnsBuffRow(d) end
-        bfSortMine.disableOn = function(d) return d.directBuffSortOrder == "DEFAULT" end
-        bfSortMine.tooltip = L["Sort your own auras before other players'. The Default sort order already shows yours first."]
+        bfSortMine.disableOn = function(d) return not DF:SortOrderSupportsMineFirst(d.directBuffSortOrder) end
+        bfSortMine.tooltip = L["Sort your own auras before other players'. Unavailable on Default (which already shows yours first) and on Order Applied (which keeps one fixed order)."]
         local bfSortRev = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Reverse Order"], db, "directBuffSortReverse", DirectFilterChanged), 30)
         bfSortRev.hideOn = function(d) return not DF:FactoryOwnsBuffRow(d) end
         bfSortRev.tooltip = L["Reverse the sort direction."]
@@ -6007,6 +6009,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             DEFAULT = L["Default (Slot Order)"],
             TIME = L["Time Remaining"],
             NAME = L["Alphabetical"],
+            APPLIED = L["Order Applied"],
+            _order = { "DEFAULT", "TIME", "NAME", "APPLIED" },
         }
         local dfSort = debuffGroup:AddWidget(GUI:CreateDropdown(self.child, L["Sort Order"], debuffSortOptions, db, "directDebuffSortOrder", function()
             DirectFilterChanged()
@@ -6016,8 +6020,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Sort refinements (native rows only — the legacy Lua scan doesn't read them)
         local dfSortMine = debuffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["My Auras First"], db, "directDebuffSortMineFirst", DirectFilterChanged), 30)
         dfSortMine.hideOn = function(d) return not DF:FactoryOwnsDebuffRow(d) end
-        dfSortMine.disableOn = function(d) return d.directDebuffSortOrder == "DEFAULT" end
-        dfSortMine.tooltip = L["Sort your own auras before other players'. The Default sort order already shows yours first."]
+        dfSortMine.disableOn = function(d) return not DF:SortOrderSupportsMineFirst(d.directDebuffSortOrder) end
+        dfSortMine.tooltip = L["Sort your own auras before other players'. Unavailable on Default (which already shows yours first) and on Order Applied (which keeps one fixed order)."]
         local dfSortRev = debuffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Reverse Order"], db, "directDebuffSortReverse", DirectFilterChanged), 30)
         dfSortRev.hideOn = function(d) return not DF:FactoryOwnsDebuffRow(d) end
         dfSortRev.tooltip = L["Reverse the sort direction."]

@@ -98,7 +98,8 @@ local function RefreshLocaleStrings()
     -- Per-group Sort Order (Wave 2) — mirrors the aura rows' dropdown exactly.
     OPTS.SORT_OPTIONS = {
         DEFAULT = L["Default (Slot Order)"], TIME = L["Time Remaining"], NAME = L["Alphabetical"],
-        _order = {"DEFAULT", "TIME", "NAME"},
+        APPLIED = L["Order Applied"],
+        _order = {"DEFAULT", "TIME", "NAME", "APPLIED"},
     }
 end
 
@@ -8482,7 +8483,7 @@ BuildLayoutGroupsTab = function()
                     local sortMineCb   -- forward capture: the dropdown greys it
                     local sortDrop = GUI:CreateDropdown(body, L["Sort Order"], OPTS.SORT_OPTIONS, nil, nil, function()
                         sortRefresh()
-                        if sortMineCb then sortMineCb:SetEnabled((group.sortOrder or "DEFAULT") ~= "DEFAULT") end
+                        if sortMineCb then sortMineCb:SetEnabled(DF:SortOrderSupportsMineFirst(group.sortOrder or "DEFAULT")) end
                     end, function() return group.sortOrder or "DEFAULT" end,
                        function(v) group.sortOrder = v end)
                     sortDrop:SetPoint("TOPLEFT", body, "TOPLEFT", 5, -(-by))
@@ -8492,8 +8493,8 @@ BuildLayoutGroupsTab = function()
                     sortMineCb = GUI:CreateCheckbox(body, L["My Auras First"], group, "sortMineFirst", sortRefresh)
                     sortMineCb:SetPoint("TOPLEFT", body, "TOPLEFT", 8, -(-by))
                     sortMineCb:SetWidth(bodyWidth - 16)
-                    sortMineCb.tooltip = L["Sort your own auras before other players'. The Default sort order already shows yours first."]
-                    sortMineCb:SetEnabled((group.sortOrder or "DEFAULT") ~= "DEFAULT")
+                    sortMineCb.tooltip = L["Sort your own auras before other players'. Unavailable on Default (which already shows yours first) and on Order Applied (which keeps one fixed order)."]
+                    sortMineCb:SetEnabled(DF:SortOrderSupportsMineFirst(group.sortOrder or "DEFAULT"))
                     by = by - 26
 
                     local sortRevCb = GUI:CreateCheckbox(body, L["Reverse Order"], group, "sortReverse", sortRefresh)
@@ -8945,7 +8946,7 @@ BuildDebuffGroupsTab = function()
                 local sortMineCb   -- forward capture: the dropdown greys it
                 local sortDrop = GUI:CreateDropdown(body, L["Sort Order"], OPTS.SORT_OPTIONS, nil, nil, function()
                     LayoutDebuffGroupRefresh()
-                    if sortMineCb then sortMineCb:SetEnabled((group.sortOrder or "TIME") ~= "DEFAULT") end
+                    if sortMineCb then sortMineCb:SetEnabled(DF:SortOrderSupportsMineFirst(group.sortOrder or "TIME")) end
                 end, function() return group.sortOrder or "TIME" end,
                    function(v) group.sortOrder = v end)
                 sortDrop:SetPoint("TOPLEFT", body, "TOPLEFT", 5, by)
@@ -8955,8 +8956,8 @@ BuildDebuffGroupsTab = function()
                 sortMineCb = GUI:CreateCheckbox(body, L["My Auras First"], group, "sortMineFirst", LayoutDebuffGroupRefresh)
                 sortMineCb:SetPoint("TOPLEFT", 8, by)
                 sortMineCb:SetWidth(bodyWidth - 16)
-                sortMineCb.tooltip = L["Sort your own auras before other players'. The Default sort order already shows yours first."]
-                sortMineCb:SetEnabled((group.sortOrder or "TIME") ~= "DEFAULT")
+                sortMineCb.tooltip = L["Sort your own auras before other players'. Unavailable on Default (which already shows yours first) and on Order Applied (which keeps one fixed order)."]
+                sortMineCb:SetEnabled(DF:SortOrderSupportsMineFirst(group.sortOrder or "TIME"))
                 by = by - 26
 
                 local sortRevCb = GUI:CreateCheckbox(body, L["Reverse Order"], group, "sortReverse", LayoutDebuffGroupRefresh)

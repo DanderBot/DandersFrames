@@ -1110,12 +1110,27 @@ end
 -- SHARED (Wave 2): exposed on DF so the AD group families (filter / other-buff /
 -- debuff groups, AuraDesigner/Factory.lua) map their per-group sort fields
 -- through the SAME function as the rows — callers feed their own storage.
+-- Sort orders whose native method has NO mine-first variant, so "My Auras First" is
+-- inert while one is selected and the GUI greys it (same treatment DEFAULT already gets).
+-- APPLIED is the only one: Blizzard ships AuraInstanceIDOnly with no plain AuraInstanceID.
+local SORT_ORDERS_WITHOUT_MINE_FIRST = { DEFAULT = true, APPLIED = true }
+function DF:SortOrderSupportsMineFirst(order)
+    return not SORT_ORDERS_WITHOUT_MINE_FIRST[order or "DEFAULT"]
+end
+
 function DF:BuildAuraSort(order, mineFirst, reverse)
     local method
     if order == "TIME" then
         method = mineFirst and "Expiration" or "ExpirationOnly"
     elseif order == "NAME" then
         method = mineFirst and "Name" or "NameOnly"
+    elseif order == "APPLIED" then
+        -- Chronological, never-reshuffling order: auraInstanceIDs are handed out in
+        -- application order and the comparator is a plain `a.auraInstanceID <
+        -- b.auraInstanceID` (Blizzard_FrameXMLUtil/AuraUtil.lua), so an aura keeps its
+        -- place when it refreshes instead of jumping as its remaining time changes.
+        -- Mine-first cannot ride this one — there is no non-"Only" variant of it.
+        method = "AuraInstanceIDOnly"
     elseif reverse then
         -- DEFAULT + Reverse: the direction needs an explicit method to ride on.
         method = "Default"
