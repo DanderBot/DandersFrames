@@ -979,16 +979,15 @@ local function bindNative(slot, config)
 
     local dispelSpec = style.dispel
     if dispelSpec then
-        if slot.dfAuraBorder and slot.SetAuraBorder
+        if slot.dfAuraBorder and (slot.AddDispelTypeTexture or slot.SetAuraBorder)
             and (not slot._boundAuraBorder or slot._dfDispelCurveGen ~= DF.dispelCurveGen) then
             slot._boundAuraBorder = true
             slot._dfDispelCurveGen = DF.dispelCurveGen
-            -- Style enum moved to Enum.CustomAuraButtonBorderStyle in 12.1 (the old
-            -- AuraButtonBorderStyle global was removed — the old `or 0` fallback was
-            -- silently degrading Color to Atlas). Dual-detect by NAME.
+            -- Style resolution is SHARED with the dispel overlay (DF:ResolveDispelTextureStyle
+            -- in Frames/Border.lua) — it carries the 68914 enum rename/renumber and the
+            -- correct last-resort literals. Never resolve the enum locally.
             local styleName = dispelSpec.style or "Atlas"
-            local styleEnum = (Enum and Enum.CustomAuraButtonBorderStyle and Enum.CustomAuraButtonBorderStyle[styleName])
-                or (AuraButtonBorderStyle and AuraButtonBorderStyle[styleName]) or 0
+            local styleEnum = DF:ResolveDispelTextureStyle(styleName)
             -- Custom dispel colours: Color-style rings recolour from the shared
             -- account palette via customDispelColorMap — keyed by dispel NAME,
             -- indexed private-side against auraData.dispelName (nil → game palette).
@@ -997,13 +996,23 @@ local function bindNative(slot, config)
                 map = DF:GetDispelColorMap()
             end
             local ok, err = pcall(function()
-                slot:SetAuraBorder(slot.dfAuraBorder, {
+                local opts = {
                     style = styleEnum,
                     customDispelColorMap = map,
                     showWhenHarmful = dispelSpec.showWhenHarmful ~= false,
                     showWhenHelpful = dispelSpec.showWhenHelpful == true,
                     showIcon = false,
-                })
+                }
+                -- 68914: SetAuraBorder is the deprecated clearing alias ("removed after
+                -- 12.1"); AddDispelTypeTexture is the real API and APPENDS. This bind
+                -- re-runs on a palette-generation bump, so clear first to REPLACE rather
+                -- than stack a second ring on the same icon.
+                if slot.AddDispelTypeTexture then
+                    if slot.ClearDispelTypeTextures then slot:ClearDispelTypeTextures() end
+                    slot:AddDispelTypeTexture(slot.dfAuraBorder, opts)
+                else
+                    slot:SetAuraBorder(slot.dfAuraBorder, opts)
+                end
             end)
             if not ok and not warnedNativeDispel then
                 warnedNativeDispel = true

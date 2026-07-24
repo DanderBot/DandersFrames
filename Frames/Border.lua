@@ -443,6 +443,35 @@ end
 -- untouched palette is byte-identical to the game's own dispel colours. None/Physical is
 -- kept only for the map's "" fallback (never user-editable — the border is hidden on
 -- no-dispel-type auras and the overlay never fires on them).
+-- SHARED dispel-texture style resolver (the debuff-icon ring + every overlay carrier
+-- resolve through this one function — never a local copy).
+-- DF names its two styles the way the ORIGINAL 12.1 enum did:
+--   "Color" = keep OUR asset, recolour it by dispel type  (gradient / ring / strips)
+--   "Atlas" = draw Blizzard's own dispel-type border art
+-- ★ 68914 renamed AND renumbered the enum: CustomAuraButtonBorderStyle{Atlas=0,Color=1}
+-- became CustomAuraButtonDispelTypeTextureStyle{Border=0,BorderWithIcon=1,Icon=2,
+-- PreserveAsset=3,CustomAsset=4}. Blizzard's own shim (Blizzard_Deprecated/
+-- Deprecated_12_1_0.lua) maps Atlas->BorderWithIcon and Color->PreserveAsset, and is
+-- flagged for removal — so resolve against the CURRENT enum first and keep the shim
+-- only as a pre-68914 fallback. The old numeric fallbacks were the real hazard: `1`
+-- now means BorderWithIcon (Blizzard's art WITH a badge, drawn over our gradient) and
+-- `0` means Border — either would silently replace our own art, so the last-resort
+-- literals below are the NEW values, not the old ones.
+local DISPEL_STYLE_NEW = { Color = "PreserveAsset", Atlas = "BorderWithIcon" }
+local DISPEL_STYLE_LITERAL = { Color = 3, Atlas = 1 }
+function DF:ResolveDispelTextureStyle(styleName)
+    styleName = (styleName == "Color" or styleName == "Atlas") and styleName or "Atlas"
+    local newEnum = Enum and Enum.CustomAuraButtonDispelTypeTextureStyle
+    local v = newEnum and newEnum[DISPEL_STYLE_NEW[styleName]]
+    if v ~= nil then return v end
+    local oldEnum = Enum and Enum.CustomAuraButtonBorderStyle          -- pre-68914
+    v = oldEnum and oldEnum[styleName]
+    if v ~= nil then return v end
+    v = _G.AuraButtonBorderStyle and _G.AuraButtonBorderStyle[styleName]   -- Blizzard's shim
+    if v ~= nil then return v end
+    return DISPEL_STYLE_LITERAL[styleName]
+end
+
 function DF:GetGameDispelPalette()
     if DF._gameDispelPalette then return DF._gameDispelPalette end
     local D = DF.DispelDefaultColors

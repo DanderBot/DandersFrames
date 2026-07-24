@@ -65,12 +65,12 @@ local function GetTestDispelColor(dispelType)
     return 0.5, 0.5, 1.0
 end
 
--- SetAuraBorder style enum: moved to Enum.CustomAuraButtonBorderStyle in 12.1 (the
--- old AuraButtonBorderStyle global was removed) — dual-detect so a configured Color
--- style can't silently degrade to Atlas.
+-- "Keep OUR asset, just recolour it by dispel type" — the style every DF overlay carrier
+-- binds with (our gradient / ring / strip art, tinted; never Blizzard's border atlas).
+-- Resolution (incl. the 68914 enum rename + renumber) is SHARED with the debuff-icon ring:
+-- DF:ResolveDispelTextureStyle, Frames/Border.lua. Never resolve the enum here.
 local function DispelBorderStyle()
-    return (Enum and Enum.CustomAuraButtonBorderStyle and Enum.CustomAuraButtonBorderStyle.Color)
-        or (_G.AuraButtonBorderStyle and _G.AuraButtonBorderStyle.Color) or 1
+    return DF:ResolveDispelTextureStyle("Color")
 end
 
 -- Dispel-colour map for the overlay: ALWAYS recolour the carriers from the shared
@@ -1309,18 +1309,37 @@ end
 -- StatusBar fill), its texture, and the colour map are all in the container SIGNATURE
 -- (dispelFactoryPlanAndSig), so any change rebuilds and re-runs this with the right
 -- carrier — no tainted re-bind is ever needed.
+-- ★ 68914: SetAuraBorder is a DEPRECATED alias (Blizzard_CustomAuraButton.lua: "will be
+-- removed after 12.1") that does ClearDispelTypeTextures() + AddDispelTypeTexture() —
+-- i.e. it REPLACES the button's texture list, which is the whole reason a slot could only
+-- ever carry one tintable region. Bind through the real API when present: AddDispelTypeTexture
+-- APPENDS, so one button can carry several tinted carriers. Behaviour is identical for a
+-- single carrier (the alias just clears an empty list first), so this is a drop-in swap.
 local function BindDispelCarrier(btn, carrier, db, key)
-    if not (carrier and btn.SetAuraBorder) then return end
+    local addTex = btn.AddDispelTypeTexture
+    if not (carrier and (addTex or btn.SetAuraBorder)) then return end
     btn._dfDispelBoundCarrier = carrier
     btn._dfDispelCurveGen = DF.dispelCurveGen
     local ok, err = pcall(function()
-        btn:SetAuraBorder(carrier, {
+        local opts = {
             style = DispelBorderStyle(),
             customDispelColorMap = DispelBorderMapFor(),
             showWhenHarmful = true,
             showWhenHelpful = false,
             showIcon = false,
-        })
+        }
+        if addTex then
+            -- Add APPENDS (unlike the clearing alias), so a re-entrant init on a
+            -- recycled button would stack duplicate carriers. Clear once per button,
+            -- then append: identical to the alias for one carrier, and safe for many.
+            if not btn._dfDispelTexBound and btn.ClearDispelTypeTextures then
+                btn:ClearDispelTypeTextures()
+            end
+            btn._dfDispelTexBound = true
+            btn:AddDispelTypeTexture(carrier, opts)
+        else
+            btn:SetAuraBorder(carrier, opts)
+        end
     end)
     DF._dispelBindErr = DF._dispelBindErr or {}
     DF._dispelBindErr[key or "?"] = ok and "ok" or tostring(err)
@@ -1345,7 +1364,9 @@ end
 -- (BUILD-ONCE-LEAVE-IT). Moving create+bind there would delay the overlay's debut to
 -- regen — exactly the moment it exists for. Timing, not legality, is the reason.
 local function DispelSlotSecureInit(btn, slotInfo, db, frame)
-    if not (btn and btn.CreateTexture and btn.SetAuraBorder) then return end
+    -- Either bind API is enough (AddDispelTypeTexture is current; SetAuraBorder is the
+    -- deprecated alias kept for pre-68914 clients) — see BindDispelCarrier.
+    if not (btn and btn.CreateTexture and (btn.AddDispelTypeTexture or btn.SetAuraBorder)) then return end
     local key = slotInfo.key
     if slotInfo.edgeSide then
         local holder = CreateFrame("Frame", nil, btn)
