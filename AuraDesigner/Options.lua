@@ -1507,7 +1507,14 @@ local TYPE_DEFAULTS = {
         expiringColor = {r = 1, g = 0.2, b = 0.2, a = 1},
         expiringTintEnabled = false,
         expiringTintColor = {r = 1, g = 0.2, b = 0.2, a = 0.5},  -- #FF3333 @ 50% (matches expiring border red)
-        showDuration = true, durationFormat = "NUMBER", durationFont = "DF Roboto SemiBold",
+        -- FALSE to match the factory's bar render default (buildDurationTextSpec is
+        -- called with defaultShow = false for bars — no text out of the box). It was
+        -- `true` here, so a never-toggled bar showed a TICKED checkbox while rendering
+        -- no text — and durationFmtKey's early-return ("") meant Duration Format
+        -- changes never moved the struct sig, reading as "stale until I toggle
+        -- Show Duration" (Krathe, 2026-07-24). Instances are created SPARSE
+        -- (CreateIndicatorInstance), so this fallback IS the checkbox for new bars.
+        showDuration = false, durationFormat = "NUMBER", durationFont = "DF Roboto SemiBold",
         durationScale = 1.2, durationOutline = "SHADOW;OUTLINE",
         durationAnchor = "CENTER", durationX = 0, durationY = 0,
         durationColorByTime = true,
