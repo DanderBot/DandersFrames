@@ -4924,7 +4924,17 @@ DF._MainEventDispatcher = function(self, event, arg1)
                                 dumpTex("slot.nativeGradient", wdg.nativeGradient)
                             end
                             if btn.dfDispelRing then dumpTex("slot[" .. tostring(key) .. "].ring", btn.dfDispelRing) end
-                            if btn.dfDispelEdgeTex then dumpTex("slot[" .. tostring(key) .. "].edge", btn.dfDispelEdgeTex) end
+                            -- Edge strips are keyed BY SIDE now (all four ride the one
+                            -- overlay slot since the carriers were consolidated).
+                            if type(btn.dfDispelEdgeTex) == "table" then
+                                for _, side in ipairs({ "TOP", "BOTTOM", "LEFT", "RIGHT" }) do
+                                    local et = btn.dfDispelEdgeTex[side]
+                                    if et then dumpTex("slot[" .. tostring(key) .. "].edge" .. side, et) end
+                                end
+                            end
+                            if btn._dfDispelCarriers then
+                                print(("  slot[%s] bound carriers=%d"):format(tostring(key), #btn._dfDispelCarriers))
+                            end
                         end
                     end
                     -- Neighbours that can overdraw the deficit area

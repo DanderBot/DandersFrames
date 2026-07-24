@@ -1185,30 +1185,36 @@ local function dispelSlotPlan(db)
     -- removed 2026-07-11 — per-type slots with the pickers; the irreducible cost
     -- was one overlay PER type on multi-type units, judged not worth the
     -- confusion once game mode gained the border and edge glow).
+    -- ★ ONE slot carries the whole any-dispellable overlay (68914). Every tinted piece
+    -- — gradient/tint, the border ring, and the four EDGE strips — used to need its OWN
+    -- slot, because the old bind API replaced the button's single tintable region and
+    -- "one tintable region per slot" was the hard limit. Up to SIX same-filter slots
+    -- existed purely to smuggle six textures onto one visual overlay, and they stayed in
+    -- sync only because identical filters happen to fill with the same aura.
+    -- AddDispelTypeTexture appends, so one button now carries them all: the sync is
+    -- structural rather than incidental, and a frame declares one slot instead of six.
+    -- `roles` says which carriers this slot builds (see DispelSlotSecureInit) and is
+    -- serialized into the plan signature, so flipping any of them still rebuilds.
+    local gradientOn = db.dispelShowGradient ~= false
+    local gradientStyle = db.dispelGradientStyle or "FULL"
+    local roles = {
+        -- EDGE renders through the four strips; any other style renders one gradient
+        -- carrier (health-tracking or plain — resolved at init). NOT gated on
+        -- dispelShowGradient: the carrier is always built for non-EDGE styles and
+        -- StyleGameMainSlot alphas it to 0 when the gradient is off, exactly as the
+        -- pre-consolidation main slot did. Gating creation here would make "show
+        -- gradient" structural and leave nothing to re-show without a rebuild.
+        gradient = (gradientStyle ~= "EDGE") and gradientStyle or nil,
+        border   = db.dispelShowBorder ~= false or nil,
+        -- A single-region vignette was tried and rejected: TexCoord zoom shows a fading
+        -- ramp's faint inner TAIL, so any Gradient Size below the baked band rendered
+        -- near-invisible (live-caught; crop-scaling only works on SOLID bands like the
+        -- border ring). Four separate strip textures, now on one button.
+        edges    = (gradientOn and gradientStyle == "EDGE")
+                   and { "TOP", "BOTTOM", "LEFT", "RIGHT" } or nil,
+    }
     local slots = {}
-    slots[#slots + 1] = { key = "main", filter = baseFilter, candidateFilters = baseCF }
-    -- BORDER: a SECOND any-dispellable slot whose bound carrier is a single
-    -- square-ring texture (transparent centre). One tintable region per slot is
-    -- the hard limit — so the border rides its own slot; the identical filter
-    -- fills it with the same aura as the main slot (no cross-slot dedup),
-    -- keeping border and gradient perfectly in sync.
-    if db.dispelShowBorder ~= false then
-        slots[#slots + 1] = { key = "gameborder", filter = baseFilter, candidateFilters = baseCF }
-    end
-    -- EDGE gradient: FOUR strip slots, one per edge, each binding its own strip
-    -- texture (the same DF_Gradient_* art the legacy EDGE uses). A single-region
-    -- vignette was tried and rejected: TexCoord zoom shows a fading ramp's faint
-    -- inner TAIL, so any Gradient Size below the baked band rendered
-    -- near-invisible (live-caught; crop-scaling only works on SOLID bands like
-    -- the border ring). Same-filter slots all fill with the same aura (proven
-    -- live: main + gameborder), so the four strips stay in sync. Structural:
-    -- the keys put the style flip in the plan signature.
-    if db.dispelShowGradient ~= false and (db.dispelGradientStyle == "EDGE") then
-        for _, edge in ipairs({ "TOP", "BOTTOM", "LEFT", "RIGHT" }) do
-            slots[#slots + 1] = { key = "edge" .. edge, filter = baseFilter,
-                candidateFilters = baseCF, edgeSide = edge }
-        end
-    end
+    slots[#slots + 1] = { key = "main", filter = baseFilter, candidateFilters = baseCF, roles = roles }
     -- Type icon: per-type slots (includeDispelTypes = type knowledge WITHOUT a
     -- native bind) carrying DF's clean RaidFrame-Icon atlases. The native Atlas
     -- style was tried first and rejected: its ui-debuff-border-*-icon art is a
@@ -1233,7 +1239,20 @@ local function dispelFactoryPlanAndSig(db)
     local slots, needPolicy = dispelSlotPlan(db)
     if not slots then return nil end
     local parts = { needPolicy and "policy" or "nopolicy" }
-    for i = 1, #slots do parts[#parts + 1] = slots[i].key .. "=" .. slots[i].filter end
+    for i = 1, #slots do
+        parts[#parts + 1] = slots[i].key .. "=" .. slots[i].filter
+        -- ROLES are structural: the carriers a slot builds are created + bound ONCE in
+        -- the secure init, so toggling the ring / gradient / EDGE strips must rebuild.
+        -- They used to be separate slot keys (and so rode the loop above); now that one
+        -- slot carries them all they have to be serialized explicitly or the flip would
+        -- silently no-op until the next unrelated rebuild.
+        local r = slots[i].roles
+        if r then
+            parts[#parts + 1] = "r:g=" .. tostring(r.gradient)
+                .. ",b=" .. tostring(r.border and true or false)
+                .. ",e=" .. (r.edges and table.concat(r.edges, "/") or "none")
+        end
+    end
     -- The bound carrier is created in the initializeFrame (DispelSlotSecureInit), so
     -- anything that changes WHICH carrier a slot binds or its texture must be in the
     -- signature — a change rebuilds the container and re-runs the init with the right
@@ -1320,39 +1339,40 @@ end
 -- ever carry one tintable region. Bind through the real API when present: AddDispelTypeTexture
 -- APPENDS, so one button can carry several tinted carriers. Behaviour is identical for a
 -- single carrier (the alias just clears an empty list first), so this is a drop-in swap.
-local function BindDispelCarrier(btn, carrier, db, key)
-    local addTex = btn.AddDispelTypeTexture
-    if not (carrier and (addTex or btn.SetAuraBorder)) then return end
-    btn._dfDispelBoundCarrier = carrier
+-- Bind EVERY carrier this button owns, in one pass. Clears once, then appends each —
+-- the ordering the appending API requires (a per-carrier clear would leave only the
+-- last). This is what lets a single slot carry the gradient, the ring and the four EDGE
+-- strips; the list is remembered so a palette edit can re-bind them all in place.
+-- Pre-68914 fallback: the deprecated alias can only hold ONE region, so the first
+-- carrier wins there (matching the old one-slot-per-carrier behaviour as closely as a
+-- single slot can).
+local function BindDispelCarriers(btn, carriers, db, key)
+    if not (btn and carriers and carriers[1]) then return end
+    btn._dfDispelCarriers = carriers
     btn._dfDispelCurveGen = DF.dispelCurveGen
+    local opts = {
+        style = DispelBorderStyle(),
+        customDispelColorMap = DispelBorderMapFor(),
+        showWhenHarmful = true,
+        showWhenHelpful = false,
+        showIcon = false,
+    }
     local ok, err = pcall(function()
-        local opts = {
-            style = DispelBorderStyle(),
-            customDispelColorMap = DispelBorderMapFor(),
-            showWhenHarmful = true,
-            showWhenHelpful = false,
-            showIcon = false,
-        }
-        if addTex then
-            -- REPLACE, don't append: Add is additive, so without the clear a re-entrant
-            -- init OR an in-place palette re-bind (StyleDispelSlots) would stack a second
-            -- carrier on the same button. Clear-then-add reproduces the old alias exactly
-            -- and is safely idempotent. NOTE for the future slot consolidation: binding
-            -- SEVERAL carriers to one button needs a batch call that clears ONCE and then
-            -- adds each — not repeated calls to this one.
+        if btn.AddDispelTypeTexture then
             if btn.ClearDispelTypeTextures then btn:ClearDispelTypeTextures() end
-            btn:AddDispelTypeTexture(carrier, opts)
+            for i = 1, #carriers do btn:AddDispelTypeTexture(carriers[i], opts) end
         else
-            btn:SetAuraBorder(carrier, opts)
+            btn:SetAuraBorder(carriers[1], opts)
         end
     end)
     DF._dispelBindErr = DF._dispelBindErr or {}
-    DF._dispelBindErr[key or "?"] = ok and "ok" or tostring(err)
+    DF._dispelBindErr[key or "?"] = ok and ("ok x" .. #carriers) or tostring(err)
     if not ok and not warnedTintBind then
         warnedTintBind = true
-        if DF.DebugWarn then DF:DebugWarn("Dispel", "SetAuraBorder %s bind failed: %s", tostring(key), tostring(err)) end
+        if DF.DebugWarn then DF:DebugWarn("Dispel", "dispel bind %s failed: %s", tostring(key), tostring(err)) end
     end
 end
+
 
 -- Create the SetAuraBorder carrier(s) for one overlay slot and bind them, per the
 -- slot's role (from its key / edgeSide). Each carrier is anchored to the button here
@@ -1370,58 +1390,74 @@ end
 -- regen — exactly the moment it exists for. Timing, not legality, is the reason.
 local function DispelSlotSecureInit(btn, slotInfo, db, frame)
     -- Either bind API is enough (AddDispelTypeTexture is current; SetAuraBorder is the
-    -- deprecated alias kept for pre-68914 clients) — see BindDispelCarrier.
+    -- deprecated alias kept for pre-68914 clients) — see BindDispelCarriers.
     if not (btn and btn.CreateTexture and (btn.AddDispelTypeTexture or btn.SetAuraBorder)) then return end
     local key = slotInfo.key
-    if slotInfo.edgeSide then
+    local roles = slotInfo.roles
+    if not roles then return end   -- icon slots bind nothing (plain art on the slot's SetShown)
+    local hbLvl = (frame.healthBar and frame.healthBar:GetFrameLevel())
+        or (frame:GetFrameLevel() + 3)
+    local w = EnsureSlotWidget(btn, frame)
+    local carriers = {}
+
+    -- GRADIENT / TINT. Health-tracking binds the widget StatusBar's FILL texture so the
+    -- bar clips it to current health (UpdateDispelGradientHealth feeds the value);
+    -- otherwise a plain texture. Anchored to the button so it inherits the button's
+    -- layout aspects at bind time; StyleGameMainSlot re-pins onto the style rect.
+    if roles.gradient then
+        local style = roles.gradient
+        local tracking = style == "FULL" and db.dispelGradientOnCurrentHealth ~= false
+        if tracking then
+            w.gradient:SetAllPoints(btn)
+            w.gradient:SetStatusBarTexture(GRADIENT_TEXTURES.FULL)
+            carriers[#carriers + 1] = w.gradient:GetStatusBarTexture()
+        else
+            if not w.nativeGradient then
+                w.nativeGradient = w:CreateTexture(nil, "ARTWORK", nil, 2)
+            end
+            w.nativeGradient:SetTexture(GRADIENT_TEXTURES[style] or GRADIENT_TEXTURES.FULL)
+            w.nativeGradient:SetAllPoints(btn)
+            carriers[#carriers + 1] = w.nativeGradient
+        end
+        -- Name the gradient carrier explicitly. StyleGameMainSlot must dress THIS one;
+        -- addressing it as "the bound carrier" only worked while a slot held exactly one,
+        -- and would grab the ring on a button whose gradient role is absent (EDGE).
+        btn._dfDispelGradientCarrier = carriers[#carriers]
+    end
+
+    -- EDGE strips: one carrier per side, keyed BY SIDE (they used to be one field each
+    -- on four separate buttons; on a shared button they must not overwrite each other).
+    if roles.edges then
+        btn.dfDispelEdgeTex = btn.dfDispelEdgeTex or {}
+        btn.dfDispelEdgeHolder = btn.dfDispelEdgeHolder or {}
+        for _, edge in ipairs(roles.edges) do
+            local holder = CreateFrame("Frame", nil, btn)
+            holder:SetAllPoints(btn)
+            holder:SetFrameLevel(hbLvl + 7)
+            local tex = holder:CreateTexture(nil, "ARTWORK", nil, 2)
+            tex:SetTexture(EDGE_GRADIENT_TEXTURES[edge])
+            tex:SetAllPoints(btn)   -- anchored for the bind; StyleGameEdgeSlot positions the strip
+            btn.dfDispelEdgeHolder[edge] = holder
+            btn.dfDispelEdgeTex[edge] = tex
+            carriers[#carriers + 1] = tex
+        end
+    end
+
+    -- BORDER ring (transparent centre). Above the strips, per the legacy layering.
+    if roles.border then
         local holder = CreateFrame("Frame", nil, btn)
         holder:SetAllPoints(btn)
-        local hbLvl = (frame.healthBar and frame.healthBar:GetFrameLevel())
-            or (frame:GetFrameLevel() + 3)
-        holder:SetFrameLevel(hbLvl + 7)
-        local tex = holder:CreateTexture(nil, "ARTWORK", nil, 2)
-        tex:SetTexture(EDGE_GRADIENT_TEXTURES[slotInfo.edgeSide])
-        tex:SetAllPoints(btn)   -- anchored for the bind; StyleGameEdgeSlot positions the strip
-        btn.dfDispelEdgeHolder = holder
-        btn.dfDispelEdgeTex = tex
-        BindDispelCarrier(btn, tex, db, key)
-    elseif key == "gameborder" then
-        local holder = CreateFrame("Frame", nil, btn)
-        holder:SetAllPoints(btn)
-        local hbLvl = (frame.healthBar and frame.healthBar:GetFrameLevel())
-            or (frame:GetFrameLevel() + 3)
         holder:SetFrameLevel(hbLvl + 9)
         local ring = holder:CreateTexture(nil, "ARTWORK")
         ring:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\DF_SquareBorder")
         ring:SetAllPoints(btn)   -- anchored for the bind; StyleGameBorderSlot crops/insets
         btn.dfDispelRing = ring
         btn.dfDispelRingHolder = holder
-        BindDispelCarrier(btn, ring, db, key)
-    elseif key == "main" then
-        local w = EnsureSlotWidget(btn, frame)
-        local style = db.dispelGradientStyle or "FULL"
-        -- EDGE renders through the four edge slots; the main carrier stays parked +
-        -- unbound (a rect-less/parked region can't render and would fail validation).
-        if style == "EDGE" then return end
-        local tracking = style == "FULL" and db.dispelGradientOnCurrentHealth ~= false
-        local carrier
-        if tracking then
-            -- Health-tracking: bind the widget StatusBar's FILL texture; the bar clips
-            -- it to current health (UpdateDispelGradientHealth feeds the value). Anchor
-            -- the bar to the button so the fill inherits the button's layout aspects.
-            w.gradient:SetAllPoints(btn)
-            w.gradient:SetStatusBarTexture(GRADIENT_TEXTURES.FULL)
-            carrier = w.gradient:GetStatusBarTexture()
-        else
-            if not w.nativeGradient then
-                w.nativeGradient = w:CreateTexture(nil, "ARTWORK", nil, 2)
-            end
-            w.nativeGradient:SetTexture(GRADIENT_TEXTURES[style] or GRADIENT_TEXTURES.FULL)
-            w.nativeGradient:SetAllPoints(btn)   -- StyleGameMainSlot re-pins onto the style rect
-            carrier = w.nativeGradient
-        end
-        BindDispelCarrier(btn, carrier, db, key)
+        carriers[#carriers + 1] = ring
     end
+
+    -- ONE bind pass for every carrier (clear-once-then-append; see BindDispelCarriers).
+    BindDispelCarriers(btn, carriers, db, key)
 end
 
 -- GAME-COLOUR mode, main slot. The ONE natively-tintable region per slot (source-
@@ -1458,7 +1494,7 @@ local function StyleGameMainSlot(btn, frame, db)
         w.gradient:Hide()
         if w.nativeGradient then w.nativeGradient:Hide() end
     else
-        local carrier = btn._dfDispelBoundCarrier
+        local carrier = btn._dfDispelGradientCarrier
         if carrier then
             if w.gradientTracksHealth then
                 -- Tracking carrier = the StatusBar fill (texture set once in onInit);
@@ -1576,14 +1612,14 @@ local function StyleGameBorderSlot(btn, frame, db)
     ApplySlotPulse(btn.dfDispelRingHolder, db.dispelAnimate)
 end
 
--- GAME mode, EDGE strip slot: one slot per edge, each binding its own gradient
--- strip texture, positioned from settings on the padded frame rect (immune to
--- the reduced-max health-bar clip). Geometry mirrors ApplyOverlayLayout's EDGE
--- branch: strip depth = padded frame dimension × Gradient Size.
+-- GAME mode, EDGE strip: one gradient strip texture per edge — all four now live on the
+-- SAME slot button (keyed by side), positioned from settings on the padded frame rect
+-- (immune to the reduced-max health-bar clip). Geometry mirrors ApplyOverlayLayout's
+-- EDGE branch: strip depth = padded frame dimension × Gradient Size.
 local function StyleGameEdgeSlot(btn, frame, db, edge)
     -- Strip tex is created + bound in DispelSlotSecureInit (secure); this pass only
     -- positions it. If onInit hasn't populated it yet, skip — it always runs first.
-    local tex = btn.dfDispelEdgeTex
+    local tex = btn.dfDispelEdgeTex and btn.dfDispelEdgeTex[edge]
     if not tex then return end
     tex:SetTexture(EDGE_GRADIENT_TEXTURES[edge])
     local pad = db.framePadding or 0
@@ -1614,7 +1650,7 @@ local function StyleGameEdgeSlot(btn, frame, db, edge)
     end
     tex:SetBlendMode(db.dispelGradientBlendMode or "ADD")
     tex:SetAlpha(db.dispelGradientAlpha or 0.5)
-    ApplySlotPulse(btn.dfDispelEdgeHolder, db.dispelAnimate)
+    ApplySlotPulse(btn.dfDispelEdgeHolder and btn.dfDispelEdgeHolder[edge], db.dispelAnimate)
 end
 
 -- Style every live slot button per the plan. Returns false while no buttons exist
@@ -1637,19 +1673,25 @@ local function StyleDispelSlots(frame, db, h, slots)
             -- which only rejects EXPLICITLY forbidden / protected / non-descendant
             -- objects — our carrier is a descendant that merely INHERITS aspects), so
             -- re-bind the carrier we already have and skip the rebuild entirely.
-            -- Icon slots bind nothing, so they never go stale.
-            if not info.iconType and btn._dfDispelBoundCarrier
-                and btn._dfDispelCurveGen ~= DF.dispelCurveGen then
-                BindDispelCarrier(btn, btn._dfDispelBoundCarrier, db, info.key)
+            -- Icon slots bind nothing, so they never go stale. Re-binds the WHOLE
+            -- carrier list for this button in one clear-then-append pass.
+            if btn._dfDispelCarriers and btn._dfDispelCurveGen ~= DF.dispelCurveGen then
+                BindDispelCarriers(btn, btn._dfDispelCarriers, db, info.key)
             end
             if info.iconType then
                 StyleGameTypeIconSlot(btn, frame, db, info.iconType)
-            elseif info.edgeSide then
-                StyleGameEdgeSlot(btn, frame, db, info.edgeSide)
-            elseif info.key == "gameborder" then
-                StyleGameBorderSlot(btn, frame, db)
             else
+                -- ONE button, every role it owns (see dispelSlotPlan's `roles`).
+                -- StyleGameMainSlot runs UNCONDITIONALLY: besides dressing the gradient
+                -- carrier it owns the shared geometry pass (ApplyOverlayLayout), hides
+                -- the legacy regions, and applies the darken/pulse — all of which the
+                -- pre-consolidation main slot did in every style, EDGE included.
                 StyleGameMainSlot(btn, frame, db)
+                local r = info.roles
+                if r and r.edges then
+                    for _, edge in ipairs(r.edges) do StyleGameEdgeSlot(btn, frame, db, edge) end
+                end
+                if r and r.border then StyleGameBorderSlot(btn, frame, db) end
             end
         end
     end
