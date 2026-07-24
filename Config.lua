@@ -1432,6 +1432,7 @@ DF.PartyDefaults = {
     defensiveIconDurationX = 0,
     defensiveIconDurationY = 0,
     defensiveIconEnabled = true,
+    defensiveIconDurationFormat = "NUMBER",   -- NUMBER / SHORT / PERCENT (icon-sized formats)
     defensiveIconFrameLevel = 0,
     defensiveIconHideSwipe = false,
     defensiveIconScale = 1,

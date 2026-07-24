@@ -1289,7 +1289,7 @@ local TYPE_DEFAULTS = {
         BorderAnimationSidesAxis    = "HORIZONTAL",
         BorderAnimationCornerLength = 10,
         hideSwipe = false, hideIcon = false,
-        showDuration = true, durationFont = "DF Roboto SemiBold",
+        showDuration = true, durationFormat = "NUMBER", durationFont = "DF Roboto SemiBold",
         durationScale = 1.2, durationOutline = "SHADOW;OUTLINE",
         durationAnchor = "CENTER", durationX = 0, durationY = 0,
         durationColorByTime = true,
@@ -1402,7 +1402,7 @@ local TYPE_DEFAULTS = {
         BorderAnimationSidesAxis    = "HORIZONTAL",
         BorderAnimationCornerLength = 10,
         hideSwipe = false, hideIcon = false,
-        showDuration = true, durationFont = "DF Roboto SemiBold",
+        showDuration = true, durationFormat = "NUMBER", durationFont = "DF Roboto SemiBold",
         durationScale = 1.2, durationOutline = "SHADOW;OUTLINE",
         durationAnchor = "CENTER", durationX = 0, durationY = 0,
         durationColorByTime = true,
@@ -1507,7 +1507,7 @@ local TYPE_DEFAULTS = {
         expiringColor = {r = 1, g = 0.2, b = 0.2, a = 1},
         expiringTintEnabled = false,
         expiringTintColor = {r = 1, g = 0.2, b = 0.2, a = 0.5},  -- #FF3333 @ 50% (matches expiring border red)
-        showDuration = true, durationFont = "DF Roboto SemiBold",
+        showDuration = true, durationFormat = "NUMBER", durationFont = "DF Roboto SemiBold",
         durationScale = 1.2, durationOutline = "SHADOW;OUTLINE",
         durationAnchor = "CENTER", durationX = 0, durationY = 0,
         durationColorByTime = true,
@@ -4172,6 +4172,15 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- Duration Text
         AddGroup(L["Duration Text"], function(g)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Show Duration"], proxy, "showDuration"), 28)
+            -- Icon-sized formats only — Number "14" / Seconds "14s" / Percent "45%";
+            -- FULL and the combined "12s (45%)" live on the BAR card, which has the
+            -- width. Forward-declared UpdateHideAboveState: the dropdown re-greys
+            -- Hide Above (percent formats can't compose with it), assigned below.
+            local UpdateHideAboveState
+            g:AddWidget(GUI:CreateDropdown(parent, L["Duration Format"], {
+                NUMBER = L["Number"], SHORT = L["Seconds"], PERCENT = L["Percent"],
+                _order = { "NUMBER", "SHORT", "PERCENT" },
+            }, proxy, "durationFormat", function() if UpdateHideAboveState then UpdateHideAboveState() end end), 54)
             g:AddWidget(GUI:CreateFontDropdown(parent, L["Duration Font"], proxy, "durationFont"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Duration Scale"], 0.5, 2.0, 0.1, proxy, "durationScale"), 54)
             g:AddWidget(GUI:CreateOutlineDropdown(parent, L["Outline"], proxy, "durationOutline"), 54)
@@ -4183,10 +4192,17 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(durColorByTimeCtl, 28)
             AddDurationColorsLink(g, parent)
             g:AddWidget(GUI:CreateColorPicker(parent, L["Duration Text Color"], proxy, "durationColor", true, RPL, RPL, true), 28)
-            local hideAboveSlider
-            local function UpdateHideAboveState()
+            local hideAboveSlider, hideAboveCheck
+            -- ASSIGNS the forward-declared local from the Duration Format dropdown
+            -- above (a `local function` here would shadow it and strand the
+            -- dropdown's callback on nil). Also greys the pair while a
+            -- percent-family format is picked — Hide Above's seconds threshold
+            -- can't band a percent-sampled formatter (see GetDurationFormatFields).
+            UpdateHideAboveState = function()
                 if not hideAboveSlider then return end
-                if proxy.durationHideAboveEnabled then
+                local pctFmt = DF.IsPercentDurationFormat and DF:IsPercentDurationFormat(proxy.durationFormat)
+                if hideAboveCheck and hideAboveCheck.SetEnabled then hideAboveCheck:SetEnabled(not pctFmt) end
+                if not pctFmt and proxy.durationHideAboveEnabled then
                     hideAboveSlider:SetAlpha(1)
                     hideAboveSlider:EnableMouse(true)
                 else
@@ -4194,7 +4210,8 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                     hideAboveSlider:EnableMouse(false)
                 end
             end
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Duration Above Threshold"], proxy, "durationHideAboveEnabled", UpdateHideAboveState), 28)
+            hideAboveCheck = GUI:CreateCheckbox(parent, L["Hide Duration Above Threshold"], proxy, "durationHideAboveEnabled", UpdateHideAboveState)
+            g:AddWidget(hideAboveCheck, 28)
             hideAboveSlider = GUI:CreateSlider(parent, L["Hide Above (seconds)"], 1, 60, 1, proxy, "durationHideAboveThreshold")
             g:AddWidget(hideAboveSlider, 54)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Duration on Permanent Auras"], proxy, "durationHideOnPermanent"), 28)
@@ -4294,6 +4311,12 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- Duration Text
         AddGroup(L["Duration Text"], function(g)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Show Duration"], proxy, "showDuration"), 28)
+            -- Icon-sized formats only (see the icon card's Duration Format note).
+            local UpdateHideAboveState
+            g:AddWidget(GUI:CreateDropdown(parent, L["Duration Format"], {
+                NUMBER = L["Number"], SHORT = L["Seconds"], PERCENT = L["Percent"],
+                _order = { "NUMBER", "SHORT", "PERCENT" },
+            }, proxy, "durationFormat", function() if UpdateHideAboveState then UpdateHideAboveState() end end), 54)
             g:AddWidget(GUI:CreateFontDropdown(parent, L["Duration Font"], proxy, "durationFont"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Duration Scale"], 0.5, 2.0, 0.1, proxy, "durationScale"), 54)
             g:AddWidget(GUI:CreateOutlineDropdown(parent, L["Outline"], proxy, "durationOutline"), 54)
@@ -4305,10 +4328,17 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(durColorByTimeCtl, 28)
             AddDurationColorsLink(g, parent)
             g:AddWidget(GUI:CreateColorPicker(parent, L["Duration Text Color"], proxy, "durationColor", true, RPL, RPL, true), 28)
-            local hideAboveSlider
-            local function UpdateHideAboveState()
+            local hideAboveSlider, hideAboveCheck
+            -- ASSIGNS the forward-declared local from the Duration Format dropdown
+            -- above (a `local function` here would shadow it and strand the
+            -- dropdown's callback on nil). Also greys the pair while a
+            -- percent-family format is picked — Hide Above's seconds threshold
+            -- can't band a percent-sampled formatter (see GetDurationFormatFields).
+            UpdateHideAboveState = function()
                 if not hideAboveSlider then return end
-                if proxy.durationHideAboveEnabled then
+                local pctFmt = DF.IsPercentDurationFormat and DF:IsPercentDurationFormat(proxy.durationFormat)
+                if hideAboveCheck and hideAboveCheck.SetEnabled then hideAboveCheck:SetEnabled(not pctFmt) end
+                if not pctFmt and proxy.durationHideAboveEnabled then
                     hideAboveSlider:SetAlpha(1)
                     hideAboveSlider:EnableMouse(true)
                 else
@@ -4316,7 +4346,8 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                     hideAboveSlider:EnableMouse(false)
                 end
             end
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Duration Above Threshold"], proxy, "durationHideAboveEnabled", UpdateHideAboveState), 28)
+            hideAboveCheck = GUI:CreateCheckbox(parent, L["Hide Duration Above Threshold"], proxy, "durationHideAboveEnabled", UpdateHideAboveState)
+            g:AddWidget(hideAboveCheck, 28)
             hideAboveSlider = GUI:CreateSlider(parent, L["Hide Above (seconds)"], 1, 60, 1, proxy, "durationHideAboveThreshold")
             g:AddWidget(hideAboveSlider, 54)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Duration on Permanent Auras"], proxy, "durationHideOnPermanent"), 28)
@@ -4462,6 +4493,15 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- Duration Text
         AddGroup(L["Duration Text"], function(g)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Show Duration"], proxy, "showDuration"), 28)
+            -- The BAR is the wide surface, so the whole format family fits here:
+            -- the icon-sized three plus FULL ("14 Seconds") and the combined
+            -- Seconds + Percent ("12s (45%)" — 68914 multi-component text, #5).
+            local UpdateHideAboveState
+            g:AddWidget(GUI:CreateDropdown(parent, L["Duration Format"], {
+                NUMBER = L["Number"], SHORT = L["Seconds"], FULL = L["Full"],
+                PERCENT = L["Percent"], SECONDS_PERCENT = L["Seconds + Percent"],
+                _order = { "NUMBER", "SHORT", "FULL", "PERCENT", "SECONDS_PERCENT" },
+            }, proxy, "durationFormat", function() if UpdateHideAboveState then UpdateHideAboveState() end end), 54)
             g:AddWidget(GUI:CreateFontDropdown(parent, L["Duration Font"], proxy, "durationFont"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Duration Scale"], 0.5, 2.0, 0.1, proxy, "durationScale"), 54)
             g:AddWidget(GUI:CreateOutlineDropdown(parent, L["Outline"], proxy, "durationOutline"), 54)
@@ -4472,10 +4512,17 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             durColorByTimeCtl = GUI:CreateCheckbox(parent, L["Color by Time Remaining"], proxy, "durationColorByTime")
             g:AddWidget(durColorByTimeCtl, 28)
             AddDurationColorsLink(g, parent)
-            local hideAboveSlider
-            local function UpdateHideAboveState()
+            local hideAboveSlider, hideAboveCheck
+            -- ASSIGNS the forward-declared local from the Duration Format dropdown
+            -- above (a `local function` here would shadow it and strand the
+            -- dropdown's callback on nil). Also greys the pair while a
+            -- percent-family format is picked — Hide Above's seconds threshold
+            -- can't band a percent-sampled formatter (see GetDurationFormatFields).
+            UpdateHideAboveState = function()
                 if not hideAboveSlider then return end
-                if proxy.durationHideAboveEnabled then
+                local pctFmt = DF.IsPercentDurationFormat and DF:IsPercentDurationFormat(proxy.durationFormat)
+                if hideAboveCheck and hideAboveCheck.SetEnabled then hideAboveCheck:SetEnabled(not pctFmt) end
+                if not pctFmt and proxy.durationHideAboveEnabled then
                     hideAboveSlider:SetAlpha(1)
                     hideAboveSlider:EnableMouse(true)
                 else
@@ -4483,7 +4530,8 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                     hideAboveSlider:EnableMouse(false)
                 end
             end
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Duration Above Threshold"], proxy, "durationHideAboveEnabled", UpdateHideAboveState), 28)
+            hideAboveCheck = GUI:CreateCheckbox(parent, L["Hide Duration Above Threshold"], proxy, "durationHideAboveEnabled", UpdateHideAboveState)
+            g:AddWidget(hideAboveCheck, 28)
             hideAboveSlider = GUI:CreateSlider(parent, L["Hide Above (seconds)"], 1, 60, 1, proxy, "durationHideAboveThreshold")
             g:AddWidget(hideAboveSlider, 54)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Duration on Permanent Auras"], proxy, "durationHideOnPermanent"), 28)
@@ -7396,6 +7444,7 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
     -- no ring until the user enables one).
     local defaults = {
         hideSwipe = false, showDuration = true, showStacks = true,
+        durationFormat = "NUMBER",
         durationFont = "DF Roboto SemiBold", durationScale = 1.0, durationOutline = "SHADOW;OUTLINE",
         durationAnchor = "CENTER", durationX = 0, durationY = 0,
         durationColorByTime = false, durationColor = { r = 1, g = 1, b = 1, a = 1 },
@@ -7504,6 +7553,16 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
     -- ── DURATION TEXT ── (shared text controls; keys mirror the placed cards')
     AddSection(L["Duration Text"], "duration", function(g)
         g:AddWidget(GUI:CreateCheckbox(body, L["Show Duration"], proxy, "showDuration", refresh), 28)
+        -- Icon-sized formats only — a group renders icon rows (see the placed icon
+        -- card's Duration Format note). Structural: the proxy write's refresh moves
+        -- durationFmtKey -> the factory Rebuilds. Forward-declared
+        -- UpdateHideAboveState (assigned below): re-greys Hide Above, which can't
+        -- compose with the percent-family formats.
+        local UpdateHideAboveState
+        g:AddWidget(GUI:CreateDropdown(body, L["Duration Format"], {
+            NUMBER = L["Number"], SHORT = L["Seconds"], PERCENT = L["Percent"],
+            _order = { "NUMBER", "SHORT", "PERCENT" },
+        }, proxy, "durationFormat", function() if UpdateHideAboveState then UpdateHideAboveState() end end), 54)
         GUI:CreateTextControls(g, proxy, "duration", {
             parent = body,
             include = { color = true },
@@ -7513,10 +7572,12 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
         })
         g:AddWidget(GUI:CreateCheckbox(body, L["Color by Time Remaining"], proxy, "durationColorByTime", refresh), 28)
         AddDurationColorsLink(g, body)
-        local hideAboveSlider
-        local function UpdateHideAboveState()
+        local hideAboveSlider, hideAboveCheck
+        UpdateHideAboveState = function()
             if not hideAboveSlider then return end
-            if proxy.durationHideAboveEnabled then
+            local pctFmt = DF.IsPercentDurationFormat and DF:IsPercentDurationFormat(proxy.durationFormat)
+            if hideAboveCheck and hideAboveCheck.SetEnabled then hideAboveCheck:SetEnabled(not pctFmt) end
+            if not pctFmt and proxy.durationHideAboveEnabled then
                 hideAboveSlider:SetAlpha(1)
                 hideAboveSlider:EnableMouse(true)
             else
@@ -7524,10 +7585,11 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
                 hideAboveSlider:EnableMouse(false)
             end
         end
-        g:AddWidget(GUI:CreateCheckbox(body, L["Hide Duration Above Threshold"], proxy, "durationHideAboveEnabled", function()
+        hideAboveCheck = GUI:CreateCheckbox(body, L["Hide Duration Above Threshold"], proxy, "durationHideAboveEnabled", function()
             UpdateHideAboveState()
             refresh()
-        end), 28)
+        end)
+        g:AddWidget(hideAboveCheck, 28)
         hideAboveSlider = GUI:CreateSlider(body, L["Hide Above (seconds)"], 1, 60, 1, proxy, "durationHideAboveThreshold", refresh, refresh, true)
         g:AddWidget(hideAboveSlider, 54)
         g:AddWidget(GUI:CreateCheckbox(body, L["Hide Duration on Permanent Auras"], proxy, "durationHideOnPermanent", refresh), 28)

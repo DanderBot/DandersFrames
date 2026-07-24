@@ -6314,8 +6314,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- The cooldown swipe (radial sweep) is the OTHER way time-remaining is
         -- shown, so it lives here with Duration Text rather than under Border.
         durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Cooldown Swipe"], db, "buffHideSwipe", nil), 30)
-        local durationFormatOptions = { NUMBER = L["Number"], SHORT = L["Short"], FULL = L["Full"] }
-        local durFormat = durationGroup:AddWidget(GUI:CreateDropdown(self.child, L["Duration Format"], durationFormatOptions, db, "buffDurationFormat", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 55)
+        -- Icon-sized formats only: Number "14" / Seconds "14s" / Percent "45%".
+        -- FULL ("14 Seconds") overflows a 20px icon (never fit, delisted with #5's
+        -- percent work — a saved FULL still renders until the user re-picks); the
+        -- combined "12s (45%)" is AD-bar-only for the same reason.
+        local durationFormatOptions = { NUMBER = L["Number"], SHORT = L["Seconds"], PERCENT = L["Percent"],
+            _order = { "NUMBER", "SHORT", "PERCENT" } }
+        local durFormat = durationGroup:AddWidget(GUI:CreateDropdown(self.child, L["Duration Format"], durationFormatOptions, db, "buffDurationFormat", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames(); GUI:RefreshCurrentPage() end), 55)
         durFormat.disableOn = function(d) return not d.buffShowDuration end
         -- Shared TextStyle control block (font/scale/outline/shadow/colour/anchor/
         -- offsets/justify). The static colour greys out while Color-by-Time owns it.
@@ -6331,10 +6336,12 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local durColor = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Color by Time Remaining"], db, "buffDurationColorByTime", function() self:RefreshStates(); DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
         durColor.disableOn = function(d) return not d.buffShowDuration end
         AddColorsPageLink(durationGroup, self.child)
+        -- Hide Above can't compose with the Percent format (its threshold is seconds
+        -- banded into a seconds-sampled formatter — see GetDurationFormatFields).
         local durHideAbove = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Above Threshold"], db, "buffDurationHideAboveEnabled", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
-        durHideAbove.disableOn = function(d) return not d.buffShowDuration end
+        durHideAbove.disableOn = function(d) return not d.buffShowDuration or DF:IsPercentDurationFormat(d.buffDurationFormat) end
         local durHideAboveSlider = durationGroup:AddWidget(GUI:CreateSlider(self.child, L["Hide Above (seconds)"], 1, 60, 1, db, "buffDurationHideAboveThreshold", nil, function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 55)
-        durHideAboveSlider.disableOn = function(d) return not d.buffShowDuration or not d.buffDurationHideAboveEnabled end
+        durHideAboveSlider.disableOn = function(d) return not d.buffShowDuration or not d.buffDurationHideAboveEnabled or DF:IsPercentDurationFormat(d.buffDurationFormat) end
         local durHidePerm = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Duration on Permanent Auras"], db, "buffDurationHideOnPermanent", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
         durHidePerm.disableOn = function(d) return not d.buffShowDuration end
         -- Grey the whole group when Buffs are off (composes with the per-control
@@ -6626,8 +6633,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end), 30)
         -- Cooldown swipe (radial time-remaining) lives with Duration Text, not Border.
         durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Cooldown Swipe"], db, "debuffHideSwipe", nil), 30)
-        local debuffDurationFormatOptions = { NUMBER = L["Number"], SHORT = L["Short"], FULL = L["Full"] }
-        local durFormat = durationGroup:AddWidget(GUI:CreateDropdown(self.child, L["Duration Format"], debuffDurationFormatOptions, db, "debuffDurationFormat", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 55)
+        -- Icon-sized formats only (see the buff page's Duration Format note).
+        local debuffDurationFormatOptions = { NUMBER = L["Number"], SHORT = L["Seconds"], PERCENT = L["Percent"],
+            _order = { "NUMBER", "SHORT", "PERCENT" } }
+        local durFormat = durationGroup:AddWidget(GUI:CreateDropdown(self.child, L["Duration Format"], debuffDurationFormatOptions, db, "debuffDurationFormat", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames(); GUI:RefreshCurrentPage() end), 55)
         durFormat.disableOn = function(d) return not d.debuffShowDuration end
         local durFont = durationGroup:AddWidget(GUI:CreateFontDropdown(self.child, L["Font"], db, "debuffDurationFont", nil), 55)
         durFont.disableOn = function(d) return not d.debuffShowDuration end
@@ -6648,10 +6657,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local durColor = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Color by Time Remaining"], db, "debuffDurationColorByTime", function() self:RefreshStates(); DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
         durColor.disableOn = function(d) return not d.debuffShowDuration end
         AddColorsPageLink(durationGroup, self.child)
+        -- Hide Above can't compose with the Percent format (see the buff page).
         local durHideAbove = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Above Threshold"], db, "debuffDurationHideAboveEnabled", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
-        durHideAbove.disableOn = function(d) return not d.debuffShowDuration end
+        durHideAbove.disableOn = function(d) return not d.debuffShowDuration or DF:IsPercentDurationFormat(d.debuffDurationFormat) end
         local durHideAboveSlider = durationGroup:AddWidget(GUI:CreateSlider(self.child, L["Hide Above (seconds)"], 1, 60, 1, db, "debuffDurationHideAboveThreshold", nil, function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 55)
-        durHideAboveSlider.disableOn = function(d) return not d.debuffShowDuration or not d.debuffDurationHideAboveEnabled end
+        durHideAboveSlider.disableOn = function(d) return not d.debuffShowDuration or not d.debuffDurationHideAboveEnabled or DF:IsPercentDurationFormat(d.debuffDurationFormat) end
         local durHidePerm = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Duration on Permanent Auras"], db, "debuffDurationHideOnPermanent", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
         durHidePerm.disableOn = function(d) return not d.debuffShowDuration end
         -- Grey the whole group when Debuffs are off (composes with the per-control
@@ -7112,6 +7122,14 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local function HideDefensiveDurationOptions(d)
             return not d.defensiveIconShowDuration
         end
+
+        -- Duration Format (PTR-7 #5): previously hardcoded NUMBER; icon-sized
+        -- formats only (see the buff page's Duration Format note). No Hide Above
+        -- on this page, so no percent-grey needed.
+        local defDurFormatOptions = { NUMBER = L["Number"], SHORT = L["Seconds"], PERCENT = L["Percent"],
+            _order = { "NUMBER", "SHORT", "PERCENT" } }
+        local defDurFormat = durationGroup:AddWidget(GUI:CreateDropdown(self.child, L["Duration Format"], defDurFormatOptions, db, "defensiveIconDurationFormat", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 55)
+        defDurFormat.hideOn = HideDefensiveDurationOptions
 
         -- Shared TextStyle control block (font/scale/outline/shadow/colour/anchor/
         -- offsets/justify). The offsets/anchor honor the existing defensiveIconDurationX/Y

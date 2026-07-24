@@ -545,6 +545,7 @@ DF.ExportCategories = {
         "defensiveIconDurationOutline",
         "defensiveIconDurationAnchor",
         "defensiveIconDurationScale",
+        "defensiveIconDurationFormat",
         "defensiveIconDurationX",
         "defensiveIconDurationY",
         "defensiveIconEnabled",

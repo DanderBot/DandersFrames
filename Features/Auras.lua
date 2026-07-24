@@ -970,6 +970,72 @@ function DF:GetFactoryDurationFormatter(format, hideAboveT, colorByTime, alertMo
     return GetDurationFormatter(format, hideAboveT, colorByTime, alertMode, alertThreshold, alertText, alertGlyphKey)
 end
 
+-- Percent renderer for the percent-family duration formats ("45%"): one band,
+-- rounding down, min 1 so a dying aura reads "1%" until it drops (mirrors the
+-- seconds bands' min). ONLY meaningful sampled against RemainingPercent via
+-- SetTextFormat — a plain SetFormatter would feed it seconds. No colour or
+-- threshold inputs -> memoised for the session; a Colours-page edit never
+-- touches it (the colour curve tints the whole fontstring on top).
+local percentFormatterMemo
+local function GetPercentFormatter()
+    if percentFormatterMemo ~= nil then return percentFormatterMemo or nil end
+    percentFormatterMemo = false
+    if C_StringUtil and C_StringUtil.CreateNumericRuleFormatter and Enum and Enum.NumericRuleFormatRounding then
+        local ok, f = pcall(function()
+            local fmt = C_StringUtil.CreateNumericRuleFormatter()
+            fmt:AddBreakpoint({ threshold = 0, step = 1, rounding = Enum.NumericRuleFormatRounding.Down,
+                                min = 1, format = "%.0f%%" })
+            return fmt
+        end)
+        if ok and f then percentFormatterMemo = f end
+    end
+    return percentFormatterMemo or nil
+end
+
+-- Resolve a Duration Format VALUE into the spec's (formatter, textFormat) pair —
+-- the ONE resolver every duration-text surface uses (buff/debuff/defensive rows +
+-- the AD factory), so a new format lands everywhere at once.
+--   NUMBER/SHORT/FULL      -> plain seconds-sampled formatter (textFormat nil).
+--   PERCENT                -> "45%": one SetTextFormat component sampling
+--                             RemainingPercent (68914 multi-component API).
+--   SECONDS_PERCENT        -> "12s (45%)": SHORT seconds + percent, two
+--                             components each sampling its OWN property.
+-- hideAboveT deliberately does NOT apply to the percent family: its threshold is
+-- seconds banded into a seconds-sampled formatter — a percent component can't
+-- blank on a seconds cut, and blanking only the seconds half would leave a
+-- floating "(45%)". The GUI greys Hide Above when a percent format is picked.
+-- colorByTime (the pre-68914 |c bucket fallback) only ever reaches the classic
+-- formats: a client old enough to bucket lacks SetTextFormat, so the percent
+-- family falls back to plain NUMBER there rather than render wrong bands.
+function DF:GetDurationFormatFields(format, hideAboveT, colorByTime)
+    if format == "PERCENT" or format == "SECONDS_PERCENT" then
+        local pct = GetPercentFormatter()
+        local prop = Enum and Enum.DurationTextBindingProperty
+        if pct and prop then
+            if format == "PERCENT" then
+                return nil, { formatString = "{}", components = {
+                    { property = prop.RemainingPercent, formatter = pct },
+                } }
+            end
+            local secs = GetDurationFormatter("SHORT", nil, colorByTime)
+            if secs then
+                return nil, { formatString = "{} ({})", components = {
+                    { property = prop.RemainingDuration, formatter = secs },
+                    { property = prop.RemainingPercent,  formatter = pct },
+                } }
+            end
+        end
+        return GetDurationFormatter("NUMBER", hideAboveT, colorByTime), nil
+    end
+    return GetDurationFormatter(format, hideAboveT, colorByTime), nil
+end
+
+-- Percent-family membership — the GUI greys Hide Above off this (see
+-- GetDurationFormatFields for why the two can't compose).
+function DF:IsPercentDurationFormat(format)
+    return format == "PERCENT" or format == "SECONDS_PERCENT"
+end
+
 -- Expiry Alert ELEMENT formatter (AD placed indicators): the alert-element variant
 -- of BuildDurationFormatter — payload below the threshold, EMPTY above; no countdown,
 -- no colour-by-time (the indicator's duration text keeps its own formatter). Cached in
@@ -1300,6 +1366,10 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
         local colorSpec = DF:GetDurationColorSpec(colorMode)
         local colorByTime = DF:DurationColorUsesBuckets(colorMode)
         local hideAboveT = (g("DurationHideAboveEnabled") and g("DurationHideAboveThreshold")) or nil
+        -- Hide Above can't compose with the percent-family formats (seconds-banded
+        -- vs percent-sampled — see GetDurationFormatFields); zeroed here so the
+        -- formatKey below stays truthful too. The GUI greys the controls to match.
+        if DF:IsPercentDurationFormat(durFormat) then hideAboveT = nil end
         -- Text styling (font/scale/outline/anchor/offsets/justify/colour) is a shared
         -- DF.TextStyle spec; the factory applies it via TextStyle:Apply. The justify box
         -- is the icon rect. Feature fields (show/formatter/formatKey) ride on top.
@@ -1308,7 +1378,7 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
         })
         dur.show = true
         dur.stableCenter = true   -- centred countdown: stable box, no shift, no wobble
-        dur.formatter = GetDurationFormatter(durFormat, hideAboveT, colorByTime)
+        dur.formatter, dur.textFormat = DF:GetDurationFormatFields(durFormat, hideAboveT, colorByTime)
         -- Either colour path (curve or legacy buckets) owns the text colour outright, so
         -- the static colour must not stomp it. formatKey carries the mode + its scale's
         -- stops so a change moves the rebuild signature — BOTH the formatter and the
@@ -1952,10 +2022,11 @@ function DF:BuildDefensiveRowConfig(db, unit)
         })
         dur.show = true
         dur.stableCenter = true   -- centred countdown: stable box, no shift, no wobble
-        dur.formatter = GetDurationFormatter("NUMBER", nil, colorByTime)
+        local defFormat = db.defensiveIconDurationFormat or "NUMBER"
+        dur.formatter, dur.textFormat = DF:GetDurationFormatFields(defFormat, nil, colorByTime)
         if colorSpec then dur.color = nil end
         dur.colorCurve, dur.colorProperty = (colorSpec and colorSpec.curve), (colorSpec and colorSpec.property)
-        dur.formatKey = "NUMBER" .. DF:GetDurationColorSig(colorMode)
+        dur.formatKey = defFormat .. DF:GetDurationColorSig(colorMode)
         -- Hide duration text on permanent auras (Wave 4, default ON — see the
         -- buff/debuff row builder for the mechanism notes).
         if db.defensiveIconDurationHideOnPermanent ~= false then dur.zeroText = "" end

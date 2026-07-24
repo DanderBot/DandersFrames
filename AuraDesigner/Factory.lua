@@ -865,14 +865,20 @@ local function buildDurationTextSpec(indicator, defaultShow, defScale, defColorB
     local colorSpec = DF:GetDurationColorSpec(colorMode)
     local colorByTime = DF:DurationColorUsesBuckets(colorMode)
     local hideAboveT = durationHideAboveT(indicator)
-    -- Always attach the NUMBER formatter (bare "45" / "2m" / "1h") — the same default the
-    -- buff/debuff/defensive rows use, and what the pre-12.1 icons showed (native cooldown
-    -- numbers). Without it the container's own SetDurationText default renders "45s". The
-    -- one formatter also carries colour-by-time buckets + hide-above blanking when set.
-    -- (The Expiry Alert is NOT part of this formatter — it is its own frame-anchored
-    -- element with its own SetDurationText binding; see the EXPIRY ALERT ELEMENT section.)
-    local formatter = DF.GetFactoryDurationFormatter
-        and DF:GetFactoryDurationFormatter("NUMBER", hideAboveT, colorByTime) or nil
+    -- Resolve the indicator's Duration Format (default NUMBER — bare "45" / "2m" / "1h",
+    -- the same default the buff/debuff/defensive rows use). Classic formats come back as
+    -- a plain formatter; the percent family (PERCENT / SECONDS_PERCENT, PTR-7 #5) comes
+    -- back as a SetTextFormat spec instead. The formatter also carries colour-by-time
+    -- buckets + hide-above blanking when set — hide-above never composes with the
+    -- percent family (see GetDurationFormatFields), zeroed here so durationFmtKey
+    -- stays truthful. (The Expiry Alert is NOT part of this formatter — it is its own
+    -- frame-anchored element with its own SetDurationText binding.)
+    local fmtValue = indicator.durationFormat or "NUMBER"
+    if DF.IsPercentDurationFormat and DF:IsPercentDurationFormat(fmtValue) then hideAboveT = nil end
+    local formatter, textFormat
+    if DF.GetDurationFormatFields then
+        formatter, textFormat = DF:GetDurationFormatFields(fmtValue, hideAboveT, colorByTime)
+    end
     return {
         show      = true,
         stableCenter = true,   -- centred countdown: stable box, no shift/wobble (shared TextStyle mode)
@@ -883,6 +889,8 @@ local function buildDurationTextSpec(indicator, defaultShow, defScale, defColorB
         offsetX   = tonumber(indicator.durationX) or 0,
         offsetY   = tonumber(indicator.durationY) or 0,
         formatter = formatter,   -- nil unless colour-by-time / hide-above; |c escapes own colour
+        textFormat = textFormat, -- percent family: SetTextFormat components (tried FIRST by
+                                 -- applyDurationFormatter; formatter is nil alongside it)
         -- Either colour path owns the text colour outright, so the static pick stands down.
         color     = (not colorSpec) and indicator.durationColor or nil,
         colorCurve   = colorSpec and colorSpec.curve or nil,
@@ -915,11 +923,16 @@ local function durationFmtKey(indicator, defaultShow, defColorByTime)
     if rawCBT == nil then rawCBT = defColorByTime end
     local colorMode = DF:ResolveDurationColorMode(rawCBT)
     local hideAboveT = durationHideAboveT(indicator)
+    -- Format value leads the key (was hardcoded "NUMBER" pre-#5); hide-above is
+    -- zeroed for the percent family EXACTLY as buildDurationTextSpec zeroes it,
+    -- or a no-op hide-above toggle would rebuild slots for an unchanged render.
+    local fmtValue = indicator.durationFormat or "NUMBER"
+    if DF.IsPercentDurationFormat and DF:IsPercentDurationFormat(fmtValue) then hideAboveT = nil end
     -- Duration-text update rate (Wave 5a, account-wide): tokenized only when
     -- non-default (NORMAL resolves nil), so untouched sigs stay byte-identical
     -- and a rate change Rebuilds every duration-text slot (creation-frozen bind).
     local updateIv = DF.GetAuraDurationUpdateInterval and DF:GetAuraDurationUpdateInterval()
-    return "NUMBER"
+    return fmtValue
         -- Mode + that scale's stops: the curve is bind-once like the formatter, so a
         -- mode change OR a Colours-page stop edit must move this key.
         .. DF:GetDurationColorSig(colorMode)
