@@ -849,6 +849,23 @@ local function applyDurationFormatter(b, durSpec)
     end
 end
 
+-- Does this client's SetDurationText read the NEW options shape
+-- ({ binding | textFormat | textFormatter | textColor }) rather than the flat
+-- formatter/expiredText/zeroDurationText/updateInterval keys?
+-- ★ The marker must be something 68914 ADDED. The obvious-looking
+-- AuraContainerInbound.GetDefaultAuraDurationFormatter is NOT it: that function exists
+-- on 68824 too, where SetDurationText still reads the flat keys and silently IGNORES
+-- options.binding — so gating on it sent 68824 down the binding path, dropping every
+-- custom duration format (SHORT/FULL, hide-above blanking, zero-text-on-permanents)
+-- back to defaults while the flat-options branch below became unreachable.
+-- C_AuraContainerUtil.ProcessCustomAuraButtonDurationTextOptions is the honest probe:
+-- 68914's SetDurationText runs the options through it (Blizzard_CustomAuraButton.lua),
+-- so its presence IS the new options shape.
+local function supportsDurationTextBinding()
+    return C_AuraContainerUtil ~= nil
+        and type(C_AuraContainerUtil.ProcessCustomAuraButtonDurationTextOptions) == "function"
+end
+
 -- Build (or reuse) the configured TEMPLATE DurationTextBinding for this config's
 -- duration spec. 68914's SetDurationText only reads { binding | textFormat |
 -- textFormatter | textColor } (CustomAuraButtonDurationTextOptions) and
@@ -899,11 +916,12 @@ local function bindNative(slot, config)
         -- 68914 RESHAPED the options: SetDurationText now only reads { binding |
         -- textFormat | textFormatter | textColor }; the flat formatter/expiredText/
         -- zeroDurationText/updateInterval keys are silently IGNORED (the
-        -- field-reported "duration text lost its format" break). Detect the drop
-        -- by its companion API and route the spec through a template binding
-        -- (durationTemplateBinding above); older builds keep the flat table.
+        -- field-reported "duration text lost its format" break). Route the spec
+        -- through a template binding on those builds (durationTemplateBinding above);
+        -- older builds keep the flat table. See supportsDurationTextBinding for why
+        -- the probe is the options PROCESSOR and not the default-formatter getter.
         local opts = {}
-        if AuraContainerInbound and type(AuraContainerInbound.GetDefaultAuraDurationFormatter) == "function" then
+        if supportsDurationTextBinding() then
             if durSpec.textFormat or durSpec.formatter or (durSpec.expiredText and durSpec.expiredText ~= "")
                or durSpec.zeroText ~= nil or durSpec.updateInterval then
                 opts.binding = durationTemplateBinding(config, durSpec)
