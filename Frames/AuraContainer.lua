@@ -810,6 +810,33 @@ local function styleButton_regions(slot, config)
     end
 end
 
+-- How a duration spec's FORMATTER goes onto a binding. Shared by the live template
+-- below and the test-mode binding (armTestDuration) — they must configure a binding
+-- identically or the preview lies about the live look.
+--   textFormat  a formatter sampled against a NON-default duration property (the expiry
+--               reveal on its percent scale). SetTextFormat substitutes each "{}" with
+--               its component, and a component names both the property and the
+--               formatter — the only way to judge bands against RemainingPercent
+--               instead of remaining seconds. MUST be tried first: a percent-unit
+--               reveal also carries `formatter`, so falling through to SetFormatter
+--               silently samples its percent bands against SECONDS. A 12s test aura
+--               then sits under the lowest band for its whole life and the reveal is
+--               stuck on that colour (red) instead of walking the ramp.
+--   formatter   plain formatter, sampled against the default remaining-seconds.
+--   neither     a fresh binding is UNCONFIGURED, so default-format rows would render
+--               no text at all — mirror the native default.
+local function applyDurationFormatter(b, durSpec)
+    if durSpec.textFormat and b.SetTextFormat then
+        b:SetTextFormat(durSpec.textFormat.formatString, durSpec.textFormat.components)
+    elseif durSpec.formatter then
+        b:SetFormatter(durSpec.formatter)
+    else
+        local def = AuraContainerInbound and AuraContainerInbound.GetDefaultAuraDurationFormatter
+              and AuraContainerInbound.GetDefaultAuraDurationFormatter()
+        if def then b:SetFormatter(def) end
+    end
+end
+
 -- Build (or reuse) the configured TEMPLATE DurationTextBinding for this config's
 -- duration spec. 68914's SetDurationText only reads { binding | textFormat |
 -- textFormatter | textColor } (CustomAuraButtonDurationTextOptions) and
@@ -824,19 +851,7 @@ local function durationTemplateBinding(config, durSpec)
     -- duration, format, formatter or fallback text) and Assign replaces the button
     -- binding WHOLESALE — so the template must carry the default formatter itself
     -- or default-format rows render no text at all.
-    -- textFormat: a formatter sampled against a NON-default duration property (the expiry
-    -- reveal on its percent scale). SetTextFormat substitutes each "{}" with its component,
-    -- and a component names both the property and the formatter — the only way to judge
-    -- bands against RemainingPercent instead of remaining seconds.
-    if durSpec.textFormat and b.SetTextFormat then
-        b:SetTextFormat(durSpec.textFormat.formatString, durSpec.textFormat.components)
-    elseif durSpec.formatter then
-        b:SetFormatter(durSpec.formatter)
-    else
-        local def = AuraContainerInbound and AuraContainerInbound.GetDefaultAuraDurationFormatter
-              and AuraContainerInbound.GetDefaultAuraDurationFormatter()
-        if def then b:SetFormatter(def) end
-    end
+    applyDurationFormatter(b, durSpec)
     -- Guards mirror the legacy flat-option block exactly: expiredText ~= "",
     -- zeroText nil-vs-set ("" MEANINGFULLY renders no text on permanents).
     if durSpec.expiredText and durSpec.expiredText ~= "" then b:SetExpiredText(durSpec.expiredText) end
@@ -1924,6 +1939,44 @@ end
 -- loop survives a MUTATE-ONLY re-arm (the native side holds a reference, so
 -- SetTimeFromStart alone restarts everything), and a colour curve applies smoothly.
 -- Returns true when the slot is natively driven; false = caller keeps the ticker.
+-- Drive a PREVIEW FontString from a duration spec exactly as a live row is driven: one
+-- DurationTextBinding, the shared formatter selection, the shared Duration object. Live
+-- rows reach the same configuration through SetDurationText's binding template; anywhere
+-- we own the fontstring (test-mode slots, the editor canvas) comes through here instead
+-- of hand-rolling it.
+--   fs        the FontString to drive
+--   durSpec   the SAME spec the live path builds (never a preview-only variant)
+--   dur       a C_DurationUtil Duration; pass a slot's own object to keep a companion
+--             reveal in lockstep with its icon's countdown, as they are live
+--   store/key where the binding is cached, so repeated paints reuse one binding
+-- Returns true when the binding is live, false when C_DurationUtil is unavailable.
+function AuraContainer.BindDurationTextPreview(fs, durSpec, dur, store, key)
+    if not (fs and durSpec and dur) then return false end
+    if not (C_DurationUtil and C_DurationUtil.CreateDurationTextBinding) then return false end
+    local b = store and store[key]
+    if not b then
+        b = C_DurationUtil.CreateDurationTextBinding()
+        if store then store[key] = b end
+        b:SetFontString(fs)
+    end
+    b:SetDuration(dur)
+    -- Options mirrored from bindNative's live SetDurationText block so the preview
+    -- formats identically (same formatter object, same texts, same cadence). Guards
+    -- match live exactly: expiredText ~= "", zeroText nil-vs-set.
+    applyDurationFormatter(b, durSpec)
+    if durSpec.expiredText and durSpec.expiredText ~= "" then b:SetExpiredText(durSpec.expiredText) end
+    if durSpec.zeroText ~= nil then b:SetZeroDurationText(durSpec.zeroText) end
+    if durSpec.updateInterval then b:SetUpdateInterval(durSpec.updateInterval) end
+    -- Colour-by-time parity: the live path sends the curve through SetDurationText's
+    -- textColor; here we own the binding, so set it directly. Without this the preview
+    -- would render the countdown in the fontstring's plain colour while live rows ramp.
+    if durSpec.colorCurve and durSpec.colorProperty ~= nil then
+        b:SetTextColorCurve(durSpec.colorCurve, durSpec.colorProperty)
+    end
+    b:SetEnabled(true)
+    return true
+end
+
 local function armTestDuration(handle, slot, d, offset)
     if not (C_DurationUtil and C_DurationUtil.CreateDuration) then return false end
     local cfg = handle.config
@@ -1955,37 +2008,7 @@ local function armTestDuration(handle, slot, d, offset)
             end
         end
         if slot.dfDur then
-            local b = slot._dfTestBinding
-            if not b then
-                b = C_DurationUtil.CreateDurationTextBinding()
-                slot._dfTestBinding = b
-                b:SetFontString(slot.dfDur)
-            end
-            b:SetDuration(dur)
-            -- Options mirrored from bindNative's live SetDurationText block so the
-            -- preview formats identically (same formatter object, same texts, same
-            -- cadence). Guards match live exactly: expiredText ~= "", zeroText nil-vs-set.
-            if durSpec.formatter then
-                b:SetFormatter(durSpec.formatter)
-            else
-                -- No spec formatter: a fresh binding is UNCONFIGURED (no default
-                -- formatter), so default-format rows would render no text. Mirror
-                -- the live path's native default (addon-readable since 68914).
-                local def = AuraContainerInbound and AuraContainerInbound.GetDefaultAuraDurationFormatter
-                      and AuraContainerInbound.GetDefaultAuraDurationFormatter()
-                if def then b:SetFormatter(def) end
-            end
-            if durSpec.expiredText and durSpec.expiredText ~= "" then b:SetExpiredText(durSpec.expiredText) end
-            if durSpec.zeroText ~= nil then b:SetZeroDurationText(durSpec.zeroText) end
-            if durSpec.updateInterval then b:SetUpdateInterval(durSpec.updateInterval) end
-            -- Colour-by-time parity: the live path sends the curve through
-            -- SetDurationText's textColor; here we own the binding, so set it directly.
-            -- Without this the preview would render the countdown in the fontstring's
-            -- plain colour while live rows ramp.
-            if durSpec.colorCurve and durSpec.colorProperty ~= nil then
-                b:SetTextColorCurve(durSpec.colorCurve, durSpec.colorProperty)
-            end
-            b:SetEnabled(true)
+            AuraContainer.BindDurationTextPreview(slot.dfDur, durSpec, dur, slot, "_dfTestBinding")
         end
     end)
     if not ok then
