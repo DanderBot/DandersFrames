@@ -810,6 +810,37 @@ local function styleButton_regions(slot, config)
     end
 end
 
+-- Build (or reuse) the configured TEMPLATE DurationTextBinding for this config's
+-- duration spec. 68914's SetDurationText only reads { binding | textFormat |
+-- textFormatter | textColor } (CustomAuraButtonDurationTextOptions) and
+-- Assign()-copies a supplied binding into the button's own — so ONE template
+-- serves every slot in the row. Cached by spec identity: a structural Rebuild
+-- delivers a fresh style table, which naturally invalidates the cache.
+local function durationTemplateBinding(config, durSpec)
+    if config._dfDurBind and config._dfDurBindSpec == durSpec then return config._dfDurBind end
+    if not (C_DurationUtil and C_DurationUtil.CreateDurationTextBinding) then return nil end
+    local b = C_DurationUtil.CreateDurationTextBinding()
+    -- A fresh binding is UNCONFIGURED (the SetToDefaults contract: no font string,
+    -- duration, format, formatter or fallback text) and Assign replaces the button
+    -- binding WHOLESALE — so the template must carry the default formatter itself
+    -- or default-format rows render no text at all.
+    if durSpec.formatter then
+        b:SetFormatter(durSpec.formatter)
+    else
+        local def = AuraContainerInbound and AuraContainerInbound.GetDefaultAuraDurationFormatter
+              and AuraContainerInbound.GetDefaultAuraDurationFormatter()
+        if def then b:SetFormatter(def) end
+    end
+    -- Guards mirror the legacy flat-option block exactly: expiredText ~= "",
+    -- zeroText nil-vs-set ("" MEANINGFULLY renders no text on permanents).
+    if durSpec.expiredText and durSpec.expiredText ~= "" then b:SetExpiredText(durSpec.expiredText) end
+    if durSpec.zeroText ~= nil then b:SetZeroDurationText(durSpec.zeroText) end
+    if durSpec.updateInterval then b:SetUpdateInterval(durSpec.updateInterval) end
+    b:SetEnabled(true)   -- Assign copies state wholesale; never hand over a disabled template
+    config._dfDurBindSpec, config._dfDurBind = durSpec, b
+    return b
+end
+
 -- Register each region with its Blizzard inbound setter. NATIVE slots only (a plain
 -- fake/legacy slot lacks these methods, so each bind is skipped and its backend pushes
 -- data to the regions instead). Bind-once per region so ApplyStyle re-runs don't re-register.
@@ -832,35 +863,47 @@ local function bindNative(slot, config)
     if slot.dfDur and slot.SetDurationText and not slot._boundDur then
         slot._boundDur = true
         local durSpec = style.duration or {}
+        -- 68914 RESHAPED the options: SetDurationText now only reads { binding |
+        -- textFormat | textFormatter | textColor }; the flat formatter/expiredText/
+        -- zeroDurationText/updateInterval keys are silently IGNORED (the
+        -- field-reported "duration text lost its format" break). Detect the drop
+        -- by its companion API and route the spec through a template binding
+        -- (durationTemplateBinding above); older builds keep the flat table.
         local opts = {}
-        if durSpec.formatter then opts.formatter = durSpec.formatter end
-        if durSpec.expiredText and durSpec.expiredText ~= "" then opts.expiredText = durSpec.expiredText end
-        -- zeroText: "" is MEANINGFUL — SetZeroDurationText("") renders NO text on
-        -- zero-duration/unconfigured (= permanent) auras, while nil keeps Blizzard's
-        -- default zero-duration rendering (the mixin forwards options.zeroDurationText
-        -- unconditionally and the API arg is nilable — Blizzard_CustomAuraButton.lua:169,
-        -- DurationTextBindingObject docs). So the guard is nil-vs-set, never ~= "".
-        if durSpec.zeroText ~= nil then opts.zeroDurationText = durSpec.zeroText end
-        -- updateInterval (Wave 5a): minimum seconds between automatic text
-        -- refreshes (Blizzard_CustomAuraButton.lua:164 forwards it to
-        -- SetUpdateInterval). Absent = the binding's own default cadence — the
-        -- NORMAL setting deliberately emits nothing (the C-side default is
-        -- undocumented, so absent-key is the only behavior-neutral shape).
-        if durSpec.updateInterval then opts.updateInterval = durSpec.updateInterval end
+        if AuraContainerInbound and type(AuraContainerInbound.GetDefaultAuraDurationFormatter) == "function" then
+            if durSpec.formatter or (durSpec.expiredText and durSpec.expiredText ~= "")
+               or durSpec.zeroText ~= nil or durSpec.updateInterval then
+                opts.binding = durationTemplateBinding(config, durSpec)
+            end
+            -- else: nothing to carry — Blizzard's no-options path (SetToDefaults +
+            -- default formatter) already renders exactly what the template would.
+        else
+            if durSpec.formatter then opts.formatter = durSpec.formatter end
+            if durSpec.expiredText and durSpec.expiredText ~= "" then opts.expiredText = durSpec.expiredText end
+            -- zeroText: "" is MEANINGFUL — SetZeroDurationText("") renders NO text on
+            -- zero-duration/unconfigured (= permanent) auras, while nil keeps Blizzard's
+            -- default zero-duration rendering (the mixin forwards options.zeroDurationText
+            -- unconditionally and the API arg is nilable). So the guard is nil-vs-set,
+            -- never ~= "".
+            if durSpec.zeroText ~= nil then opts.zeroDurationText = durSpec.zeroText end
+            -- updateInterval (Wave 5a): minimum seconds between automatic text
+            -- refreshes. Absent = the binding's own default cadence — the NORMAL
+            -- setting deliberately emits nothing (the C-side default is
+            -- undocumented, so absent-key is the only behavior-neutral shape).
+            if durSpec.updateInterval then opts.updateInterval = durSpec.updateInterval end
+        end
         local ok, err = pcall(function() slot:SetDurationText(slot.dfDur, opts) end)
         if not ok and not warnedCurve then
             warnedCurve = true
             DF:DebugWarn(DBG, "SetDurationText failed: %s", tostring(err))
         end
-        -- Colour-by-time: the smooth textColorCurve path is DEAD on 68569 (live-tested
-        -- 2026-07-09, port plan §2.8/§3): SetDurationText forwards SetTextColorCurve(curve)
-        -- WITHOUT the required `property` arg (no-op), and `button.DurationTextBinding` is a
-        -- PRIVATE field — NOT on the public object table initializeFrame receives — so the
-        -- old direct-binding poke here could never fire, and poking Blizzard-owned binding
-        -- state on a live button is exactly the class of touch the combat-proven DF_AuraLab
-        -- initFrame avoids. durSpec.colorCurve is accepted-but-inert; colour-by-time ships
-        -- via the discrete BUCKETS formatter (|cRRGGBB escapes in AddBreakpoint format
-        -- strings, the NSRT/EnhanceQoL-proven path) in P2.
+        -- Colour-by-time: 68914 FIXED the smooth path — SetDurationText now forwards
+        -- options.textColor = { curve, property } WITH the property arg the 68569
+        -- forward dropped (the reason the curve was dead; port plan §2.8/§3).
+        -- durSpec.colorCurve stays accepted-but-inert HERE until the smooth-colour
+        -- item lands (curve build + editor mode); discrete colour still ships via
+        -- the BUCKETS formatter (|cRRGGBB escapes in AddBreakpoint format strings),
+        -- which rides the template binding's formatter unchanged.
     end
 
     if slot.dfStack and slot.SetApplicationCount and not slot._boundStack then
@@ -1911,7 +1954,16 @@ local function armTestDuration(handle, slot, d, offset)
             -- Options mirrored from bindNative's live SetDurationText block so the
             -- preview formats identically (same formatter object, same texts, same
             -- cadence). Guards match live exactly: expiredText ~= "", zeroText nil-vs-set.
-            if durSpec.formatter then b:SetFormatter(durSpec.formatter) end
+            if durSpec.formatter then
+                b:SetFormatter(durSpec.formatter)
+            else
+                -- No spec formatter: a fresh binding is UNCONFIGURED (no default
+                -- formatter), so default-format rows would render no text. Mirror
+                -- the live path's native default (addon-readable since 68914).
+                local def = AuraContainerInbound and AuraContainerInbound.GetDefaultAuraDurationFormatter
+                      and AuraContainerInbound.GetDefaultAuraDurationFormatter()
+                if def then b:SetFormatter(def) end
+            end
             if durSpec.expiredText and durSpec.expiredText ~= "" then b:SetExpiredText(durSpec.expiredText) end
             if durSpec.zeroText ~= nil then b:SetZeroDurationText(durSpec.zeroText) end
             if durSpec.updateInterval then b:SetUpdateInterval(durSpec.updateInterval) end
