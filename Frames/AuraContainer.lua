@@ -499,6 +499,18 @@ local function styleButton_regions(slot, config)
     local sy = config.layout and (config.layout.sizeY or config.layout.size) or sx
     if isRow then slot:SetSize(sx, sy) end   -- overlay is SetAllPoints(frame) in _build
 
+    -- Native tooltip placement + combat-hide (68914+): plain AuraButtonSharedMixin
+    -- state, read at hover time (SetOwner anchor; the ShouldShowTooltip combat gate)
+    -- — NOT creation-frozen and NOT a bind, so this cosmetic pass keeps it current
+    -- on init and on every restyle. Guarded: only native container buttons carry
+    -- the mixin (test/fake slots and overlay carriers don't). The spec's point is
+    -- always one of the mixin's valid names (SetTooltipAnchorPoint asserts).
+    local tt = style.tooltip
+    if tt and slot.SetTooltipAnchorPoint and slot.SetHideTooltipInCombat then
+        slot:SetTooltipAnchorPoint(tt.point, tt.x, tt.y)
+        slot:SetHideTooltipInCombat(tt.hideInCombat == true)
+    end
+
     -- OVERLAY tint / ROW icon. Static icon (known spell) is set here (source-agnostic —
     -- it's also the fake backend's icon mechanism); the native SetIcon bind is in bindNative.
     if config.mode == "overlay" then
@@ -2242,9 +2254,18 @@ function Handle:_paintTestSlot(slot, index)
             self._testTips[index] = tip
             tip:EnableMouse(true)
             if tip.SetMouseClickEnabled then tip:SetMouseClickEnabled(false) end
+            local handle = self
             tip:SetScript("OnEnter", function(s)
                 if not GameTooltip then return end
-                GameTooltip:SetOwner(s, "ANCHOR_RIGHT")
+                -- LIVE-PATHWAY parity: mirror the row's configured tooltip placement
+                -- + combat-hide exactly as the native hover applies them (the same
+                -- style.tooltip spec styleButton_regions stamps on live buttons).
+                -- Resolved at hover time so a settings change needs no tip recreate.
+                local tt = handle.config.style and handle.config.style.tooltip
+                if tt and tt.hideInCombat and UnitAffectingCombat("player") then return end
+                local point, ox, oy = "ANCHOR_RIGHT", 0, 0
+                if tt then point, ox, oy = tt.point, tt.x or 0, tt.y or 0 end
+                GameTooltip:SetOwner(s, point, ox, oy)
                 -- Real spell tooltip when the pool entry carries a live spell ID.
                 -- dontOverride (arg 4) is LOAD-BEARING: without it the tooltip
                 -- resolves the player's SPEC OVERRIDE and renders a different
@@ -2261,7 +2282,7 @@ function Handle:_paintTestSlot(slot, index)
                     end
                 end
                 if not shown and s._name then
-                    GameTooltip:SetOwner(s, "ANCHOR_RIGHT")   -- reset any wrong render
+                    GameTooltip:SetOwner(s, point, ox, oy)   -- reset any wrong render
                     GameTooltip:SetText(s._name, 1, 1, 1)
                 end
                 GameTooltip:Show()
@@ -2438,10 +2459,12 @@ function Handle:_makeInitializeFrame(gen, fixedIndex, onInit)
             if button.SetMouseClickEnabled then button:SetMouseClickEnabled(false) end
             -- Tooltips stay OFF in test mode regardless of the setting: hover would
             -- show the underlying SAMPLE aura's real tooltip (random spellbook data),
-            -- not the curated preview icon it appears to be. Motion is the ONE addon
-            -- lever over the native aura tooltip (the tooltip is a forbidden object
-            -- with a hardcoded anchor); it can't be toggled per-combat because the
-            -- button's mouse state is secret + write-locked in combat (live-verified).
+            -- not the curated preview icon it appears to be. Motion is the on/off
+            -- lever; it can't be toggled per-combat because the button's mouse state
+            -- is secret + write-locked in combat (live-verified). Placement and
+            -- combat-hide are NOT limited like that on 68914+: SetTooltipAnchorPoint/
+            -- SetHideTooltipInCombat are plain shared-mixin state, stamped from
+            -- style.tooltip in styleButton_regions (via _acceptSlot below).
             if button.SetMouseMotionEnabled then
                 button:SetMouseMotionEnabled(handle.config.tooltips == true and not AuraContainer._testMode)
             end
@@ -3135,7 +3158,10 @@ end
 --   sort     = { rule, direction },             -- PTR-4 only; accepted + no-op now (warns if set)
 --   layout   = { anchor, growth, wrap, scale, size|sizeX|sizeY, spacing|spacingX|spacingY, offsetX, offsetY },
 --   style    = { icon{show,zoom,inset,staticSpellID}, border, cooldown{show,edge,reverse,numbers},
---                duration, stacks, bar, spellName, dispel, overlay },
+--                duration, stacks, bar, spellName, dispel, overlay,
+--                tooltip{point,x,y,hideInCombat} },   -- native tooltip placement (68914+): point =
+--                                                     -- a SetTooltipAnchorPoint name; live mixin
+--                                                     -- state, restyles in place (no Rebuild).
 -- }
 function AuraContainer:Create(parent, config)
     if not AuraContainer.IsSupported() then return nil end

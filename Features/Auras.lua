@@ -1235,6 +1235,46 @@ function DF:BuildDurationBarSpec(store, keyPrefix)
     }
 end
 
+-- Tooltips page -> native aura-button tooltip placement (68914+). The button's
+-- SetTooltipAnchorPoint/SetHideTooltipInCombat are plain mixin state read at hover
+-- time (SetOwner anchor + the ShouldShowTooltip combat gate), so this spec rides
+-- style.* and hot-applies through the cosmetic ApplyStyle pass — no rebuild.
+-- key = "Buff"/"Debuff"/"Defensive" (the Tooltips page's per-row blocks).
+-- Model mapping (mirrors the legacy frame-tooltip semantics in Create.lua):
+--   DEFAULT -> ANCHOR_BOTTOMLEFT 0,0 (the template's own default — explicit so a
+--              hot-apply can always overwrite a previous mode)
+--   CURSOR  -> cursor-follow anchor, side picked from AnchorPos (offsets unused,
+--              matching the page greying them out)
+--   FRAME   -> "ANCHOR_"..AnchorPos on the hovered icon + the X/Y offsets.
+--              CENTER has no native anchor name -> falls back to DEFAULT
+--              (SetTooltipAnchorPoint asserts on anything off its list).
+local NATIVE_TOOLTIP_POINTS = {
+    TOPLEFT = true, TOP = true, TOPRIGHT = true, LEFT = true, RIGHT = true,
+    BOTTOMLEFT = true, BOTTOM = true, BOTTOMRIGHT = true,
+}
+local function buildTooltipSpec(db, key)
+    local mode = db["tooltip" .. key .. "Anchor"] or "DEFAULT"
+    local pos  = db["tooltip" .. key .. "AnchorPos"]
+    local point, x, y = "ANCHOR_BOTTOMLEFT", 0, 0
+    if mode == "CURSOR" then
+        if pos == "LEFT" or pos == "TOPLEFT" or pos == "BOTTOMLEFT" then
+            point = "ANCHOR_CURSOR_RIGHT"
+        elseif pos == "RIGHT" or pos == "TOPRIGHT" or pos == "BOTTOMRIGHT" then
+            point = "ANCHOR_CURSOR_LEFT"
+        else
+            point = "ANCHOR_CURSOR"
+        end
+    elseif mode == "FRAME" and NATIVE_TOOLTIP_POINTS[pos] then
+        point = "ANCHOR_" .. pos
+        x = db["tooltip" .. key .. "X"] or 0
+        y = db["tooltip" .. key .. "Y"] or 0
+    end
+    return {
+        point = point, x = x, y = y,
+        hideInCombat = db["tooltip" .. key .. "DisableInCombat"] == true,
+    }
+end
+
 -- Map a prefixed aura-row setting block (buff*/debuff*) -> DF.AuraContainer config.
 -- prefix = "buff" (debuff reuses this later). opts.filterList is the PRE-BUILT native
 -- filter list (buffs: BuildDirectBuffFilters); opts.unit is the initial unit token.
@@ -1462,6 +1502,9 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
             cooldown = { show = not g("HideSwipe"), reverse = true, edge = false, numbers = false },
             duration = dur,
             dispel   = dispel,
+            -- Tooltip placement + combat-hide (Tooltips page): live mixin state,
+            -- restyles in place — deliberately in NEITHER row sig.
+            tooltip  = buildTooltipSpec(db, (prefix == "debuff") and "Debuff" or "Buff"),
             -- Duration bar strip (nil when disabled — byte-neutral). Presence +
             -- geometry are structural (rowStructSig's s.bar entry, Wave 3.1);
             -- texture/colours restyle in place.
@@ -1991,6 +2034,8 @@ function DF:BuildDefensiveRowConfig(db, unit)
             border = (db.defensiveIconShowBorder ~= false) and { db = db, prefix = "defensiveIcon" } or nil,
             cooldown = { show = not db.defensiveIconHideSwipe, reverse = true, edge = false, numbers = false },
             duration = dur,
+            -- Tooltip placement + combat-hide (Tooltips page) — see the buff row.
+            tooltip  = buildTooltipSpec(db, "Defensive"),
             -- Duration bar strip (nil when disabled — byte-neutral; see the buff row).
             bar      = DF:BuildDurationBarSpec(db, "defensiveDurationBar"),
             -- TextStyle-shaped spec (defensive stacks have no db keys — legacy fixed

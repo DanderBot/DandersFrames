@@ -430,8 +430,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Buff Tooltips (Column 2)
         local buffTooltipGroup = GUI:CreateSettingsGroup(self.child, 280)
         buffTooltipGroup:AddWidget(GUI:CreateHeader(self.child, L["Buff Tooltips"]), 40)
-        -- 12.1 factory rows read these at build (mouse-motion opt-in, in the row sig) —
-        -- a toggle must invalidate so the rebuild picks it up. Legacy reads at hover (free).
+        -- 12.1 factory rows read all of these on the layout-version bump: the Enable
+        -- toggle is structural (mouse-motion opt-in, in the row sig -> Rebuild), while
+        -- anchor/offsets/combat-hide ride style.tooltip and restyle in place
+        -- (SetTooltipAnchorPoint/SetHideTooltipInCombat are live mixin state, 68914+).
         local RefreshAuraTooltips = function()
             if DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
             DF:UpdateAllFrames()
@@ -439,38 +441,23 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local buffTooltipEnable = buffTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Buff Tooltips"], db, "tooltipBuffEnabled", RefreshAuraTooltips), 30)
         buffTooltipEnable.keepEnabled = true
         buffTooltipGroup.disableChildrenOn = function(d) return not d.tooltipBuffEnabled end
-        -- Permanent 12.1 limitation: the aura button's mouse state is secret and
-        -- write-locked in combat, so the native hover can't be dropped per-combat
-        -- (live-verified — the insecure SetMouseMotionEnabled flip no-ops in combat).
-        local buffTtCombat = buffTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Disable in Combat"], db, "tooltipBuffDisableInCombat", function() end), 30)
-        GUI:BlockControl12_1(buffTtCombat, "limitation", { id = "tooltips:buffcombat", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsBuffRow(d) end })
-        -- Position controls below are a PERMANENT 12.1 limitation: the game's aura
-        -- tooltip is a forbidden object with a hardcoded anchor (source-verified;
-        -- even Blizzard's own frames get no say). Explain rather than just grey.
-        local buffTipNote = buffTooltipGroup:AddWidget(GUI:CreateNote(self.child,
-            L["On 12.1 the game draws aura tooltips at a fixed position beside the icon."],
-            { width = 260 }), 40)
-        buffTipNote.hideOn = function(d) return not DF:FactoryOwnsBuffRow(d) end
+        buffTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Disable in Combat"], db, "tooltipBuffDisableInCombat", RefreshAuraTooltips), 30)
 
         local buffAnchorValues = {
             DEFAULT = L["Game Default"],
             CURSOR = L["Cursor"],
             FRAME = L["Buff Icon"],
         }
-        local buffTtAnchorTo = buffTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor To"], buffAnchorValues, db, "tooltipBuffAnchor", function() GUI:RefreshCurrentPage() end), 55)
-        GUI:BlockControl12_1(buffTtAnchorTo, "limitation", { id = "tooltips:buffanchorto", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsBuffRow(d) end })
-        
-        local buffAnchorPos = buffTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorPositionValues, db, "tooltipBuffAnchorPos", function() end), 55)
+        buffTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor To"], buffAnchorValues, db, "tooltipBuffAnchor", function() RefreshAuraTooltips() GUI:RefreshCurrentPage() end), 55)
+
+        local buffAnchorPos = buffTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorPositionValues, db, "tooltipBuffAnchorPos", RefreshAuraTooltips), 55)
         buffAnchorPos.disableOn = function(d) return d.tooltipBuffAnchor == "DEFAULT" end
-        GUI:BlockControl12_1(buffAnchorPos, "limitation", { id = "tooltips:buffanchorpos", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsBuffRow(d) end })
-        
-        local buffOffsetX = buffTooltipGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -150, 150, 1, db, "tooltipBuffX", function() end), 55)
+
+        local buffOffsetX = buffTooltipGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -150, 150, 1, db, "tooltipBuffX", RefreshAuraTooltips), 55)
         buffOffsetX.disableOn = function(d) return d.tooltipBuffAnchor ~= "FRAME" end
-        GUI:BlockControl12_1(buffOffsetX, "limitation", { id = "tooltips:buffoffsetx", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsBuffRow(d) end })
-        
-        local buffOffsetY = buffTooltipGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -150, 150, 1, db, "tooltipBuffY", function() end), 55)
+
+        local buffOffsetY = buffTooltipGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -150, 150, 1, db, "tooltipBuffY", RefreshAuraTooltips), 55)
         buffOffsetY.disableOn = function(d) return d.tooltipBuffAnchor ~= "FRAME" end
-        GUI:BlockControl12_1(buffOffsetY, "limitation", { id = "tooltips:buffoffsety", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsBuffRow(d) end })
         
         Add(buffTooltipGroup, nil, 2)
         
@@ -485,33 +472,23 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local debuffTooltipEnable = debuffTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Debuff Tooltips"], db, "tooltipDebuffEnabled", RefreshAuraTooltips), 30)
         debuffTooltipEnable.keepEnabled = true
         debuffTooltipGroup.disableChildrenOn = function(d) return not d.tooltipDebuffEnabled end
-        -- Permanent 12.1 limitation (see the buff group): combat hover-drop no-ops.
-        local debuffTtCombat = debuffTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Disable in Combat"], db, "tooltipDebuffDisableInCombat", function() end), 30)
-        GUI:BlockControl12_1(debuffTtCombat, "limitation", { id = "tooltips:debuffcombat", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsDebuffRow(d) end })
-        local debuffTipNote = debuffTooltipGroup:AddWidget(GUI:CreateNote(self.child,
-            L["On 12.1 the game draws aura tooltips at a fixed position beside the icon."],
-            { width = 260 }), 40)
-        debuffTipNote.hideOn = function(d) return not DF:FactoryOwnsDebuffRow(d) end
+        debuffTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Disable in Combat"], db, "tooltipDebuffDisableInCombat", RefreshAuraTooltips), 30)
 
         local debuffAnchorValues = {
             DEFAULT = L["Game Default"],
             CURSOR = L["Cursor"],
             FRAME = L["Debuff Icon"],
         }
-        local debuffTtAnchorTo = debuffTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor To"], debuffAnchorValues, db, "tooltipDebuffAnchor", function() GUI:RefreshCurrentPage() end), 55)
-        GUI:BlockControl12_1(debuffTtAnchorTo, "limitation", { id = "tooltips:debuffanchorto", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsDebuffRow(d) end })
-        
-        local debuffAnchorPos = debuffTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorPositionValues, db, "tooltipDebuffAnchorPos", function() end), 55)
+        debuffTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor To"], debuffAnchorValues, db, "tooltipDebuffAnchor", function() RefreshAuraTooltips() GUI:RefreshCurrentPage() end), 55)
+
+        local debuffAnchorPos = debuffTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorPositionValues, db, "tooltipDebuffAnchorPos", RefreshAuraTooltips), 55)
         debuffAnchorPos.disableOn = function(d) return d.tooltipDebuffAnchor == "DEFAULT" end
-        GUI:BlockControl12_1(debuffAnchorPos, "limitation", { id = "tooltips:debuffanchorpos", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsDebuffRow(d) end })
-        
-        local debuffOffsetX = debuffTooltipGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -150, 150, 1, db, "tooltipDebuffX", function() end), 55)
+
+        local debuffOffsetX = debuffTooltipGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -150, 150, 1, db, "tooltipDebuffX", RefreshAuraTooltips), 55)
         debuffOffsetX.disableOn = function(d) return d.tooltipDebuffAnchor ~= "FRAME" end
-        GUI:BlockControl12_1(debuffOffsetX, "limitation", { id = "tooltips:debuffoffsetx", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsDebuffRow(d) end })
-        
-        local debuffOffsetY = debuffTooltipGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -150, 150, 1, db, "tooltipDebuffY", function() end), 55)
+
+        local debuffOffsetY = debuffTooltipGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -150, 150, 1, db, "tooltipDebuffY", RefreshAuraTooltips), 55)
         debuffOffsetY.disableOn = function(d) return d.tooltipDebuffAnchor ~= "FRAME" end
-        GUI:BlockControl12_1(debuffOffsetY, "limitation", { id = "tooltips:debuffoffsety", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsDebuffRow(d) end })
         
         Add(debuffTooltipGroup, nil, 1)
         
@@ -521,33 +498,23 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local defTooltipEnable = defTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Defensive Icon Tooltips"], db, "tooltipDefensiveEnabled", RefreshAuraTooltips), 30)
         defTooltipEnable.keepEnabled = true
         defTooltipGroup.disableChildrenOn = function(d) return not d.tooltipDefensiveEnabled end
-        -- Permanent 12.1 limitation (see the buff group): combat hover-drop no-ops.
-        local defTtCombat = defTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Disable in Combat"], db, "tooltipDefensiveDisableInCombat", function() end), 30)
-        GUI:BlockControl12_1(defTtCombat, "limitation", { id = "tooltips:defensivecombat", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsDefensiveRow(d) end })
-        local defTipNote = defTooltipGroup:AddWidget(GUI:CreateNote(self.child,
-            L["On 12.1 the game draws aura tooltips at a fixed position beside the icon."],
-            { width = 260 }), 40)
-        defTipNote.hideOn = function(d) return not DF:FactoryOwnsDefensiveRow(d) end
+        defTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Disable in Combat"], db, "tooltipDefensiveDisableInCombat", RefreshAuraTooltips), 30)
 
         local defAnchorValues = {
             DEFAULT = L["Game Default"],
             CURSOR = L["Cursor"],
             FRAME = L["Defensive Icon"],
         }
-        local defTtAnchorTo = defTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor To"], defAnchorValues, db, "tooltipDefensiveAnchor", function() GUI:RefreshCurrentPage() end), 55)
-        GUI:BlockControl12_1(defTtAnchorTo, "limitation", { id = "tooltips:defensiveanchorto", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsDefensiveRow(d) end })
-        
-        local defAnchorPos = defTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorPositionValues, db, "tooltipDefensiveAnchorPos", function() end), 55)
+        defTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor To"], defAnchorValues, db, "tooltipDefensiveAnchor", function() RefreshAuraTooltips() GUI:RefreshCurrentPage() end), 55)
+
+        local defAnchorPos = defTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorPositionValues, db, "tooltipDefensiveAnchorPos", RefreshAuraTooltips), 55)
         defAnchorPos.disableOn = function(d) return d.tooltipDefensiveAnchor == "DEFAULT" end
-        GUI:BlockControl12_1(defAnchorPos, "limitation", { id = "tooltips:defensiveanchorpos", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsDefensiveRow(d) end })
-        
-        local defOffsetX = defTooltipGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -100, 100, 1, db, "tooltipDefensiveX", function() end), 55)
+
+        local defOffsetX = defTooltipGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -100, 100, 1, db, "tooltipDefensiveX", RefreshAuraTooltips), 55)
         defOffsetX.disableOn = function(d) return d.tooltipDefensiveAnchor ~= "FRAME" end
-        GUI:BlockControl12_1(defOffsetX, "limitation", { id = "tooltips:defensiveoffsetx", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsDefensiveRow(d) end })
-        
-        local defOffsetY = defTooltipGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -100, 100, 1, db, "tooltipDefensiveY", function() end), 55)
+
+        local defOffsetY = defTooltipGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -100, 100, 1, db, "tooltipDefensiveY", RefreshAuraTooltips), 55)
         defOffsetY.disableOn = function(d) return d.tooltipDefensiveAnchor ~= "FRAME" end
-        GUI:BlockControl12_1(defOffsetY, "limitation", { id = "tooltips:defensiveoffsety", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsDefensiveRow(d) end })
         
         Add(defTooltipGroup, nil, 2)
 
