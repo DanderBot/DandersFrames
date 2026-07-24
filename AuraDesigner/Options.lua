@@ -1467,7 +1467,7 @@ local TYPE_DEFAULTS = {
         anchor = "BOTTOM", offsetX = 0, offsetY = 0,
         orientation = "HORIZONTAL", width = 60, height = 6,
         matchFrameWidth = true, matchFrameHeight = false,
-        barColorMode = "STATIC",   -- STATIC / DF / CLASSIC (curve = green->red ramp as it drains)
+        barColorMode = "STATIC",   -- STATIC / DF / DFSTOPS / CLASSIC (curve = green->red ramp as it drains)
         texture = "Interface\\TargetingFrame\\UI-StatusBar",
         fillColor = {r = 1, g = 1, b = 1, a = 1},
         bgColor = {r = 0, g = 0, b = 0, a = 0.5},
@@ -3942,7 +3942,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             barChild(GUI:CreateSlider(parent, L["Height"], 1, 12, 1, proxy, "durationBarHeight"), 54)
             barChild(GUI:CreateSlider(parent, L["Gap"], 0, 10, 1, proxy, "durationBarGap"), 54)
             barChild(GUI:CreateDropdown(parent, L["Color Mode"],
-                { STATIC = L["Static"], DF = L["DF Curve"], CLASSIC = L["Classic Curve"] },
+                DF:GetDurationBarColorModes(),
                 proxy, "durationBarColorMode", UpdateBarGrey), 54)
             -- A curve mode brings its own ramp texture and forces a white tint, so these
             -- two do nothing while it is selected — grey them (curveGated) when it is.
@@ -4378,8 +4378,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 for w in pairs(curveGated) do if w.SetEnabled then w:SetEnabled(not curve) end end
             end
             colorModeDrop = g:AddWidget(GUI:CreateDropdown(parent, L["Color Mode"],
-                { STATIC = L["Static"], DF = L["DF Curve"], CLASSIC = L["Classic Curve"],
-                  _order = { "STATIC", "DF", "CLASSIC" } }, proxy, "barColorMode", UpdateColorModeGrey), 54)
+                DF:GetDurationBarColorModes(), proxy, "barColorMode", UpdateColorModeGrey), 54)
             local texW = g:AddWidget(GUI:CreateTextureDropdown(parent, L["Bar Texture"], proxy, "texture"), 54)
             local colW = g:AddWidget(GUI:CreateColorPicker(parent, L["Fill Color"], proxy, "fillColor", true, RPL, RPL, true), 28)
             curveGated[texW] = true; curveGated[colW] = true
@@ -7574,7 +7573,7 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
         barChild(GUI:CreateSlider(body, L["Height"], 1, 12, 1, proxy, "durationBarHeight", refresh, refresh, true), 54)
         barChild(GUI:CreateSlider(body, L["Gap"], 0, 10, 1, proxy, "durationBarGap", refresh, refresh, true), 54)
         barChild(GUI:CreateDropdown(body, L["Color Mode"],
-            { STATIC = L["Static"], DF = L["DF Curve"], CLASSIC = L["Classic Curve"] },
+            DF:GetDurationBarColorModes(),
             proxy, "durationBarColorMode", function() UpdateBarGrey(); refresh() end), 54)
         -- A curve mode brings its own ramp texture and forces a white tint, so these two
         -- do nothing while it is selected - dim them (curveGated) rather than leave dead

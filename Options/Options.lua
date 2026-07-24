@@ -8,15 +8,6 @@ local format = string.format
 function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     local L = DF.L
 
-    -- Duration-bar colour modes, shared by the buff / debuff / defensive Bar Style
-    -- groups (the Aura Designer group cards mirror it). A curve mode swaps the fill
-    -- for a baked ramp image and forces a white tint, so Texture / Bar Color are dimmed
-    -- while one is active. Colours by FRACTION remaining, not seconds - the ramp is a
-    -- fixed image and is not driven by the colour pickers. See DF:BuildDurationBarSpec.
-    local function DurationBarColorModes()
-        return { STATIC = L["Static"], DF = L["DF Curve"], CLASSIC = L["Classic Curve"] }
-    end
-
     -- Note-style cross-link dropped in under a "Color by Time Remaining" toggle so users can
     -- jump to where the shared, account-wide breakpoint colours actually live (and see that
     -- section highlighted on arrival). `group` is the settings group the toggle sits in; `parent`
@@ -6396,7 +6387,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local durBarStyleGroup = GUI:CreateSettingsGroup(self.child, 280)
         durBarStyleGroup.hideOn = durBarSection.hideOn
         durBarStyleGroup:AddWidget(GUI:CreateHeader(self.child, L["Bar Style"]), 40)
-        durBarStyleGroup:AddWidget(GUI:CreateDropdown(self.child, L["Color Mode"], DurationBarColorModes(), db, "buffDurationBarColorMode", function()
+        durBarStyleGroup:AddWidget(GUI:CreateDropdown(self.child, L["Color Mode"], DF:GetDurationBarColorModes(), db, "buffDurationBarColorMode", function()
             self:RefreshStates()
             BuffBarChanged()
         end), 55)
@@ -6664,7 +6655,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local durBarStyleGroup = GUI:CreateSettingsGroup(self.child, 280)
         durBarStyleGroup.hideOn = durBarSection.hideOn
         durBarStyleGroup:AddWidget(GUI:CreateHeader(self.child, L["Bar Style"]), 40)
-        durBarStyleGroup:AddWidget(GUI:CreateDropdown(self.child, L["Color Mode"], DurationBarColorModes(), db, "debuffDurationBarColorMode", function()
+        durBarStyleGroup:AddWidget(GUI:CreateDropdown(self.child, L["Color Mode"], DF:GetDurationBarColorModes(), db, "debuffDurationBarColorMode", function()
             self:RefreshStates()
             DebuffBarChanged()
         end), 55)
@@ -7183,7 +7174,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         durBarGroup:AddWidget(GUI:CreateDropdown(self.child, L["Position"], { BOTTOM = L["Bottom"], TOP = L["Top"] }, db, "defensiveDurationBarPosition", DefBarChanged), 55)
         durBarGroup:AddWidget(GUI:CreateSlider(self.child, L["Height"], 1, 12, 1, db, "defensiveDurationBarHeight", nil, DefBarChanged, true), 55)
         durBarGroup:AddWidget(GUI:CreateSlider(self.child, L["Gap"], 0, 10, 1, db, "defensiveDurationBarGap", nil, DefBarChanged, true), 55)
-        durBarGroup:AddWidget(GUI:CreateDropdown(self.child, L["Color Mode"], DurationBarColorModes(), db, "defensiveDurationBarColorMode", function()
+        durBarGroup:AddWidget(GUI:CreateDropdown(self.child, L["Color Mode"], DF:GetDurationBarColorModes(), db, "defensiveDurationBarColorMode", function()
             self:RefreshStates()
             DefBarChanged()
         end), 55)

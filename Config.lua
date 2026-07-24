@@ -1151,7 +1151,7 @@ DF.PartyDefaults = {
     buffDurationBarPosition = "BOTTOM",       -- "BOTTOM" / "TOP"
     buffDurationBarHeight = 4,
     buffDurationBarGap = 1,
-    buffDurationBarColorMode = "STATIC",      -- STATIC / DF / CLASSIC (see BuildDurationBarSpec)
+    buffDurationBarColorMode = "STATIC",      -- STATIC / DF / DFSTOPS / CLASSIC (see BuildDurationBarSpec)
     buffDurationBarTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Minimalist",
     buffDurationBarColor = {r = 0.2, g = 0.9, b = 0.3, a = 1},
     buffDurationBarBGColor = {r = 0, g = 0, b = 0, a = 0.8},
