@@ -3643,72 +3643,18 @@ end
 -- Build the widget content for a given indicator type
 -- optProxy: optional proxy table; if nil, creates one via CreateProxy (frame-level types)
 -- yOffset: optional vertical offset to start content below other elements (e.g. trigger tags)
--- Helper: create expiring threshold slider with percent/seconds mode toggle
+-- Helper: the shared expiring threshold row (slider + s / % segment toggle above its
+-- value box). Delegates to GUI:CreateExpiringThresholdRow -- this used to be a verbatim
+-- copy of it, so the two drifted apart in look. Defaults match what the copy hard-coded:
+-- captions "Expiring Threshold (seconds/%)", ranges 1-60 step 1 / 5-100 step 5, and the
+-- 10 / 30 reset when the single stored value is reinterpreted between units.
 local function CreateExpiringThresholdRow(parent, proxy, width)
-    local isSeconds = proxy.expiringThresholdMode == "SECONDS"
-    local container = CreateFrame("Frame", nil, parent)
-    container:SetHeight(54)
-    container:SetWidth(width or 248)
-
-    -- Slider: range depends on mode
-    local label, minV, maxV, step
-    if isSeconds then
-        label = L["Expiring Threshold (seconds)"]
-        minV, maxV, step = 1, 60, 1
-        -- Clamp value to seconds range if switching from percent
-        local cur = proxy.expiringThreshold
-        if cur and cur > 60 then proxy.expiringThreshold = 10 end
-    else
-        label = L["Expiring Threshold (%)"]
-        minV, maxV, step = 5, 100, 5
-        -- Clamp value to percent range if switching from seconds
-        local cur = proxy.expiringThreshold
-        if cur and cur < 5 then proxy.expiringThreshold = 30 end
-    end
-
-    local slider = GUI:CreateSlider(container, label, minV, maxV, step, proxy, "expiringThreshold")
-    slider:SetPoint("TOPLEFT", 0, 0)
-    slider:SetWidth(width or 248)
-
-    -- Mode toggle button (above the slider label, top-right)
-    local modeBtn = CreateFrame("Button", nil, container, "BackdropTemplate")
-    modeBtn:SetSize(56, 18)
-    modeBtn:SetPoint("BOTTOMRIGHT", slider, "TOPRIGHT", -10, 2)
-
-    local modeText = modeBtn:CreateFontString(nil, "OVERLAY")
-    GUI:SetSettingsFont(modeText, 9, "")
-    modeText:SetPoint("CENTER", 0, 0)
-    modeText:SetText(isSeconds and L["Seconds"] or L["Percent"])
-    modeText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    -- Shared styler (rest + accent-wash hover). It's a two-state toggle whose
-    -- label shows the current mode; mark active when on Seconds so the engaged
-    -- state reads via the shared accent border (page rebuilds on click).
-    GUI:StyleButton(modeBtn)
-    modeBtn:SetActive(isSeconds)
-
-    modeBtn:HookScript("OnEnter", function(self)
-        GUI:ShowTooltip(self, {
-            title = L["Threshold Mode"],
-            lines = {
-                isSeconds and L["Currently: Seconds. Click for Percent."] or L["Currently: Percent. Click for Seconds."],
-            },
-        })
-    end)
-    modeBtn:HookScript("OnLeave", function()
-        GUI:HideTooltip()
-    end)
-    modeBtn:SetScript("OnClick", function()
-        if proxy.expiringThresholdMode == "SECONDS" then
-            proxy.expiringThresholdMode = "PERCENT"
-            proxy.expiringThreshold = 30  -- Reset to sensible default
-        else
-            proxy.expiringThresholdMode = "SECONDS"
-            proxy.expiringThreshold = 10  -- Reset to sensible default
-        end
-        DF:AuraDesigner_RefreshPage()
-    end)
-
-    return container
+    return GUI:CreateExpiringThresholdRow(parent, proxy, {
+        thresholdKey     = "expiringThreshold",
+        thresholdModeKey = "expiringThresholdMode",
+        width            = width or 248,
+        refreshPage      = function() DF:AuraDesigner_RefreshPage() end,
+    })
 end
 
 -- Duration priority toggle + secret aura warning for frame-level expiring indicators
@@ -4983,65 +4929,17 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 DF:AuraDesigner_RefreshPage()
             end), 28)
 
-            -- Threshold slider + mode toggle (same pattern as CreateExpiringThresholdRow)
-            local isSeconds = (proxy.expireThresholdMode or "SECONDS") == "SECONDS"
-            local threshContainer = CreateFrame("Frame", nil, parent)
-            threshContainer:SetHeight(54)
-            threshContainer:SetWidth(contentWidth - 10)
-
-            local thLabel, thMin, thMax, thStep
-            if isSeconds then
-                thLabel = L["Expiring Threshold (seconds)"]
-                thMin, thMax, thStep = 1, 60, 1
-                local cur = proxy.expireThreshold
-                if cur and cur > 60 then proxy.expireThreshold = 5 end
-            else
-                thLabel = L["Expiring Threshold (%)"]
-                thMin, thMax, thStep = 5, 100, 5
-                local cur = proxy.expireThreshold
-                if cur and cur < 5 then proxy.expireThreshold = 30 end
-            end
-
-            local thSlider = GUI:CreateSlider(threshContainer, thLabel, thMin, thMax, thStep, proxy, "expireThreshold")
-            thSlider:SetPoint("TOPLEFT", 0, 0)
-            thSlider:SetWidth(contentWidth - 10)
-
-            local thModeBtn = CreateFrame("Button", nil, threshContainer, "BackdropTemplate")
-            thModeBtn:SetSize(56, 18)
-            thModeBtn:SetPoint("BOTTOMRIGHT", thSlider, "TOPRIGHT", -10, 2)
-
-            local thModeText = thModeBtn:CreateFontString(nil, "OVERLAY")
-            GUI:SetSettingsFont(thModeText, 9, "")
-            thModeText:SetPoint("CENTER", 0, 0)
-            thModeText:SetText(isSeconds and L["Seconds"] or L["Percent"])
-            thModeText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-            -- Shared styler (rest + accent-wash hover). Two-state mode toggle;
-            -- mark active on Seconds (page rebuilds on click).
-            GUI:StyleButton(thModeBtn)
-            thModeBtn:SetActive(isSeconds)
-
-            thModeBtn:HookScript("OnEnter", function(self)
-                GUI:ShowTooltip(self, {
-                    title = L["Threshold Mode"],
-                    lines = {
-                        isSeconds and L["Currently: Seconds. Click for Percent."] or L["Currently: Percent. Click for Seconds."],
-                    },
-                })
-            end)
-            thModeBtn:HookScript("OnLeave", function()
-                GUI:HideTooltip()
-            end)
-            thModeBtn:SetScript("OnClick", function()
-                if proxy.expireThresholdMode == "SECONDS" then
-                    proxy.expireThresholdMode = "PERCENT"
-                    proxy.expireThreshold = 30
-                else
-                    proxy.expireThresholdMode = "SECONDS"
-                    proxy.expireThreshold = 5
-                end
-                DF:AuraDesigner_RefreshPage()
-            end)
-
+            -- Threshold slider + s / % segment toggle -- the SHARED row. This was a
+            -- verbatim second copy of GUI:CreateExpiringThresholdRow; the only things
+            -- it did differently are passed as options (its own keys, and a 5s -- not
+            -- 10s -- reset when switching back to seconds).
+            local threshContainer = GUI:CreateExpiringThresholdRow(parent, proxy, {
+                thresholdKey     = "expireThreshold",
+                thresholdModeKey = "expireThresholdMode",
+                width            = contentWidth - 10,
+                resetValues      = { SECONDS = 5, PERCENT = 30 },
+                refreshPage      = function() DF:AuraDesigner_RefreshPage() end,
+            })
             g:AddWidget(threshContainer, 54)
 
             -- Play Once toggle
@@ -5059,10 +4957,10 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             -- Grey out expire sub-controls when expire alert is disabled.
             -- Loop interval is also greyed when Play Once is enabled.
             if not expireOn then
-                thSlider:SetAlpha(0.4)
-                thSlider:EnableMouse(false)
-                thModeBtn:SetAlpha(0.4)
-                thModeBtn:EnableMouse(false)
+                -- The threshold row greys as a unit through its own SetEnabled (it dims
+                -- itself and un-mouses the slider + both unit segments), replacing the
+                -- hand-dimming of the two widgets this block used to build inline.
+                threshContainer:SetEnabled(false)
                 playOnceCB:SetAlpha(0.4)
                 playOnceCB:EnableMouse(false)
                 expireLoopSlider:SetAlpha(0.4)

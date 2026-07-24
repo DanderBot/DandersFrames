@@ -47,6 +47,7 @@ GUI.RowHeight = {
     dropdown    = 55,
     colorpicker = 30,   -- match the checkbox row (both ~24px of content) so the rhythm reads even
     editbox     = 55,
+    toggle      = 30,   -- two-state switch; same ~24px of content as a checkbox, same row
     -- Labels are VARIABLE height (they wrap), so they have no fixed row — but they do
     -- have fixed CHROME, which CreateLabel adds to the measured text height: the 5px top
     -- inset its FontString sits at, plus 13px below. That 13 IS the whole visible gap to
@@ -3684,6 +3685,88 @@ function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, 
 end
 
 -- ============================================================
+-- SEGMENT TOGGLE
+-- A compact segmented control: the labels sit ON the buttons, all
+-- of them boxed inside one recessed track so the pair reads as a
+-- single control rather than two loose buttons. This is the
+-- "Border Mode: [Shared][Custom]" idiom (AuraDesigner/Options.lua)
+-- with the track added; use it for short mutually-exclusive values
+-- that want to sit next to the field they qualify (s / %).
+--
+-- API: GUI:CreateSegmentToggle(parent, segments, dbTable, dbKey, callback, opts)
+--   segments : ordered { value =, label =, tooltip = } — label is what
+--              shows on the button, tooltip the full name behind a terse one
+--   opts.segmentWidth (26) / opts.height (18)
+--   opts.fallbackValue : treated as selected when the stored value matches
+--              no segment, so an unset key still lights the right button
+-- Returns the container with :Refresh(), :refreshContent() and :SetEnabled().
+-- ============================================================
+function GUI:CreateSegmentToggle(parent, segments, dbTable, dbKey, callback, opts)
+    opts = opts or {}
+    local segW = opts.segmentWidth or 26
+    local h = opts.height or 18
+    local pad = 1   -- track lip around the buttons
+
+    local container = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    container:SetSize(segW * #segments + pad * 2, h + pad * 2)
+    CreateElementBackdrop(container)   -- the recessed track behind every segment
+
+    local buttons = {}
+    for i, seg in ipairs(segments) do
+        local btn = CreateFrame("Button", nil, container, "BackdropTemplate")
+        GUI:StyleButton(btn, { width = segW, height = h, text = seg.label })
+        GUI:SetSettingsFont(btn.Text, 9, "")
+        btn:SetPoint("TOPLEFT", container, "TOPLEFT", pad + (i - 1) * segW, -pad)
+        btn.value = seg.value
+        if seg.tooltip then
+            btn:HookScript("OnEnter", function(self)
+                GUI:ShowTooltip(self, { title = seg.tooltip, lines = opts.tooltipLines })
+            end)
+            btn:HookScript("OnLeave", function() GUI:HideTooltip() end)
+        end
+        btn:SetScript("OnClick", function(self)
+            if not (dbTable and dbKey) then return end
+            if dbTable[dbKey] == self.value then return end
+            dbTable[dbKey] = self.value
+            container:Refresh()
+            if callback then callback(self.value) end
+        end)
+        buttons[i] = btn
+    end
+
+    -- Selection: the shared accent border/fill via SetActive, plus a bright/dim
+    -- label so the state still reads at a glance in a themed accent that is close
+    -- to the resting border colour.
+    function container:Refresh()
+        local cur = dbTable and dbKey and dbTable[dbKey]
+        local matched = false
+        for _, b in ipairs(buttons) do if b.value == cur then matched = true end end
+        if not matched then cur = opts.fallbackValue end
+        for _, b in ipairs(buttons) do
+            local on = (b.value == cur)
+            b:SetActive(on)
+            if b.Text then
+                local c = on and C_TEXT or C_TEXT_DIM
+                b.Text:SetTextColor(c.r, c.g, c.b)
+            end
+        end
+    end
+    container.refreshContent = function(self) self:Refresh() end
+
+    container.SetEnabled = function(self, enabled)
+        self:SetAlpha(enabled and 1 or 0.4)
+        for _, b in ipairs(buttons) do b:EnableMouse(enabled) end
+    end
+
+    container.UpdateTheme = function() container:Refresh() end
+    if not parent.ThemeListeners then parent.ThemeListeners = {} end
+    table.insert(parent.ThemeListeners, container)
+
+    container:Refresh()
+    return container
+end
+
+-- ============================================================
 -- TOGGLE SWITCH
 -- A two-state toggle for mutually exclusive options. Two labels
 -- flank a pill-shaped track with a sliding thumb. The active
@@ -3697,6 +3780,8 @@ end
 function GUI:CreateToggleSwitch(parent, labelA, labelB, dbTable, dbKey, valueA, valueB, callback)
     local container = CreateFrame("Frame", nil, parent)
     container:SetSize(260, 24)
+    container.preferredHeight = GUI.RowHeight.toggle   -- factory-owned slot height (see GUI.RowHeight)
+    container.fixedRowHeight = true
 
     -- Left label
     local txtA = container:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
@@ -6107,46 +6192,25 @@ function GUI:CreateExpirationControls(group, dbTable, opts)
     -- ONE STORED VALUE PER UNIT (mirrors the ramps, and DF.Expiration:Threshold reads the
     -- same pair): a threshold cannot be reinterpreted between units, so each keeps its own
     -- and switching back finds it untouched.
-    local function expiryPct()
-        return DF.Expiration and DF.Expiration:Unit(dbTable) == "PERCENT" or false
-    end
-    local function thresholdKey()
-        return expiryPct() and "expiryAlertThresholdPercent" or "expiryAlertThreshold"
-    end
-    local function thresholdGet()
-        local key = thresholdKey()
-        local v = tonumber(dbTable and dbTable[key])
-        if v == nil then
-            -- Seed on first use: an unset percent threshold would read 1 and hide the
-            -- reveal in the final 1% of the aura.
-            v = expiryPct() and ((DF.Expiration and DF.Expiration.PERCENT_THRESHOLD_DEFAULT) or 30) or 5
-            if dbTable then dbTable[key] = v end
-        end
-        return v
-    end
-    -- Nothing about the slider is captured at build time: customGet/customSet resolve the
-    -- key on EVERY access (so flipping the unit can never write a percentage into the
-    -- seconds key), and refreshContent — fired for every shown widget on RefreshStates —
-    -- re-captions it and re-scales its track.
-    w.threshold = group:AddWidget(GUI:CreateSlider(parent,
-        expiryPct() and L["Alert Below (%)"] or L["Alert Below (seconds)"],
-        1, expiryPct() and 100 or 60, 1,
-        nil, nil, nil, nil, nil,                                    -- dbTable/dbKey/callback/lightweight/preview
-        thresholdGet,                                               -- customGet
-        function(v) if dbTable then dbTable[thresholdKey()] = v end end), 54)
-    w.threshold.refreshContent = function(self)
-        local pct = expiryPct()
-        if self.label then self.label:SetText(pct and L["Alert Below (%)"] or L["Alert Below (seconds)"]) end
-        self:SetRange(1, pct and 100 or 60)   -- also re-reads the value through customGet
-    end
-
-    -- Measure the threshold in seconds remaining or percent of the aura's duration.
-    -- Structural: the formatter is bind-frozen, so a unit change must Rebuild the
-    -- companion (DF.Expiration:StructSig folds the unit in) — onStructural covers it.
-    w.thresholdUnit = group:AddWidget(GUI:CreateDropdown(parent, L["Measured In"],
-        { _order = { "SECONDS", "PERCENT" },
-          SECONDS = L["Seconds remaining"], PERCENT = L["Percent of duration"] },
-        dbTable, "expiryAlertThresholdUnit", onStructural), 54)
+    -- The shared threshold row (AD's design, six other cards already use it): the slider
+    -- with a compact unit button sitting directly above its value box, so the number and
+    -- the unit read as one control. unitKeys gives it the per-unit key pair, so toggling
+    -- swaps which value is live rather than reinterpreting one.
+    -- Structural: the formatter is bind-frozen, so a unit change must Rebuild the companion
+    -- (DF.Expiration:StructSig folds the unit in) — refreshPage carries onStructural, and
+    -- the row also re-captions and re-ranges itself in place.
+    w.threshold = group:AddWidget(GUI:CreateExpiringThresholdRow(parent, dbTable, {
+        thresholdModeKey = "expiryAlertThresholdUnit",
+        unitKeys  = { SECONDS = "expiryAlertThreshold", PERCENT = "expiryAlertThresholdPercent" },
+        labels    = { SECONDS = L["Alert Below (seconds)"], PERCENT = L["Alert Below (%)"] },
+        ranges    = { SECONDS = { min = 1, max = 60, step = 1 },
+                      PERCENT = { min = 1, max = 100, step = 1 } },
+        -- Seeded on first use: an unset percent threshold would read 1 and hide the
+        -- reveal in the final 1% of the aura.
+        defaults  = { SECONDS = 5,
+                      PERCENT = (DF.Expiration and DF.Expiration.PERCENT_THRESHOLD_DEFAULT) or 30 },
+        refreshPage = onStructural,
+    }), 54)
 
     -- Type — the reveal kind (no Off; the Enable toggle owns on/off). Border / Tint lead (the
     -- primary reveals), then the Text / Glyph payloads. Consumers can drop types via include.
@@ -6271,77 +6335,126 @@ function GUI:CreateExpiringSubheader(parent, text)
     return frame
 end
 
--- Threshold slider + a compact Percent/Seconds TOGGLE BUTTON (AD's design).
--- The slider's label/range switch with the mode, so the row rebuilds the page
--- on toggle via opts.refreshPage.  Keys are parameterised (thresholdKey /
--- thresholdModeKey) so any consumer's DB schema works.
+-- Threshold slider + a compact s / % SEGMENT TOGGLE sitting directly above the
+-- slider's value box, so the number and the unit read as one control. The slider's
+-- label/range switch with the mode, so the row rebuilds the page on toggle via
+-- opts.refreshPage. Keys are parameterised (thresholdKey / thresholdModeKey) so any
+-- consumer's DB schema works.
+--
+-- opts.unitKeys = { SECONDS = key, PERCENT = key } switches the row to ONE STORED
+-- VALUE PER UNIT instead of a single key reinterpreted between them. A threshold
+-- cannot be reinterpreted (5 seconds is not 5 percent), so with this set the toggle
+-- swaps which value is live and leaves the other untouched — no clamping, no reset.
+-- The slider then binds through customGet/customSet and re-labels/re-ranges itself
+-- from refreshContent, so the row is correct even if a consumer's refresh does not
+-- rebuild it. opts.labels / opts.ranges override the slider caption and range per
+-- unit; opts.modeText overrides the segment labels (default s / %); opts.resetValues
+-- the single-key reset pair. Every default preserves the original behaviour.
 function GUI:CreateExpiringThresholdRow(parent, dbTable, opts)
     opts = opts or {}
     local tKey = opts.thresholdKey
     local mKey = opts.thresholdModeKey
+    local unitKeys = opts.unitKeys
     local refresh = opts.refreshPage or function() end
     local width = opts.width or 248
-    local isSeconds = mKey and dbTable[mKey] == "SECONDS"
+    local labels = opts.labels or {}
+    local ranges = opts.ranges or {}
+    local modeText = opts.modeText or {}
+    local function secondsNow() return mKey and dbTable[mKey] == "SECONDS" or false end
+    local isSeconds = secondsNow()
 
     local container = CreateFrame("Frame", nil, parent)
     container:SetHeight(54)
     container:SetWidth(width)
 
-    local label, minV, maxV, step
-    if isSeconds then
-        label = L["Expiring Threshold (seconds)"]
-        minV, maxV, step = 1, 60, 1
-        if tKey and dbTable[tKey] and dbTable[tKey] > 60 then dbTable[tKey] = 10 end
-    else
-        label = L["Expiring Threshold (%)"]
-        minV, maxV, step = 5, 100, 5
-        if tKey and dbTable[tKey] and dbTable[tKey] < 5 then dbTable[tKey] = 30 end
+    -- Caption + range for a unit. Ranges default to the original pair (seconds
+    -- 1-60 step 1; percent 5-100 step 5).
+    local function unitSpec(sec)
+        local r = ranges[sec and "SECONDS" or "PERCENT"]
+        if sec then
+            return labels.SECONDS or L["Expiring Threshold (seconds)"],
+                   (r and r.min) or 1, (r and r.max) or 60, (r and r.step) or 1
+        end
+        return labels.PERCENT or L["Expiring Threshold (%)"],
+               (r and r.min) or 5, (r and r.max) or 100, (r and r.step) or 5
     end
 
-    local slider = GUI:CreateSlider(container, label, minV, maxV, step, dbTable, tKey)
+    local label, minV, maxV, step = unitSpec(isSeconds)
+    local slider
+    if unitKeys then
+        -- Per-unit keys: resolve on EVERY access so a toggle can never write one
+        -- unit's number into the other's key, and seed a unit's value on first use.
+        local function keyNow() return secondsNow() and unitKeys.SECONDS or unitKeys.PERCENT end
+        local function readValue()
+            local k = keyNow()
+            local v = tonumber(dbTable and dbTable[k])
+            if v == nil then
+                local _, dMin = unitSpec(secondsNow())
+                v = (opts.defaults and opts.defaults[secondsNow() and "SECONDS" or "PERCENT"]) or dMin
+                if dbTable then dbTable[k] = v end
+            end
+            return v
+        end
+        slider = GUI:CreateSlider(container, label, minV, maxV, step,
+            nil, nil, nil, nil, nil,
+            readValue, function(v) if dbTable then dbTable[keyNow()] = v end end)
+        slider.refreshContent = function(self)
+            local sec = secondsNow()
+            local lbl, lo, hi = unitSpec(sec)
+            if self.label then self.label:SetText(lbl) end
+            self:SetRange(lo, hi)   -- also re-reads the value through customGet
+        end
+    else
+        -- Single key reinterpreted between units: clamp it into the new range.
+        if isSeconds then
+            if tKey and dbTable[tKey] and dbTable[tKey] > maxV then dbTable[tKey] = 10 end
+        else
+            if tKey and dbTable[tKey] and dbTable[tKey] < minV then dbTable[tKey] = 30 end
+        end
+        slider = GUI:CreateSlider(container, label, minV, maxV, step, dbTable, tKey)
+    end
     slider:SetPoint("TOPLEFT", 0, 0)
     slider:SetWidth(width)
 
-    local modeBtn = CreateFrame("Button", nil, container, "BackdropTemplate")
-    modeBtn:SetPoint("BOTTOMRIGHT", slider, "TOPRIGHT", -10, 2)
-    GUI:StyleButton(modeBtn, {
-        width = 56, height = 18,
-        text = isSeconds and L["Seconds"] or L["Percent"],
-    })
-    GUI:SetSettingsFont(modeBtn.Text, 9, "")
-    modeBtn:SetActive(isSeconds)
-
-    modeBtn:HookScript("OnEnter", function(self)
-        GUI:ShowTooltip(self, {
-            title = L["Threshold Mode"],
-            lines = { isSeconds and L["Currently: Seconds. Click for Percent."] or L["Currently: Percent. Click for Seconds."] },
-        })
-    end)
-    modeBtn:HookScript("OnLeave", function()
-        GameTooltip:Hide()
-    end)
-    modeBtn:SetScript("OnClick", function()
-        if not mKey then return end
-        if dbTable[mKey] == "SECONDS" then
-            dbTable[mKey] = "PERCENT"
-            if tKey then dbTable[tKey] = 30 end
-        else
-            dbTable[mKey] = "SECONDS"
-            if tKey then dbTable[tKey] = 10 end
+    -- Unit picker: a two-segment toggle with the units ON the buttons, boxed in one
+    -- track, sitting directly above the slider's value box. Terse labels (s / %) keep
+    -- it to the button's footprint; each segment tooltips its full name.
+    local modeBtn = GUI:CreateSegmentToggle(container, {
+        { value = "SECONDS", label = modeText.SECONDS or L["s"], tooltip = L["Seconds"] },
+        { value = "PERCENT", label = modeText.PERCENT or L["%"], tooltip = L["Percent"] },
+    }, dbTable, mKey, function(newVal)
+        local toSeconds = (newVal == "SECONDS")
+        -- Reset the value ONLY when one key is being reinterpreted between units.
+        -- With unitKeys each unit keeps its own, so switching back finds it intact.
+        if not unitKeys and tKey then
+            local r = opts.resetValues or {}
+            dbTable[tKey] = toSeconds and (r.SECONDS or 10) or (r.PERCENT or 30)
         end
         refresh()
-    end)
+        -- Re-sync in place as well as asking for a rebuild: a consumer whose refresh
+        -- only re-evaluates states would otherwise leave a stale caption and range.
+        if slider.refreshContent then slider:refreshContent() end
+    end, {
+        segmentWidth = opts.modeSegmentWidth or 26,
+        fallbackValue = "PERCENT",   -- matches isSeconds: an unset mode key reads as percent
+        tooltipLines = { L["Threshold Mode"] },
+    })
+    modeBtn:SetPoint("BOTTOMRIGHT", slider, "TOPRIGHT", -10, 2)
 
-    -- Composite row: forward grey-out (disableOn) to its slider + mode button so the
-    -- whole row dims when the expiring feature is off. Dim the row uniformly via
-    -- SetAlpha and block interaction with slider:SetEnabled + modeBtn:EnableMouse —
-    -- NOT modeBtn:SetDisabled (which fights the hover wash) nor native
-    -- modeBtn:SetEnabled alone (blocks clicks but leaves the custom backdrop/label
-    -- full-brightness, so the toggle wouldn't visually grey with its row).
+    -- Composite row: forward grey-out (disableOn) to its slider + unit toggle so the
+    -- whole row dims when the expiring feature is off. The row dims uniformly via
+    -- SetAlpha; each child blocks its own interaction (the toggle's SetEnabled dims and
+    -- un-mouses its segments) — deliberately NOT SetDisabled or a raw Button:SetEnabled
+    -- on the segments, both of which fight the shared hover wash / SetActive state.
     container.SetEnabled = function(_, enabled)
         container:SetAlpha(enabled and 1 or 0.4)
         if slider.SetEnabled then slider:SetEnabled(enabled) end
-        modeBtn:EnableMouse(enabled)
+        modeBtn:SetEnabled(enabled)
+    end
+    -- Keep the unit toggle in sync on external changes (profile switch, page refresh).
+    container.refreshContent = function()
+        modeBtn:Refresh()
+        if slider.refreshContent then slider:refreshContent() end
     end
 
     return container

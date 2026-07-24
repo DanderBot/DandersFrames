@@ -1795,8 +1795,6 @@ L["Click to toggle"] = true
 L["Combat Mode"] = true
 L["Copy Settings to %s"] = true
 L["Currently can't track: %s"] = true
-L["Currently: Percent. Click for Seconds."] = true
-L["Currently: Seconds. Click for Percent."] = true
 L["Custom Border"] = true
 L["Custom Sound Path"] = true
 L["Customise"] = true
@@ -2237,11 +2235,15 @@ L["when switching to this spec"] = true
 
 -- Color by Time: one shared ramp per unit (Colours page + per-indicator expiry unit)
 L["Duration Text Measured In"] = true
-L["Measured In"] = true
 L["One set of colors for time running out, shared by duration text and the expiry border and tint. Each expiry reveal picks its own unit on its indicator."] = true
 L["Percent of duration"] = true
 L["The expiry border and tint always step between colors."] = true
 L["Used by any expiry reveal measured in this unit."] = true
 L["Used by duration text, and by any expiry reveal measured in this unit."] = true
+-- Unit segments on a threshold toggle. Single glyphs, but still localised: the
+-- seconds abbreviation is language-dependent even where the percent sign is not.
+-- Each segment tooltips its full name (L["Seconds"] / L["Percent"]).
+L["s"] = true
+L["%"] = true
 
 --@end-do-not-package@
