@@ -953,11 +953,13 @@ DF.GlobalDefaults = {
     -- absolute stops had to be re-tuned every time the threshold moved — and any stop at or
     -- above it silently built no band at all. Stops relative to the window stay correct at
     -- any threshold, on either scale.
+    -- Stops MATCH durationColorByPercentBreakpoints out of the box, so the border and the
+    -- duration text change colour at the same moments by default and read as one system.
     durationBorderColorStops = {
-        { threshold = 75, color = { r = 0.373, g = 0.878, b = 0.373 } },  -- green  (top quarter of the window)
-        { threshold = 50, color = { r = 1.0,   g = 0.824, b = 0.239 } },  -- gold
-        { threshold = 25, color = { r = 1.0,   g = 0.596, b = 0.22  } },  -- orange
-        { threshold = 0,  color = { r = 0.969, g = 0.333, b = 0.333 } },  -- red    (final quarter)
+        { threshold = 60, color = { r = 0.373, g = 0.878, b = 0.373 } },  -- green
+        { threshold = 35, color = { r = 1.0,   g = 0.824, b = 0.239 } },  -- gold
+        { threshold = 15, color = { r = 1.0,   g = 0.596, b = 0.22  } },  -- orange
+        { threshold = 0,  color = { r = 0.969, g = 0.333, b = 0.333 } },  -- red
     },
 }
 

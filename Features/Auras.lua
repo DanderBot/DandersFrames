@@ -432,9 +432,11 @@ local DEFAULT_PERCENT_BREAKPOINTS = {
 -- The BORDER ramp is expressed as PERCENT OF THE REVEAL WINDOW (100 = the threshold,
 -- 0 = expiry), so it needs no re-tuning when the threshold moves (keep in sync with
 -- Config.lua durationBorderColorStops).
+-- Stops MATCH DEFAULT_PERCENT_BREAKPOINTS out of the box: the border and the duration
+-- text then change colour at the same moments and read as one system.
 local DEFAULT_BORDER_STOPS = {
-    { threshold = 75, hex = "5fe05f" }, { threshold = 50, hex = "ffd23d" },
-    { threshold = 25, hex = "ff9838" }, { threshold = 0,  hex = "f75555" },
+    { threshold = 60, hex = "5fe05f" }, { threshold = 35, hex = "ffd23d" },
+    { threshold = 15, hex = "ff9838" }, { threshold = 0,  hex = "f75555" },
 }
 -- FOUR account-wide ramps: two consumers (duration TEXT / the expiry BORDER+TINT reveal)
 -- x two scales (seconds / percent). The consumer keeps only an on/off; which scale it

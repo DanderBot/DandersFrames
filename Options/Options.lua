@@ -4405,7 +4405,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         local cbtGroup = GUI:CreateSettingsGroup(self.child, 280)
         cbtGroup:AddWidget(GUI:CreateHeader(self.child, section.title), 40)
-        cbtGroup:AddWidget(GUI:CreateLabel(self.child, section.blurb, 260), 44)
+        -- No slot height: CreateLabel measures its own wrapped text (GUI.RowHeight.labelPad
+        -- for the chrome). These blurbs run to four lines at this width, and a guessed
+        -- number left the last line sitting on top of the Measure By dropdown.
+        cbtGroup:AddWidget(GUI:CreateLabel(self.child, section.blurb, 260))
 
         -- Dials. Both rebuild the page: they change the strip's rendering, every range
         -- label's unit, and (for the scale) which ramp is on screen.

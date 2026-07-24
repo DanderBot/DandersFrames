@@ -47,6 +47,13 @@ GUI.RowHeight = {
     dropdown    = 55,
     colorpicker = 30,   -- match the checkbox row (both ~24px of content) so the rhythm reads even
     editbox     = 55,
+    -- Labels are VARIABLE height (they wrap), so they have no fixed row — but they do
+    -- have fixed CHROME, which CreateLabel adds to the measured text height: the 5px top
+    -- inset its FontString sits at, plus 13px below. That 13 IS the whole visible gap to
+    -- the next row — LayoutChildren stacks rows flush (y = y - height) and a labelled
+    -- control (dropdown/slider/editbox) puts its own label at TOPLEFT 0,0 — so a smaller
+    -- pad reads as a blurb crowding the control it describes.
+    labelPad    = 18,
 }
 
 -- Resolve the layout slot height for a widget being added to a group/page. Fixed-height widgets
@@ -59,6 +66,34 @@ local function ResolveRowHeight(widget, height)
     return height or (widget and widget.preferredHeight) or 55
 end
 GUI.ResolveRowHeight = ResolveRowHeight
+
+-- Sync a widget's slot height into its host SettingsGroup and re-flow. Used by any
+-- widget that only learns its true height AFTER construction (a measured label, an
+-- info banner): update the group's stored entry, re-lay out the group, then bubble to
+-- the page so sibling groups in the same column re-anchor to the group's new bottom.
+-- Without the bubble a grown group's backdrop overshoots the next group's anchor and
+-- renders as an empty rectangle of backdrop above it.
+function GUI:RelayoutHost(widget, slotHeight)
+    if not widget then return end
+    local g = widget.settingsGroup
+    if g and g.LayoutChildren then
+        for _, entry in ipairs(g.groupChildren or {}) do
+            if entry.widget == widget then
+                entry.height = slotHeight
+                break
+            end
+        end
+        g:LayoutChildren()
+    end
+    local p = (g or widget):GetParent()
+    while p do
+        if type(p.RefreshStates) == "function" and p.children then
+            p:RefreshStates()
+            return
+        end
+        p = p:GetParent()
+    end
+end
 
 DF.SectionRegistry = DF.SectionRegistry or {}
 
@@ -821,6 +856,10 @@ function GUI:CreateSettingsGroup(parent, width, opts)
     -- Add a widget to this group
     group.AddWidget = function(self, widget, height)
         widget:SetParent(self)
+        -- Record whether the CALL SITE pinned this slot's height. A self-measuring
+        -- widget (CreateLabel) may only re-flow the group when it did not — an
+        -- explicit number stays authoritative, so no existing layout can shift.
+        widget._slotHeightExplicit = (height ~= nil) or nil
         table.insert(self.groupChildren, {
             widget = widget,
             height = ResolveRowHeight(widget, height),
@@ -1061,8 +1100,45 @@ function GUI:CreateLabel(parent, text, width, color)
     else
         lbl:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 1)
     end
-    
-    frame.SetText = function(self, newText) lbl:SetText(newText) end
+
+    -- MEASURED slot height. A label is a variable-height widget, so ResolveRowHeight
+    -- prefers the call-site number and falls back to preferredHeight — stamping a
+    -- measured one here leaves every existing call site byte-identical while letting a
+    -- NEW one omit the number entirely and get a slot that fits the text however it
+    -- wraps. Hand-guessed numbers are exactly what let a 4-line blurb overlap the
+    -- dropdown beneath it (Colours page, Color by Time).
+    local function Remeasure()
+        local h = lbl:GetStringHeight()
+        if not h or h <= 0 then return false end
+        local newH = math.ceil(h) + (GUI.RowHeight.labelPad or 10)
+        if frame.preferredHeight == newH then return false end
+        frame.preferredHeight = newH
+        frame:SetHeight(newH)
+        return true
+    end
+    -- The layout engine resizes this frame to the column's available width (see the
+    -- anchor note above), and GetStringHeight can return a stale single-line value until
+    -- the FontString has rendered at that final width — so converge ONCE on the next
+    -- frame, after LayoutChildren has run. Re-flow only when this label OWNS its slot:
+    -- inside a SettingsGroup (nothing else tracks a stored height) and with no call-site
+    -- number (_slotHeightExplicit, stamped by AddWidget) to override. Deliberately NOT an
+    -- OnSizeChanged binding — that cascade is the Aura Designer indicator-card lockup
+    -- documented on CreateInfoBanner; the cost is that a label added with no height does
+    -- not re-measure if its width changes again later.
+    local function Measure()
+        Remeasure()
+        if C_Timer and C_Timer.After then
+            C_Timer.After(0, function()
+                if frame:IsShown() and frame.settingsGroup and not frame._slotHeightExplicit
+                   and Remeasure() then
+                    GUI:RelayoutHost(frame, frame.preferredHeight)
+                end
+            end)
+        end
+    end
+    Measure()
+
+    frame.SetText = function(self, newText) lbl:SetText(newText); Measure() end
     return frame
 end
 
@@ -1456,46 +1532,13 @@ function GUI:CreateInfoBanner(parent, opts)
 
     local cachedH, recomputing = nil, false
 
+    -- Sync the banner's measured slot height into its host group and re-flow (bubbling
+    -- to the page so sibling groups re-anchor). Shared with the measured label — see
+    -- GUI:RelayoutHost, which is this logic verbatim; the page bubble is what stops a
+    -- grown group's backdrop overshooting the next group's anchor when an animation
+    -- type is first selected in a border panel.
     local function TriggerHostRelayout()
-        -- If this banner was added to a SettingsGroup, sync its stored
-        -- height entry and re-lay out the group.
-        if banner.settingsGroup and banner.settingsGroup.LayoutChildren then
-            local g = banner.settingsGroup
-            for _, entry in ipairs(g.groupChildren or {}) do
-                if entry.widget == banner then
-                    entry.height = banner.layoutHeight
-                    break
-                end
-            end
-            g:LayoutChildren()
-            -- Also bubble up to the page so its column layout sees the
-            -- group's new calculatedHeight. Without this, sibling groups
-            -- in the same column stay anchored to the OLD bottom of this
-            -- group, and the group's backdrop (now taller) visibly
-            -- overshoots past those siblings' anchor — rendering as an
-            -- empty rectangle of group backdrop above the next group.
-            -- Hit when an animation type is first selected in a border
-            -- panel: banner appears, async recompute grows the group,
-            -- next group below stays put, gap shows.
-            local p = g:GetParent()
-            while p do
-                if type(p.RefreshStates) == "function" and p.children then
-                    p:RefreshStates()
-                    return
-                end
-                p = p:GetParent()
-            end
-            return
-        end
-        -- Otherwise, walk up to find a host page.
-        local p = banner:GetParent()
-        while p do
-            if type(p.RefreshStates) == "function" and p.children then
-                p:RefreshStates()
-                return
-            end
-            p = p:GetParent()
-        end
+        GUI:RelayoutHost(banner, banner.layoutHeight)
     end
 
     local function MeasureContent()
