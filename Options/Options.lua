@@ -4317,28 +4317,23 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             PERCENT = { maxT = 100, capT = 100,
                         above = L["%d%% and above"], under = L["under %d%%"], range = L["%d-%d%%"] },
         }
+        -- ONE RAMP PER UNIT, shared by every colour-by-time consumer — the duration text
+        -- AND the expiry border/tint reveal. "Time is running out" is one idea, so it gets
+        -- one set of colours, and a box here is a UNIT rather than a consumer.
+        -- BOTH are live at once: duration text reads whichever its Measure By dial names
+        -- (it has no threshold, so that is account-wide), while each expiry reveal reads
+        -- the one matching ITS OWN Measured In — per indicator, because a reveal's bands
+        -- and its Alert Below threshold are one formatter sampled against one property.
         local CBT_SECTIONS = {
             {
-                title    = L["Duration Text"],
-                blurb    = L["Colors the countdown text on buffs, debuffs, defensives and Aura Designer indicators."],
-                keys     = { SECONDS = "durationColorByTimeBreakpoints",
-                             PERCENT = "durationColorByPercentBreakpoints" },
-                scaleKey = "durationTextColorScale",
-                smoothKey = "durationTextColorSmooth",   -- present = this section offers blending
+                title = L["Seconds remaining"],
+                unit  = "SECONDS",
+                bpKey = "durationColorByTimeBreakpoints",
             },
             {
-                title    = L["Expiry Border & Tint"],
-                blurb    = L["Colors the expiring border and tint. Stops are a percentage of the alert window, so they hold when you change the alert threshold. These are drawn as inline textures and always step between colors."],
-                -- ONE ramp, and its stops are PERCENT OF THE REVEAL WINDOW rather than
-                -- either unit — so it stays correct at any threshold and the scale below
-                -- only picks the threshold's unit.
-                bpKey    = "durationBorderColorStops",
-                rampUnit = "PERCENT",
-                -- Also sets the unit every reveal's Alert Below threshold is read in: the
-                -- bands and the threshold are one formatter sampled against one property
-                -- (see the border ramp note in Config.lua), so they cannot disagree.
-                scaleKey = "durationBorderColorScale",
-                smoothKey = nil,    -- stepped by construction
+                title = L["Percent of duration"],
+                unit  = "PERCENT",
+                bpKey = "durationColorByPercentBreakpoints",
             },
         }
 
@@ -4349,6 +4344,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             if DF.AuraDesigner and DF.AuraDesigner.Engine and DF.AuraDesigner.Engine.ForceRefreshAllFrames then
                 DF.AuraDesigner.Engine:ForceRefreshAllFrames()
             end
+            -- Expiry reveals read these ramps too, so an open Aura Designer card must
+            -- re-render its preview (no-ops if the designer was never opened).
+            if DF.AuraDesigner_RefreshPage then DF:AuraDesigner_RefreshPage() end
         end
 
         -- The colour swatch fires its callback on EVERY change (many ticks per wheel drag),
@@ -4370,26 +4368,21 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- loop so it lands on the page ABOVE the boxes it owns.
         local cbtSection
 
-        -- Build one section's editor. Called once per entry in CBT_SECTIONS; everything
-        -- below closes over `section` so both are the same widget with different dials.
+        -- Build one ramp's editor. Called once per entry in CBT_SECTIONS — one box per
+        -- UNIT, both always shown, because both are always live (see the table above).
         local function BuildSection(section)
-        -- Which ramp is live right now: the section's stored scale, defaulting to the one
-        -- scale it supports when it only has one.
-        local scaleName = section.scaleKey and cbtGlobalDB[section.scaleKey] or nil
-        if not (scaleName and (section.bpKey or section.keys[scaleName])) then
-            scaleName = (section.keys and section.keys.PERCENT and section.scaleKey) and "PERCENT" or "SECONDS"
-        end
-        local scale = CBT_UNITS[section.rampUnit or scaleName]
-        local bpKey = section.bpKey or section.keys[scaleName]
-        local smooth = section.smoothKey and (cbtGlobalDB[section.smoothKey] ~= false) or false
+        local scale = CBT_UNITS[section.unit]
+        local bpKey = section.bpKey
+        -- Blending is a property of the MEDIUM, not of the ramp: duration text can blend
+        -- (the 12.1 colour curve writes a vertex colour), the |T-based reveal cannot. So
+        -- the strip draws a gradient ONLY on the ramp the text actually reads — the other
+        -- one is read exclusively by reveals, which always step.
+        local smooth = (cbtGlobalDB.durationTextColorSmooth ~= false)
+            and (cbtGlobalDB.durationTextColorScale == section.unit)
 
         local bps = cbtGlobalDB[bpKey]
         if type(bps) ~= "table" or #bps == 0 then
-            -- Seed from the shipped default. The border SECONDS ramp additionally falls
-            -- back to the text one: the two shared a single list before they were split,
-            -- so an upgrade keeps the border colours it already had.
-            local seed = DF.GlobalDefaults[bpKey]
-            bps = DF:DeepCopy(seed)
+            bps = DF:DeepCopy(DF.GlobalDefaults[bpKey])
             cbtGlobalDB[bpKey] = bps
         end
 
@@ -4405,27 +4398,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         local cbtGroup = GUI:CreateSettingsGroup(self.child, 280)
         cbtGroup:AddWidget(GUI:CreateHeader(self.child, section.title), 40)
-        -- No slot height: CreateLabel measures its own wrapped text (GUI.RowHeight.labelPad
-        -- for the chrome). These blurbs run to four lines at this width, and a guessed
-        -- number left the last line sitting on top of the Measure By dropdown.
-        cbtGroup:AddWidget(GUI:CreateLabel(self.child, section.blurb, 260))
-
-        -- Dials. Both rebuild the page: they change the strip's rendering, every range
-        -- label's unit, and (for the scale) which ramp is on screen.
-        if section.smoothKey then
-            cbtGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Blend Colors Smoothly"], cbtGlobalDB, section.smoothKey, function()
-                ApplyColorByTime()
-                if pageColors and pageColors.Refresh then pageColors:Refresh() end
-            end), 30)
-        end
-        if section.scaleKey then
-            cbtGroup:AddWidget(GUI:CreateDropdown(self.child, L["Measure By"],
-                { _order = { "PERCENT", "SECONDS" }, PERCENT = L["Percent remaining"], SECONDS = L["Seconds remaining"] },
-                cbtGlobalDB, section.scaleKey, function()
-                    ApplyColorByTime()
-                    if pageColors and pageColors.Refresh then pageColors:Refresh() end
-                end))
-        end
+        -- Who is on this ramp right now — the dials live once at section level, so each box
+        -- states its own audience instead of repeating them. No slot height: CreateLabel
+        -- measures its own wrapped text (GUI.RowHeight.labelPad for the chrome); a guessed
+        -- number is what left a four-line blurb sitting on the control below it.
+        cbtGroup:AddWidget(GUI:CreateLabel(self.child, (cbtGlobalDB.durationTextColorScale == section.unit)
+            and L["Used by duration text, and by any expiry reveal measured in this unit."]
+            or L["Used by any expiry reveal measured in this unit."], 260))
 
         -- Preview strip, rendered the way this section actually reads: a gradient when
         -- blending, hard bands when stepping. Low values left, high right.
@@ -4608,6 +4587,33 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- spanning the page (column 1 holds the dispel palette, which it does not own).
         -- Width matches the boxes so the rule under the title lines up with them.
         cbtSection = Add(GUI:CreateCollapsibleSection(self.child, L["Color by Time"], true, 280), 36, 2)
+
+        -- The two dials sit ONCE, above both ramps, because neither belongs to a ramp:
+        -- blending is a property of the medium (only text can blend), and Measure By picks
+        -- which ramp the TEXT reads. An expiry reveal picks its own unit on its indicator
+        -- card, which is why both ramps below are always shown and always live.
+        local dialGroup = GUI:CreateSettingsGroup(self.child, 280)
+        dialGroup:AddWidget(GUI:CreateLabel(self.child,
+            L["One set of colors for time running out, shared by duration text and the expiry border and tint. Each expiry reveal picks its own unit on its indicator."], 260))
+        dialGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Blend Colors Smoothly"], cbtGlobalDB,
+            "durationTextColorSmooth", function()
+                ApplyColorByTime()
+                if pageColors and pageColors.Refresh then pageColors:Refresh() end
+            end), 30)
+        -- Blending is a duration-text-only capability — the reveal's |T escapes ignore the
+        -- vertex colour a curve writes — so say so rather than leaving it looking global.
+        dialGroup:AddWidget(GUI:CreateNote(self.child,
+            L["The expiry border and tint always step between colors."], { width = 260 }))
+        dialGroup:AddWidget(GUI:CreateDropdown(self.child, L["Duration Text Measured In"],
+            { _order = { "PERCENT", "SECONDS" },
+              PERCENT = L["Percent of duration"], SECONDS = L["Seconds remaining"] },
+            cbtGlobalDB, "durationTextColorScale", function()
+                ApplyColorByTime()
+                if pageColors and pageColors.Refresh then pageColors:Refresh() end
+            end))
+        Add(dialGroup, nil, 2)
+        cbtSection:RegisterChild(dialGroup)
+
         for _, section in ipairs(CBT_SECTIONS) do BuildSection(section) end
     end)
 

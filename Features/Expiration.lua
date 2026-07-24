@@ -102,13 +102,22 @@ function Expiration:EffectiveSize(cfg, geometry)
     return s, s
 end
 
--- The reveal threshold, in the unit the account-wide expiry scale is set to. ONE STORED
--- VALUE PER SCALE, exactly like the colour ramps: a threshold cannot be reinterpreted
--- between units (5 seconds is not 5 percent), and reading a seconds value as a percentage
--- pins the reveal to the last 5% of an aura, which reads as "the border disappeared".
--- Switching the scale therefore swaps which threshold is live and leaves the other intact.
+-- The unit this reveal is measured in — PER INDICATOR, not account-wide. Its bands and
+-- its Alert Below threshold are ONE formatter sampled against ONE duration property, so
+-- the two must agree; but nothing makes two different indicators agree with each other,
+-- and a TEXT/GLYPH reveal has no colour ramp at all, so its unit is purely "when does
+-- this appear". A glyph at 5 seconds alongside a border at 30% is a legitimate setup.
+function Expiration:Unit(cfg)
+    return (cfg and cfg.expiryAlertThresholdUnit == "PERCENT") and "PERCENT" or "SECONDS"
+end
+
+-- The reveal threshold, in this indicator's unit. ONE STORED VALUE PER UNIT, exactly like
+-- the colour ramps: a threshold cannot be reinterpreted between units (5 seconds is not
+-- 5 percent), and reading a seconds value as a percentage pins the reveal to the last 5%
+-- of an aura, which reads as "the border disappeared". Switching the unit therefore swaps
+-- which threshold is live and leaves the other intact.
 function Expiration:Threshold(cfg)
-    if DF.GetDurationBorderColorScale and DF:GetDurationBorderColorScale() == "PERCENT" then
+    if self:Unit(cfg) == "PERCENT" then
         return tonumber(cfg and cfg.expiryAlertThresholdPercent) or 30
     end
     return tonumber(cfg and cfg.expiryAlertThreshold) or 5
@@ -134,6 +143,10 @@ function Expiration:StructSig(cfg, geometry)
     local sw, sh = self:EffectiveSize(cfg, geometry)
     local key = (DF.GetExpiryAlertFmtKey and DF:GetExpiryAlertFmtKey(mode,
             self:Threshold(cfg), cfg.expiryAlertText, cfg.expiryAlertGlyph) or "")
+        -- The unit is part of the formatter's identity (it picks the sampled property and,
+        -- for BYTIME, the ramp) and the formatter is bind-frozen -> a unit change must
+        -- Rebuild, not just restyle.
+        .. ":U" .. self:Unit(cfg)
         .. ":S" .. tostring(sw) .. "x" .. tostring(sh)
         .. ":P" .. self:EffectiveAnchor(cfg)
         .. "," .. tostring(tonumber(cfg.expiryAlertOffsetX) or 0)
@@ -141,10 +154,10 @@ function Expiration:StructSig(cfg, geometry)
     if isFrameMode(mode) then
         local cm = cfg.expiryAlertBorderColorMode or "STATIC"
         key = key .. ":B" .. cm .. ":" .. ((cm == "BYTIME")
-            -- BORDER ramp at the CURRENT border scale, not the text one: the reveal reads
-            -- its own stops, and the scale picks which. Using the text seconds ramp here
-            -- would leave the bind-once formatter stale after a border-stop or scale edit.
-            and (DF.GetDurationBreakpointsSig and DF:GetDurationBreakpointsSig("BORDER") or "")
+            -- The shared ramp FOR THIS INDICATOR'S UNIT, so a Colours-page edit to that
+            -- ramp rebuilds the bind-once formatter (and an edit to the other one doesn't).
+            and (DF.GetDurationBreakpointsSig and DF.GetDurationRampKey
+                 and DF:GetDurationBreakpointsSig(DF:GetDurationRampKey(self:Unit(cfg))) or "")
             or colorSig(cfg.expiryAlertBorderColor))
             .. ":T" .. tostring(resolveThickness(cfg, mode))
             .. ":A" .. tostring(tonumber(cfg.expiryAlertBorderAlpha) or 1)
@@ -167,20 +180,19 @@ function Expiration:BuildDurationSpec(cfg, geometry)
         formatter = DF.GetExpiryBorderElementFormatter and DF:GetExpiryBorderElementFormatter(
             self:Threshold(cfg), w, h,
             cfg.expiryAlertBorderColorMode, cfg.expiryAlertBorderColor,
-            resolveThickness(cfg, mode))
+            resolveThickness(cfg, mode), self:Unit(cfg))
     else
         formatter = DF.GetExpiryAlertElementFormatter and DF:GetExpiryAlertElementFormatter(
             mode, self:Threshold(cfg),
             cfg.expiryAlertText, cfg.expiryAlertGlyph, w)   -- TEXT/GLYPH: square, w == h
     end
     if not formatter then return nil end   -- pre-12.1 formatter API missing: no companion
-    -- PERCENT scale: the reveal's bands (and its Alert Below threshold, which rides the
+    -- PERCENT unit: the reveal's bands (and its Alert Below threshold, which rides the
     -- same formatter) are percentages, so the binding must sample RemainingPercent rather
     -- than the default remaining seconds. textFormat is the only route to a non-default
     -- property — a lone "{}" substituted by one component naming property + formatter.
     local textFormat
-    if DF.GetDurationBorderColorScale and DF:GetDurationBorderColorScale() == "PERCENT"
-       and Enum and Enum.DurationTextBindingProperty then
+    if self:Unit(cfg) == "PERCENT" and Enum and Enum.DurationTextBindingProperty then
         textFormat = { formatString = "{}", components = {
             { property = Enum.DurationTextBindingProperty.RemainingPercent, formatter = formatter },
         } }

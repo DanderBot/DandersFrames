@@ -933,34 +933,19 @@ DF.GlobalDefaults = {
     -- four combinations; the expiry border/tint supports only stepped (see below).
     durationTextColorSmooth = true,        -- true = blend between stops, false = snap to the stop at or below
     durationTextColorScale  = "PERCENT",   -- "PERCENT" | "SECONDS" — which ramp text reads
-    -- ============================================================
-    -- EXPIRY BORDER / TINT ramp (account-wide, Colours page)
-    -- ============================================================
-    -- The reveal's colours are baked into |T inline-texture escapes, and inline textures
-    -- IGNORE the fontstring vertex colour the smooth curve writes (probe-verified) — so
-    -- the border/tint can only ever be STEPPED. Its own ramp, separate from the text's, on
-    -- purpose: a border reads well with two or three bold steps where text carries four or
-    -- five. Seeded from durationColorByTimeBreakpoints on first use (the two shared one
-    -- list before they were split), so an upgrade keeps the borders it already had.
-    --
-    -- The reveal is ONE formatter whose bands encode BOTH when it appears (the Alert Below
-    -- threshold) and what colour it is, and a formatter samples ONE duration property. So
-    -- this scale governs the pair: the unit the threshold is read in AND which property is
-    -- sampled. It does NOT pick a ramp — there is only one, below.
-    durationBorderColorScale = "SECONDS",  -- "PERCENT" | "SECONDS"
-    -- ONE ramp, expressed as PERCENT OF THE REVEAL WINDOW: 100 = the moment the reveal
-    -- appears (the threshold), 0 = expiry. The reveal exists only below its threshold, so
-    -- absolute stops had to be re-tuned every time the threshold moved — and any stop at or
-    -- above it silently built no band at all. Stops relative to the window stay correct at
-    -- any threshold, on either scale.
-    -- Stops MATCH durationColorByPercentBreakpoints out of the box, so the border and the
-    -- duration text change colour at the same moments by default and read as one system.
-    durationBorderColorStops = {
-        { threshold = 60, color = { r = 0.373, g = 0.878, b = 0.373 } },  -- green
-        { threshold = 35, color = { r = 1.0,   g = 0.824, b = 0.239 } },  -- gold
-        { threshold = 15, color = { r = 1.0,   g = 0.596, b = 0.22  } },  -- orange
-        { threshold = 0,  color = { r = 0.969, g = 0.333, b = 0.333 } },  -- red
-    },
+    -- The expiry BORDER/TINT reveal has NO ramp of its own — it reads the two above, the
+    -- same lists the duration text uses, picked by the reveal's own per-indicator unit
+    -- (expiryAlertThresholdUnit). One set of colours for "time is running out".
+    -- The reveal cannot BLEND between them: its colours are baked into |T inline-texture
+    -- escapes, and inline textures IGNORE the fontstring vertex colour the smooth curve
+    -- writes (probe-verified). So durationTextColorSmooth above is text-only by nature.
+    -- A stop at or above an indicator's Alert Below threshold never renders — the reveal
+    -- doesn't exist up there, the same way a text stop past the aura's duration never
+    -- shows. /df cbt lists the affected stops per indicator.
+    -- (Removed 2026-07-24: durationBorderColorScale + durationBorderColorStops +
+    -- durationBorderColorPercentStops. A separate border palette bought nothing once the
+    -- defaults were asked to match the text, and the account-wide scale could not express
+    -- a glyph at 5 seconds next to a border at 30%.)
 }
 
 -- ============================================================

@@ -4319,6 +4319,24 @@ function GUI:CreateSlider(parent, label, minVal, maxVal, step, dbTable, dbKey, c
         end
     end
     
+    -- Re-read the bound value (customGet or dbTable[dbKey]) and redraw. For a slider whose
+    -- source can change under it — e.g. one bound through customGet to whichever key an
+    -- account-wide unit dial currently selects — called from refreshContent.
+    container.RefreshValue = function(self)
+        local v = ReadValue()
+        if v ~= nil then UpdateValue(math.max(minVal, math.min(maxVal, v))) end
+    end
+    -- Runtime range. A slider whose UNIT is decided elsewhere (seconds vs percent) is built
+    -- once but must re-scale in place, or flipping that dial leaves a 1-60 track in front of
+    -- a percentage until the panel is rebuilt. Pair with container.label for the caption.
+    container.SetRange = function(self, newMin, newMax)
+        if newMin ~= minVal or newMax ~= maxVal then
+            minVal, maxVal = newMin, newMax
+            slider:SetMinMaxValues(minVal, maxVal)
+        end
+        self:RefreshValue()
+    end
+
     -- Track drag start - pass the lightweight update function, name for debug, and preview mode
     slider:SetScript("OnMouseDown", function(self, button)
         if button == "LeftButton" then
@@ -6080,23 +6098,55 @@ function GUI:CreateExpirationControls(group, dbTable, opts)
         "expiryAlertEnabled", onStructural), 28)
     w.enable.keepEnabled = true
 
-    -- Threshold first (right under Enable): the "show when remaining time drops below N"
-    -- gate every type shares. Its UNIT follows the account-wide expiry colour scale — the
-    -- threshold and the by-time colour bands are ONE formatter sampled against ONE duration
-    -- property, so they are always in the same unit (see Features/Auras.lua). Percent tops
-    -- out at 100; seconds keep the original 60s ceiling.
-    -- ONE STORED VALUE PER SCALE (mirrors the ramps, and DF.Expiration:Threshold reads the
-    -- same pair): a threshold cannot be reinterpreted between units, so each scale keeps
-    -- its own and switching back finds it untouched. Seed the percent one on first use —
-    -- an unset slider would otherwise read 1 and hide the reveal in the final 1%.
-    local expiryPct = (DF.GetDurationBorderColorScale and DF:GetDurationBorderColorScale() == "PERCENT")
-    local thresholdKey = expiryPct and "expiryAlertThresholdPercent" or "expiryAlertThreshold"
-    if expiryPct and dbTable and dbTable[thresholdKey] == nil then
-        dbTable[thresholdKey] = (DF.Expiration and DF.Expiration.PERCENT_THRESHOLD_DEFAULT) or 30
+    -- Threshold + its UNIT (right under Enable): the "show when remaining time drops below
+    -- N" gate every type shares. The unit is PER INDICATOR — a glyph revealing at 5 seconds
+    -- and a border revealing at 30% are both legitimate — and it also selects which shared
+    -- Colours-page ramp a by-time Border/Tint reads, because the threshold and the bands
+    -- are ONE formatter sampled against ONE duration property (see Features/Auras.lua).
+    -- Percent tops out at 100; seconds keep the original 60s ceiling.
+    -- ONE STORED VALUE PER UNIT (mirrors the ramps, and DF.Expiration:Threshold reads the
+    -- same pair): a threshold cannot be reinterpreted between units, so each keeps its own
+    -- and switching back finds it untouched.
+    local function expiryPct()
+        return DF.Expiration and DF.Expiration:Unit(dbTable) == "PERCENT" or false
     end
+    local function thresholdKey()
+        return expiryPct() and "expiryAlertThresholdPercent" or "expiryAlertThreshold"
+    end
+    local function thresholdGet()
+        local key = thresholdKey()
+        local v = tonumber(dbTable and dbTable[key])
+        if v == nil then
+            -- Seed on first use: an unset percent threshold would read 1 and hide the
+            -- reveal in the final 1% of the aura.
+            v = expiryPct() and ((DF.Expiration and DF.Expiration.PERCENT_THRESHOLD_DEFAULT) or 30) or 5
+            if dbTable then dbTable[key] = v end
+        end
+        return v
+    end
+    -- Nothing about the slider is captured at build time: customGet/customSet resolve the
+    -- key on EVERY access (so flipping the unit can never write a percentage into the
+    -- seconds key), and refreshContent — fired for every shown widget on RefreshStates —
+    -- re-captions it and re-scales its track.
     w.threshold = group:AddWidget(GUI:CreateSlider(parent,
-        expiryPct and L["Alert Below (%)"] or L["Alert Below (seconds)"],
-        1, expiryPct and 100 or 60, 1, dbTable, thresholdKey), 54)
+        expiryPct() and L["Alert Below (%)"] or L["Alert Below (seconds)"],
+        1, expiryPct() and 100 or 60, 1,
+        nil, nil, nil, nil, nil,                                    -- dbTable/dbKey/callback/lightweight/preview
+        thresholdGet,                                               -- customGet
+        function(v) if dbTable then dbTable[thresholdKey()] = v end end), 54)
+    w.threshold.refreshContent = function(self)
+        local pct = expiryPct()
+        if self.label then self.label:SetText(pct and L["Alert Below (%)"] or L["Alert Below (seconds)"]) end
+        self:SetRange(1, pct and 100 or 60)   -- also re-reads the value through customGet
+    end
+
+    -- Measure the threshold in seconds remaining or percent of the aura's duration.
+    -- Structural: the formatter is bind-frozen, so a unit change must Rebuild the
+    -- companion (DF.Expiration:StructSig folds the unit in) — onStructural covers it.
+    w.thresholdUnit = group:AddWidget(GUI:CreateDropdown(parent, L["Measured In"],
+        { _order = { "SECONDS", "PERCENT" },
+          SECONDS = L["Seconds remaining"], PERCENT = L["Percent of duration"] },
+        dbTable, "expiryAlertThresholdUnit", onStructural), 54)
 
     -- Type — the reveal kind (no Off; the Enable toggle owns on/off). Border / Tint lead (the
     -- primary reveals), then the Text / Glyph payloads. Consumers can drop types via include.

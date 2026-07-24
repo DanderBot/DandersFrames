@@ -429,26 +429,27 @@ local DEFAULT_PERCENT_BREAKPOINTS = {
     { threshold = 60, hex = "5fe05f" }, { threshold = 35, hex = "ffd23d" },
     { threshold = 15, hex = "ff9838" }, { threshold = 0,  hex = "f75555" },
 }
--- The BORDER ramp is expressed as PERCENT OF THE REVEAL WINDOW (100 = the threshold,
--- 0 = expiry), so it needs no re-tuning when the threshold moves (keep in sync with
--- Config.lua durationBorderColorStops).
--- Stops MATCH DEFAULT_PERCENT_BREAKPOINTS out of the box: the border and the duration
--- text then change colour at the same moments and read as one system.
-local DEFAULT_BORDER_STOPS = {
-    { threshold = 60, hex = "5fe05f" }, { threshold = 35, hex = "ffd23d" },
-    { threshold = 15, hex = "ff9838" }, { threshold = 0,  hex = "f75555" },
-}
--- FOUR account-wide ramps: two consumers (duration TEXT / the expiry BORDER+TINT reveal)
--- x two scales (seconds / percent). The consumer keeps only an on/off; which scale it
--- reads — and, for text, whether it blends — is account-wide on the Colours page, because
--- that is a property of the ramp rather than of any one aura row. Only ONE ramp per
--- consumer is live at a time; the other is retained so flipping the scale back finds it
--- untouched (thresholds cannot be reinterpreted between units).
+-- TWO account-wide ramps, ONE PER UNIT — seconds remaining and percent of duration —
+-- shared by EVERY colour-by-time consumer: the duration text AND the expiry border/tint
+-- reveal. "Time is running out" is one idea, so it gets one set of colours; a consumer
+-- keeps only an on/off, and which ramp it reads follows from its unit.
+--   * Duration TEXT has no threshold, so its unit is account-wide (durationTextColorScale)
+--     and it also carries the blend dial (only text can blend — |T escapes ignore the
+--     vertex colour a curve writes).
+--   * The expiry reveal's unit is PER INDICATOR (expiryAlertThresholdUnit): its bands and
+--     its Alert Below threshold are ONE formatter sampled against ONE property, so they
+--     must share a unit — but nothing makes two different indicators share one. Both ramps
+--     are therefore live at once: a seconds reveal reads the seconds ramp, a percent
+--     reveal the percent one.
 local COLOR_SCALES = {
     TEXT_SECONDS   = { key = "durationColorByTimeBreakpoints",            fallback = DEFAULT_DURATION_BREAKPOINTS },
     TEXT_PERCENT   = { key = "durationColorByPercentBreakpoints",         fallback = DEFAULT_PERCENT_BREAKPOINTS  },
-    BORDER         = { key = "durationBorderColorStops",                 fallback = DEFAULT_BORDER_STOPS },
 }
+-- The ramp for a unit ("SECONDS" | "PERCENT"). One resolver so every consumer, cache key
+-- and struct sig maps a unit to a ramp the same way.
+function DF:GetDurationRampKey(unit)
+    return (unit == "PERCENT") and "TEXT_PERCENT" or "TEXT_SECONDS"
+end
 -- Account-wide reading of each ramp. Text carries both dials; the border/tint is stepped
 -- by construction (its |T escapes ignore the vertex colour a curve writes) and so carries
 -- only a scale.
@@ -460,12 +461,11 @@ function DF:IsDurationTextColorSmooth()
     local g = DF.GetGlobalDB and DF:GetGlobalDB()
     return not (g and g.durationTextColorSmooth == false)
 end
--- The expiry reveal's scale. Governs BOTH its colour ramp and the unit its Alert Below
--- threshold is read in — one formatter, one sampled property, so the two are inseparable.
-function DF:GetDurationBorderColorScale()
-    local g = DF.GetGlobalDB and DF:GetGlobalDB()
-    return (g and g.durationBorderColorScale == "PERCENT") and "PERCENT" or "SECONDS"
-end
+-- (Removed 2026-07-24: DF:GetDurationBorderColorScale / GetDurationBorderScaleKey and the
+-- account-wide durationBorderColorScale behind them. The expiry reveal's unit is now a
+-- PER-INDICATOR setting — DF.Expiration:Unit(cfg) — so one global could not express it:
+-- a glyph revealing at 5 seconds and a border revealing at 30% are both legitimate at the
+-- same time. Use DF:GetDurationRampKey(DF.Expiration:Unit(cfg)) to reach its ramp.)
 local function GetDurationColorBreakpoints(scale)
     local def = COLOR_SCALES[scale] or COLOR_SCALES.TEXT_SECONDS
     local g = DF.GetGlobalDB and DF:GetGlobalDB()
@@ -871,48 +871,19 @@ function DF:DebugDumpColorByTime(threshold)
     say("  enabled consumer -> mode=%s  curve=%s  buckets=%s", tostring(mode),
         tostring(spec and spec.curve ~= nil), tostring(spec and spec.buckets == true))
     say("  sig=%s", tostring(DF:GetDurationColorSig(mode)))
-    for _, s in ipairs({ "TEXT_SECONDS", "TEXT_PERCENT", "BORDER" }) do
+    -- The TWO shared ramps. Duration text reads the one its scale names; each expiry
+    -- reveal reads the one matching its OWN unit, so both can be live at once.
+    for _, s in ipairs({ "TEXT_SECONDS", "TEXT_PERCENT" }) do
         local bps = GetDurationColorBreakpoints(s)
         local parts = {}
         for _, bp in ipairs(bps) do parts[#parts + 1] = bp.threshold .. "=" .. tostring(bp.hex) end
         say("  %s: %s", s, table.concat(parts, " "))
     end
 
-    -- EXPIRY REVEAL. Its bands and its Alert Below threshold are one formatter sampled
-    -- against one property, so both are reported together — and only stops BELOW the
-    -- threshold ever render, which is the usual "why is my top colour never showing".
-    local bscale = DF:GetDurationBorderColorScale()
-    local pct = (bscale == "PERCENT")
-    local t = tonumber(threshold)
-    if not t then t = pct and ((DF.Expiration and DF.Expiration.PERCENT_THRESHOLD_DEFAULT) or 30) or 5 end
-    if t < 1 then t = 1 end
-    say("|cff33ff99Expiry reveal|r  scale=%s  property=%s", bscale,
-        pct and "RemainingPercent" or "RemainingDuration")
-    say("  threshold %s%s (%s) — pass a number to /df cbt to test another",
-        tostring(t), pct and "%" or "s",
-        pct and "expiryAlertThresholdPercent" or "expiryAlertThreshold")
-    -- Stops are a share of the WINDOW, so report both: the authored share and where it
-    -- actually lands once scaled onto the threshold. Nothing can be dropped any more --
-    -- that was the whole point of going window-relative.
-    local parts = {}
-    for _, bp in ipairs(GetDurationColorBreakpoints("BORDER")) do
-        -- Mirror the formatter's clamp EXACTLY (a stop at 100 lands a hair under the
-        -- hide band instead of being dropped) so this dump can never disagree with it.
-        local at = t * math.min(tonumber(bp.threshold) or 0, 100) / 100
-        if at >= t then at = t - 0.01 end
-        parts[#parts + 1] = ("%d%%->%.2f%s=%s"):format(bp.threshold, at,
-            pct and "%" or "s", tostring(bp.hex))
-    end
-    say("  bands (share of window -> where it lands): %s",
-        (#parts > 0) and table.concat(parts, "  ") or "|cffff6060none|r")
-    if pct then
-        say("  on a 12s aura the reveal starts at %.1fs remaining", 12 * t / 100)
-    end
-
-    -- LIVE ALERTED INDICATORS: the threshold above is only the fallback — each placed
-    -- indicator reads its OWN expiryAlert keys, and "reveals too late" is almost always
-    -- this number. The % threshold is PER-AURA-DURATION (30% of a 12s buff = 3.6s;
-    -- 100 = visible for the aura's whole life), unlike the absolute seconds one.
+    -- EXPIRY REVEALS, per indicator. Bands and the Alert Below threshold are ONE formatter
+    -- sampled against ONE property, so each indicator's unit governs both — and only stops
+    -- BELOW its threshold ever render, which is the usual "why is my top colour missing".
+    say("|cff33ff99Expiry reveals|r  (unit, threshold and ramp are PER INDICATOR)")
     local Engine = DF.AuraDesigner and DF.AuraDesigner.Engine
     local seen, found = {}, 0
     for _, adMode in ipairs({ "party", "raid" }) do
@@ -930,13 +901,28 @@ function DF:DebugDumpColorByTime(threshold)
                         for _, ind in ipairs(inds) do
                             if ind.expiryAlertEnabled and DF.Expiration then
                                 found = found + 1
+                                local unit  = DF.Expiration:Unit(ind)
+                                local ipct  = (unit == "PERCENT")
                                 local liveT = DF.Expiration:Threshold(ind)
-                                say("  [%s] %s %s: %s live=%s%s (stored %ss / %s%%) -> a 12s aura reveals at %.1fs",
+                                say("  [%s] %s %s: %s  below %s%s  ramp=%s  -> a 12s aura reveals at %.1fs",
                                     adMode, tostring(auraName), tostring(ind.type or "?"),
                                     tostring(ind.expiryAlertMode or "BORDER"),
-                                    tostring(liveT), pct and "%" or "s",
-                                    tostring(ind.expiryAlertThreshold), tostring(ind.expiryAlertThresholdPercent),
-                                    pct and (12 * liveT / 100) or math.min(12, liveT))
+                                    tostring(liveT), ipct and "%" or "s",
+                                    DF:GetDurationRampKey(unit),
+                                    ipct and (12 * liveT / 100) or math.min(12, liveT))
+                                -- Only a BYTIME reveal reads the ramp; a static one is one colour.
+                                if ind.expiryAlertBorderColorMode == "BYTIME" then
+                                    local parts, hidden = {}, {}
+                                    for _, bp in ipairs(GetDurationColorBreakpoints(DF:GetDurationRampKey(unit))) do
+                                        local at = tonumber(bp.threshold) or 0
+                                        local into = (at < liveT) and parts or hidden
+                                        into[#into + 1] = ("%s%s=%s"):format(tostring(at), ipct and "%" or "s", tostring(bp.hex))
+                                    end
+                                    say("      bands: %s", (#parts > 0) and table.concat(parts, "  ") or "|cffff6060none|r")
+                                    if #hidden > 0 then
+                                        say("      |cffff6060above the threshold (never render):|r %s", table.concat(hidden, "  "))
+                                    end
+                                end
                             end
                         end
                     end
@@ -1009,17 +995,18 @@ end
 --   BYTIME  -> one band per BORDER-ramp step below the threshold, each |T tinted to that
 --              breakpoint's colour. Breakpoints sig keys the cache (and the factory struct
 --              key) so a Colours-page edit rebuilds the bind-frozen formatter.
--- The border/tint reads its OWN ramp (durationBorderColorStops), separate from
--- the duration text's: they are different media — a border reads well with two or three
--- bold steps where text carries four or five — and text can blend where this cannot (the
--- |T escapes ignore the fontstring vertex colour a colour curve writes).
--- SCALE: these bands and the reveal threshold are ONE formatter sampled against ONE
--- property, so the account-wide border scale governs both — its ramp AND the unit
--- `threshold` arrives in. On PERCENT the caller must bind this formatter to
--- RemainingPercent (Features/Expiration.lua feeds it through textFormat); binding it the
--- default way would judge percent bands against remaining seconds.
+-- The reveal reads the SAME account-wide ramp as the duration text, picked by `unit`
+-- ("SECONDS" | "PERCENT" — the indicator's own expiryAlertThresholdUnit). One set of
+-- colours for "time is running out"; the reveal simply cannot BLEND between them (the |T
+-- escapes ignore the fontstring vertex colour a colour curve writes), so it steps where
+-- text may blend.
+-- UNIT: these bands and the reveal threshold are ONE formatter sampled against ONE
+-- property, so `unit` governs both — which ramp is read AND the unit `threshold` arrives
+-- in. On PERCENT the caller must bind this formatter to RemainingPercent
+-- (Features/Expiration.lua feeds it through textFormat); binding it the default way
+-- would judge percent bands against remaining seconds.
 -- Cached under an "XBEL|" prefix (duration-text keys start with the format name, never "X").
-function DF:GetExpiryBorderElementFormatter(threshold, width, height, colorMode, staticColor, thickness)
+function DF:GetExpiryBorderElementFormatter(threshold, width, height, colorMode, staticColor, thickness, unit)
     if not (C_StringUtil and C_StringUtil.CreateNumericRuleFormatter and Enum and Enum.NumericRuleFormatRounding) then return nil end
     local alertT = tonumber(threshold) or 5
     if alertT < 1 then alertT = 1 end
@@ -1027,30 +1014,26 @@ function DF:GetExpiryBorderElementFormatter(threshold, width, height, colorMode,
     local h = math.max(1, math.floor(tonumber(height) or tonumber(width) or 18))
     local tex = borderTexture(thickness)
     local byTime = (colorMode == "BYTIME")
-    local scale = DF:GetDurationBorderColorScale()   -- property + threshold unit only; one ramp
-    local key = "XBEL|" .. tostring(alertT) .. ":" .. tostring(w) .. "x" .. tostring(h) .. ":" .. tostring(thickness or "MEDIUM") .. ":" .. scale .. ":"
-        .. (byTime and ("T:" .. DF:GetDurationBreakpointsSig("BORDER")) or ("S:" .. colorToHex(staticColor or { r = 1, g = 0.2, b = 0.2 })))
+    local scaleKey = DF:GetDurationRampKey(unit)   -- picks the ramp AND the sampled property
+    local key = "XBEL|" .. tostring(alertT) .. ":" .. tostring(w) .. "x" .. tostring(h) .. ":" .. tostring(thickness or "MEDIUM") .. ":" .. scaleKey .. ":"
+        .. (byTime and ("T:" .. DF:GetDurationBreakpointsSig(scaleKey)) or ("S:" .. colorToHex(staticColor or { r = 1, g = 0.2, b = 0.2 })))
     if durationFormatterCache[key] == nil then
         local ok, f = pcall(function()
             local down = Enum.NumericRuleFormatRounding.Down
             local fmt = C_StringUtil.CreateNumericRuleFormatter()
             if byTime then
-                -- One coloured band per stop, each holding its colour up to the next-higher
-                -- band (mirrors colorHexAt). Stops are relative to the reveal WINDOW, so the
-                -- ramp always spans exactly [0, threshold] and no stop can fall outside it —
-                -- the old absolute stops silently built no band once they passed the
-                -- threshold, and the topmost band's width depended on the gap to it.
-                for _, bp in ipairs(GetDurationColorBreakpoints("BORDER")) do
-                    -- Stops are % OF THE WINDOW, so scale each onto the threshold. A stop at
-                    -- 100 (the window top) would land exactly ON the hide band — clamp it a
-                    -- hair below instead of DROPPING it (the old guard silently deleted the
-                    -- colour). Its band is near-zero width either way ("100% and above" of a
-                    -- window that ENDS at 100); this is stored-data grace, not a real config —
-                    -- a top colour wants its stop BELOW 100 (75 = the top quarter).
-                    local at = alertT * math.min(tonumber(bp.threshold) or 0, 100) / 100
-                    if at >= alertT then at = alertT - 0.01 end
-                    fmt:AddBreakpoint({ threshold = at, step = 1, rounding = down, min = 1,
-                        format = borderEscapeHex(w, h, bp.hex, tex) })
+                -- One coloured band per stop, in the ramp's own unit (seconds remaining or
+                -- percent of duration — whichever `unit` selected), each holding its colour
+                -- up to the next-higher band. Mirrors colorHexAt, and IS the duration-text
+                -- ramp: same list, same numbers, same meaning.
+                -- A stop AT OR ABOVE the reveal threshold simply never renders — the reveal
+                -- does not exist up there. That is the same "a stop past the aura's duration
+                -- never shows" the text ramp has always had, so the two behave alike.
+                for _, bp in ipairs(GetDurationColorBreakpoints(scaleKey)) do
+                    if (tonumber(bp.threshold) or 0) < alertT then
+                        fmt:AddBreakpoint({ threshold = bp.threshold, step = 1, rounding = down, min = 1,
+                            format = borderEscapeHex(w, h, bp.hex, tex) })
+                    end
                 end
             else
                 fmt:AddBreakpoint({ threshold = 0, step = 1, rounding = down, min = 1,

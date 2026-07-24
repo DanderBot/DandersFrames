@@ -620,8 +620,6 @@ L["Clip Health Bar"] = true
 L["Close"] = true
 L["Color"] = true
 L["Color by Dispel Type"] = true
-L["Colors the countdown text on buffs, debuffs, defensives and Aura Designer indicators."] = true
-L["Colors the expiring border and tint. Stops are a percentage of the alert window, so they hold when you change the alert threshold. These are drawn as inline textures and always step between colors."] = true
 L["Color by Time"] = true
 L["Color Mode"] = true
 L["Color Name Text"] = true
@@ -835,7 +833,6 @@ L["Errors Only"] = true
 L["Evoker"] = true
 L["Exit Editing"] = true
 L["Exclamation Mark"] = true
-L["Expiry Border & Tint"] = true
 L["Expiring Indicator"] = true
 L["Expiring Threshold (%)"] = true
 L["Expiring Threshold (seconds)"] = true
@@ -1127,7 +1124,6 @@ L["Minimal"] = true
 L["Minimap"] = true
 L["Minimum Log Level"] = true
 L["Missing Buff Alpha"] = true
-L["Measure By"] = true
 L["Missing Buffs"] = true
 L["Missing Health"] = true
 L["Missing Health Alpha"] = true
@@ -1204,7 +1200,6 @@ L["Notify me when a newer version is available"] = true
 L["OOR"] = true
 L["Off"] = true
 L["Offline"] = true
-L["Percent remaining"] = true
 L["Offset X"] = true
 L["Offset Y"] = true
 L["Override Border"] = true
@@ -2239,5 +2234,14 @@ L["instead of Command for left click modifiers."] = true
 L["is already bound to:"] = true
 L["or "] = true
 L["when switching to this spec"] = true
+
+-- Color by Time: one shared ramp per unit (Colours page + per-indicator expiry unit)
+L["Duration Text Measured In"] = true
+L["Measured In"] = true
+L["One set of colors for time running out, shared by duration text and the expiry border and tint. Each expiry reveal picks its own unit on its indicator."] = true
+L["Percent of duration"] = true
+L["The expiry border and tint always step between colors."] = true
+L["Used by any expiry reveal measured in this unit."] = true
+L["Used by duration text, and by any expiry reveal measured in this unit."] = true
 
 --@end-do-not-package@
