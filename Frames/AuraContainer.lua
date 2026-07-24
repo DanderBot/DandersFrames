@@ -1191,7 +1191,7 @@ local function applyContainerLayout(c, handle)
         rowWidth = sx + headroom
     elseif wrap and wrap >= 1 then
         rowWidth = wrap * sx + (wrap - 1) * spX + headroom
-    end   -- nil -> math.huge (no wrap) inside SetAuraLayoutRowWidth
+    end   -- nil -> math.huge (no wrap) inside SetFlowLayoutMaximumLineSize (né SetAuraLayoutRowWidth)
 
     -- Strip reservation, start-side inset (see stripReservation): only when the strip
     -- faces the flow's vertical start. Padding is config-derived, live (MarkDirty
@@ -1232,18 +1232,30 @@ local function applyContainerLayout(c, handle)
         -- centre-of-edge pins instead (see resolveGrowthLayout).
         c:ClearAllPoints()
         c:SetPoint(G.pinPoint, handle.frame, G.anchor, px, py)
-        c:SetAuraLayoutAnchorPoint(G.flowAnchor)
-        if AnchorUtil and AnchorUtil.FlowDirection then
-            local h = resolveEnum(AnchorUtil.FlowDirection, G.hName)
-            local v = resolveEnum(AnchorUtil.FlowDirection, G.vName)
-            if h ~= nil and v ~= nil then c:SetAuraLayoutGrowthDirection(h, v) end
-        end
-        c:SetAuraLayoutRowWidth(rowWidth)
-        if padTop > 0 or padBottom > 0 or c._dfPadApplied then
-            c._dfPadApplied = (padTop > 0 or padBottom > 0) or nil
-            c:SetAuraLayoutPadding(0, 0, padTop, padBottom)
-        end
     end)
+
+    -- Flow-layout family: 68914 renamed SetAuraLayout* -> SetFlowLayout* (RowWidth
+    -- -> MaximumLineSize, same nil = no-wrap contract; padding is growth-relative,
+    -- which matches the padTop/padBottom branches above — the named side IS the
+    -- flow's vertical start in both used cases). Dual-detect by method presence,
+    -- and protect each call SEPARATELY: pre-68914 this rode the pin pcall above,
+    -- so the rename made the first layout call throw and silently dropped
+    -- growth/wrap/padding for the whole row.
+    local setFlowAnchor  = c.SetFlowLayoutAnchorPoint or c.SetAuraLayoutAnchorPoint
+    local setFlowGrowth  = c.SetFlowLayoutGrowthDirection or c.SetAuraLayoutGrowthDirection
+    local setFlowMaxLine = c.SetFlowLayoutMaximumLineSize or c.SetAuraLayoutRowWidth
+    local setFlowPadding = c.SetFlowLayoutPadding or c.SetAuraLayoutPadding
+    if setFlowAnchor then pcall(setFlowAnchor, c, G.flowAnchor) end
+    if setFlowGrowth and AnchorUtil and AnchorUtil.FlowDirection then
+        local h = resolveEnum(AnchorUtil.FlowDirection, G.hName)
+        local v = resolveEnum(AnchorUtil.FlowDirection, G.vName)
+        if h ~= nil and v ~= nil then pcall(setFlowGrowth, c, h, v) end
+    end
+    if setFlowMaxLine then pcall(setFlowMaxLine, c, rowWidth) end
+    if setFlowPadding and (padTop > 0 or padBottom > 0 or c._dfPadApplied) then
+        c._dfPadApplied = (padTop > 0 or padBottom > 0) or nil
+        pcall(setFlowPadding, c, 0, 0, padTop, padBottom)
+    end
 
     -- PIN RETRY (live-caught): at login/reload the containers build BEFORE the
     -- unit frames' first layout — the anchor rect is nil, the pin snap above
@@ -1270,13 +1282,20 @@ local function applyContainerLayout(c, handle)
     end
 end
 
--- Per-group layout options (stride/spacing). gapX stays 0: the flow advances its
--- cursor by width + elementSpacingX after EVERY element — including a group's
--- last — and then adds gapX before the next group (AnchorUtil.ApplyFlowLayout),
--- so any non-zero gapX renders group boundaries at spacing + gapX. The original
--- gapX = spacing DOUBLED the gap between filter blocks on multi-filter rows
--- (and between every button of the per-slot test rows) — live-reported. With
--- gapX = 0 groups still continue on the same row, uniformly spaced.
+-- Per-group layout options (stride/spacing). groupSpacing stays 0: the flow
+-- advances its cursor by width + elementSpacing after EVERY element — including
+-- a group's last — and then adds groupSpacing ON TOP before the next group
+-- (AnchorUtil.ApplyFlowLayout), so any non-zero value renders group boundaries
+-- at spacing + groupSpacing. The original gap = spacing DOUBLED the gap between
+-- filter blocks on multi-filter rows (and between every button of the per-slot
+-- test rows) — live-reported. With 0, groups still continue on the same row,
+-- uniformly spaced. (68914 rewrote the flow but kept these additive semantics.)
+--
+-- 68914 also RENAMED the keys: elementSpacingX/elementSpacingY/gapX ->
+-- elementSpacing (primary axis) / lineSpacing (cross axis, applied on wrap) /
+-- groupSpacing. Unknown keys are silently dropped, never rejected
+-- (CopyAndValidateInboundTable merges over defaults and validates known keys
+-- only), so we carry BOTH families and each build reads its own.
 local function buildGroupLayout(config)
     local L = config.layout or {}
     local sx = (L.sizeX or L.size or 32)
@@ -1295,9 +1314,12 @@ local function buildGroupLayout(config)
         -- both grow by the strip's out-of-rect space (0 for fill / no bar). The
         -- start-side inset half of the reservation lives in applyContainerLayout.
         elementHeight   = sy + resv,
-        elementSpacingX = spX,
-        elementSpacingY = spY,
-        gapX            = 0,
+        elementSpacing  = spX,   -- 68914+
+        lineSpacing     = spY,   -- 68914+
+        groupSpacing    = 0,     -- 68914+ (see header comment)
+        elementSpacingX = spX,   -- pre-68914 twin
+        elementSpacingY = spY,   -- pre-68914 twin
+        gapX            = 0,     -- pre-68914 twin
     }
 end
 
@@ -1365,7 +1387,7 @@ end
 -- OWN buttons (AddAuraFrame is removed): we register one AuraGroup per filter (row mode)
 -- or one AuraSlot per filter (overlay mode), and Blizzard invokes our initializeFrame
 -- per button (in lazy batches of 10) to style it. isNativeSlots = true. Row layout is the
--- container's flow layout (SetAuraLayout* translation lands in P1); overlay slots are
+-- container's flow layout (applyContainerLayout translates onto SetFlowLayout*); overlay slots are
 -- addon-anchored via the button AddAuraSlot returns.
 --
 -- Each backend owns its OWN plain container: insecure CreateFrame is combat-legal for the
@@ -1446,7 +1468,8 @@ function NativeBackend:build()
         -- mouse-dead so nothing floats over the unit frame.
         c:ClearAllPoints()
         c:SetPoint("TOPRIGHT", handle.frame, "TOPLEFT", -MISSING_PAD, 0)
-        pcall(function() c:SetAuraLayoutAnchorPoint("TOPLEFT") end)
+        local setFlowAnchor = c.SetFlowLayoutAnchorPoint or c.SetAuraLayoutAnchorPoint
+        if setFlowAnchor then pcall(setFlowAnchor, c, "TOPLEFT") end
         pcall(function() if c.SetMouseClickEnabled then c:SetMouseClickEnabled(false) end end)
         pcall(function() if c.SetMouseMotionEnabled then c:SetMouseMotionEnabled(false) end end)
     else
@@ -1539,7 +1562,7 @@ function NativeBackend:build()
                 c:AddAuraGroup(key, category, {
                     maxFrameCount = 1,
                     initializeFrame = handle:_makeInitializeFrame(handle._gen, k),
-                    layout = groupLayout,   -- gapX = 0 (buildGroupLayout) = uniform spacing
+                    layout = groupLayout,   -- groupSpacing = 0 (buildGroupLayout) = uniform spacing
                 })
             end)
             if okGroup then
@@ -2240,7 +2263,7 @@ function Handle:_positionTestTip(tip, index)
     local idx = index - 1
     -- Strip reservation (Wave 3.2/3.3): rendered rows stride by elementHeight
     -- (sy + reservation) + spacing, and a strip FACING the flow's vertical start
-    -- insets the first row by the reservation (SetAuraLayoutPadding). Mirror
+    -- insets the first row by the reservation (SetFlowLayoutPadding). Mirror
     -- both here or the hover zones drift by `resv` per row once a bar is on.
     local resv, topStrip = stripReservation(self.config)
     local inset = 0
@@ -2615,7 +2638,7 @@ function Handle:ApplyStyle(style, layout)
     end
     -- Row-mode buttons are anchored by the CONTAINER's secure flow layout -- SetPoint-ing
     -- them here would fight it (and touches secretwrapped anchor points). Geometry changes
-    -- hot-apply through the live SetAuraLayout*/SetAuraGroupLayout mutators instead; a
+    -- hot-apply through the live SetFlowLayout*/SetAuraGroupLayout mutators instead; a
     -- future non-native "slots" mode would hand-anchor via layoutRow. styleButton_regions below still
     -- re-applies per-button SIZE, which the flow layout reads.
     local native = self.backend and self.backend:isNativeSlots()
