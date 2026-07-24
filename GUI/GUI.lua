@@ -1377,7 +1377,8 @@ end
 -- that px (matches a banner word, which is SetSettingsFont'd); nil → measure the
 -- template's own font object (a CreateLink / template-fonted word). One reused
 -- probe (no per-call FontString churn); measured fresh so a font-family change is
--- always reflected. Result is pixel-rounded so every word stays crisp.
+-- always reflected. Returns the EXACT fractional advance (no pixel rounding) so the
+-- flow spaces identically to native wrapped text — see the return note below.
 local _flowProbe
 local function FlowSpaceWidth(tmpl, sizePx)
     tmpl = tmpl or "DFFontHighlightSmall"
@@ -1400,7 +1401,12 @@ local function FlowSpaceWidth(tmpl, sizePx)
     _flowProbe:SetText("")
     local sp = (wA - wB) / N
     if not sp or sp <= 0 then sp = 3 end
-    return math.floor(sp + 0.5)   -- keep every word pixel-aligned (one shared value per line)
+    -- Return the EXACT fractional advance, NOT math.floor(sp+0.5). Rounding a small
+    -- space (Roboto ~2.7px at 11px) UP to a whole pixel added a fixed sliver to every
+    -- word gap, so the flow read looser than a native wrapped FontString — which
+    -- positions its own spaces at sub-pixel offsets. Fractional here = same gap as
+    -- native. (Krathe: "look like normal text with links, no extra spacing.")
+    return sp
 end
 
 function GUI:CreateInfoBanner(parent, opts)
@@ -1795,8 +1801,11 @@ function GUI:CreateInfoBanner(parent, opts)
                 fs:SetJustifyH("LEFT")   -- ink flush-left so the link spaces like a plain word
                 fs:SetText(seg.text)
                 fs:SetTextColor(tc.r, tc.g, tc.b)
-                local w = math.ceil(fs:GetStringWidth())   -- ceil guards last-glyph clip; no extra pad
-                btn:SetSize(w, FLOW_LINE_H)
+                -- Box width ceil'd (anti last-glyph clip), but the flow ADVANCE uses the
+                -- RAW width — else the ≤1px of empty box after every link became extra
+                -- gap before the next word (looser than native). seg._w drives the gap.
+                local rawW = fs:GetStringWidth()
+                btn:SetSize(math.ceil(rawW), FLOW_LINE_H)
                 btn:SetScript("OnEnter", function()
                     local h = GUI:LinkHoverColor((GUI.GetThemeColor and GUI.GetThemeColor()) or tc)
                     fs:SetTextColor(h.r, h.g, h.b)
@@ -1813,7 +1822,7 @@ function GUI:CreateInfoBanner(parent, opts)
                     end
                 end)
                 seg._widget = btn
-                seg._w = w
+                seg._w = rawW
                 self._flowWidgets[#self._flowWidgets + 1] = btn
             end
         end
@@ -1887,8 +1896,10 @@ function GUI:CreateLink(parent, text, opts)
             fs:SetJustifyH("LEFT")   -- ink flush-left so the link spaces like a plain word
             fs:SetText(seg.text)
             fs:SetTextColor(tc.r, tc.g, tc.b)
-            local w = math.ceil(fs:GetStringWidth())   -- ceil guards last-glyph clip; no extra pad
-            btn:SetSize(w, LINE_H)
+            -- Box ceil'd (anti last-glyph clip); flow ADVANCE uses the RAW width so the
+            -- ≤1px of empty box after a link doesn't become extra word gap (see SetHTML).
+            local rawW = fs:GetStringWidth()
+            btn:SetSize(math.ceil(rawW), LINE_H)
             btn:SetScript("OnEnter", function()
                 local h = GUI:LinkHoverColor((GUI.GetThemeColor and GUI.GetThemeColor()) or tc)
                 fs:SetTextColor(h.r, h.g, h.b)
@@ -1899,7 +1910,7 @@ function GUI:CreateLink(parent, text, opts)
             end)
             local segData = seg.data
             btn:SetScript("OnClick", function() if onLinkClick then onLinkClick(segData) end end)
-            seg._w = w
+            seg._w = rawW
             seg._widget = btn
         end
     end
