@@ -4388,13 +4388,36 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local cbtGroup = GUI:CreateSettingsGroup(self.child, 280)
 
         -- Tabs: which unit's stops are on the editor below. UI state only — flipping a
-        -- tab changes nothing about what renders in the world.
-        cbtGroup:AddWidget(GUI:CreateSegmentToggle(self.child, {
-            { value = "SECONDS", label = L["Seconds"] },
-            { value = "PERCENT", label = L["Percent"] },
-        }, self, "_cbtEditUnit", function()
-            if pageColors and pageColors.Refresh then pageColors:Refresh() end
-        end, { segmentWidth = 127, height = 22 }), 32)
+        -- tab changes nothing about what renders in the world. Underline-tab style
+        -- (StyleButton opts.tab — the PARTY/RAID/BINDS look), half-width each so the
+        -- pair spans the box. No explicit accent: the tab picks up the mode accent
+        -- (party purple / raid), same as the main tabs. CreateSegmentToggle stays the
+        -- compact value toggle beside a control (the s/% dials in the legend below).
+        local tabRow = CreateFrame("Frame", nil, self.child)
+        tabRow:SetSize(260, 24)
+        local prevTab
+        for _, def in ipairs({
+            { key = "SECONDS", label = L["Seconds"] },
+            { key = "PERCENT", label = L["Percent"] },
+        }) do
+            local tabBtn = CreateFrame("Button", nil, tabRow, "BackdropTemplate")
+            GUI:StyleButton(tabBtn, { tab = true, width = 128, height = 24, text = def.label, font = "DFFontHighlight" })
+            if prevTab then
+                tabBtn:SetPoint("LEFT", prevTab, "RIGHT", 4, 0)
+            else
+                tabBtn:SetPoint("LEFT", tabRow, "LEFT", 0, 0)
+            end
+            local key = def.key
+            tabBtn:SetScript("OnClick", function()
+                if self._cbtEditUnit ~= key then
+                    self._cbtEditUnit = key
+                    if pageColors and pageColors.Refresh then pageColors:Refresh() end
+                end
+            end)
+            tabBtn:SetActive(editUnit == key)
+            prevTab = tabBtn
+        end
+        cbtGroup:AddWidget(tabRow, 30)
 
         -- Strip builder, shared by the editor strip and the legend previews. `unit` picks
         -- which ramp the strip shows — the editor and border previews show the EDITED
@@ -4451,7 +4474,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         cbtGroup:AddWidget(BuildStrip(previewW, stripH, false, editUnit), 24)
         RefreshPreview()
 
-        -- One row per stop, freshest (highest threshold) first.
+        -- ONE row per stop, freshest (highest threshold) first: colour chip, computed
+        -- range, boundary stepper, remove. The chip IS a CreateColorPicker — shrunk to
+        -- its swatch by resizing the container (the button anchors TOPLEFT/TOPRIGHT, so
+        -- it follows) — which brings the whole dialog stack along (cancel restore,
+        -- Default button, ElvUI hook, spurious open-fire suppression) instead of
+        -- reimplementing any of it. The "Starts at" caption the merge dropped lives on
+        -- as a tooltip on the stepper controls.
         local desc = cbtSorted(true)
         for i = 1, #desc do
             local bp = desc[i]
@@ -4467,10 +4496,23 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 rangeLabel = format(scale.range, t, above or t)
             end
 
-            cbtGroup:AddWidget(GUI:CreateColorPicker(self.child, rangeLabel, bp, "color", false, function()
+            local row = CreateFrame("Frame", nil, self.child)
+            row:SetSize(previewW, 24)
+
+            local chip = GUI:CreateColorPicker(self.child, "", bp, "color", false, function()
                 RefreshPreview()
                 ScheduleColorApply()
-            end, nil, false), 30)
+            end, nil, false)
+            chip:SetParent(row)
+            chip:SetSize(52, 24)
+            chip:SetPoint("LEFT", row, "LEFT", 0, 0)
+
+            local cap = row:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+            cap:SetPoint("LEFT", chip, "RIGHT", 8, 0)
+            cap:SetText(rangeLabel)
+            cap:SetTextColor(0.85, 0.85, 0.85)
+            cap:SetWordWrap(false)
+            cap:SetJustifyH("LEFT")
 
             -- Boundary stepper (the t == 0 base band has no adjustable lower edge).
             -- +/- nudge by one; the middle field is typeable for big jumps (8 -> 120).
@@ -4479,12 +4521,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 -- The top stop is capped by the scale (100% has a real ceiling; seconds
                 -- keep the long-buff headroom the field already allowed).
                 local upperBound = (i > 1) and (cbtT(desc[i - 1]) - 1) or scale.capT
-                local row = CreateFrame("Frame", nil, self.child)
-                row:SetSize(previewW, 22)
-                local cap = row:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-                cap:SetPoint("LEFT", row, "LEFT", 12, 0)
-                cap:SetText(L["Starts at"])
-                cap:SetTextColor(0.7, 0.7, 0.7)
 
                 local eb
                 local function commitTo(nt)
@@ -4499,15 +4535,36 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                     if pageColors and pageColors.Refresh then pageColors:Refresh() end
                 end
 
-                local minus = CreateFrame("Button", nil, row, "BackdropTemplate")
-                GUI:StyleButton(minus, { width = 22, height = 20, icon = { texture = iconPath .. "remove", size = 12, color = { r = 0.85, g = 0.85, b = 0.85 } } })
-                minus:SetPoint("LEFT", cap, "RIGHT", 8, 0)
-                minus:SetScript("OnClick", function() commitTo(cbtT(bp) - 1) end)
+                -- Right-to-left: [−][value][+][×], the × only when removable. Stepper
+                -- rows all share the removable state, so their columns stay aligned.
+                local rightAnchor, rightPoint, rightOff = row, "RIGHT", -2
+                if #bps > 2 then
+                    -- Reuse the shared close-X in its default (dismiss) form — grey glyph at
+                    -- rest, white glyph + red hover wash on mouseover, exactly like the GUI's
+                    -- own close button. (No tone="danger" — that tints the glyph red at rest.)
+                    local remBtn = GUI:CreateCloseButton(row, {
+                        size = 20,
+                        onClick = function()
+                            for idx, s in ipairs(bps) do
+                                if s == bp then table.remove(bps, idx) break end
+                            end
+                            ApplyColorByTime()
+                            if pageColors and pageColors.Refresh then pageColors:Refresh() end
+                        end,
+                    })
+                    remBtn:SetPoint("RIGHT", row, "RIGHT", -2, 0)
+                    rightAnchor, rightPoint, rightOff = remBtn, "LEFT", -6
+                end
+
+                local plus = CreateFrame("Button", nil, row, "BackdropTemplate")
+                GUI:StyleButton(plus, { width = 22, height = 20, icon = { texture = iconPath .. "add", size = 12, color = { r = 0.85, g = 0.85, b = 0.85 } } })
+                plus:SetPoint("RIGHT", rightAnchor, rightPoint, rightOff, 0)
+                plus:SetScript("OnClick", function() commitTo(cbtT(bp) + 1) end)
 
                 eb = CreateFrame("EditBox", nil, row)
                 GUI:StyleEditBox(eb)
                 eb:SetSize(42, 20)
-                eb:SetPoint("LEFT", minus, "RIGHT", 4, 0)
+                eb:SetPoint("RIGHT", plus, "LEFT", -4, 0)
                 eb:SetAutoFocus(false)
                 eb:SetNumeric(true)
                 eb:SetMaxLetters(4)
@@ -4527,33 +4584,29 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                     self:SetText(tostring(cbtT(bp)))
                 end)
 
-                local plus = CreateFrame("Button", nil, row, "BackdropTemplate")
-                GUI:StyleButton(plus, { width = 22, height = 20, icon = { texture = iconPath .. "add", size = 12, color = { r = 0.85, g = 0.85, b = 0.85 } } })
-                plus:SetPoint("LEFT", eb, "RIGHT", 4, 0)
-                plus:SetScript("OnClick", function() commitTo(cbtT(bp) + 1) end)
+                local minus = CreateFrame("Button", nil, row, "BackdropTemplate")
+                GUI:StyleButton(minus, { width = 22, height = 20, icon = { texture = iconPath .. "remove", size = 12, color = { r = 0.85, g = 0.85, b = 0.85 } } })
+                minus:SetPoint("RIGHT", eb, "LEFT", -4, 0)
+                minus:SetScript("OnClick", function() commitTo(cbtT(bp) - 1) end)
 
-                if #bps > 2 then
-                    -- Reuse the shared close-X in its default (dismiss) form — grey glyph at
-                    -- rest, white glyph + red hover wash on mouseover, exactly like the GUI's
-                    -- own close button. (No tone="danger" — that tints the glyph red at rest.)
-                    local remBtn = GUI:CreateCloseButton(row, {
-                        size = 20,
-                        onClick = function()
-                            for idx, s in ipairs(bps) do
-                                if s == bp then table.remove(bps, idx) break end
-                            end
-                            ApplyColorByTime()
-                            if pageColors and pageColors.Refresh then pageColors:Refresh() end
-                        end,
-                    })
-                    remBtn:SetPoint("RIGHT", row, "RIGHT", -6, 0)
-                end
-                cbtGroup:AddWidget(row, 24)
+                -- The merged row dropped the "Starts at" caption; the value box (only —
+                -- the +/- explain themselves) says it on hover instead.
+                eb:HookScript("OnEnter", function() GUI:ShowTooltip(eb, { title = L["Starts at"] }) end)
+                eb:HookScript("OnLeave", function() GameTooltip:Hide() end)
+                cap:SetPoint("RIGHT", minus, "LEFT", -6, 0)
+            else
+                cap:SetPoint("RIGHT", row, "RIGHT", -6, 0)
             end
+            cbtGroup:AddWidget(row, 28)
         end
 
-        local addStopBtn = CreateFrame("Button", nil, self.child, "BackdropTemplate")
-        GUI:StyleButton(addStopBtn, { width = 260, height = 24, text = L["Add Color Stop"] })
+        -- Add + Reset side by side: neither needs a full row to itself, and halving
+        -- them buys back a row of the height the stop merge just saved.
+        local stopBtnRow = CreateFrame("Frame", nil, self.child)
+        stopBtnRow:SetSize(260, 24)
+        local addStopBtn = CreateFrame("Button", nil, stopBtnRow, "BackdropTemplate")
+        GUI:StyleButton(addStopBtn, { width = 127, height = 24, text = L["Add Color Stop"] })
+        addStopBtn:SetPoint("LEFT", stopBtnRow, "LEFT", 0, 0)
         addStopBtn:SetScript("OnClick", function()
             -- Drop a new stop into the widest existing gap.
             local a2 = cbtSorted(false)
@@ -4572,10 +4625,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             ApplyColorByTime()
             if pageColors and pageColors.Refresh then pageColors:Refresh() end
         end)
-        cbtGroup:AddWidget(addStopBtn, 30)
 
-        local resetStopsBtn = CreateFrame("Button", nil, self.child, "BackdropTemplate")
-        GUI:StyleButton(resetStopsBtn, { width = 260, height = 24, text = L["Reset to Default"] })
+        local resetStopsBtn = CreateFrame("Button", nil, stopBtnRow, "BackdropTemplate")
+        GUI:StyleButton(resetStopsBtn, { width = 127, height = 24, text = L["Reset to Default"] })
+        resetStopsBtn:SetPoint("RIGHT", stopBtnRow, "RIGHT", 0, 0)
         resetStopsBtn:SetScript("OnClick", function()
             wipe(bps)
             for _, dv in ipairs(DF.GlobalDefaults[bpKey]) do
@@ -4584,7 +4637,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             ApplyColorByTime()
             if pageColors and pageColors.Refresh then pageColors:Refresh() end
         end)
-        cbtGroup:AddWidget(resetStopsBtn, 30)
+        cbtGroup:AddWidget(stopBtnRow, 30)
 
         -- ── HOW THIS RENDERS ─────────────────────────────────────────────────────
         -- One labelled preview per consumer, each rendering the EDITED ramp through
@@ -4617,11 +4670,21 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         textUnit:SetPoint("RIGHT", textRow, "RIGHT", 0, 0)
         cbtGroup:AddWidget(textRow, 26)
 
+        -- Blend belongs to the TEXT, so it sits inside the text block — above the note,
+        -- not between the note and Border & Tint, where it read as a border dial (the
+        -- exact opposite of what it is: borders can never blend). Each block here is
+        -- "row, its dials, then its note", so the note is what closes a block.
         cbtGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Blend Colors Smoothly"], cbtGlobalDB,
             "durationTextColorSmooth", function()
                 ApplyColorByTime()
                 RefreshPreview()   -- rendering-only: retint the text preview in place
             end), 30)
+
+        -- Covers BOTH dials above: durationTextColorScale and durationTextColorSmooth
+        -- are account-wide, unlike the border's per-indicator unit — the pair of notes
+        -- exists to make that contrast readable.
+        cbtGroup:AddWidget(GUI:CreateNote(self.child, L["Shared by all duration text."],
+            { width = 260 }))
 
         -- Border & tint: always hard bands (|T escapes ignore the vertex colour a curve
         -- writes), reading whichever ramp matches each indicator's own unit.
@@ -4640,7 +4703,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         borderTag:SetTextColor(0.55, 0.55, 0.55)
         cbtGroup:AddWidget(borderRow, 26)
         cbtGroup:AddWidget(GUI:CreateNote(self.child,
-            L["Borders can't blend colors. Each indicator picks s or % beside its Alert Below slider."],
+            L["Set per indicator. Can't blend colors — always steps."],
             { width = 260 }))
 
         RefreshPreview()   -- tint the legend strips built after the first pass

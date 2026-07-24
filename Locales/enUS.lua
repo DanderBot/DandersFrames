@@ -2237,7 +2237,8 @@ L["when switching to this spec"] = true
 -- Color by Time: one shared ramp per unit (tabbed Colours-page editor + legend,
 -- per-indicator expiry unit)
 L["Border & Tint"] = true
-L["Borders can't blend colors. Each indicator picks s or % beside its Alert Below slider."] = true
+L["Set per indicator. Can't blend colors — always steps."] = true
+L["Shared by all duration text."] = true
 L["How this renders"] = true
 L["steps"] = true
 L["The expiry border and tint always step between colors."] = true
