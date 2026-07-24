@@ -1295,7 +1295,7 @@ local TYPE_DEFAULTS = {
         durationColor = {r = 1, g = 1, b = 1, a = 1},
         durationHideAboveEnabled = false, durationHideAboveThreshold = 10,
         durationHideOnPermanent = true,   -- Wave 4: no timer text on permanent auras
-        expiryAlertEnabled = false, expiryAlertMode = "BORDER", expiryAlertThreshold = 5,
+        expiryAlertEnabled = false, expiryAlertMode = "BORDER", expiryAlertThreshold = 5, expiryAlertThresholdPercent = 30,
         expiryAlertText = "", expiryAlertGlyph = "WARNING",
         expiryAlertAnchor = "TOP", expiryAlertOffsetX = 0, expiryAlertOffsetY = 0,
         expiryAlertSize = 14,
@@ -1408,7 +1408,7 @@ local TYPE_DEFAULTS = {
         durationColor = {r = 1, g = 1, b = 1, a = 1},
         durationHideAboveEnabled = false, durationHideAboveThreshold = 10,
         durationHideOnPermanent = true,   -- Wave 4: no timer text on permanent auras
-        expiryAlertEnabled = false, expiryAlertMode = "BORDER", expiryAlertThreshold = 5,
+        expiryAlertEnabled = false, expiryAlertMode = "BORDER", expiryAlertThreshold = 5, expiryAlertThresholdPercent = 30,
         expiryAlertText = "", expiryAlertGlyph = "WARNING",
         expiryAlertAnchor = "TOP", expiryAlertOffsetX = 0, expiryAlertOffsetY = 0,
         expiryAlertSize = 14,
@@ -1514,7 +1514,7 @@ local TYPE_DEFAULTS = {
         durationHideOnPermanent = true,   -- Wave 4: no timer text on permanent auras
         -- A bar's expiry COLOUR is its own fill (the Duration Bar Color Mode reddens as it
         -- drains); the |T reveal only offers Text / Glyph here, so default to a warning Glyph.
-        expiryAlertEnabled = false, expiryAlertMode = "GLYPH", expiryAlertThreshold = 5,
+        expiryAlertEnabled = false, expiryAlertMode = "GLYPH", expiryAlertThreshold = 5, expiryAlertThresholdPercent = 30,
         expiryAlertText = "", expiryAlertGlyph = "WARNING",
         expiryAlertAnchor = "TOP", expiryAlertOffsetX = 0, expiryAlertOffsetY = 0,
         expiryAlertSize = 14,

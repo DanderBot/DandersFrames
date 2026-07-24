@@ -858,7 +858,12 @@ local function buildDurationTextSpec(indicator, defaultShow, defScale, defColorB
     -- instance = inherit the caller's default.
     local rawCBT = indicator.durationColorByTime
     if rawCBT == nil then rawCBT = defColorByTime end
-    local colorByTime = rawCBT and true or false
+    -- Colour-by-time is a MODE (legacy instances hold a boolean -> STEP_SECONDS). On
+    -- 68914+ it paints through the native colour CURVE; only the pre-68914 fallback bakes
+    -- |c escapes into the formatter bands. See Features/Auras.lua for the mechanism.
+    local colorMode = DF:ResolveDurationColorMode(rawCBT)
+    local colorSpec = DF:GetDurationColorSpec(colorMode)
+    local colorByTime = DF:DurationColorUsesBuckets(colorMode)
     local hideAboveT = durationHideAboveT(indicator)
     -- Always attach the NUMBER formatter (bare "45" / "2m" / "1h") — the same default the
     -- buff/debuff/defensive rows use, and what the pre-12.1 icons showed (native cooldown
@@ -878,7 +883,10 @@ local function buildDurationTextSpec(indicator, defaultShow, defScale, defColorB
         offsetX   = tonumber(indicator.durationX) or 0,
         offsetY   = tonumber(indicator.durationY) or 0,
         formatter = formatter,   -- nil unless colour-by-time / hide-above; |c escapes own colour
-        color     = (not colorByTime) and indicator.durationColor or nil,
+        -- Either colour path owns the text colour outright, so the static pick stands down.
+        color     = (not colorSpec) and indicator.durationColor or nil,
+        colorCurve   = colorSpec and colorSpec.curve or nil,
+        colorProperty = colorSpec and colorSpec.property or nil,
         -- Hide duration text on permanent auras (Wave 4, default ON): "" flows to
         -- the native binding's zeroDurationText (renders NO text on zero-duration/
         -- unconfigured). ABSENT key = ON — style-less groups and untouched
@@ -905,14 +913,16 @@ local function durationFmtKey(indicator, defaultShow, defColorByTime)
     -- bind-once formatter is never re-bound and the colours go stale until /reload.
     local rawCBT = indicator.durationColorByTime
     if rawCBT == nil then rawCBT = defColorByTime end
-    local colorByTime = rawCBT and true or false
+    local colorMode = DF:ResolveDurationColorMode(rawCBT)
     local hideAboveT = durationHideAboveT(indicator)
     -- Duration-text update rate (Wave 5a, account-wide): tokenized only when
     -- non-default (NORMAL resolves nil), so untouched sigs stay byte-identical
     -- and a rate change Rebuilds every duration-text slot (creation-frozen bind).
     local updateIv = DF.GetAuraDurationUpdateInterval and DF:GetAuraDurationUpdateInterval()
     return "NUMBER"
-        .. (colorByTime and (":C" .. DF:GetDurationBreakpointsSig()) or "")
+        -- Mode + that scale's stops: the curve is bind-once like the formatter, so a
+        -- mode change OR a Colours-page stop edit must move this key.
+        .. DF:GetDurationColorSig(colorMode)
         .. (hideAboveT and (":H" .. tostring(hideAboveT)) or "")
         -- Hide-on-permanent (Wave 4): the OFF state alone is tokenized so the
         -- absent key sigs byte-identically to explicit true (absent = ON is the
@@ -973,6 +983,9 @@ local function resolveDefCBT(adDB)
     if type(d) == "table" and d.durationColorByTime ~= nil then
         return d.durationColorByTime and true or false
     end
+    -- Plain ON, never a mode string: an explicit mode OVERRIDES the account-wide dials
+    -- (ResolveDurationColorMode), so returning one here would make every indicator that
+    -- inherits the default deaf to the Colours page's Blend / Measure By settings.
     return true
 end
 Factory.ResolveDefaultColorByTime = resolveDefCBT   -- editor preview passes this into BuildPreviewConfig
@@ -1140,7 +1153,11 @@ local function placedCoSig(indicator, isSquare, borderOn, alpha)
             tostring(indicator.durationFont), tostring(indicator.durationScale),
             tostring(indicator.durationOutline), tostring(indicator.durationAnchor),
             tostring(indicator.durationX), tostring(indicator.durationY),
-            tostring(indicator.durationColorByTime and 1 or 0),
+            -- Colour MODE verbatim (not a 1/0 flag): every mode is truthy, so a boolean
+            -- token could never tell SMOOTH_PERCENT from STEP_SECONDS and a mode switch
+            -- would not move the signature. (durationFmtKey carries the mode + its stops
+            -- too; this keeps the per-indicator sig honest on its own.)
+            tostring(indicator.durationColorByTime),
             colSig(indicator.durationColor),
         }, ","),
         "stk=" .. tconcat({
@@ -1571,7 +1588,11 @@ local function barCoSig(frame, indicator, borderOn, alpha)
             tostring(indicator.durationFont), tostring(indicator.durationScale),
             tostring(indicator.durationOutline), tostring(indicator.durationAnchor),
             tostring(indicator.durationX), tostring(indicator.durationY),
-            tostring(indicator.durationColorByTime and 1 or 0),
+            -- Colour MODE verbatim (not a 1/0 flag): every mode is truthy, so a boolean
+            -- token could never tell SMOOTH_PERCENT from STEP_SECONDS and a mode switch
+            -- would not move the signature. (durationFmtKey carries the mode + its stops
+            -- too; this keeps the per-indicator sig honest on its own.)
+            tostring(indicator.durationColorByTime),
             colSig(indicator.durationColor),
         }, ","),
         "bd=" .. placedBorderRawSig(indicator, borderOn),

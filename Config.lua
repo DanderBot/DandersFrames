@@ -912,6 +912,53 @@ DF.GlobalDefaults = {
         { threshold = 2, color = { r = 1.0,   g = 0.596, b = 0.22  } },  -- orange (2-5s)
         { threshold = 0, color = { r = 0.969, g = 0.333, b = 0.333 } },  -- red    (<2s, about to fall off)
     },
+    -- PERCENT ramp for duration TEXT. Thresholds are PERCENT OF TOTAL REMAINING (0-100),
+    -- so every aura tells the same relative story regardless of length — a 30-minute raid
+    -- buff ramps exactly like a 6-second HoT, which a seconds ladder can never do (a long
+    -- buff sits in the "fresh" band essentially forever). Same "highest threshold <=
+    -- remaining wins" rule as the seconds ramp above.
+    durationColorByPercentBreakpoints = {
+        -- Same vivid traffic-light palette as the seconds ladder, spread over the whole
+        -- life of the aura. Keep in sync with DEFAULT_PERCENT_BREAKPOINTS (Features/Auras.lua).
+        { threshold = 60, color = { r = 0.373, g = 0.878, b = 0.373 } },  -- green  (>=60% left)
+        { threshold = 35, color = { r = 1.0,   g = 0.824, b = 0.239 } },  -- gold   (35-60%)
+        { threshold = 15, color = { r = 1.0,   g = 0.596, b = 0.22  } },  -- orange (15-35%)
+        { threshold = 0,  color = { r = 0.969, g = 0.333, b = 0.333 } },  -- red    (<15%, about to fall off)
+    },
+    -- ============================================================
+    -- HOW the duration-text ramp is READ (account-wide, Colours page)
+    -- ============================================================
+    -- The ramp's colours and the way they're read belong together, so both live here
+    -- rather than on each aura page — a row only carries an on/off. Text supports all
+    -- four combinations; the expiry border/tint supports only stepped (see below).
+    durationTextColorSmooth = true,        -- true = blend between stops, false = snap to the stop at or below
+    durationTextColorScale  = "PERCENT",   -- "PERCENT" | "SECONDS" — which ramp text reads
+    -- ============================================================
+    -- EXPIRY BORDER / TINT ramp (account-wide, Colours page)
+    -- ============================================================
+    -- The reveal's colours are baked into |T inline-texture escapes, and inline textures
+    -- IGNORE the fontstring vertex colour the smooth curve writes (probe-verified) — so
+    -- the border/tint can only ever be STEPPED. Its own ramp, separate from the text's, on
+    -- purpose: a border reads well with two or three bold steps where text carries four or
+    -- five. Seeded from durationColorByTimeBreakpoints on first use (the two shared one
+    -- list before they were split), so an upgrade keeps the borders it already had.
+    --
+    -- The reveal is ONE formatter whose bands encode BOTH when it appears (the Alert Below
+    -- threshold) and what colour it is, and a formatter samples ONE duration property. So
+    -- this scale governs the pair: the unit the threshold is read in AND which property is
+    -- sampled. It does NOT pick a ramp — there is only one, below.
+    durationBorderColorScale = "SECONDS",  -- "PERCENT" | "SECONDS"
+    -- ONE ramp, expressed as PERCENT OF THE REVEAL WINDOW: 100 = the moment the reveal
+    -- appears (the threshold), 0 = expiry. The reveal exists only below its threshold, so
+    -- absolute stops had to be re-tuned every time the threshold moved — and any stop at or
+    -- above it silently built no band at all. Stops relative to the window stay correct at
+    -- any threshold, on either scale.
+    durationBorderColorStops = {
+        { threshold = 75, color = { r = 0.373, g = 0.878, b = 0.373 } },  -- green  (top quarter of the window)
+        { threshold = 50, color = { r = 1.0,   g = 0.824, b = 0.239 } },  -- gold
+        { threshold = 25, color = { r = 1.0,   g = 0.596, b = 0.22  } },  -- orange
+        { threshold = 0,  color = { r = 0.969, g = 0.333, b = 0.333 } },  -- red    (final quarter)
+    },
 }
 
 -- ============================================================
@@ -1087,6 +1134,9 @@ DF.PartyDefaults = {
     buffDeduplicateDefensives = true,
     buffDurationAnchor = "CENTER",
     buffDurationColor = {r = 1, g = 1, b = 1},
+    -- Colour-by-time is a plain ON/OFF here. HOW it reads (smooth vs stepped, percent vs
+    -- seconds) and the colours themselves are account-wide on the Colours page — the mode
+    -- is a property of the ramp, not of this row (see durationTextColorSmooth below).
     buffDurationColorByTime = true,
     buffDurationHideAboveEnabled = false,
     buffDurationHideAboveThreshold = 10,

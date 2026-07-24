@@ -102,6 +102,19 @@ function Expiration:EffectiveSize(cfg, geometry)
     return s, s
 end
 
+-- The reveal threshold, in the unit the account-wide expiry scale is set to. ONE STORED
+-- VALUE PER SCALE, exactly like the colour ramps: a threshold cannot be reinterpreted
+-- between units (5 seconds is not 5 percent), and reading a seconds value as a percentage
+-- pins the reveal to the last 5% of an aura, which reads as "the border disappeared".
+-- Switching the scale therefore swaps which threshold is live and leaves the other intact.
+function Expiration:Threshold(cfg)
+    if DF.GetDurationBorderColorScale and DF:GetDurationBorderColorScale() == "PERCENT" then
+        return tonumber(cfg and cfg.expiryAlertThresholdPercent) or 30
+    end
+    return tonumber(cfg and cfg.expiryAlertThreshold) or 5
+end
+Expiration.PERCENT_THRESHOLD_DEFAULT = 30
+
 -- A frame/tint overlays the icon concentrically, so it is ALWAYS centred (its Anchor control
 -- is hidden) — any other anchor just de-centres it. TEXT/GLYPH keep the user's chosen anchor.
 function Expiration:EffectiveAnchor(cfg)
@@ -120,7 +133,7 @@ function Expiration:StructSig(cfg, geometry)
     if not mode then return "" end
     local sw, sh = self:EffectiveSize(cfg, geometry)
     local key = (DF.GetExpiryAlertFmtKey and DF:GetExpiryAlertFmtKey(mode,
-            cfg.expiryAlertThreshold, cfg.expiryAlertText, cfg.expiryAlertGlyph) or "")
+            self:Threshold(cfg), cfg.expiryAlertText, cfg.expiryAlertGlyph) or "")
         .. ":S" .. tostring(sw) .. "x" .. tostring(sh)
         .. ":P" .. self:EffectiveAnchor(cfg)
         .. "," .. tostring(tonumber(cfg.expiryAlertOffsetX) or 0)
@@ -128,7 +141,10 @@ function Expiration:StructSig(cfg, geometry)
     if isFrameMode(mode) then
         local cm = cfg.expiryAlertBorderColorMode or "STATIC"
         key = key .. ":B" .. cm .. ":" .. ((cm == "BYTIME")
-            and (DF.GetDurationBreakpointsSig and DF:GetDurationBreakpointsSig() or "")
+            -- BORDER ramp at the CURRENT border scale, not the text one: the reveal reads
+            -- its own stops, and the scale picks which. Using the text seconds ramp here
+            -- would leave the bind-once formatter stale after a border-stop or scale edit.
+            and (DF.GetDurationBreakpointsSig and DF:GetDurationBreakpointsSig("BORDER") or "")
             or colorSig(cfg.expiryAlertBorderColor))
             .. ":T" .. tostring(resolveThickness(cfg, mode))
             .. ":A" .. tostring(tonumber(cfg.expiryAlertBorderAlpha) or 1)
@@ -149,18 +165,30 @@ function Expiration:BuildDurationSpec(cfg, geometry)
     local formatter
     if isFrameMode(mode) then
         formatter = DF.GetExpiryBorderElementFormatter and DF:GetExpiryBorderElementFormatter(
-            cfg.expiryAlertThreshold, w, h,
+            self:Threshold(cfg), w, h,
             cfg.expiryAlertBorderColorMode, cfg.expiryAlertBorderColor,
             resolveThickness(cfg, mode))
     else
         formatter = DF.GetExpiryAlertElementFormatter and DF:GetExpiryAlertElementFormatter(
-            mode, cfg.expiryAlertThreshold,
+            mode, self:Threshold(cfg),
             cfg.expiryAlertText, cfg.expiryAlertGlyph, w)   -- TEXT/GLYPH: square, w == h
     end
     if not formatter then return nil end   -- pre-12.1 formatter API missing: no companion
+    -- PERCENT scale: the reveal's bands (and its Alert Below threshold, which rides the
+    -- same formatter) are percentages, so the binding must sample RemainingPercent rather
+    -- than the default remaining seconds. textFormat is the only route to a non-default
+    -- property — a lone "{}" substituted by one component naming property + formatter.
+    local textFormat
+    if DF.GetDurationBorderColorScale and DF:GetDurationBorderColorScale() == "PERCENT"
+       and Enum and Enum.DurationTextBindingProperty then
+        textFormat = { formatString = "{}", components = {
+            { property = Enum.DurationTextBindingProperty.RemainingPercent, formatter = formatter },
+        } }
+    end
     return {
         show      = true,
         formatter = formatter,
+        textFormat = textFormat,
         font      = (geometry and geometry.font) or cfg.durationFont,
         size      = h,   -- font / line-box size; == the square size for icons and text/glyph
         outline   = "OUTLINE",

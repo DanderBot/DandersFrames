@@ -6037,10 +6037,23 @@ function GUI:CreateExpirationControls(group, dbTable, opts)
         "expiryAlertEnabled", onStructural), 28)
     w.enable.keepEnabled = true
 
-    -- Threshold first (right under Enable): the "show when remaining time drops below N seconds"
-    -- gate every type shares.
-    w.threshold = group:AddWidget(GUI:CreateSlider(parent, L["Alert Below (seconds)"], 1, 60, 1,
-        dbTable, "expiryAlertThreshold"), 54)
+    -- Threshold first (right under Enable): the "show when remaining time drops below N"
+    -- gate every type shares. Its UNIT follows the account-wide expiry colour scale — the
+    -- threshold and the by-time colour bands are ONE formatter sampled against ONE duration
+    -- property, so they are always in the same unit (see Features/Auras.lua). Percent tops
+    -- out at 100; seconds keep the original 60s ceiling.
+    -- ONE STORED VALUE PER SCALE (mirrors the ramps, and DF.Expiration:Threshold reads the
+    -- same pair): a threshold cannot be reinterpreted between units, so each scale keeps
+    -- its own and switching back finds it untouched. Seed the percent one on first use —
+    -- an unset slider would otherwise read 1 and hide the reveal in the final 1%.
+    local expiryPct = (DF.GetDurationBorderColorScale and DF:GetDurationBorderColorScale() == "PERCENT")
+    local thresholdKey = expiryPct and "expiryAlertThresholdPercent" or "expiryAlertThreshold"
+    if expiryPct and dbTable and dbTable[thresholdKey] == nil then
+        dbTable[thresholdKey] = (DF.Expiration and DF.Expiration.PERCENT_THRESHOLD_DEFAULT) or 30
+    end
+    w.threshold = group:AddWidget(GUI:CreateSlider(parent,
+        expiryPct and L["Alert Below (%)"] or L["Alert Below (seconds)"],
+        1, expiryPct and 100 or 60, 1, dbTable, thresholdKey), 54)
 
     -- Type — the reveal kind (no Off; the Enable toggle owns on/off). Border / Tint lead (the
     -- primary reveals), then the Text / Glyph payloads. Consumers can drop types via include.

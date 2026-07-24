@@ -424,21 +424,62 @@ local DEFAULT_DURATION_BREAKPOINTS = {
     { threshold = 8, hex = "5fe05f" }, { threshold = 5, hex = "ffd23d" },
     { threshold = 2, hex = "ff9838" }, { threshold = 0, hex = "f75555" },
 }
-local function GetDurationColorBreakpoints()
+-- PERCENT scale (keep in sync with Config.lua durationColorByPercentBreakpoints).
+local DEFAULT_PERCENT_BREAKPOINTS = {
+    { threshold = 60, hex = "5fe05f" }, { threshold = 35, hex = "ffd23d" },
+    { threshold = 15, hex = "ff9838" }, { threshold = 0,  hex = "f75555" },
+}
+-- The BORDER ramp is expressed as PERCENT OF THE REVEAL WINDOW (100 = the threshold,
+-- 0 = expiry), so it needs no re-tuning when the threshold moves (keep in sync with
+-- Config.lua durationBorderColorStops).
+local DEFAULT_BORDER_STOPS = {
+    { threshold = 75, hex = "5fe05f" }, { threshold = 50, hex = "ffd23d" },
+    { threshold = 25, hex = "ff9838" }, { threshold = 0,  hex = "f75555" },
+}
+-- FOUR account-wide ramps: two consumers (duration TEXT / the expiry BORDER+TINT reveal)
+-- x two scales (seconds / percent). The consumer keeps only an on/off; which scale it
+-- reads — and, for text, whether it blends — is account-wide on the Colours page, because
+-- that is a property of the ramp rather than of any one aura row. Only ONE ramp per
+-- consumer is live at a time; the other is retained so flipping the scale back finds it
+-- untouched (thresholds cannot be reinterpreted between units).
+local COLOR_SCALES = {
+    TEXT_SECONDS   = { key = "durationColorByTimeBreakpoints",            fallback = DEFAULT_DURATION_BREAKPOINTS },
+    TEXT_PERCENT   = { key = "durationColorByPercentBreakpoints",         fallback = DEFAULT_PERCENT_BREAKPOINTS  },
+    BORDER         = { key = "durationBorderColorStops",                 fallback = DEFAULT_BORDER_STOPS },
+}
+-- Account-wide reading of each ramp. Text carries both dials; the border/tint is stepped
+-- by construction (its |T escapes ignore the vertex colour a curve writes) and so carries
+-- only a scale.
+function DF:GetDurationTextColorScale()
     local g = DF.GetGlobalDB and DF:GetGlobalDB()
-    local raw = g and g.durationColorByTimeBreakpoints
+    return (g and g.durationTextColorScale == "SECONDS") and "SECONDS" or "PERCENT"
+end
+function DF:IsDurationTextColorSmooth()
+    local g = DF.GetGlobalDB and DF:GetGlobalDB()
+    return not (g and g.durationTextColorSmooth == false)
+end
+-- The expiry reveal's scale. Governs BOTH its colour ramp and the unit its Alert Below
+-- threshold is read in — one formatter, one sampled property, so the two are inseparable.
+function DF:GetDurationBorderColorScale()
+    local g = DF.GetGlobalDB and DF:GetGlobalDB()
+    return (g and g.durationBorderColorScale == "PERCENT") and "PERCENT" or "SECONDS"
+end
+local function GetDurationColorBreakpoints(scale)
+    local def = COLOR_SCALES[scale] or COLOR_SCALES.TEXT_SECONDS
+    local g = DF.GetGlobalDB and DF:GetGlobalDB()
+    local raw = g and g[def.key]
     local out = {}
     if type(raw) == "table" then
         for _, bp in ipairs(raw) do
             local t = tonumber(bp and bp.threshold)
             if t and type(bp.color) == "table" then
-                out[#out + 1] = { threshold = math.max(0, t), hex = colorToHex(bp.color) }
+                out[#out + 1] = { threshold = math.max(0, t), hex = colorToHex(bp.color), color = bp.color }
             end
         end
     end
-    if #out == 0 then return DEFAULT_DURATION_BREAKPOINTS end
+    if #out == 0 then return def.fallback end
     table.sort(out, function(a, b) return a.threshold > b.threshold end)  -- descending
-    if out[#out].threshold ~= 0 then out[#out + 1] = { threshold = 0, hex = out[#out].hex } end
+    if out[#out].threshold ~= 0 then out[#out + 1] = { threshold = 0, hex = out[#out].hex, color = out[#out].color } end
     return out
 end
 
@@ -637,6 +678,9 @@ local durationBreakpointsSigCache   -- memoized DF:GetDurationBreakpointsSig() s
 function DF:InvalidateDurationFormatters()
     wipe(durationFormatterCache)
     durationBreakpointsSigCache = nil
+    -- Colour curves are built from the same stops (DF:GetDurationColorSpec) — a stop edit
+    -- must drop them too or the cached curve keeps painting the old ramp.
+    if DF._wipeDurationCurves then DF:_wipeDurationCurves() end
 end
 local function GetDurationFormatter(format, hideAboveT, colorByTime, alertMode, alertThreshold, alertText, alertGlyphKey)
     format = format or "NUMBER"
@@ -664,11 +708,241 @@ end
 -- a walk that is deliberately allocation-free — recomputing (GetGlobalDB scan + sort +
 -- concat) there would churn garbage every aura event. The cache clears on
 -- InvalidateDurationFormatters, which every breakpoint edit already fires.
-function DF:GetDurationBreakpointsSig()
+function DF:GetDurationBreakpointsSig(scale)
+    scale = scale or "TEXT_SECONDS"
+    if scale ~= "TEXT_SECONDS" then return breakpointsSig(GetDurationColorBreakpoints(scale)) end
     if not durationBreakpointsSigCache then
-        durationBreakpointsSigCache = breakpointsSig(GetDurationColorBreakpoints())
+        durationBreakpointsSigCache = breakpointsSig(GetDurationColorBreakpoints("TEXT_SECONDS"))
     end
     return durationBreakpointsSigCache
+end
+
+-- ============================================================
+-- COLOUR-BY-TIME MODES (12.1 colour curve, build 68914+)
+-- ============================================================
+-- 68914 restored options.textColor on SetDurationText — it now forwards
+-- SetTextColorCurve(curve, PROPERTY); the 68569 wrapper dropped the property arg, which
+-- is the whole reason the curve was dead and colour shipped as |c escapes baked into the
+-- formatter's bands. With the curve reachable, duration TEXT gets two independent dials:
+--
+--   INTERPOLATION  Linear = blends between stops · Step = snaps to the stop at or below
+--   SCALE          seconds remaining · percent of total remaining
+--
+-- Probe-verified on 68914 (/al smoothcolor, readback in the lab log):
+--   * Linear interpolates linearly in RGB and CLAMPS at both ends (below the first stop
+--     and above the last) — it never falls to zero/black outside the authored range.
+--   * Step FLOORS: x=2.5 yields the x=0 colour, x=7.5 the x=5 colour. That is exactly
+--     DF's own "highest threshold <= remaining wins" rule, so STEP_SECONDS reproduces the
+--     legacy bucket look with no compensation (no doubled points at band ends).
+--   * RemainingPercent is expressed 0-100 (probe row G), matching the stops as stored.
+--   * The curve writes the FONTSTRING's vertex colour, which inline |T textures IGNORE
+--     (they keep their own baked vertex args). The expiry border/tint reveal is a |T
+--     escape, so it can never blend — it stays stepped, and seconds-only because a static
+--     formatter cannot know an aura's total duration. That asymmetry is a hard engine
+--     ceiling, not a policy choice.
+--   * |c escapes still beat the curve, so the legacy bucket path and a curve must never
+--     both be armed on one fontstring (see the mutual exclusion in the row builders).
+local DURATION_COLOR_MODES = {
+    OFF            = { },
+    SMOOTH_PERCENT = { scale = "TEXT_PERCENT", interp = "Linear" },
+    SMOOTH_SECONDS = { scale = "TEXT_SECONDS", interp = "Linear" },
+    STEP_PERCENT   = { scale = "TEXT_PERCENT", interp = "Step"   },
+    STEP_SECONDS   = { scale = "TEXT_SECONDS", interp = "Step"   },
+}
+-- Curves need C_CurveUtil + the property enum; without them (pre-68914) every non-OFF
+-- mode degrades to the legacy seconds BUCKETS, which is the only colour the old
+-- SetDurationText could express.
+local function curvesAvailable()
+    return (C_CurveUtil and C_CurveUtil.CreateColorCurve and CreateColor
+        and Enum and Enum.DurationTextBindingProperty and Enum.LuaCurveType) and true or false
+end
+
+-- A consumer's stored value is a plain ON/OFF; the MODE it resolves to is composed from
+-- the account-wide dials, so every text consumer reads the ramp the same way and the
+-- Colours page is the single place that decides how. (A stored mode STRING is still
+-- honoured: an in-development profile may hold one, and "OFF" must keep meaning off.)
+function DF:ResolveDurationColorMode(raw)
+    if raw == false or raw == nil then return "OFF" end
+    -- A stored MODE STRING means only "on". It is never honoured as a mode: the dials are
+    -- account-wide by design, and a per-consumer mode would silently opt that consumer out
+    -- of them. Strings exist because a development build briefly stored the mode here, and
+    -- an Aura Designer indicator that picked up "STEP_SECONDS" that way rendered stepped
+    -- seconds no matter what the Colours page said. Treating them as plain ON self-heals
+    -- those profiles without touching stored data.
+    if type(raw) == "string" and (raw == "OFF" or not DURATION_COLOR_MODES[raw]) then
+        return "OFF"
+    end
+    local scale = (DF:GetDurationTextColorScale() == "SECONDS") and "SECONDS" or "PERCENT"
+    return (DF:IsDurationTextColorSmooth() and "SMOOTH_" or "STEP_") .. scale
+end
+
+-- Colour spec for a mode: { curve, property } to hand to SetDurationText's textColor, or
+-- `buckets = true` for the legacy |c-escape formatter path. Cached per mode (the curve is
+-- a userdata we must keep alive anyway) and invalidated with the formatters, so a
+-- Colours-page stop edit rebuilds it.
+local durationCurveCache = {}
+local function hexToColor(hex)
+    return CreateColor((tonumber(hex:sub(1, 2), 16) or 255) / 255,
+                       (tonumber(hex:sub(3, 4), 16) or 255) / 255,
+                       (tonumber(hex:sub(5, 6), 16) or 255) / 255, 1)
+end
+function DF:GetDurationColorSpec(rawOrMode)
+    local mode = DF:ResolveDurationColorMode(rawOrMode)
+    if mode == "OFF" then return nil end
+    local cached = durationCurveCache[mode]
+    if cached ~= nil then return cached or nil end
+    local def = DURATION_COLOR_MODES[mode]
+    -- Pre-68914: no curve -> the legacy seconds buckets are the only expressible colour.
+    if not curvesAvailable() then
+        durationCurveCache[mode] = { buckets = true }
+        return durationCurveCache[mode]
+    end
+    local ok, spec = pcall(function()
+        local curve = C_CurveUtil.CreateColorCurve()
+        curve:SetType(Enum.LuaCurveType[def.interp])
+        -- Stops are stored DESCENDING; the curve wants ascending x. Threshold 0 is always
+        -- present (GetDurationColorBreakpoints guarantees the base band), so the curve
+        -- always spans from 0 and both Linear and Step clamp below it.
+        local bps = GetDurationColorBreakpoints(def.scale)
+        for i = #bps, 1, -1 do
+            curve:AddPoint(bps[i].threshold, hexToColor(bps[i].hex))
+        end
+        return {
+            curve    = curve,
+            -- ★ Compare the FULL scale key. This briefly read `== "PERCENT"` after the
+            -- scales were renamed TEXT_*/BORDER_*, which silently bound RemainingDuration
+            -- (seconds) for EVERY mode — percent stops evaluated against remaining
+            -- seconds, red-for-life on short auras. Field-diagnosed twice 2026-07-24
+            -- (the first pass misblamed the curve domain; percent IS 0-100, matching
+            -- the stops as stored).
+            property = (def.scale == "TEXT_PERCENT") and Enum.DurationTextBindingProperty.RemainingPercent
+                                                      or Enum.DurationTextBindingProperty.RemainingDuration,
+        }
+    end)
+    durationCurveCache[mode] = (ok and spec) or { buckets = true }
+    return durationCurveCache[mode]
+end
+
+-- Structural signature contribution for a colour mode. The curve binds ONCE per slot
+-- (SetDurationText), so a mode change or a stop edit must move the row/indicator struct
+-- sig and force a Rebuild — exactly like the formatter's own breakpoints sig.
+function DF:GetDurationColorSig(rawOrMode)
+    local mode = DF:ResolveDurationColorMode(rawOrMode)
+    if mode == "OFF" then return "" end
+    local def = DURATION_COLOR_MODES[mode]
+    return ":C" .. mode .. ":" .. DF:GetDurationBreakpointsSig(def.scale)
+end
+
+-- True when this mode paints via the legacy |c-escape BUCKET formatter rather than a
+-- curve — the formatter must then bake colour into its bands (and the two must never
+-- both be armed, since escapes beat the curve).
+function DF:DurationColorUsesBuckets(rawOrMode)
+    local spec = DF:GetDurationColorSpec(rawOrMode)
+    return (spec and spec.buckets) and true or false
+end
+
+-- Declared as a method so InvalidateDurationFormatters (defined ABOVE the cache) can
+-- reach the upvalue without forward-declaring it.
+function DF:_wipeDurationCurves()
+    wipe(durationCurveCache)
+end
+
+-- /df cbt — colour-by-time ground truth. Reports what the engine ACTUALLY resolved
+-- rather than what the Colours page shows: whether the curve APIs are reachable at all
+-- (if not, every mode silently degrades to the legacy seconds buckets = stepped seconds
+-- no matter what the dials say), the account-wide dials, the mode a plain enabled
+-- consumer composes, and whether that mode produced a real curve or the bucket fallback.
+function DF:DebugDumpColorByTime(threshold)
+    local function say(fmt, ...) print(string.format(fmt, ...)) end
+    say("|cff33ff99Color by Time|r")
+    say("  curve APIs reachable: %s", tostring(curvesAvailable()))
+    say("    C_CurveUtil.CreateColorCurve=%s CreateColor=%s DurationTextBindingProperty=%s LuaCurveType=%s",
+        tostring(C_CurveUtil and C_CurveUtil.CreateColorCurve ~= nil), tostring(CreateColor ~= nil),
+        tostring(Enum and Enum.DurationTextBindingProperty ~= nil), tostring(Enum and Enum.LuaCurveType ~= nil))
+    local g = DF.GetGlobalDB and DF:GetGlobalDB()
+    say("  stored dials: smooth=%s scale=%s", tostring(g and g.durationTextColorSmooth),
+        tostring(g and g.durationTextColorScale))
+    say("  resolved dials: smooth=%s scale=%s", tostring(DF:IsDurationTextColorSmooth()),
+        tostring(DF:GetDurationTextColorScale()))
+    local mode = DF:ResolveDurationColorMode(true)
+    local spec = DF:GetDurationColorSpec(mode)
+    say("  enabled consumer -> mode=%s  curve=%s  buckets=%s", tostring(mode),
+        tostring(spec and spec.curve ~= nil), tostring(spec and spec.buckets == true))
+    say("  sig=%s", tostring(DF:GetDurationColorSig(mode)))
+    for _, s in ipairs({ "TEXT_SECONDS", "TEXT_PERCENT", "BORDER" }) do
+        local bps = GetDurationColorBreakpoints(s)
+        local parts = {}
+        for _, bp in ipairs(bps) do parts[#parts + 1] = bp.threshold .. "=" .. tostring(bp.hex) end
+        say("  %s: %s", s, table.concat(parts, " "))
+    end
+
+    -- EXPIRY REVEAL. Its bands and its Alert Below threshold are one formatter sampled
+    -- against one property, so both are reported together — and only stops BELOW the
+    -- threshold ever render, which is the usual "why is my top colour never showing".
+    local bscale = DF:GetDurationBorderColorScale()
+    local pct = (bscale == "PERCENT")
+    local t = tonumber(threshold)
+    if not t then t = pct and ((DF.Expiration and DF.Expiration.PERCENT_THRESHOLD_DEFAULT) or 30) or 5 end
+    if t < 1 then t = 1 end
+    say("|cff33ff99Expiry reveal|r  scale=%s  property=%s", bscale,
+        pct and "RemainingPercent" or "RemainingDuration")
+    say("  threshold %s%s (%s) — pass a number to /df cbt to test another",
+        tostring(t), pct and "%" or "s",
+        pct and "expiryAlertThresholdPercent" or "expiryAlertThreshold")
+    -- Stops are a share of the WINDOW, so report both: the authored share and where it
+    -- actually lands once scaled onto the threshold. Nothing can be dropped any more --
+    -- that was the whole point of going window-relative.
+    local parts = {}
+    for _, bp in ipairs(GetDurationColorBreakpoints("BORDER")) do
+        -- Mirror the formatter's clamp EXACTLY (a stop at 100 lands a hair under the
+        -- hide band instead of being dropped) so this dump can never disagree with it.
+        local at = t * math.min(tonumber(bp.threshold) or 0, 100) / 100
+        if at >= t then at = t - 0.01 end
+        parts[#parts + 1] = ("%d%%->%.2f%s=%s"):format(bp.threshold, at,
+            pct and "%" or "s", tostring(bp.hex))
+    end
+    say("  bands (share of window -> where it lands): %s",
+        (#parts > 0) and table.concat(parts, "  ") or "|cffff6060none|r")
+    if pct then
+        say("  on a 12s aura the reveal starts at %.1fs remaining", 12 * t / 100)
+    end
+
+    -- LIVE ALERTED INDICATORS: the threshold above is only the fallback — each placed
+    -- indicator reads its OWN expiryAlert keys, and "reveals too late" is almost always
+    -- this number. The % threshold is PER-AURA-DURATION (30% of a 12s buff = 3.6s;
+    -- 100 = visible for the aura's whole life), unlike the absolute seconds one.
+    local Engine = DF.AuraDesigner and DF.AuraDesigner.Engine
+    local seen, found = {}, 0
+    for _, adMode in ipairs({ "party", "raid" }) do
+        local adDB = DF.GetModeAuraDesigner and DF:GetModeAuraDesigner(adMode)
+        if adDB and not seen[adDB] then
+            seen[adDB] = true
+            local spec = Engine and Engine.ResolveSpec and Engine:ResolveSpec(adDB)
+            local pools = {}
+            if spec and adDB.auras and adDB.auras[spec] then pools[#pools + 1] = adDB.auras[spec] end
+            if adDB.otherAuras then pools[#pools + 1] = adDB.otherAuras end
+            for _, pool in ipairs(pools) do
+                for auraName, auraCfg in pairs(pool) do
+                    local inds = type(auraCfg) == "table" and auraCfg.indicators
+                    if type(inds) == "table" then
+                        for _, ind in ipairs(inds) do
+                            if ind.expiryAlertEnabled and DF.Expiration then
+                                found = found + 1
+                                local liveT = DF.Expiration:Threshold(ind)
+                                say("  [%s] %s %s: %s live=%s%s (stored %ss / %s%%) -> a 12s aura reveals at %.1fs",
+                                    adMode, tostring(auraName), tostring(ind.type or "?"),
+                                    tostring(ind.expiryAlertMode or "BORDER"),
+                                    tostring(liveT), pct and "%" or "s",
+                                    tostring(ind.expiryAlertThreshold), tostring(ind.expiryAlertThresholdPercent),
+                                    pct and (12 * liveT / 100) or math.min(12, liveT))
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    if found == 0 then say("  no alerted AD indicators found") end
 end
 
 -- Account-wide duration-text update rate (Wave 5a) -> the native binding's
@@ -730,10 +1004,18 @@ end
 -- the alert threshold, empty above. Two colour modes, both secret-safe (Blizzard picks the
 -- band from the SECRET remaining time):
 --   STATIC  -> one band, |T tinted to `staticColor`.
---   BYTIME  -> one band per GetDurationColorBreakpoints() step below the threshold, each |T
---              tinted to that breakpoint's colour — the SAME palette the duration TEXT uses,
---              so border and text escalate together. Breakpoints sig keys the cache (and the
---              factory struct key) so a Colours-page edit rebuilds the bind-frozen formatter.
+--   BYTIME  -> one band per BORDER-ramp step below the threshold, each |T tinted to that
+--              breakpoint's colour. Breakpoints sig keys the cache (and the factory struct
+--              key) so a Colours-page edit rebuilds the bind-frozen formatter.
+-- The border/tint reads its OWN ramp (durationBorderColorStops), separate from
+-- the duration text's: they are different media — a border reads well with two or three
+-- bold steps where text carries four or five — and text can blend where this cannot (the
+-- |T escapes ignore the fontstring vertex colour a colour curve writes).
+-- SCALE: these bands and the reveal threshold are ONE formatter sampled against ONE
+-- property, so the account-wide border scale governs both — its ramp AND the unit
+-- `threshold` arrives in. On PERCENT the caller must bind this formatter to
+-- RemainingPercent (Features/Expiration.lua feeds it through textFormat); binding it the
+-- default way would judge percent bands against remaining seconds.
 -- Cached under an "XBEL|" prefix (duration-text keys start with the format name, never "X").
 function DF:GetExpiryBorderElementFormatter(threshold, width, height, colorMode, staticColor, thickness)
     if not (C_StringUtil and C_StringUtil.CreateNumericRuleFormatter and Enum and Enum.NumericRuleFormatRounding) then return nil end
@@ -743,21 +1025,30 @@ function DF:GetExpiryBorderElementFormatter(threshold, width, height, colorMode,
     local h = math.max(1, math.floor(tonumber(height) or tonumber(width) or 18))
     local tex = borderTexture(thickness)
     local byTime = (colorMode == "BYTIME")
-    local key = "XBEL|" .. tostring(alertT) .. ":" .. tostring(w) .. "x" .. tostring(h) .. ":" .. tostring(thickness or "MEDIUM") .. ":"
-        .. (byTime and ("T:" .. DF:GetDurationBreakpointsSig()) or ("S:" .. colorToHex(staticColor or { r = 1, g = 0.2, b = 0.2 })))
+    local scale = DF:GetDurationBorderColorScale()   -- property + threshold unit only; one ramp
+    local key = "XBEL|" .. tostring(alertT) .. ":" .. tostring(w) .. "x" .. tostring(h) .. ":" .. tostring(thickness or "MEDIUM") .. ":" .. scale .. ":"
+        .. (byTime and ("T:" .. DF:GetDurationBreakpointsSig("BORDER")) or ("S:" .. colorToHex(staticColor or { r = 1, g = 0.2, b = 0.2 })))
     if durationFormatterCache[key] == nil then
         local ok, f = pcall(function()
             local down = Enum.NumericRuleFormatRounding.Down
             local fmt = C_StringUtil.CreateNumericRuleFormatter()
             if byTime then
-                -- One coloured band per breakpoint BELOW the threshold (a bp AT/above the
-                -- threshold never renders — the empty band covers it). The band starting at
-                -- bp.threshold holds bp's colour up to the next-higher band (mirrors colorHexAt).
-                for _, bp in ipairs(GetDurationColorBreakpoints()) do
-                    if bp.threshold < alertT then
-                        fmt:AddBreakpoint({ threshold = bp.threshold, step = 1, rounding = down, min = 1,
-                            format = borderEscapeHex(w, h, bp.hex, tex) })
-                    end
+                -- One coloured band per stop, each holding its colour up to the next-higher
+                -- band (mirrors colorHexAt). Stops are relative to the reveal WINDOW, so the
+                -- ramp always spans exactly [0, threshold] and no stop can fall outside it —
+                -- the old absolute stops silently built no band once they passed the
+                -- threshold, and the topmost band's width depended on the gap to it.
+                for _, bp in ipairs(GetDurationColorBreakpoints("BORDER")) do
+                    -- Stops are % OF THE WINDOW, so scale each onto the threshold. A stop at
+                    -- 100 (the window top) would land exactly ON the hide band — clamp it a
+                    -- hair below instead of DROPPING it (the old guard silently deleted the
+                    -- colour). Its band is near-zero width either way ("100% and above" of a
+                    -- window that ENDS at 100); this is stored-data grace, not a real config —
+                    -- a top colour wants its stop BELOW 100 (75 = the top quarter).
+                    local at = alertT * math.min(tonumber(bp.threshold) or 0, 100) / 100
+                    if at >= alertT then at = alertT - 0.01 end
+                    fmt:AddBreakpoint({ threshold = at, step = 1, rounding = down, min = 1,
+                        format = borderEscapeHex(w, h, bp.hex, tex) })
                 end
             else
                 fmt:AddBreakpoint({ threshold = 0, step = 1, rounding = down, min = 1,
@@ -926,7 +1217,14 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
     local dur
     if g("ShowDuration") ~= false then
         local durFormat = g("DurationFormat") or "NUMBER"
-        local colorByTime = g("DurationColorByTime") and true or false
+        -- Colour-by-time: the stored value is a MODE (legacy profiles hold a boolean —
+        -- ResolveDurationColorMode maps true to STEP_SECONDS so they keep today's look).
+        -- On 68914+ every mode paints through the native colour CURVE; only the pre-68914
+        -- fallback bakes |c escapes into the formatter's bands, and the two are mutually
+        -- exclusive because escapes beat the curve.
+        local colorMode = DF:ResolveDurationColorMode(g("DurationColorByTime"))
+        local colorSpec = DF:GetDurationColorSpec(colorMode)
+        local colorByTime = DF:DurationColorUsesBuckets(colorMode)
         local hideAboveT = (g("DurationHideAboveEnabled") and g("DurationHideAboveThreshold")) or nil
         -- Text styling (font/scale/outline/anchor/offsets/justify/colour) is a shared
         -- DF.TextStyle spec; the factory applies it via TextStyle:Apply. The justify box
@@ -937,12 +1235,13 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
         dur.show = true
         dur.stableCenter = true   -- centred countdown: stable box, no shift, no wobble
         dur.formatter = GetDurationFormatter(durFormat, hideAboveT, colorByTime)
-        -- colorByTime = colour BUCKETS baked into the formatter's band format strings
-        -- (see BuildDurationFormatter — the smooth curve is not addon-reachable). The
-        -- static colour must not stomp the escapes; formatKey keeps both flags in the
-        -- rebuild signature (the formatter is creation-frozen on the native bind).
-        if colorByTime then dur.color = nil end
-        dur.formatKey = durFormat .. (colorByTime and (":C" .. DF:GetDurationBreakpointsSig()) or "") .. (hideAboveT and (":H" .. tostring(hideAboveT)) or "")
+        -- Either colour path (curve or legacy buckets) owns the text colour outright, so
+        -- the static colour must not stomp it. formatKey carries the mode + its scale's
+        -- stops so a change moves the rebuild signature — BOTH the formatter and the
+        -- curve are creation-frozen on the native bind.
+        if colorSpec then dur.color = nil end
+        dur.colorCurve, dur.colorProperty = (colorSpec and colorSpec.curve), (colorSpec and colorSpec.property)
+        dur.formatKey = durFormat .. DF:GetDurationColorSig(colorMode) .. (hideAboveT and (":H" .. tostring(hideAboveT)) or "")
         -- Hide duration text on permanent auras (Wave 4, default ON): zeroText = ""
         -- flows to the native binding's zeroDurationText — Blizzard renders NO text
         -- on zero-duration/unconfigured durations. Absent key (pre-migration db)
@@ -1565,7 +1864,10 @@ function DF:BuildDefensiveRowConfig(db, unit)
     local iconSize = db.defensiveIconSize or 24
     local dur
     if db.defensiveIconShowDuration ~= false then
-        local colorByTime = db.defensiveIconDurationColorByTime and true or false
+        -- Colour-by-time mode + curve (see the buff/debuff row builder for the mechanism).
+        local colorMode = DF:ResolveDurationColorMode(db.defensiveIconDurationColorByTime)
+        local colorSpec = DF:GetDurationColorSpec(colorMode)
+        local colorByTime = DF:DurationColorUsesBuckets(colorMode)
         -- Shared TextStyle spec (picks up defensiveIconDurationFont/Scale/Outline/X/Y/
         -- JustifyH/JustifyV/Color); feature fields ride on top.
         dur = DF.TextStyle:BuildSpec(db, "defensiveIconDuration", {
@@ -1574,10 +1876,9 @@ function DF:BuildDefensiveRowConfig(db, unit)
         dur.show = true
         dur.stableCenter = true   -- centred countdown: stable box, no shift, no wobble
         dur.formatter = GetDurationFormatter("NUMBER", nil, colorByTime)
-        -- colorByTime = colour buckets baked into the formatter bands (see
-        -- BuildDurationFormatter). Static colour must not stomp the escapes.
-        if colorByTime then dur.color = nil end
-        dur.formatKey = "NUMBER" .. (colorByTime and (":C" .. DF:GetDurationBreakpointsSig()) or "")
+        if colorSpec then dur.color = nil end
+        dur.colorCurve, dur.colorProperty = (colorSpec and colorSpec.curve), (colorSpec and colorSpec.property)
+        dur.formatKey = "NUMBER" .. DF:GetDurationColorSig(colorMode)
         -- Hide duration text on permanent auras (Wave 4, default ON — see the
         -- buff/debuff row builder for the mechanism notes).
         if db.defensiveIconDurationHideOnPermanent ~= false then dur.zeroText = "" end

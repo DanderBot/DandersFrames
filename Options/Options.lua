@@ -4299,22 +4299,48 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- human range it covers ("8s and above", "5-8s", "under 2s"), and a small +/- stepper
         -- moves that stop's lower boundary. Colour edits re-tint the strip in place; boundary
         -- add/remove/reset rebuild the page so every range label and the strip stay in sync.
+        -- TWO SECTIONS, one per consumer: duration TEXT and the expiry BORDER/TINT reveal.
+        -- An aura page only carries an on/off; everything about HOW the colour is read
+        -- lives here with the colours it reads, because that is a property of the ramp.
+        --   TEXT    blends or steps (12.1's colour curve), on either scale.
+        --   BORDER  steps only — its colours are baked into |T inline-texture escapes,
+        --           which ignore the fontstring vertex colour a curve writes.
+        -- Each section keeps ONE stop list PER SCALE: thresholds cannot be reinterpreted
+        -- between units (8 seconds is not 8 percent), so switching the scale swaps which
+        -- ramp is being edited and leaves the other untouched for switching back.
         local cbtGlobalDB = DF:GetGlobalDB()
-        if type(cbtGlobalDB.durationColorByTimeBreakpoints) ~= "table" or #cbtGlobalDB.durationColorByTimeBreakpoints == 0 then
-            cbtGlobalDB.durationColorByTimeBreakpoints = DF:DeepCopy(DF.GlobalDefaults.durationColorByTimeBreakpoints)
-        end
-        local bps = cbtGlobalDB.durationColorByTimeBreakpoints
         local iconPath = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
 
-        local function cbtT(s) return math.max(0, tonumber(s and s.threshold) or 0) end
-        local function cbtSorted(descending)
-            local out = {}
-            for _, s in ipairs(bps) do out[#out + 1] = s end
-            table.sort(out, function(a, b)
-                if descending then return cbtT(a) > cbtT(b) else return cbtT(a) < cbtT(b) end
-            end)
-            return out
-        end
+        local CBT_UNITS = {
+            SECONDS = { maxT = nil, capT = 600,   -- seconds have no natural ceiling; derive from the stops
+                        above = L["%ds and above"], under = L["under %ds"], range = L["%d-%ds"] },
+            PERCENT = { maxT = 100, capT = 100,
+                        above = L["%d%% and above"], under = L["under %d%%"], range = L["%d-%d%%"] },
+        }
+        local CBT_SECTIONS = {
+            {
+                title    = L["Duration Text"],
+                blurb    = L["Colors the countdown text on buffs, debuffs, defensives and Aura Designer indicators."],
+                keys     = { SECONDS = "durationColorByTimeBreakpoints",
+                             PERCENT = "durationColorByPercentBreakpoints" },
+                scaleKey = "durationTextColorScale",
+                smoothKey = "durationTextColorSmooth",   -- present = this section offers blending
+            },
+            {
+                title    = L["Expiry Border & Tint"],
+                blurb    = L["Colors the expiring border and tint. Stops are a percentage of the alert window, so they hold when you change the alert threshold. These are drawn as inline textures and always step between colors."],
+                -- ONE ramp, and its stops are PERCENT OF THE REVEAL WINDOW rather than
+                -- either unit — so it stays correct at any threshold and the scale below
+                -- only picks the threshold's unit.
+                bpKey    = "durationBorderColorStops",
+                rampUnit = "PERCENT",
+                -- Also sets the unit every reveal's Alert Below threshold is read in: the
+                -- bands and the threshold are one formatter sampled against one property
+                -- (see the border ramp note in Config.lua), so they cannot disagree.
+                scaleKey = "durationBorderColorScale",
+                smoothKey = nil,    -- stepped by construction
+            },
+        }
 
         local function ApplyColorByTime()
             if DF.InvalidateDurationFormatters then DF:InvalidateDurationFormatters() end
@@ -4337,16 +4363,74 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end)
         end
 
-        local cbtGroup = GUI:CreateSettingsGroup(self.child, 280)
-        cbtGroup:AddWidget(GUI:CreateHeader(self.child, L["Color by Time"]), 40)
-        cbtGroup:AddWidget(GUI:CreateLabel(self.child, L["Sets the duration-text colors used wherever Color by Time Remaining is enabled (buffs, debuffs, defensives and the Aura Designer)."], 260), 48)
+        -- Page-level collapsible section wrapping BOTH boxes, matching Health Bar and
+        -- friends. Its title is also the cross-link anchor every aura page flashes
+        -- (GUI:CreateColorsPageLink -> LinkToSetting{ section = L["Color by Time"] }) —
+        -- keep the two in step if it is ever renamed. Assigned just before the build
+        -- loop so it lands on the page ABOVE the boxes it owns.
+        local cbtSection
 
-        -- Read-only preview strip: 0s at the left, (highest + a little) at the right.
-        local previewW = 256
+        -- Build one section's editor. Called once per entry in CBT_SECTIONS; everything
+        -- below closes over `section` so both are the same widget with different dials.
+        local function BuildSection(section)
+        -- Which ramp is live right now: the section's stored scale, defaulting to the one
+        -- scale it supports when it only has one.
+        local scaleName = section.scaleKey and cbtGlobalDB[section.scaleKey] or nil
+        if not (scaleName and (section.bpKey or section.keys[scaleName])) then
+            scaleName = (section.keys and section.keys.PERCENT and section.scaleKey) and "PERCENT" or "SECONDS"
+        end
+        local scale = CBT_UNITS[section.rampUnit or scaleName]
+        local bpKey = section.bpKey or section.keys[scaleName]
+        local smooth = section.smoothKey and (cbtGlobalDB[section.smoothKey] ~= false) or false
+
+        local bps = cbtGlobalDB[bpKey]
+        if type(bps) ~= "table" or #bps == 0 then
+            -- Seed from the shipped default. The border SECONDS ramp additionally falls
+            -- back to the text one: the two shared a single list before they were split,
+            -- so an upgrade keeps the border colours it already had.
+            local seed = DF.GlobalDefaults[bpKey]
+            bps = DF:DeepCopy(seed)
+            cbtGlobalDB[bpKey] = bps
+        end
+
+        local function cbtT(s) return math.max(0, tonumber(s and s.threshold) or 0) end
+        local function cbtSorted(descending)
+            local out = {}
+            for _, s in ipairs(bps) do out[#out + 1] = s end
+            table.sort(out, function(a, b)
+                if descending then return cbtT(a) > cbtT(b) else return cbtT(a) < cbtT(b) end
+            end)
+            return out
+        end
+
+        local cbtGroup = GUI:CreateSettingsGroup(self.child, 280)
+        cbtGroup:AddWidget(GUI:CreateHeader(self.child, section.title), 40)
+        cbtGroup:AddWidget(GUI:CreateLabel(self.child, section.blurb, 260), 44)
+
+        -- Dials. Both rebuild the page: they change the strip's rendering, every range
+        -- label's unit, and (for the scale) which ramp is on screen.
+        if section.smoothKey then
+            cbtGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Blend Colors Smoothly"], cbtGlobalDB, section.smoothKey, function()
+                ApplyColorByTime()
+                if pageColors and pageColors.Refresh then pageColors:Refresh() end
+            end), 30)
+        end
+        if section.scaleKey then
+            cbtGroup:AddWidget(GUI:CreateDropdown(self.child, L["Measure By"],
+                { _order = { "PERCENT", "SECONDS" }, PERCENT = L["Percent remaining"], SECONDS = L["Seconds remaining"] },
+                cbtGlobalDB, section.scaleKey, function()
+                    ApplyColorByTime()
+                    if pageColors and pageColors.Refresh then pageColors:Refresh() end
+                end))
+        end
+
+        -- Preview strip, rendered the way this section actually reads: a gradient when
+        -- blending, hard bands when stepping. Low values left, high right.
+        local previewW, stripH = 256, 18
         local asc = cbtSorted(false)
-        local maxT = math.max(12, cbtT(asc[#asc]) + 2)
+        local maxT = scale.maxT or math.max(12, cbtT(asc[#asc]) + 2)
         local strip = CreateFrame("Frame", nil, self.child)
-        strip:SetSize(previewW, 18)
+        strip:SetSize(previewW, stripH)
         strip.segs = {}
         for k = 1, #asc do
             local lo = cbtT(asc[k])
@@ -4354,20 +4438,30 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             if hi > lo then
                 local tex = strip:CreateTexture(nil, "ARTWORK")
                 tex:SetPoint("TOPLEFT", strip, "TOPLEFT", (lo / maxT) * previewW, 0)
-                tex:SetSize(((hi - lo) / maxT) * previewW, 18)
-                local c = asc[k].color or { r = 1, g = 1, b = 1 }
-                tex:SetColorTexture(c.r or 1, c.g or 1, c.b or 1, 1)
-                strip.segs[asc[k]] = tex
+                tex:SetSize(((hi - lo) / maxT) * previewW, stripH)
+                tex:SetColorTexture(1, 1, 1, 1)   -- white base; the gradient tints it
+                strip.segs[#strip.segs + 1] = { tex = tex, from = asc[k], to = asc[k + 1] }
             end
         end
         cbtGroup:AddWidget(strip, 24)
 
         local function RefreshPreview()
-            for stop, tex in pairs(strip.segs) do
-                local c = stop.color or { r = 1, g = 1, b = 1 }
-                tex:SetColorTexture(c.r or 1, c.g or 1, c.b or 1, 1)
+            for _, seg in ipairs(strip.segs) do
+                local a = seg.from.color or { r = 1, g = 1, b = 1 }
+                if smooth then
+                    -- Blend into the next stop. The band ABOVE the final stop stays flat
+                    -- because the curve clamps there (probe-verified), so the preview
+                    -- matches what actually renders rather than approximating it.
+                    local b = (seg.to and seg.to.color) or a
+                    seg.tex:SetGradient("HORIZONTAL",
+                        CreateColor(a.r or 1, a.g or 1, a.b or 1, 1),
+                        CreateColor(b.r or 1, b.g or 1, b.b or 1, 1))
+                else
+                    seg.tex:SetColorTexture(a.r or 1, a.g or 1, a.b or 1, 1)
+                end
             end
         end
+        RefreshPreview()
 
         -- One row per stop, freshest (highest threshold) first.
         local desc = cbtSorted(true)
@@ -4378,11 +4472,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             local above = (i > 1) and cbtT(desc[i - 1]) or nil
             local rangeLabel
             if i == 1 then
-                rangeLabel = format(L["%ds and above"], t)
+                rangeLabel = format(scale.above, t)
             elseif t == 0 then
-                rangeLabel = format(L["under %ds"], above or 0)
+                rangeLabel = format(scale.under, above or 0)
             else
-                rangeLabel = format(L["%d-%ds"], t, above or t)
+                rangeLabel = format(scale.range, t, above or t)
             end
 
             cbtGroup:AddWidget(GUI:CreateColorPicker(self.child, rangeLabel, bp, "color", false, function()
@@ -4394,7 +4488,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- +/- nudge by one; the middle field is typeable for big jumps (8 -> 120).
             if t ~= 0 then
                 local lowerBound = (i < #desc) and (cbtT(desc[i + 1]) + 1) or 1
-                local upperBound = (i > 1) and (cbtT(desc[i - 1]) - 1) or 600
+                -- The top stop is capped by the scale (100% has a real ceiling; seconds
+                -- keep the long-buff headroom the field already allowed).
+                local upperBound = (i > 1) and (cbtT(desc[i - 1]) - 1) or scale.capT
                 local row = CreateFrame("Frame", nil, self.child)
                 row:SetSize(previewW, 22)
                 local cap = row:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
@@ -4473,7 +4569,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         addStopBtn:SetScript("OnClick", function()
             -- Drop a new stop into the widest existing gap.
             local a2 = cbtSorted(false)
-            local mx = math.max(12, cbtT(a2[#a2]) + 2)
+            local mx = scale.maxT or math.max(12, cbtT(a2[#a2]) + 2)
             local bestT, bestGap = nil, -1
             for k = 1, #a2 do
                 local lo = cbtT(a2[k])
@@ -4494,15 +4590,22 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         GUI:StyleButton(resetStopsBtn, { width = 260, height = 24, text = L["Reset to Default"] })
         resetStopsBtn:SetScript("OnClick", function()
             wipe(bps)
-            for _, dv in ipairs(DF.GlobalDefaults.durationColorByTimeBreakpoints) do
+            for _, dv in ipairs(DF.GlobalDefaults[bpKey]) do
                 bps[#bps + 1] = { threshold = dv.threshold, color = { r = dv.color.r, g = dv.color.g, b = dv.color.b } }
             end
             ApplyColorByTime()
             if pageColors and pageColors.Refresh then pageColors:Refresh() end
         end)
         cbtGroup:AddWidget(resetStopsBtn, 30)
-
         Add(cbtGroup, nil, 2)
+        if cbtSection then cbtSection:RegisterChild(cbtGroup) end
+        end   -- BuildSection
+
+        -- Column 2, not "both": the header belongs over the boxes it owns rather than
+        -- spanning the page (column 1 holds the dispel palette, which it does not own).
+        -- Width matches the boxes so the rule under the title lines up with them.
+        cbtSection = Add(GUI:CreateCollapsibleSection(self.child, L["Color by Time"], true, 280), 36, 2)
+        for _, section in ipairs(CBT_SECTIONS) do BuildSection(section) end
     end)
 
     -- ========================================

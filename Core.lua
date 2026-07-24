@@ -4625,6 +4625,13 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- Diagnostic: window-park missing badges (bypasses the container's secret
                 -- self-size) — proves/disproves the last missing-badge pp drift source
                 if DF.AuraContainer and DF.AuraContainer.ToggleBadgeParkDebug then DF.AuraContainer.ToggleBadgeParkDebug() end
+            elseif msg == "cbt" or msg:match("^cbt%s+%d") then
+                -- Colour-by-time ground truth: curve-API reachability, the account-wide
+                -- dials, the mode an enabled consumer composes, whether it built a real
+                -- curve or fell back to the legacy seconds buckets, and the expiry
+                -- reveal's threshold + which of its colour bands actually render.
+                -- Optional number = try another reveal threshold ("/df cbt 60").
+                if DF.DebugDumpColorByTime then DF:DebugDumpColorByTime(tonumber(msg:match("(%d+)"))) end
             elseif msg == "idgate" then
                 -- Identity-gate ground truth: per vulnerable handle, live UnitCanAssist
                 -- vs the stored gate verdict vs actual window visibility

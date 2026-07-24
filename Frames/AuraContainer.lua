@@ -824,7 +824,13 @@ local function durationTemplateBinding(config, durSpec)
     -- duration, format, formatter or fallback text) and Assign replaces the button
     -- binding WHOLESALE — so the template must carry the default formatter itself
     -- or default-format rows render no text at all.
-    if durSpec.formatter then
+    -- textFormat: a formatter sampled against a NON-default duration property (the expiry
+    -- reveal on its percent scale). SetTextFormat substitutes each "{}" with its component,
+    -- and a component names both the property and the formatter — the only way to judge
+    -- bands against RemainingPercent instead of remaining seconds.
+    if durSpec.textFormat and b.SetTextFormat then
+        b:SetTextFormat(durSpec.textFormat.formatString, durSpec.textFormat.components)
+    elseif durSpec.formatter then
         b:SetFormatter(durSpec.formatter)
     else
         local def = AuraContainerInbound and AuraContainerInbound.GetDefaultAuraDurationFormatter
@@ -871,7 +877,7 @@ local function bindNative(slot, config)
         -- (durationTemplateBinding above); older builds keep the flat table.
         local opts = {}
         if AuraContainerInbound and type(AuraContainerInbound.GetDefaultAuraDurationFormatter) == "function" then
-            if durSpec.formatter or (durSpec.expiredText and durSpec.expiredText ~= "")
+            if durSpec.textFormat or durSpec.formatter or (durSpec.expiredText and durSpec.expiredText ~= "")
                or durSpec.zeroText ~= nil or durSpec.updateInterval then
                 opts.binding = durationTemplateBinding(config, durSpec)
             end
@@ -892,18 +898,23 @@ local function bindNative(slot, config)
             -- undocumented, so absent-key is the only behavior-neutral shape).
             if durSpec.updateInterval then opts.updateInterval = durSpec.updateInterval end
         end
+        -- Colour-by-time (68914+): options.textColor = { curve, property } is forwarded
+        -- to binding:SetTextColorCurve WITH the property arg the 68569 wrapper dropped —
+        -- the reason the curve was dead. The C side evaluates it against the SECRET
+        -- remaining time and writes the fontstring's vertex colour, so the whole ramp
+        -- costs zero Lua per frame. The spec supplies BOTH members or neither
+        -- (Features/Auras.lua builds them together); a partial table would assert.
+        -- MUTUALLY EXCLUSIVE with the legacy bucket formatter: |c escapes inside the
+        -- text beat vertex colour, so a spec never carries both (the row builders send
+        -- a curve OR a coloured formatter, never each).
+        if durSpec.colorCurve and durSpec.colorProperty ~= nil then
+            opts.textColor = { curve = durSpec.colorCurve, property = durSpec.colorProperty }
+        end
         local ok, err = pcall(function() slot:SetDurationText(slot.dfDur, opts) end)
         if not ok and not warnedCurve then
             warnedCurve = true
             DF:DebugWarn(DBG, "SetDurationText failed: %s", tostring(err))
         end
-        -- Colour-by-time: 68914 FIXED the smooth path — SetDurationText now forwards
-        -- options.textColor = { curve, property } WITH the property arg the 68569
-        -- forward dropped (the reason the curve was dead; port plan §2.8/§3).
-        -- durSpec.colorCurve stays accepted-but-inert HERE until the smooth-colour
-        -- item lands (curve build + editor mode); discrete colour still ships via
-        -- the BUCKETS formatter (|cRRGGBB escapes in AddBreakpoint format strings),
-        -- which rides the template binding's formatter unchanged.
     end
 
     if slot.dfStack and slot.SetApplicationCount and not slot._boundStack then
@@ -1967,6 +1978,13 @@ local function armTestDuration(handle, slot, d, offset)
             if durSpec.expiredText and durSpec.expiredText ~= "" then b:SetExpiredText(durSpec.expiredText) end
             if durSpec.zeroText ~= nil then b:SetZeroDurationText(durSpec.zeroText) end
             if durSpec.updateInterval then b:SetUpdateInterval(durSpec.updateInterval) end
+            -- Colour-by-time parity: the live path sends the curve through
+            -- SetDurationText's textColor; here we own the binding, so set it directly.
+            -- Without this the preview would render the countdown in the fontstring's
+            -- plain colour while live rows ramp.
+            if durSpec.colorCurve and durSpec.colorProperty ~= nil then
+                b:SetTextColorCurve(durSpec.colorCurve, durSpec.colorProperty)
+            end
             b:SetEnabled(true)
         end
     end)
