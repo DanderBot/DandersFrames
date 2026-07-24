@@ -33,13 +33,15 @@ local EDGE_GRADIENT_TEXTURES = {
 function DF:InvalidateDispelColorCurve()
     DF.debuffBorderCurve = nil
     DF.dispelColorMap = nil
-    -- Generation counter: the overlay carrier is bound in the SECURE initializeFrame
-    -- (DispelSlotSecureInit), and Blizzard securecopy's the colour map at bind time —
-    -- so a custom-palette edit can only re-bind by REBUILDING the overlay container.
-    -- dispelCurveGen is in the overlay's signature (custom mode), and InvalidateAuraLayout
-    -- breaks DriveDispelOverlayFactory's fast-path latch so the new signature is
-    -- recomputed and the container rebuilt with the fresh map. (Also feeds the debuff
-    -- icon's own curve-gen re-bind, which is styled in its initializeFrame already.)
+    -- Generation counter: Blizzard securecopy's the colour map at BIND time, so a palette
+    -- edit only lands once each carrier is re-bound. The counter is what marks carriers
+    -- stale; InvalidateAuraLayout breaks DriveDispelOverlayFactory's fast-path latch so
+    -- the drive re-runs and reaches the style pass.
+    -- ★ 68914: this NO LONGER rebuilds the container. The generation is deliberately out
+    -- of the overlay's plan signature — StyleDispelSlots re-binds each stale carrier IN
+    -- PLACE (a tainted re-bind is legal now), so a colour tweak costs one re-bind instead
+    -- of a full teardown+rebuild flicker. The debuff icon's ring re-binds off the same
+    -- counter in its own style pass (Frames/AuraContainer.lua).
     DF.dispelCurveGen = (DF.dispelCurveGen or 0) + 1
     if DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
 end
@@ -1233,19 +1235,22 @@ local function dispelFactoryPlanAndSig(db)
     local parts = { needPolicy and "policy" or "nopolicy" }
     for i = 1, #slots do parts[#parts + 1] = slots[i].key .. "=" .. slots[i].filter end
     -- The bound carrier is created in the initializeFrame (DispelSlotSecureInit), so
-    -- anything that changes WHICH carrier a slot binds, its texture, or the bound
-    -- colour map must be in the signature — a change rebuilds the container and re-runs
-    -- the init with the right carrier. ★ 68914 note: a tainted re-bind IS legal now
-    -- (ValidateInboundScriptObject only checks forbidden/protected/descendant-of-owner;
-    -- the access-constrained rule is gone — /al accessbind proved it live), so
-    -- rebind-in-place instead of rebuild-to-rebind is an AVAILABLE simplification;
-    -- kept as-is for now because rebuilds also re-run the timing-critical init below:
+    -- anything that changes WHICH carrier a slot binds or its texture must be in the
+    -- signature — a change rebuilds the container and re-runs the init with the right
+    -- carrier:
     --   gs = gradient style (plain texture file vs the strip textures),
-    --   gh = health-tracking flag (StatusBar fill vs plain texture),
-    --   cm = the palette generation (a Colors-page colour edit bumps it → re-bind).
+    --   gh = health-tracking flag (StatusBar fill vs plain texture).
+    -- ★ The palette generation is DELIBERATELY NOT here any more (68914). Blizzard
+    -- securecopy's the colour map at bind time, so a Colours-page edit does need a
+    -- re-bind — but a tainted re-bind is legal now (the access-constrained rule is gone;
+    -- the current validator only rejects EXPLICITLY forbidden / protected /
+    -- non-descendant objects, and /al accessbind proved it live), so StyleDispelSlots
+    -- re-binds the existing carrier in place. Keeping "cm=" here would rebuild the whole
+    -- container — a visible teardown flicker — for a colour tweak that now costs one
+    -- re-bind. WHICH carrier is bound is unchanged by a palette edit, so the plan is
+    -- genuinely identical and the rebuild bought nothing.
     parts[#parts + 1] = "gs=" .. tostring(db.dispelGradientStyle or "FULL")
     parts[#parts + 1] = "gh=" .. tostring(db.dispelGradientOnCurrentHealth ~= false)
-    parts[#parts + 1] = "cm=" .. tostring(DF.dispelCurveGen or 0)
     return table.concat(parts, ";"), slots, needPolicy
 end
 
@@ -1329,13 +1334,13 @@ local function BindDispelCarrier(btn, carrier, db, key)
             showIcon = false,
         }
         if addTex then
-            -- Add APPENDS (unlike the clearing alias), so a re-entrant init on a
-            -- recycled button would stack duplicate carriers. Clear once per button,
-            -- then append: identical to the alias for one carrier, and safe for many.
-            if not btn._dfDispelTexBound and btn.ClearDispelTypeTextures then
-                btn:ClearDispelTypeTextures()
-            end
-            btn._dfDispelTexBound = true
+            -- REPLACE, don't append: Add is additive, so without the clear a re-entrant
+            -- init OR an in-place palette re-bind (StyleDispelSlots) would stack a second
+            -- carrier on the same button. Clear-then-add reproduces the old alias exactly
+            -- and is safely idempotent. NOTE for the future slot consolidation: binding
+            -- SEVERAL carriers to one button needs a batch call that clears ONCE and then
+            -- adds each — not repeated calls to this one.
+            if btn.ClearDispelTypeTextures then btn:ClearDispelTypeTextures() end
             btn:AddDispelTypeTexture(carrier, opts)
         else
             btn:SetAuraBorder(carrier, opts)
@@ -1623,6 +1628,20 @@ local function StyleDispelSlots(frame, db, h, slots)
         local btn = buttons[info.key]
         if btn then
             styled = true
+            -- IN-PLACE PALETTE RE-BIND (68914): Blizzard securecopy's the colour map at
+            -- bind time, so a Colours-page edit needs the carrier RE-BOUND. That used to
+            -- force a full container rebuild (the palette generation rode the plan
+            -- signature) — a visible teardown/rebuild flicker on every colour tweak.
+            -- AddDispelTypeTexture accepts a re-bind from this tainted pass now (the
+            -- access-constrained rule is gone; /al accessbind + the 68914 validator,
+            -- which only rejects EXPLICITLY forbidden / protected / non-descendant
+            -- objects — our carrier is a descendant that merely INHERITS aspects), so
+            -- re-bind the carrier we already have and skip the rebuild entirely.
+            -- Icon slots bind nothing, so they never go stale.
+            if not info.iconType and btn._dfDispelBoundCarrier
+                and btn._dfDispelCurveGen ~= DF.dispelCurveGen then
+                BindDispelCarrier(btn, btn._dfDispelBoundCarrier, db, info.key)
+            end
             if info.iconType then
                 StyleGameTypeIconSlot(btn, frame, db, info.iconType)
             elseif info.edgeSide then
