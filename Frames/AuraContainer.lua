@@ -3139,7 +3139,22 @@ function AuraContainer:Create(parent, config)
         -- parked on the window: with no live container we must not claim "missing"
         -- (false-negative until regen beats a false-positive). The backend shows it and
         -- re-anchors it to the container when a build lands; teardown re-parks it.
-        h.badge = CreateFrame("Frame", nil, h.frame)
+        --
+        -- ★ 68914: AddAuraGroup stamps ForbiddenAspect.UntrustedLayoutScriptExecution
+        -- on the container (Blizzard_CustomAuraContainer.lua:321), and SetPoint REFUSES
+        -- a dependent that doesn't already carry the aspect ("Anchoring disallowed as
+        -- dependent object would inherit forbidden aspects" — field-hit in a dungeon).
+        -- Aspects are NEVER granted implicitly via SetParent/SetPoint, and tainted
+        -- AddForbiddenAspects is disallowed — the sanctioned opt-in is inheriting
+        -- DisableUntrustedLayoutScriptsTemplate at creation (ForbiddenAspectTemplates.xml,
+        -- named in Blizzard's own comment above the stamp). Cost: the badge (and its
+        -- children — border overlays, consumer art) may never run LAYOUT scripts
+        -- (OnSizeChanged); nothing in the badge subtree uses them. Template-probe so
+        -- pre-68914 builds (no such template) keep the plain frame they never needed.
+        local aspectTmpl = C_XMLUtil and C_XMLUtil.GetTemplateInfo
+            and C_XMLUtil.GetTemplateInfo("DisableUntrustedLayoutScriptsTemplate")
+            and "DisableUntrustedLayoutScriptsTemplate" or nil
+        h.badge = CreateFrame("Frame", nil, h.frame, aspectTmpl)
         h.badge:SetSize(bw, bh)
         h.badge:SetPoint("TOPLEFT", h.frame, "TOPLEFT", sp, -sp)
         h.badge:Hide()
