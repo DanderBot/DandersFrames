@@ -629,6 +629,13 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width)
     end
     section.sectionTitleText = text
     section.sectionChildren = {}
+    -- Same contract as CreateHeader's container.GetText: it is how a section is FOUND
+    -- by title (Search:ScrollToSection, and every GUI:LinkToSetting{ section = ... }
+    -- cross-link through it). Without it a collapsible section is invisible to those
+    -- lookups, so a link to it silently does nothing — which is exactly what happened
+    -- to the Colours page's "Color by Time" links when that box was promoted from a
+    -- plain header to a collapsible section.
+    section.GetText = function(self) return self.sectionTitleText end
     section.paddingAfter = 8  -- Padding space after header before first child
     
     -- Header bar with background

@@ -799,6 +799,15 @@ function Search:ScrollToSection(tabName, sectionName)
     for _, widget in ipairs(page.children) do
         if matches(widget) then
             scrollTo, flashTarget = widget, widget
+            -- A COLLAPSIBLE section is only its header bar; the content sits in
+            -- separate page children registered against it (RegisterChild). Two
+            -- things follow: expand it if the user had it closed, since scrolling to
+            -- hidden content reads as a dead link; and flash that CONTENT rather than
+            -- the ~28px bar, because the content is what the link points at.
+            if widget.sectionChildren then
+                if not widget.expanded and widget.Toggle then widget:Toggle() end
+                flashTarget = widget.sectionChildren[1] or widget
+            end
         elseif widget.isSettingsGroup and widget.groupChildren then
             for _, entry in ipairs(widget.groupChildren) do
                 if matches(entry.widget) then
