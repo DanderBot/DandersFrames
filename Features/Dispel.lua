@@ -1232,10 +1232,14 @@ local function dispelFactoryPlanAndSig(db)
     if not slots then return nil end
     local parts = { needPolicy and "policy" or "nopolicy" }
     for i = 1, #slots do parts[#parts + 1] = slots[i].key .. "=" .. slots[i].filter end
-    -- The bound carrier is created in the SECURE initializeFrame (DispelSlotSecureInit),
-    -- so anything that changes WHICH carrier a slot binds, its texture, or the bound
+    -- The bound carrier is created in the initializeFrame (DispelSlotSecureInit), so
+    -- anything that changes WHICH carrier a slot binds, its texture, or the bound
     -- colour map must be in the signature — a change rebuilds the container and re-runs
-    -- the secure init with the right carrier (no tainted re-bind is possible):
+    -- the init with the right carrier. ★ 68914 note: a tainted re-bind IS legal now
+    -- (ValidateInboundScriptObject only checks forbidden/protected/descendant-of-owner;
+    -- the access-constrained rule is gone — /al accessbind proved it live), so
+    -- rebind-in-place instead of rebuild-to-rebind is an AVAILABLE simplification;
+    -- kept as-is for now because rebuilds also re-run the timing-critical init below:
     --   gs = gradient style (plain texture file vs the strip textures),
     --   gh = health-tracking flag (StatusBar fill vs plain texture),
     --   cm = the palette generation (a Colors-page colour edit bumps it → re-bind).
@@ -1331,6 +1335,15 @@ end
 -- (SetAllPoints(btn)) so it inherits the button's forbidden aspects at bind time; the
 -- tainted style pass re-positions it afterwards (validation already passed). Icon
 -- slots bind nothing — their plain type-icon textures ride the slot's SetShown.
+-- ★ 68914 re-verified: SECURE context is NO LONGER REQUIRED for the bind's legality —
+-- the access-constrained rejection (old Blizzard_CustomAuraButton.lua:15) was replaced
+-- by ValidateInboundScriptObject (forbidden/protected/descendant-of-owner only), and a
+-- tainted create+bind passes (/al accessbind, live). This init STAYS in the secure
+-- initializeFrame anyway because it is the only hook that fires AT SLOT CREATION —
+-- Blizzard creates overlay buttons lazily, including MID-COMBAT when a unit's first
+-- dispellable debuff lands, and the style pass can't touch live buttons in combat
+-- (BUILD-ONCE-LEAVE-IT). Moving create+bind there would delay the overlay's debut to
+-- regen — exactly the moment it exists for. Timing, not legality, is the reason.
 local function DispelSlotSecureInit(btn, slotInfo, db, frame)
     if not (btn and btn.CreateTexture and btn.SetAuraBorder) then return end
     local key = slotInfo.key

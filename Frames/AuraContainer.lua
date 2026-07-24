@@ -2689,9 +2689,13 @@ function Handle:_applyIdentityGate()
     self:_applyVisibility()
 end
 
--- Enable/disable the (secure) container's parse+bind. COMBAT-GUARDED: SetEnabled
--- touches secure container state, so in lockdown we persist the desired state and
--- defer the call to PLAYER_REGEN_ENABLED (never downgrading a pending rebuild).
+-- Enable/disable the container's parse+bind. ★ 68914 re-verified: SetEnabled is NOT
+-- combat-locked — it's plain mixin state (AuraContainerSharedMixin:SetEnabled = a field
+-- write + UpdateEventRegistrations/UpdateAllAuras, no protected calls; /al combatops
+-- ran it clean mid-combat). The deferral is KEPT for DISPLAY correctness, not legality:
+-- an addon-context enable sets the dirty flags but cannot ARM the private-side
+-- processor (see NativeBackend:refresh), so a combat enable wouldn't render until the
+-- next aura event anyway — flushing at regen is the deliberate, deterministic choice.
 function Handle:_applyEnabled(on)
     on = on and true or false
     self.config.enabled = on
@@ -2699,8 +2703,15 @@ function Handle:_applyEnabled(on)
     if self.backend then self.backend:setEnabled(on) end
 end
 
--- Retarget the container's unit. Guarded: retargeting touches secure container
--- state, so defer if we're in combat.
+-- Retarget the container's unit. ★ 68914 re-verified: SetUnit is NOT combat-locked
+-- (plain mixin state; Blizzard's own TargetFrame.lua:65 retargets its container on
+-- every target change, i.e. constantly in combat; /al combatops ran it clean). The
+-- deferral is KEPT for DISPLAY correctness: the partition kick that makes a retarget
+-- actually render (the Hide/Show bounce in NativeBackend:setUnit) is OOC-only, so a
+-- combat retarget would keep DISPLAYING the old unit's parse until the next aura
+-- event — the drives hide the row till regen instead, which beats showing the wrong
+-- player's auras. (If show-with-brief-staleness is ever preferred over hide-till-regen,
+-- this deferral + the drives' hidden-flag logic is the seam to change — Krathe's call.)
 function Handle:SetUnit(unit)
     self.config.unit = unit
     self:_updateDynRefresh()   -- re-evaluate dynamic-unit auto-refresh for the new token
