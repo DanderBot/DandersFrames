@@ -2875,8 +2875,12 @@ local function RenderPreviewIndicator(mockFrame, spec, auraName, info, indicator
     AC.PaintPreviewSlot(slot, cfg, 1)
     slot:Show()
 
-    -- Expiry Alert element sample (cfg.alertPreview): the static payload at the
-    -- configured anchor/offset/size, so positioning is WYSIWYG while editing.
+    -- Expiry Alert element sample (cfg.alertPreview): the reveal's REAL duration spec,
+    -- bound to the SAME duration object driving this slot's countdown, so the sample
+    -- counts down and changes colour exactly as the live companion does — including
+    -- stepping through the by-time ramp and going empty above the threshold. Binding it
+    -- rather than stamping a payload is the whole point: a preview-only renderer is what
+    -- previously left by-time samples stuck on a hardcoded red.
     -- Anchored to the PREVIEW SLOT: live, the companion slot's invisible button
     -- coincides with the indicator's rect and its duration text pins the
     -- configured anchor point to the same point on the button plus offsets —
@@ -2900,7 +2904,12 @@ local function RenderPreviewIndicator(mockFrame, spec, auraName, info, indicator
         ah.fs:SetPoint(ap.anchor, ah, ap.anchor, ap.offsetX, ap.offsetY)
         if DF.SafeSetFont then DF:SafeSetFont(ah.fs, ap.font, ap.size, "OUTLINE") end
         ah.fs:SetAlpha(ap.alpha or 1)   -- border/tint opacity (region alpha scales the |T)
-        ah.fs:SetText(ap.payload)
+        -- PaintPreviewSlot armed slot._dfTestDurObj for the icon's own countdown; reusing
+        -- it keeps the reveal in lockstep with the timer it is meant to be reacting to.
+        if not (AC.BindDurationTextPreview
+                and AC.BindDurationTextPreview(ah.fs, ap, slot._dfTestDurObj, rec, "alertBinding")) then
+            ah.fs:SetText("")   -- no duration API: show nothing rather than a stale sample
+        end
         ah:Show()
     elseif rec.alertHolder then
         rec.alertHolder:Hide()

@@ -18,10 +18,15 @@ local addonName, DF = ...
 --
 -- BOUNDARY (Stage 1): the low-level reveal FORMATTERS + border art live in Features/
 -- Auras.lua as public DF: methods (GetExpiryBorderElementFormatter / GetExpiryAlert-
--- ElementFormatter / GetExpiryBorderEscape / GetExpiryAlertPayload / GetExpiryAlertFmtKey),
--- because they share the duration-text engine's formatter cache + colour breakpoints and
--- the inline-alert-on-countdown feature. This engine COMPOSES them; it does not duplicate
--- them. The dependency is one-way (Expiration -> Auras).
+-- ElementFormatter / GetExpiryAlertPayload / GetExpiryAlertFmtKey), because they share the
+-- duration-text engine's formatter cache + colour breakpoints and the inline-alert-on-
+-- countdown feature. This engine COMPOSES them; it does not duplicate them. The dependency
+-- is one-way (Expiration -> Auras).
+--
+-- ONE PATHWAY: live rows, test mode and the editor canvas all render the reveal from the
+-- SAME BuildDurationSpec against a real duration — there is no preview-only renderer.
+-- (DF:GetExpiryBorderEscape, which composed a static one-frame border sample, is left
+-- unused by that change rather than deleted.)
 --
 -- CONTRACT:
 --   cfg      = the settings block holding the expiryAlert* keys (the AD indicator record,
@@ -212,33 +217,20 @@ function Expiration:BuildDurationSpec(cfg, geometry)
     }
 end
 
--- Editor-canvas sample: the STATIC payload at the configured anchor/offset/size so
--- positioning is WYSIWYG while editing. Composed by the SAME payload/escape helpers the
--- live formatter uses, so preview and live can never drift. nil when the alert is off OR
--- the config is in show-when-missing mode (no companion is built there — nothing counts down).
+-- Editor-canvas sample for the expiry alert. This is deliberately nothing but
+-- BuildDurationSpec — the SAME spec the live companion slot runs — so the canvas drives
+-- its sample through the real formatter against a real duration and cannot disagree with
+-- what the reveal actually does. Placement (anchor / offsets / size / alpha / font) is
+-- already on that spec, so there is nothing preview-specific to add.
+--
+-- It used to compose a STATIC payload instead, with by-time hardcoded to red on the
+-- reasoning that "the canvas is one still frame, so show the about-to-expire end". That
+-- second pathway is precisely how the canvas ended up permanently red while live walked
+-- the ramp, and it would drift again on any future change to the reveal.
+--
+-- nil when the alert is off, or in show-when-missing mode: no aura means nothing counts
+-- down, and the live factory builds no companion there either.
 function Expiration:BuildPreview(cfg, geometry)
-    local mode = self:Mode(cfg)
     if cfg.showWhenMissing then return nil end
-    if not mode then return nil end
-    local w, h = self:EffectiveSize(cfg, geometry)
-    local payload
-    if isFrameMode(mode) then
-        -- Static: the picked colour. By-time: the canvas is one still frame, so show the
-        -- "about to expire" end (red) — the most representative moment.
-        local col = (cfg.expiryAlertBorderColorMode == "BYTIME")
-            and { r = 1, g = 0.2, b = 0.2 } or cfg.expiryAlertBorderColor
-        payload = DF.GetExpiryBorderEscape and DF:GetExpiryBorderEscape(w, h, col, resolveThickness(cfg, mode))
-    elseif DF.GetExpiryAlertPayload then
-        payload = DF:GetExpiryAlertPayload(mode, cfg.expiryAlertText, cfg.expiryAlertGlyph, w)
-    end
-    if not payload then return nil end
-    return {
-        payload = payload,
-        anchor  = self:EffectiveAnchor(cfg),
-        offsetX = tonumber(cfg.expiryAlertOffsetX) or 0,
-        offsetY = tonumber(cfg.expiryAlertOffsetY) or 0,
-        size    = h,
-        alpha   = isFrameMode(mode) and (tonumber(cfg.expiryAlertBorderAlpha) or 1) or nil,
-        font    = (geometry and geometry.font) or cfg.durationFont,
-    }
+    return self:BuildDurationSpec(cfg, geometry)
 end
