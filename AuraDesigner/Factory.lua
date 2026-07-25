@@ -540,16 +540,24 @@ local function buildBorderSpec(frame, borderCfg)
     -- from a plain config number instead of measuring the secret slot. Ignored otherwise.
     spec.knownWidth  = fdb.frameWidth
     spec.knownHeight = fdb.frameHeight
-    -- KNOWN DEGRADATION (GRADIENT → solid): the AuraContainer overlay-border builder creates
-    -- the DF.Border with solidOnly=true (AuraContainer.lua:298), because container slots are
-    -- anchored by Blizzard's flow layout with SECRET / unresolved rects and gradient rendering
-    -- needs a resolved rect to compute its direction+extent (the same rect problem that forces
-    -- the secretRect anchor-only path — see AuraContainer.lua:291-294). So a user's GRADIENT
-    -- border style renders as a SOLID ring here (texture styles still render). Threading
-    -- solidOnly=false was deliberately NOT done: that flag lives on the SHARED slot-border
-    -- builder used by the #205 buff/debuff rows too, and enabling gradients on a secret-anchored
-    -- rect is unverified (likely broken), which would be worse than a clean solid. → P4.7 must
-    -- FROST / API-limit-mark the gradient border-style control for factory-owned AD.
+    -- GRADIENT: this used to carry a "KNOWN DEGRADATION (GRADIENT -> solid)" note claiming the
+    -- overlay border cannot gradient because the slot's rect is SECRET and "gradient rendering
+    -- needs a resolved rect to compute its direction+extent". ★ RE-READ 2026-07-25 -- that
+    -- reasoning does not survive the source:
+    --   * DF.Border's gradient path MEASURES NOTHING. It is SetColorTexture(1,1,1,1) then
+    --     SetGradient(direction, a, b) on edges positioned by SetPoint. There is no
+    --     GetWidth / GetHeight / GetLeft anywhere in Apply -- SetGradient ramps C-side across
+    --     whatever the texture already spans, so an unresolved rect is not an input.
+    --   * Apply's gradient branch is gated on `style == "GRADIENT" and gradient and CreateColor`
+    --     with NO _solidOnly check (Frames/Border.lua), so the slot's solidOnly flag never
+    --     blocked the paint in the first place.
+    --   * solidOnly is about secret COLOURS, not rects -- it skips CreateColor/SetGradient
+    --     because those taint on secret values (debuff dispel tints). The gradient pickers are
+    --     STATIC config, and Border.lua:195 skips the ctx colour paths entirely for GRADIENT,
+    --     so no secret can reach them. secretRect is the rect flag, and only TEXTURE needs it.
+    -- The three gradient controls are therefore UNFROSTED (AuraDesigner/Options.lua) to find out
+    -- what actually happens. If it still renders solid in game, the real cause is something not
+    -- yet identified -- record it here and re-frost, rather than restoring the rect explanation.
     return spec
 end
 

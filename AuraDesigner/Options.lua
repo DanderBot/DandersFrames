@@ -3550,10 +3550,9 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
     -- end of BuildTypeContent can frost the effect-settings groups the factory
     -- can't (yet) drive, WITHOUT touching the trigger tags above (built into
     -- `parent` before this function runs — the working "which aura" layer).
-    -- swmCheck / borderCtl are captured for the surgical blocks (Show When Missing,
-    -- gradient border style). See block pass below.
+    -- swmCheck is captured for the surgical Show-When-Missing block. See block pass below.
     local builtGroups = {}
-    local swmCheck, borderCtl, wholeBarCheck, swmGroup, durColorByTimeCtl
+    local swmCheck, wholeBarCheck, swmGroup, durColorByTimeCtl
 
     local function AddWidget(widget, height)
         widget:SetPoint("TOPLEFT", parent, "TOPLEFT", 5, -totalHeight)
@@ -4252,7 +4251,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- include offset too — this border covers the whole frame, so nudging
         -- it can be useful.  No class/role (it's an aura indicator).
         AddGroup(L["Appearance"], function(g)
-            borderCtl = GUI:CreateBorderControls(g, proxy, "", {
+            GUI:CreateBorderControls(g, proxy, "", {
                 parent  = parent,
                 include = {
                     inset = true, offset = true, blendMode = true,
@@ -4592,17 +4591,19 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         --   * Tint Entire Bar (healthbar only) — NO LONGER blocked. The filled health-mirror
         --     bar makes the current-health-fill variant (tintWholeBar=false) expressible
         --     read-free, so both settings work under the factory.
-        --   * Gradient border style — permanent limitation (degrades to solid on
-        --     secret-anchored slots). Blocks only the gradient pickers/direction,
-        --     which surface under Border Style = Gradient; Solid/Texture stay usable.
-        if typeKey == "border" and borderCtl then
-            for _, wKey in ipairs({ "gradientStart", "gradientEnd", "gradientDirection" }) do
-                if borderCtl[wKey] then
-                    GUI:BlockControl12_1(borderCtl[wKey], "limitation",
-                        { id = "ad:border:gradient", page = L["Aura Designer"], when = ADgate })
-                end
-            end
-        end
+        --   * Gradient border style -- UNFROSTED 2026-07-25 to test the claim behind it.
+        --     The frost said gradient "needs a resolved rect to compute its direction+
+        --     extent" and so degrades to solid on a secret-anchored slot. Re-reading
+        --     Border.lua that looks wrong on two counts: the gradient path measures
+        --     NOTHING (it is SetColorTexture + SetGradient on SetPoint-anchored edges --
+        --     no GetWidth/GetHeight anywhere in Apply), and Apply's gradient branch is
+        --     gated on `style == "GRADIENT" and gradient and CreateColor` with no
+        --     _solidOnly check, so the slot's solidOnly flag never blocked the paint.
+        --     solidOnly is about secret COLOURS (CreateColor taints on them), which the
+        --     gradient pickers are not -- they are static config. secretRect is the flag
+        --     that handles rects, and only TEXTURE style needs it. If gradient still
+        --     renders solid in game, the cause is something not yet found and the block
+        --     should come back with the real reason recorded.
     end
 
     totalHeight = totalHeight + 8  -- bottom padding
