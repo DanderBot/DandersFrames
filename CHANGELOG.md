@@ -7,28 +7,6 @@
 * (Click Casting) Enabling a targeting fallback (Global, Target, Self or Always Cast) on a key that already does something in WoW now asks for confirmation and names exactly what the key will stop doing — these options make the key active everywhere, not just over the frames. The fallback tooltips explain this too.
 * (Click Casting) The "Clear Blizzard Bindings" button now warns that clearing is permanent, and it no longer silently re-clears Blizzard's click-casting profile every time click casting is enabled — clearing only happens when you press the button.
 
-## [4.7.5]
-
-### Bug Fixes
-
-* (Click Casting) **Fixed the 4.7.4 regression where every key bound in DF stopped working on the action bars ("like my keyboard is unplugged") after hovering a party/raid frame, until a reload.** 4.7.4's hover-bind rework applied binds under one owner but released them under another — so leaving a frame looked clean but never actually freed the keys. Bind ownership is now genuinely held by one permanent frame (applied and released in the same secure context), every release point additionally clears both possible owners as insurance, and the combat safety-check regression from 4.7.4 is reverted — keys release the moment the cursor leaves a frame. (by Krathe)
-* (Click Casting) Added extra recovery layers on top: stuck hover binds detected after leaving a frame are released immediately out of combat (or at combat end / next frame hover in combat), and the loading-screen self-repair now releases lingering hover binds unconditionally instead of trusting a state flag. (by Krathe)
-
-## [4.7.4]
-
-### Bug Fixes
-
-* (Click Casting) Fixed a Lua error walking Blizzard unit frames after combat that could stop click-casting bindings from working on the default frames until reload — the frame scan now skips protected (secret) values introduced by recent client versions. (by Krathe)
-* (Click Casting) Keyboard binds that stop working mid-session now recover automatically after combat ends or a loading screen, instead of staying broken until a reload.
-* (Click Casting) **Fixed keyboard and extra-mouse-button hover binds dying addon-wide mid-combat until a /reload** — hover binds are now owned by one permanent frame instead of the unit frame under the cursor, removing the cleanup step that could hit a dead frame reference and silently break every later hover. The automatic self-repair stays as a safety net, but the cause is gone. (by Krathe)
-* (Click Casting) Fixed keyboard and mouse-wheel click-cast binds being silently dropped mid-hover during combat — the safety check that removes hover binds could misread the cursor as off the frame while the frame's position was briefly unreadable, wiping the binds until the frame was re-hovered. Binds are now only removed when the cursor is provably off the frame. (by Krathe)
-* (Click Casting) Fixed binds on keys from international keyboard layouts (such as æ, ø or å) not casting on the frame under the cursor.
-* (Click Casting) New "Always Cast" option in a binding's Advanced settings. When enabled, the key still casts with the spell's normal targeting if no other rule matches — so ground-targeted spells (like aimable Shaman totems) show their aiming circle when pressed while hovering nothing.
-* (Click Casting) Frames that other addons register for click-casting are now only taken over if they are real unit frames — non-unit buttons (such as toy or action buttons) are left alone, and frames an addon explicitly unregisters stay unregistered.
-* (Auras) Fixed a stream of blocked-action taint warnings in PvP instances (triggered while styling aura duration text) that could spill over and break Blizzard's chat or other addons until a /reload.
-* (Bars) **Fixed health bars rendering solid green when a profile references a bar texture you don't have** — imported profiles often point at another addon's texture files; if that addon isn't installed (or its files changed), the bar showed WoW's green missing-texture state and class colours appeared broken. All bar textures now fall back to the stock texture with a one-time warning, on every update path (the fallback previously only applied when a frame was first created and was immediately overwritten). (by Krathe)
-* (Bars) Fixed class-coloured health bars staying stuck on the gradient colour (usually green) after using or switching away from the Percent colour mode — the class/custom colour is now written directly to the bar texture, so it can no longer be masked by a leftover gradient tint. (by Krathe)
-
 ### WoW 12.1 (Midnight) Rework
 
 *The 12.1 rework is a big team effort — brought to you by Danders, Krathe and Maelareth. A single change below often includes work from more than one of us, so entries aren't credited individually.*
@@ -176,10 +154,31 @@ DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally chan
 
 * The 12.1 aura displays are rebuilt on Blizzard's new container system and are under active testing — please report any case where buff, debuff, defensive or missing-buff displays stop updating, **especially in combat**.
 * A debuff that counts as both a Priority debuff and a Boss/Role debuff can show one icon per matching filter when both are enabled — the only duplicate case the new filter system can't remove. "Show All Debuffs" avoids it.
-* Aura tooltips on 12.1 are drawn by the game beside the icon — tooltip Anchor/Offset and Disable in Combat can't apply to the new aura rows (game limitation).
 * Dispel Overlay: "Color Name Text" is not yet wired to the new overlay (marked in place). A unit with dispellable debuffs of two different types can show both type icons overlapped (rare).
 * Aura Designer text colouring is drawn as a cover over the text: it ignores the out-of-range text fade, and group parts with their own inline colours keep them.
 * Dragging certain aura sliders can briefly stutter.
+
+## [4.7.5]
+
+### Bug Fixes
+
+* (Click Casting) **Fixed the 4.7.4 regression where every key bound in DF stopped working on the action bars ("like my keyboard is unplugged") after hovering a party/raid frame, until a reload.** 4.7.4's hover-bind rework applied binds under one owner but released them under another — so leaving a frame looked clean but never actually freed the keys. Bind ownership is now genuinely held by one permanent frame (applied and released in the same secure context), every release point additionally clears both possible owners as insurance, and the combat safety-check regression from 4.7.4 is reverted — keys release the moment the cursor leaves a frame. (by Krathe)
+* (Click Casting) Added extra recovery layers on top: stuck hover binds detected after leaving a frame are released immediately out of combat (or at combat end / next frame hover in combat), and the loading-screen self-repair now releases lingering hover binds unconditionally instead of trusting a state flag. (by Krathe)
+
+## [4.7.4]
+
+### Bug Fixes
+
+* (Click Casting) Fixed a Lua error walking Blizzard unit frames after combat that could stop click-casting bindings from working on the default frames until reload — the frame scan now skips protected (secret) values introduced by recent client versions. (by Krathe)
+* (Click Casting) Keyboard binds that stop working mid-session now recover automatically after combat ends or a loading screen, instead of staying broken until a reload.
+* (Click Casting) **Fixed keyboard and extra-mouse-button hover binds dying addon-wide mid-combat until a /reload** — hover binds are now owned by one permanent frame instead of the unit frame under the cursor, removing the cleanup step that could hit a dead frame reference and silently break every later hover. The automatic self-repair stays as a safety net, but the cause is gone. (by Krathe)
+* (Click Casting) Fixed keyboard and mouse-wheel click-cast binds being silently dropped mid-hover during combat — the safety check that removes hover binds could misread the cursor as off the frame while the frame's position was briefly unreadable, wiping the binds until the frame was re-hovered. Binds are now only removed when the cursor is provably off the frame. (by Krathe)
+* (Click Casting) Fixed binds on keys from international keyboard layouts (such as æ, ø or å) not casting on the frame under the cursor.
+* (Click Casting) New "Always Cast" option in a binding's Advanced settings. When enabled, the key still casts with the spell's normal targeting if no other rule matches — so ground-targeted spells (like aimable Shaman totems) show their aiming circle when pressed while hovering nothing.
+* (Click Casting) Frames that other addons register for click-casting are now only taken over if they are real unit frames — non-unit buttons (such as toy or action buttons) are left alone, and frames an addon explicitly unregisters stay unregistered.
+* (Auras) Fixed a stream of blocked-action taint warnings in PvP instances (triggered while styling aura duration text) that could spill over and break Blizzard's chat or other addons until a /reload.
+* (Bars) **Fixed health bars rendering solid green when a profile references a bar texture you don't have** — imported profiles often point at another addon's texture files; if that addon isn't installed (or its files changed), the bar showed WoW's green missing-texture state and class colours appeared broken. All bar textures now fall back to the stock texture with a one-time warning, on every update path (the fallback previously only applied when a frame was first created and was immediately overwritten). (by Krathe)
+* (Bars) Fixed class-coloured health bars staying stuck on the gradient colour (usually green) after using or switching away from the Percent colour mode — the class/custom colour is now written directly to the bar texture, so it can no longer be masked by a leftover gradient tint. (by Krathe)
 
 ## [4.7.3]
 
