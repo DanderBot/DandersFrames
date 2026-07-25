@@ -2,18 +2,6 @@
 
 ## [5.0.0]
 
-## [4.8.0]
-
-### Bug Fixes
-
-* (Click Casting) Fixed all binds being dead in your first arena or dungeon of a session until a reload. (by Krathe)
-* (Pinned Frames) Fixed an empty "drag to move" box getting stuck on screen after a profile switch, surviving reloads. (by Krathe)
-
-### Improvements
-
-* (Click Casting) Enabling a targeting fallback on a key that already does something now asks for confirmation and names what the key will stop doing.
-* (Click Casting) "Clear Blizzard Bindings" now warns that clearing is permanent, and only clears when you press it.
-
 ### WoW 12.1 (Midnight) Rework
 
 *The 12.1 rework is a big team effort — brought to you by Danders, Krathe and Maelareth. A single change below often includes work from more than one of us, so entries aren't credited individually.*
@@ -164,6 +152,18 @@ DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally chan
 * Dispel Overlay: "Color Name Text" is not yet wired to the new overlay (marked in place). A unit with dispellable debuffs of two different types can show both type icons overlapped (rare).
 * Aura Designer text colouring is drawn as a cover over the text: it ignores the out-of-range text fade, and group parts with their own inline colours keep them.
 * Dragging certain aura sliders can briefly stutter.
+
+## [4.8.0]
+
+### Bug Fixes
+
+* (Click Casting) Fixed all binds being dead in your first arena or dungeon of a session until a reload. (by Krathe)
+* (Pinned Frames) Fixed an empty "drag to move" box getting stuck on screen after a profile switch, surviving reloads. (by Krathe)
+
+### Improvements
+
+* (Click Casting) Enabling a targeting fallback on a key that already does something now asks for confirmation and names what the key will stop doing.
+* (Click Casting) "Clear Blizzard Bindings" now warns that clearing is permanent, and only clears when you press it.
 
 ## [4.7.5]
 
