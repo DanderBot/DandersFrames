@@ -1866,16 +1866,18 @@ function DF:UpdateDispelOverlay(frame)
 
         if testData and testData.dispelType then
             local overlay = CreateDispelOverlay(frame)
-            -- Preview what the container path renders live: Blizzard's palette
-            -- colour on the shared art (the game engine owns the RGB live; the
-            -- legacy widget's border/EDGE regions are geometry-matched
-            -- stand-ins for the ring slot / vignette carrier). GetTestDispelColor
-            -- is the fallback when the palette API is unavailable.
+            -- Preview what the container path renders LIVE: the shared account palette
+            -- (DF.db.dispelColors) on the shared art — the legacy widget's border/EDGE
+            -- regions are geometry-matched stand-ins for the ring slot / vignette
+            -- carrier. GetTestDispelColor resolves that palette and falls back to the
+            -- GAME palette per type, which is also what an untouched palette holds.
+            -- ⚠ This used to resolve the palette and then OVERWRITE it with
+            -- AuraUtil.GetAuraBorderColor, so test mode always previewed Blizzard's
+            -- colours while live rendered the user's — a leftover from the era when the
+            -- overlay really did render the game palette and a game-vs-custom split
+            -- existed. That split is gone (the overlay always follows the Colours page),
+            -- so the override made the preview lie about live. Never re-add it.
             local r, g, b = GetTestDispelColor(testData.dispelType, db)
-            if AuraUtil and AuraUtil.GetAuraBorderColor then
-                local ok, c = pcall(AuraUtil.GetAuraBorderColor, testData.dispelType)
-                if ok and c then r, g, b = c:GetRGB() end
-            end
 
             -- Calculate OOR alpha multiplier for test mode
             local oorMultiplier = 1.0
