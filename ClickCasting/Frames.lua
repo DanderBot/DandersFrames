@@ -437,8 +437,17 @@ function CC:CreateClickCastHeader()
     -- The ClickCastHeader is a secure frame that wraps unit frame OnEnter/OnLeave
     -- This is the approach used by Cell and Clique for in-combat keyboard bindings
     
-    if self.header then return end
-    
+    -- Validate, don't just presence-check. If this field ever holds a frame that
+    -- is not a secure handler, the old `if self.header then return end` kept the
+    -- impostor for the rest of the session and every hover bind stayed dead
+    -- until a /reload. A frame with no WrapScript is not our header, so rebuild.
+    if self.header then
+        if self.header.WrapScript then return end
+        DF:DebugError("CLICK", "CC.header held a non-secure frame (%s) — rebuilding the secure header",
+            tostring((self.header.GetName and self.header:GetName()) or "unnamed"))
+        self.header = nil
+    end
+
     -- Don't create during combat
     if InCombatLockdown() then
         -- Keep retrying while combat lasts rather than giving up after one
@@ -1490,6 +1499,22 @@ function CC:SetupSecureHandlers(frame)
     -- OnLeave only fires when truly leaving to the 3D world, not when hovering children.
     -- This allows us to safely clear bindings on OnLeave.
     
+    -- No secure header means no hover binds at all on this frame. This used to
+    -- fall straight through to the insecure hooks and still mark the frame as
+    -- set up, so the frame reported handlersSetup=true with enterCount=0 forever
+    -- (the "HOVER BUT NO KB BINDINGS / OnEnter DID NOT FIRE" signature) and no
+    -- retry was ever scheduled, because nothing errored. Treat it like the
+    -- WrapScript failure below: say so, and retry.
+    if not (self.header and self.header.WrapScript) then
+        DF:DebugError("CLICK", "No secure header when wrapping %s — hover binds cannot be installed; retrying in 2s",
+            frameName)
+        self:CreateClickCastHeader()
+        self:DeferAfter("wrapRetry:" .. frameName, 2, function()
+            CC:SetupSecureHandlers(frame)
+        end)
+        return
+    end
+
     if self.header and self.header.WrapScript then
         -- WrapScript OnEnter: Set up bindings
         --
@@ -2093,7 +2118,15 @@ local REPAIR_COOLDOWN = 5  -- seconds between repair attempts
 -- Returns true when the frame ends up wrapped.
 function CC:RewrapSecureHandlers(frame)
     if not frame or InCombatLockdown() then return false end
-    if not (self.header and self.header.WrapScript) then return false end
+    -- Without a secure header the whole re-wrap self-heal is a no-op, and it used
+    -- to bail silently — the repair would report "re-wrapped 0 frames" and look
+    -- like it had nothing to do. Say why, and try to get the header back.
+    if not (self.header and self.header.WrapScript) then
+        DF:DebugError("CLICK", "RewrapSecureHandlers: no secure header — cannot re-wrap %s",
+            tostring(frame.GetName and frame:GetName() or "unnamed"))
+        self:CreateClickCastHeader()
+        return false
+    end
     local snippets = self.wrapSnippets
     if not snippets then return false end
 

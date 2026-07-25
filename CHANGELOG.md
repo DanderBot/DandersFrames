@@ -4,6 +4,7 @@
 
 ### Bug Fixes
 
+* (Click Casting) **Fixed hover keybinds never working on frames that appear after you open the settings window** — opening the Click Casting options replaced the internal frame that owns hover bindings with a piece of the settings panel, so every frame created from then on (arena and boss frames, nameplates, frames for people joining your group) silently never got its keyboard bindings, and the automatic repair could not fix it either. A reload was the only way back. (by Krathe)
 * (Click Casting) Fixed keyboard binds going dead on every frame for a whole fight when combat interrupted a binding refresh — typically zoning into a raid and a pull starting seconds later. (by Krathe)
 * (Click Casting) Fixed hover keybinds dying for the rest of the session on some frames after visiting player housing. (by Krathe)
 * (Click Casting) Fixed cast-on-down silently switching itself off on Blizzard's own raid and party frames after every roster change. (by Krathe)
