@@ -6753,14 +6753,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             refreshMissing()
             DF:UpdateAllAuras()
         end), 30)
-        local mbDebug = settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Debug Mode (print to chat)"], db, "missingBuffIconDebug", function()
-            if DF.UpdateAllMissingBuffIcons then DF:UpdateAllMissingBuffIcons() end
-        end), 30)
-        -- The debug trace narrates the legacy UnitHasBuff scan, which never runs on
-        -- the read-free 12.1 widget (there is nothing to print — presence is never
-        -- known to Lua). Candidate for deletion in the post-port cleanup sweep.
-        GUI:BlockControl12_1(mbDebug, "limitation",
-            { id = "missingbuffs:debug", page = L["Missing Buffs"], when = function(d) return DF:FactoryOwnsMissingBuff(d) end })
+        -- (No Debug Mode checkbox: its trace narrated the legacy UnitHasBuff scan, which
+        -- never runs on the read-free 12.1 widget -- presence is never known to Lua, so
+        -- there is nothing to print. Removed 2026-07-25 as its own comment long proposed.)
         Add(settingsGroup, nil, 1)
         
         -- ===== BUFFS TO CHECK GROUP (Column 2) =====

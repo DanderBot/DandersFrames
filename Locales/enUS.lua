@@ -711,7 +711,6 @@ L["Debuffs that can be dispelled. Use the dropdown below to choose which dispels
 L["Debug"] = true
 L["Debug Log Export (Filtered)"] = true
 L["Debug logging %s"] = true
-L["Debug Mode (print to chat)"] = true
 L["Decimal Places"] = true
 L["Deduplication"] = true
 L["Default"] = true

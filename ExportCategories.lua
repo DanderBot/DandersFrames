@@ -453,7 +453,6 @@ DF.ExportCategories = {
         "missingBuffIconBorderSize",
         "missingBuffIconBorderStyle",
         "missingBuffIconBorderTexture",
-        "missingBuffIconDebug",
         "missingBuffIconEnabled",
         "missingBuffIconFrameLevel",
         "missingBuffIconScale",

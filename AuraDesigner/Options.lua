@@ -1177,16 +1177,6 @@ local function EnsureTypeConfig(auraName, typeKey, pool)
                 soundFile = nil,
                 soundLSMKey = nil,
                 volume = 0.8,
-                missingEnabled = true,
-                triggerMode = "ANY_MISSING",
-                combatMode = "ALWAYS",
-                startDelay = 2,
-                loopInterval = 3,
-                expireEnabled = false,
-                expireThreshold = 5,
-                expireThresholdMode = "SECONDS",
-                expirePlayOnce = false,
-                expireLoopInterval = 3,
                 -- Per-event native sounds (12.1 AddAuraSound triggers). The flat sound
                 -- above is the APPLIED sound (Added trigger). dropped = Removed (buff
                 -- fell off), stackGained = ApplicationsIncreased (stack gained). There is
@@ -3564,7 +3554,6 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
     -- gradient border style). See block pass below.
     local builtGroups = {}
     local swmCheck, borderCtl, wholeBarCheck, swmGroup, durColorByTimeCtl
-    local missingTriggerGroup, expireAlertGroup   -- sound casualties (P4.5 limitation blocks)
 
     local function AddWidget(widget, height)
         widget:SetPoint("TOPLEFT", parent, "TOPLEFT", 5, -totalHeight)
@@ -3614,8 +3603,6 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- frost them per-type. Tag the Expiring group for its own limitation block.
         builtGroups[#builtGroups + 1] = group
         if header == L["Show When Missing"] then swmGroup = group end
-        if header == L["Missing Trigger"] then missingTriggerGroup = group end
-        if header == L["Expire Alert"] then expireAlertGroup = group end
         return group
     end
 
@@ -4522,104 +4509,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         AddEventSoundGroup(L["Buff Dropped"], "dropped", L["Enable Buff-Dropped Sound"])
         AddEventSoundGroup(L["Stack Gained"], "stackGained", L["Enable Stack-Gained Sound"])
 
-        -- Missing Trigger
-        AddGroup(L["Missing Trigger"], function(g)
-            -- Initialise nil for older profiles (nil = enabled by default)
-            if proxy.missingEnabled == nil then proxy.missingEnabled = true end
-            local missingOn = proxy.missingEnabled ~= false
 
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Enable Missing Trigger"], proxy, "missingEnabled", function()
-                if not proxy.missingEnabled and DF.AuraDesigner.SoundEngine then
-                    DF.AuraDesigner.SoundEngine:StopAura(auraName)
-                end
-                DF:AuraDesigner_RefreshPage()
-            end), 28)
-
-            local triggerModeOptions = {
-                ANY_MISSING = L["Alert if anyone is missing the buff"],
-                ALL_MISSING = L["Alert only if nobody has the buff"],
-            }
-            local triggerModeDD = GUI:CreateDropdown(parent, L["Trigger Mode"], triggerModeOptions, proxy, "triggerMode")
-            g:AddWidget(triggerModeDD, 54)
-
-            local combatModeOptions = {
-                ALWAYS         = L["Always"],
-                IN_COMBAT      = L["In Combat Only"],
-                OUT_OF_COMBAT  = L["Out of Combat Only"],
-            }
-            local combatModeDD = GUI:CreateDropdown(parent, L["Combat Mode"], combatModeOptions, proxy, "combatMode")
-            g:AddWidget(combatModeDD, 54)
-
-            local startDelaySlider = GUI:CreateSlider(parent, L["Start Delay (seconds)"], 0, 10, 0.5, proxy, "startDelay")
-            g:AddWidget(startDelaySlider, 54)
-
-            local loopIntervalSlider = GUI:CreateSlider(parent, L["Loop Interval (seconds)"], 1, 30, 0.5, proxy, "loopInterval")
-            g:AddWidget(loopIntervalSlider, 54)
-
-            -- Grey out trigger/timing controls when missing trigger is disabled
-            if not missingOn then
-                triggerModeDD:SetAlpha(0.4)
-                triggerModeDD:EnableMouse(false)
-                combatModeDD:SetAlpha(0.4)
-                combatModeDD:EnableMouse(false)
-                startDelaySlider:SetAlpha(0.4)
-                startDelaySlider:EnableMouse(false)
-                loopIntervalSlider:SetAlpha(0.4)
-                loopIntervalSlider:EnableMouse(false)
-            end
-        end)
-
-        -- Expire Alert
-        AddGroup(L["Expire Alert"], function(g)
-            local expireOn = proxy.expireEnabled ~= false
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Enable Alert When Expiring"], proxy, "expireEnabled", function()
-                if not proxy.expireEnabled and DF.AuraDesigner.SoundEngine then
-                    DF.AuraDesigner.SoundEngine:StopAura(auraName)
-                end
-                DF:AuraDesigner_RefreshPage()
-            end), 28)
-
-            -- Threshold slider + s / % segment toggle -- the SHARED row. This was a
-            -- verbatim second copy of GUI:CreateExpiringThresholdRow; the only things
-            -- it did differently are passed as options (its own keys, and a 5s -- not
-            -- 10s -- reset when switching back to seconds).
-            local threshContainer = GUI:CreateExpiringThresholdRow(parent, proxy, {
-                thresholdKey     = "expireThreshold",
-                thresholdModeKey = "expireThresholdMode",
-                width            = contentWidth - 10,
-                resetValues      = { SECONDS = 5, PERCENT = 30 },
-                refreshPage      = function() DF:AuraDesigner_RefreshPage() end,
-            })
-            g:AddWidget(threshContainer, 54)
-
-            -- Play Once toggle
-            local playOnceOn = proxy.expirePlayOnce == true
-            local playOnceCB = GUI:CreateCheckbox(parent, L["Play Once"], proxy, "expirePlayOnce", function()
-                DF:AuraDesigner_RefreshPage()
-            end)
-            g:AddWidget(playOnceCB, 28)
-
-            -- Expire loop interval (greyed out when Play Once is enabled)
-            if proxy.expireLoopInterval == nil then proxy.expireLoopInterval = 3 end
-            local expireLoopSlider = GUI:CreateSlider(parent, L["Loop Interval (seconds)"], 1, 30, 0.5, proxy, "expireLoopInterval")
-            g:AddWidget(expireLoopSlider, 54)
-
-            -- Grey out expire sub-controls when expire alert is disabled.
-            -- Loop interval is also greyed when Play Once is enabled.
-            if not expireOn then
-                -- The threshold row greys as a unit through its own SetEnabled (it dims
-                -- itself and un-mouses the slider + both unit segments), replacing the
-                -- hand-dimming of the two widgets this block used to build inline.
-                threshContainer:SetEnabled(false)
-                playOnceCB:SetAlpha(0.4)
-                playOnceCB:EnableMouse(false)
-                expireLoopSlider:SetAlpha(0.4)
-                expireLoopSlider:EnableMouse(false)
-            elseif playOnceOn then
-                expireLoopSlider:SetAlpha(0.4)
-                expireLoopSlider:EnableMouse(false)
-            end
-        end)
     end
 
     -- ============================================================
@@ -4665,25 +4555,14 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         --     unreadable on the container path, so it is gone rather than frosted. The
         --     12.1-safe replacement is the DF.Expiration engine (the Expiry Alert group).
     elseif typeKey == "sound" then
-        -- P4.5 SHIPPED: the sound indicator plays natively ON APPLY via
-        -- C_UnitAuras.AddAuraAppliedSound (read-free, on-apply only). The whole-type roadmap
-        -- overlay is gone; the Sound Alert group (sound picker / volume / preview) stays
-        -- editable. Two surgical limitation blocks — both need a read the container path can't do:
-        --   * Missing Trigger — "alert WHILE the buff is absent" is presence-driven (present-vs-
-        --     total count) plus loop/delay timing. The native hook fires only ON GAIN, never on
-        --     absence. → permanent limitation.
-        --   * Expire Alert — "alert as the buff FADES" is remaining-time-driven; there is no
-        --     AuraRemovedSound / on-fade native hook. → permanent limitation.
-        -- (Per-play VOLUME is also unexpressible on the native path — it plays at the output
-        -- channel's volume — but the slider still drives the Preview button, so it is left live.)
-        if missingTriggerGroup then
-            GUI:BlockControl12_1(missingTriggerGroup, "limitation",
-                { id = "ad:sound:missing", page = L["Aura Designer"], when = ADgate })
-        end
-        if expireAlertGroup then
-            GUI:BlockControl12_1(expireAlertGroup, "limitation",
-                { id = "ad:sound:expire", page = L["Aura Designer"], when = ADgate })
-        end
+        -- P4.5 SHIPPED: the sound indicator plays natively via C_UnitAuras.AddAuraSound.
+        -- The Sound Alert group (picker / volume / preview) and the per-event groups
+        -- (Applied / Buff Dropped / Stack Gained) are all live and unblocked.
+        -- REMOVED 2026-07-25 -- Missing Trigger and Expire Alert. "Alert WHILE the buff is
+        -- absent" is presence-driven and no native hook fires during absence; "alert as the
+        -- buff FADES" is remaining-time-driven. Both were permanently frosted, and Expire
+        -- Alert's intent is now served natively by Buff Dropped (the Removed trigger), so
+        -- the groups and their ten inert keys are gone rather than left as dead controls.
     elseif typeKey == "framealpha" then
         -- Permanent: whole-frame alpha needs frame:SetAlpha gated on secret presence
         -- and collides with the range/OOR alpha owners — the whole effect is unavailable.

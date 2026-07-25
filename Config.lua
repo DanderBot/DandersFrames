@@ -1627,7 +1627,6 @@ DF.PartyDefaults = {
     missingBuffIconBorderSize = 2,
     missingBuffIconBorderStyle = "SOLID",
     missingBuffIconBorderTexture = "SOLID",
-    missingBuffIconDebug = false,
     missingBuffIconEnabled = true,
     missingBuffIconFrameLevel = 0,
     missingBuffIconScale = 1.2000000476837,
