@@ -494,8 +494,9 @@ function CC:CheckLoadoutProfileSwitch()
     if InCombatLockdown() then
         -- Defer, don't drop: entering an arena/dungeon starts combat quickly,
         -- and silently losing the check leaves the previous spec's profile
-        -- active for the whole match. OnCombatEnd drains pendingLoadoutCheck.
-        self.pendingLoadoutCheck = true
+        -- active for the whole match. The "loadoutCheck" queue job re-runs this
+        -- function and the drain on PLAYER_REGEN_ENABLED is automatic.
+        self:Defer("loadoutCheck")
         return
     end
 

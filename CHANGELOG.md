@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Bug Fixes
+
+* (Click Casting) Fixed keyboard binds going dead on every frame for a whole fight when combat interrupted a binding refresh — typically zoning into a raid and a pull starting seconds later. (by Krathe)
+* (Click Casting) Fixed hover keybinds dying for the rest of the session on some frames after visiting player housing. (by Krathe)
+* (Click Casting) Fixed cast-on-down silently switching itself off on Blizzard's own raid and party frames after every roster change. (by Krathe)
+
+### Improvements
+
+* (Click Casting) Work that has to wait for combat to end — profile switches, frame registration, binding refreshes and keyboard-bind rebuilds — now runs from a single queue that always drains, instead of ten separate flags; a keyboard-bind refresh asked for during combat was previously dropped entirely. (by Krathe)
+* (Click Casting) Binding-settle timers are now deduplicated so repeated events reuse one pending pass, a background rescan that re-armed itself forever now stops once its work is done, and two setup steps that gave up when combat outlasted their single retry now retry until combat ends. (by Krathe)
+* (Click Casting) Applying and clearing bindings now tracks exactly which click attributes were written on each frame instead of a ~500-write blanket sweep, which also fixes the previous profile's action lingering on an unmodified mouse button until reload. (by Krathe)
+* (Click Casting) **Removed:** the hidden per-binding "load only for these specs" field, which no settings screen could ever set and which could filter your binding list using unresolved spec data at login — per-spec click casting is unchanged via loadout-assigned profiles. (by Krathe)
+
+
 ## [4.8.0]
 
 ### Bug Fixes
@@ -13,15 +27,6 @@
 
 * (Click Casting) Enabling a targeting fallback on a key that already does something now asks for confirmation and names what the key will stop doing.
 * (Click Casting) "Clear Blizzard Bindings" now warns that clearing is permanent, and only clears when you press it.
-* (Click Casting) Enabling a targeting fallback (Global, Target, Self or Always Cast) on a key that already does something in WoW now asks for confirmation and names exactly what the key will stop doing — these options make the key active everywhere, not just over the frames. The fallback tooltips explain this too.
-* (Click Casting) The "Clear Blizzard Bindings" button now warns that clearing is permanent, and it no longer silently re-clears Blizzard's click-casting profile every time click casting is enabled — clearing only happens when you press the button.
-* (Click Casting) Work that has to wait for combat to end — profile switches, frame registration, binding refreshes and keyboard-bind rebuilds — now runs from a single queue that always drains when you leave combat, instead of ten separate flags that each had to be emptied by hand. A keyboard-bind refresh asked for during combat was being dropped entirely, and hovercast keys could be lost if a loading screen landed mid-combat; both now always apply. (by Krathe)
-* (Click Casting) Internal timers that settle bindings after loading screens, spec changes, arena prep and boss pulls are now deduplicated — repeated events reuse one pending pass instead of stacking several, a background rescan that re-armed itself every 2 seconds forever now stops once its work is done, and two setup steps that silently gave up when combat outlasted their single retry (leaving hover-casting dead until reload) now retry until combat ends. (by Krathe)
-* (Click Casting) Applying and clearing bindings now tracks exactly which click attributes were written on each frame and clears precisely those, replacing a ~500-write blanket sweep per frame. This also fixes a bug where switching profiles could leave the previous profile's action on an unmodified mouse button on Blizzard/other addons' frames until reload. (by Krathe)
-* (Click Casting) Fixed keyboard binds going dead on every frame for an entire fight when combat interrupted a binding refresh (typical case: zoning into LFR and a pull starting seconds later while a roster update was still applying). The refresh wiped each frame's hover-key data up front and only rebuilt it at the end, so an interruption stranded every processed frame with none; the data is now kept in place until the rebuild actually runs. This window has existed since click casting shipped. (by Krathe)
-* (Click Casting) Fixed hover keybinds dying for the rest of the session on some frames after visiting player housing — the secure hover handlers could be invalidated by the game, the self-repair could see it but had no way to re-install them, and the "wrap failed" path gave up on the frame permanently. Repairs now re-install the hover handlers on every frame (so any zone change or the automatic detector fixes it within seconds instead of needing a reload), a failed install retries instead of giving up, and leaving housing triggers a repair directly. (by Krathe)
-* (Click Casting) When click casting is used on **Blizzard's own raid/party frames**, the game resets their click registration on every roster shuffle — silently turning off cast-on-down until the bindings were reapplied. Click casting now detects exactly which of those frames the game touched and restores its bindings automatically (immediately out of combat, at combat end otherwise). DandersFrames' own frames are unaffected — they register clicks once and keep them across roster changes. (by Krathe)
-* (Click Casting) **Removed:** the hidden per-binding "load only for these specs" field (`loadSpec`). No settings screen could ever set it — it existed only in hand-edited or imported data — and reading it during a cold login could silently filter the binding list using unresolved spec data. Per-spec click casting is unchanged: assign profiles to loadouts, which remains the supported (and visible) way. (by Krathe)
 
 ## [4.7.5]
 

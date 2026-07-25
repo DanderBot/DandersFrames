@@ -30,7 +30,8 @@ function CC:RegisterEvents()
     eventFrame:RegisterEvent("NAME_PLATE_UNIT_ADDED")
     eventFrame:RegisterEvent("NAME_PLATE_UNIT_REMOVED")
 
-    -- Spell data arrival — resolves a provisional (cold-start) binding map
+    -- Spell data arrival — one of the triggers that re-runs a cold-start
+    -- profile check (see CC:ResolveColdStartProfile)
     eventFrame:RegisterEvent("SPELLS_CHANGED")
 
     -- Player housing can invalidate secure wraps on unit frames
@@ -49,12 +50,12 @@ function CC:RegisterEvents()
         elseif event == "PLAYER_SPECIALIZATION_CHANGED" or event == "ACTIVE_PLAYER_SPECIALIZATION_CHANGED" then
             -- Spec changed - check for profile switch
             CC:OnSpecChanged()
-            -- Cold-start resolve: a map built before GetSpecialization()
-            -- resolved dropped every spec-scoped binding — rebuild it now
-            CC:ResolveProvisionalMap("spec-resolved")
+            -- Cold-start resolve: a loadout check that ran before
+            -- GetSpecialization() resolved could not pick a profile — run it now
+            CC:ResolveColdStartProfile("spec-resolved")
         elseif event == "SPELLS_CHANGED" then
-            -- Spell data arrived/changed — no-op unless the map is provisional
-            CC:ResolveProvisionalMap("spells-changed")
+            -- Spell data arrived/changed — no-op unless a check is outstanding
+            CC:ResolveColdStartProfile("spells-changed")
         elseif event == "TRAIT_CONFIG_UPDATED" or event == "TRAIT_CONFIG_CREATED" or event == "ACTIVE_COMBAT_CONFIG_CHANGED" then
             -- Loadout/talent changed - check for profile switch and reapply bindings (with debounce)
             if not InCombatLockdown() then
@@ -109,11 +110,12 @@ function CC:RegisterEvents()
                 -- so a broken hover-bind state never survives a zone change
                 CC:RunBindingRepair("zone-in", true)
 
-                -- Cold-start resolve: if the login build ran before spec data
-                -- was available, the map is provisional — rebuild it on the
-                -- first loading screen so it is correct BEFORE the first
-                -- arena/dungeon of the session, not only after a /reload
-                CC:ResolveProvisionalMap("zone-in")
+                -- Cold-start resolve: if the login check ran before spec data
+                -- was available, no profile could be picked — re-run it on the
+                -- first loading screen so the right profile is active BEFORE
+                -- the first arena/dungeon of the session, not only after a
+                -- /reload
+                CC:ResolveColdStartProfile("zone-in")
 
                 -- Check for loadout-based profile on initial load. Keyed so
                 -- back-to-back loading screens reuse one pending pass, and
@@ -128,8 +130,8 @@ function CC:RegisterEvents()
             end)
         elseif event == "ARENA_PREP_OPPONENT_SPECIALIZATIONS" then
             -- Arena frames should now exist
-            -- Belt: never enter an arena on a provisional (cold-start) map
-            CC:ResolveProvisionalMap("arena-prep")
+            -- Belt: never enter an arena on an unresolved cold-start profile
+            CC:ResolveColdStartProfile("arena-prep")
             CC:OnArenaPrep()
         elseif event == "INSTANCE_ENCOUNTER_ENGAGE_UNIT" then
             -- Boss frames should now exist

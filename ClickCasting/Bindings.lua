@@ -2432,7 +2432,7 @@ end
 -- The binding map itself is no longer spec-dependent: retiring the per-binding
 -- loadSpec field removed the only path by which a cold-start build could drop
 -- bindings, so there is no provisional-map half to resolve any more.
-function CC:ResolveProvisionalMap(reason)
+function CC:ResolveColdStartProfile(reason)
     if not self.loadoutCheckUnresolved then return end
     if not (self.db and self.db.enabled) then return end
     if self.provisionalResolveTimer then self.provisionalResolveTimer:Cancel() end
