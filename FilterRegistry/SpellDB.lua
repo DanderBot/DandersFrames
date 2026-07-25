@@ -29,10 +29,14 @@ R.DBStamp = { harvest = "2026-07-12", gameBuild = 68569 }
 -- to let the next regeneration re-add the spell.
 R.Excluded = {
     -- Maintainer curation 2026-07-19 (Krathe filter pass; kept in sync via lab discussion)
-    [120517]  = "Halo - does not leave an aura on the unit",
-    [120644]  = "Halo (variant) - does not leave an aura",
-    [453094]  = "Halo (variant) - does not leave an aura",
-    [449840]  = "Halo (variant) - does not leave an aura",
+    -- Halo: a real aura, but HIDDEN - the server applies it (WCL logs 19-47M ms
+    -- of uptime per id) and the client never draws it on the buff bar. 100% self,
+    -- Priest-only. Its visible children (Echo of Light, Resonant Energy, Power
+    -- Surge) are carried as their own records instead.
+    [120517]  = "Halo - hidden self-only aura, never on allies; track its visible children instead",
+    [120644]  = "Halo (variant) - hidden self-only aura; see 120517",
+    [453094]  = "Halo (variant) - hidden self-only aura; see 120517",
+    [449840]  = "Halo (variant) - hidden self-only aura; see 120517",
     [108280]  = "Healing Tide Totem - totem, not an aura on the unit",
     [5394]    = "Healing Stream Totem - totem, not an aura on the unit",
     [198103]  = "Earth Elemental - guardian/pet, not an aura on the unit",
@@ -62,6 +66,9 @@ R.CategoryPatch = {
     [363502]  = { raidDefensives = true },
     [359816]  = { raidDefensives = true },
     [362361]  = { raidDefensives = true },
+    -- Power Surge (Priest/Archon, self-only) - pin to Healing beside its siblings:
+    [453113]  = { healing = true },
+    [453112]  = { healing = true },
     -- Moved into Healing (Holy Paladin healing-adjacent auras):
     [1241717] = { healing = true },  -- Seraphic Barrier
     [378412]  = { healing = true },  -- Light of the Titans
@@ -177,6 +184,7 @@ R.Spells = {
     { id = 1241866,  n = "Glistening Radiance",       class = "PALADIN",       cats = { healing = true } },
     { id = 431907,   alts = { 463073 }, n = "Sun's Avatar", class = "PALADIN", off = true, cats = { healing = true } },
     { id = 453846,   alts = { 453850 }, n = "Resonant Energy", class = "PRIEST", off = true, cats = { healing = true } },
+    { id = 453113,   alts = { 453112 }, n = "Power Surge", class = "PRIEST", off = true, cats = { healing = true } },
     { id = 469703,   n = "Tempered in Battle",        class = "PALADIN",       cats = { healing = true } },
     { id = 1292922,  n = "Coalescence",               class = "MONK",          cats = { healing = true } },
     { id = 450805,   n = "Purified Spirit",           class = "MONK",          cats = { healing = true } },

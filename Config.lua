@@ -907,16 +907,68 @@ DF.GlobalDefaults = {
         -- a glance in combat without going pure-primary neon. Keep in sync with
         -- DEFAULT_DURATION_BREAKPOINTS (Features/Auras.lua) so "Reset to Default" and the engine
         -- fallback agree. Hex: 5fe05f/ffd23d/ff9838/f75555.
-        { threshold = 8, color = { r = 0.373, g = 0.878, b = 0.373 } },  -- green  (fresh / healthy, >=8s)
-        { threshold = 5, color = { r = 1.0,   g = 0.824, b = 0.239 } },  -- gold   (5-8s)
-        { threshold = 2, color = { r = 1.0,   g = 0.596, b = 0.22  } },  -- orange (2-5s)
-        { threshold = 0, color = { r = 0.969, g = 0.333, b = 0.333 } },  -- red    (<2s, about to fall off)
+        -- 9/6/3 on the strip's 12s preview domain = EVEN QUARTERS, the same bar the percent
+        -- ramp's 75/50/25 draws — flipping the Colours-page tabs shows one identical default.
+        { threshold = 9, color = { r = 0.373, g = 0.878, b = 0.373 } },  -- green  (fresh / healthy, >=9s)
+        { threshold = 6, color = { r = 1.0,   g = 0.824, b = 0.239 } },  -- gold   (6-9s)
+        { threshold = 3, color = { r = 1.0,   g = 0.596, b = 0.22  } },  -- orange (3-6s)
+        { threshold = 0, color = { r = 0.969, g = 0.333, b = 0.333 } },  -- red    (<3s, about to fall off)
     },
+    -- PERCENT ramp for duration TEXT. Thresholds are PERCENT OF TOTAL REMAINING (0-100),
+    -- so every aura tells the same relative story regardless of length — a 30-minute raid
+    -- buff ramps exactly like a 6-second HoT, which a seconds ladder can never do (a long
+    -- buff sits in the "fresh" band essentially forever). Same "highest threshold <=
+    -- remaining wins" rule as the seconds ramp above.
+    durationColorByPercentBreakpoints = {
+        -- Same vivid traffic-light palette as the seconds ladder, spread over the whole
+        -- life of the aura. Keep in sync with DEFAULT_PERCENT_BREAKPOINTS (Features/Auras.lua).
+        -- 75/50/25 = EVEN QUARTERS, mirroring the seconds ladder's 9/6/3 on its 12s
+        -- preview domain — the two default bars are identical.
+        { threshold = 75, color = { r = 0.373, g = 0.878, b = 0.373 } },  -- green  (>=75% left)
+        { threshold = 50, color = { r = 1.0,   g = 0.824, b = 0.239 } },  -- gold   (50-75%)
+        { threshold = 25, color = { r = 1.0,   g = 0.596, b = 0.22  } },  -- orange (25-50%)
+        { threshold = 0,  color = { r = 0.969, g = 0.333, b = 0.333 } },  -- red    (<25%, about to fall off)
+    },
+    -- ============================================================
+    -- HOW the duration-text ramp is READ (account-wide, Colours page)
+    -- ============================================================
+    -- The ramp's colours and the way they're read belong together, so both live here
+    -- rather than on each aura page — a row only carries an on/off. Text supports all
+    -- four combinations; the expiry border/tint supports only stepped (see below).
+    durationTextColorSmooth = true,        -- true = blend between stops, false = snap to the stop at or below
+    durationTextColorScale  = "PERCENT",   -- "PERCENT" | "SECONDS" — which ramp text reads
+    -- The expiry BORDER/TINT reveal has NO ramp of its own — it reads the two above, the
+    -- same lists the duration text uses, picked by the reveal's own per-indicator unit
+    -- (expiryAlertThresholdUnit). One set of colours for "time is running out".
+    -- The reveal cannot BLEND between them: its colours are baked into |T inline-texture
+    -- escapes, and inline textures IGNORE the fontstring vertex colour the smooth curve
+    -- writes (probe-verified). So durationTextColorSmooth above is text-only by nature.
+    -- A stop at or above an indicator's Alert Below threshold never renders — the reveal
+    -- doesn't exist up there, the same way a text stop past the aura's duration never
+    -- shows. /df cbt lists the affected stops per indicator.
+    -- (Removed 2026-07-24: durationBorderColorScale + durationBorderColorStops +
+    -- durationBorderColorPercentStops. A separate border palette bought nothing once the
+    -- defaults were asked to match the text, and the account-wide scale could not express
+    -- a glyph at 5 seconds next to a border at 30%.)
 }
 
 -- ============================================================
 -- DEFAULT SETTINGS (exported from profile v2.9.8)
 -- ============================================================
+
+-- Shared default dispel-type palette (the game colours). One source of truth for
+-- the db colour defaults below, the test/OOR fallbacks (Features/Dispel.lua) and
+-- the custom-colour resolver (Frames/Colors.lua). Enrage defaults to Bleed's red;
+-- both get their own picker so they can be told apart.
+DF.DispelDefaultColors = {
+    Magic   = { r = 0.2, g = 0.6, b = 1.0 },
+    Curse   = { r = 0.6, g = 0.0, b = 1.0 },
+    Disease = { r = 0.6, g = 0.4, b = 0.0 },
+    Poison  = { r = 0.0, g = 0.6, b = 0.0 },
+    Bleed   = { r = 0.8, g = 0.0, b = 0.0 },
+    Enrage  = { r = 0.8, g = 0.0, b = 0.0 },   -- shares Bleed's red
+    None    = { r = 0.0, g = 0.0, b = 0.0 },   -- None / Physical (icon border only)
+}
 
 DF.PartyDefaults = {
     -- Global Font Shadow Settings (applies when outline is SHADOW)
@@ -1073,6 +1125,9 @@ DF.PartyDefaults = {
     buffDeduplicateDefensives = true,
     buffDurationAnchor = "CENTER",
     buffDurationColor = {r = 1, g = 1, b = 1},
+    -- Colour-by-time is a plain ON/OFF here. HOW it reads (smooth vs stepped, percent vs
+    -- seconds) and the colours themselves are account-wide on the Colours page — the mode
+    -- is a property of the ramp, not of this row (see durationTextColorSmooth below).
     buffDurationColorByTime = true,
     buffDurationHideAboveEnabled = false,
     buffDurationHideAboveThreshold = 10,
@@ -1095,37 +1150,13 @@ DF.PartyDefaults = {
     buffDurationBarEnabled = false,
     buffDurationBarPosition = "BOTTOM",       -- "BOTTOM" / "TOP"
     buffDurationBarHeight = 4,
-    buffDurationBarGap = 2,
+    buffDurationBarGap = 1,
+    buffDurationBarColorMode = "STATIC",      -- STATIC / DF / DFSTOPS / CLASSIC (see BuildDurationBarSpec)
     buffDurationBarTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Minimalist",
     buffDurationBarColor = {r = 0.2, g = 0.9, b = 0.3, a = 1},
     buffDurationBarBGColor = {r = 0, g = 0, b = 0, a = 0.8},
     buffDurationBarReverseFill = false,
-    buffExpiringBorderColor = {r = 1, g = 0.50196081399918, b = 0, a = 1},
-    buffExpiringBorderColorByTime = false,
-    buffExpiringBorderEnabled = true,
-    buffExpiringBorderInset = 0,
-    buffExpiringBorderPulsate = true,
-    buffExpiringBorderThickness = 2,
     -- Expiring Animation (AD-style full toolkit) — replaces the legacy
-    -- buffExpiringBorderPulsate boolean (migrated: true -> DF_PULSATE).
-    buffExpiringBorderAnimationType = "DF_PULSATE",
-    buffExpiringBorderAnimationColor = {r = 1, g = 0.5, b = 0, a = 1},
-    buffExpiringBorderAnimationFrequency = 2,
-    buffExpiringBorderAnimationParticles = 8,
-    buffExpiringBorderAnimationLength = 8,
-    buffExpiringBorderAnimationThickness = 3,
-    buffExpiringBorderAnimationScale = 1,
-    buffExpiringBorderAnimationInset = 0,
-    buffExpiringBorderAnimationOffsetX = 0,
-    buffExpiringBorderAnimationOffsetY = 0,
-    buffExpiringBorderAnimationMask = false,
-    buffExpiringBorderAnimationSidesAxis = "HORIZONTAL",
-    buffExpiringBorderAnimationCornerLength = 10,
-    buffExpiringEnabled = true,
-    buffExpiringThreshold = 30,
-    buffExpiringThresholdMode = "PERCENT",
-    buffExpiringTintColor = {r = 1, g = 0, b = 0.12156863510609, a = 0.46354159712791},
-    buffExpiringTintEnabled = false,
 
     -- Aura Source Mode
 
@@ -1147,13 +1178,19 @@ DF.PartyDefaults = {
     directBuffSortReverse = false,            -- Reverse the sort direction
 
     -- Direct Mode: Debuff Filters
-    directDebuffShowAll = false,              -- Show all debuffs (ignores category filters)
+    directDebuffShowAll = true,               -- Show all debuffs (DEFAULT ON — Blizzard's category tokens miss untagged debuffs even with all enabled, so "all" is the only complete option; category mode stays available)
     debuffFilterBoss = true,                  -- Boss debuffs (native isBossAura)
     debuffFilterRole = true,                  -- Role debuffs (native isRoleAura)
     debuffFilterPriority = true,              -- Priority debuffs (native isPriorityAura)
     debuffFilterCrowdControl = true,          -- Crowd control (CROWD_CONTROL token)
     debuffFilterRaid = false,                 -- Other raid-flagged debuffs (RAID token)
     debuffFilterDispellable = true,           -- Dispellable debuffs (mode below)
+    -- Debuff blacklist: hide these non-secret debuffs from the debuff row (12.1
+    -- excludeSpellIDs, friendly-safe — NeverSecret only). Default hides the
+    -- post-Lust family (Sated/Exhaustion/Temporal Displacement/Fatigued/Insanity);
+    -- Deserters + Ride Along are opt-in on the Aura Blacklist page. Buffs are NOT
+    -- here by design — they're opt-in via the Filter Designer.
+    debuffBlacklist = { [57724] = true, [57723] = true, [80354] = true, [160455] = true, [95809] = true },
     directDebuffDispellableMode = "PLAYER",  -- "PLAYER" (dispellable by me) / "ALL" (dispellable type map) / "ANY" (native DISPELLABLE token, PTR-5+)
     debuffMaxDurationEnabled = false,         -- Hide long debuffs
     debuffMaxDurationMinutes = 5,             -- ... threshold (base duration)
@@ -1175,7 +1212,6 @@ DF.PartyDefaults = {
     buffStackAnchor = "BOTTOMRIGHT",
     buffStackColor = {r = 1, g = 0.82, b = 0},
     buffStackFont = "DF Roboto SemiBold",
-    buffStackMinimum = 2,
     buffStackOutline = "SHADOW;OUTLINE",
     buffStackScale = 1,
     buffStackX = 3,
@@ -1272,22 +1308,12 @@ DF.PartyDefaults = {
     debuffDurationBarEnabled = false,
     debuffDurationBarPosition = "BOTTOM",     -- "BOTTOM" / "TOP"
     debuffDurationBarHeight = 4,
-    debuffDurationBarGap = 2,
+    debuffDurationBarGap = 1,
+    debuffDurationBarColorMode = "STATIC",
     debuffDurationBarTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Minimalist",
     debuffDurationBarColor = {r = 0.2, g = 0.9, b = 0.3, a = 1},
     debuffDurationBarBGColor = {r = 0, g = 0, b = 0, a = 0.8},
     debuffDurationBarReverseFill = false,
-    debuffExpiringBorderColor = {r = 1, g = 0.27843138575554, b = 0, a = 1},
-    debuffExpiringBorderColorByTime = false,
-    debuffExpiringBorderEnabled = true,
-    debuffExpiringBorderInset = 1,
-    debuffExpiringBorderPulsate = true,
-    debuffExpiringBorderThickness = 2,
-    debuffExpiringEnabled = false,
-    debuffExpiringThreshold = 90,
-    debuffExpiringThresholdMode = "PERCENT",
-    debuffExpiringTintColor = {r = 1, g = 0.30196079611778, b = 0.30196079611778, a = 0.81119740009308},
-    debuffExpiringTintEnabled = true,
     debuffGrowth = "RIGHT_UP",
     debuffHideSwipe = false,
     debuffMax = 5,
@@ -1300,7 +1326,6 @@ DF.PartyDefaults = {
     debuffSize = 20,
     debuffStackAnchor = "BOTTOMRIGHT",
     debuffStackFont = "DF Roboto SemiBold",
-    debuffStackMinimum = 2,
     debuffStackOutline = "SHADOW;OUTLINE",
     debuffStackScale = 1,
     debuffStackX = 0,
@@ -1318,7 +1343,8 @@ DF.PartyDefaults = {
     defensiveDurationBarEnabled = false,
     defensiveDurationBarPosition = "BOTTOM",  -- "BOTTOM" / "TOP"
     defensiveDurationBarHeight = 4,
-    defensiveDurationBarGap = 2,
+    defensiveDurationBarGap = 1,
+    defensiveDurationBarColorMode = "STATIC",
     defensiveDurationBarTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Minimalist",
     defensiveDurationBarColor = {r = 0.2, g = 0.9, b = 0.3, a = 1},
     defensiveDurationBarBGColor = {r = 0, g = 0, b = 0, a = 0.8},
@@ -1368,6 +1394,7 @@ DF.PartyDefaults = {
     defensiveIconDurationX = 0,
     defensiveIconDurationY = 0,
     defensiveIconEnabled = true,
+    defensiveIconDurationFormat = "NUMBER",   -- NUMBER / SHORT / PERCENT (icon-sized formats)
     defensiveIconFrameLevel = 0,
     defensiveIconHideSwipe = false,
     defensiveIconScale = 1,
@@ -1378,8 +1405,10 @@ DF.PartyDefaults = {
     defensiveIconY = 0,
     defensiveSortOrder = "EXTERNALS",         -- "DEFAULT" / "TIME" / "EXTERNALS" (EXTERNALS = the shipped BigDefensive order)
 
-    -- Dispel Overlay (game-palette colours only — the Custom Colors mode and its
-    -- per-type pickers/intensity were removed 2026-07-11; see Features/Dispel.lua)
+    -- Dispel Overlay. Dispel-type colours come from the shared account palette
+    -- DF.db.dispelColors (edited on the Colors page; defaults = the game palette),
+    -- applied always — there is no game-vs-custom toggle (Reset on the Colors page
+    -- restores the game colours). The debuff icon opts in via "Color by Dispel Type".
     dispelAnimate = false,
     dispelBorderAlpha = 1,
     dispelBorderInset = 0,
@@ -1598,7 +1627,6 @@ DF.PartyDefaults = {
     missingBuffIconBorderSize = 2,
     missingBuffIconBorderStyle = "SOLID",
     missingBuffIconBorderTexture = "SOLID",
-    missingBuffIconDebug = false,
     missingBuffIconEnabled = true,
     missingBuffIconFrameLevel = 0,
     missingBuffIconScale = 1.2000000476837,
@@ -2243,7 +2271,14 @@ DF.PartyDefaults = {
     -- testShowTargetedList drives the Targeted List demo bars in party
     -- test mode. There is no raid-mode equivalent because the
     -- Targeted List itself is party-only.
-    testShowTargetedList = false,
+    --
+    -- The toggle defaults below MIRROR TEST_PRESETS.STATIC (TestMode/TestMode.lua),
+    -- so a fresh profile actually matches the preset the panel shows as selected
+    -- (testPreset = "STATIC"). They drifted apart once; if STATIC changes, change
+    -- these to match. The sliders (testBuffCount/testDebuffCount/testFrameCount)
+    -- are deliberately outside the preset - a working preference, not part of its
+    -- visual identity - so they have no STATIC counterpart.
+    testShowTargetedList = true,
     testAnimateTargetedList = true,
     testAnimateHealth = false,
     testBuffCount = 2,
@@ -2252,19 +2287,19 @@ DF.PartyDefaults = {
     testPreset = "STATIC",
     testShowAbsorbs = false,
     testShowAggro = false,
-    testShowAuras = false,
-    testShowDispelGlow = false,
+    testShowAuras = true,
+    testShowDispelGlow = true,
     testShowExternalDef = false,
     testShowHealPrediction = false,
     testShowMissingBuff = false,
     testShowOutOfRange = false,
     testShowPets = true,
-    testShowReducedMaxHealth = true,
+    testShowReducedMaxHealth = false,
     testShowSelection = false,
     testShowStatusIcons = true,
     testShowTargetedSpell = true,
     testShowPersonalTargeted = true,
-    testShowAuraDesigner = false,
+    testShowAuraDesigner = true,
     testShowTextDesigner = true,
 
     -- Tooltip settings
@@ -2404,7 +2439,6 @@ DF.PartyDefaults = {
             stackY = -2,
             iconBorderEnabled = true,
             iconBorderThickness = 1,
-            stackMinimum = 2,
             durationColorByTime = true,
             durationColor = {r = 1, g = 1, b = 1, a = 1},
             stackColor = {r = 1, g = 1, b = 1, a = 1},

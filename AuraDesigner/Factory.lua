@@ -487,14 +487,20 @@ end
 -- secret visibility. levelOffset 10 lifts the ring above the class border (frame+10 inside
 -- the slot) so it reads as an AD border, mirroring the legacy draw-above default
 -- (Indicators.lua:1145-1147). Z-order polish is a P4.7 concern.
-local function buildBorderConfig(unit, map, spec, filter)
+-- drawAbove (the indicator's `drawAboveFrameBorder`, default true) picks which side of the
+-- frame's own class/role border this ring lands on. That border is a DF.Border child at
+-- frame+10 (Frames/Border.lua:69), so 10 put the two at the SAME level and left the order to
+-- creation sequence -- the toggle's whole point. 11 = definitively above (the legacy
+-- draw-above default), 9 = definitively tucked underneath. Wired 2026-07-25; the flag rides
+-- the border structSig so toggling it rebuilds with the new offset.
+local function buildBorderConfig(unit, map, spec, filter, drawAbove)
     return {
         unit = unit,
         mode = "overlay",
         filter = filter or "HELPFUL",
         candidateFilters = { includeSpellIDs = map },
         enabled = true,
-        frameLevelOffset = 10,
+        frameLevelOffset = (drawAbove ~= false) and 11 or 9,
         style = { border = { spec = spec } },
     }
 end
@@ -540,23 +546,40 @@ local function buildBorderSpec(frame, borderCfg)
     -- from a plain config number instead of measuring the secret slot. Ignored otherwise.
     spec.knownWidth  = fdb.frameWidth
     spec.knownHeight = fdb.frameHeight
-    -- KNOWN DEGRADATION (GRADIENT → solid): the AuraContainer overlay-border builder creates
-    -- the DF.Border with solidOnly=true (AuraContainer.lua:298), because container slots are
-    -- anchored by Blizzard's flow layout with SECRET / unresolved rects and gradient rendering
-    -- needs a resolved rect to compute its direction+extent (the same rect problem that forces
-    -- the secretRect anchor-only path — see AuraContainer.lua:291-294). So a user's GRADIENT
-    -- border style renders as a SOLID ring here (texture styles still render). Threading
-    -- solidOnly=false was deliberately NOT done: that flag lives on the SHARED slot-border
-    -- builder used by the #205 buff/debuff rows too, and enabling gradients on a secret-anchored
-    -- rect is unverified (likely broken), which would be worse than a clean solid. → P4.7 must
-    -- FROST / API-limit-mark the gradient border-style control for factory-owned AD.
+    -- GRADIENT: this used to carry a "KNOWN DEGRADATION (GRADIENT -> solid)" note claiming the
+    -- overlay border cannot gradient because the slot's rect is SECRET and "gradient rendering
+    -- needs a resolved rect to compute its direction+extent". ★ RE-READ 2026-07-25 -- that
+    -- reasoning does not survive the source:
+    --   * DF.Border's gradient path MEASURES NOTHING. It is SetColorTexture(1,1,1,1) then
+    --     SetGradient(direction, a, b) on edges positioned by SetPoint. There is no
+    --     GetWidth / GetHeight / GetLeft anywhere in Apply -- SetGradient ramps C-side across
+    --     whatever the texture already spans, so an unresolved rect is not an input.
+    --   * Apply's gradient branch is gated on `style == "GRADIENT" and gradient and CreateColor`
+    --     with NO _solidOnly check (Frames/Border.lua), so the slot's solidOnly flag never
+    --     blocked the paint in the first place.
+    --   * solidOnly is about secret COLOURS, not rects -- it skips CreateColor/SetGradient
+    --     because those taint on secret values (debuff dispel tints). The gradient pickers are
+    --     STATIC config, and Border.lua:195 skips the ctx colour paths entirely for GRADIENT,
+    --     so no secret can reach them. secretRect is the rect flag, and only TEXTURE needs it.
+    -- The three gradient controls are therefore UNFROSTED (AuraDesigner/Options.lua) to find out
+    -- what actually happens. If it still renders solid in game, the real cause is something not
+    -- yet identified -- record it here and re-frost, rather than restoring the rect explanation.
     return spec
 end
 
--- Order-stable cosmetic signature of a DF.Border spec (scalars + one-level subtables).
+-- Order-stable cosmetic signature of a DF.Border spec (scalars + NESTED subtables).
 -- Field-name-agnostic so it survives BuildSpec schema tweaks; any change → ApplyStyle
 -- (in-place restyle), never a rebuild (only the identity set is structural).
-local function subSig(t)
+--
+-- ★ RECURSES (fixed 2026-07-25). This used to serialise only ONE level and silently drop
+-- any table it found inside a subtable, which made whole settings invisible to the sig:
+-- spec.gradient holds startColor/endColor as COLOUR TABLES, so editing a gradient colour
+-- left coSig unchanged, ApplyStyle never ran, and the border kept the colours it was first
+-- painted with (field-caught: "I can see the gradient but not the colours I set" -- the
+-- direction dropdown worked, because direction is a scalar). spec.shadow.color had the
+-- same latent hole. Depth-capped purely as a cycle guard; real specs are 2-3 deep.
+local function subSig(t, depth)
+    depth = depth or 1
     local keys = {}
     for kk in pairs(t) do keys[#keys + 1] = kk end
     tsort(keys)
@@ -564,7 +587,11 @@ local function subSig(t)
     for _, kk in ipairs(keys) do
         local v = t[kk]
         local tv = type(v)
-        if tv ~= "table" and tv ~= "function" and tv ~= "userdata" and tv ~= "thread" then
+        if tv == "table" then
+            if depth < 4 then
+                parts[#parts + 1] = tostring(kk) .. "={" .. subSig(v, depth + 1) .. "}"
+            end
+        elseif tv ~= "function" and tv ~= "userdata" and tv ~= "thread" then
             parts[#parts + 1] = tostring(kk) .. "=" .. tostring(v)
         end
     end
@@ -858,16 +885,27 @@ local function buildDurationTextSpec(indicator, defaultShow, defScale, defColorB
     -- instance = inherit the caller's default.
     local rawCBT = indicator.durationColorByTime
     if rawCBT == nil then rawCBT = defColorByTime end
-    local colorByTime = rawCBT and true or false
+    -- Colour-by-time is a MODE (legacy instances hold a boolean -> STEP_SECONDS). On
+    -- 68914+ it paints through the native colour CURVE; only the pre-68914 fallback bakes
+    -- |c escapes into the formatter bands. See Features/Auras.lua for the mechanism.
+    local colorMode = DF:ResolveDurationColorMode(rawCBT)
+    local colorSpec = DF:GetDurationColorSpec(colorMode)
+    local colorByTime = DF:DurationColorUsesBuckets(colorMode)
     local hideAboveT = durationHideAboveT(indicator)
-    -- Always attach the NUMBER formatter (bare "45" / "2m" / "1h") — the same default the
-    -- buff/debuff/defensive rows use, and what the pre-12.1 icons showed (native cooldown
-    -- numbers). Without it the container's own SetDurationText default renders "45s". The
-    -- one formatter also carries colour-by-time buckets + hide-above blanking when set.
-    -- (The Expiry Alert is NOT part of this formatter — it is its own frame-anchored
-    -- element with its own SetDurationText binding; see the EXPIRY ALERT ELEMENT section.)
-    local formatter = DF.GetFactoryDurationFormatter
-        and DF:GetFactoryDurationFormatter("NUMBER", hideAboveT, colorByTime) or nil
+    -- Resolve the indicator's Duration Format (default NUMBER — bare "45" / "2m" / "1h",
+    -- the same default the buff/debuff/defensive rows use). Classic formats come back as
+    -- a plain formatter; the percent family (PERCENT / SECONDS_PERCENT, PTR-7 #5) comes
+    -- back as a SetTextFormat spec instead. The formatter also carries colour-by-time
+    -- buckets + hide-above blanking when set — hide-above never composes with the
+    -- percent family (see GetDurationFormatFields), zeroed here so durationFmtKey
+    -- stays truthful. (The Expiry Alert is NOT part of this formatter — it is its own
+    -- frame-anchored element with its own SetDurationText binding.)
+    local fmtValue = indicator.durationFormat or "NUMBER"
+    if DF.IsPercentDurationFormat and DF:IsPercentDurationFormat(fmtValue) then hideAboveT = nil end
+    local formatter, textFormat
+    if DF.GetDurationFormatFields then
+        formatter, textFormat = DF:GetDurationFormatFields(fmtValue, hideAboveT, colorByTime)
+    end
     return {
         show      = true,
         stableCenter = true,   -- centred countdown: stable box, no shift/wobble (shared TextStyle mode)
@@ -878,7 +916,12 @@ local function buildDurationTextSpec(indicator, defaultShow, defScale, defColorB
         offsetX   = tonumber(indicator.durationX) or 0,
         offsetY   = tonumber(indicator.durationY) or 0,
         formatter = formatter,   -- nil unless colour-by-time / hide-above; |c escapes own colour
-        color     = (not colorByTime) and indicator.durationColor or nil,
+        textFormat = textFormat, -- percent family: SetTextFormat components (tried FIRST by
+                                 -- applyDurationFormatter; formatter is nil alongside it)
+        -- Either colour path owns the text colour outright, so the static pick stands down.
+        color     = (not colorSpec) and indicator.durationColor or nil,
+        colorCurve   = colorSpec and colorSpec.curve or nil,
+        colorProperty = colorSpec and colorSpec.property or nil,
         -- Hide duration text on permanent auras (Wave 4, default ON): "" flows to
         -- the native binding's zeroDurationText (renders NO text on zero-duration/
         -- unconfigured). ABSENT key = ON — style-less groups and untouched
@@ -905,14 +948,21 @@ local function durationFmtKey(indicator, defaultShow, defColorByTime)
     -- bind-once formatter is never re-bound and the colours go stale until /reload.
     local rawCBT = indicator.durationColorByTime
     if rawCBT == nil then rawCBT = defColorByTime end
-    local colorByTime = rawCBT and true or false
+    local colorMode = DF:ResolveDurationColorMode(rawCBT)
     local hideAboveT = durationHideAboveT(indicator)
+    -- Format value leads the key (was hardcoded "NUMBER" pre-#5); hide-above is
+    -- zeroed for the percent family EXACTLY as buildDurationTextSpec zeroes it,
+    -- or a no-op hide-above toggle would rebuild slots for an unchanged render.
+    local fmtValue = indicator.durationFormat or "NUMBER"
+    if DF.IsPercentDurationFormat and DF:IsPercentDurationFormat(fmtValue) then hideAboveT = nil end
     -- Duration-text update rate (Wave 5a, account-wide): tokenized only when
     -- non-default (NORMAL resolves nil), so untouched sigs stay byte-identical
     -- and a rate change Rebuilds every duration-text slot (creation-frozen bind).
     local updateIv = DF.GetAuraDurationUpdateInterval and DF:GetAuraDurationUpdateInterval()
-    return "NUMBER"
-        .. (colorByTime and (":C" .. DF:GetDurationBreakpointsSig()) or "")
+    return fmtValue
+        -- Mode + that scale's stops: the curve is bind-once like the formatter, so a
+        -- mode change OR a Colours-page stop edit must move this key.
+        .. DF:GetDurationColorSig(colorMode)
         .. (hideAboveT and (":H" .. tostring(hideAboveT)) or "")
         -- Hide-on-permanent (Wave 4): the OFF state alone is tokenized so the
         -- absent key sigs byte-identically to explicit true (absent = ON is the
@@ -945,29 +995,18 @@ end
 -- the alert is ON or OFF.
 -- ============================================================
 
--- Active alert mode or nil. Missing-mode placed indicators never carry one
--- (nothing to count down while the buff is absent).
-local function alertElemMode(indicator)
-    local m = indicator.expiryAlertMode
-    if m == "TEXT" or m == "GLYPH" then return m end
-    return nil
-end
-
--- STRUCTURAL alert key ("" when off): mode/threshold/payload via the shared
--- fmt-key helper, plus size (the GLYPH |A escape bakes size into the band
--- string) AND anchor/offsets. Every alert key is structural: the companion's
--- formatter is bind-frozen and its text placement is a button-child write —
--- forbidden post-init while auras are secret (PTR-5) — so any change Rebuilds
--- the companion slot (positioning is applied at init, bind-frozen thereafter).
-local function alertElemStructKey(indicator)
-    local mode = alertElemMode(indicator)
-    if not mode then return "" end
-    return (DF.GetExpiryAlertFmtKey and DF:GetExpiryAlertFmtKey(mode,
-            indicator.expiryAlertThreshold, indicator.expiryAlertText, indicator.expiryAlertGlyph) or "")
-        .. ":S" .. tostring(math.floor(tonumber(indicator.expiryAlertSize) or 14))
-        .. ":P" .. tostring(indicator.expiryAlertAnchor or "TOP")
-        .. "," .. tostring(tonumber(indicator.expiryAlertOffsetX) or 0)
-        .. "," .. tostring(tonumber(indicator.expiryAlertOffsetY) or 0)
+-- Expiry-alert MODE / geometry / structural identity now live in the DF.Expiration
+-- engine (Features/Expiration.lua) so the frame-level indicators can share the same
+-- secret-safe reveal. These thin locals keep the factory's own call sites reading the
+-- same, passing the icon side as the engine's geometry.baseSize (BORDER auto-match reads
+-- it). Size/anchor are computed inside the engine's StructSig / BuildDurationSpec /
+-- BuildPreview, so the factory no longer needs its own effectiveAlertSize/Anchor.
+local function alertElemMode(indicator) return DF.Expiration:Mode(indicator) end
+-- geom (from alertGeometry, defined after resolveBarSize) carries the target's shape: a square
+-- { baseSize } for icons/squares, or a rectangular { width, height } for bars. Defaults to the
+-- square icon path when a caller has none.
+local function alertElemStructKey(indicator, geom)
+    return DF.Expiration:StructSig(indicator, geom or { baseSize = indicator.size })
 end
 
 -- Resolve the profile's GLOBAL colour-by-time default for placed/bar duration text:
@@ -984,6 +1023,9 @@ local function resolveDefCBT(adDB)
     if type(d) == "table" and d.durationColorByTime ~= nil then
         return d.durationColorByTime and true or false
     end
+    -- Plain ON, never a mode string: an explicit mode OVERRIDES the account-wide dials
+    -- (ResolveDurationColorMode), so returning one here would make every indicator that
+    -- inherits the default deaf to the Colours page's Blend / Measure By settings.
     return true
 end
 Factory.ResolveDefaultColorByTime = resolveDefCBT   -- editor preview passes this into BuildPreviewConfig
@@ -1044,6 +1086,13 @@ local function buildPlacedStyle(indicator, isSquare, borderSpec, defCBT)
     if showStacks then style.stacks = buildStackSpec(indicator, 2, -2) end   -- placed baseline stack offset
 
     if borderSpec then style.border = { spec = borderSpec } end
+
+    -- Duration bar strip: the ROW's shared spec builder over the indicator's own
+    -- durationBar* keys (identical keying to filter groups and the buff/debuff
+    -- rows). nil when disabled/absent, so a bar-less indicator's style is
+    -- byte-identical to the pre-feature output. Icon AND square both carry it —
+    -- the strip hangs off the slot edge regardless of the slot's content shape.
+    style.bar = DF.BuildDurationBarSpec and DF:BuildDurationBarSpec(indicator, "durationBar") or nil
 
     -- Expiry Alert element: rendered by a separate COMPANION SLOT, never by this
     -- button (one duration binding per button — see EXPIRY ALERT COMPANION SLOT).
@@ -1114,6 +1163,17 @@ local function placedStructSig(map, isSquare, hideIcon, showStacks, showDuration
         -- (No alert keys: the expiry alert lives on the COMPANION slot, whose own
         -- structSig carries alertElemStructKey — an alert edit rebuilds only it.)
         .. "|f=" .. poolFilter(indicator, mine)   -- filter string binds at build (pool/othersOnly change -> Rebuild)
+        -- Duration bar presence + GEOMETRY (mirror groupStyleStructSig): the strip
+        -- region is create-once and reserves wrap space outside the button rect, so
+        -- enable/position/height/gap/colorMode ride the struct sig (Rebuild). Cosmetics
+        -- (texture/colour/reverseFill) hot-apply — they live in placedCoSig. "" when
+        -- disabled/absent, so a bar-less indicator sigs identically to pre-feature.
+        .. "|" .. (indicator.durationBarEnabled == true
+            and ("bar" .. (indicator.durationBarPosition == "TOP" and "TOP" or "BOTTOM") .. ":"
+                .. tostring(tonumber(indicator.durationBarHeight) or 4) .. ":"
+                .. tostring(tonumber(indicator.durationBarGap) or 1) .. ":"
+                .. tostring(indicator.durationBarColorMode or "STATIC"))
+            or "")
 end
 
 -- COSMETIC signature: size/anchor/offset/scale/alpha, swipe, duration/stack styling, square
@@ -1133,7 +1193,11 @@ local function placedCoSig(indicator, isSquare, borderOn, alpha)
             tostring(indicator.durationFont), tostring(indicator.durationScale),
             tostring(indicator.durationOutline), tostring(indicator.durationAnchor),
             tostring(indicator.durationX), tostring(indicator.durationY),
-            tostring(indicator.durationColorByTime and 1 or 0),
+            -- Colour MODE verbatim (not a 1/0 flag): every mode is truthy, so a boolean
+            -- token could never tell SMOOTH_PERCENT from STEP_SECONDS and a mode switch
+            -- would not move the signature. (durationFmtKey carries the mode + its stops
+            -- too; this keeps the per-indicator sig honest on its own.)
+            tostring(indicator.durationColorByTime),
             colSig(indicator.durationColor),
         }, ","),
         "stk=" .. tconcat({
@@ -1143,6 +1207,15 @@ local function placedCoSig(indicator, isSquare, borderOn, alpha)
             colSig(indicator.stackColor),
         }, ","),
         "bd=" .. placedBorderRawSig(indicator, borderOn),
+        -- Duration-bar COSMETICS (texture / colour / bg / reverse-fill) hot-apply via
+        -- styleBarShared; geometry/presence is structural (placedStructSig). Serialised
+        -- only when the bar is on — an off bar contributes nothing, matching the sig.
+        "bar=" .. (indicator.durationBarEnabled == true and tconcat({
+            tostring(indicator.durationBarTexture),
+            tostring(indicator.durationBarColorMode or "STATIC"),
+            colSig(indicator.durationBarColor), colSig(indicator.durationBarBGColor),
+            tostring(indicator.durationBarReverseFill and 1 or 0),
+        }, ",") or ""),
         -- (No alert entry: the expiry alert renders on its COMPANION slot with
         -- its own struct/cosmetic sigs — this container never carries it.)
     }
@@ -1182,8 +1255,27 @@ local function resolveBarSize(frame, indicator)
     local matchH = indicator.matchFrameHeight and true or false
     local width  = tonumber(indicator.width)  or 60
     local height = tonumber(indicator.height) or 6
-    if matchW then width  = tonumber(fdb.frameWidth)  or width end
-    if matchH then height = tonumber(fdb.frameHeight) or height end
+    if matchW or matchH then
+        -- Match the VISIBLE health bar, not the frame's outer edge: the border band overlaps the
+        -- outer max(padding, borderInset) px on each side, so a full-frameWidth bar overhangs the
+        -- border by one inset per side ("slightly too wide"). Inset it the same amount the resource
+        -- bar's Match Width does (Frames/Bars.lua). Read-free from config; PP-snapped like the frame.
+        local usePP    = fdb.pixelPerfect and DF.PixelPerfect
+        local padding  = tonumber(fdb.framePadding) or 0
+        local border   = (fdb.frameShowBorder ~= false) and (tonumber(fdb.frameBorderSize) or 1) or 0
+        if usePP then padding = DF:PixelPerfect(padding); border = DF:PixelPerfect(border) end
+        local edgeInset = math.max(padding, border)
+        if matchW then
+            local fw = tonumber(fdb.frameWidth) or width
+            if usePP then fw = DF:PixelPerfect(fw) end
+            width = fw - 2 * edgeInset
+        end
+        if matchH then
+            local fh = tonumber(fdb.frameHeight) or height
+            if usePP then fh = DF:PixelPerfect(fh) end
+            height = fh - 2 * edgeInset
+        end
+    end
     return math.max(1, width), math.max(1, height)
 end
 
@@ -1232,6 +1324,18 @@ local function buildBarLayout(frame, indicator)
     }
 end
 
+-- Geometry for the expiry-reveal companion (DF.Expiration): the shape it overlays. A bar is a
+-- RECTANGLE (width x height from resolveBarSize) so a Tint stretches to fill it; an icon/square
+-- is SQUARE (baseSize). font follows the indicator's duration font. The engine does the x0.75
+-- |T calibration + inset/match from here, so callers never repeat it.
+local function alertGeometry(frame, indicator, isBar)
+    if isBar then
+        local w, h = resolveBarSize(frame, indicator)
+        return { width = w, height = h, font = indicator.durationFont }
+    end
+    return { baseSize = indicator.size, font = indicator.durationFont }
+end
+
 -- Bar style: the StatusBar fills the slot (no icon / no square / no cooldown swipe — the fill
 -- IS the countdown). Fill colour / texture / orientation / reverse-fill / background from
 -- config; native SetDurationBar (bindNative) drives the value. Duration text via the shared
@@ -1239,13 +1343,19 @@ end
 -- opts (bind-once) — Immediate + RemainingTime match the legacy bar's SetTimerDuration call.
 local function buildBarStyle(indicator, borderSpec, defCBT)
     local fr, fg, fb, fa = readADColor(indicator.fillColor)
+    -- Colour Mode: a curve (DF / Classic) swaps the fill texture for a green->red ramp the
+    -- native RemainingTime drain reveals, and forces a white tint (styleBarShared honours
+    -- `curve`) so the ramp shows pure — secret-safe, same mechanism as the duration-bar strips.
+    -- Static keeps the configured Bar Texture + Fill Color.
+    local curveTex = DF.GetDurationBarCurveTexture and DF:GetDurationBarCurveTexture(indicator.barColorMode)
     local style = {
         icon     = { show = false },
         cooldown = { show = false },
         bar = {
             show          = true,
             fill          = true,
-            texture       = indicator.texture,
+            texture       = curveTex or indicator.texture,
+            curve         = curveTex and true or nil,
             color         = { fr, fg, fb, fa },
             bgColor       = indicator.bgColor,
             orientation   = (indicator.orientation == "VERTICAL") and "VERTICAL" or "HORIZONTAL",
@@ -1309,15 +1419,14 @@ end
 -- (GetADTrackedSpellIDs) is built from the CONFIG records, not from live
 -- handles — the companion adds nothing to it.
 -- ============================================================
-local function buildAlertCompanionConfig(unit, map, indicator, layout, mine)
-    local mode = alertElemMode(indicator)
-    if not mode then return nil end
-    local formatter = DF.GetExpiryAlertElementFormatter
-        and DF:GetExpiryAlertElementFormatter(mode, indicator.expiryAlertThreshold,
-            indicator.expiryAlertText, indicator.expiryAlertGlyph, indicator.expiryAlertSize)
-    if not formatter then return nil end   -- pre-12.1 formatter API missing: no companion
-    local size = math.floor(tonumber(indicator.expiryAlertSize) or 14)
-    if size < 1 then size = 1 end
+local function buildAlertCompanionConfig(unit, map, indicator, layout, mine, geom)
+    -- The reveal's duration spec (formatter + placement + opacity) is engine-owned; the factory
+    -- only wraps it in the AuraContainer plumbing. nil = alert off, or the pre-12.1 formatter
+    -- API is missing (no companion). geom (alertGeometry) is the target's shape — a square for
+    -- an icon (auto-match), a rectangle for a bar (Tint fills it).
+    local dur = DF.Expiration:BuildDurationSpec(indicator,
+        geom or { baseSize = indicator.size, font = indicator.durationFont })
+    if not dur then return nil end
     return {
         unit = unit,
         mode = "row",
@@ -1335,25 +1444,7 @@ local function buildAlertCompanionConfig(unit, map, indicator, layout, mine)
         style = {
             icon     = { show = false },
             cooldown = { show = false },
-            -- The alert IS this button's duration text: alert-element formatter +
-            -- TextStyle placement at the configured anchor point on the invisible
-            -- button, offsets from it. TEXT size via the font, GLYPH size via the
-            -- |A escape (font size still set — harmless). Font follows the
-            -- indicator's duration font so the alert reads as part of the same
-            -- indicator; color nil — the payload's own escapes own it. level 7 =
-            -- one above a normal duration holder (6), preserving the alert's
-            -- established layering.
-            duration = {
-                show      = true,
-                formatter = formatter,
-                font      = indicator.durationFont,
-                size      = size,
-                outline   = "OUTLINE",
-                anchor    = indicator.expiryAlertAnchor or "TOP",
-                offsetX   = tonumber(indicator.expiryAlertOffsetX) or 0,
-                offsetY   = tonumber(indicator.expiryAlertOffsetY) or 0,
-                level     = 7,
-            },
+            duration = dur,   -- the alert IS this invisible button's duration text
         },
     }
 end
@@ -1364,10 +1455,10 @@ end
 -- geometry — dragging / resizing the indicator hot-moves its companion — plus
 -- font and alpha. Raw-config, alloc-light, computed per pass like the other
 -- placed sigs (FIX C discipline).
-local function alertCompanionStructSig(map, indicator, mine)
+local function alertCompanionStructSig(map, indicator, mine, geom)
     return includeSig(map)
         .. "|xalert"
-        .. "|xa=" .. alertElemStructKey(indicator)
+        .. "|xa=" .. alertElemStructKey(indicator, geom)
         .. "|fl=" .. tostring(tonumber(indicator.frameLevel) or 0)
         .. "|f=" .. poolFilter(indicator, mine)
 end
@@ -1401,7 +1492,8 @@ end
 local function syncAlertCompanion(frame, placed, live, key, map, indicator, isBar, alpha, mine)
     if not alertElemMode(indicator) then return end
     local akey = key .. ":alert"
-    local structSig = alertCompanionStructSig(map, indicator, mine)
+    local geom = alertGeometry(frame, indicator, isBar)   -- square (icon) or rect (bar)
+    local structSig = alertCompanionStructSig(map, indicator, mine, geom)
     local coSig = alertCompanionCoSig(frame, indicator, isBar, alpha)
     local entry = placed[akey]
     if entry and entry.structSig == structSig and entry.coSig == coSig then
@@ -1409,7 +1501,7 @@ local function syncAlertCompanion(frame, placed, live, key, map, indicator, isBa
         return
     end
     local layout = isBar and buildBarLayout(frame, indicator) or buildPlacedLayout(indicator)
-    local cfg = buildAlertCompanionConfig(frame.unit, map, indicator, layout, mine)
+    local cfg = buildAlertCompanionConfig(frame.unit, map, indicator, layout, mine, geom)
     if not cfg then return end   -- formatter unavailable: key stays dead -> sweep
     if not entry then
         local handle = DF.AuraContainer:Create(frame, cfg)
@@ -1450,21 +1542,9 @@ end
 -- alert is off OR the indicator is in show-when-missing mode (the factory
 -- builds no companion for missing-mode indicators — nothing to count down —
 -- so the canvas must not show one).
-local function buildAlertPreview(indicator)
-    local mode = alertElemMode(indicator)
-    if indicator.showWhenMissing then return nil end
-    if not mode or not DF.GetExpiryAlertPayload then return nil end
-    local size = math.floor(tonumber(indicator.expiryAlertSize) or 14)
-    if size < 1 then size = 1 end
-    return {
-        payload = DF:GetExpiryAlertPayload(mode, indicator.expiryAlertText,
-            indicator.expiryAlertGlyph, size),
-        anchor  = indicator.expiryAlertAnchor or "TOP",
-        offsetX = tonumber(indicator.expiryAlertOffsetX) or 0,
-        offsetY = tonumber(indicator.expiryAlertOffsetY) or 0,
-        size    = size,
-        font    = indicator.durationFont,
-    }
+local function buildAlertPreview(indicator, geom)
+    return DF.Expiration:BuildPreview(indicator,
+        geom or { baseSize = indicator.size, font = indicator.durationFont })
 end
 
 function Factory:BuildPreviewConfig(frame, indicator, typeKey, spellID, defCBT)
@@ -1479,7 +1559,7 @@ function Factory:BuildPreviewConfig(frame, indicator, typeKey, spellID, defCBT)
             layout = buildBarLayout(frame, indicator),
             style = buildBarStyle(indicator, borderSpec, defCBT),
             testEntries = entries,
-            alertPreview = buildAlertPreview(indicator),
+            alertPreview = buildAlertPreview(indicator, alertGeometry(frame, indicator, true)),
         }
         local sig = "bar|" .. tostring(borderSpec ~= nil)
             .. "|" .. tostring(cfg.style.duration ~= nil)
@@ -1529,12 +1609,16 @@ local function barCoSig(frame, indicator, borderOn, alpha)
         "h="  .. tostring(tonumber(indicator.height) or 6),
         "mw=" .. tostring(indicator.matchFrameWidth ~= false and 1 or 0) .. ":" .. tostring(fdb.frameWidth),
         "mh=" .. tostring(indicator.matchFrameHeight and 1 or 0) .. ":" .. tostring(fdb.frameHeight),
+        -- Match Width/Height now insets by the frame's border+padding (resolveBarSize), so those
+        -- feed the cosmetic size too — a frame border/padding change must re-apply the bar layout.
+        "mi=" .. tostring(fdb.framePadding) .. ":" .. tostring(fdb.frameShowBorder) .. ":" .. tostring(fdb.frameBorderSize) .. ":" .. tostring(fdb.pixelPerfect),
         "an=" .. tostring(indicator.anchor or "BOTTOM"),
         "ox=" .. tostring(tonumber(indicator.offsetX) or 0),
         "oy=" .. tostring(tonumber(indicator.offsetY) or 0),
         "sc=" .. tostring(tonumber(indicator.scale) or 1),
         "al=" .. tostring(alpha),
         "tex=" .. tostring(indicator.texture),
+        "cm=" .. tostring(indicator.barColorMode or "STATIC"),   -- curve swaps texture+tint (cosmetic)
         "or=" .. tostring(indicator.orientation or "HORIZONTAL"),
         "rf=" .. tostring(indicator.reverseFill and 1 or 0),
         "fc=" .. colSig(indicator.fillColor),
@@ -1544,7 +1628,11 @@ local function barCoSig(frame, indicator, borderOn, alpha)
             tostring(indicator.durationFont), tostring(indicator.durationScale),
             tostring(indicator.durationOutline), tostring(indicator.durationAnchor),
             tostring(indicator.durationX), tostring(indicator.durationY),
-            tostring(indicator.durationColorByTime and 1 or 0),
+            -- Colour MODE verbatim (not a 1/0 flag): every mode is truthy, so a boolean
+            -- token could never tell SMOOTH_PERCENT from STEP_SECONDS and a mode switch
+            -- would not move the signature. (durationFmtKey carries the mode + its stops
+            -- too; this keeps the per-indicator sig honest on its own.)
+            tostring(indicator.durationColorByTime),
             colSig(indicator.durationColor),
         }, ","),
         "bd=" .. placedBorderRawSig(indicator, borderOn),
@@ -1668,7 +1756,8 @@ local function groupStyleStructSig(group)
         .. "|" .. (s.durationBarEnabled == true
             and ("bar" .. (s.durationBarPosition == "TOP" and "TOP" or "BOTTOM") .. ":"
                 .. tostring(tonumber(s.durationBarHeight) or 4) .. ":"
-                .. tostring(tonumber(s.durationBarGap) or 2))
+                .. tostring(tonumber(s.durationBarGap) or 1) .. ":"
+                .. tostring(s.durationBarColorMode or "STATIC"))
             or "")
 end
 
@@ -2233,17 +2322,19 @@ local function syncFrameLevelMissing(store, keyName, map, frame, parent, anchorT
 end
 
 -- ============================================================
--- SOUND INDICATOR  (native on-apply)  — P4.5
--- The 12.1 revival of the sound indicator. C_UnitAuras.AddAuraAppliedSound({ unitToken,
--- spellID, soundFileName|soundFileID, outputChannel }) plays a sound when the tracked aura is
--- APPLIED to the unit — the ONLY read-free sound the API supports (there is NO on-fade /
--- AuraRemovedSound hook, and no per-play volume). This REPLACES the legacy read-based
--- SoundEngine on the factory path (which alerted while a buff was MISSING / EXPIRING — both
--- presence/remaining-time driven, sealed on 12.1). Registration is NOT a secure-frame op, but
--- the lab did NOT confirm combat-legality, so (re)registration is DEFERRED out of combat, the
--- same OOC/regen discipline the containers use (consistency over cleverness). Registration
--- handles are tracked per aura and unregistered on every teardown path — a leaked registration
--- is the failure mode this is designed against.
+-- SOUND INDICATOR  (native, event-driven)  — P4.5 + per-event triggers
+-- C_UnitAuras.AddAuraSound(trigger, { unitToken, spellID, soundFileName|soundFileID,
+-- outputChannel }) plays a sound when a native EVENT fires on the tracked aura. Three
+-- triggers (Enum.UnitAuraSoundTrigger): Added (applied), Removed (buff dropped / expired)
+-- and ApplicationsIncreased (stack gained) — each event gets its OWN sound. No per-play
+-- volume (plays at the output channel), and NO ApplicationsDecreased, so stack-LOSS has no
+-- trigger. These are the read-free events the API supports; the legacy read-based alerts
+-- (fire WHILE a buff is missing; fire near an expiry THRESHOLD — presence / remaining-time
+-- driven) stay sealed on 12.1 (the still-blocked Missing / Expire groups). The old build's
+-- apply-only AddAuraAppliedSound is dual-detected as a fallback (Added only). Registration
+-- is NOT a secure-frame op but combat-legality is unconfirmed, so (re)registration DEFERS
+-- out of combat (the container OOC/regen discipline). Handles are tracked per (aura, event)
+-- and unregistered on every teardown path — a leaked registration is the failure mode.
 -- ============================================================
 
 local VALID_SOUND_CHANNELS = { Master = true, SFX = true, Music = true, Ambience = true, Dialog = true }
@@ -2264,42 +2355,85 @@ local function resolveSoundArg(soundCfg)
     return nil
 end
 
-local function registerAppliedSound(unit, spellID, argKey, argVal, channel)
-    local add = C_UnitAuras and C_UnitAuras.AddAuraAppliedSound
-    if type(add) ~= "function" then return nil end
-    local args = { unitToken = unit, spellID = spellID, outputChannel = channel }
-    args[argKey] = argVal
-    local ok, id = pcall(add, args)
-    if ok then return id end
-    DF:DebugWarn(DBG, "AddAuraAppliedSound failed (spell %s): %s", tostring(spellID), tostring(id))
+-- The native sound API was RENAMED on the CustomAuraButton build:
+--   AddAuraAppliedSound(sound)  ->  AddAuraSound(trigger, sound)   (same UnitAuraSoundInfo
+--   struct; the old name is GONE with no alias, so we dual-detect both — the old code went
+--   silently no-op on the renamed build). The new form adds a TRIGGER
+--   (Enum.UnitAuraSoundTrigger): Added (on apply = the old behaviour), Removed (buff dropped /
+--   expired) and ApplicationsIncreased (stack gained). The legacy build is apply-only. There is
+--   NO ApplicationsDecreased — stack LOSS has no native trigger. Source: Gethe fa38386c.
+local TRIGGER_ENUM_NAME = { applied = "Added", dropped = "Removed", stackGained = "ApplicationsIncreased" }
+
+local function soundAPIAvailable()
+    return (C_UnitAuras and (C_UnitAuras.AddAuraSound or C_UnitAuras.AddAuraAppliedSound)) and true or false
+end
+
+-- Register ONE native sound for (event, spell). Returns the handle id, or nil (event
+-- unsupported by this build / call failed). event = "applied" | "dropped" | "stackGained".
+local function registerAuraSound(event, unit, spellID, argKey, argVal, channel)
+    if not C_UnitAuras then return nil end
+    local sound = { unitToken = unit, spellID = spellID, outputChannel = channel }
+    sound[argKey] = argVal
+    if type(C_UnitAuras.AddAuraSound) == "function" then
+        local UAST = Enum and Enum.UnitAuraSoundTrigger
+        local trig = UAST and UAST[TRIGGER_ENUM_NAME[event]]
+        if trig == nil then return nil end   -- this build's enum lacks the trigger
+        local ok, id = pcall(C_UnitAuras.AddAuraSound, trig, sound)
+        if ok then return id end
+        DF:DebugWarn(DBG, "AddAuraSound failed (spell %s, %s): %s", tostring(spellID), tostring(event), tostring(id))
+        return nil
+    end
+    -- Legacy (pre-rename) build: only the on-apply sound exists.
+    if event == "applied" and type(C_UnitAuras.AddAuraAppliedSound) == "function" then
+        local ok, id = pcall(C_UnitAuras.AddAuraAppliedSound, sound)
+        if ok then return id end
+        DF:DebugWarn(DBG, "AddAuraAppliedSound failed (spell %s): %s", tostring(spellID), tostring(id))
+    end
     return nil
 end
 
-local function unregisterAppliedSound(id)
-    local rem = C_UnitAuras and C_UnitAuras.RemoveAuraAppliedSound
-    if id ~= nil and type(rem) == "function" then pcall(rem, id) end
+local function unregisterAuraSound(id)
+    if id == nil or not C_UnitAuras then return end
+    local rem = C_UnitAuras.RemoveAuraSound or C_UnitAuras.RemoveAuraAppliedSound
+    if type(rem) == "function" then pcall(rem, id) end
 end
 
--- Collect the desired applied-sound registrations of ONE aura pool into `desired`
--- (created on first hit; keys are keyPrefix .. auraName so the two pools can never
--- collide in the store). idSpec = the spec for the spec pool, NIL for the Other Buffs
--- pool (spec-independent identity). NOTE: AddAuraAppliedSound has no caster filter, so
--- othersOnly cannot gate sound — an othersOnly aura's sound fires for any caster.
+-- The three per-event sounds of one indicator. The flat sc.soundLSMKey/soundFile is the
+-- APPLIED sound (back-compat with the old single-sound config); dropped / stackGained read
+-- their own sub-tables. Each is independently enabled. (No stacks-lost — no native trigger.)
+local SOUND_EVENTS = {
+    { event = "applied",     enabled = function(sc) return sc.appliedEnabled ~= false end,               cfg = function(sc) return sc end },
+    { event = "dropped",     enabled = function(sc) return sc.dropped and sc.dropped.enabled end,        cfg = function(sc) return sc.dropped end },
+    { event = "stackGained", enabled = function(sc) return sc.stackGained and sc.stackGained.enabled end, cfg = function(sc) return sc.stackGained end },
+}
+
+-- Collect the desired PER-EVENT sound registrations of ONE aura pool into `desired`
+-- (created on first hit; store keys are keyPrefix .. auraName .. "|" .. event so the two
+-- pools AND the three events can never collide). idSpec = the spec for the spec pool, NIL
+-- for the Other Buffs pool. NOTE: the native sound path has no caster filter, so othersOnly
+-- cannot gate sound — an othersOnly aura's sound fires for any caster. On a pre-rename
+-- (apply-only) client the dropped / stackGained triggers simply fail to register (no-op).
 local function collectDesiredSounds(desired, unit, auras, keyPrefix, idSpec, channel)
     for auraName, auraCfg in pairs(auras) do
         local sc = (type(auraCfg) == "table") and auraCfg.sound
         if sc and sc.enabled then
             local ids = DF:BuildADIdentityFilters(idSpec, auraName)
             local map = ids and ids.includeSpellIDs
-            local argKey, argVal = resolveSoundArg(sc)
             if not map and keyPrefix ~= "" then warnOtherUnresolved(auraName) end
-            if map and argKey then
-                desired = desired or {}
-                desired[keyPrefix .. auraName] = {
-                    map = map, argKey = argKey, argVal = argVal, channel = channel,
-                    sig = unit .. "|" .. includeSig(map) .. "|"
-                        .. argKey .. "=" .. tostring(argVal) .. "|" .. channel,
-                }
+            if map then
+                for _, ev in ipairs(SOUND_EVENTS) do
+                    if ev.enabled(sc) then
+                        local argKey, argVal = resolveSoundArg(ev.cfg(sc) or {})
+                        if argKey then
+                            desired = desired or {}
+                            desired[keyPrefix .. auraName .. "|" .. ev.event] = {
+                                event = ev.event, map = map, argKey = argKey, argVal = argVal, channel = channel,
+                                sig = unit .. "|" .. ev.event .. "|" .. includeSig(map) .. "|"
+                                    .. argKey .. "=" .. tostring(argVal) .. "|" .. channel,
+                            }
+                        end
+                    end
+                end
             end
         end
     end
@@ -2313,7 +2447,7 @@ end
 -- handles then re-registers. Gate off / spec nil / config removed -> desired empty -> full
 -- teardown. Idempotent — safe to call repeatedly (SyncFrame tail, regen flush).
 local function reconcileSoundNow(frame)
-    if not (C_UnitAuras and C_UnitAuras.AddAuraAppliedSound) then return end   -- pre-12.1: legacy owns it
+    if not soundAPIAvailable() then return end   -- pre-12.1: legacy owns it
     local store = frame.dfADFactory
     if not store then return end
 
@@ -2348,7 +2482,7 @@ local function reconcileSoundNow(frame)
     for auraName, entry in pairs(soundStore) do
         local d = desired and desired[auraName]
         if not d or d.sig ~= entry.sig then
-            for _, id in ipairs(entry.ids) do unregisterAppliedSound(id) end
+            for _, id in ipairs(entry.ids) do unregisterAuraSound(id) end
             soundStore[auraName] = nil
         end
     end
@@ -2358,7 +2492,7 @@ local function reconcileSoundNow(frame)
             if not soundStore[auraName] then
                 local ids = {}
                 for spellID in pairs(d.map) do
-                    local id = registerAppliedSound(frame.unit, spellID, d.argKey, d.argVal, d.channel)
+                    local id = registerAuraSound(d.event, frame.unit, spellID, d.argKey, d.argVal, d.channel)
                     if id ~= nil then ids[#ids + 1] = id end
                 end
                 soundStore[auraName] = { ids = ids, sig = d.sig }
@@ -2387,7 +2521,7 @@ end
 -- OOC discipline); OOC we reconcile immediately.
 function Factory:SyncSound(frame)
     if not frame or not frame.unit then return end
-    if not (C_UnitAuras and C_UnitAuras.AddAuraAppliedSound) then return end
+    if not soundAPIAvailable() then return end
     if InCombatLockdown() then
         Factory._soundPending[frame] = true
         ensureSoundRegen()
@@ -2979,18 +3113,21 @@ function Factory:SyncFrame(frame)
             syncFrameLevelMissing(bd, bestName, bestMap, frame, frame, frame, mw, mh, 10, coSig,
                 function(handle) styleBorderMissingBadge(handle, capturedSpec) end, filt)
           else
-            local structSig = includeSig(bestMap) .. "|" .. filt
+            -- drawAboveFrameBorder rides the STRUCT sig: it resolves to frameLevelOffset in
+            -- buildBorderConfig, which only a Rebuild re-reads (ApplyStyle carries the spec only).
+            local drawAbove = bestCfg.drawAboveFrameBorder ~= false
+            local structSig = includeSig(bestMap) .. "|" .. filt .. "|da=" .. tostring(drawAbove)
             local coSig = borderSpecSig(bestSpec)
 
             local entry = bd[bestName]
             if not entry then
-                local handle = DF.AuraContainer:Create(frame, buildBorderConfig(frame.unit, bestMap, bestSpec, filt))
+                local handle = DF.AuraContainer:Create(frame, buildBorderConfig(frame.unit, bestMap, bestSpec, filt, drawAbove))
                 if handle then
                     bd[bestName] = { handle = handle, structSig = structSig, coSig = coSig }
                 end
             elseif entry.structSig ~= structSig then
                 entry.structSig, entry.coSig = structSig, coSig
-                entry.handle:Rebuild(buildBorderConfig(frame.unit, bestMap, bestSpec, filt))
+                entry.handle:Rebuild(buildBorderConfig(frame.unit, bestMap, bestSpec, filt, drawAbove))
             elseif entry.coSig ~= coSig then
                 entry.coSig = coSig
                 entry.handle:ApplyStyle({ border = { spec = bestSpec } })

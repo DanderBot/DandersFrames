@@ -420,21 +420,184 @@ end
 -- Lazy-builds `DF.debuffBorderCurve` from C_CurveUtil if it isn't already
 -- present (Auras.lua / Dispel.lua build the same one independently today;
 -- this serves as a shared lazy fallback).
+-- Account-wide dispel-type colour curve, built from DF.db.dispelColors (edited on
+-- the Colors page; seeded from the old debuff-border palette). Per the API doc,
+-- GetAuraDispelTypeColor "remaps the dispel type to a colour via a curve, with the
+-- dispel type ID used as the 'x' value" — so the curve's X positions ARE the
+-- Enum.AuraDispelType values. Feature-detected: returns nil (caller keeps the
+-- game/native colour) when C_CurveUtil / the enum is absent. Cached on
+-- DF.debuffBorderCurve; DF:InvalidateDispelColorCurve() nils it on any change.
+-- ⚠ The Enum.AuraDispelType field set needs an in-game confirm (/df dispelids).
+-- Name-keyed colour map for SetAuraBorder's customDispelColorMap: Blizzard indexes
+-- auraData.dispelName ("Magic"/"Curse"/... ; "" when the aura has no dispel type)
+-- straight into this table private-side, with map[""] as the no-type fallback —
+-- confirmed from Blizzard_CustomAuraButton.lua (ptr). NO enum IDs involved (unlike
+-- the curve form, whose ID axis is documented nowhere) — this is the primary
+-- custom-colour carrier for both the overlay and the debuff-icon ring. Values are
+-- ColorMixin objects (their code calls color:GetRGBA()). Cached; invalidated with
+-- the curve by DF:InvalidateDispelColorCurve().
+-- Blizzard's LIVE dispel-type border palette, queried from AuraUtil.GetAuraBorderColor
+-- (the exact colours the game paints), cached. Per-type fallback to DF.DispelDefaultColors
+-- (which mirror the classic DebuffTypeColor values) if the API is missing / returns nil.
+-- This is what every default, the Colors-page "Reset", and each fallback resolve to, so an
+-- untouched palette is byte-identical to the game's own dispel colours. None/Physical is
+-- kept only for the map's "" fallback (never user-editable — the border is hidden on
+-- no-dispel-type auras and the overlay never fires on them).
+-- SHARED dispel-texture style resolver (the debuff-icon ring + every overlay carrier
+-- resolve through this one function — never a local copy).
+-- DF names its two styles the way the ORIGINAL 12.1 enum did:
+--   "Color" = keep OUR asset, recolour it by dispel type  (gradient / ring / strips)
+--   "Atlas" = draw Blizzard's own dispel-type border art
+-- ★ 68914 renamed AND renumbered the enum: CustomAuraButtonBorderStyle{Atlas=0,Color=1}
+-- became CustomAuraButtonDispelTypeTextureStyle{Border=0,BorderWithIcon=1,Icon=2,
+-- PreserveAsset=3,CustomAsset=4}. Blizzard's own shim (Blizzard_Deprecated/
+-- Deprecated_12_1_0.lua) maps Atlas->BorderWithIcon and Color->PreserveAsset, and is
+-- flagged for removal — so resolve against the CURRENT enum first and keep the shim
+-- only as a pre-68914 fallback. The old numeric fallbacks were the real hazard: `1`
+-- now means BorderWithIcon (Blizzard's art WITH a badge, drawn over our gradient) and
+-- `0` means Border — either would silently replace our own art, so the last-resort
+-- literals below are the NEW values, not the old ones.
+local DISPEL_STYLE_NEW = { Color = "PreserveAsset", Atlas = "BorderWithIcon" }
+local DISPEL_STYLE_LITERAL = { Color = 3, Atlas = 1 }
+function DF:ResolveDispelTextureStyle(styleName)
+    styleName = (styleName == "Color" or styleName == "Atlas") and styleName or "Atlas"
+    local newEnum = Enum and Enum.CustomAuraButtonDispelTypeTextureStyle
+    local v = newEnum and newEnum[DISPEL_STYLE_NEW[styleName]]
+    if v ~= nil then return v end
+    local oldEnum = Enum and Enum.CustomAuraButtonBorderStyle          -- pre-68914
+    v = oldEnum and oldEnum[styleName]
+    if v ~= nil then return v end
+    v = _G.AuraButtonBorderStyle and _G.AuraButtonBorderStyle[styleName]   -- Blizzard's shim
+    if v ~= nil then return v end
+    return DISPEL_STYLE_LITERAL[styleName]
+end
+
+function DF:GetGameDispelPalette()
+    if DF._gameDispelPalette then return DF._gameDispelPalette end
+    local D = DF.DispelDefaultColors
+    local getC = AuraUtil and AuraUtil.GetAuraBorderColor
+    local function resolve(typeName, fb)
+        if getC then
+            local ok, c = pcall(getC, typeName)
+            if ok and c and c.GetRGB then
+                local r, g, b = c:GetRGB()
+                if r then return { r = r, g = g, b = b } end
+            end
+        end
+        return { r = fb.r, g = fb.g, b = fb.b }
+    end
+    local pal = {
+        Magic   = resolve("Magic",   D.Magic),
+        Curse   = resolve("Curse",   D.Curse),
+        Disease = resolve("Disease", D.Disease),
+        Poison  = resolve("Poison",  D.Poison),
+        Bleed   = resolve("Bleed",   D.Bleed),
+        Enrage  = resolve("Bleed",   D.Enrage),   -- shares Bleed's colour
+        None    = { r = D.None.r, g = D.None.g, b = D.None.b },
+    }
+    if getC then DF._gameDispelPalette = pal end   -- don't cache a pre-AuraUtil fallback
+    return pal
+end
+
+function DF:GetDispelColorMap()
+    if DF.dispelColorMap then return DF.dispelColorMap end
+    if not CreateColor then return nil end
+    local D = DF:GetGameDispelPalette()
+    local colors = (DF.db and DF.db.dispelColors) or D
+    local function C(c, fb)
+        if type(c) ~= "table" or not c.r then c = fb end
+        return CreateColor(c.r or 1, c.g or 1, c.b or 1, 1)
+    end
+    local map = {
+        Magic   = C(colors.Magic,   D.Magic),
+        Curse   = C(colors.Curse,   D.Curse),
+        Disease = C(colors.Disease, D.Disease),
+        Poison  = C(colors.Poison,  D.Poison),
+        Bleed   = C(colors.Bleed,   D.Bleed),
+        Enrage  = C(colors.Enrage or colors.Bleed, D.Enrage),
+        None    = C(colors.None,    D.None),
+    }
+    map[""] = map.None
+    DF.dispelColorMap = map
+    return map
+end
+
+-- The dispel-type enum's NAME is unconfirmed (Enum.AuraDispelType probed nil on
+-- 68824; a shape-scan only found the JournalEncounterIconFlags false positive) —
+-- kept for Border:ResolveTypeColor's GetAuraDispelTypeColor path, which has no map
+-- form. Scan Enum once for a table carrying numeric Magic/Curse/Disease/Poison
+-- fields, preferring names that mention "dispel". Cached; false = none found.
+function DF:FindDispelTypeEnum()
+    if DF._dispelTypeEnum ~= nil then
+        return DF._dispelTypeEnum or nil
+    end
+    local found, foundName
+    if type(Enum) == "table" then
+        for name, t in pairs(Enum) do
+            if type(t) == "table" and type(t.Magic) == "number" and type(t.Curse) == "number"
+                and type(t.Disease) == "number" and type(t.Poison) == "number"
+                -- reject bitflag lookalikes (Enum.JournalEncounterIconFlags carries
+                -- Magic/Curse/... alongside role fields — a live-caught false positive)
+                and t.Tank == nil and t.Healer == nil then
+                if tostring(name):lower():find("dispel") then
+                    found, foundName = t, name
+                    break
+                end
+                if not found then found, foundName = t, name end
+            end
+        end
+    end
+    DF._dispelTypeEnum = found or false
+    DF._dispelTypeEnumName = foundName
+    return found
+end
+
+function DF:GetDispelColorCurve()
+    if DF.debuffBorderCurve then return DF.debuffBorderCurve end
+    if not (C_CurveUtil and C_CurveUtil.CreateColorCurve) then return nil end
+    local E = DF:FindDispelTypeEnum()
+    if not E then return nil end
+    local colors = (DF.db and DF.db.dispelColors) or DF:GetGameDispelPalette()
+    local candidates = {
+        { E.Magic,   colors.Magic },
+        { E.Curse,   colors.Curse },
+        { E.Disease, colors.Disease },
+        { E.Poison,  colors.Poison },
+        { E.Bleed,   colors.Bleed },
+        { E.Enrage,  colors.Enrage or colors.Bleed },
+        { E.None,    colors.None },
+    }
+    local points = {}
+    for _, pair in ipairs(candidates) do
+        local x, c = pair[1], pair[2]
+        if type(x) == "number" and type(c) == "table" then
+            points[#points + 1] = { x, CreateColor(c.r or 0, c.g or 0, c.b or 0, 1) }
+        end
+    end
+    if #points == 0 then return nil end
+    table.sort(points, function(a, b) return a[1] < b[1] end)
+    -- CreateColorCurve takes NO constructor args (a passed table is ignored →
+    -- an EMPTY curve that evaluates to white); build via SetType + AddPoint,
+    -- the same pattern as Colors.lua / HealthFade.lua. Exact-integer X hits
+    -- land on their point, so Linear is safe for the discrete type IDs.
+    local curve = C_CurveUtil.CreateColorCurve()
+    if not curve then return nil end
+    if curve.SetType and Enum.LuaCurveType then curve:SetType(Enum.LuaCurveType.Linear) end
+    for _, p in ipairs(points) do
+        curve:AddPoint(p[1], p[2])
+    end
+    DF.debuffBorderCurve = curve
+    return DF.debuffBorderCurve
+end
+
 function Border:ResolveTypeColor(unit, auraInstanceID, fallback)
     local fr, fg, fb, fa = readColor(fallback)
     if not unit or not auraInstanceID or not C_UnitAuras or not C_UnitAuras.GetAuraDispelTypeColor then
         return fr, fg, fb, fa
     end
-    if not DF.debuffBorderCurve and C_CurveUtil and C_CurveUtil.CreateColorCurve then
-        -- Same curve spec the buff/debuff aura system uses (extracted later if
-        -- we need to expose customisation; for now a sensible default).
-        DF.debuffBorderCurve = C_CurveUtil.CreateColorCurve({
-            { 0,   CreateColor(0.6, 0.0, 0.0, 1) },
-            { 1,   CreateColor(0.6, 0.0, 0.0, 1) },
-        })
-    end
-    if not DF.debuffBorderCurve then return fr, fg, fb, fa end
-    local result = C_UnitAuras.GetAuraDispelTypeColor(unit, auraInstanceID, DF.debuffBorderCurve)
+    local curve = DF:GetDispelColorCurve()
+    if not curve then return fr, fg, fb, fa end
+    local result = C_UnitAuras.GetAuraDispelTypeColor(unit, auraInstanceID, curve)
     if result and result.GetRGBA then
         local r, g, b, a = result:GetRGBA()
         return r or fr, g or fg, b or fb, fa  -- keep fallback alpha (picker controls it)

@@ -8,31 +8,19 @@ local format = string.format
 function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     local L = DF.L
 
-    -- Small info banner with a hyperlink to the Colors page, dropped in under a
-    -- "Color by Time Remaining" toggle so users can jump to where the shared,
-    -- account-wide breakpoint colours actually live. Mirrors the Aura Filters
-    -- cross-links (|HdfPage:<id>| markup + onLinkClick -> GUI.SelectTab). `group`
-    -- is the settings group the toggle sits in; `parent` is the page child frame.
+    -- Note-style cross-link dropped in under a "Color by Time Remaining" toggle so users can
+    -- jump to where the shared, account-wide breakpoint colours actually live (and see that
+    -- section highlighted on arrival). `group` is the settings group the toggle sits in; `parent`
+    -- is the page child frame. The link itself is GUI:CreateColorsPageLink (shared with the Aura Designer).
     local function AddColorsPageLink(group, parent)
-        local tc = (GUI.GetThemeColor and GUI.GetThemeColor()) or { r = 1, g = 1, b = 1 }
-        local linkColor = format("|cFF%02X%02X%02X",
-            math.floor((tc.r or 1) * 255), math.floor((tc.g or 1) * 255), math.floor((tc.b or 1) * 255))
-        -- Plain hint with only "Colors page" as the clickable link (jumps to the shared,
-        -- account-wide breakpoint editor). One format-string key so the link can move for
-        -- other locales' word order. No arrow glyph — the DF font renders it as a box.
-        local link = linkColor .. "|HdfPage:display_classcolors|h" .. L["Colors page"] .. "|h|r"
-        local text = format(L["Customize duration colors on the %s."], link)
-        local banner = GUI:CreateInfoBanner(parent, {
-            tone = "info",
-            html = true,
-            text = text,
-            onLinkClick = function(pageId)
-                if GUI.SelectTab then GUI.SelectTab(pageId) end
-            end,
-            minHeight = 28,
-        })
-        group:AddWidget(banner, banner.layoutHeight or 32)
-        return banner
+        -- Shared note-style cross-link to the Colors page Color-by-Time section (jump + whole-
+        -- section border flash). CreateLink is fixed-layout, so hand it the group's inner width
+        -- up front — its wrapped height is then known before AddWidget (the group advances Y by
+        -- the height we pass). Defined once in GUI:CreateColorsPageLink; shared with the Aura Designer.
+        local innerW = math.max(40, (group:GetWidth() or 260) - 2 * (group.padding or 10))
+        local note = GUI:CreateColorsPageLink(parent, innerW)
+        group:AddWidget(note, (note.layoutHeight or 16) + 2)
+        return note
     end
 
     -- Helper function to create a themed "Copy to Raid/Party" button for a section.
@@ -442,8 +430,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Buff Tooltips (Column 2)
         local buffTooltipGroup = GUI:CreateSettingsGroup(self.child, 280)
         buffTooltipGroup:AddWidget(GUI:CreateHeader(self.child, L["Buff Tooltips"]), 40)
-        -- 12.1 factory rows read these at build (mouse-motion opt-in, in the row sig) —
-        -- a toggle must invalidate so the rebuild picks it up. Legacy reads at hover (free).
+        -- 12.1 factory rows read all of these on the layout-version bump: the Enable
+        -- toggle is structural (mouse-motion opt-in, in the row sig -> Rebuild), while
+        -- anchor/offsets/combat-hide ride style.tooltip and restyle in place
+        -- (SetTooltipAnchorPoint/SetHideTooltipInCombat are live mixin state, 68914+).
         local RefreshAuraTooltips = function()
             if DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
             DF:UpdateAllFrames()
@@ -451,38 +441,23 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local buffTooltipEnable = buffTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Buff Tooltips"], db, "tooltipBuffEnabled", RefreshAuraTooltips), 30)
         buffTooltipEnable.keepEnabled = true
         buffTooltipGroup.disableChildrenOn = function(d) return not d.tooltipBuffEnabled end
-        -- Permanent 12.1 limitation: the aura button's mouse state is secret and
-        -- write-locked in combat, so the native hover can't be dropped per-combat
-        -- (live-verified — the insecure SetMouseMotionEnabled flip no-ops in combat).
-        local buffTtCombat = buffTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Disable in Combat"], db, "tooltipBuffDisableInCombat", function() end), 30)
-        GUI:BlockControl12_1(buffTtCombat, "limitation", { id = "tooltips:buffcombat", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsBuffRow(d) end })
-        -- Position controls below are a PERMANENT 12.1 limitation: the game's aura
-        -- tooltip is a forbidden object with a hardcoded anchor (source-verified;
-        -- even Blizzard's own frames get no say). Explain rather than just grey.
-        local buffTipNote = buffTooltipGroup:AddWidget(GUI:CreateNote(self.child,
-            L["On 12.1 the game draws aura tooltips at a fixed position beside the icon."],
-            { width = 260 }), 40)
-        buffTipNote.hideOn = function(d) return not DF:FactoryOwnsBuffRow(d) end
+        buffTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Disable in Combat"], db, "tooltipBuffDisableInCombat", RefreshAuraTooltips), 30)
 
         local buffAnchorValues = {
             DEFAULT = L["Game Default"],
             CURSOR = L["Cursor"],
             FRAME = L["Buff Icon"],
         }
-        local buffTtAnchorTo = buffTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor To"], buffAnchorValues, db, "tooltipBuffAnchor", function() GUI:RefreshCurrentPage() end), 55)
-        GUI:BlockControl12_1(buffTtAnchorTo, "limitation", { id = "tooltips:buffanchorto", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsBuffRow(d) end })
-        
-        local buffAnchorPos = buffTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorPositionValues, db, "tooltipBuffAnchorPos", function() end), 55)
+        buffTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor To"], buffAnchorValues, db, "tooltipBuffAnchor", function() RefreshAuraTooltips() GUI:RefreshCurrentPage() end), 55)
+
+        local buffAnchorPos = buffTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorPositionValues, db, "tooltipBuffAnchorPos", RefreshAuraTooltips), 55)
         buffAnchorPos.disableOn = function(d) return d.tooltipBuffAnchor == "DEFAULT" end
-        GUI:BlockControl12_1(buffAnchorPos, "limitation", { id = "tooltips:buffanchorpos", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsBuffRow(d) end })
-        
-        local buffOffsetX = buffTooltipGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -150, 150, 1, db, "tooltipBuffX", function() end), 55)
+
+        local buffOffsetX = buffTooltipGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -150, 150, 1, db, "tooltipBuffX", RefreshAuraTooltips), 55)
         buffOffsetX.disableOn = function(d) return d.tooltipBuffAnchor ~= "FRAME" end
-        GUI:BlockControl12_1(buffOffsetX, "limitation", { id = "tooltips:buffoffsetx", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsBuffRow(d) end })
-        
-        local buffOffsetY = buffTooltipGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -150, 150, 1, db, "tooltipBuffY", function() end), 55)
+
+        local buffOffsetY = buffTooltipGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -150, 150, 1, db, "tooltipBuffY", RefreshAuraTooltips), 55)
         buffOffsetY.disableOn = function(d) return d.tooltipBuffAnchor ~= "FRAME" end
-        GUI:BlockControl12_1(buffOffsetY, "limitation", { id = "tooltips:buffoffsety", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsBuffRow(d) end })
         
         Add(buffTooltipGroup, nil, 2)
         
@@ -497,33 +472,23 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local debuffTooltipEnable = debuffTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Debuff Tooltips"], db, "tooltipDebuffEnabled", RefreshAuraTooltips), 30)
         debuffTooltipEnable.keepEnabled = true
         debuffTooltipGroup.disableChildrenOn = function(d) return not d.tooltipDebuffEnabled end
-        -- Permanent 12.1 limitation (see the buff group): combat hover-drop no-ops.
-        local debuffTtCombat = debuffTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Disable in Combat"], db, "tooltipDebuffDisableInCombat", function() end), 30)
-        GUI:BlockControl12_1(debuffTtCombat, "limitation", { id = "tooltips:debuffcombat", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsDebuffRow(d) end })
-        local debuffTipNote = debuffTooltipGroup:AddWidget(GUI:CreateNote(self.child,
-            L["On 12.1 the game draws aura tooltips at a fixed position beside the icon."],
-            { width = 260 }), 40)
-        debuffTipNote.hideOn = function(d) return not DF:FactoryOwnsDebuffRow(d) end
+        debuffTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Disable in Combat"], db, "tooltipDebuffDisableInCombat", RefreshAuraTooltips), 30)
 
         local debuffAnchorValues = {
             DEFAULT = L["Game Default"],
             CURSOR = L["Cursor"],
             FRAME = L["Debuff Icon"],
         }
-        local debuffTtAnchorTo = debuffTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor To"], debuffAnchorValues, db, "tooltipDebuffAnchor", function() GUI:RefreshCurrentPage() end), 55)
-        GUI:BlockControl12_1(debuffTtAnchorTo, "limitation", { id = "tooltips:debuffanchorto", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsDebuffRow(d) end })
-        
-        local debuffAnchorPos = debuffTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorPositionValues, db, "tooltipDebuffAnchorPos", function() end), 55)
+        debuffTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor To"], debuffAnchorValues, db, "tooltipDebuffAnchor", function() RefreshAuraTooltips() GUI:RefreshCurrentPage() end), 55)
+
+        local debuffAnchorPos = debuffTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorPositionValues, db, "tooltipDebuffAnchorPos", RefreshAuraTooltips), 55)
         debuffAnchorPos.disableOn = function(d) return d.tooltipDebuffAnchor == "DEFAULT" end
-        GUI:BlockControl12_1(debuffAnchorPos, "limitation", { id = "tooltips:debuffanchorpos", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsDebuffRow(d) end })
-        
-        local debuffOffsetX = debuffTooltipGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -150, 150, 1, db, "tooltipDebuffX", function() end), 55)
+
+        local debuffOffsetX = debuffTooltipGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -150, 150, 1, db, "tooltipDebuffX", RefreshAuraTooltips), 55)
         debuffOffsetX.disableOn = function(d) return d.tooltipDebuffAnchor ~= "FRAME" end
-        GUI:BlockControl12_1(debuffOffsetX, "limitation", { id = "tooltips:debuffoffsetx", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsDebuffRow(d) end })
-        
-        local debuffOffsetY = debuffTooltipGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -150, 150, 1, db, "tooltipDebuffY", function() end), 55)
+
+        local debuffOffsetY = debuffTooltipGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -150, 150, 1, db, "tooltipDebuffY", RefreshAuraTooltips), 55)
         debuffOffsetY.disableOn = function(d) return d.tooltipDebuffAnchor ~= "FRAME" end
-        GUI:BlockControl12_1(debuffOffsetY, "limitation", { id = "tooltips:debuffoffsety", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsDebuffRow(d) end })
         
         Add(debuffTooltipGroup, nil, 1)
         
@@ -533,33 +498,23 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local defTooltipEnable = defTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Defensive Icon Tooltips"], db, "tooltipDefensiveEnabled", RefreshAuraTooltips), 30)
         defTooltipEnable.keepEnabled = true
         defTooltipGroup.disableChildrenOn = function(d) return not d.tooltipDefensiveEnabled end
-        -- Permanent 12.1 limitation (see the buff group): combat hover-drop no-ops.
-        local defTtCombat = defTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Disable in Combat"], db, "tooltipDefensiveDisableInCombat", function() end), 30)
-        GUI:BlockControl12_1(defTtCombat, "limitation", { id = "tooltips:defensivecombat", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsDefensiveRow(d) end })
-        local defTipNote = defTooltipGroup:AddWidget(GUI:CreateNote(self.child,
-            L["On 12.1 the game draws aura tooltips at a fixed position beside the icon."],
-            { width = 260 }), 40)
-        defTipNote.hideOn = function(d) return not DF:FactoryOwnsDefensiveRow(d) end
+        defTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Disable in Combat"], db, "tooltipDefensiveDisableInCombat", RefreshAuraTooltips), 30)
 
         local defAnchorValues = {
             DEFAULT = L["Game Default"],
             CURSOR = L["Cursor"],
             FRAME = L["Defensive Icon"],
         }
-        local defTtAnchorTo = defTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor To"], defAnchorValues, db, "tooltipDefensiveAnchor", function() GUI:RefreshCurrentPage() end), 55)
-        GUI:BlockControl12_1(defTtAnchorTo, "limitation", { id = "tooltips:defensiveanchorto", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsDefensiveRow(d) end })
-        
-        local defAnchorPos = defTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorPositionValues, db, "tooltipDefensiveAnchorPos", function() end), 55)
+        defTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor To"], defAnchorValues, db, "tooltipDefensiveAnchor", function() RefreshAuraTooltips() GUI:RefreshCurrentPage() end), 55)
+
+        local defAnchorPos = defTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorPositionValues, db, "tooltipDefensiveAnchorPos", RefreshAuraTooltips), 55)
         defAnchorPos.disableOn = function(d) return d.tooltipDefensiveAnchor == "DEFAULT" end
-        GUI:BlockControl12_1(defAnchorPos, "limitation", { id = "tooltips:defensiveanchorpos", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsDefensiveRow(d) end })
-        
-        local defOffsetX = defTooltipGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -100, 100, 1, db, "tooltipDefensiveX", function() end), 55)
+
+        local defOffsetX = defTooltipGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -100, 100, 1, db, "tooltipDefensiveX", RefreshAuraTooltips), 55)
         defOffsetX.disableOn = function(d) return d.tooltipDefensiveAnchor ~= "FRAME" end
-        GUI:BlockControl12_1(defOffsetX, "limitation", { id = "tooltips:defensiveoffsetx", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsDefensiveRow(d) end })
-        
-        local defOffsetY = defTooltipGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -100, 100, 1, db, "tooltipDefensiveY", function() end), 55)
+
+        local defOffsetY = defTooltipGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -100, 100, 1, db, "tooltipDefensiveY", RefreshAuraTooltips), 55)
         defOffsetY.disableOn = function(d) return d.tooltipDefensiveAnchor ~= "FRAME" end
-        GUI:BlockControl12_1(defOffsetY, "limitation", { id = "tooltips:defensiveoffsety", page = L["Tooltips"], when = function(d) return DF:FactoryOwnsDefensiveRow(d) end })
         
         Add(defTooltipGroup, nil, 2)
 
@@ -1395,8 +1350,12 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         renderingGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Pixel-Perfect Scaling"],
             nil, nil, refreshPixelPerfect,
             makeBlizGet("pixelPerfect"), makeBlizSet("pixelPerfect"), "pixelPerfect"), 30)
+        -- Label slots below are sized for the WRAPPED text plus a gap. Labels are
+        -- variable-height widgets (GUI.RowHeight only governs fixed ones), so the
+        -- slot is whatever is passed here — too small and the next widget's label
+        -- sits on the last line of this one.
         renderingGroup:AddWidget(GUI:CreateLabel(self.child,
-            L["Snaps sizes and borders to exact pixels for crisp rendering."], 250), 30)
+            L["Snaps sizes and borders to exact pixels for crisp rendering."], 250), 42)
         -- Pixel-perfect scale hint: at a UI Scale of 768/physicalHeight, one UI unit
         -- equals one physical pixel, so snapping has nothing to round away and borders
         -- are at their crispest. Tell the user that value (and whether they're already
@@ -1424,7 +1383,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                     scaleHint:SetText(t)
                 end
             end
-            renderingGroup:AddWidget(scaleHint, 45)
+            -- 3 wrapped lines (~48px) + a clear gap before the dropdown below.
+            renderingGroup:AddWidget(scaleHint, 72)
         end
         -- Aura duration-text update rate (account-wide, DF.GlobalDefaults). Feeds the
         -- native duration binding at bind time (creation-frozen), so a change is
@@ -1446,7 +1406,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end), 55)
         renderingGroup:AddWidget(GUI:CreateLabel(self.child,
             L["How often aura countdown text refreshes. Smooth updates ten times a second, Performance once a second. Normal keeps the standard rate."],
-            250), 45)
+            250), 52)
         Add(renderingGroup, nil, 1)
 
         -- ===== SETTINGS PANEL APPEARANCE GROUP (Column 2, Top) =====
@@ -4226,6 +4186,66 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         Add(col2, nil, 2)
 
+        -- ===== Column 1 (cont.): Dispel Colours =====
+        -- Account-wide per-dispel-type palette (DF.db.dispelColors), the single source of
+        -- truth for both the debuff-icon border and the dispel overlay. Defaults ARE the
+        -- game palette (GetGameDispelPalette, queried from AuraUtil), so an untouched
+        -- palette matches the game exactly; the overlay always follows it, the icon when
+        -- "Color by Dispel Type" is on. No None/Physical picker — that border is hidden on
+        -- no-dispel-type auras and the overlay never fires on them. Editing re-drives frames.
+        local dispelColorsDB = DF.db.dispelColors
+        if type(dispelColorsDB) ~= "table" then
+            DF.db.dispelColors = {}
+            dispelColorsDB = DF.db.dispelColors
+        end
+        local dispelGamePalette = DF:GetGameDispelPalette()
+        local DISPEL_LIST = {
+            { key = "Magic",   name = L["Magic"] },
+            { key = "Curse",   name = L["Curse"] },
+            { key = "Disease", name = L["Disease"] },
+            { key = "Poison",  name = L["Poison"] },
+            { key = "Bleed",   name = L["Bleed / Enrage"] },
+        }
+        -- Commit: bump the curve generation, rebuild the container rows (fresh
+        -- SetAuraBorder binds pick up the new curve) and restyle the overlay
+        -- (its binds re-run via the generation gate).
+        local function DispelColorChanged()
+            if DF.InvalidateDispelColorCurve then DF:InvalidateDispelColorCurve() end
+            if DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
+            if DF.UpdateAllFrames then DF:UpdateAllFrames() end
+            if DF.LightweightUpdateDispelOverlay then DF:LightweightUpdateDispelOverlay() end
+        end
+        -- Live (colour-wheel drag): cheap path — the overlay re-binds via the
+        -- generation gate and test-mode rings repaint on their ticker; live row
+        -- rings catch up on commit (a native bind can't retint per drag frame).
+        local function DispelColorLive()
+            if DF.InvalidateDispelColorCurve then DF:InvalidateDispelColorCurve() end
+            if DF.LightweightUpdateDispelOverlay then DF:LightweightUpdateDispelOverlay() end
+        end
+        local dispelCol = GUI:CreateSettingsGroup(self.child, 280)
+        dispelCol:AddWidget(GUI:CreateHeader(self.child, L["Dispel Type Colors"]), 40)
+        dispelCol:AddWidget(GUI:CreateLabel(self.child, L["Colours for each dispel type, used by the dispel overlay and the debuff-icon border (when Color by Dispel Type is on). Reset restores the game's colours."], 260), 55)
+        local dispelResetBtn = CreateFrame("Button", nil, self.child, "BackdropTemplate")
+        GUI:StyleButton(dispelResetBtn, { width = 260, height = 24, text = L["Reset All to Default"] })
+        dispelResetBtn:SetScript("OnClick", function()
+            for _, info in ipairs(DISPEL_LIST) do
+                local d = dispelGamePalette[info.key]
+                if d then dispelColorsDB[info.key] = { r = d.r, g = d.g, b = d.b } end
+            end
+            DispelColorChanged()
+            if pageColors and pageColors.Refresh then pageColors:Refresh() end
+        end)
+        dispelCol:AddWidget(dispelResetBtn, 30)
+        for i = 1, #DISPEL_LIST do
+            local info = DISPEL_LIST[i]
+            if type(dispelColorsDB[info.key]) ~= "table" then
+                local d = dispelGamePalette[info.key]
+                if d then dispelColorsDB[info.key] = { r = d.r, g = d.g, b = d.b } end
+            end
+            dispelCol:AddWidget(GUI:CreateColorPicker(self.child, info.name, dispelColorsDB, info.key, false, DispelColorChanged, DispelColorLive, true), 30)
+        end
+        Add(dispelCol, nil, 1)
+
         -- ===== Column 2 (cont.): Color by Time Remaining =====
         -- Account-wide duration-colour breakpoints, shared by the buff / debuff / defensive
         -- rows AND the Aura Designer wherever "Color by Time Remaining" is enabled. Each stop
@@ -4237,22 +4257,35 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- human range it covers ("8s and above", "5-8s", "under 2s"), and a small +/- stepper
         -- moves that stop's lower boundary. Colour edits re-tint the strip in place; boundary
         -- add/remove/reset rebuild the page so every range label and the strip stay in sync.
+        -- TWO SECTIONS, one per consumer: duration TEXT and the expiry BORDER/TINT reveal.
+        -- An aura page only carries an on/off; everything about HOW the colour is read
+        -- lives here with the colours it reads, because that is a property of the ramp.
+        --   TEXT    blends or steps (12.1's colour curve), on either scale.
+        --   BORDER  steps only — its colours are baked into |T inline-texture escapes,
+        --           which ignore the fontstring vertex colour a curve writes.
+        -- Each section keeps ONE stop list PER SCALE: thresholds cannot be reinterpreted
+        -- between units (8 seconds is not 8 percent), so switching the scale swaps which
+        -- ramp is being edited and leaves the other untouched for switching back.
         local cbtGlobalDB = DF:GetGlobalDB()
-        if type(cbtGlobalDB.durationColorByTimeBreakpoints) ~= "table" or #cbtGlobalDB.durationColorByTimeBreakpoints == 0 then
-            cbtGlobalDB.durationColorByTimeBreakpoints = DF:DeepCopy(DF.GlobalDefaults.durationColorByTimeBreakpoints)
-        end
-        local bps = cbtGlobalDB.durationColorByTimeBreakpoints
         local iconPath = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
 
-        local function cbtT(s) return math.max(0, tonumber(s and s.threshold) or 0) end
-        local function cbtSorted(descending)
-            local out = {}
-            for _, s in ipairs(bps) do out[#out + 1] = s end
-            table.sort(out, function(a, b)
-                if descending then return cbtT(a) > cbtT(b) else return cbtT(a) < cbtT(b) end
-            end)
-            return out
-        end
+        local CBT_UNITS = {
+            SECONDS = { maxT = nil, capT = 600,   -- seconds have no natural ceiling; derive from the stops
+                        above = L["%ds and above"], under = L["under %ds"], range = L["%d-%ds"] },
+            PERCENT = { maxT = 100, capT = 100,
+                        above = L["%d%% and above"], under = L["under %d%%"], range = L["%d-%d%%"] },
+        }
+        -- ONE RAMP PER UNIT, shared by every colour-by-time consumer — the duration text
+        -- AND the expiry border/tint reveal. "Time is running out" is one idea, so it gets
+        -- one set of colours. BOTH ramps are live at once: duration text reads whichever
+        -- its s/% toggle names (it has no threshold, so that is account-wide), while each
+        -- expiry reveal reads the one matching ITS OWN unit — per indicator, because a
+        -- reveal's bands and its Alert Below threshold are one formatter sampled against
+        -- one property.
+        local CBT_RAMPS = {
+            SECONDS = { bpKey = "durationColorByTimeBreakpoints" },
+            PERCENT = { bpKey = "durationColorByPercentBreakpoints" },
+        }
 
         local function ApplyColorByTime()
             if DF.InvalidateDurationFormatters then DF:InvalidateDurationFormatters() end
@@ -4261,6 +4294,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             if DF.AuraDesigner and DF.AuraDesigner.Engine and DF.AuraDesigner.Engine.ForceRefreshAllFrames then
                 DF.AuraDesigner.Engine:ForceRefreshAllFrames()
             end
+            -- Expiry reveals read these ramps too, so an open Aura Designer card must
+            -- re-render its preview (no-ops if the designer was never opened).
+            if DF.AuraDesigner_RefreshPage then DF:AuraDesigner_RefreshPage() end
         end
 
         -- The colour swatch fires its callback on EVERY change (many ticks per wheel drag),
@@ -4275,39 +4311,143 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end)
         end
 
+        -- Page-level collapsible section wrapping BOTH boxes, matching Health Bar and
+        -- friends. Its title is also the cross-link anchor every aura page flashes
+        -- (GUI:CreateColorsPageLink -> LinkToSetting{ section = L["Color by Time"] }) —
+        -- keep the two in step if it is ever renamed. Assigned just before the build
+        -- loop so it lands on the page ABOVE the boxes it owns.
+        local cbtSection
+
+        -- ONE box (design "A"): Seconds/Percent TABS pick which unit's stops are being
+        -- EDITED (self._cbtEditUnit — page-local UI state, deliberately not saved), the
+        -- editor strip under them always shows HARD BANDS (the stops are data; how a
+        -- consumer renders them is the legend's job), and the "How this renders" legend
+        -- at the bottom is FIXED: a labelled preview per consumer, with that consumer's
+        -- own dials beside it. The previous layout drew the gradient on whichever ramp
+        -- the text happened to read, so flipping the text's unit visibly moved the
+        -- gradient between boxes — correct data, but it read as a bug.
+        local function BuildSection()
+        local editUnit = (self._cbtEditUnit == "PERCENT") and "PERCENT" or "SECONDS"
+        self._cbtEditUnit = editUnit
+        local scale = CBT_UNITS[editUnit]
+        local bpKey = CBT_RAMPS[editUnit].bpKey
+
+        -- Seed BOTH ramps: the legend previews can show the non-edited unit (the text
+        -- preview always renders the ramp the text actually reads), so both lists must
+        -- exist whichever tab is up.
+        for _, ramp in pairs(CBT_RAMPS) do
+            if type(cbtGlobalDB[ramp.bpKey]) ~= "table" or #cbtGlobalDB[ramp.bpKey] == 0 then
+                cbtGlobalDB[ramp.bpKey] = DF:DeepCopy(DF.GlobalDefaults[ramp.bpKey])
+            end
+        end
+        local bps = cbtGlobalDB[bpKey]
+
+        local function cbtT(s) return math.max(0, tonumber(s and s.threshold) or 0) end
+        local function cbtSorted(descending)
+            local out = {}
+            for _, s in ipairs(bps) do out[#out + 1] = s end
+            table.sort(out, function(a, b)
+                if descending then return cbtT(a) > cbtT(b) else return cbtT(a) < cbtT(b) end
+            end)
+            return out
+        end
+
         local cbtGroup = GUI:CreateSettingsGroup(self.child, 280)
-        cbtGroup:AddWidget(GUI:CreateHeader(self.child, L["Color by Time"]), 40)
-        cbtGroup:AddWidget(GUI:CreateLabel(self.child, L["Sets the duration-text colors used wherever Color by Time Remaining is enabled (buffs, debuffs, defensives and the Aura Designer)."], 260), 48)
 
-        -- Read-only preview strip: 0s at the left, (highest + a little) at the right.
-        local previewW = 256
-        local asc = cbtSorted(false)
-        local maxT = math.max(12, cbtT(asc[#asc]) + 2)
-        local strip = CreateFrame("Frame", nil, self.child)
-        strip:SetSize(previewW, 18)
-        strip.segs = {}
-        for k = 1, #asc do
-            local lo = cbtT(asc[k])
-            local hi = (k < #asc) and cbtT(asc[k + 1]) or maxT
-            if hi > lo then
-                local tex = strip:CreateTexture(nil, "ARTWORK")
-                tex:SetPoint("TOPLEFT", strip, "TOPLEFT", (lo / maxT) * previewW, 0)
-                tex:SetSize(((hi - lo) / maxT) * previewW, 18)
-                local c = asc[k].color or { r = 1, g = 1, b = 1 }
-                tex:SetColorTexture(c.r or 1, c.g or 1, c.b or 1, 1)
-                strip.segs[asc[k]] = tex
+        -- Tabs: which unit's stops are on the editor below. UI state only — flipping a
+        -- tab changes nothing about what renders in the world. Underline-tab style
+        -- (StyleButton opts.tab — the PARTY/RAID/BINDS look), half-width each so the
+        -- pair spans the box. No explicit accent: the tab picks up the mode accent
+        -- (party purple / raid), same as the main tabs. CreateSegmentToggle stays the
+        -- compact value toggle beside a control (the s/% dials in the legend below).
+        local tabRow = CreateFrame("Frame", nil, self.child)
+        tabRow:SetSize(260, 24)
+        local prevTab
+        for _, def in ipairs({
+            { key = "SECONDS", label = L["Seconds"] },
+            { key = "PERCENT", label = L["Percent"] },
+        }) do
+            local tabBtn = CreateFrame("Button", nil, tabRow, "BackdropTemplate")
+            GUI:StyleButton(tabBtn, { tab = true, width = 128, height = 24, text = def.label, font = "DFFontHighlight" })
+            if prevTab then
+                tabBtn:SetPoint("LEFT", prevTab, "RIGHT", 4, 0)
+            else
+                tabBtn:SetPoint("LEFT", tabRow, "LEFT", 0, 0)
             end
+            local key = def.key
+            tabBtn:SetScript("OnClick", function()
+                if self._cbtEditUnit ~= key then
+                    self._cbtEditUnit = key
+                    if pageColors and pageColors.Refresh then pageColors:Refresh() end
+                end
+            end)
+            tabBtn:SetActive(editUnit == key)
+            prevTab = tabBtn
         end
-        cbtGroup:AddWidget(strip, 24)
+        cbtGroup:AddWidget(tabRow, 30)
 
+        -- Strip builder, shared by the editor strip and the legend previews. `unit` picks
+        -- which ramp the strip shows — the editor and border previews show the EDITED
+        -- unit, the text preview always shows the ramp the TEXT reads. smoothMode marks
+        -- the strips that render the way the duration text does (gradient while Blend
+        -- Colors Smoothly is on). Low values left, high right.
+        local previewW, stripH = 256, 18
+        local strips = {}
+        local function BuildStrip(w, h, smoothMode, unit)
+            local f = CreateFrame("Frame", nil, self.child)
+            f:SetSize(w, h)
+            f.segs, f.smoothMode = {}, smoothMode
+            local asc = {}
+            for _, s2 in ipairs(cbtGlobalDB[CBT_RAMPS[unit].bpKey]) do asc[#asc + 1] = s2 end
+            table.sort(asc, function(a, b) return cbtT(a) < cbtT(b) end)
+            local maxT = CBT_UNITS[unit].maxT or math.max(12, cbtT(asc[#asc]) + 2)
+            for k = 1, #asc do
+                local lo = cbtT(asc[k])
+                local hi = (k < #asc) and cbtT(asc[k + 1]) or maxT
+                if hi > lo then
+                    local tex = f:CreateTexture(nil, "ARTWORK")
+                    tex:SetPoint("TOPLEFT", f, "TOPLEFT", (lo / maxT) * w, 0)
+                    tex:SetSize(((hi - lo) / maxT) * w, h)
+                    tex:SetColorTexture(1, 1, 1, 1)   -- white base; the gradient tints it
+                    f.segs[#f.segs + 1] = { tex = tex, from = asc[k], to = asc[k + 1] }
+                end
+            end
+            strips[#strips + 1] = f
+            return f
+        end
         local function RefreshPreview()
-            for stop, tex in pairs(strip.segs) do
-                local c = stop.color or { r = 1, g = 1, b = 1 }
-                tex:SetColorTexture(c.r or 1, c.g or 1, c.b or 1, 1)
+            for _, f in ipairs(strips) do
+                local sm = f.smoothMode and (cbtGlobalDB.durationTextColorSmooth ~= false)
+                for _, seg in ipairs(f.segs) do
+                    -- ONE path for both modes: reset the base to white, then gradient
+                    -- a->b — stepped is just a->a, a solid band. The mode now flips at
+                    -- RUNTIME (the Blend checkbox retints in place), and SetGradient
+                    -- layered over a texture left as SetColorTexture(band colour)
+                    -- MULTIPLIES the two into mud; the white reset makes every retint
+                    -- idempotent. The band above the final stop stays flat because the
+                    -- curve clamps there (probe-verified).
+                    local a = seg.from.color or { r = 1, g = 1, b = 1 }
+                    local b = (sm and seg.to and seg.to.color) or a
+                    seg.tex:SetColorTexture(1, 1, 1, 1)
+                    seg.tex:SetGradient("HORIZONTAL",
+                        CreateColor(a.r or 1, a.g or 1, a.b or 1, 1),
+                        CreateColor(b.r or 1, b.g or 1, b.b or 1, 1))
+                end
             end
         end
 
-        -- One row per stop, freshest (highest threshold) first.
+        -- Editor strip: ALWAYS hard bands. The stops are the data being edited; whether a
+        -- consumer blends them is that consumer's property, previewed in the legend below.
+        cbtGroup:AddWidget(BuildStrip(previewW, stripH, false, editUnit), 24)
+        RefreshPreview()
+
+        -- ONE row per stop, freshest (highest threshold) first: colour chip, computed
+        -- range, boundary stepper, remove. The chip IS a CreateColorPicker — shrunk to
+        -- its swatch by resizing the container (the button anchors TOPLEFT/TOPRIGHT, so
+        -- it follows) — which brings the whole dialog stack along (cancel restore,
+        -- Default button, ElvUI hook, spurious open-fire suppression) instead of
+        -- reimplementing any of it. The "Starts at" caption the merge dropped lives on
+        -- as a tooltip on the stepper controls.
         local desc = cbtSorted(true)
         for i = 1, #desc do
             local bp = desc[i]
@@ -4316,29 +4456,38 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             local above = (i > 1) and cbtT(desc[i - 1]) or nil
             local rangeLabel
             if i == 1 then
-                rangeLabel = format(L["%ds and above"], t)
+                rangeLabel = format(scale.above, t)
             elseif t == 0 then
-                rangeLabel = format(L["under %ds"], above or 0)
+                rangeLabel = format(scale.under, above or 0)
             else
-                rangeLabel = format(L["%d-%ds"], t, above or t)
+                rangeLabel = format(scale.range, t, above or t)
             end
 
-            cbtGroup:AddWidget(GUI:CreateColorPicker(self.child, rangeLabel, bp, "color", false, function()
+            local row = CreateFrame("Frame", nil, self.child)
+            row:SetSize(previewW, 24)
+
+            local chip = GUI:CreateColorPicker(self.child, "", bp, "color", false, function()
                 RefreshPreview()
                 ScheduleColorApply()
-            end, nil, false), 30)
+            end, nil, false)
+            chip:SetParent(row)
+            chip:SetSize(52, 24)
+            chip:SetPoint("LEFT", row, "LEFT", 0, 0)
+
+            local cap = row:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+            cap:SetPoint("LEFT", chip, "RIGHT", 8, 0)
+            cap:SetText(rangeLabel)
+            cap:SetTextColor(0.85, 0.85, 0.85)
+            cap:SetWordWrap(false)
+            cap:SetJustifyH("LEFT")
 
             -- Boundary stepper (the t == 0 base band has no adjustable lower edge).
             -- +/- nudge by one; the middle field is typeable for big jumps (8 -> 120).
             if t ~= 0 then
                 local lowerBound = (i < #desc) and (cbtT(desc[i + 1]) + 1) or 1
-                local upperBound = (i > 1) and (cbtT(desc[i - 1]) - 1) or 600
-                local row = CreateFrame("Frame", nil, self.child)
-                row:SetSize(previewW, 22)
-                local cap = row:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-                cap:SetPoint("LEFT", row, "LEFT", 12, 0)
-                cap:SetText(L["Starts at"])
-                cap:SetTextColor(0.7, 0.7, 0.7)
+                -- The top stop is capped by the scale (100% has a real ceiling; seconds
+                -- keep the long-buff headroom the field already allowed).
+                local upperBound = (i > 1) and (cbtT(desc[i - 1]) - 1) or scale.capT
 
                 local eb
                 local function commitTo(nt)
@@ -4353,15 +4502,36 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                     if pageColors and pageColors.Refresh then pageColors:Refresh() end
                 end
 
-                local minus = CreateFrame("Button", nil, row, "BackdropTemplate")
-                GUI:StyleButton(minus, { width = 22, height = 20, icon = { texture = iconPath .. "remove", size = 12, color = { r = 0.85, g = 0.85, b = 0.85 } } })
-                minus:SetPoint("LEFT", cap, "RIGHT", 8, 0)
-                minus:SetScript("OnClick", function() commitTo(cbtT(bp) - 1) end)
+                -- Right-to-left: [−][value][+][×], the × only when removable. Stepper
+                -- rows all share the removable state, so their columns stay aligned.
+                local rightAnchor, rightPoint, rightOff = row, "RIGHT", -2
+                if #bps > 2 then
+                    -- Reuse the shared close-X in its default (dismiss) form — grey glyph at
+                    -- rest, white glyph + red hover wash on mouseover, exactly like the GUI's
+                    -- own close button. (No tone="danger" — that tints the glyph red at rest.)
+                    local remBtn = GUI:CreateCloseButton(row, {
+                        size = 20,
+                        onClick = function()
+                            for idx, s in ipairs(bps) do
+                                if s == bp then table.remove(bps, idx) break end
+                            end
+                            ApplyColorByTime()
+                            if pageColors and pageColors.Refresh then pageColors:Refresh() end
+                        end,
+                    })
+                    remBtn:SetPoint("RIGHT", row, "RIGHT", -2, 0)
+                    rightAnchor, rightPoint, rightOff = remBtn, "LEFT", -6
+                end
+
+                local plus = CreateFrame("Button", nil, row, "BackdropTemplate")
+                GUI:StyleButton(plus, { width = 22, height = 20, icon = { texture = iconPath .. "add", size = 12, color = { r = 0.85, g = 0.85, b = 0.85 } } })
+                plus:SetPoint("RIGHT", rightAnchor, rightPoint, rightOff, 0)
+                plus:SetScript("OnClick", function() commitTo(cbtT(bp) + 1) end)
 
                 eb = CreateFrame("EditBox", nil, row)
                 GUI:StyleEditBox(eb)
                 eb:SetSize(42, 20)
-                eb:SetPoint("LEFT", minus, "RIGHT", 4, 0)
+                eb:SetPoint("RIGHT", plus, "LEFT", -4, 0)
                 eb:SetAutoFocus(false)
                 eb:SetNumeric(true)
                 eb:SetMaxLetters(4)
@@ -4381,37 +4551,33 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                     self:SetText(tostring(cbtT(bp)))
                 end)
 
-                local plus = CreateFrame("Button", nil, row, "BackdropTemplate")
-                GUI:StyleButton(plus, { width = 22, height = 20, icon = { texture = iconPath .. "add", size = 12, color = { r = 0.85, g = 0.85, b = 0.85 } } })
-                plus:SetPoint("LEFT", eb, "RIGHT", 4, 0)
-                plus:SetScript("OnClick", function() commitTo(cbtT(bp) + 1) end)
+                local minus = CreateFrame("Button", nil, row, "BackdropTemplate")
+                GUI:StyleButton(minus, { width = 22, height = 20, icon = { texture = iconPath .. "remove", size = 12, color = { r = 0.85, g = 0.85, b = 0.85 } } })
+                minus:SetPoint("RIGHT", eb, "LEFT", -4, 0)
+                minus:SetScript("OnClick", function() commitTo(cbtT(bp) - 1) end)
 
-                if #bps > 2 then
-                    -- Reuse the shared close-X in its default (dismiss) form — grey glyph at
-                    -- rest, white glyph + red hover wash on mouseover, exactly like the GUI's
-                    -- own close button. (No tone="danger" — that tints the glyph red at rest.)
-                    local remBtn = GUI:CreateCloseButton(row, {
-                        size = 20,
-                        onClick = function()
-                            for idx, s in ipairs(bps) do
-                                if s == bp then table.remove(bps, idx) break end
-                            end
-                            ApplyColorByTime()
-                            if pageColors and pageColors.Refresh then pageColors:Refresh() end
-                        end,
-                    })
-                    remBtn:SetPoint("RIGHT", row, "RIGHT", -6, 0)
-                end
-                cbtGroup:AddWidget(row, 24)
+                -- The merged row dropped the "Starts at" caption; the value box (only —
+                -- the +/- explain themselves) says it on hover instead.
+                eb:HookScript("OnEnter", function() GUI:ShowTooltip(eb, { title = L["Starts at"] }) end)
+                eb:HookScript("OnLeave", function() GameTooltip:Hide() end)
+                cap:SetPoint("RIGHT", minus, "LEFT", -6, 0)
+            else
+                cap:SetPoint("RIGHT", row, "RIGHT", -6, 0)
             end
+            cbtGroup:AddWidget(row, 28)
         end
 
-        local addStopBtn = CreateFrame("Button", nil, self.child, "BackdropTemplate")
-        GUI:StyleButton(addStopBtn, { width = 260, height = 24, text = L["Add Color Stop"] })
+        -- Add + Reset side by side: neither needs a full row to itself, and halving
+        -- them buys back a row of the height the stop merge just saved.
+        local stopBtnRow = CreateFrame("Frame", nil, self.child)
+        stopBtnRow:SetSize(260, 24)
+        local addStopBtn = CreateFrame("Button", nil, stopBtnRow, "BackdropTemplate")
+        GUI:StyleButton(addStopBtn, { width = 127, height = 24, text = L["Add Color Stop"] })
+        addStopBtn:SetPoint("LEFT", stopBtnRow, "LEFT", 0, 0)
         addStopBtn:SetScript("OnClick", function()
             -- Drop a new stop into the widest existing gap.
             local a2 = cbtSorted(false)
-            local mx = math.max(12, cbtT(a2[#a2]) + 2)
+            local mx = scale.maxT or math.max(12, cbtT(a2[#a2]) + 2)
             local bestT, bestGap = nil, -1
             for k = 1, #a2 do
                 local lo = cbtT(a2[k])
@@ -4426,21 +4592,97 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             ApplyColorByTime()
             if pageColors and pageColors.Refresh then pageColors:Refresh() end
         end)
-        cbtGroup:AddWidget(addStopBtn, 30)
 
-        local resetStopsBtn = CreateFrame("Button", nil, self.child, "BackdropTemplate")
-        GUI:StyleButton(resetStopsBtn, { width = 260, height = 24, text = L["Reset to Default"] })
+        local resetStopsBtn = CreateFrame("Button", nil, stopBtnRow, "BackdropTemplate")
+        GUI:StyleButton(resetStopsBtn, { width = 127, height = 24, text = L["Reset to Default"] })
+        resetStopsBtn:SetPoint("RIGHT", stopBtnRow, "RIGHT", 0, 0)
         resetStopsBtn:SetScript("OnClick", function()
             wipe(bps)
-            for _, dv in ipairs(DF.GlobalDefaults.durationColorByTimeBreakpoints) do
+            for _, dv in ipairs(DF.GlobalDefaults[bpKey]) do
                 bps[#bps + 1] = { threshold = dv.threshold, color = { r = dv.color.r, g = dv.color.g, b = dv.color.b } }
             end
             ApplyColorByTime()
             if pageColors and pageColors.Refresh then pageColors:Refresh() end
         end)
-        cbtGroup:AddWidget(resetStopsBtn, 30)
+        cbtGroup:AddWidget(stopBtnRow, 30)
 
+        -- ── HOW THIS RENDERS ─────────────────────────────────────────────────────
+        -- One labelled preview per consumer, each rendering the EDITED ramp through
+        -- that consumer's lens, with the consumer's own dials on its row. This block
+        -- never changes shape — only the pixels inside the previews.
+        cbtGroup:AddWidget(GUI:CreateExpiringSubheader(self.child, L["How this renders"]), 26)
+
+        -- Duration text: ALWAYS the ramp the text actually reads (its own unit, whatever
+        -- tab is up), gradient while Blend is on. Never dimmed — this row answers "what
+        -- does my countdown text look like right now", and its s/% toggle switches which
+        -- ramp that is, which the preview shows by changing colours, not by greying.
+        local textRow = CreateFrame("Frame", nil, self.child)
+        textRow:SetSize(260, 22)
+        local textLbl = textRow:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+        textLbl:SetPoint("LEFT", 0, 0)
+        textLbl:SetText(L["Duration Text"])
+        textLbl:SetTextColor(0.85, 0.85, 0.85)
+        local textUnitNow = (cbtGlobalDB.durationTextColorScale == "SECONDS") and "SECONDS" or "PERCENT"
+        local textStrip = BuildStrip(108, 14, true, textUnitNow)
+        textStrip:SetParent(textRow)
+        textStrip:SetPoint("LEFT", textRow, "LEFT", 88, 0)
+        local textUnit = GUI:CreateSegmentToggle(self.child, {
+            { value = "SECONDS", label = L["s"], tooltip = L["Seconds"] },
+            { value = "PERCENT", label = L["%"], tooltip = L["Percent"] },
+        }, cbtGlobalDB, "durationTextColorScale", function()
+            ApplyColorByTime()
+            if pageColors and pageColors.Refresh then pageColors:Refresh() end
+        end, { segmentWidth = 26, height = 18 })
+        textUnit:SetParent(textRow)
+        textUnit:SetPoint("RIGHT", textRow, "RIGHT", 0, 0)
+        cbtGroup:AddWidget(textRow, 26)
+
+        -- Blend belongs to the TEXT, so it sits inside the text block — above the note,
+        -- not between the note and Border & Tint, where it read as a border dial (the
+        -- exact opposite of what it is: borders can never blend). Each block here is
+        -- "row, its dials, then its note", so the note is what closes a block.
+        cbtGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Blend Colors Smoothly"], cbtGlobalDB,
+            "durationTextColorSmooth", function()
+                ApplyColorByTime()
+                RefreshPreview()   -- rendering-only: retint the text preview in place
+            end), 30)
+
+        -- Covers BOTH dials above: durationTextColorScale and durationTextColorSmooth
+        -- are account-wide, unlike the border's per-indicator unit — the pair of notes
+        -- exists to make that contrast readable.
+        cbtGroup:AddWidget(GUI:CreateNote(self.child, L["Shared by all duration text."],
+            { width = 260 }))
+
+        -- Border & tint: always hard bands (|T escapes ignore the vertex colour a curve
+        -- writes), reading whichever ramp matches each indicator's own unit.
+        local borderRow = CreateFrame("Frame", nil, self.child)
+        borderRow:SetSize(260, 22)
+        local borderLbl = borderRow:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+        borderLbl:SetPoint("LEFT", 0, 0)
+        borderLbl:SetText(L["Border & Tint"])
+        borderLbl:SetTextColor(0.85, 0.85, 0.85)
+        local borderStrip = BuildStrip(108, 14, false, editUnit)
+        borderStrip:SetParent(borderRow)
+        borderStrip:SetPoint("LEFT", borderRow, "LEFT", 88, 0)
+        local borderTag = borderRow:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+        borderTag:SetPoint("RIGHT", borderRow, "RIGHT", -2, 0)
+        borderTag:SetText(L["steps"])
+        borderTag:SetTextColor(0.55, 0.55, 0.55)
+        cbtGroup:AddWidget(borderRow, 26)
+        cbtGroup:AddWidget(GUI:CreateNote(self.child,
+            L["Set per indicator. Can't blend colors — always steps."],
+            { width = 260 }))
+
+        RefreshPreview()   -- tint the legend strips built after the first pass
         Add(cbtGroup, nil, 2)
+        if cbtSection then cbtSection:RegisterChild(cbtGroup) end
+        end   -- BuildSection
+
+        -- Column 2, not "both": the header belongs over the box it owns rather than
+        -- spanning the page (column 1 holds the dispel palette, which it does not own).
+        -- Width matches the box so the rule under the title lines up with it.
+        cbtSection = Add(GUI:CreateCollapsibleSection(self.child, L["Color by Time"], true, 280), 36, 2)
+        BuildSection()
     end)
 
     -- ========================================
@@ -5432,19 +5674,22 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             local function L_link(text, pageId)
                 return linkColor .. "|HdfPage:" .. pageId .. "|h" .. text .. "|h|r"
             end
-            local bodyText = L["You have full control over buffs — enable or disable any spell in the presets below, or create your own custom filters. Debuffs are more limited: Blizzard only lets addons filter them by category (boss, dispellable, crowd control, and so on), not by individual spell, so the debuff filters themselves can't be customised."]
+            local bodyText = L["Choose which filters are active here. Buffs: full control — toggle individual spells or create your own filters in the"] .. " "
+                .. L_link(L["Filter Designer"], "auras_filterdesigner") .. ". "
+                .. L["Debuffs: you can only pick from Blizzard's fixed categories (boss, dispellable, crowd control, and so on) — no editing, no custom debuff filters, no per-spell filtering. The debuff Blacklist is the only per-spell control."]
                 .. "\n\n"
-                .. L["Aura Filters only affect the"] .. " "
+                .. L["The filters you enable here apply to the"] .. " "
                 .. L_link(L["Buff Bar"], "auras_buffs") .. " "
                 .. L["and"] .. " "
                 .. L_link(L["Debuff Bar"], "auras_debuffs") .. "."
                 .. "\n"
-                .. L["Auras displayed in the"] .. " "
-                .. L_link(L["Dispel Overlay"], "auras_dispel") .. ", "
-                .. L_link(L["Defensive Icon"], "auras_defensiveicon") .. ", "
+                .. L["Other surfaces choose their own: the"] .. " "
+                .. L_link(L["Defensive Icon"], "auras_defensiveicon") .. " "
                 .. L["and"] .. " "
                 .. L_link(L["Aura Designer"], "auras_auradesigner") .. " "
-                .. L["are independent of Aura Filters."]
+                .. L["(per placed indicator) pick which filters to use on their own pages. The"] .. " "
+                .. L_link(L["Dispel Overlay"], "auras_dispel") .. " "
+                .. L["is fixed and takes no filter selection."]
 
             local infoBanner = GUI:CreateInfoBanner(self.child, {
                 tone = "info",
@@ -5477,6 +5722,18 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         local buffGroup = GUI:CreateSettingsGroup(self.child, 280)
         local buffHeader = buffGroup:AddWidget(GUI:CreateHeader(self.child, L["Buff Filters"]), 40)
+
+        -- Top-of-section link: which filters are active is set here; the spells in
+        -- each preset and your own custom filters are edited in the Filter Designer.
+        local bfManage = buffGroup:AddWidget(GUI:CreateButton(self.child, L["Customise in Filter Designer"], 220, 22, function()
+            if not (GUI.SelectTab and GUI.Pages and GUI.Pages["auras_filterdesigner"]) then return end
+            GUI.SelectTab("auras_filterdesigner")
+            -- Land on a buff filter, not whatever was last open (e.g. the Blacklist
+            -- if the debuff button was used previously).
+            local fdPage = GUI.Pages["auras_filterdesigner"]
+            if fdPage and fdPage._fdSelectBuffs then fdPage._fdSelectBuffs() end
+        end), 30)
+        bfManage.disableOn = function() return not (GUI.Pages and GUI.Pages["auras_filterdesigner"]) end
 
         local bfAll = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["All Buffs"], db, "directBuffShowAll", function()
             DirectFilterChanged()
@@ -5542,15 +5799,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             function() return db.buffFilterSelection.uncategorised end,
             function(v) db.buffFilterSelection.uncategorised = v and true or false end)
 
-        local bfManage = buffGroup:AddWidget(GUI:CreateButton(self.child, L["Manage Filters"], 140, 22, function()
-            -- The Filter Designer page ships in a later step; no-op until the
-            -- page id exists so the button can't strand the panel on a blank page.
-            if GUI.SelectTab and GUI.Pages and GUI.Pages["auras_filterdesigner"] then
-                GUI.SelectTab("auras_filterdesigner")
-            end
-        end), 30)
-        bfManage.disableOn = function() return not (GUI.Pages and GUI.Pages["auras_filterdesigner"]) end
-
         -- The page build is cached across tab switches, but preset counts and the
         -- custom-filter list can change while this page is hidden (Filter Designer
         -- edits). On show, invalidate the page cache when the registry signature
@@ -5582,6 +5830,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             DEFAULT = L["Default (Slot Order)"],
             TIME = L["Time Remaining"],
             NAME = L["Alphabetical"],
+            APPLIED = L["Order Applied"],
+            _order = { "DEFAULT", "TIME", "NAME", "APPLIED" },
         }
         -- Sort works on BOTH paths: legacy rows sort in the Lua scan; factory rows map
         -- the same key onto the native AuraContainerSortMethod (TIME -> ExpirationOnly,
@@ -5595,8 +5845,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Sort refinements (native rows only — the legacy Lua scan doesn't read them)
         local bfSortMine = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["My Auras First"], db, "directBuffSortMineFirst", DirectFilterChanged), 30)
         bfSortMine.hideOn = function(d) return not DF:FactoryOwnsBuffRow(d) end
-        bfSortMine.disableOn = function(d) return d.directBuffSortOrder == "DEFAULT" end
-        bfSortMine.tooltip = L["Sort your own auras before other players'. The Default sort order already shows yours first."]
+        bfSortMine.disableOn = function(d) return not DF:SortOrderSupportsMineFirst(d.directBuffSortOrder) end
+        bfSortMine.tooltip = L["Sort your own auras before other players'. Unavailable on Default (which already shows yours first) and on Order Applied (which keeps one fixed order)."]
         local bfSortRev = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Reverse Order"], db, "directBuffSortReverse", DirectFilterChanged), 30)
         bfSortRev.hideOn = function(d) return not DF:FactoryOwnsBuffRow(d) end
         bfSortRev.tooltip = L["Reverse the sort direction."]
@@ -5629,21 +5879,36 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local debuffGroup = GUI:CreateSettingsGroup(self.child, 280)
         local debuffHeader = debuffGroup:AddWidget(GUI:CreateHeader(self.child, L["Debuff Filters"]), 40)
 
+        -- Top-of-section link: the debuff categories are set here; the one per-spell
+        -- debuff control (the Blacklist) lives in the Filter Designer, so land there.
+        local dfManage = debuffGroup:AddWidget(GUI:CreateButton(self.child, L["Edit debuff Blacklist"], 220, 22, function()
+            if not (GUI.SelectTab and GUI.Pages and GUI.Pages["auras_filterdesigner"]) then return end
+            GUI.SelectTab("auras_filterdesigner")
+            -- Page content builds on first show (inside SelectTab), so the entry
+            -- ref exists now — land on the Blacklist directly.
+            local fdPage = GUI.Pages["auras_filterdesigner"]
+            if fdPage and fdPage._fdSelectBlacklist then fdPage._fdSelectBlacklist() end
+        end), 30)
+        dfManage.disableOn = function() return not (GUI.Pages and GUI.Pages["auras_filterdesigner"]) end
+
         local dfAll = debuffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["All Debuffs"], db, "directDebuffShowAll", function()
             DirectFilterChanged()
             self:RefreshStates()
         end), 30)
         dfAll.tooltip = L["Show every debuff with no filtering."]
 
-        -- ===== INFO BANNER: All Debuffs enabled =====
-        -- Shown while All Debuffs is ON: the curated categories replaced the old
-        -- "enable All Debuffs" advice, so the nudge now points the other way.
+        -- ===== CAUTION BANNER: category filters are incomplete =====
+        -- Shown while All Debuffs is OFF (category mode). Blizzard's category tokens
+        -- (boss/role/priority/CC/raid/dispellable) are not exhaustive — some harmful
+        -- debuffs are tagged with NONE of them, so they're missed even with every
+        -- box below ticked. "All Debuffs" is the only complete option, and we can't
+        -- widen the categories (they're Blizzard-defined).
         local debuffWarningBanner = GUI:CreateInfoBanner(self.child, {
-            tone = "info",
-            text = L["Recommended: use the category filters instead of 'All Debuffs' - they cover the important debuffs without the clutter."],
+            tone = "caution",
+            text = L["Blizzard's debuff categories aren't complete: even with all of them enabled, some debuffs Blizzard doesn't tag are still missed. Only 'All Debuffs' shows every debuff, and the categories can't be changed (they're Blizzard-defined)."],
         })
         debuffWarningBanner.hideOn = function(d)
-            return not d.directDebuffShowAll
+            return d.directDebuffShowAll
         end
         debuffGroup:AddWidget(debuffWarningBanner, debuffWarningBanner.layoutHeight)
 
@@ -5711,6 +5976,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             DEFAULT = L["Default (Slot Order)"],
             TIME = L["Time Remaining"],
             NAME = L["Alphabetical"],
+            APPLIED = L["Order Applied"],
+            _order = { "DEFAULT", "TIME", "NAME", "APPLIED" },
         }
         local dfSort = debuffGroup:AddWidget(GUI:CreateDropdown(self.child, L["Sort Order"], debuffSortOptions, db, "directDebuffSortOrder", function()
             DirectFilterChanged()
@@ -5720,8 +5987,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Sort refinements (native rows only — the legacy Lua scan doesn't read them)
         local dfSortMine = debuffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["My Auras First"], db, "directDebuffSortMineFirst", DirectFilterChanged), 30)
         dfSortMine.hideOn = function(d) return not DF:FactoryOwnsDebuffRow(d) end
-        dfSortMine.disableOn = function(d) return d.directDebuffSortOrder == "DEFAULT" end
-        dfSortMine.tooltip = L["Sort your own auras before other players'. The Default sort order already shows yours first."]
+        dfSortMine.disableOn = function(d) return not DF:SortOrderSupportsMineFirst(d.directDebuffSortOrder) end
+        dfSortMine.tooltip = L["Sort your own auras before other players'. Unavailable on Default (which already shows yours first) and on Order Applied (which keeps one fixed order)."]
         local dfSortRev = debuffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Reverse Order"], db, "directDebuffSortReverse", DirectFilterChanged), 30)
         dfSortRev.hideOn = function(d) return not DF:FactoryOwnsDebuffRow(d) end
         dfSortRev.tooltip = L["Reverse the sort direction."]
@@ -5798,17 +6065,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end
     end)
 
-    -- Auras > Aura Blacklist
-    -- RETIRED: superseded by the filter registry (Aura Filters + Filter Designer);
-    -- the debuff half was already unenforceable on friendly frames. The page stays
-    -- registered and builds a retirement notice with links to the replacements
-    -- (see AuraBlacklist/Options.lua). Stored data is kept but no longer enforced.
-    local pageAuraBlacklist = CreateSubTab("auras", "auras_blacklist", L["Aura Blacklist"])
-    BuildPage(pageAuraBlacklist, function(self, db, Add, AddSpace, AddSyncPoint)
-        if DF.BuildAuraBlacklistPage then
-            DF.BuildAuraBlacklistPage(GUI, self, db)
-        end
-    end)
+    -- Auras > Aura Blacklist: RETIRED as a standalone page. The debuff blacklist
+    -- now lives inside the Filter Designer (Debuffs > Blacklist) — one home for
+    -- all per-spell aura control. Backend unchanged (AuraBlacklist/Config.lua +
+    -- Features/Auras.lua applyDebuffBlacklist); stored data carries over.
 
     -- Auras > Buffs (combined Layout + Appearance with collapsible sections)
     local pageBuffs = CreateSubTab("auras", "auras_buffs", L["Buffs"])
@@ -5855,6 +6115,29 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end
 
         Add(adBanner, 32, "both")
+
+        -- ========================================
+        -- AD DISCOVERY BANNER
+        -- The INVERSE of the coexistence banner above: shown only when the Aura
+        -- Designer is NOT active, to point users who want more than one look for
+        -- every buff at per-slot control + advanced indicators. Its hideOn is the
+        -- exact negation of adBanner's, so precisely one AD banner ever occupies
+        -- this slot (a hidden banner collapses to zero height — no gap).
+        -- success tone (an inviting green), but a "widget" glyph overrides the tone's
+        -- default check so it reads as "advanced indicators available", not a
+        -- completed-state confirmation. Reuses adLink/adOnLink (the openAD path).
+        -- ========================================
+        local adPromoBanner = GUI:CreateInfoBanner(self.child, {tone = "success"})
+        adPromoBanner:SetIconTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\widget_small")
+        adPromoBanner.refreshContent = function(b)
+            b:SetHTML(L["Want per-spell control? The Aura Designer lets you place any buff exactly where you want, with advanced indicators — expiry glyphs, duration bars, custom borders and sounds."] .. " " ..
+                adLink("openAD", L["Open Aura Designer"]), adOnLink)
+        end
+        adPromoBanner.hideOn = function(d)
+            local _adCfg = DF.GetModeAuraDesigner and DF:GetModeAuraDesigner((d == DF.db.raid) and "raid" or "party")
+            return (_adCfg and _adCfg.enabled) and true or false   -- hide when AD IS active
+        end
+        Add(adPromoBanner, 32, "both")
 
         -- Copy button at top right
         Add(CreateCopyButton(self.child, {"buff", "showBuffs"}, L["Buffs"], "auras_buffs"), 25, 2)
@@ -5910,7 +6193,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         currentSection = layoutSection
 
         -- Settings Group (col1)
-        local settingsGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local settingsGroup = GUI:CreateSettingsGroup(self.child, 280)
         settingsGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 40)
         local showBuffsCb = settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Buffs"], db, "showBuffs", function()
             self:RefreshStates()
@@ -5936,7 +6219,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         AddToSection(settingsGroup, nil, 1)
         
         -- Position Group (col2)
-        local positionGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local positionGroup = GUI:CreateSettingsGroup(self.child, 280)
         positionGroup:AddWidget(GUI:CreateHeader(self.child, L["Position"]), 40)
         local buffAnchor = positionGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "buffAnchor", nil), 55)
         buffAnchor.disableOn = function(d) return not d.showBuffs end
@@ -5949,7 +6232,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         AddToSection(positionGroup, nil, 2)
         
         -- Grid Layout Group (col1)
-        local gridGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local gridGroup = GUI:CreateSettingsGroup(self.child, 280)
         gridGroup:AddWidget(GUI:CreateHeader(self.child, L["Grid Layout"]), 40)
         local buffWrap = gridGroup:AddWidget(GUI:CreateSlider(self.child, L["Icons Per Row"], 1, 8, 1, db, "buffWrap", nil, function() DF:LightweightUpdateAuraPosition("buff") end, true), 55)
         buffWrap.disableOn = function(d) return not d.showBuffs end
@@ -5979,7 +6262,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         currentSection = appearanceSection
 
         -- Border Group (col1)
-        local borderGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local borderGroup = GUI:CreateSettingsGroup(self.child, 280)
         borderGroup:AddWidget(GUI:CreateHeader(self.child, L["Border"]), 40)
         -- Full border toolkit via the unified helper (Stage 5.5 Phase 2).  No
         -- class/role colour (aura indicators aren't unit-class).  Hidden when
@@ -6003,7 +6286,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         
         -- Stack Count Group (col2) — the shared TextStyle control block (font/scale/
         -- outline/shadow/colour/anchor/offsets/justify) + the feature-specific extras.
-        local stackCountGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local stackCountGroup = GUI:CreateSettingsGroup(self.child, 280)
         stackCountGroup:AddWidget(GUI:CreateHeader(self.child, L["Stack Count"]), 40)
         GUI:CreateTextControls(stackCountGroup, db, "buffStack", {
             parent   = self.child,
@@ -6011,18 +6294,16 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             onChange = function() DF:LightweightUpdateAuraStackText("buff") end,
             onDrag   = function() DF:LightweightUpdateAuraStackText("buff") end,
         })
-        local buffStackMin = stackCountGroup:AddWidget(GUI:CreateSlider(self.child, L["Min Stacks to Show"], 1, 10, 1, db, "buffStackMinimum", nil, function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 55)
-        -- 12.1: a stacks formatter is FORBIDDEN on container rows (it throws on the secret
-        -- combat stack count inside Blizzard's dirty pass and bricks the container — see the
-        -- Features/Auras.lua tombstone). Native display = counts > 1, so a custom minimum
-        -- is not expressible on the factory row.
-        GUI:BlockControl12_1(buffStackMin, "limitation", { id = "buffs:stackminimum", page = L["Buffs"], when = function(d) return DF:FactoryOwnsBuffRow(d) end })
+        -- (No "Min Stacks to Show": a stacks formatter is FORBIDDEN on container rows — it
+        -- throws on the secret combat stack count inside Blizzard's dirty pass and bricks
+        -- the container (see the Features/Auras.lua tombstone). Native display is
+        -- "counts > 1", so a custom minimum cannot be expressed; the setting is gone.)
         -- Grey the whole group when Buffs are off, matching Settings/Position/Grid.
         stackCountGroup.disableChildrenOn = function(d) return not d.showBuffs end
         AddToSection(stackCountGroup, nil, 2)
         
         -- Duration Text Group (col2)
-        local durationGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local durationGroup = GUI:CreateSettingsGroup(self.child, 280)
         durationGroup:AddWidget(GUI:CreateHeader(self.child, L["Duration"]), 40)
         local durShow = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Duration"], db, "buffShowDuration", function()
             self:RefreshStates()
@@ -6031,8 +6312,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- The cooldown swipe (radial sweep) is the OTHER way time-remaining is
         -- shown, so it lives here with Duration Text rather than under Border.
         durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Cooldown Swipe"], db, "buffHideSwipe", nil), 30)
-        local durationFormatOptions = { NUMBER = L["Number"], SHORT = L["Short"], FULL = L["Full"] }
-        local durFormat = durationGroup:AddWidget(GUI:CreateDropdown(self.child, L["Duration Format"], durationFormatOptions, db, "buffDurationFormat", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 55)
+        -- Icon-sized formats only: Number "14" / Seconds "14s" / Percent "45%".
+        -- FULL ("14 Seconds") overflows a 20px icon (never fit, delisted with #5's
+        -- percent work — a saved FULL still renders until the user re-picks); the
+        -- combined "12s (45%)" is AD-bar-only for the same reason.
+        local durationFormatOptions = { NUMBER = L["Number"], SHORT = L["Seconds"], PERCENT = L["Percent"],
+            _order = { "NUMBER", "SHORT", "PERCENT" } }
+        local durFormat = durationGroup:AddWidget(GUI:CreateDropdown(self.child, L["Duration Format"], durationFormatOptions, db, "buffDurationFormat", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames(); GUI:RefreshCurrentPage() end), 55)
         durFormat.disableOn = function(d) return not d.buffShowDuration end
         -- Shared TextStyle control block (font/scale/outline/shadow/colour/anchor/
         -- offsets/justify). The static colour greys out while Color-by-Time owns it.
@@ -6048,10 +6334,12 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local durColor = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Color by Time Remaining"], db, "buffDurationColorByTime", function() self:RefreshStates(); DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
         durColor.disableOn = function(d) return not d.buffShowDuration end
         AddColorsPageLink(durationGroup, self.child)
+        -- Hide Above can't compose with the Percent format (its threshold is seconds
+        -- banded into a seconds-sampled formatter — see GetDurationFormatFields).
         local durHideAbove = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Above Threshold"], db, "buffDurationHideAboveEnabled", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
-        durHideAbove.disableOn = function(d) return not d.buffShowDuration end
+        durHideAbove.disableOn = function(d) return not d.buffShowDuration or DF:IsPercentDurationFormat(d.buffDurationFormat) end
         local durHideAboveSlider = durationGroup:AddWidget(GUI:CreateSlider(self.child, L["Hide Above (seconds)"], 1, 60, 1, db, "buffDurationHideAboveThreshold", nil, function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 55)
-        durHideAboveSlider.disableOn = function(d) return not d.buffShowDuration or not d.buffDurationHideAboveEnabled end
+        durHideAboveSlider.disableOn = function(d) return not d.buffShowDuration or not d.buffDurationHideAboveEnabled or DF:IsPercentDurationFormat(d.buffDurationFormat) end
         local durHidePerm = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Duration on Permanent Auras"], db, "buffDurationHideOnPermanent", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
         durHidePerm.disableOn = function(d) return not d.buffShowDuration end
         -- Grey the whole group when Buffs are off (composes with the per-control
@@ -6059,51 +6347,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         durationGroup.disableChildrenOn = function(d) return not d.showBuffs end
         AddToSection(durationGroup, nil, 2)
 
-        -- Expiring Indicator Group (col1 — placed under Border, matching the
-        -- Aura Designer's Border→Expiring ordering)
-        local expiringGroup = GUI:CreateSettingsGroup(self.child, 260)
-        expiringGroup:AddWidget(GUI:CreateHeader(self.child, L["Expiring Indicator"]), 40)
-        -- Unified expiring panel — SAME shared helper + flow as the Aura Designer
-        -- (which is the reference design): master enable → Percent/Seconds toggle
-        -- threshold → State Overrides → thickness/inset/colour/alpha/animation →
-        -- Tint.  Buff-only rows (Show Expiring Border, Color-by-Time, Inset, Tint)
-        -- appear via include flags; rows that don't apply simply hide.
-        GUI:CreateExpiringControls(expiringGroup, db, {
-            parent        = self.child,
-            masterLabel   = L["Enable Expiring Indicators"],
-            fullUpdate    = function() DF:UpdateAllFrames() end,
-            lightColors   = function() DF:LightweightUpdateExpiringBorderColor() end,
-            lightGeometry = function() DF:LightweightUpdateAuraBorder("buff") end,
-            lightTint     = function() DF:LightweightUpdateExpiringTintColor() end,
-            refreshStates = function() self:RefreshStates() end,
-            refreshPage   = function() self:Refresh() end,
-            keys = {
-                master           = "buffExpiringEnabled",
-                threshold        = "buffExpiringThreshold",
-                thresholdMode    = "buffExpiringThresholdMode",
-                borderEnable     = "buffExpiringBorderEnabled",
-                colorByTime      = "buffExpiringBorderColorByTime",
-                color            = "buffExpiringBorderColor",
-                alphaHandleColor = "buffExpiringBorderColor",
-                thickness        = "buffExpiringBorderThickness",
-                inset            = "buffExpiringBorderInset",
-                animPrefix       = "buffExpiringBorderAnimation",
-                tintEnable       = "buffExpiringTintEnabled",
-                tintColor        = "buffExpiringTintColor",
-            },
-            include = {
-                threshold    = true,
-                borderEnable = true,
-                colorByTime  = true,
-                alpha        = true,
-                thickness    = true, thicknessMin = 1, thicknessMax = 5,
-                inset        = true,
-                animation    = true,
-                tint         = true,
-            },
-        })
-        AddToSection(expiringGroup, nil, 1)
-        GUI:BlockControl12_1(expiringGroup, "roadmap", { id = "buffs:expiring", page = L["Buffs"], when = function(d) return DF:FactoryOwnsBuffRow(d) end })
+        -- (No Expiring Indicator group: the pre-12.1 expiring border/tint was driven by a
+        -- ~3 Hz ticker reading remaining time, which is SECRET on 12.1. Removed 2026-07-25
+        -- rather than left frosted. The 12.1-safe replacement is the DF.Expiration engine
+        -- (Features/Expiration.lua) + GUI:CreateExpirationControls, currently adopted by the
+        -- Aura Designer only -- rolling it out to these rows is a separate, unscheduled job.)
 
         currentSection = nil
         AddSpace(10, "both")
@@ -6119,7 +6367,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- restyle (texture/colours) — same callback either way.
         local function BuffBarChanged() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end
 
-        local durBarGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local durBarGroup = GUI:CreateSettingsGroup(self.child, 280)
         durBarGroup.hideOn = durBarSection.hideOn
         durBarGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 40)
         durBarGroup:AddWidget(GUI:CreateLabel(self.child, L["Shows a bar on each icon that drains with the aura's remaining time."], 250), 30)
@@ -6135,11 +6383,19 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         durBarGroup:AddWidget(GUI:CreateSlider(self.child, L["Gap"], 0, 10, 1, db, "buffDurationBarGap", nil, BuffBarChanged, true), 55)
         AddToSection(durBarGroup, nil, 1)
 
-        local durBarStyleGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local durBarStyleGroup = GUI:CreateSettingsGroup(self.child, 280)
         durBarStyleGroup.hideOn = durBarSection.hideOn
         durBarStyleGroup:AddWidget(GUI:CreateHeader(self.child, L["Bar Style"]), 40)
-        durBarStyleGroup:AddWidget(GUI:CreateTextureDropdown(self.child, L["Texture"], db, "buffDurationBarTexture", BuffBarChanged), 55)
-        durBarStyleGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Bar Color"], db, "buffDurationBarColor", true, BuffBarChanged), 30)
+        durBarStyleGroup:AddWidget(GUI:CreateDropdown(self.child, L["Color Mode"], DF:GetDurationBarColorModes(), db, "buffDurationBarColorMode", function()
+            self:RefreshStates()
+            BuffBarChanged()
+        end), 55)
+        local buffBarTex = durBarStyleGroup:AddWidget(GUI:CreateTextureDropdown(self.child, L["Texture"], db, "buffDurationBarTexture", BuffBarChanged), 55)
+        local buffBarCol = durBarStyleGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Bar Color"], db, "buffDurationBarColor", true, BuffBarChanged), 30)
+        -- A curve mode brings its own ramp texture and forces white, so these two do
+        -- nothing while it is selected - dim them rather than leave dead controls live.
+        buffBarTex.disableOn = function(d) return DF:IsDurationBarCurveMode(d.buffDurationBarColorMode) end
+        buffBarCol.disableOn = buffBarTex.disableOn
         durBarStyleGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Background Color"], db, "buffDurationBarBGColor", true, BuffBarChanged), 30)
         durBarStyleGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Reverse Fill"], db, "buffDurationBarReverseFill", BuffBarChanged), 30)
         durBarStyleGroup.disableChildrenOn = durBarGroup.disableChildrenOn
@@ -6189,7 +6445,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         currentSection = layoutSection
 
         -- Settings Group (col1)
-        local settingsGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local settingsGroup = GUI:CreateSettingsGroup(self.child, 280)
         settingsGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 40)
         settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Debuffs"], db, "showDebuffs", function()
             self:RefreshStates()
@@ -6208,7 +6464,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         AddToSection(settingsGroup, nil, 1)
         
         -- Position Group (col2)
-        local positionGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local positionGroup = GUI:CreateSettingsGroup(self.child, 280)
         positionGroup:AddWidget(GUI:CreateHeader(self.child, L["Position"]), 40)
         local debuffAnchor = positionGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "debuffAnchor", nil), 55)
         debuffAnchor.disableOn = function(d) return not d.showDebuffs end
@@ -6221,7 +6477,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         AddToSection(positionGroup, nil, 2)
         
         -- Grid Layout Group (col1)
-        local gridGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local gridGroup = GUI:CreateSettingsGroup(self.child, 280)
         gridGroup:AddWidget(GUI:CreateHeader(self.child, L["Grid Layout"]), 40)
         local debuffWrap = gridGroup:AddWidget(GUI:CreateSlider(self.child, L["Icons Per Row"], 1, 8, 1, db, "debuffWrap", nil, function() DF:LightweightUpdateAuraPosition("debuff") end, true), 55)
         debuffWrap.disableOn = function(d) return not d.showDebuffs end
@@ -6245,7 +6501,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end
         
         -- Border Group (col1)
-        local borderGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local borderGroup = GUI:CreateSettingsGroup(self.child, 280)
         borderGroup:AddWidget(GUI:CreateHeader(self.child, L["Border"]), 40)
         -- Full border toolkit via the unified helper (Stage 5.5 Phase 2).  When
         -- "Color by Dispel Type" (below) is ON, the border is forced SOLID and
@@ -6270,35 +6526,18 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local dispelInset = borderGroup:AddWidget(GUI:CreateSlider(self.child, L["Dispel Border Inset"], -8, 8, 1, db, "debuffDispelBorderInset", nil, function() DF:LightweightUpdateAuraBorder("debuff") end, true), 55)
         dispelInset.disableOn = function(d) return not d.debuffBorderColorByType end
         dispelInset.hideOn = function(d) return not DF:FactoryOwnsDebuffRow(d) end
+        -- Colors-page link right under "Color by Dispel Type": the dispel-type palette
+        -- lives on the account-wide Colors page (one shared set, also used by the Dispel
+        -- Overlay). Co-located with its toggle so it's obvious where to edit the colours.
+        local dispelColorsLink = GUI:CreateDispelColorsPageLink(self.child, 260)
+        borderGroup:AddWidget(dispelColorsLink, (dispelColorsLink.layoutHeight or 16) + 2)
         AddToSection(borderGroup, nil, 1)
-        
-        -- Dispel Colors Group (col2)
-        local colorsGroup = GUI:CreateSettingsGroup(self.child, 260)
-        colorsGroup:AddWidget(GUI:CreateHeader(self.child, L["Dispel Type Colors"]), 40)
-        local magicColor = colorsGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Magic"], db, "debuffBorderColorMagic", false, InvalidateAndUpdate, function() DF:LightweightUpdateDebuffBorderColors() end, true), 30)
-        magicColor.disableOn = function(d) return not d.debuffShowBorder or not d.debuffBorderColorByType end
-        local curseColor = colorsGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Curse"], db, "debuffBorderColorCurse", false, InvalidateAndUpdate, function() DF:LightweightUpdateDebuffBorderColors() end, true), 30)
-        curseColor.disableOn = function(d) return not d.debuffShowBorder or not d.debuffBorderColorByType end
-        local diseaseColor = colorsGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Disease"], db, "debuffBorderColorDisease", false, InvalidateAndUpdate, function() DF:LightweightUpdateDebuffBorderColors() end, true), 30)
-        diseaseColor.disableOn = function(d) return not d.debuffShowBorder or not d.debuffBorderColorByType end
-        local poisonColor = colorsGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Poison"], db, "debuffBorderColorPoison", false, InvalidateAndUpdate, function() DF:LightweightUpdateDebuffBorderColors() end, true), 30)
-        poisonColor.disableOn = function(d) return not d.debuffShowBorder or not d.debuffBorderColorByType end
-        local bleedColor = colorsGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Bleed / Enrage"], db, "debuffBorderColorBleed", false, InvalidateAndUpdate, function() DF:LightweightUpdateDebuffBorderColors() end, true), 30)
-        bleedColor.disableOn = function(d) return not d.debuffShowBorder or not d.debuffBorderColorByType end
-        local noneColor = colorsGroup:AddWidget(GUI:CreateColorPicker(self.child, L["None / Physical"], db, "debuffBorderColorNone", false, InvalidateAndUpdate, function() DF:LightweightUpdateDebuffBorderColors() end, true), 30)
-        noneColor.disableOn = function(d) return not d.debuffShowBorder or not d.debuffBorderColorByType end
-        -- 12.1: the native dispel border is coloured PRIVATE-side from Blizzard's
-        -- standard dispel palette (the aura's dispel type is secret) -- custom
-        -- per-type colours are not expressible on the factory row.
-        GUI:BlockControl12_1(colorsGroup, "limitation",
-            { id = "debuffs:dispelcolors", page = L["Debuffs"], when = function(d) return DF:FactoryOwnsDebuffRow(d) end })
-        AddToSection(colorsGroup, nil, 2)
 
         -- Dispel Symbol Group (col2) — the native colourblind dispel-type letter,
         -- engine-written per aura (12.1 factory rows only; the legacy renderer has no
         -- symbol source). The game draws it ONLY while Colorblind Mode is on — the
         -- tooltip + caution note set that expectation; test mode previews it regardless.
-        local symbolGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local symbolGroup = GUI:CreateSettingsGroup(self.child, 280)
         symbolGroup:AddWidget(GUI:CreateHeader(self.child, L["Dispel Symbol"]), 40)
         local symbolEnable = symbolGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Dispel Symbol"], db, "debuffDispelSymbolEnabled", function()
             self:RefreshStates()
@@ -6327,7 +6566,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         AddToSection(symbolGroup, nil, 2)
 
         -- Stack Count Group (col1)
-        local stackCountGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local stackCountGroup = GUI:CreateSettingsGroup(self.child, 280)
         stackCountGroup:AddWidget(GUI:CreateHeader(self.child, L["Stack Count"]), 40)
         stackCountGroup:AddWidget(GUI:CreateFontDropdown(self.child, L["Font"], db, "debuffStackFont", function() DF:LightweightUpdateAuraStackText("debuff") end), 55)
         stackCountGroup:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.0, 0.05, db, "debuffStackScale", nil, function() DF:LightweightUpdateAuraStackText("debuff") end, true), 55)
@@ -6337,14 +6576,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         stackCountGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -150, 150, 1, db, "debuffStackX", nil, function() DF:LightweightUpdateAuraStackText("debuff") end, true), 55)
         stackCountGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -150, 150, 1, db, "debuffStackY", nil, function() DF:LightweightUpdateAuraStackText("debuff") end, true), 55)
         stackCountGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Color"], db, "debuffStackColor", false, function() DF:LightweightUpdateAuraStackText("debuff") end, function() DF:LightweightUpdateAuraStackText("debuff") end, true), 30)
-        local debuffStackMin = stackCountGroup:AddWidget(GUI:CreateSlider(self.child, L["Min Stacks to Show"], 1, 10, 1, db, "debuffStackMinimum", nil), 55)
-        GUI:BlockControl12_1(debuffStackMin, "limitation", { id = "debuffs:stackminimum", page = L["Debuffs"], when = function(d) return DF:FactoryOwnsDebuffRow(d) end })
+        -- (No "Min Stacks to Show" — see the Buffs page for why it cannot exist on 12.1.)
         -- Grey the whole group when Debuffs are off, matching Settings/Position/Grid.
         stackCountGroup.disableChildrenOn = function(d) return not d.showDebuffs end
         AddToSection(stackCountGroup, nil, 1)
         
         -- Duration Text Group (col2)
-        local durationGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local durationGroup = GUI:CreateSettingsGroup(self.child, 280)
         durationGroup:AddWidget(GUI:CreateHeader(self.child, L["Duration"]), 40)
         local durShow = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Duration"], db, "debuffShowDuration", function()
             self:RefreshStates()
@@ -6352,8 +6590,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end), 30)
         -- Cooldown swipe (radial time-remaining) lives with Duration Text, not Border.
         durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Cooldown Swipe"], db, "debuffHideSwipe", nil), 30)
-        local debuffDurationFormatOptions = { NUMBER = L["Number"], SHORT = L["Short"], FULL = L["Full"] }
-        local durFormat = durationGroup:AddWidget(GUI:CreateDropdown(self.child, L["Duration Format"], debuffDurationFormatOptions, db, "debuffDurationFormat", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 55)
+        -- Icon-sized formats only (see the buff page's Duration Format note).
+        local debuffDurationFormatOptions = { NUMBER = L["Number"], SHORT = L["Seconds"], PERCENT = L["Percent"],
+            _order = { "NUMBER", "SHORT", "PERCENT" } }
+        local durFormat = durationGroup:AddWidget(GUI:CreateDropdown(self.child, L["Duration Format"], debuffDurationFormatOptions, db, "debuffDurationFormat", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames(); GUI:RefreshCurrentPage() end), 55)
         durFormat.disableOn = function(d) return not d.debuffShowDuration end
         local durFont = durationGroup:AddWidget(GUI:CreateFontDropdown(self.child, L["Font"], db, "debuffDurationFont", nil), 55)
         durFont.disableOn = function(d) return not d.debuffShowDuration end
@@ -6374,10 +6614,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local durColor = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Color by Time Remaining"], db, "debuffDurationColorByTime", function() self:RefreshStates(); DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
         durColor.disableOn = function(d) return not d.debuffShowDuration end
         AddColorsPageLink(durationGroup, self.child)
+        -- Hide Above can't compose with the Percent format (see the buff page).
         local durHideAbove = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Above Threshold"], db, "debuffDurationHideAboveEnabled", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
-        durHideAbove.disableOn = function(d) return not d.debuffShowDuration end
+        durHideAbove.disableOn = function(d) return not d.debuffShowDuration or DF:IsPercentDurationFormat(d.debuffDurationFormat) end
         local durHideAboveSlider = durationGroup:AddWidget(GUI:CreateSlider(self.child, L["Hide Above (seconds)"], 1, 60, 1, db, "debuffDurationHideAboveThreshold", nil, function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 55)
-        durHideAboveSlider.disableOn = function(d) return not d.debuffShowDuration or not d.debuffDurationHideAboveEnabled end
+        durHideAboveSlider.disableOn = function(d) return not d.debuffShowDuration or not d.debuffDurationHideAboveEnabled or DF:IsPercentDurationFormat(d.debuffDurationFormat) end
         local durHidePerm = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Duration on Permanent Auras"], db, "debuffDurationHideOnPermanent", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
         durHidePerm.disableOn = function(d) return not d.debuffShowDuration end
         -- Grey the whole group when Debuffs are off (composes with the per-control
@@ -6396,7 +6637,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         local function DebuffBarChanged() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end
 
-        local durBarGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local durBarGroup = GUI:CreateSettingsGroup(self.child, 280)
         durBarGroup.hideOn = durBarSection.hideOn
         durBarGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 40)
         durBarGroup:AddWidget(GUI:CreateLabel(self.child, L["Shows a bar on each icon that drains with the aura's remaining time."], 250), 30)
@@ -6412,11 +6653,19 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         durBarGroup:AddWidget(GUI:CreateSlider(self.child, L["Gap"], 0, 10, 1, db, "debuffDurationBarGap", nil, DebuffBarChanged, true), 55)
         AddToSection(durBarGroup, nil, 1)
 
-        local durBarStyleGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local durBarStyleGroup = GUI:CreateSettingsGroup(self.child, 280)
         durBarStyleGroup.hideOn = durBarSection.hideOn
         durBarStyleGroup:AddWidget(GUI:CreateHeader(self.child, L["Bar Style"]), 40)
-        durBarStyleGroup:AddWidget(GUI:CreateTextureDropdown(self.child, L["Texture"], db, "debuffDurationBarTexture", DebuffBarChanged), 55)
-        durBarStyleGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Bar Color"], db, "debuffDurationBarColor", true, DebuffBarChanged), 30)
+        durBarStyleGroup:AddWidget(GUI:CreateDropdown(self.child, L["Color Mode"], DF:GetDurationBarColorModes(), db, "debuffDurationBarColorMode", function()
+            self:RefreshStates()
+            DebuffBarChanged()
+        end), 55)
+        local debuffBarTex = durBarStyleGroup:AddWidget(GUI:CreateTextureDropdown(self.child, L["Texture"], db, "debuffDurationBarTexture", DebuffBarChanged), 55)
+        local debuffBarCol = durBarStyleGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Bar Color"], db, "debuffDurationBarColor", true, DebuffBarChanged), 30)
+        -- A curve mode brings its own ramp texture and forces white, so these two do
+        -- nothing while it is selected - dim them rather than leave dead controls live.
+        debuffBarTex.disableOn = function(d) return DF:IsDurationBarCurveMode(d.debuffDurationBarColorMode) end
+        debuffBarCol.disableOn = debuffBarTex.disableOn
         durBarStyleGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Background Color"], db, "debuffDurationBarBGColor", true, DebuffBarChanged), 30)
         durBarStyleGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Reverse Fill"], db, "debuffDurationBarReverseFill", DebuffBarChanged), 30)
         durBarStyleGroup.disableChildrenOn = durBarGroup.disableChildrenOn
@@ -6504,14 +6753,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             refreshMissing()
             DF:UpdateAllAuras()
         end), 30)
-        local mbDebug = settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Debug Mode (print to chat)"], db, "missingBuffIconDebug", function()
-            if DF.UpdateAllMissingBuffIcons then DF:UpdateAllMissingBuffIcons() end
-        end), 30)
-        -- The debug trace narrates the legacy UnitHasBuff scan, which never runs on
-        -- the read-free 12.1 widget (there is nothing to print — presence is never
-        -- known to Lua). Candidate for deletion in the post-port cleanup sweep.
-        GUI:BlockControl12_1(mbDebug, "limitation",
-            { id = "missingbuffs:debug", page = L["Missing Buffs"], when = function(d) return DF:FactoryOwnsMissingBuff(d) end })
+        -- (No Debug Mode checkbox: its trace narrated the legacy UnitHasBuff scan, which
+        -- never runs on the read-free 12.1 widget -- presence is never known to Lua, so
+        -- there is nothing to print. Removed 2026-07-25 as its own comment long proposed.)
         Add(settingsGroup, nil, 1)
         
         -- ===== BUFFS TO CHECK GROUP (Column 2) =====
@@ -6831,6 +7075,14 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             return not d.defensiveIconShowDuration
         end
 
+        -- Duration Format (PTR-7 #5): previously hardcoded NUMBER; icon-sized
+        -- formats only (see the buff page's Duration Format note). No Hide Above
+        -- on this page, so no percent-grey needed.
+        local defDurFormatOptions = { NUMBER = L["Number"], SHORT = L["Seconds"], PERCENT = L["Percent"],
+            _order = { "NUMBER", "SHORT", "PERCENT" } }
+        local defDurFormat = durationGroup:AddWidget(GUI:CreateDropdown(self.child, L["Duration Format"], defDurFormatOptions, db, "defensiveIconDurationFormat", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 55)
+        defDurFormat.hideOn = HideDefensiveDurationOptions
+
         -- Shared TextStyle control block (font/scale/outline/shadow/colour/anchor/
         -- offsets/justify). The offsets/anchor honor the existing defensiveIconDurationX/Y
         -- keys (previously config-only); the static colour greys while Color-by-Time owns it.
@@ -6926,8 +7178,16 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         durBarGroup:AddWidget(GUI:CreateDropdown(self.child, L["Position"], { BOTTOM = L["Bottom"], TOP = L["Top"] }, db, "defensiveDurationBarPosition", DefBarChanged), 55)
         durBarGroup:AddWidget(GUI:CreateSlider(self.child, L["Height"], 1, 12, 1, db, "defensiveDurationBarHeight", nil, DefBarChanged, true), 55)
         durBarGroup:AddWidget(GUI:CreateSlider(self.child, L["Gap"], 0, 10, 1, db, "defensiveDurationBarGap", nil, DefBarChanged, true), 55)
-        durBarGroup:AddWidget(GUI:CreateTextureDropdown(self.child, L["Texture"], db, "defensiveDurationBarTexture", DefBarChanged), 55)
-        durBarGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Bar Color"], db, "defensiveDurationBarColor", true, DefBarChanged), 30)
+        durBarGroup:AddWidget(GUI:CreateDropdown(self.child, L["Color Mode"], DF:GetDurationBarColorModes(), db, "defensiveDurationBarColorMode", function()
+            self:RefreshStates()
+            DefBarChanged()
+        end), 55)
+        local defBarTex = durBarGroup:AddWidget(GUI:CreateTextureDropdown(self.child, L["Texture"], db, "defensiveDurationBarTexture", DefBarChanged), 55)
+        local defBarCol = durBarGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Bar Color"], db, "defensiveDurationBarColor", true, DefBarChanged), 30)
+        -- A curve mode brings its own ramp texture and forces white, so these two do
+        -- nothing while it is selected - dim them rather than leave dead controls live.
+        defBarTex.disableOn = function(d) return DF:IsDurationBarCurveMode(d.defensiveDurationBarColorMode) end
+        defBarCol.disableOn = defBarTex.disableOn
         durBarGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Background Color"], db, "defensiveDurationBarBGColor", true, DefBarChanged), 30)
         durBarGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Reverse Fill"], db, "defensiveDurationBarReverseFill", DefBarChanged), 30)
         Add(durBarGroup, nil, 1)
@@ -7058,7 +7318,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         currentSection = layoutSection
         
         -- Position Group (col1)
-        local positionGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local positionGroup = GUI:CreateSettingsGroup(self.child, 280)
         positionGroup:AddWidget(GUI:CreateHeader(self.child, L["Position"]), 40)
         local tsAnchor = positionGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "targetedSpellAnchor", FullUpdate), 55)
         tsAnchor.disableOn = HideTargetedSpellOptions
@@ -7071,7 +7331,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         AddToSection(positionGroup, nil, 1)
         
         -- Size Group (col2)
-        local sizeGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local sizeGroup = GUI:CreateSettingsGroup(self.child, 280)
         sizeGroup:AddWidget(GUI:CreateHeader(self.child, L["Size"]), 40)
         local tsIconSize = sizeGroup:AddWidget(GUI:CreateSlider(self.child, L["Icon Size"], 12, 48, 1, db, "targetedSpellSize", FullUpdate, TargetedSpellLightweightUpdate, true), 55)
         tsIconSize.disableOn = HideTargetedSpellOptions
@@ -7095,7 +7355,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         currentSection = appearanceSection
         
         -- Border Group (col1)
-        local borderGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local borderGroup = GUI:CreateSettingsGroup(self.child, 280)
         borderGroup:AddWidget(GUI:CreateHeader(self.child, L["Border"]), 40)
         -- Full DF.Border toolkit (matches Personal Targeted Spell): Show Border,
         -- Size, Style/Gradient, Colour, Alpha, Inset, Blend Mode, Shadow, Animate.
@@ -7115,7 +7375,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         AddToSection(borderGroup, nil, 1)
         
         -- Duration Group (col2)
-        local durationGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local durationGroup = GUI:CreateSettingsGroup(self.child, 280)
         durationGroup:AddWidget(GUI:CreateHeader(self.child, L["Duration Text"]), 40)
         local showDur = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Duration"], db, "targetedSpellShowDuration", function()
             self:RefreshStates()
@@ -7151,7 +7411,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         
         local function HideHighlightOptions(d) return not d.targetedSpellEnabled or not d.targetedSpellHighlightImportant end
 
-        local highlightGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local highlightGroup = GUI:CreateSettingsGroup(self.child, 280)
         highlightGroup:AddWidget(GUI:CreateHeader(self.child, L["Highlight Settings"]), 40)
         local tsHighlightImportant = highlightGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Highlight Important Spells"], db, "targetedSpellHighlightImportant", function()
             self:RefreshStates()
@@ -7184,7 +7444,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local function HideInterruptedOptions(d) return not d.targetedSpellEnabled or not d.targetedSpellShowInterrupted end
         local function HideXOptions(d) return not d.targetedSpellEnabled or not d.targetedSpellShowInterrupted or not d.targetedSpellInterruptedShowX end
         
-        local interruptGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local interruptGroup = GUI:CreateSettingsGroup(self.child, 280)
         interruptGroup:AddWidget(GUI:CreateHeader(self.child, L["Interrupt Settings"]), 40)
         local tsShowInterrupted = interruptGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Interrupted Visual"], db, "targetedSpellShowInterrupted", function()
             self:RefreshStates()
@@ -7199,7 +7459,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         tsInterruptedTintAlpha.disableOn = HideInterruptedOptions
         AddToSection(interruptGroup, nil, 1)
         
-        local xMarkGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local xMarkGroup = GUI:CreateSettingsGroup(self.child, 280)
         xMarkGroup:AddWidget(GUI:CreateHeader(self.child, L["X Mark"]), 40)
         local tsInterruptedShowX = xMarkGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show X Mark"], db, "targetedSpellInterruptedShowX", function()
             self:RefreshStates()
@@ -7376,7 +7636,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             local layoutSection = Add(GUI:CreateCollapsibleSection(self.child, L["Layout"], true), 36, "both")
             currentSection = layoutSection
 
-            local layoutGroup = GUI:CreateSettingsGroup(self.child, 260)
+            local layoutGroup = GUI:CreateSettingsGroup(self.child, 280)
             layoutGroup:AddWidget(GUI:CreateHeader(self.child, L["Size & Spacing"]), 40)
             local tlW = layoutGroup:AddWidget(GUI:CreateSlider(self.child, L["Bar Width"], 120, 600, 1, db, "targetedListWidth", TargetedListUpdate, TargetedListUpdate, true), 55)
             tlW.disableOn = HideTLOptions
@@ -7391,7 +7651,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             tlSort.disableOn = HideTLOptions
             AddToSection(layoutGroup, nil, 1)
 
-            local presetGroup = GUI:CreateSettingsGroup(self.child, 260)
+            local presetGroup = GUI:CreateSettingsGroup(self.child, 280)
             presetGroup:AddWidget(GUI:CreateHeader(self.child, L["Bar Style"]), 40)
             -- Picking a preset writes a bundle of settings to db
             -- (bar dimensions, show/hide toggles, font size, etc.)
@@ -7444,7 +7704,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             local appearanceSection = Add(GUI:CreateCollapsibleSection(self.child, L["Appearance"], true), 36, "both")
             currentSection = appearanceSection
 
-            local colorGroup = GUI:CreateSettingsGroup(self.child, 260)
+            local colorGroup = GUI:CreateSettingsGroup(self.child, 280)
             colorGroup:AddWidget(GUI:CreateHeader(self.child, L["Bar Color"]), 40)
             local tlInterColor = colorGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Interruptible Color"], db, "targetedListInterruptibleColor", true, TargetedListUpdate, function() if DF.LightweightUpdateTargetedListBarColor then DF:LightweightUpdateTargetedListBarColor() end end, true), 35)
             tlInterColor.disableOn = HideTLOptions
@@ -7484,7 +7744,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             tlResetColors.disableOn = HideTLOptions
             AddToSection(colorGroup, nil, 1)
 
-            local iconGroup = GUI:CreateSettingsGroup(self.child, 260)
+            local iconGroup = GUI:CreateSettingsGroup(self.child, 280)
             iconGroup:AddWidget(GUI:CreateHeader(self.child, L["Icon"]), 40)
             local tlShowIcon = iconGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Icon"], db, "targetedListShowIcon", function()
                 self:RefreshStates()
@@ -7504,7 +7764,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             local textSection = Add(GUI:CreateCollapsibleSection(self.child, L["Text"], true), 36, "both")
             currentSection = textSection
 
-            local textToggleGroup = GUI:CreateSettingsGroup(self.child, 260)
+            local textToggleGroup = GUI:CreateSettingsGroup(self.child, 280)
             textToggleGroup:AddWidget(GUI:CreateHeader(self.child, L["Show"]), 40)
             local tlShowSpellName = textToggleGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Spell Name"], db, "targetedListShowSpellName", TargetedListUpdate), 30)
             tlShowSpellName.disableOn = HideTLOptions
@@ -7523,7 +7783,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             tlArrowSuffix.disableOn = HideTargetNameOptions
             AddToSection(textToggleGroup, nil, 1)
 
-            local fontGroup = GUI:CreateSettingsGroup(self.child, 260)
+            local fontGroup = GUI:CreateSettingsGroup(self.child, 280)
             fontGroup:AddWidget(GUI:CreateHeader(self.child, L["Font"]), 40)
             local tlFont = fontGroup:AddWidget(GUI:CreateFontDropdown(self.child, L["Font"], db, "targetedListFont", TargetedListUpdate), 55)
             tlFont.disableOn = HideTLOptions
@@ -7549,7 +7809,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             local textAnchorOptions = { LEFT = L["Left"], CENTER = L["Center"], RIGHT = L["Right"] }
             local textAlignOptions = { LEFT = L["Left"], CENTER = L["Center"], RIGHT = L["Right"] }
 
-            local spellNamePosGroup = GUI:CreateSettingsGroup(self.child, 260)
+            local spellNamePosGroup = GUI:CreateSettingsGroup(self.child, 280)
             spellNamePosGroup:AddWidget(GUI:CreateHeader(self.child, L["Spell Name"]), 40)
             local tlSNFontSize = spellNamePosGroup:AddWidget(GUI:CreateSlider(self.child, L["Font Size"], 6, 24, 1, db, "targetedListSpellNameFontSize", TargetedListUpdate, TargetedListUpdate, true), 55)
             tlSNFontSize.disableOn = HideTLOptions
@@ -7565,7 +7825,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             tlSNY.disableOn = HideTLOptions
             AddToSection(spellNamePosGroup, nil, 1)
 
-            local targetNamePosGroup = GUI:CreateSettingsGroup(self.child, 260)
+            local targetNamePosGroup = GUI:CreateSettingsGroup(self.child, 280)
             targetNamePosGroup:AddWidget(GUI:CreateHeader(self.child, L["Target Name"]), 40)
             local tlTNFontSize = targetNamePosGroup:AddWidget(GUI:CreateSlider(self.child, L["Font Size"], 6, 24, 1, db, "targetedListTargetNameFontSize", TargetedListUpdate, TargetedListUpdate, true), 55)
             tlTNFontSize.disableOn = HideTargetNameOptions
@@ -7582,7 +7842,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             AddToSection(targetNamePosGroup, nil, 2)
 
             local function HideDurationPosOptions(d) return not d.targetedListEnabled or not d.targetedListShowDuration end
-            local durationPosGroup = GUI:CreateSettingsGroup(self.child, 260)
+            local durationPosGroup = GUI:CreateSettingsGroup(self.child, 280)
             durationPosGroup:AddWidget(GUI:CreateHeader(self.child, L["Duration"]), 40)
             local tlDurFontSize = durationPosGroup:AddWidget(GUI:CreateSlider(self.child, L["Font Size"], 6, 24, 1, db, "targetedListDurationFontSize", TargetedListUpdate, TargetedListUpdate, true), 55)
             tlDurFontSize.disableOn = HideDurationPosOptions
@@ -7596,7 +7856,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             tlDurY.disableOn = HideDurationPosOptions
             AddToSection(durationPosGroup, nil, 1)
 
-            local interruptPosGroup = GUI:CreateSettingsGroup(self.child, 260)
+            local interruptPosGroup = GUI:CreateSettingsGroup(self.child, 280)
             interruptPosGroup:AddWidget(GUI:CreateHeader(self.child, L["Interrupt Text"]), 40)
             local tlIntFontSize = interruptPosGroup:AddWidget(GUI:CreateSlider(self.child, L["Font Size"], 6, 24, 1, db, "targetedListInterruptTextFontSize", TargetedListUpdate, TargetedListUpdate, true), 55)
             tlIntFontSize.disableOn = HideTLOptions
@@ -7619,7 +7879,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             local behaviorSection = Add(GUI:CreateCollapsibleSection(self.child, L["Behavior"], true), 36, "both")
             currentSection = behaviorSection
 
-            local timingGroup = GUI:CreateSettingsGroup(self.child, 260)
+            local timingGroup = GUI:CreateSettingsGroup(self.child, 280)
             timingGroup:AddWidget(GUI:CreateHeader(self.child, L["Timing"]), 40)
             local tlFadeOut = timingGroup:AddWidget(GUI:CreateSlider(self.child, L["Fade Out Duration"], 0, 1, 0.05, db, "targetedListFadeOutDuration", TargetedListUpdate, TargetedListUpdate, true), 55)
             tlFadeOut.disableOn = HideTLOptions
@@ -7705,7 +7965,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         currentSection = layoutSection
         
         -- Size Group (col1)
-        local sizeGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local sizeGroup = GUI:CreateSettingsGroup(self.child, 280)
         sizeGroup:AddWidget(GUI:CreateHeader(self.child, L["Size"]), 40)
         local ptsSize = sizeGroup:AddWidget(GUI:CreateSlider(self.child, L["Icon Size"], 20, 80, 1, db, "personalTargetedSpellSize", PersonalTargetedUpdate, PersonalTargetedUpdate, true), 55)
         ptsSize.disableOn = HidePersonalOptions
@@ -7720,7 +7980,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         AddToSection(sizeGroup, nil, 1)
         
         -- Growth Group (col2)
-        local growthGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local growthGroup = GUI:CreateSettingsGroup(self.child, 280)
         growthGroup:AddWidget(GUI:CreateHeader(self.child, L["Growth"]), 40)
         local ptsGrowth = growthGroup:AddWidget(GUI:CreateDropdown(self.child, L["Growth Direction"], growthOptions, db, "personalTargetedSpellGrowth", PersonalTargetedUpdate), 55)
         ptsGrowth.disableOn = HidePersonalOptions
@@ -7739,7 +7999,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Targeted = spells targeting you). Skipped: offset (icon has its
         -- own positioning), classColor / roleColor (spell alert, not unit
         -- identity), colorByTime / colorByType (no aura-state context).
-        local borderGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local borderGroup = GUI:CreateSettingsGroup(self.child, 280)
         borderGroup:AddWidget(GUI:CreateHeader(self.child, L["Border"]), 40)
         GUI:CreateBorderControls(borderGroup, db, "personalTargetedSpell", {
             parent       = self.child,
@@ -7755,7 +8015,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         AddToSection(borderGroup, nil, 1)
         
         -- Duration Group (col2)
-        local durationGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local durationGroup = GUI:CreateSettingsGroup(self.child, 280)
         durationGroup:AddWidget(GUI:CreateHeader(self.child, L["Duration Text"]), 40)
         local ptsDuration = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Duration"], db, "personalTargetedSpellShowDuration", function()
             self:RefreshStates()
@@ -7791,7 +8051,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         
         local function HidePersonalHighlightOptions(d) return not d.personalTargetedSpellEnabled or not d.personalTargetedSpellHighlightImportant end
 
-        local highlightGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local highlightGroup = GUI:CreateSettingsGroup(self.child, 280)
         highlightGroup:AddWidget(GUI:CreateHeader(self.child, L["Highlight Settings"]), 40)
         local ptsHighlight = highlightGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Highlight Important Spells"], db, "personalTargetedSpellHighlightImportant", function()
             self:RefreshStates()
@@ -7824,7 +8084,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local function HideInterruptOptions(d) return not d.personalTargetedSpellEnabled or not d.personalTargetedSpellShowInterrupted end
         local function HideInterruptXOptions(d) return not d.personalTargetedSpellEnabled or not d.personalTargetedSpellShowInterrupted or not d.personalTargetedSpellInterruptedShowX end
         
-        local interruptGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local interruptGroup = GUI:CreateSettingsGroup(self.child, 280)
         interruptGroup:AddWidget(GUI:CreateHeader(self.child, L["Interrupt Settings"]), 40)
         local ptsInterrupted = interruptGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Interrupted Visual"], db, "personalTargetedSpellShowInterrupted", function()
             self:RefreshStates()
@@ -7839,7 +8099,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         ptsInterruptTintAlpha.disableOn = HideInterruptOptions
         AddToSection(interruptGroup, nil, 1)
         
-        local xMarkGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local xMarkGroup = GUI:CreateSettingsGroup(self.child, 280)
         xMarkGroup:AddWidget(GUI:CreateHeader(self.child, L["X Mark"]), 40)
         local ptsShowX = xMarkGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show X Mark"], db, "personalTargetedSpellInterruptedShowX", function()
             self:RefreshStates()
@@ -7968,7 +8228,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         roleSection:RegisterChild(roleHeaderGap)
 
         -- Settings
-        local roleSettings = GUI:CreateSettingsGroup(self.child, 270, { collapsible = true, collapseKey = "roleIcon:Settings" })
+        local roleSettings = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "roleIcon:Settings" })
         roleSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 25)
         roleSettings:AddWidget(GUI:CreateDropdown(self.child, L["Icon Style"], roleStyleOptions, db, "roleIconStyle", function() DF:UpdateAllRoleIcons(); UpdateRolePreview() end), 55)
         local roleExtTank = roleSettings:AddWidget(GUI:CreateEditBox(self.child, L["Tank Icon Path"], db, "roleIconExternalTank", function() DF:UpdateAllRoleIcons(); UpdateRolePreview() end, nil, "Interface\\MyIcons\\Tank.tga"), 55)
@@ -7988,7 +8248,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         roleSection:RegisterChild(roleSettings)
 
         -- Appearance
-        local roleAppearance = GUI:CreateSettingsGroup(self.child, 270, { collapsible = true, collapseKey = "roleIcon:Appearance" })
+        local roleAppearance = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "roleIcon:Appearance" })
         roleAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 25)
         roleAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "roleIconScale", nil, function() DF:LightweightUpdateIconPosition("role") end, true), 55)
         roleAppearance:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "roleIconAlpha", nil, function() DF:LightweightUpdateIconAlpha("role") end, true), 55)
@@ -7998,7 +8258,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         roleSection:RegisterChild(roleAppearance)
 
         -- Position
-        local rolePosition = GUI:CreateSettingsGroup(self.child, 270, { collapsible = true, collapseKey = "roleIcon:Position" })
+        local rolePosition = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "roleIcon:Position" })
         rolePosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), 25)
         rolePosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "roleIconAnchor", function() DF:LightweightUpdateIconPosition("role") end), 55)
         rolePosition:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "roleIconX", nil, function() DF:LightweightUpdateIconPosition("role") end, true), 55)
@@ -8074,7 +8334,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         leaderSection:RegisterChild(leaderHeaderGap)
 
         -- Settings
-        local leaderSettings = GUI:CreateSettingsGroup(self.child, 270, { collapsible = true, collapseKey = "leaderIcon:Settings" })
+        local leaderSettings = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "leaderIcon:Settings" })
         leaderSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 25)
         leaderSettings.disableChildrenOn = function(d) return not d.leaderIconEnabled end
         local leaderIconEnableCb = leaderSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Leader Icon"], db, "leaderIconEnabled", function() DF:UpdateAllFrames() end), 30)
@@ -8083,7 +8343,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         leaderSection:RegisterChild(leaderSettings)
 
         -- Appearance
-        local leaderAppearance = GUI:CreateSettingsGroup(self.child, 270, { collapsible = true, collapseKey = "leaderIcon:Appearance" })
+        local leaderAppearance = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "leaderIcon:Appearance" })
         leaderAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 25)
         leaderAppearance.disableChildrenOn = function(d) return not d.leaderIconEnabled end
         leaderAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "leaderIconScale", nil, function() DF:LightweightUpdateIconPosition("leader") end, true), 55)
@@ -8094,7 +8354,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         leaderSection:RegisterChild(leaderAppearance)
 
         -- Position
-        local leaderPosition = GUI:CreateSettingsGroup(self.child, 270, { collapsible = true, collapseKey = "leaderIcon:Position" })
+        local leaderPosition = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "leaderIcon:Position" })
         leaderPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), 25)
         leaderPosition.disableChildrenOn = function(d) return not d.leaderIconEnabled end
         leaderPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "leaderIconAnchor", function() DF:LightweightUpdateIconPosition("leader") end), 55)
@@ -8121,7 +8381,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         raidTargetSection:RegisterChild(rtHeaderGap)
 
         -- Settings
-        local rtSettings = GUI:CreateSettingsGroup(self.child, 270, { collapsible = true, collapseKey = "raidTargetIcon:Settings" })
+        local rtSettings = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "raidTargetIcon:Settings" })
         rtSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 25)
         rtSettings.disableChildrenOn = function(d) return not d.raidTargetIconEnabled end
         local raidTargetIconEnableCb = rtSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Target Marker Icon"], db, "raidTargetIconEnabled", function() DF:UpdateAllFrames() end), 30)
@@ -8130,7 +8390,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         raidTargetSection:RegisterChild(rtSettings)
 
         -- Appearance
-        local rtAppearance = GUI:CreateSettingsGroup(self.child, 270, { collapsible = true, collapseKey = "raidTargetIcon:Appearance" })
+        local rtAppearance = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "raidTargetIcon:Appearance" })
         rtAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 25)
         rtAppearance.disableChildrenOn = function(d) return not d.raidTargetIconEnabled end
         rtAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "raidTargetIconScale", nil, function() DF:LightweightUpdateIconPosition("raidTarget") end, true), 55)
@@ -8141,7 +8401,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         raidTargetSection:RegisterChild(rtAppearance)
 
         -- Position
-        local rtPosition = GUI:CreateSettingsGroup(self.child, 270, { collapsible = true, collapseKey = "raidTargetIcon:Position" })
+        local rtPosition = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "raidTargetIcon:Position" })
         rtPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), 25)
         rtPosition.disableChildrenOn = function(d) return not d.raidTargetIconEnabled end
         rtPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "raidTargetIconAnchor", function() DF:LightweightUpdateIconPosition("raidTarget") end), 55)
@@ -8161,7 +8421,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         readySection:RegisterChild(rcHeaderGap)
 
         -- Settings
-        local rcSettings = GUI:CreateSettingsGroup(self.child, 270, { collapsible = true, collapseKey = "readyCheckIcon:Settings" })
+        local rcSettings = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "readyCheckIcon:Settings" })
         rcSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 25)
         rcSettings.disableChildrenOn = function(d) return not d.readyCheckIconEnabled end
         local readyCheckIconEnableCb = rcSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Ready Check Icon"], db, "readyCheckIconEnabled", function() DF:UpdateAllFrames() end), 30)
@@ -8171,7 +8431,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         readySection:RegisterChild(rcSettings)
 
         -- Appearance
-        local rcAppearance = GUI:CreateSettingsGroup(self.child, 270, { collapsible = true, collapseKey = "readyCheckIcon:Appearance" })
+        local rcAppearance = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "readyCheckIcon:Appearance" })
         rcAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 25)
         rcAppearance.disableChildrenOn = function(d) return not d.readyCheckIconEnabled end
         rcAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "readyCheckIconScale", nil, function() DF:LightweightUpdateIconPosition("readyCheck") end, true), 55)
@@ -8182,7 +8442,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         readySection:RegisterChild(rcAppearance)
 
         -- Position
-        local rcPosition = GUI:CreateSettingsGroup(self.child, 270, { collapsible = true, collapseKey = "readyCheckIcon:Position" })
+        local rcPosition = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "readyCheckIcon:Position" })
         rcPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), 25)
         rcPosition.disableChildrenOn = function(d) return not d.readyCheckIconEnabled end
         rcPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "readyCheckIconAnchor", function() DF:LightweightUpdateIconPosition("readyCheck") end), 55)
@@ -8202,7 +8462,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         summonSection:RegisterChild(sumHeaderGap)
 
         -- Settings
-        local sumSettings = GUI:CreateSettingsGroup(self.child, 270, { collapsible = true, collapseKey = "summonIcon:Settings" })
+        local sumSettings = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "summonIcon:Settings" })
         sumSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 25)
         sumSettings.disableChildrenOn = function(d) return not d.summonIconEnabled end
         local summonIconEnableCb = sumSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Summon Icon"], db, "summonIconEnabled", function() DF:UpdateAllFrames() end), 30)
@@ -8215,7 +8475,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         summonSection:RegisterChild(sumSettings)
 
         -- Appearance
-        local sumAppearance = GUI:CreateSettingsGroup(self.child, 270, { collapsible = true, collapseKey = "summonIcon:Appearance" })
+        local sumAppearance = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "summonIcon:Appearance" })
         sumAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 25)
         sumAppearance.disableChildrenOn = function(d) return not d.summonIconEnabled end
         sumAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "summonIconScale", nil, function() DF:LightweightUpdateIconPosition("summon") end, true), 55)
@@ -8226,7 +8486,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         summonSection:RegisterChild(sumAppearance)
 
         -- Position
-        local sumPosition = GUI:CreateSettingsGroup(self.child, 270, { collapsible = true, collapseKey = "summonIcon:Position" })
+        local sumPosition = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "summonIcon:Position" })
         sumPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), 25)
         sumPosition.disableChildrenOn = function(d) return not d.summonIconEnabled end
         sumPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "summonIconAnchor", function() DF:LightweightUpdateIconPosition("summon") end), 55)
@@ -8249,7 +8509,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         bgCarrierSection:RegisterChild(bgcHeaderGap)
 
         -- Settings
-        local bgcSettings = GUI:CreateSettingsGroup(self.child, 270, { collapsible = true, collapseKey = "bgCarrierIcon:Settings" })
+        local bgcSettings = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "bgCarrierIcon:Settings" })
         bgcSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 25)
         bgcSettings.disableChildrenOn = function(d) return not d.bgCarrierIconEnabled end
         local bgCarrierIconEnableCb = bgcSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable BG Carrier Icon"], db, "bgCarrierIconEnabled", function() DF:UpdateAllFrames() end), 30)
@@ -8261,7 +8521,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         bgCarrierSection:RegisterChild(bgcSettings)
 
         -- Appearance
-        local bgcAppearance = GUI:CreateSettingsGroup(self.child, 270, { collapsible = true, collapseKey = "bgCarrierIcon:Appearance" })
+        local bgcAppearance = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "bgCarrierIcon:Appearance" })
         bgcAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 25)
         bgcAppearance.disableChildrenOn = function(d) return not d.bgCarrierIconEnabled end
         bgcAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "bgCarrierIconScale", nil, function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end, true), 55)
@@ -8271,7 +8531,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         bgCarrierSection:RegisterChild(bgcAppearance)
 
         -- Position
-        local bgcPosition = GUI:CreateSettingsGroup(self.child, 270, { collapsible = true, collapseKey = "bgCarrierIcon:Position" })
+        local bgcPosition = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "bgCarrierIcon:Position" })
         bgcPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), 25)
         bgcPosition.disableChildrenOn = function(d) return not d.bgCarrierIconEnabled end
         bgcPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "bgCarrierIconAnchor", function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end), 55)
@@ -8292,7 +8552,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         combatSection:RegisterChild(combatHeaderGap)
 
         -- Settings
-        local combatSettings = GUI:CreateSettingsGroup(self.child, 270, { collapsible = true, collapseKey = "combatIcon:Settings" })
+        local combatSettings = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "combatIcon:Settings" })
         combatSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 25)
         combatSettings.disableChildrenOn = function(d) return not d.combatIconEnabled end
         local combatIconEnableCb = combatSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Combat Icon"], db, "combatIconEnabled", function() DF:UpdateAllFrames() end), 30)
@@ -8302,7 +8562,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         combatSection:RegisterChild(combatSettings)
 
         -- Appearance
-        local combatAppearance = GUI:CreateSettingsGroup(self.child, 270, { collapsible = true, collapseKey = "combatIcon:Appearance" })
+        local combatAppearance = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "combatIcon:Appearance" })
         combatAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 25)
         combatAppearance.disableChildrenOn = function(d) return not d.combatIconEnabled end
         combatAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "combatIconScale", nil, function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end, true), 55)
@@ -8312,7 +8572,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         combatSection:RegisterChild(combatAppearance)
 
         -- Position
-        local combatPosition = GUI:CreateSettingsGroup(self.child, 270, { collapsible = true, collapseKey = "combatIcon:Position" })
+        local combatPosition = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "combatIcon:Position" })
         combatPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), 25)
         combatPosition.disableChildrenOn = function(d) return not d.combatIconEnabled end
         combatPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "combatIconAnchor", function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end), 55)
@@ -8332,7 +8592,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         resSection:RegisterChild(resHeaderGap)
 
         -- Settings
-        local resSettings = GUI:CreateSettingsGroup(self.child, 270, { collapsible = true, collapseKey = "resurrectionIcon:Settings" })
+        local resSettings = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "resurrectionIcon:Settings" })
         resSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 25)
         resSettings.disableChildrenOn = function(d) return not d.resurrectionIconEnabled end
         local resurrectionIconEnableCb = resSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Resurrection Icon"], db, "resurrectionIconEnabled", function() DF:UpdateAllFrames() end), 30)
@@ -8346,7 +8606,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         resSection:RegisterChild(resSettings)
 
         -- Appearance
-        local resAppearance = GUI:CreateSettingsGroup(self.child, 270, { collapsible = true, collapseKey = "resurrectionIcon:Appearance" })
+        local resAppearance = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "resurrectionIcon:Appearance" })
         resAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 25)
         resAppearance.disableChildrenOn = function(d) return not d.resurrectionIconEnabled end
         resAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "resurrectionIconScale", nil, function() DF:LightweightUpdateIconPosition("resurrection") end, true), 55)
@@ -8356,7 +8616,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         resSection:RegisterChild(resAppearance)
 
         -- Position
-        local resPosition = GUI:CreateSettingsGroup(self.child, 270, { collapsible = true, collapseKey = "resurrectionIcon:Position" })
+        local resPosition = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "resurrectionIcon:Position" })
         resPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), 25)
         resPosition.disableChildrenOn = function(d) return not d.resurrectionIconEnabled end
         resPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "resurrectionIconAnchor", function() DF:LightweightUpdateIconPosition("resurrection") end), 55)
@@ -8376,7 +8636,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         phasedSection:RegisterChild(phHeaderGap)
 
         -- Settings
-        local phSettings = GUI:CreateSettingsGroup(self.child, 270, { collapsible = true, collapseKey = "phasedIcon:Settings" })
+        local phSettings = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "phasedIcon:Settings" })
         phSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 25)
         phSettings.disableChildrenOn = function(d) return not d.phasedIconEnabled end
         local phasedIconEnableCb = phSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Phased Icon"], db, "phasedIconEnabled", function() DF:UpdateAllFrames() end), 30)
@@ -8388,7 +8648,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         phasedSection:RegisterChild(phSettings)
 
         -- Appearance
-        local phAppearance = GUI:CreateSettingsGroup(self.child, 270, { collapsible = true, collapseKey = "phasedIcon:Appearance" })
+        local phAppearance = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "phasedIcon:Appearance" })
         phAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 25)
         phAppearance.disableChildrenOn = function(d) return not d.phasedIconEnabled end
         phAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "phasedIconScale", nil, function() DF:LightweightUpdateIconPosition("phased") end, true), 55)
@@ -8399,7 +8659,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         phasedSection:RegisterChild(phAppearance)
 
         -- Position
-        local phPosition = GUI:CreateSettingsGroup(self.child, 270, { collapsible = true, collapseKey = "phasedIcon:Position" })
+        local phPosition = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "phasedIcon:Position" })
         phPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), 25)
         phPosition.disableChildrenOn = function(d) return not d.phasedIconEnabled end
         phPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "phasedIconAnchor", function() DF:LightweightUpdateIconPosition("phased") end), 55)
@@ -8425,7 +8685,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         afkSection:RegisterChild(afkHeaderGap)
 
         -- Settings
-        local afkSettings = GUI:CreateSettingsGroup(self.child, 270, { collapsible = true, collapseKey = "afkIcon:Settings" })
+        local afkSettings = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "afkIcon:Settings" })
         afkSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 25)
         afkSettings.disableChildrenOn = function(d) return not d.afkIconEnabled end
         local afkIconEnableCb = afkSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable AFK Icon"], db, "afkIconEnabled", function() DF:UpdateAllFrames() end), 30)
@@ -8442,7 +8702,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- Timer Text — elapsed-time text under the icon. Icon mode only (Show as
         -- Text off) with Show Timer on, so the whole box is gated.
-        local afkTimerGroup = GUI:CreateSettingsGroup(self.child, 270, { collapsible = true, collapseKey = "afkIcon:TimerText" })
+        local afkTimerGroup = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "afkIcon:TimerText" })
         afkTimerGroup:AddWidget(GUI:CreateHeader(self.child, L["Timer Text"]), 25)
         afkTimerGroup.disableChildrenOn = function(d) return not d.afkIconEnabled end
         afkTimerGroup:AddWidget(GUI:CreateFontDropdown(self.child, L["Font"], db, "afkIconTimerFont", afkTimerCB, "statusIconFont"), 55)
@@ -8456,7 +8716,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         afkTimerGroup.hideOn = function(d) return not d.afkIconShowTimer or d.afkIconShowText end
 
         -- Appearance
-        local afkAppearance = GUI:CreateSettingsGroup(self.child, 270, { collapsible = true, collapseKey = "afkIcon:Appearance" })
+        local afkAppearance = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "afkIcon:Appearance" })
         afkAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 25)
         afkAppearance.disableChildrenOn = function(d) return not d.afkIconEnabled end
         afkAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "afkIconScale", nil, function() DF:LightweightUpdateIconPosition("afk") end, true), 55)
@@ -8467,7 +8727,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         afkSection:RegisterChild(afkAppearance)
 
         -- Position
-        local afkPosition = GUI:CreateSettingsGroup(self.child, 270, { collapsible = true, collapseKey = "afkIcon:Position" })
+        local afkPosition = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "afkIcon:Position" })
         afkPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), 25)
         afkPosition.disableChildrenOn = function(d) return not d.afkIconEnabled end
         afkPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "afkIconAnchor", function() DF:LightweightUpdateIconPosition("afk") end), 55)
@@ -8487,7 +8747,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         vehSection:RegisterChild(vehHeaderGap)
 
         -- Settings
-        local vehSettings = GUI:CreateSettingsGroup(self.child, 270, { collapsible = true, collapseKey = "vehicleIcon:Settings" })
+        local vehSettings = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "vehicleIcon:Settings" })
         vehSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 25)
         vehSettings.disableChildrenOn = function(d) return not d.vehicleIconEnabled end
         local vehicleIconEnableCb = vehSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Vehicle Icon"], db, "vehicleIconEnabled", function() DF:UpdateAllFrames() end), 30)
@@ -8498,7 +8758,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         vehSection:RegisterChild(vehSettings)
 
         -- Appearance
-        local vehAppearance = GUI:CreateSettingsGroup(self.child, 270, { collapsible = true, collapseKey = "vehicleIcon:Appearance" })
+        local vehAppearance = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "vehicleIcon:Appearance" })
         vehAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 25)
         vehAppearance.disableChildrenOn = function(d) return not d.vehicleIconEnabled end
         vehAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "vehicleIconScale", nil, function() DF:LightweightUpdateIconPosition("vehicle") end, true), 55)
@@ -8509,7 +8769,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         vehSection:RegisterChild(vehAppearance)
 
         -- Position
-        local vehPosition = GUI:CreateSettingsGroup(self.child, 270, { collapsible = true, collapseKey = "vehicleIcon:Position" })
+        local vehPosition = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "vehicleIcon:Position" })
         vehPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), 25)
         vehPosition.disableChildrenOn = function(d) return not d.vehicleIconEnabled end
         vehPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "vehicleIconAnchor", function() DF:LightweightUpdateIconPosition("vehicle") end), 55)
@@ -8529,7 +8789,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         rrSection:RegisterChild(rrHeaderGap)
 
         -- Settings
-        local rrSettings = GUI:CreateSettingsGroup(self.child, 270, { collapsible = true, collapseKey = "raidRoleIcon:Settings" })
+        local rrSettings = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "raidRoleIcon:Settings" })
         rrSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 25)
         rrSettings.disableChildrenOn = function(d) return not d.raidRoleIconEnabled end
         local raidRoleIconEnableCb = rrSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Raid Role Icon"], db, "raidRoleIconEnabled", function() DF:UpdateAllFrames() end), 30)
@@ -8543,7 +8803,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         rrSection:RegisterChild(rrSettings)
 
         -- Appearance
-        local rrAppearance = GUI:CreateSettingsGroup(self.child, 270, { collapsible = true, collapseKey = "raidRoleIcon:Appearance" })
+        local rrAppearance = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "raidRoleIcon:Appearance" })
         rrAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 25)
         rrAppearance.disableChildrenOn = function(d) return not d.raidRoleIconEnabled end
         rrAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "raidRoleIconScale", nil, function() DF:LightweightUpdateIconPosition("raidRole") end, true), 55)
@@ -8554,7 +8814,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         rrSection:RegisterChild(rrAppearance)
 
         -- Position
-        local rrPosition = GUI:CreateSettingsGroup(self.child, 270, { collapsible = true, collapseKey = "raidRoleIcon:Position" })
+        local rrPosition = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "raidRoleIcon:Position" })
         rrPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), 25)
         rrPosition.disableChildrenOn = function(d) return not d.raidRoleIconEnabled end
         rrPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "raidRoleIconAnchor", function() DF:LightweightUpdateIconPosition("raidRole") end), 55)
@@ -8597,7 +8857,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         
         local function HideSelectionOptions(d) return d.selectionHighlightMode == "NONE" end
         
-        local selGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local selGroup = GUI:CreateSettingsGroup(self.child, 280)
         selGroup:AddWidget(GUI:CreateHeader(self.child, L["Selection Settings"]), 40)
         selGroup:AddWidget(GUI:CreateDropdown(self.child, L["Mode"], highlightModes, db, "selectionHighlightMode", function()
             self:RefreshStates()
@@ -8623,7 +8883,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         
         local function HideHoverOptions(d) return d.hoverHighlightMode == "NONE" end
         
-        local hoverGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local hoverGroup = GUI:CreateSettingsGroup(self.child, 280)
         hoverGroup:AddWidget(GUI:CreateHeader(self.child, L["Hover Settings"]), 40)
         hoverGroup:AddWidget(GUI:CreateDropdown(self.child, L["Mode"], highlightModes, db, "hoverHighlightMode", function()
             self:RefreshStates()
@@ -8663,7 +8923,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         }
         
         -- Aggro Settings Group (col1)
-        local aggroGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local aggroGroup = GUI:CreateSettingsGroup(self.child, 280)
         aggroGroup:AddWidget(GUI:CreateHeader(self.child, L["Aggro Settings"]), 40)
         aggroGroup:AddWidget(GUI:CreateDropdown(self.child, L["Mode"], aggroModes, db, "aggroHighlightMode", function()
             self:RefreshStates()
@@ -8687,7 +8947,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         AddToSection(aggroGroup, nil, 1)
         
         -- Threat Colors Group (col2)
-        local threatGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local threatGroup = GUI:CreateSettingsGroup(self.child, 280)
         threatGroup:AddWidget(GUI:CreateHeader(self.child, L["Threat Colors"]), 40)
         local useCustomColors = threatGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Use Custom Colors"], db, "aggroUseCustomColors", function()
             self:RefreshStates()
@@ -8734,9 +8994,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- unified overlay every appearance control simply follows the toggle.
         local HideDispelOptions = HideIfDisabled
 
-        -- 12.1: the container factory owns the overlay — the era frosts below
-        -- lift when it does (mirrors the Missing Buffs page's conditional lift).
-        local dispelFactoryOwns = DF.FactoryOwnsDispelOverlay and DF:FactoryOwnsDispelOverlay(db)
+        -- 12.1: the container factory owns the overlay unconditionally
+        -- (FactoryOwnsDispelOverlay == AuraContainer.IsSupported()), so the
+        -- Display/Icon/Border/Gradient groups are always live here. The legacy
+        -- "frost while the old path owns it" guards were unreachable and are gone.
 
         -- Every dispel-page callback funnels through here: the version bump
         -- breaks the 12.1 factory drive's fast-path latch, so structural changes
@@ -8775,15 +9036,12 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             OnDispelTypeChanged()
         end), 55)
         dispelIndicatorDropdown.hideOn = HideIfDisabled
-        -- One system: the game's dispel palette via the native tint, one overlay
-        -- at a time (Blizzard-identical, covers private auras). The Custom Colors
-        -- mode (per-type slots + pickers) was removed 2026-07-11 — its dual-
-        -- overlay quirk wasn't worth the confusion once game mode gained the
-        -- border and edge glow.
-        local overlayNote = settingsGroup:AddWidget(GUI:CreateNote(self.child,
-            L["One overlay at a time, colored and switched by the game engine. Includes boss (private) auras."],
-            { width = 260 }), 40)
-        overlayNote.hideOn = HideIfDisabled
+        -- Dispel-type colours come from the shared account palette on the Colors page
+        -- (defaults = the game palette; Reset restores it). The overlay always follows
+        -- it — no game-vs-custom toggle — so this is just a link to where you edit them.
+        local overlayColorsLink = GUI:CreateDispelColorsPageLink(self.child, 260)
+        settingsGroup:AddWidget(overlayColorsLink, (overlayColorsLink.layoutHeight or 16) + 2)
+        overlayColorsLink.hideOn = HideIfDisabled
         Add(settingsGroup, nil, 1)
 
         -- ===== APPEARANCE COLLAPSIBLE SECTION =====
@@ -8821,7 +9079,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         GUI:BlockControl12_1(nameTextCheck, "roadmap", { id = "dispel:nametext", page = L["Dispel Overlay"] })
         displayGroup.hideOn = HideDispelOptions
         dfSection:RegisterChild(displayGroup)
-        if not dispelFactoryOwns then GUI:BlockControl12_1(displayGroup, "roadmap", { id = "dispel:display", page = L["Dispel Overlay"] }) end
         Add(displayGroup, nil, 1)
 
         -- ===== ICON GROUP (Column 2) =====
@@ -8865,7 +9122,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         iconOffsetY.disableOn = DisableIfNoIcon
         iconGroup.hideOn = HideDispelOptions
         dfSection:RegisterChild(iconGroup)
-        if not dispelFactoryOwns then GUI:BlockControl12_1(iconGroup, "roadmap", { id = "dispel:icon", page = L["Dispel Overlay"] }) end
         Add(iconGroup, nil, 2)
 
         -- ===== BORDER GROUP (Column 1) =====
@@ -8893,7 +9149,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         borderAlpha.disableOn = DisableIfNoBorder
         borderGroup.hideOn = HideDispelOptions   -- works in BOTH modes (game = ring slot)
         dfSection:RegisterChild(borderGroup)
-        if not dispelFactoryOwns then GUI:BlockControl12_1(borderGroup, "roadmap", { id = "dispel:border", page = L["Dispel Overlay"] }) end
         Add(borderGroup, nil, 1)
 
         -- ===== GRADIENT GROUP (Column 1) =====
@@ -8954,7 +9209,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end
         gradientGroup.hideOn = HideDispelOptions
         dfSection:RegisterChild(gradientGroup)
-        if not dispelFactoryOwns then GUI:BlockControl12_1(gradientGroup, "limitation", { id = "dispel:gradient", page = L["Dispel Overlay"] }) end
         Add(gradientGroup, nil, 1)
 
 
@@ -9002,13 +9256,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- ============================================
         
         -- Current Profile Info Group
-        local currentGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local currentGroup = GUI:CreateSettingsGroup(self.child, 280)
         currentGroup:AddWidget(GUI:CreateHeader(self.child, L["Current Profile"]), 40)
         currentGroup:AddWidget(GUI:CreateLabel(self.child, "|cff00ff00" .. currentProfile .. "|r", 240), 25)
         AddToSection(currentGroup, nil, 1)
         
         -- Available Profiles Group
-        local listGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local listGroup = GUI:CreateSettingsGroup(self.child, 280)
         listGroup:AddWidget(GUI:CreateHeader(self.child, L["Available Profiles"]), 40)
         
         -- Create a container frame for profile list with fixed width and max height
@@ -9081,7 +9335,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         AddToSection(listGroup, nil, 1)
         
         -- Create New Profile Group
-        local createGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local createGroup = GUI:CreateSettingsGroup(self.child, 280)
         createGroup:AddWidget(GUI:CreateHeader(self.child, L["Create New Profile"]), 40)
         
         local input = GUI:CreateInput(self.child, L["Profile Name"], 240)
@@ -9126,7 +9380,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- ============================================
         
         -- Profile Actions Group
-        local actionsGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local actionsGroup = GUI:CreateSettingsGroup(self.child, 280)
         actionsGroup:AddWidget(GUI:CreateHeader(self.child, L["Profile Actions"]), 40)
         
         -- Register delete confirmation popup
@@ -9181,7 +9435,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         AddToSection(actionsGroup, nil, 2)
         
         -- Copy Settings Group
-        local copyGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local copyGroup = GUI:CreateSettingsGroup(self.child, 280)
         copyGroup:AddWidget(GUI:CreateHeader(self.child, L["Copy Settings"]), 40)
         copyGroup:AddWidget(GUI:CreateLabel(self.child, L["Copy all settings between Party and Raid modes."], 240), 25)
         
@@ -9227,7 +9481,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         AddToSection(copyGroup, nil, 2)
         
         -- Auto-Switch by Spec Group
-        local specGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local specGroup = GUI:CreateSettingsGroup(self.child, 280)
         specGroup:AddWidget(GUI:CreateHeader(self.child, L["Auto-Switch by Spec"]), 40)
         
         -- Initialize per-character data if needed
@@ -9350,7 +9604,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- ========================================
         
         -- Export Settings Group
-        local exportSettingsGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local exportSettingsGroup = GUI:CreateSettingsGroup(self.child, 280)
         exportSettingsGroup:AddWidget(GUI:CreateHeader(self.child, L["Export Settings"]), 40)
         
         -- Profile name input
@@ -9440,7 +9694,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         AddToSection(exportSettingsGroup, nil, 1)
         
         -- Export Actions Group
-        local exportActionsGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local exportActionsGroup = GUI:CreateSettingsGroup(self.child, 280)
         exportActionsGroup:AddWidget(GUI:CreateHeader(self.child, L["Export"]), 40)
         
         -- Export button
@@ -9515,7 +9769,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- ========================================
         
         -- Import String Group
-        local importStringGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local importStringGroup = GUI:CreateSettingsGroup(self.child, 280)
         importStringGroup:AddWidget(GUI:CreateHeader(self.child, L["Import String"]), 40)
         
         -- Import text area
@@ -9619,7 +9873,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         AddToSection(importStringGroup, nil, 2)
         
         -- Import Settings Group
-        local importSettingsGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local importSettingsGroup = GUI:CreateSettingsGroup(self.child, 280)
         importSettingsGroup:AddWidget(GUI:CreateHeader(self.child, L["Import Settings"]), 40)
         
         -- Profile name input for import
@@ -9673,7 +9927,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         AddToSection(importSettingsGroup, nil, 2)
         
         -- Import Actions Group
-        local importActionsGroup = GUI:CreateSettingsGroup(self.child, 260)
+        local importActionsGroup = GUI:CreateSettingsGroup(self.child, 280)
         importActionsGroup:AddWidget(GUI:CreateHeader(self.child, L["Import"]), 40)
         
         -- Import button

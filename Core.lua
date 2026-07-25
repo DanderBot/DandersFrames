@@ -1986,16 +1986,10 @@ function DF:LightweightUpdateSelectionHighlightColor()
     DF:LightweightUpdateHighlight("selection")
 end
 
--- Update expiring border color on buff icons
-function DF:LightweightUpdateExpiringBorderColor()
-    -- 12.1: expiring borders can't run on the game's aura rows (secret time);
-    -- the GUI controls are marked as a game limitation. Nothing to restyle.
-end
-
--- Update expiring tint color on buff icons
-function DF:LightweightUpdateExpiringTintColor()
-    -- 12.1: expiring tint can't run on the game's aura rows (see above).
-end
+-- (LightweightUpdateExpiringBorderColor / ...TintColor removed 2026-07-25 with the
+-- pre-12.1 Expiring system: both had already degenerated to empty stubs because
+-- remaining time is secret on the container rows. The 12.1-safe reveal is the
+-- DF.Expiration engine, which re-specs through the normal drive.)
 
 -- Update missing buff icon border color
 function DF:LightweightUpdateMissingBuffBorderColor()
@@ -2751,13 +2745,9 @@ function DF:MigrateAuraBorderKeys(modeDb)
             modeDb[p .. "BorderSize"] = modeDb[p .. "BorderThickness"]
         end
     end
-    -- Expiring border: the legacy single Pulsate bool becomes the unified
-    -- Expiring Animation type (true -> DF Pulsate, false -> None).  Only seed
-    -- when an old key exists and the new one hasn't been set yet, so existing
-    -- configs keep their pulse and new profiles use their own default.
-    if modeDb.buffExpiringBorderAnimationType == nil and modeDb.buffExpiringBorderPulsate ~= nil then
-        modeDb.buffExpiringBorderAnimationType = modeDb.buffExpiringBorderPulsate and "DF_PULSATE" or "NONE"
-    end
+    -- (The buffExpiringBorderPulsate -> ...AnimationType migration was removed with the
+    -- pre-12.1 Expiring system on 2026-07-25 — both keys are gone, so there is nothing
+    -- left to migrate between.)
 end
 
 -- ============================================================
@@ -3353,6 +3343,29 @@ DF._MainEventDispatcher = function(self, event, arg1)
                             profile.raid[key] = DF:DeepCopy(value)
                         end
                     end
+                end
+                -- Dispel colours are account-wide (per profile, mode-independent —
+                -- edited on the Colors page; sibling of classColors). Seed ONCE from
+                -- the profile's existing per-mode debuff-border palette so any
+                -- customisations carry over; otherwise the game palette. The per-mode
+                -- debuffBorderColor* keys are left in place.
+                if type(profile.dispelColors) ~= "table" then
+                    local src = profile.party or {}
+                    -- Defaults = Blizzard's live game palette (GetGameDispelPalette). No
+                    -- None key — the None/Physical border is hidden on no-dispel-type auras.
+                    local D = (DF.GetGameDispelPalette and DF:GetGameDispelPalette()) or DF.DispelDefaultColors
+                    local function seedColor(key, d)
+                        local c = src[key]
+                        if type(c) == "table" and c.r then return { r = c.r, g = c.g, b = c.b } end
+                        return { r = d.r, g = d.g, b = d.b }
+                    end
+                    profile.dispelColors = {
+                        Magic   = seedColor("debuffBorderColorMagic",   D.Magic),
+                        Curse   = seedColor("debuffBorderColorCurse",   D.Curse),
+                        Disease = seedColor("debuffBorderColorDisease", D.Disease),
+                        Poison  = seedColor("debuffBorderColorPoison",  D.Poison),
+                        Bleed   = seedColor("debuffBorderColorBleed",   D.Bleed),
+                    }
                 end
                 -- Ensure mode-enable flags exist on every profile
                 if profile.partyEnabled == nil then profile.partyEnabled = true end
@@ -4602,10 +4615,67 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- Diagnostic: window-park missing badges (bypasses the container's secret
                 -- self-size) — proves/disproves the last missing-badge pp drift source
                 if DF.AuraContainer and DF.AuraContainer.ToggleBadgeParkDebug then DF.AuraContainer.ToggleBadgeParkDebug() end
+            elseif msg == "cbt" or msg:match("^cbt%s+%d") then
+                -- Colour-by-time ground truth: curve-API reachability, the account-wide
+                -- dials, the mode an enabled consumer composes, whether it built a real
+                -- curve or fell back to the legacy seconds buckets, and the expiry
+                -- reveal's threshold + which of its colour bands actually render.
+                -- Optional number = try another reveal threshold ("/df cbt 60").
+                if DF.DebugDumpColorByTime then DF:DebugDumpColorByTime(tonumber(msg:match("(%d+)"))) end
+            elseif msg == "guiwidth" or msg == "guiwidths" then
+                -- Settings-layout ground truth: every frame on the open page with its
+                -- live width, flagging any that lost one. Truncated / non-wrapping label
+                -- text is always a width fault; this says WHICH frame caused it.
+                if DF.GUI and DF.GUI.DebugDumpWidths then DF.GUI:DebugDumpWidths() end
             elseif msg == "idgate" then
                 -- Identity-gate ground truth: per vulnerable handle, live UnitCanAssist
                 -- vs the stored gate verdict vs actual window visibility
                 if DF.AuraContainer and DF.AuraContainer.DebugDumpIdentityGate then DF.AuraContainer.DebugDumpIdentityGate() end
+            elseif msg == "dispelids" then
+                -- Custom dispel colours: the curve's X = the dispel type ID. The enum's
+                -- NAME is build-dependent, so FindDispelTypeEnum scans Enum for the
+                -- Magic/Curse/Disease/Poison shape; this probe shows what it found,
+                -- the SetAuraBorder style enums (Color vs Atlas resolution), and
+                -- whether the shared curve builds.
+                print("|cff00ff00DandersFrames:|r dispel colour probe")
+                DF._dispelTypeEnum = nil   -- force a fresh scan
+                local E = DF.FindDispelTypeEnum and DF:FindDispelTypeEnum()
+                if E then
+                    print("  dispel-type enum: Enum." .. tostring(DF._dispelTypeEnumName))
+                    for name, val in pairs(E) do
+                        print(string.format("    %s = %s", tostring(name), tostring(val)))
+                    end
+                else
+                    print("  |cffff0000no Enum table with Magic/Curse/Disease/Poison found|r")
+                end
+                local function dumpEnum(label, t)
+                    if type(t) == "table" then
+                        local parts = {}
+                        for k, v in pairs(t) do parts[#parts + 1] = tostring(k) .. "=" .. tostring(v) end
+                        print("  " .. label .. ": " .. table.concat(parts, "  "))
+                    else
+                        print("  " .. label .. ": nil")
+                    end
+                end
+                dumpEnum("Enum.CustomAuraButtonBorderStyle", Enum and Enum.CustomAuraButtonBorderStyle)
+                dumpEnum("AuraButtonBorderStyle (legacy global)", _G.AuraButtonBorderStyle)
+                if DF.InvalidateDispelColorCurve then DF:InvalidateDispelColorCurve() end
+                local curve = DF.GetDispelColorCurve and DF:GetDispelColorCurve()
+                print("  shared curve built: " .. (curve and "yes" or "no"))
+                local map = DF.GetDispelColorMap and DF:GetDispelColorMap()
+                print("  shared colour map built: " .. (map and "yes" or "no"))
+                print("  GetAuraDispelTypeColor: " .. tostring(C_UnitAuras and C_UnitAuras.GetAuraDispelTypeColor ~= nil))
+                -- Overlay ground truth: each SetAuraBorder bind site's last attempt
+                -- ("ok" / the pcall error / never attempted). Keyed by slot key
+                -- (main / gameborder / edgeTOP / …).
+                local be = DF._dispelBindErr
+                if be then
+                    for site, res in pairs(be) do
+                        print(string.format("  overlay bind [%s]: %s", tostring(site), tostring(res)))
+                    end
+                else
+                    print("  overlay bind: no attempts recorded (no dispellable aura styled since reload?)")
+                end
             elseif msg == "admissing" then
                 -- Diagnostic for the Aura Designer show-when-missing push mechanism
                 if DF.DebugADMissing then DF:DebugADMissing() end
@@ -4844,7 +4914,17 @@ DF._MainEventDispatcher = function(self, event, arg1)
                                 dumpTex("slot.nativeGradient", wdg.nativeGradient)
                             end
                             if btn.dfDispelRing then dumpTex("slot[" .. tostring(key) .. "].ring", btn.dfDispelRing) end
-                            if btn.dfDispelEdgeTex then dumpTex("slot[" .. tostring(key) .. "].edge", btn.dfDispelEdgeTex) end
+                            -- Edge strips are keyed BY SIDE now (all four ride the one
+                            -- overlay slot since the carriers were consolidated).
+                            if type(btn.dfDispelEdgeTex) == "table" then
+                                for _, side in ipairs({ "TOP", "BOTTOM", "LEFT", "RIGHT" }) do
+                                    local et = btn.dfDispelEdgeTex[side]
+                                    if et then dumpTex("slot[" .. tostring(key) .. "].edge" .. side, et) end
+                                end
+                            end
+                            if btn._dfDispelCarriers then
+                                print(("  slot[%s] bound carriers=%d"):format(tostring(key), #btn._dfDispelCarriers))
+                            end
                         end
                     end
                     -- Neighbours that can overdraw the deficit area

@@ -76,7 +76,16 @@ function DF:UpdateReducedMaxHealth(frame)
         pct = GetUnitTotalModifiedMaxHealthPercent(unit)
     end
 
-    if not pct or issecretvalue(pct) or pct <= 0 then
+    -- In restricted content (M+/raid — exactly where max-HP reductions live) the
+    -- percent comes back SECRET. StatusBar:SetValue is a secret SINK
+    -- (SecretArgumentsAddAspect = SecretAspect.BarValue), so instead of hiding we
+    -- FORWARD the secret straight into the bar: an unmodified unit resolves to 0 ->
+    -- an empty (invisible) reverse-fill; a reduced unit renders its fraction
+    -- natively. Only the numeric "pct <= 0" hide-test is skipped on the secret path
+    -- (comparing a secret taints; the `not pctIsSecret and` short-circuit keeps it
+    -- unevaluated). issecretvalue() itself returns a plain, non-secret boolean.
+    local pctIsSecret = issecretvalue(pct)
+    if not pct or (not pctIsSecret and pct <= 0) then
         bar:Hide()
         DF:RestoreHealthBarFromReducedMax(frame)
         return
@@ -125,10 +134,14 @@ function DF:UpdateReducedMaxHealth(frame)
     bar:SetValue(pct)
     bar:Show()
 
-    if db.reducedMaxHealthClipHealthBar and frame.healthBar and tex then
+    if db.reducedMaxHealthClipHealthBar and frame.healthBar and tex and not pctIsSecret then
         -- Clip the health bar to the portion NOT covered by the reduced-max
         -- overlay: pin the three frame-side edges and anchor the full-health
         -- edge to the reduced texture's inner edge. Mirrors the orientation above.
+        -- SKIPPED on the secret path: clipping re-anchors the health bar to the
+        -- reduced bar's fill-texture geometry, which is driven by the secret value.
+        -- The overlay itself renders fine from the secret (above), but we don't clip
+        -- against secret-derived geometry unless it's proven taint-safe in-game.
         frame.healthBar:ClearAllPoints()
         if orientation == "HORIZONTAL_INV" then          -- reduced on left
             frame.healthBar:SetPoint("TOPRIGHT", -padding, -padding)
@@ -157,7 +170,8 @@ function DF:UpdateReducedMaxHealth(frame)
     end
 
     if DF.Debug then
-        DF:Debug("ReducedMaxHealth", "Updated", unit or "(test)", "pct=", pct)
+        -- Never pass the raw pct to Debug on the secret path — format/concat taints.
+        DF:Debug("ReducedMaxHealth", "Updated", unit or "(test)", "pct=", pctIsSecret and "<secret>" or pct)
     end
 end
 

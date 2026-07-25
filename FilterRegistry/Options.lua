@@ -240,13 +240,13 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     local PANEL_H = 490
     local LEFT_W = 240
     local LEFT_ROW_H = 24
-    local SECTION_H = 22
+    local SECTION_H = 26 -- section-label slot (bumped for the larger DFFontNormal labels)
     local SPELL_ROW_H = 26
     local CLASS_HEADER_H = 22
     local HEADER_H = 92 -- right-column header panel (3 stacked rows)
 
     -- ========== STATE ==========
-    local selKind = "preset" -- "preset" | "custom"
+    local selKind = "preset" -- "preset" | "custom" | "blacklist"
     local selKey = R.Categories[1] and R.Categories[1].key
     local searchText = "" -- lowercased query
 
@@ -262,6 +262,66 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         if DF.InvalidateAuraLayout then
             DF:InvalidateAuraLayout()
         end
+    end
+
+    -- ========== DEBUFF BLACKLIST (folded into this page) ==========
+    -- The debuff blacklist is PER-MODE (party/raid), stored on the mode db
+    -- alongside the other debuff-row filters (debuffFilterRole etc.) — NOT
+    -- account-wide like the buff registry. Resolve it LIVE on each access
+    -- (DF.db[GUI.SelectedMode], the same handle BuildPage's DoBuild uses): the
+    -- page builds once and its guard path never re-captures a db, so a stale
+    -- capture would edit the wrong mode after a party/raid switch. Toggling a
+    -- debuff reuses DirectFilterChangedProxy (RebuildDirectFilterStrings +
+    -- InvalidateAuraLayout) — the exact refresh the debuff row's excludeSpellIDs
+    -- merge reacts to (Features/Auras.lua applyDebuffBlacklist).
+    local function BlacklistSet()
+        local mdb = DF.db and DF.db[GUI.SelectedMode or "party"]
+        if not mdb then return nil end
+        mdb.debuffBlacklist = mdb.debuffBlacklist or {}
+        return mdb.debuffBlacklist
+    end
+    local function BlacklistDebuffs()
+        return (DF.AuraBlacklist and DF.AuraBlacklist.DebuffSpells) or {}
+    end
+    local function BlacklistCounts()
+        local set = BlacklistSet()
+        local total, hidden = 0, 0
+        for _, e in ipairs(BlacklistDebuffs()) do
+            total = total + 1
+            if set and set[e.spellId] then hidden = hidden + 1 end
+        end
+        return hidden, total
+    end
+    -- Canonical per-mode default set (DF.PartyDefaults/RaidDefaults are the same
+    -- source new profiles + the missing-key backfill deep-copy from, so it's safe
+    -- to read here without aliasing the live db). Drives the reset button.
+    local function BlacklistDefault()
+        local mode = GUI.SelectedMode or "party"
+        local defaults = (mode == "raid") and DF.RaidDefaults or DF.PartyDefaults
+        return defaults and defaults.debuffBlacklist or nil
+    end
+    local function BlacklistModified()
+        local set = BlacklistSet()
+        if not set then return false end
+        local def = BlacklistDefault() or {}
+        for id, on in pairs(set) do
+            if on and not def[id] then return true end
+        end
+        for id, on in pairs(def) do
+            if on and not set[id] then return true end
+        end
+        return false
+    end
+    local function ResetBlacklist()
+        local mdb = DF.db and DF.db[GUI.SelectedMode or "party"]
+        if not mdb then return end
+        -- Replace with a FRESH copy of the default (never wipe-in-place, never
+        -- assign the default table by reference).
+        local def, fresh = BlacklistDefault(), {}
+        if def then
+            for id, on in pairs(def) do if on then fresh[id] = true end end
+        end
+        mdb.debuffBlacklist = fresh
     end
 
     -- ========== CUSTOM FILTER HELPERS ==========
@@ -300,9 +360,31 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     end
 
     -- ========== INFO BANNER ==========
+    -- The banner text + tone swap by selection: the buff filters are a whitelist
+    -- (opt-in — nothing shows until enabled), the blacklist is the inverse
+    -- (opt-out — debuffs show until hidden). Naming that flip is what keeps the
+    -- Hide/Show rows from reading like the Enable/Disable ones above. Both texts
+    -- are ~2 lines, so the swap barely changes the banner height. RefreshRight
+    -- drives the swap; SetHTML is idempotent so it only recomputes on a real
+    -- buff<->blacklist transition. HTML mode so the buff copy links back to the
+    -- Aura Filters page (which links here) — SetHTML re-tints the link per theme.
+    local function fdBannerLink(text, pageId)
+        local tc = (GUI.GetThemeColor and GUI.GetThemeColor()) or { r = 1, g = 0.82, b = 0 }
+        local col = string.format("|cFF%02X%02X%02X",
+            math.floor((tc.r or 1) * 255), math.floor((tc.g or 1) * 255), math.floor((tc.b or 1) * 255))
+        return col .. "|HdfPage:" .. pageId .. "|h" .. text .. "|h|r"
+    end
+    local function fdBannerLinkClick(pageId)
+        if GUI.SelectTab then GUI.SelectTab(pageId) end
+    end
+    local BUFF_BANNER = L["Opt-in buff filters — you choose which buffs show. Enable or disable spells in the built-in presets, or create custom filters, then turn them on from the"]
+        .. " " .. fdBannerLink(L["Aura Filters"], "auras_filters") .. "."
+    local BLACKLIST_BANNER = L["The reverse of the opt-in buff filters: instead of choosing what to show, you choose nuisance debuffs to hide from the debuff bar. Only debuffs Blizzard keeps non-secret can be hidden."]
     local banner = GUI:CreateInfoBanner(parent, {
         tone = "info",
-        text = L["Build and edit buff filters here, then enable them per row in Aura Filters. Changes you make to built-in presets are saved per profile and survive spell database updates."],
+        html = true,
+        text = BUFF_BANNER,
+        onLinkClick = fdBannerLinkClick,
     })
     banner:SetPoint("TOPLEFT", 10, -10)
     banner:SetPoint("RIGHT", -10, 0)
@@ -322,15 +404,17 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     leftContent:SetSize(LEFT_W - 28, 1)
     leftScroll:SetScrollChild(leftContent)
 
-    -- Section labels (created once, positioned during refresh)
+    -- Section labels (created once, positioned during refresh). DFFontNormal to
+    -- match the right-column header title (titleText) — same weight both sides.
     local function CreateSectionLabel(text)
-        local fs = leftContent:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
+        local fs = leftContent:CreateFontString(nil, "OVERLAY", "DFFontNormal")
         fs:SetJustifyH("LEFT")
         fs:SetText(text)
         return fs
     end
-    local presetLabel = CreateSectionLabel(L["Built-in Presets"])
+    local presetLabel = CreateSectionLabel(L["Buff Presets"])
     local customLabel = CreateSectionLabel(L["Custom Filters"])
+    local debuffLabel = CreateSectionLabel(L["Debuffs"])
 
     -- ========== RIGHT COLUMN: HEADER PANEL + SPELL LIST ==========
     local rightArea = CreateFrame("Frame", nil, parent)
@@ -374,6 +458,12 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     resetBtn:SetPoint("LEFT", countText, "RIGHT", 12, 0)
     resetBtn:Hide()
     resetBtn:SetScript("OnClick", function()
+        if selKind == "blacklist" then
+            ResetBlacklist()
+            DirectFilterChangedProxy()
+            RefreshAll()
+            return
+        end
         if selKind ~= "preset" or not selKey then return end
         R:ResetPreset(selKey)
         DirectFilterChangedProxy()
@@ -664,13 +754,29 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
 
     UpdateActionStates = function()
         local isCustom = selKind == "custom" and R:GetCustomFilter(selKey) ~= nil
-        dupBtn:SetDisabled(selKey == nil)
+        local isBlacklist = selKind == "blacklist"
+        dupBtn:SetDisabled(selKey == nil or isBlacklist)
         renameBtn:SetDisabled(not isCustom)
         delBtn:SetDisabled(not isCustom)
         addBox:SetEnabled(isCustom)
         addBtn:SetDisabled(not isCustom)
         dbBtn:SetDisabled(not isCustom)
-        resetBtn:SetShown((selKind == "preset" and selKey ~= nil and R:IsPresetModified(selKey)) or false)
+        -- The blacklist is a fixed list — hide the search + add-spell controls
+        -- entirely (they only exist for editable filters). The preset/custom
+        -- views keep them shown (disabled-with-tooltip for presets).
+        searchBox:SetShown(not isBlacklist)
+        dbBtn:SetShown(not isBlacklist)
+        addBox:SetShown(not isBlacklist)
+        addBtn:SetShown(not isBlacklist)
+        if isBlacklist then HideEcho() end
+        -- Reset (header row 1, red danger tone): shown when the selection differs
+        -- from its defaults — presets via the registry, the blacklist via its
+        -- per-mode default set.
+        if isBlacklist then
+            resetBtn:SetShown(BlacklistModified())
+        else
+            resetBtn:SetShown((selKind == "preset" and selKey ~= nil and R:IsPresetModified(selKey)) or false)
+        end
     end
 
     -- ========== LEFT ROW POOL ==========
@@ -851,6 +957,9 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     end
 
     local function BindSpellRow(row, y, item, isPreset)
+        -- Blacklist rows render like preset rows (Enable/Disable action, dim
+        -- when hidden) but carry their own toggle instead of R:SetSpellEnabled.
+        local showAction = isPreset or item.isBlacklist
         row:ClearAllPoints()
         row:SetPoint("TOPLEFT", 0, -y)
         row:SetPoint("TOPRIGHT", 0, -y)
@@ -862,10 +971,10 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         -- button in the preset view, 18px remove "x" in the custom view.
         -- The chip is anchored to the info button, so it follows.
         row.info:ClearAllPoints()
-        row.info:SetPoint("RIGHT", isPreset and -74 or -28, 0)
+        row.info:SetPoint("RIGHT", showAction and -74 or -28, 0)
         row._spellID = item.tooltipID
         row._raw = item.raw
-        row._rowToggles = isPreset
+        row._rowToggles = showAction
 
         -- Info tooltip data: canonical + variant IDs for known spells, just
         -- the raw ID otherwise. Rebuilt on every bind like the rest.
@@ -877,21 +986,39 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
             row._infoIDs = tostring(rec and rec.id or item.id)
         end
 
-        local dim = isPreset and not item.enabled
+        local dim = showAction and not item.enabled
         row.icon:SetAlpha(dim and 0.4 or 1)
         row.icon:SetDesaturated(dim)
         row.name:SetAlpha(dim and 0.5 or 1)
         ApplyNameColor(row.name, rec and rec.class, dim)
 
-        if isPreset then
+        if showAction then
             row.action:Show()
             row.remove:Hide()
-            row.action.Text:SetText(item.enabled and L["Disable"] or L["Enable"])
-            local key, rec = selKey, item.rec
-            row._onAction = function()
-                R:SetSpellEnabled(key, rec, not R:IsSpellEnabled(key, rec))
-                DirectFilterChangedProxy()
-                RefreshAll()
+            if item.isBlacklist then
+                -- The blacklist is opt-out, so its rows read Hide/Show — the verb
+                -- matches the outcome (dim = hidden stays the page-wide convention).
+                -- Toggle the per-mode blacklist entry (true = hidden), reusing
+                -- DirectFilterChangedProxy so the debuff row re-merges its
+                -- excludeSpellIDs immediately.
+                row.action.Text:SetText(item.enabled and L["Hide"] or L["Show"])
+                local id = item.id
+                row._onAction = function()
+                    local set = BlacklistSet()
+                    if set then
+                        set[id] = (not set[id]) and true or nil
+                        DirectFilterChangedProxy()
+                        RefreshAll()
+                    end
+                end
+            else
+                row.action.Text:SetText(item.enabled and L["Disable"] or L["Enable"])
+                local key, rec = selKey, item.rec
+                row._onAction = function()
+                    R:SetSpellEnabled(key, rec, not R:IsSpellEnabled(key, rec))
+                    DirectFilterChangedProxy()
+                    RefreshAll()
+                end
             end
             row._onRemove = nil
         else
@@ -912,6 +1039,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         local tc = GUI.GetThemeColor()
         presetLabel:SetTextColor(tc.r, tc.g, tc.b)
         customLabel:SetTextColor(tc.r, tc.g, tc.b)
+        debuffLabel:SetTextColor(tc.r, tc.g, tc.b)
 
         local y = 4
         presetLabel:ClearAllPoints()
@@ -945,6 +1073,23 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
             y = y + LEFT_ROW_H
         end
 
+        -- Debuffs: a single "Blacklist" entry — the per-mode non-secret debuff
+        -- hide list. Buffs above are whitelist-by-design; this is the one
+        -- debuff-side control that belongs on the Filter Designer.
+        y = y + 8
+        debuffLabel:ClearAllPoints()
+        debuffLabel:SetPoint("TOPLEFT", 6, -(y + 4))
+        y = y + SECTION_H
+
+        used = used + 1
+        do
+            local hidden, total = BlacklistCounts()
+            BindLeftRow(AcquireLeftRow(used), y, "blacklist", "blacklist",
+                L["Blacklist"], hidden .. "/" .. total, false,
+                selKind == "blacklist")
+            y = y + LEFT_ROW_H
+        end
+
         -- Hide pooled rows beyond this refresh's needs
         for j = used + 1, #leftRows do
             leftRows[j]:Hide()
@@ -963,6 +1108,17 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
             selKey = R.Categories[1] and R.Categories[1].key
         end
         local isPreset = selKind == "preset"
+        local isBlacklist = selKind == "blacklist"
+
+        -- Banner reflects the selection's polarity: caution/opt-out copy for the
+        -- blacklist, the default whitelist copy for buff filters.
+        if isBlacklist then
+            banner:SetTone("caution")
+            banner:SetHTML(BLACKLIST_BANNER, fdBannerLinkClick)
+        else
+            banner:SetTone("info")
+            banner:SetHTML(BUFF_BANNER, fdBannerLinkClick)
+        end
 
         -- Hide any lingering add-by-ID echo once the selection changes
         local selIdent = selKind .. "|" .. tostring(selKey)
@@ -986,6 +1142,10 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
             titleText:SetText(catName or selKey or "")
             local enabled, total = R:PresetCounts(selKey)
             countText:SetText(format(L["%d of %d tracked"], enabled, total))
+        elseif isBlacklist then
+            titleText:SetText(L["Debuff Blacklist"])
+            local hidden, total = BlacklistCounts()
+            countText:SetText(format(L["%d of %d hidden"], hidden, total))
         else
             local f = R:GetCustomFilter(selKey)
             titleText:SetText(f and (f.name or selKey) or "")
@@ -1061,6 +1221,35 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
                     })
                 end
             end
+        elseif isBlacklist then
+            -- The fixed non-secret debuff list. "Enabled" = shown; disabling a
+            -- row blacklists the spell (excludeSpellIDs) so it drops off the
+            -- debuff bar. Resolve the live client name so it localizes like the
+            -- rest of the list; fall back to the entry's English display.
+            local set = BlacklistSet()
+            for _, e in ipairs(BlacklistDebuffs()) do
+                local name
+                if C_Spell and C_Spell.GetSpellName then
+                    local ok, v = pcall(C_Spell.GetSpellName, e.spellId)
+                    if ok and type(v) == "string" and v ~= "" then name = v end
+                end
+                name = name or e.display
+                -- Icon: use the entry's baked fileID, else resolve it live — lets new
+                -- catalog entries omit a hardcoded icon and still show the real one.
+                local icon = e.icon
+                if not icon and C_Spell and C_Spell.GetSpellTexture then
+                    local okI, t = pcall(C_Spell.GetSpellTexture, e.spellId)
+                    if okI and t then icon = t end
+                end
+                if matches(name) then
+                    put("ALL", {
+                        id = e.spellId, name = name, icon = icon or FALLBACK_ICON,
+                        tooltipID = e.spellId,
+                        enabled = not (set and set[e.spellId]),
+                        isBlacklist = true,
+                    })
+                end
+            end
         else
             local f = R:GetCustomFilter(selKey)
             if f then
@@ -1103,18 +1292,22 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         local function RenderGroup(token)
             local g = groups[token]
             if not g or #g == 0 then return end
-            usedHeaders = usedHeaders + 1
-            local hdr = AcquireClassHeader(usedHeaders)
-            hdr:ClearAllPoints()
-            hdr:SetPoint("TOPLEFT", 6, -(y + 6))
-            hdr:SetText(ClassDisplayName(token))
-            local cc = token ~= "ALL" and RAID_CLASS_COLORS and RAID_CLASS_COLORS[token]
-            if cc then
-                hdr:SetTextColor(cc.r, cc.g, cc.b)
-            else
-                hdr:SetTextColor(0.65, 0.65, 0.65)
+            -- The blacklist is a single flat list; the "All Classes" class
+            -- header adds nothing there, so skip it in that view.
+            if not isBlacklist then
+                usedHeaders = usedHeaders + 1
+                local hdr = AcquireClassHeader(usedHeaders)
+                hdr:ClearAllPoints()
+                hdr:SetPoint("TOPLEFT", 6, -(y + 6))
+                hdr:SetText(ClassDisplayName(token))
+                local cc = token ~= "ALL" and RAID_CLASS_COLORS and RAID_CLASS_COLORS[token]
+                if cc then
+                    hdr:SetTextColor(cc.r, cc.g, cc.b)
+                else
+                    hdr:SetTextColor(0.65, 0.65, 0.65)
+                end
+                y = y + CLASS_HEADER_H
             end
-            y = y + CLASS_HEADER_H
 
             for _, item in ipairs(g) do
                 usedRows = usedRows + 1
@@ -1160,6 +1353,18 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         end
     end
     pageRef._fdRefreshAll = RefreshAll
+    -- Cross-page entry: the Aura Filters "Edit debuff Blacklist" button navigates
+    -- here (SelectTab builds synchronously) then calls this to land directly on
+    -- the Blacklist entry instead of the default buff preset.
+    pageRef._fdSelectBlacklist = function() SelectFilter("blacklist", "blacklist") end
+    -- The buff-side "Customise" button: keep the user's last buff filter, but if
+    -- they're parked on the (debuff) Blacklist, move to the first buff preset so
+    -- "Customise" from the buff section never lands on a debuff view.
+    pageRef._fdSelectBuffs = function()
+        if selKind == "blacklist" then
+            SelectFilter("preset", R.Categories[1] and R.Categories[1].key)
+        end
+    end
 
     -- ========== SEARCH WIRING ==========
     -- HookScript (not SetScript): CreateEditBox already hooks OnTextChanged

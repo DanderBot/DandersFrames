@@ -100,7 +100,10 @@ function DF:CreateStatusIcons(frame)
     if frame.resurrectionIcon.SetPropagateMouseMotion then
         frame.resurrectionIcon:SetPropagateMouseMotion(true)
     end
-    if frame.resurrectionIcon.SetPropagateMouseClicks then
+    -- SetPropagateMouseClicks is protected on 12.1 (ADDON_ACTION_BLOCKED under
+    -- combat lockdown); skip it in combat — a res icon can be (re)built on a
+    -- roster change mid-combat.
+    if frame.resurrectionIcon.SetPropagateMouseClicks and not InCombatLockdown() then
         frame.resurrectionIcon:SetPropagateMouseClicks(true)
     end
     if frame.resurrectionIcon.SetMouseClickEnabled then

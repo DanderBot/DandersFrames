@@ -245,7 +245,8 @@ function AuraContainer.SetTestMode(on)
         AuraContainer._ownsProviderSwitch = true
         rebuildAll()
         AuraContainer._queueTestBounce()
-        AuraContainer._startTestTicker()
+        -- No ticker start here: countdowns arm natively per slot (armTestDuration),
+        -- and only a slot that FAILS to arm starts the fallback ticker.
     else
         AuraContainer._stopTestTicker()
         pcall(function()
@@ -285,7 +286,12 @@ local function normalizeFilters(filter)
             if type(f) == "string" then
                 out[#out + 1] = { f = f }
             elseif type(f) == "table" and type(f.filter) == "string" then
-                out[#out + 1] = { f = f.filter, key = f.key, candidateFilters = f.candidateFilters }
+                -- onInit: a consumer secure-init hook (overlay dispel carriers) run
+                -- INSIDE initializeFrame so its regions are created in secure context
+                -- (SetAuraBorder rejects textures created in the tainted style pass —
+                -- children of the secret aura button are access-constrained, cab.lua:15).
+                out[#out + 1] = { f = f.filter, key = f.key, candidateFilters = f.candidateFilters,
+                                  onInit = f.onInit }
             end
         end
     end
@@ -364,6 +370,26 @@ local function filterVulnerableToIdentityGate(filterString, cf)
     return false
 end
 
+-- SOURCE-RELATIVE pools depend on WHO cast each aura: the PLAYER token (only-my-
+-- buffs = "HELPFUL|PLAYER") and the isFromPlayerOrPlayerPet candidateFilter. These
+-- have a SECOND fail-open condition distinct from the UnitCanAssist gate above:
+-- for a unit that isn't in your visible world (a same-faction party member in a
+-- DIFFERENT instance), the engine can't attribute a caster, so "mine" passes every
+-- caster's aura. Spell-ID sub-filters are source-INDEPENDENT and keep working, so
+-- only-my-buffs breaks in isolation while UnitCanAssist stays TRUE — which is why
+-- the assist gate never catches it. Gated on UnitIsVisible (see _applyIdentityGate):
+-- the instance-scoped signal, true for a same-instance member far outside 40yd
+-- range, false only across instances/phases (field-verified 3-case probe 2026-07-23).
+local function filterSourceRelative(filterString, cf)
+    if type(filterString) == "string" then
+        for token in filterString:gmatch("[^|%s]+") do
+            if (token:gsub("^!", "")) == "PLAYER" then return true end
+        end
+    end
+    if cf and cf.isFromPlayerOrPlayerPet ~= nil then return true end
+    return false
+end
+
 -- Dynamic-unit tokens whose underlying unit changes WITHOUT the token changing, so
 -- OnUnitChanged never fires -> they need a Refresh() bounce on the matching event.
 -- Prefix-match so "targettarget"/"focustarget" are covered by their base event too.
@@ -406,7 +432,14 @@ local function styleBarShared(slot, sb, barSpec, dr, dg, db2, da)
     if barSpec.texture and DF.SafeSetStatusBarTexture then
         DF:SafeSetStatusBarTexture(sb, barSpec.texture)
     end
-    if barSpec.fill and barSpec.orientation and sb.SetOrientation then sb:SetOrientation(barSpec.orientation) end
+    if barSpec.fill and barSpec.orientation and sb.SetOrientation then
+        sb:SetOrientation(barSpec.orientation)
+        -- Rotate the fill texture with a VERTICAL bar (the DF health-bar convention —
+        -- SetRotatesTexture(isVertical)) so a DIRECTIONAL fill like the DF/Classic colour
+        -- ramp runs ALONG the drain, not sideways across the width. Set explicitly both ways
+        -- so a bar flipped back to horizontal clears it.
+        if sb.SetRotatesTexture then sb:SetRotatesTexture(barSpec.orientation == "VERTICAL") end
+    end
     if sb.SetReverseFill then sb:SetReverseFill(barSpec.reverseFill and true or false) end
     -- Background texture child (drawn under the fill). Create-once; recolour live.
     if barSpec.bgColor or barSpec.bgTexture then
@@ -428,7 +461,16 @@ local function styleBarShared(slot, sb, barSpec, dr, dg, db2, da)
     elseif slot.dfBarBG then
         slot.dfBarBG:SetColorTexture(0, 0, 0, 0)   -- background cleared
     end
-    sb:SetStatusBarColor(readColor(barSpec.color, dr, dg, db2, da))
+    -- Curve colour modes: the ramp IMAGE carries the colour, so the fill must stay
+    -- untinted — SetStatusBarColor multiplies the texture, and anything but white
+    -- would muddy the ramp. (BuildDurationBarSpec sets .curve when it swapped the
+    -- texture for a ramp; the configured .color is left alone so switching back to
+    -- Static restores it without a round trip through the GUI.)
+    if barSpec.curve then
+        sb:SetStatusBarColor(1, 1, 1, 1)
+    else
+        sb:SetStatusBarColor(readColor(barSpec.color, dr, dg, db2, da))
+    end
 end
 
 -- ============================================================
@@ -456,6 +498,18 @@ local function styleButton_regions(slot, config)
     local sx = config.layout and (config.layout.sizeX or config.layout.size) or 32
     local sy = config.layout and (config.layout.sizeY or config.layout.size) or sx
     if isRow then slot:SetSize(sx, sy) end   -- overlay is SetAllPoints(frame) in _build
+
+    -- Native tooltip placement + combat-hide (68914+): plain AuraButtonSharedMixin
+    -- state, read at hover time (SetOwner anchor; the ShouldShowTooltip combat gate)
+    -- — NOT creation-frozen and NOT a bind, so this cosmetic pass keeps it current
+    -- on init and on every restyle. Guarded: only native container buttons carry
+    -- the mixin (test/fake slots and overlay carriers don't). The spec's point is
+    -- always one of the mixin's valid names (SetTooltipAnchorPoint asserts).
+    local tt = style.tooltip
+    if tt and slot.SetTooltipAnchorPoint and slot.SetHideTooltipInCombat then
+        slot:SetTooltipAnchorPoint(tt.point, tt.x, tt.y)
+        slot:SetHideTooltipInCombat(tt.hideInCombat == true)
+    end
 
     -- OVERLAY tint / ROW icon. Static icon (known spell) is set here (source-agnostic —
     -- it's also the fake backend's icon mechanism); the native SetIcon bind is in bindNative.
@@ -768,6 +822,75 @@ local function styleButton_regions(slot, config)
     end
 end
 
+-- How a duration spec's FORMATTER goes onto a binding. Shared by the live template
+-- below and the test-mode binding (armTestDuration) — they must configure a binding
+-- identically or the preview lies about the live look.
+--   textFormat  a formatter sampled against a NON-default duration property (the expiry
+--               reveal on its percent scale). SetTextFormat substitutes each "{}" with
+--               its component, and a component names both the property and the
+--               formatter — the only way to judge bands against RemainingPercent
+--               instead of remaining seconds. MUST be tried first: a percent-unit
+--               reveal also carries `formatter`, so falling through to SetFormatter
+--               silently samples its percent bands against SECONDS. A 12s test aura
+--               then sits under the lowest band for its whole life and the reveal is
+--               stuck on that colour (red) instead of walking the ramp.
+--   formatter   plain formatter, sampled against the default remaining-seconds.
+--   neither     a fresh binding is UNCONFIGURED, so default-format rows would render
+--               no text at all — mirror the native default.
+local function applyDurationFormatter(b, durSpec)
+    if durSpec.textFormat and b.SetTextFormat then
+        b:SetTextFormat(durSpec.textFormat.formatString, durSpec.textFormat.components)
+    elseif durSpec.formatter then
+        b:SetFormatter(durSpec.formatter)
+    else
+        local def = AuraContainerInbound and AuraContainerInbound.GetDefaultAuraDurationFormatter
+              and AuraContainerInbound.GetDefaultAuraDurationFormatter()
+        if def then b:SetFormatter(def) end
+    end
+end
+
+-- Does this client's SetDurationText read the NEW options shape
+-- ({ binding | textFormat | textFormatter | textColor }) rather than the flat
+-- formatter/expiredText/zeroDurationText/updateInterval keys?
+-- ★ The marker must be something 68914 ADDED. The obvious-looking
+-- AuraContainerInbound.GetDefaultAuraDurationFormatter is NOT it: that function exists
+-- on 68824 too, where SetDurationText still reads the flat keys and silently IGNORES
+-- options.binding — so gating on it sent 68824 down the binding path, dropping every
+-- custom duration format (SHORT/FULL, hide-above blanking, zero-text-on-permanents)
+-- back to defaults while the flat-options branch below became unreachable.
+-- C_AuraContainerUtil.ProcessCustomAuraButtonDurationTextOptions is the honest probe:
+-- 68914's SetDurationText runs the options through it (Blizzard_CustomAuraButton.lua),
+-- so its presence IS the new options shape.
+local function supportsDurationTextBinding()
+    return C_AuraContainerUtil ~= nil
+        and type(C_AuraContainerUtil.ProcessCustomAuraButtonDurationTextOptions) == "function"
+end
+
+-- Build (or reuse) the configured TEMPLATE DurationTextBinding for this config's
+-- duration spec. 68914's SetDurationText only reads { binding | textFormat |
+-- textFormatter | textColor } (CustomAuraButtonDurationTextOptions) and
+-- Assign()-copies a supplied binding into the button's own — so ONE template
+-- serves every slot in the row. Cached by spec identity: a structural Rebuild
+-- delivers a fresh style table, which naturally invalidates the cache.
+local function durationTemplateBinding(config, durSpec)
+    if config._dfDurBind and config._dfDurBindSpec == durSpec then return config._dfDurBind end
+    if not (C_DurationUtil and C_DurationUtil.CreateDurationTextBinding) then return nil end
+    local b = C_DurationUtil.CreateDurationTextBinding()
+    -- A fresh binding is UNCONFIGURED (the SetToDefaults contract: no font string,
+    -- duration, format, formatter or fallback text) and Assign replaces the button
+    -- binding WHOLESALE — so the template must carry the default formatter itself
+    -- or default-format rows render no text at all.
+    applyDurationFormatter(b, durSpec)
+    -- Guards mirror the legacy flat-option block exactly: expiredText ~= "",
+    -- zeroText nil-vs-set ("" MEANINGFULLY renders no text on permanents).
+    if durSpec.expiredText and durSpec.expiredText ~= "" then b:SetExpiredText(durSpec.expiredText) end
+    if durSpec.zeroText ~= nil then b:SetZeroDurationText(durSpec.zeroText) end
+    if durSpec.updateInterval then b:SetUpdateInterval(durSpec.updateInterval) end
+    b:SetEnabled(true)   -- Assign copies state wholesale; never hand over a disabled template
+    config._dfDurBindSpec, config._dfDurBind = durSpec, b
+    return b
+end
+
 -- Register each region with its Blizzard inbound setter. NATIVE slots only (a plain
 -- fake/legacy slot lacks these methods, so each bind is skipped and its backend pushes
 -- data to the regions instead). Bind-once per region so ApplyStyle re-runs don't re-register.
@@ -790,35 +913,53 @@ local function bindNative(slot, config)
     if slot.dfDur and slot.SetDurationText and not slot._boundDur then
         slot._boundDur = true
         local durSpec = style.duration or {}
+        -- 68914 RESHAPED the options: SetDurationText now only reads { binding |
+        -- textFormat | textFormatter | textColor }; the flat formatter/expiredText/
+        -- zeroDurationText/updateInterval keys are silently IGNORED (the
+        -- field-reported "duration text lost its format" break). Route the spec
+        -- through a template binding on those builds (durationTemplateBinding above);
+        -- older builds keep the flat table. See supportsDurationTextBinding for why
+        -- the probe is the options PROCESSOR and not the default-formatter getter.
         local opts = {}
-        if durSpec.formatter then opts.formatter = durSpec.formatter end
-        if durSpec.expiredText and durSpec.expiredText ~= "" then opts.expiredText = durSpec.expiredText end
-        -- zeroText: "" is MEANINGFUL — SetZeroDurationText("") renders NO text on
-        -- zero-duration/unconfigured (= permanent) auras, while nil keeps Blizzard's
-        -- default zero-duration rendering (the mixin forwards options.zeroDurationText
-        -- unconditionally and the API arg is nilable — Blizzard_CustomAuraButton.lua:169,
-        -- DurationTextBindingObject docs). So the guard is nil-vs-set, never ~= "".
-        if durSpec.zeroText ~= nil then opts.zeroDurationText = durSpec.zeroText end
-        -- updateInterval (Wave 5a): minimum seconds between automatic text
-        -- refreshes (Blizzard_CustomAuraButton.lua:164 forwards it to
-        -- SetUpdateInterval). Absent = the binding's own default cadence — the
-        -- NORMAL setting deliberately emits nothing (the C-side default is
-        -- undocumented, so absent-key is the only behavior-neutral shape).
-        if durSpec.updateInterval then opts.updateInterval = durSpec.updateInterval end
+        if supportsDurationTextBinding() then
+            if durSpec.textFormat or durSpec.formatter or (durSpec.expiredText and durSpec.expiredText ~= "")
+               or durSpec.zeroText ~= nil or durSpec.updateInterval then
+                opts.binding = durationTemplateBinding(config, durSpec)
+            end
+            -- else: nothing to carry — Blizzard's no-options path (SetToDefaults +
+            -- default formatter) already renders exactly what the template would.
+        else
+            if durSpec.formatter then opts.formatter = durSpec.formatter end
+            if durSpec.expiredText and durSpec.expiredText ~= "" then opts.expiredText = durSpec.expiredText end
+            -- zeroText: "" is MEANINGFUL — SetZeroDurationText("") renders NO text on
+            -- zero-duration/unconfigured (= permanent) auras, while nil keeps Blizzard's
+            -- default zero-duration rendering (the mixin forwards options.zeroDurationText
+            -- unconditionally and the API arg is nilable). So the guard is nil-vs-set,
+            -- never ~= "".
+            if durSpec.zeroText ~= nil then opts.zeroDurationText = durSpec.zeroText end
+            -- updateInterval (Wave 5a): minimum seconds between automatic text
+            -- refreshes. Absent = the binding's own default cadence — the NORMAL
+            -- setting deliberately emits nothing (the C-side default is
+            -- undocumented, so absent-key is the only behavior-neutral shape).
+            if durSpec.updateInterval then opts.updateInterval = durSpec.updateInterval end
+        end
+        -- Colour-by-time (68914+): options.textColor = { curve, property } is forwarded
+        -- to binding:SetTextColorCurve WITH the property arg the 68569 wrapper dropped —
+        -- the reason the curve was dead. The C side evaluates it against the SECRET
+        -- remaining time and writes the fontstring's vertex colour, so the whole ramp
+        -- costs zero Lua per frame. The spec supplies BOTH members or neither
+        -- (Features/Auras.lua builds them together); a partial table would assert.
+        -- MUTUALLY EXCLUSIVE with the legacy bucket formatter: |c escapes inside the
+        -- text beat vertex colour, so a spec never carries both (the row builders send
+        -- a curve OR a coloured formatter, never each).
+        if durSpec.colorCurve and durSpec.colorProperty ~= nil then
+            opts.textColor = { curve = durSpec.colorCurve, property = durSpec.colorProperty }
+        end
         local ok, err = pcall(function() slot:SetDurationText(slot.dfDur, opts) end)
         if not ok and not warnedCurve then
             warnedCurve = true
             DF:DebugWarn(DBG, "SetDurationText failed: %s", tostring(err))
         end
-        -- Colour-by-time: the smooth textColorCurve path is DEAD on 68569 (live-tested
-        -- 2026-07-09, port plan §2.8/§3): SetDurationText forwards SetTextColorCurve(curve)
-        -- WITHOUT the required `property` arg (no-op), and `button.DurationTextBinding` is a
-        -- PRIVATE field — NOT on the public object table initializeFrame receives — so the
-        -- old direct-binding poke here could never fire, and poking Blizzard-owned binding
-        -- state on a live button is exactly the class of touch the combat-proven DF_AuraLab
-        -- initFrame avoids. durSpec.colorCurve is accepted-but-inert; colour-by-time ships
-        -- via the discrete BUCKETS formatter (|cRRGGBB escapes in AddBreakpoint format
-        -- strings, the NSRT/EnhanceQoL-proven path) in P2.
     end
 
     if slot.dfStack and slot.SetApplicationCount and not slot._boundStack then
@@ -856,15 +997,40 @@ local function bindNative(slot, config)
 
     local dispelSpec = style.dispel
     if dispelSpec then
-        if slot.dfAuraBorder and slot.SetAuraBorder and not slot._boundAuraBorder then
+        if slot.dfAuraBorder and (slot.AddDispelTypeTexture or slot.SetAuraBorder)
+            and (not slot._boundAuraBorder or slot._dfDispelCurveGen ~= DF.dispelCurveGen) then
             slot._boundAuraBorder = true
+            slot._dfDispelCurveGen = DF.dispelCurveGen
+            -- Style resolution is SHARED with the dispel overlay (DF:ResolveDispelTextureStyle
+            -- in Frames/Border.lua) — it carries the 68914 enum rename/renumber and the
+            -- correct last-resort literals. Never resolve the enum locally.
+            local styleName = dispelSpec.style or "Atlas"
+            local styleEnum = DF:ResolveDispelTextureStyle(styleName)
+            -- Custom dispel colours: Color-style rings recolour from the shared
+            -- account palette via customDispelColorMap — keyed by dispel NAME,
+            -- indexed private-side against auraData.dispelName (nil → game palette).
+            local map
+            if styleName == "Color" and DF.GetDispelColorMap then
+                map = DF:GetDispelColorMap()
+            end
             local ok, err = pcall(function()
-                slot:SetAuraBorder(slot.dfAuraBorder, {
-                    style = (AuraButtonBorderStyle and AuraButtonBorderStyle[dispelSpec.style or "Atlas"]) or 0,
+                local opts = {
+                    style = styleEnum,
+                    customDispelColorMap = map,
                     showWhenHarmful = dispelSpec.showWhenHarmful ~= false,
                     showWhenHelpful = dispelSpec.showWhenHelpful == true,
                     showIcon = false,
-                })
+                }
+                -- 68914: SetAuraBorder is the deprecated clearing alias ("removed after
+                -- 12.1"); AddDispelTypeTexture is the real API and APPENDS. This bind
+                -- re-runs on a palette-generation bump, so clear first to REPLACE rather
+                -- than stack a second ring on the same icon.
+                if slot.AddDispelTypeTexture then
+                    if slot.ClearDispelTypeTextures then slot:ClearDispelTypeTextures() end
+                    slot:AddDispelTypeTexture(slot.dfAuraBorder, opts)
+                else
+                    slot:SetAuraBorder(slot.dfAuraBorder, opts)
+                end
             end)
             if not ok and not warnedNativeDispel then
                 warnedNativeDispel = true
@@ -1133,7 +1299,7 @@ local function applyContainerLayout(c, handle)
         rowWidth = sx + headroom
     elseif wrap and wrap >= 1 then
         rowWidth = wrap * sx + (wrap - 1) * spX + headroom
-    end   -- nil -> math.huge (no wrap) inside SetAuraLayoutRowWidth
+    end   -- nil -> math.huge (no wrap) inside SetFlowLayoutMaximumLineSize (né SetAuraLayoutRowWidth)
 
     -- Strip reservation, start-side inset (see stripReservation): only when the strip
     -- faces the flow's vertical start. Padding is config-derived, live (MarkDirty
@@ -1174,18 +1340,30 @@ local function applyContainerLayout(c, handle)
         -- centre-of-edge pins instead (see resolveGrowthLayout).
         c:ClearAllPoints()
         c:SetPoint(G.pinPoint, handle.frame, G.anchor, px, py)
-        c:SetAuraLayoutAnchorPoint(G.flowAnchor)
-        if AnchorUtil and AnchorUtil.FlowDirection then
-            local h = resolveEnum(AnchorUtil.FlowDirection, G.hName)
-            local v = resolveEnum(AnchorUtil.FlowDirection, G.vName)
-            if h ~= nil and v ~= nil then c:SetAuraLayoutGrowthDirection(h, v) end
-        end
-        c:SetAuraLayoutRowWidth(rowWidth)
-        if padTop > 0 or padBottom > 0 or c._dfPadApplied then
-            c._dfPadApplied = (padTop > 0 or padBottom > 0) or nil
-            c:SetAuraLayoutPadding(0, 0, padTop, padBottom)
-        end
     end)
+
+    -- Flow-layout family: 68914 renamed SetAuraLayout* -> SetFlowLayout* (RowWidth
+    -- -> MaximumLineSize, same nil = no-wrap contract; padding is growth-relative,
+    -- which matches the padTop/padBottom branches above — the named side IS the
+    -- flow's vertical start in both used cases). Dual-detect by method presence,
+    -- and protect each call SEPARATELY: pre-68914 this rode the pin pcall above,
+    -- so the rename made the first layout call throw and silently dropped
+    -- growth/wrap/padding for the whole row.
+    local setFlowAnchor  = c.SetFlowLayoutAnchorPoint or c.SetAuraLayoutAnchorPoint
+    local setFlowGrowth  = c.SetFlowLayoutGrowthDirection or c.SetAuraLayoutGrowthDirection
+    local setFlowMaxLine = c.SetFlowLayoutMaximumLineSize or c.SetAuraLayoutRowWidth
+    local setFlowPadding = c.SetFlowLayoutPadding or c.SetAuraLayoutPadding
+    if setFlowAnchor then pcall(setFlowAnchor, c, G.flowAnchor) end
+    if setFlowGrowth and AnchorUtil and AnchorUtil.FlowDirection then
+        local h = resolveEnum(AnchorUtil.FlowDirection, G.hName)
+        local v = resolveEnum(AnchorUtil.FlowDirection, G.vName)
+        if h ~= nil and v ~= nil then pcall(setFlowGrowth, c, h, v) end
+    end
+    if setFlowMaxLine then pcall(setFlowMaxLine, c, rowWidth) end
+    if setFlowPadding and (padTop > 0 or padBottom > 0 or c._dfPadApplied) then
+        c._dfPadApplied = (padTop > 0 or padBottom > 0) or nil
+        pcall(setFlowPadding, c, 0, 0, padTop, padBottom)
+    end
 
     -- PIN RETRY (live-caught): at login/reload the containers build BEFORE the
     -- unit frames' first layout — the anchor rect is nil, the pin snap above
@@ -1212,13 +1390,20 @@ local function applyContainerLayout(c, handle)
     end
 end
 
--- Per-group layout options (stride/spacing). gapX stays 0: the flow advances its
--- cursor by width + elementSpacingX after EVERY element — including a group's
--- last — and then adds gapX before the next group (AnchorUtil.ApplyFlowLayout),
--- so any non-zero gapX renders group boundaries at spacing + gapX. The original
--- gapX = spacing DOUBLED the gap between filter blocks on multi-filter rows
--- (and between every button of the per-slot test rows) — live-reported. With
--- gapX = 0 groups still continue on the same row, uniformly spaced.
+-- Per-group layout options (stride/spacing). groupSpacing stays 0: the flow
+-- advances its cursor by width + elementSpacing after EVERY element — including
+-- a group's last — and then adds groupSpacing ON TOP before the next group
+-- (AnchorUtil.ApplyFlowLayout), so any non-zero value renders group boundaries
+-- at spacing + groupSpacing. The original gap = spacing DOUBLED the gap between
+-- filter blocks on multi-filter rows (and between every button of the per-slot
+-- test rows) — live-reported. With 0, groups still continue on the same row,
+-- uniformly spaced. (68914 rewrote the flow but kept these additive semantics.)
+--
+-- 68914 also RENAMED the keys: elementSpacingX/elementSpacingY/gapX ->
+-- elementSpacing (primary axis) / lineSpacing (cross axis, applied on wrap) /
+-- groupSpacing. Unknown keys are silently dropped, never rejected
+-- (CopyAndValidateInboundTable merges over defaults and validates known keys
+-- only), so we carry BOTH families and each build reads its own.
 local function buildGroupLayout(config)
     local L = config.layout or {}
     local sx = (L.sizeX or L.size or 32)
@@ -1237,9 +1422,12 @@ local function buildGroupLayout(config)
         -- both grow by the strip's out-of-rect space (0 for fill / no bar). The
         -- start-side inset half of the reservation lives in applyContainerLayout.
         elementHeight   = sy + resv,
-        elementSpacingX = spX,
-        elementSpacingY = spY,
-        gapX            = 0,
+        elementSpacing  = spX,   -- 68914+
+        lineSpacing     = spY,   -- 68914+
+        groupSpacing    = 0,     -- 68914+ (see header comment)
+        elementSpacingX = spX,   -- pre-68914 twin
+        elementSpacingY = spY,   -- pre-68914 twin
+        gapX            = 0,     -- pre-68914 twin
     }
 end
 
@@ -1307,7 +1495,7 @@ end
 -- OWN buttons (AddAuraFrame is removed): we register one AuraGroup per filter (row mode)
 -- or one AuraSlot per filter (overlay mode), and Blizzard invokes our initializeFrame
 -- per button (in lazy batches of 10) to style it. isNativeSlots = true. Row layout is the
--- container's flow layout (SetAuraLayout* translation lands in P1); overlay slots are
+-- container's flow layout (applyContainerLayout translates onto SetFlowLayout*); overlay slots are
 -- addon-anchored via the button AddAuraSlot returns.
 --
 -- Each backend owns its OWN plain container: insecure CreateFrame is combat-legal for the
@@ -1388,7 +1576,8 @@ function NativeBackend:build()
         -- mouse-dead so nothing floats over the unit frame.
         c:ClearAllPoints()
         c:SetPoint("TOPRIGHT", handle.frame, "TOPLEFT", -MISSING_PAD, 0)
-        pcall(function() c:SetAuraLayoutAnchorPoint("TOPLEFT") end)
+        local setFlowAnchor = c.SetFlowLayoutAnchorPoint or c.SetAuraLayoutAnchorPoint
+        if setFlowAnchor then pcall(setFlowAnchor, c, "TOPLEFT") end
         pcall(function() if c.SetMouseClickEnabled then c:SetMouseClickEnabled(false) end end)
         pcall(function() if c.SetMouseMotionEnabled then c:SetMouseMotionEnabled(false) end end)
     else
@@ -1459,6 +1648,7 @@ function NativeBackend:build()
     self.groupKeys = {}
     self.slotButtons = isOverlay and {} or nil   -- overlay: key -> native slot button (consumer styling)
     handle._idGateVulnerable = nil   -- re-derived from this build's records (see the record loop)
+    handle._idGateSourceRelative = nil   -- PLAYER-token / isFromPlayerOrPlayerPet pools (visibility gate)
     if testMode and not isOverlay and not isMissing then
         -- PER-SLOT TEST GROUPS (P5). Two hard-won facts drive this shape:
         --  * The flow lays buttons out by the container's own aura ordering, NOT
@@ -1480,7 +1670,7 @@ function NativeBackend:build()
                 c:AddAuraGroup(key, category, {
                     maxFrameCount = 1,
                     initializeFrame = handle:_makeInitializeFrame(handle._gen, k),
-                    layout = groupLayout,   -- gapX = 0 (buildGroupLayout) = uniform spacing
+                    layout = groupLayout,   -- groupSpacing = 0 (buildGroupLayout) = uniform spacing
                 })
             end)
             if okGroup then
@@ -1496,13 +1686,20 @@ function NativeBackend:build()
         if cf and filterVulnerableToIdentityGate(f, cf) then
             handle._idGateVulnerable = true
         end
+        if filterSourceRelative(f, cf) then
+            handle._idGateSourceRelative = true
+        end
         if AuraUtil and AuraUtil.IsValidFilterString and not AuraUtil.IsValidFilterString(f) then
             DF:DebugWarn(DBG, "filter rejected by IsValidFilterString: %s (group skipped)", tostring(f))
         else
             local key = rec.key or ("df" .. i)
             if isOverlay then
+                -- Per-slot init when the consumer supplied an onInit hook (overlay
+                -- dispel carriers) so it can create+bind SetAuraBorder in secure
+                -- context; else the shared initFn.
+                local slotInit = rec.onInit and handle:_makeInitializeFrame(handle._gen, nil, rec.onInit) or initFn
                 local okSlot, btn = pcall(function()
-                    return c:AddAuraSlot(key, f, { initializeFrame = initFn, candidateFilters = cf,
+                    return c:AddAuraSlot(key, f, { initializeFrame = slotInit, candidateFilters = cf,
                                                    sortMethod = sortMethod, sortDirection = sortDirection })
                 end)
                 if okSlot and btn then
@@ -1767,6 +1964,111 @@ local function formatTestDuration(handle, rem)
     return s > 0 and (s .. "s") or ""
 end
 
+-- NATIVE test countdown. Test mode has no aura to bind, so it used to FAKE the
+-- countdown on a shared ticker. It doesn't have to: C_DurationUtil.CreateDuration
+-- and CreateDurationTextBinding are addon-callable, and every consumer setter is
+-- AllowedWhenUntainted — which our DF-owned test widgets are. So we build a real
+-- duration object and hand it to the SAME three consumers the live path uses:
+--   bar   -> StatusBar:SetTimerDuration        (live: SetDurationBar -> ApplyDurationBar)
+--   swipe -> Cooldown:SetCooldownFromDurationObject
+--   text  -> our own DurationTextBinding, options mirrored 1:1 from bindNative
+-- The C side then drives all three per-frame with ZERO Lua per frame; the only Lua
+-- left is one re-arm per aura cycle (scheduleTestRearm). Live-verified on 68824 via
+-- /al nativetimer: bars sweep, text honours the binding's own updateInterval, the
+-- loop survives a MUTATE-ONLY re-arm (the native side holds a reference, so
+-- SetTimeFromStart alone restarts everything), and a colour curve applies smoothly.
+-- Returns true when the slot is natively driven; false = caller keeps the ticker.
+-- Drive a PREVIEW FontString from a duration spec exactly as a live row is driven: one
+-- DurationTextBinding, the shared formatter selection, the shared Duration object. Live
+-- rows reach the same configuration through SetDurationText's binding template; anywhere
+-- we own the fontstring (test-mode slots, the editor canvas) comes through here instead
+-- of hand-rolling it.
+--   fs        the FontString to drive
+--   durSpec   the SAME spec the live path builds (never a preview-only variant)
+--   dur       a C_DurationUtil Duration; pass a slot's own object to keep a companion
+--             reveal in lockstep with its icon's countdown, as they are live
+--   store/key where the binding is cached, so repeated paints reuse one binding
+-- Returns true when the binding is live, false when C_DurationUtil is unavailable.
+function AuraContainer.BindDurationTextPreview(fs, durSpec, dur, store, key)
+    if not (fs and durSpec and dur) then return false end
+    if not (C_DurationUtil and C_DurationUtil.CreateDurationTextBinding) then return false end
+    local b = store and store[key]
+    if not b then
+        b = C_DurationUtil.CreateDurationTextBinding()
+        if store then store[key] = b end
+        b:SetFontString(fs)
+    end
+    b:SetDuration(dur)
+    -- Options mirrored from bindNative's live SetDurationText block so the preview
+    -- formats identically (same formatter object, same texts, same cadence). Guards
+    -- match live exactly: expiredText ~= "", zeroText nil-vs-set.
+    applyDurationFormatter(b, durSpec)
+    if durSpec.expiredText and durSpec.expiredText ~= "" then b:SetExpiredText(durSpec.expiredText) end
+    if durSpec.zeroText ~= nil then b:SetZeroDurationText(durSpec.zeroText) end
+    if durSpec.updateInterval then b:SetUpdateInterval(durSpec.updateInterval) end
+    -- Colour-by-time parity: the live path sends the curve through SetDurationText's
+    -- textColor; here we own the binding, so set it directly. Without this the preview
+    -- would render the countdown in the fontstring's plain colour while live rows ramp.
+    if durSpec.colorCurve and durSpec.colorProperty ~= nil then
+        b:SetTextColorCurve(durSpec.colorCurve, durSpec.colorProperty)
+    end
+    b:SetEnabled(true)
+    return true
+end
+
+local function armTestDuration(handle, slot, d, offset)
+    if not (C_DurationUtil and C_DurationUtil.CreateDuration) then return false end
+    local cfg = handle.config
+    local durSpec = (cfg.style and cfg.style.duration) or {}
+    local barSpec = (cfg.style and cfg.style.bar) or {}
+    local ok, err = pcall(function()
+        local dur = slot._dfTestDurObj
+        if not dur then
+            dur = C_DurationUtil.CreateDuration()
+            slot._dfTestDurObj = dur
+        end
+        -- Start in the PAST by `offset` so the preview keeps its per-slot stagger.
+        dur:SetTimeFromStart(GetTime() - offset, d)
+
+        if slot.dfBar and slot.dfBar.SetTimerDuration then
+            local interp = resolveEnum(Enum and Enum.StatusBarInterpolation, barSpec.interpolation)
+            local dir = resolveEnum(Enum and Enum.StatusBarTimerDirection, barSpec.direction)
+            if interp == nil then interp = Enum.StatusBarInterpolation.Immediate end
+            if dir == nil then dir = Enum.StatusBarTimerDirection.RemainingTime end
+            slot.dfBar:SetTimerDuration(dur, interp, dir)
+        end
+        -- SetCooldownFromDurationObject rides the same object; the plain SetCooldown
+        -- fallback keeps older builds rendering a swipe.
+        if slot.dfCD then
+            if slot.dfCD.SetCooldownFromDurationObject then
+                slot.dfCD:SetCooldownFromDurationObject(dur)
+            elseif slot.dfCD.SetCooldown then
+                slot.dfCD:SetCooldown(GetTime() - offset, d)
+            end
+        end
+        if slot.dfDur then
+            AuraContainer.BindDurationTextPreview(slot.dfDur, durSpec, dur, slot, "_dfTestBinding")
+        end
+    end)
+    if not ok then
+        DF:DebugWarn(DBG, "armTestDuration failed (falling back to ticker): %s", tostring(err))
+    end
+    return ok
+end
+
+-- One re-arm per aura cycle, scheduled exactly at expiry — no polling. Mutating the
+-- shared duration restarts bar, swipe and text together (proven in the lab), so this
+-- is the ONLY Lua the native preview costs. `gen` invalidates pending re-arms across
+-- a repaint/teardown: every paint bumps slot._dfTestGen, and a stale closure returns.
+local function scheduleTestRearm(handle, slot, d, gen, delay)
+    C_Timer.After(delay, function()
+        if handle._destroyed or slot._dfTestGen ~= gen then return end
+        if not AuraContainer._testMode or not slot._dfTestDurObj then return end
+        local ok = pcall(function() slot._dfTestDurObj:SetTimeFromStart(GetTime(), d) end)
+        if ok then scheduleTestRearm(handle, slot, d, gen, d) end
+    end)
+end
+
 -- TEST MODE paint (P5 hybrid): push DF's curated preview data onto the regions
 -- styleButton_regions just built — the SAME regions the native binds would drive
 -- live, so the preview is styling-true (borders, fonts, insets, swipe). Harmful
@@ -1836,27 +2138,65 @@ function Handle:_paintTestSlot(slot, index)
         local tex = sid and C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(sid)
         if tex or e.icon then slot.dfIcon:SetTexture(tex or e.icon) end
     end
-    local barFill = 1   -- permanent aura (duration 0): full bar, never drains
+    local barFill = 1       -- permanent aura (duration 0): full bar, never drains
+    local nativeBar = false -- true = the C timer owns dfBar; SetValue must not fight it
     do
         -- Live countdown: stagger per slot AND per unit (digits of the unit token —
         -- party2's row must not mirror party1's; same per-unit-variation idea as
-        -- TestMode's per-index health values) so the preview doesn't tick in unison;
-        -- the shared test ticker (SetTestMode) counts the text down, drains the bar
-        -- and loops timer + swipe at zero. Permanent auras (duration 0) show no timer.
+        -- TestMode's per-index health values) so the preview doesn't tick in unison.
+        -- The stagger is applied by starting the duration `offset` seconds in the
+        -- past; armTestDuration then hands it to the native bar/swipe/text drivers
+        -- and scheduleTestRearm loops it. Permanent auras (duration 0) show no timer.
         local d = e.duration or 0
         if d > 0 then
             local u = self.config.unit
             local useed = (type(u) == "string" and tonumber(u:match("%d+"))) or 0
             local offset = (index * 3 + useed * 5) % math.max(d - 1, 1)
-            slot._dfTestDur = d
-            slot._dfTestExpiry = GetTime() + (d - offset)
             barFill = (d - offset) / d
-            if slot.dfCD and slot.dfCD.SetCooldown then
-                slot.dfCD:SetCooldown(GetTime() - offset, d)
+            -- Invalidate any re-arm still pending from the previous paint.
+            slot._dfTestGen = (slot._dfTestGen or 0) + 1
+            if armTestDuration(self, slot, d, offset) then
+                -- Natively driven: the C side owns bar, swipe and text from here.
+                -- Nothing left for the ticker, so clear its per-slot state.
+                slot._dfTestDur, slot._dfTestExpiry = nil, nil
+                slot._dfTestText, slot._dfTestTextAt = nil, nil
+                slot._dfTestTimed = true
+                nativeBar = slot.dfBar and true or false
+                scheduleTestRearm(self, slot, d, slot._dfTestGen, d - offset)
+            else
+                -- FALLBACK (no C_DurationUtil / a setter threw): the faked ticker path.
+                slot._dfTestDur = d
+                slot._dfTestExpiry = GetTime() + (d - offset)
+                if slot.dfCD and slot.dfCD.SetCooldown then
+                    slot.dfCD:SetCooldown(GetTime() - offset, d)
+                end
+                -- Seed the ticker's text cache with what we just rendered, so its
+                -- change-detection compares against the live string (a recycled
+                -- button would otherwise carry a stale one across the rebuild).
+                if slot.dfDur then
+                    local s = formatTestDuration(self, d - offset)
+                    slot.dfDur:SetText(s)
+                    slot._dfTestText, slot._dfTestTextAt = s, GetTime()
+                end
+                AuraContainer._startTestTicker()
             end
-            if slot.dfDur then slot.dfDur:SetText(formatTestDuration(self, d - offset)) end
         else
             slot._dfTestDur = nil
+            slot._dfTestText, slot._dfTestTextAt = nil, nil
+            slot._dfTestGen = (slot._dfTestGen or 0) + 1   -- kill any pending re-arm
+            -- Permanent aura on a slot that was previously TIMED: the bar is still
+            -- under SetTimerDuration and there is no "clear timer" API, so a plain
+            -- SetValue would be fighting the C timer. Re-arm its own duration with a
+            -- span long enough that the fill stays pinned at full (~1% per 15 min)
+            -- rather than guessing at which write wins.
+            if slot._dfTestTimed and slot._dfTestDurObj and slot.dfBar then
+                pcall(function() slot._dfTestDurObj:SetTimeFromStart(GetTime(), 86400) end)
+                nativeBar = true
+            end
+            -- The binding would keep writing a countdown over the zero text below.
+            if slot._dfTestBinding then
+                pcall(function() slot._dfTestBinding:SetEnabled(false) end)
+            end
             if slot.dfDur then
                 -- Hide-on-permanent (Wave 4): mirror the native zeroDurationText
                 -- route. zeroText set (the "" default) = that text verbatim; unset
@@ -1879,17 +2219,31 @@ function Handle:_paintTestSlot(slot, index)
     -- the value mirrors the staggered countdown above so bar, timer text and swipe
     -- agree, and the test ticker drains it in step. SetReverseFill is styling and
     -- was already applied by styleBarShared — value only here.
-    if slot.dfBar then slot.dfBar:SetMinMaxValues(0, 1); slot.dfBar:SetValue(barFill) end
+    -- nativeBar = the C timer owns the fill (SetTimerDuration); writing SetValue over
+    -- it would fight the sweep. min/max is irrelevant either way on a timer bar
+    -- (lab-verified: an untouched bar sweeps identically), so it stays for the
+    -- fallback path only.
+    if slot.dfBar and not nativeBar then
+        slot.dfBar:SetMinMaxValues(0, 1); slot.dfBar:SetValue(barFill)
+    end
     if slot.dfName then slot.dfName:SetText(dispName or "") end
     -- Dispel ring: no native SetAuraBorder bind in test mode -> tint + show it
-    -- ourselves from the game palette (the ring art/thickness were already styled).
+    -- ourselves. Custom palette first (the preview mirrors live, where the shared
+    -- account dispel colours drive Color-style rings), game palette fallback.
     if slot.dfAuraBorder then
         local shown = false
-        if e.debuffType and AuraUtil and AuraUtil.GetAuraBorderColor then
-            shown = pcall(function()
-                local c = AuraUtil.GetAuraBorderColor(e.debuffType)
-                slot.dfAuraBorder:SetVertexColor(c:GetRGB())
-            end)
+        if e.debuffType then
+            local key = (e.debuffType == "Enrage") and "Bleed" or e.debuffType
+            local c = DF.db and DF.db.dispelColors and DF.db.dispelColors[key]
+            if type(c) == "table" and c.r then
+                slot.dfAuraBorder:SetVertexColor(c.r, c.g, c.b)
+                shown = true
+            elseif AuraUtil and AuraUtil.GetAuraBorderColor then
+                shown = pcall(function()
+                    local gc = AuraUtil.GetAuraBorderColor(e.debuffType)
+                    slot.dfAuraBorder:SetVertexColor(gc:GetRGB())
+                end)
+            end
         end
         slot.dfAuraBorder:SetShown(shown and true or false)
     end
@@ -1927,9 +2281,18 @@ function Handle:_paintTestSlot(slot, index)
             self._testTips[index] = tip
             tip:EnableMouse(true)
             if tip.SetMouseClickEnabled then tip:SetMouseClickEnabled(false) end
+            local handle = self
             tip:SetScript("OnEnter", function(s)
                 if not GameTooltip then return end
-                GameTooltip:SetOwner(s, "ANCHOR_RIGHT")
+                -- LIVE-PATHWAY parity: mirror the row's configured tooltip placement
+                -- + combat-hide exactly as the native hover applies them (the same
+                -- style.tooltip spec styleButton_regions stamps on live buttons).
+                -- Resolved at hover time so a settings change needs no tip recreate.
+                local tt = handle.config.style and handle.config.style.tooltip
+                if tt and tt.hideInCombat and UnitAffectingCombat("player") then return end
+                local point, ox, oy = "ANCHOR_RIGHT", 0, 0
+                if tt then point, ox, oy = tt.point, tt.x or 0, tt.y or 0 end
+                GameTooltip:SetOwner(s, point, ox, oy)
                 -- Real spell tooltip when the pool entry carries a live spell ID.
                 -- dontOverride (arg 4) is LOAD-BEARING: without it the tooltip
                 -- resolves the player's SPEC OVERRIDE and renders a different
@@ -1946,7 +2309,7 @@ function Handle:_paintTestSlot(slot, index)
                     end
                 end
                 if not shown and s._name then
-                    GameTooltip:SetOwner(s, "ANCHOR_RIGHT")   -- reset any wrong render
+                    GameTooltip:SetOwner(s, point, ox, oy)   -- reset any wrong render
                     GameTooltip:SetText(s._name, 1, 1, 1)
                 end
                 GameTooltip:Show()
@@ -1963,15 +2326,31 @@ function Handle:_paintTestSlot(slot, index)
     end
 end
 
--- Shared 1s ticker driving the preview countdowns (test mode only; started and
+-- Shared ticker driving the preview countdowns (test mode only; started and
 -- stopped by SetTestMode). Loops each timer + swipe at zero and drains the
 -- duration bar in step so the preview animates indefinitely. Buttons die with
 -- their containers, so stale state can't outlive a rebuild (handle.buttons is
 -- wiped on teardown).
+--
+-- FALLBACK ONLY as of the native-duration path (armTestDuration): started on demand
+-- by the first slot that fails to arm natively, never by SetTestMode. On a build with
+-- C_DurationUtil it never runs at all — the C side drives every preview countdown.
+-- 10Hz, not the original 1s: the faked bar fill stepped in visible jumps at 1s while
+-- the cooldown swipe beside it swept smoothly. 0.1 is the same cadence the SMOOTH
+-- duration-update-rate option asks of the live binding.
+local TEST_TICK = 0.1
 function AuraContainer._startTestTicker()
     if AuraContainer._testTicker then return end
-    AuraContainer._testTicker = C_Timer.NewTicker(1, function()
+    AuraContainer._testTicker = C_Timer.NewTicker(TEST_TICK, function()
         local now = GetTime()
+        -- Duration TEXT keeps the live cadence: the account-wide update rate is
+        -- forwarded to the native binding live (GetAuraDurationUpdateInterval),
+        -- so PERFORMANCE's 1s text throttle must show up in the preview too or
+        -- the preview lies. NORMAL (native default, cadence undocumented) has no
+        -- number to honour -> reformat every tick and push only when the rendered
+        -- string actually changed, which is what a whole-second format does
+        -- anyway. The bar is unthrottled either way: it's DF-drawn, not bound.
+        local textIv = DF.GetAuraDurationUpdateInterval and DF:GetAuraDurationUpdateInterval()
         for h in pairs(AuraContainer._handles or {}) do
             if not h._destroyed and h.buttons then
                 for _, b in ipairs(h.buttons) do
@@ -1985,7 +2364,15 @@ function AuraContainer._startTestTicker()
                                 pcall(function() b.dfCD:SetCooldown(now, b._dfTestDur) end)
                             end
                         end
-                        if b.dfDur then b.dfDur:SetText(formatTestDuration(h, rem)) end
+                        if b.dfDur and (not textIv or not b._dfTestTextAt
+                            or (now - b._dfTestTextAt) >= textIv) then
+                            local s = formatTestDuration(h, rem)
+                            if s ~= b._dfTestText then
+                                b.dfDur:SetText(s)
+                                b._dfTestText = s
+                            end
+                            b._dfTestTextAt = now
+                        end
                         if b.dfBar then b.dfBar:SetValue(rem / b._dfTestDur) end
                     end
                 end
@@ -2017,7 +2404,7 @@ function Handle:_positionTestTip(tip, index)
     local idx = index - 1
     -- Strip reservation (Wave 3.2/3.3): rendered rows stride by elementHeight
     -- (sy + reservation) + spacing, and a strip FACING the flow's vertical start
-    -- insets the first row by the reservation (SetAuraLayoutPadding). Mirror
+    -- insets the first row by the reservation (SetFlowLayoutPadding). Mirror
     -- both here or the hover zones drift by `resv` per row once a bar is on.
     local resv, topStrip = stripReservation(self.config)
     local inset = 0
@@ -2085,7 +2472,7 @@ end
 -- abort Blizzard's batch creation); the gen token drops a callback from a torn-down or
 -- rebuilt container; a running counter mirrors the old per-index slot id (batches append,
 -- so indices stay contiguous -- ipairs(self.buttons) in ApplyStyle/layoutRow still holds).
-function Handle:_makeInitializeFrame(gen, fixedIndex)
+function Handle:_makeInitializeFrame(gen, fixedIndex, onInit)
     local handle = self
     return function(button)
         local ok, err = pcall(function()
@@ -2099,10 +2486,12 @@ function Handle:_makeInitializeFrame(gen, fixedIndex)
             if button.SetMouseClickEnabled then button:SetMouseClickEnabled(false) end
             -- Tooltips stay OFF in test mode regardless of the setting: hover would
             -- show the underlying SAMPLE aura's real tooltip (random spellbook data),
-            -- not the curated preview icon it appears to be. Motion is the ONE addon
-            -- lever over the native aura tooltip (the tooltip is a forbidden object
-            -- with a hardcoded anchor); it can't be toggled per-combat because the
-            -- button's mouse state is secret + write-locked in combat (live-verified).
+            -- not the curated preview icon it appears to be. Motion is the on/off
+            -- lever; it can't be toggled per-combat because the button's mouse state
+            -- is secret + write-locked in combat (live-verified). Placement and
+            -- combat-hide are NOT limited like that on 68914+: SetTooltipAnchorPoint/
+            -- SetHideTooltipInCombat are plain shared-mixin state, stamped from
+            -- style.tooltip in styleButton_regions (via _acceptSlot below).
             if button.SetMouseMotionEnabled then
                 button:SetMouseMotionEnabled(handle.config.tooltips == true and not AuraContainer._testMode)
             end
@@ -2122,6 +2511,13 @@ function Handle:_makeInitializeFrame(gen, fixedIndex)
                     handle:_paintTestSlot(button, button._dfTestIndex)
                 else
                     handle:_bindNativeSlot(button)     -- native inbound setters
+                    -- Consumer secure init (overlay dispel carriers): runs in THIS
+                    -- securecallfunction pass, so any texture it creates on the button
+                    -- and binds via SetAuraBorder is created in secure context and is
+                    -- NOT access-constrained (the tainted style pass can't do the bind —
+                    -- cab.lua:15). Inside the pcall, so a fault warns and doesn't abort
+                    -- Blizzard's batch build.
+                    if onInit then onInit(button) end
                 end
             end
         end)
@@ -2291,13 +2687,28 @@ end
 -- hidden flag instead of staying hidden forever.
 function Handle:_applyIdentityGate()
     local hide = false
-    if self._idGateVulnerable and not AuraContainer._testMode then
+    if (self._idGateVulnerable or self._idGateSourceRelative) and not AuraContainer._testMode then
         local unit = self.config and self.config.unit
         if type(unit) == "string" and unit ~= "player" and UnitExists(unit) then
-            local ok, can = pcall(UnitCanAssist, "player", unit)
-            if ok then
-                if issecretvalue and issecretvalue(can) then can = true end
-                hide = not can
+            -- (1) Cross-faction / non-assistable: includeSpellIDs / category tokens
+            --     fail open. Signal: UnitCanAssist.
+            if self._idGateVulnerable then
+                local ok, can = pcall(UnitCanAssist, "player", unit)
+                if ok then
+                    if issecretvalue and issecretvalue(can) then can = true end
+                    if not can then hide = true end
+                end
+            end
+            -- (2) Not in your visible world (different instance/phase): the
+            --     source-relative "mine" filter (PLAYER token / isFromPlayerOrPlayerPet)
+            --     fails open — the engine can't attribute a caster. Signal: UnitIsVisible.
+            --     Fail-safe (matches the assist gate): only hide on a definite,
+            --     non-secret false; any doubt (pcall fail / secret) SHOWS.
+            if not hide and self._idGateSourceRelative then
+                local okv, vis = pcall(UnitIsVisible, unit)
+                if okv and not (issecretvalue and issecretvalue(vis)) and not vis then
+                    hide = true
+                end
             end
         end
     end
@@ -2305,9 +2716,13 @@ function Handle:_applyIdentityGate()
     self:_applyVisibility()
 end
 
--- Enable/disable the (secure) container's parse+bind. COMBAT-GUARDED: SetEnabled
--- touches secure container state, so in lockdown we persist the desired state and
--- defer the call to PLAYER_REGEN_ENABLED (never downgrading a pending rebuild).
+-- Enable/disable the container's parse+bind. ★ 68914 re-verified: SetEnabled is NOT
+-- combat-locked — it's plain mixin state (AuraContainerSharedMixin:SetEnabled = a field
+-- write + UpdateEventRegistrations/UpdateAllAuras, no protected calls; /al combatops
+-- ran it clean mid-combat). The deferral is KEPT for DISPLAY correctness, not legality:
+-- an addon-context enable sets the dirty flags but cannot ARM the private-side
+-- processor (see NativeBackend:refresh), so a combat enable wouldn't render until the
+-- next aura event anyway — flushing at regen is the deliberate, deterministic choice.
 function Handle:_applyEnabled(on)
     on = on and true or false
     self.config.enabled = on
@@ -2315,8 +2730,15 @@ function Handle:_applyEnabled(on)
     if self.backend then self.backend:setEnabled(on) end
 end
 
--- Retarget the container's unit. Guarded: retargeting touches secure container
--- state, so defer if we're in combat.
+-- Retarget the container's unit. ★ 68914 re-verified: SetUnit is NOT combat-locked
+-- (plain mixin state; Blizzard's own TargetFrame.lua:65 retargets its container on
+-- every target change, i.e. constantly in combat; /al combatops ran it clean). The
+-- deferral is KEPT for DISPLAY correctness: the partition kick that makes a retarget
+-- actually render (the Hide/Show bounce in NativeBackend:setUnit) is OOC-only, so a
+-- combat retarget would keep DISPLAYING the old unit's parse until the next aura
+-- event — the drives hide the row till regen instead, which beats showing the wrong
+-- player's auras. (If show-with-brief-staleness is ever preferred over hide-till-regen,
+-- this deferral + the drives' hidden-flag logic is the seam to change — Krathe's call.)
 function Handle:SetUnit(unit)
     self.config.unit = unit
     self:_updateDynRefresh()   -- re-evaluate dynamic-unit auto-refresh for the new token
@@ -2370,7 +2792,7 @@ function Handle:ApplyStyle(style, layout)
     end
     -- Row-mode buttons are anchored by the CONTAINER's secure flow layout -- SetPoint-ing
     -- them here would fight it (and touches secretwrapped anchor points). Geometry changes
-    -- hot-apply through the live SetAuraLayout*/SetAuraGroupLayout mutators instead; a
+    -- hot-apply through the live SetFlowLayout*/SetAuraGroupLayout mutators instead; a
     -- future non-native "slots" mode would hand-anchor via layoutRow. styleButton_regions below still
     -- re-applies per-button SIZE, which the flow layout reads.
     local native = self.backend and self.backend:isNativeSlots()
@@ -2528,6 +2950,16 @@ function Handle:_teardownContainer()
         for _, slot in pairs(self.buttons) do
             if slot and slot.dfBorder then DF.Border:StopAnimation(slot.dfBorder) end
         end
+    end
+    -- Test-mode native countdowns: a DurationTextBinding holds a reference to the
+    -- slot's fontstring and keeps writing to it C-side, so it must be switched off
+    -- before the slot goes — same reasoning as the border animation driver above.
+    -- Bumping the generation also retires any re-arm still pending on a timer.
+    for _, slot in pairs(self.buttons) do
+        if slot and slot._dfTestBinding then
+            pcall(function() slot._dfTestBinding:SetEnabled(false) end)
+        end
+        if slot then slot._dfTestGen = (slot._dfTestGen or 0) + 1 end
     end
     wipe(self.buttons)
     self._slotCounter = 0   -- restart the lazy-batch index for the next build
@@ -2764,7 +3196,10 @@ end
 --   sort     = { rule, direction },             -- PTR-4 only; accepted + no-op now (warns if set)
 --   layout   = { anchor, growth, wrap, scale, size|sizeX|sizeY, spacing|spacingX|spacingY, offsetX, offsetY },
 --   style    = { icon{show,zoom,inset,staticSpellID}, border, cooldown{show,edge,reverse,numbers},
---                duration, stacks, bar, spellName, dispel, overlay },
+--                duration, stacks, bar, spellName, dispel, overlay,
+--                tooltip{point,x,y,hideInCombat} },   -- native tooltip placement (68914+): point =
+--                                                     -- a SetTooltipAnchorPoint name; live mixin
+--                                                     -- state, restyles in place (no Rebuild).
 -- }
 function AuraContainer:Create(parent, config)
     if not AuraContainer.IsSupported() then return nil end
@@ -2809,7 +3244,22 @@ function AuraContainer:Create(parent, config)
         -- parked on the window: with no live container we must not claim "missing"
         -- (false-negative until regen beats a false-positive). The backend shows it and
         -- re-anchors it to the container when a build lands; teardown re-parks it.
-        h.badge = CreateFrame("Frame", nil, h.frame)
+        --
+        -- ★ 68914: AddAuraGroup stamps ForbiddenAspect.UntrustedLayoutScriptExecution
+        -- on the container (Blizzard_CustomAuraContainer.lua:321), and SetPoint REFUSES
+        -- a dependent that doesn't already carry the aspect ("Anchoring disallowed as
+        -- dependent object would inherit forbidden aspects" — field-hit in a dungeon).
+        -- Aspects are NEVER granted implicitly via SetParent/SetPoint, and tainted
+        -- AddForbiddenAspects is disallowed — the sanctioned opt-in is inheriting
+        -- DisableUntrustedLayoutScriptsTemplate at creation (ForbiddenAspectTemplates.xml,
+        -- named in Blizzard's own comment above the stamp). Cost: the badge (and its
+        -- children — border overlays, consumer art) may never run LAYOUT scripts
+        -- (OnSizeChanged); nothing in the badge subtree uses them. Template-probe so
+        -- pre-68914 builds (no such template) keep the plain frame they never needed.
+        local aspectTmpl = C_XMLUtil and C_XMLUtil.GetTemplateInfo
+            and C_XMLUtil.GetTemplateInfo("DisableUntrustedLayoutScriptsTemplate")
+            and "DisableUntrustedLayoutScriptsTemplate" or nil
+        h.badge = CreateFrame("Frame", nil, h.frame, aspectTmpl)
         h.badge:SetSize(bw, bh)
         h.badge:SetPoint("TOPLEFT", h.frame, "TOPLEFT", sp, -sp)
         h.badge:Hide()
@@ -2887,7 +3337,7 @@ local gateSweepQueued
 local function IdentityGateSweep()
     gateSweepQueued = nil
     for h in pairs(AuraContainer._handles or {}) do
-        if h._idGateVulnerable then
+        if h._idGateVulnerable or h._idGateSourceRelative then
             pcall(function() h:_applyIdentityGate() end)
         end
     end
@@ -2925,6 +3375,14 @@ function AuraContainer.DebugDumpIdentityGate()
                 elseif issecretvalue and issecretvalue(can) then canTxt = "SECRET"
                 else canTxt = tostring(can) end
             end
+            -- UnitIsVisible: the source-relative (PLAYER-token) gate's signal.
+            local visTxt = "-"
+            if type(unit) == "string" and UnitExists(unit) then
+                local okv, vis = pcall(UnitIsVisible, unit)
+                if not okv then visTxt = "ERR"
+                elseif issecretvalue and issecretvalue(vis) then visTxt = "SECRET"
+                else visTxt = tostring(vis) end
+            end
             -- Filter + cf summary: distinct record filter strings, and whether ANY
             -- record carries an include/exclude spell map — the fields the
             -- vulnerability classification is derived from.
@@ -2938,11 +3396,12 @@ function AuraContainer.DebugDumpIdentityGate()
                 if cf and cf.includeSpellIDs then inc = true end
                 if cf and cf.excludeSpellIDs then exc = true end
             end
-            print(("|cff33ff99[idgate %d]|r mode=%s unit=%s filter=%s inc=%s exc=%s vuln=%s exists=%s canAssist=%s gateHidden=%s intent=%s shown=%s retry=%s"):format(
+            print(("|cff33ff99[idgate %d]|r mode=%s unit=%s filter=%s inc=%s exc=%s vuln=%s srcRel=%s exists=%s canAssist=%s vis=%s gateHidden=%s intent=%s shown=%s retry=%s"):format(
                 n, tostring(cfg.mode or "row"), tostring(unit),
                 table.concat(fParts, "&"), tostring(inc), tostring(exc),
                 tostring(h._idGateVulnerable or false),
-                tostring(type(unit) == "string" and UnitExists(unit) or false), canTxt,
+                tostring(h._idGateSourceRelative or false),
+                tostring(type(unit) == "string" and UnitExists(unit) or false), canTxt, visTxt,
                 tostring(h._idGateHidden or false),
                 tostring(h._intendedShown ~= false),
                 tostring(h.frame and h.frame:IsShown() or false),

@@ -35,6 +35,128 @@ GUI.Colors = {
     warning    = C_WARNING,  -- soft red for behaviour-change / caution notes
 }
 
+-- Canonical row heights (the "airier" scale). A fixed-height widget factory stamps its own slot
+-- height onto the widget (widget.preferredHeight + widget.fixedRowHeight), so the layout uses THAT
+-- and a call-site number can't make the same widget type render at a different height on a different
+-- page. New callers can omit the height entirely; legacy call-site numbers on fixed widgets are
+-- ignored (harmless, strippable later). Variable widgets (labels, headers, spacers) are NOT stamped
+-- and keep whatever height they are given. One place to retune the whole GUI's vertical rhythm.
+GUI.RowHeight = {
+    checkbox    = 30,
+    slider      = 55,
+    dropdown    = 55,
+    colorpicker = 30,   -- match the checkbox row (both ~24px of content) so the rhythm reads even
+    editbox     = 55,
+    toggle      = 30,   -- two-state switch; same ~24px of content as a checkbox, same row
+    -- Labels are VARIABLE height (they wrap), so they have no fixed row — but they do
+    -- have fixed CHROME, which CreateLabel adds to the measured text height: the 5px top
+    -- inset its FontString sits at, plus 13px below. That 13 IS the whole visible gap to
+    -- the next row — LayoutChildren stacks rows flush (y = y - height) and a labelled
+    -- control (dropdown/slider/editbox) puts its own label at TOPLEFT 0,0 — so a smaller
+    -- pad reads as a blurb crowding the control it describes.
+    labelPad    = 18,
+}
+
+-- Resolve the layout slot height for a widget being added to a group/page. Fixed-height widgets
+-- own their height (drift-proof); everything else uses the height it was handed, then the widget's
+-- own preferred height, then a sane default.
+local function ResolveRowHeight(widget, height)
+    if widget and widget.fixedRowHeight and widget.preferredHeight then
+        return widget.preferredHeight
+    end
+    return height or (widget and widget.preferredHeight) or 55
+end
+GUI.ResolveRowHeight = ResolveRowHeight
+
+-- Sync a widget's slot height into its host SettingsGroup and re-flow. Used by any
+-- widget that only learns its true height AFTER construction (a measured label, an
+-- info banner): update the group's stored entry, re-lay out the group, then bubble to
+-- the page so sibling groups in the same column re-anchor to the group's new bottom.
+-- Without the bubble a grown group's backdrop overshoots the next group's anchor and
+-- renders as an empty rectangle of backdrop above it.
+function GUI:RelayoutHost(widget, slotHeight)
+    if not widget then return end
+    local g = widget.settingsGroup
+    -- RETIRED widgets must not re-flow anything. A measured label arms a next-frame
+    -- converge; if the page rebuilds first (any Refresh — e.g. flipping the Colours
+    -- page's Seconds/Percent tabs), that timer still fires against the PREVIOUS build.
+    -- Its group is by then parented to the trash frame with its anchors cleared, so
+    -- re-laying it out sizes children off a dead frame, and the parent walk below still
+    -- reaches the LIVE page and makes it re-lay out mid-flight. IsShown() does not catch
+    -- this — a frame keeps its own shown flag when an ancestor is hidden — so test the
+    -- ancestry instead.
+    local trash = GUI._trashFrame
+    if trash then
+        local p = (g or widget)
+        while p do
+            if p == trash then return end
+            p = p:GetParent()
+        end
+    end
+    if g and g.LayoutChildren then
+        for _, entry in ipairs(g.groupChildren or {}) do
+            if entry.widget == widget then
+                entry.height = slotHeight
+                break
+            end
+        end
+        g:LayoutChildren()
+    end
+    local p = (g or widget):GetParent()
+    while p do
+        if type(p.RefreshStates) == "function" and p.children then
+            p:RefreshStates()
+            return
+        end
+        p = p:GetParent()
+    end
+end
+
+-- "/df guiwidth" — width ground truth for the page on screen: every top-level child and
+-- every settings-group child with its live width, flagging any that is non-positive or
+-- narrower than its group allows.
+-- Use it to TELL APART the two causes of truncated label text, which look identical:
+--   * a real width fault  -> frames show up flagged here;
+--   * a stale FontString wrap -> every width reads correct and the count is 0, yet the
+--     text is visibly ellipsised (and scrolling the window snaps it back, because that
+--     re-renders the string). That is CreateLabel's Reflow case, not a sizing bug.
+-- Recorded because the second one cost two wrong fixes before this dump ruled out the first.
+function GUI:DebugDumpWidths()
+    local page = GUI.CurrentPageName and GUI.Pages[GUI.CurrentPageName]
+    if not page or not page.children then
+        print("|cff00ff00DandersFrames:|r no built page on screen.")
+        return
+    end
+    local content = GUI.contentFrame and GUI.contentFrame:GetWidth() or -1
+    print(("|cff00ff00DandersFrames|r guiwidth — page '%s', content %.0f, child %.0f")
+        :format(GUI.CurrentPageName, content, page.child and page.child:GetWidth() or -1))
+    local bad = 0
+    local function flag(w, limit)
+        if not w or w <= 0 then bad = bad + 1; return "|cffff4444 <== NON-POSITIVE|r" end
+        if limit and w < limit - 1 then bad = bad + 1; return "|cffffcc00 <== NARROW|r" end
+        return ""
+    end
+    for i, widget in ipairs(page.children) do
+        if widget.isSettingsGroup then
+            local gw = widget:GetWidth() or 0
+            local inner = gw - (widget.padding or 10) * 2
+            print(("  [%d] group  w=%.0f inner=%.0f col=%s shown=%s%s")
+                :format(i, gw, inner, tostring(widget.layoutCol), tostring(widget:IsShown()), flag(gw)))
+            for j, entry in ipairs(widget.groupChildren or {}) do
+                local c = entry.widget
+                local cw = c and c:GetWidth() or 0
+                print(("      (%d) w=%.0f h=%.0f shown=%s%s")
+                    :format(j, cw, entry.height or -1, tostring(c and c:IsShown()), flag(cw, inner)))
+            end
+        else
+            local w = widget:GetWidth() or 0
+            print(("  [%d] widget w=%.0f col=%s shown=%s%s")
+                :format(i, w, tostring(widget.layoutCol), tostring(widget:IsShown()), flag(w)))
+        end
+    end
+    print(("|cff00ff00DandersFrames:|r %d suspect frame(s)."):format(bad))
+end
+
 DF.SectionRegistry = DF.SectionRegistry or {}
 
 -- ============================================================
@@ -507,6 +629,13 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width)
     end
     section.sectionTitleText = text
     section.sectionChildren = {}
+    -- Same contract as CreateHeader's container.GetText: it is how a section is FOUND
+    -- by title (Search:ScrollToSection, and every GUI:LinkToSetting{ section = ... }
+    -- cross-link through it). Without it a collapsible section is invisible to those
+    -- lookups, so a link to it silently does nothing — which is exactly what happened
+    -- to the Colours page's "Color by Time" links when that box was promoted from a
+    -- plain header to a collapsible section.
+    section.GetText = function(self) return self.sectionTitleText end
     section.paddingAfter = 8  -- Padding space after header before first child
     
     -- Header bar with background
@@ -796,9 +925,13 @@ function GUI:CreateSettingsGroup(parent, width, opts)
     -- Add a widget to this group
     group.AddWidget = function(self, widget, height)
         widget:SetParent(self)
+        -- Record whether the CALL SITE pinned this slot's height. A self-measuring
+        -- widget (CreateLabel) may only re-flow the group when it did not — an
+        -- explicit number stays authoritative, so no existing layout can shift.
+        widget._slotHeightExplicit = (height ~= nil) or nil
         table.insert(self.groupChildren, {
             widget = widget,
-            height = height or 55,
+            height = ResolveRowHeight(widget, height),
         })
         -- Mark widget as belonging to this group
         widget.settingsGroup = self
@@ -877,7 +1010,15 @@ function GUI:CreateSettingsGroup(parent, width, opts)
     group.LayoutChildren = function(self)
         local y = -self.padding  -- Start with top padding
         local visibleCount = 0
-        local innerWidth = self:GetWidth() - (self.padding * 2)  -- Width for child widgets
+        -- Width for child widgets. A group whose width is not resolved yet (created but
+        -- not laid out, or anchors cleared) yields a non-positive innerWidth. Do NOT
+        -- substitute a guessed width — a group can legitimately be far wider than its
+        -- constructed size (RefreshStates stretches layoutCol "both" groups to the full
+        -- content width), so guessing squeezes those children and truncates their text.
+        -- Skip the sizing instead and let the next pass, with a real width, do it. That
+        -- matches the old behaviour, where a negative SetWidth was silently a no-op.
+        local innerWidth = (self:GetWidth() or 0) - (self.padding * 2)
+        local canSize = innerWidth > 0
 
         for i, entry in ipairs(self.groupChildren) do
             local widget = entry.widget
@@ -899,8 +1040,8 @@ function GUI:CreateSettingsGroup(parent, width, opts)
                 if shouldShow then
                     widget:ClearAllPoints()
                     widget:SetPoint("TOPLEFT", self, "TOPLEFT", self.padding, y)
-                    -- Set width to fit within group padding
-                    widget:SetWidth(innerWidth)
+                    -- Set width to fit within group padding (only once the group has one)
+                    if canSize then widget:SetWidth(innerWidth) end
                     widget:Show()
                     y = y - height
                     visibleCount = visibleCount + 1
@@ -1036,8 +1177,75 @@ function GUI:CreateLabel(parent, text, width, color)
     else
         lbl:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 1)
     end
-    
-    frame.SetText = function(self, newText) lbl:SetText(newText) end
+
+    -- MEASURED slot height. A label is a variable-height widget, so ResolveRowHeight
+    -- prefers the call-site number and falls back to preferredHeight — stamping a
+    -- measured one here leaves every existing call site byte-identical while letting a
+    -- NEW one omit the number entirely and get a slot that fits the text however it
+    -- wraps. Hand-guessed numbers are exactly what let a 4-line blurb overlap the
+    -- dropdown beneath it (Colours page, Color by Time).
+    local function Remeasure()
+        local h = lbl:GetStringHeight()
+        if not h or h <= 0 then return false end
+        local newH = math.ceil(h) + (GUI.RowHeight.labelPad or 10)
+        if frame.preferredHeight == newH then return false end
+        frame.preferredHeight = newH
+        frame:SetHeight(newH)
+        return true
+    end
+    -- Force the FontString to re-flow at its CURRENT width. A dual-anchored string
+    -- resolves its wrap lazily, so one that was laid out before its frame reached
+    -- final width keeps the old single-line layout and renders ellipsised
+    -- ("Customize class colors used throughout DandersFra…") even though the frame
+    -- measures a correct 260 — /df guiwidth reports zero suspect frames while the
+    -- text is visibly truncated. Scrolling the settings window dirties it and the
+    -- text snaps back, which is the tell that it is a stale layout, not a bad size.
+    -- Clearing the text first matters: SetText with an unchanged string can early-out
+    -- without marking the string dirty.
+    local function Reflow()
+        local t = lbl:GetText()
+        if t and t ~= "" then
+            lbl:SetText("")
+            lbl:SetText(t)
+        end
+    end
+    -- The layout engine resizes this frame to the column's available width (see the
+    -- anchor note above), and GetStringHeight can return a stale single-line value until
+    -- the FontString has rendered at that final width — so converge ONCE on the next
+    -- frame, after LayoutChildren has run. Re-flow only when this label OWNS its slot:
+    -- inside a SettingsGroup (nothing else tracks a stored height) and with no call-site
+    -- number (_slotHeightExplicit, stamped by AddWidget) to override. Deliberately NOT an
+    -- OnSizeChanged binding — that cascade is the Aura Designer indicator-card lockup
+    -- documented on CreateInfoBanner; the cost is that a label added with no height does
+    -- not re-measure if its width changes again later.
+    local function Measure()
+        Remeasure()
+        if C_Timer and C_Timer.After then
+            C_Timer.After(0, function()
+                if not frame:IsShown() then return end
+                -- Re-flow FIRST, and for EVERY label — the height converge below is
+                -- gated (it only runs for labels that own their slot), but a stale
+                -- wrap can strand any label, and the ones with a call-site height are
+                -- exactly the ones nothing else ever touches again.
+                Reflow()
+                if frame.settingsGroup and not frame._slotHeightExplicit and Remeasure() then
+                    GUI:RelayoutHost(frame, frame.preferredHeight)
+                end
+            end)
+        end
+    end
+    Measure()
+
+    -- A rebuilt page hides then re-shows its widgets, and a label re-shown at a width
+    -- it was not laid out at comes back with the stale single-line wrap. Re-flow on the
+    -- frame AFTER the show settles. Safe against the OnSizeChanged cascade that locked
+    -- up the AD indicator cards: Reflow re-applies the same string and never resizes,
+    -- so it cannot feed itself.
+    frame:SetScript("OnShow", function()
+        if C_Timer and C_Timer.After then C_Timer.After(0, Reflow) end
+    end)
+
+    frame.SetText = function(self, newText) lbl:SetText(newText); Measure() end
     return frame
 end
 
@@ -1065,6 +1273,17 @@ function GUI:CreateNote(parent, text, opts)
         str = text
     end
     return self:CreateLabel(parent, str, opts.width)
+end
+
+-- Shared link HOVER colour: the rest colour (the theme accent — blue in party, orange in
+-- raid) LIGHTENED toward white. Keeps the hue, so a hovered link brightens instead of going
+-- flat white and blending into white body text. One source of truth for every link's hover
+-- (SetHTML links, the page/URL link buttons, and hand-rolled note links). `c` = the link's
+-- rest colour (defaults to the live theme colour); returns {r,g,b}.
+function GUI:LinkHoverColor(c)
+    c = c or (GUI.GetThemeColor and GUI.GetThemeColor()) or { r = 1, g = 1, b = 1 }
+    local t = 0.45   -- lift toward white; tune here to re-key every link at once
+    return { r = c.r + (1 - c.r) * t, g = c.g + (1 - c.g) * t, b = c.b + (1 - c.b) * t }
 end
 
 -- Segmented button group: a row of mutually-exclusive buttons, one selected at
@@ -1296,6 +1515,83 @@ end
 
 local INFO_BANNER_ICON_PATH = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
 
+-- Shared inline-markup parser: split "…|cCOLOR|HlinkData|hText|h|r…" (WoW hyperlink markup
+-- plus \n line breaks) into a flat token list of { type = "word"/"link"/"newline", text, data,
+-- color }. Used by the InfoBanner's SetHTML flow AND GUI:CreateLink, so both read links the
+-- same way — one parser, no fork.
+local function ParseHTMLSegments(s)
+    local segs = {}
+    local function addWords(chunk)
+        local pos = 1
+        while pos <= #chunk do
+            local nl = chunk:find("\n", pos, true)
+            local line = nl and chunk:sub(pos, nl - 1) or chunk:sub(pos)
+            for _, w in ipairs({ strsplit(" ", line) }) do
+                if #w > 0 then segs[#segs + 1] = { type = "word", text = w } end
+            end
+            if nl then
+                segs[#segs + 1] = { type = "newline" }
+                pos = nl + 1
+            else
+                break
+            end
+        end
+    end
+    local rem = s
+    while #rem > 0 do
+        local pre, color, data, lt, rest =
+            rem:match("^(.-)|c(%x%x%x%x%x%x%x%x)|H([^|]*)|h([^|]*)|h|r(.*)")
+        if pre ~= nil then
+            addWords(pre)
+            segs[#segs + 1] = { type = "link", text = lt, data = data, color = color }
+            rem = rest or ""
+        else
+            addWords(rem)
+            break
+        end
+    end
+    return segs
+end
+
+-- FlowSpaceWidth — the font's OWN space advance, so a word-per-FontString flow
+-- (CreateLink / InfoBanner) spaces exactly like a single wrapped FontString. A
+-- fixed pixel gap reads too loose at small sizes; measuring "m m" minus "mm"
+-- isolates one space advance. `sizePx` set → measure the user's settings font at
+-- that px (matches a banner word, which is SetSettingsFont'd); nil → measure the
+-- template's own font object (a CreateLink / template-fonted word). One reused
+-- probe (no per-call FontString churn); measured fresh so a font-family change is
+-- always reflected. Returns the EXACT fractional advance (no pixel rounding) so the
+-- flow spaces identically to native wrapped text — see the return note below.
+local _flowProbe
+local function FlowSpaceWidth(tmpl, sizePx)
+    tmpl = tmpl or "DFFontHighlightSmall"
+    if not _flowProbe then
+        _flowProbe = UIParent:CreateFontString(nil, "OVERLAY")
+    end
+    if sizePx and DF.SafeSetFont then
+        local fontName = (DF.db and DF.db.settingsFont) or "DF Roboto SemiBold"
+        DF:SafeSetFont(_flowProbe, fontName, sizePx, "")
+    else
+        _flowProbe:SetFontObject(_G[tmpl] or _G.GameFontHighlight)
+    end
+    -- Average over N spaces: each GetStringWidth is pixel-rounded, so a single-space
+    -- "m m" - "mm" diff can inflate the space advance by ~1px (which read as too-loose
+    -- word gaps next to the native-wrapped notes). Isolating N spaces and dividing
+    -- shrinks that rounding error to ~1/N of a pixel, so the flow spaces like real text.
+    local N = 12
+    _flowProbe:SetText("m" .. string.rep(" m", N)); local wA = _flowProbe:GetStringWidth()
+    _flowProbe:SetText("m" .. string.rep("m", N));  local wB = _flowProbe:GetStringWidth()
+    _flowProbe:SetText("")
+    local sp = (wA - wB) / N
+    if not sp or sp <= 0 then sp = 3 end
+    -- Return the EXACT fractional advance, NOT math.floor(sp+0.5). Rounding a small
+    -- space (Roboto ~2.7px at 11px) UP to a whole pixel added a fixed sliver to every
+    -- word gap, so the flow read looser than a native wrapped FontString — which
+    -- positions its own spaces at sub-pixel offsets. Fractional here = same gap as
+    -- native. (Krathe: "look like normal text with links, no extra spacing.")
+    return sp
+end
+
 function GUI:CreateInfoBanner(parent, opts)
     opts = opts or {}
 
@@ -1343,46 +1639,13 @@ function GUI:CreateInfoBanner(parent, opts)
 
     local cachedH, recomputing = nil, false
 
+    -- Sync the banner's measured slot height into its host group and re-flow (bubbling
+    -- to the page so sibling groups re-anchor). Shared with the measured label — see
+    -- GUI:RelayoutHost, which is this logic verbatim; the page bubble is what stops a
+    -- grown group's backdrop overshooting the next group's anchor when an animation
+    -- type is first selected in a border panel.
     local function TriggerHostRelayout()
-        -- If this banner was added to a SettingsGroup, sync its stored
-        -- height entry and re-lay out the group.
-        if banner.settingsGroup and banner.settingsGroup.LayoutChildren then
-            local g = banner.settingsGroup
-            for _, entry in ipairs(g.groupChildren or {}) do
-                if entry.widget == banner then
-                    entry.height = banner.layoutHeight
-                    break
-                end
-            end
-            g:LayoutChildren()
-            -- Also bubble up to the page so its column layout sees the
-            -- group's new calculatedHeight. Without this, sibling groups
-            -- in the same column stay anchored to the OLD bottom of this
-            -- group, and the group's backdrop (now taller) visibly
-            -- overshoots past those siblings' anchor — rendering as an
-            -- empty rectangle of group backdrop above the next group.
-            -- Hit when an animation type is first selected in a border
-            -- panel: banner appears, async recompute grows the group,
-            -- next group below stays put, gap shows.
-            local p = g:GetParent()
-            while p do
-                if type(p.RefreshStates) == "function" and p.children then
-                    p:RefreshStates()
-                    return
-                end
-                p = p:GetParent()
-            end
-            return
-        end
-        -- Otherwise, walk up to find a host page.
-        local p = banner:GetParent()
-        while p do
-            if type(p.RefreshStates) == "function" and p.children then
-                p:RefreshStates()
-                return
-            end
-            p = p:GetParent()
-        end
+        GUI:RelayoutHost(banner, banner.layoutHeight)
     end
 
     local function MeasureContent()
@@ -1598,45 +1861,15 @@ function GUI:CreateInfoBanner(parent, opts)
     -- and \n for explicit line breaks. Plain text is word-split so wrapping
     -- occurs at word boundaries when the banner is narrow.
 
-    -- Parse text into a flat list of typed tokens.
-    local function ParseHTMLSegments(s)
-        local segs = {}
-        local function addWords(chunk)
-            local pos = 1
-            while pos <= #chunk do
-                local nl = chunk:find("\n", pos, true)
-                local line = nl and chunk:sub(pos, nl - 1) or chunk:sub(pos)
-                for _, w in ipairs({strsplit(" ", line)}) do
-                    if #w > 0 then segs[#segs + 1] = {type = "word", text = w} end
-                end
-                if nl then
-                    segs[#segs + 1] = {type = "newline"}
-                    pos = nl + 1
-                else
-                    break
-                end
-            end
-        end
-        local rem = s
-        while #rem > 0 do
-            local pre, color, data, lt, rest =
-                rem:match("^(.-)|c(%x%x%x%x%x%x%x%x)|H([^|]*)|h([^|]*)|h|r(.*)")
-            if pre ~= nil then
-                addWords(pre)
-                segs[#segs + 1] = {type = "link", text = lt, data = data, color = color}
-                rem = rest or ""
-            else
-                addWords(rem)
-                break
-            end
-        end
-        return segs
-    end
+    -- (Markup parsing is the file-level ParseHTMLSegments, shared with GUI:CreateLink.)
 
     -- Position all flow widgets left-to-right with wrapping; returns total
     -- content height. Punctuation tokens attach to the preceding element
     -- with no leading gap so "Foo," renders without extra space before the comma.
     local FLOW_LINE_H = 14
+    -- Banner words are SetSettingsFont'd to 11px unless a custom template is given; measure the
+    -- space advance at that same font so the flow spaces like native text (see FlowSpaceWidth).
+    local flowSpaceW = FlowSpaceWidth(fontTemplate, (not opts.fontTemplate) and 11 or nil)
     local function DoFlowLayout()
         if not banner._flowSegs then return 0 end
         local availW = banner:GetWidth() - (12 + 18 + 8) - 12
@@ -1647,8 +1880,11 @@ function GUI:CreateInfoBanner(parent, opts)
                 x = 0; lineY = lineY - FLOW_LINE_H - 2
             elseif seg._widget then
                 local w = seg._w
-                local isPunct = seg.type == "word" and seg.text:match("^[%p]") and true or false
-                local gap = (x > 0 and not isPunct) and 3 or 0
+                -- Only a token that is ENTIRELY trailing punctuation (a lone "." or "," after a
+                -- link) hugs the preceding word. Connectors like & / - are whole words and keep
+                -- normal spacing on both sides — else "Texture & Colors" renders as "Texture& …".
+                local isPunct = seg.type == "word" and seg.text:match("^[%.%,%;%:%!%?%)%]%}]+$") and true or false
+                local gap = (x > 0 and not isPunct) and flowSpaceW or 0
                 if x > 0 and (x + gap + w) > availW then
                     x = 0; lineY = lineY - FLOW_LINE_H - 2; gap = 0
                 end
@@ -1712,11 +1948,18 @@ function GUI:CreateInfoBanner(parent, opts)
                 local fs = btn:CreateFontString(nil, "OVERLAY", fontTemplate)
                 if not opts.fontTemplate then GUI:SetSettingsFont(fs, 11, "") end  -- match the 11px plain body
                 fs:SetAllPoints()
+                fs:SetJustifyH("LEFT")   -- ink flush-left so the link spaces like a plain word
                 fs:SetText(seg.text)
                 fs:SetTextColor(tc.r, tc.g, tc.b)
-                local w = fs:GetStringWidth() + 2
-                btn:SetSize(w, FLOW_LINE_H)
-                btn:SetScript("OnEnter", function() fs:SetTextColor(1, 1, 1) end)
+                -- Box width ceil'd (anti last-glyph clip), but the flow ADVANCE uses the
+                -- RAW width — else the ≤1px of empty box after every link became extra
+                -- gap before the next word (looser than native). seg._w drives the gap.
+                local rawW = fs:GetStringWidth()
+                btn:SetSize(math.ceil(rawW), FLOW_LINE_H)
+                btn:SetScript("OnEnter", function()
+                    local h = GUI:LinkHoverColor((GUI.GetThemeColor and GUI.GetThemeColor()) or tc)
+                    fs:SetTextColor(h.r, h.g, h.b)
+                end)
                 btn:SetScript("OnLeave", function()
                     local c = GUI.GetThemeColor and GUI.GetThemeColor() or tc
                     fs:SetTextColor(c.r, c.g, c.b)
@@ -1729,7 +1972,7 @@ function GUI:CreateInfoBanner(parent, opts)
                     end
                 end)
                 seg._widget = btn
-                seg._w = w
+                seg._w = rawW
                 self._flowWidgets[#self._flowWidgets + 1] = btn
             end
         end
@@ -1751,6 +1994,264 @@ function GUI:CreateInfoBanner(parent, opts)
     end
 
     return banner
+end
+
+-- ============================================================
+-- GUI:CreateLink — lean inline text + clickable links in a NOTE style (no box), FIXED layout.
+-- The link-capable counterpart to CreateNote: same |cCOLOR|Hdata|hText|h|r markup as the
+-- InfoBanner (shared ParseHTMLSegments), rendered as flowing dim body text with a themed,
+-- hover-lightening Button per link — but WITHOUT the banner's self-resize machinery, so it is
+-- safe inside the Aura Designer's reflowing indicator cards (no OnSizeChanged -> relayout loop
+-- that drops FPS there). Only the link words are clickable/hovered (fixes the old note's
+-- whole-frame click). Named CreateLink (not CreateLinkText) so we can grow other link forms.
+--
+-- opts:
+--   onLinkClick(data)  called with the link's raw data string on click.
+--   width              wrap width; if given, flows immediately. Omit to flow once when the host
+--                      first sizes the frame (then it stops — no re-flow loop).
+--   fontTemplate       body font (default DFFontHighlightSmall — the note look).
+--   lineHeight         per-line height (default 14).
+--   padTop/padBottom   vertical breathing room baked into layoutHeight (default 2 / 8) so a note
+--                      isn't glued to the controls above/below it — the measured height (and thus
+--                      the slot a caller gives it) already includes it. More below than above so
+--                      the note reads as annotating the control above while clearing the next one.
+-- Returns the frame; frame.layoutHeight is the measured height after flow; frame:Reflow(w)
+-- re-flows at a new width if a caller ever needs it.
+-- ============================================================
+function GUI:CreateLink(parent, text, opts)
+    opts = opts or {}
+    local onLinkClick = opts.onLinkClick
+    local fontTemplate = opts.fontTemplate or "DFFontHighlightSmall"
+    local LINE_H = opts.lineHeight or 14
+    local PAD_TOP = opts.padTop or 2
+    local PAD_BOTTOM = opts.padBottom or 8
+    local frame = CreateFrame("Frame", nil, parent)
+    frame:SetHeight(LINE_H)
+
+    local segs = ParseHTMLSegments(text or "")
+    local tc = (GUI.GetThemeColor and GUI.GetThemeColor()) or { r = 1, g = 0.82, b = 0 }
+
+    for _, seg in ipairs(segs) do
+        if seg.type == "word" then
+            local fs = frame:CreateFontString(nil, "OVERLAY", fontTemplate)
+            fs:SetText(seg.text)
+            fs:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)   -- dim body, like a note
+            seg._w = fs:GetStringWidth()
+            fs:SetSize(seg._w, LINE_H)
+            seg._widget = fs
+        elseif seg.type == "link" then
+            local btn = CreateFrame("Button", nil, frame)
+            local fs = btn:CreateFontString(nil, "OVERLAY", fontTemplate)
+            fs:SetAllPoints()
+            fs:SetJustifyH("LEFT")   -- ink flush-left so the link spaces like a plain word
+            fs:SetText(seg.text)
+            fs:SetTextColor(tc.r, tc.g, tc.b)
+            -- Box ceil'd (anti last-glyph clip); flow ADVANCE uses the RAW width so the
+            -- ≤1px of empty box after a link doesn't become extra word gap (see SetHTML).
+            local rawW = fs:GetStringWidth()
+            btn:SetSize(math.ceil(rawW), LINE_H)
+            btn:SetScript("OnEnter", function()
+                local h = GUI:LinkHoverColor((GUI.GetThemeColor and GUI.GetThemeColor()) or tc)
+                fs:SetTextColor(h.r, h.g, h.b)
+            end)
+            btn:SetScript("OnLeave", function()
+                local c = (GUI.GetThemeColor and GUI.GetThemeColor()) or tc
+                fs:SetTextColor(c.r, c.g, c.b)
+            end)
+            local segData = seg.data
+            btn:SetScript("OnClick", function() if onLinkClick then onLinkClick(segData) end end)
+            seg._w = rawW
+            seg._widget = btn
+        end
+    end
+
+    -- Match native inter-word spacing: the flow gap is the font's own space advance, so a
+    -- word-per-FontString line reads exactly like a single wrapped FontString (a fixed pixel
+    -- gap looks too loose at small sizes). Words here use the raw template font (no
+    -- SetSettingsFont resize), so measure the template object directly.
+    local SPACE_W = FlowSpaceWidth(fontTemplate)
+
+    -- Wrap the tokens left-to-right at `w`; punctuation hugs the preceding token. Sets the
+    -- frame height to fit. Fixed layout — never re-flows on its own, so no host feedback loop.
+    local function doFlow(w)
+        w = w or frame:GetWidth() or 0
+        if w < 20 then return LINE_H end
+        local x, lineY = 0, -PAD_TOP   -- start below the top so the first line isn't glued up
+        for _, seg in ipairs(segs) do
+            if seg.type == "newline" then
+                x = 0; lineY = lineY - LINE_H - 2
+            elseif seg._widget then
+                -- Only a token that is ENTIRELY trailing punctuation (a lone "." or "," after a
+                -- link) hugs the preceding word. Connectors like & / - are whole words and keep
+                -- normal spacing on both sides — else "Texture & Colors" renders as "Texture& …".
+                local isPunct = seg.type == "word" and seg.text:match("^[%.%,%;%:%!%?%)%]%}]+$") and true or false
+                local gap = (x > 0 and not isPunct) and SPACE_W or 0
+                if x > 0 and (x + gap + seg._w) > w then
+                    x = 0; lineY = lineY - LINE_H - 2; gap = 0
+                end
+                seg._widget:ClearAllPoints()
+                seg._widget:SetPoint("TOPLEFT", frame, "TOPLEFT", x + gap, lineY)
+                x = x + gap + seg._w
+            end
+        end
+        local h = math.abs(lineY) + LINE_H + PAD_BOTTOM
+        frame:SetHeight(h); frame.layoutHeight = h
+        return h
+    end
+    frame.Reflow = function(_, w) return doFlow(w) end
+
+    if opts.width then
+        frame:SetWidth(opts.width)
+        doFlow(opts.width)
+    else
+        frame:SetScript("OnSizeChanged", function(self, w)
+            if w and w > 20 and not self._flowed then
+                self._flowed = true
+                self:SetScript("OnSizeChanged", nil)   -- flow once; never re-flow (no loop)
+                doFlow(w)
+            end
+        end)
+    end
+    return frame
+end
+
+-- GUI:FlashWidget — the "show me" pulse (revived from the pre-12.1 boss-debuffs jump): briefly
+-- highlight a widget/section in the theme colour so the eye lands on it after a jump. One reused
+-- overlay per target; the colour refreshes each call (party blue / raid orange).
+-- opts (all opt-in / out):
+--   fill    (default true)  — a soft theme-coloured WASH (peaks ~35% alpha, control stays legible).
+--   border  (default false) — a theme-coloured OUTLINE. Mix per call: a whole section reads well
+--                             as border-only; a single control as fill + border.
+--   alpha       fill peak alpha (default 0.35).   borderSize  outline thickness px (default 2).
+-- The overlay is a backdrop frame parented to the target's parent + anchored to the target, so
+-- it works whether the target is a Frame or a raw FontString (section headers).
+function GUI:FlashWidget(widget, opts)
+    if not widget or not widget.GetParent then return end
+    opts = opts or {}
+    local doFill   = opts.fill ~= false
+    local doBorder = opts.border and true or false
+    if not doFill and not doBorder then doFill = true end   -- something has to show
+    local hl = widget._dfFlashHL
+    if not hl then
+        local host = widget:GetParent() or widget
+        hl = CreateFrame("Frame", nil, host, "BackdropTemplate")
+        if not hl.SetBackdrop then Mixin(hl, BackdropTemplateMixin) end
+        hl:SetPoint("TOPLEFT", widget, "TOPLEFT", -3, 3)
+        hl:SetPoint("BOTTOMRIGHT", widget, "BOTTOMRIGHT", 3, -3)
+        local wl = (widget.GetFrameLevel and widget:GetFrameLevel())
+            or (host.GetFrameLevel and host:GetFrameLevel()) or 1
+        hl:SetFrameLevel(wl + 4)   -- draw over the target
+        widget._dfFlashHL = hl
+    end
+    local c = (GUI.GetThemeColor and GUI.GetThemeColor()) or { r = 1, g = 0.82, b = 0 }
+    hl:SetBackdrop({
+        bgFile   = doFill and "Interface\\Buttons\\WHITE8x8" or nil,
+        edgeFile = doBorder and "Interface\\Buttons\\WHITE8x8" or nil,
+        edgeSize = doBorder and (opts.borderSize or 2) or nil,
+    })
+    hl:SetBackdropColor(c.r, c.g, c.b, doFill and (opts.alpha or 0.35) or 0)
+    if doBorder then hl:SetBackdropBorderColor(c.r, c.g, c.b, 1) end
+
+    -- Gentle alpha pulse (mirrors the live "show me" highlight): a few soft
+    -- fade in/out cycles then a slow fade to nothing — a calm breathe rather
+    -- than a hard flash. The group drives hl's frame alpha; the backdrop keeps
+    -- its own tint alpha, so the two multiply into a subtle pulse.
+    local pulse = hl._dfPulse
+    if not pulse then
+        pulse = hl:CreateAnimationGroup()
+        local PULSES, HALF = 4, 0.4
+        for i = 1, PULSES do
+            local up = pulse:CreateAnimation("Alpha")
+            up:SetFromAlpha(0.3); up:SetToAlpha(1)
+            up:SetDuration(HALF); up:SetOrder(i * 2 - 1)
+            local down = pulse:CreateAnimation("Alpha")
+            down:SetFromAlpha(1); down:SetToAlpha(0.3)
+            down:SetDuration(HALF); down:SetOrder(i * 2)
+        end
+        local out = pulse:CreateAnimation("Alpha")
+        out:SetFromAlpha(0.3); out:SetToAlpha(0)
+        out:SetDuration(0.6); out:SetOrder(PULSES * 2 + 1)
+        pulse:SetScript("OnFinished", function() hl:SetAlpha(0); hl:Hide() end)
+        hl._dfPulse = pulse
+    end
+    pulse:Stop()
+    hl:SetAlpha(1)
+    hl:Show()
+    pulse:Play()
+end
+
+-- GUI:LinkToSetting — the click action for a settings-link: jump to a setting and flash it.
+-- Unifies same-page and cross-page so every link behaves identically. target:
+--   page      tab to switch to first (nil = stay on the current page).
+--   section   section header text — scrolls to it (Search:ScrollToSection) and flashes it.
+--   widget    explicit widget to flash (overrides the section-header lookup).
+--   scrollTo  optional function() that scrolls a CUSTOM container (e.g. an Aura Designer card)
+--             to the target — used instead of the page section scroll.
+--   flash     false = no pulse; a table = FlashWidget opts (fill / border / …) so a link picks
+--             its own highlight style; nil or true = the default flash.
+function GUI:LinkToSetting(target)
+    if type(target) ~= "table" then return end
+    local function go()
+        local w = target.widget
+        if target.scrollTo then
+            target.scrollTo()
+        elseif target.page and target.section and DF.Search and DF.Search.ScrollToSection then
+            w = DF.Search:ScrollToSection(target.page, target.section) or w
+        end
+        if w and target.flash ~= false then
+            local fopts = type(target.flash) == "table" and target.flash or nil
+            C_Timer.After(0.05, function() GUI:FlashWidget(w, fopts) end)   -- after the scroll settles
+        end
+    end
+    if target.page and GUI.SelectTab then
+        GUI.SelectTab(target.page)
+        C_Timer.After(0.12, go)   -- let the tab build + lay out before scroll/flash
+    else
+        go()
+    end
+end
+
+-- GUI:CreateColorsPageLink — the shared "Customize duration colors on the Colors page."
+-- note (GUI:CreateLink, note style — not a banner). Its only link jumps to the shared,
+-- account-wide Color-by-Time editor on the Colors page and border-flashes that whole
+-- section so the eye lands on it. Used by the aura pages (buffs/debuffs/defensives) AND
+-- the Aura Designer wherever a "Color by Time Remaining" control (text, or the expiry
+-- Border/Tint modes) draws from those breakpoints — one cross-link, defined once.
+--   `width`  flows the fixed-layout note up front (see GUI:CreateLink); the caller then
+--            AddWidget's it at note.layoutHeight. The |cffffffff is a parser placeholder —
+--            CreateLink re-tints the link itself.
+function GUI:CreateColorsPageLink(parent, width)
+    local link = string.format("|cffffffff|HdfColors|h%s|h|r", L["Colors page"])
+    local text = string.format(L["Customize duration colors on the %s."], link)
+    return GUI:CreateLink(parent, text, {
+        width = width,
+        onLinkClick = function()
+            GUI:LinkToSetting({
+                page    = "display_classcolors",
+                section = L["Color by Time"],
+                flash   = { border = true, fill = false },   -- whole section → outline only
+            })
+        end,
+    })
+end
+
+-- Sibling of CreateColorsPageLink for the shared per-dispel-type palette: jumps to
+-- the Colors page and flashes its "Dispel Type Colors" section. Used by the debuff
+-- Border page and the Dispel Overlay page — both of which draw their dispel colours
+-- from that one account-wide set.
+function GUI:CreateDispelColorsPageLink(parent, width)
+    local link = string.format("|cffffffff|HdfColors|h%s|h|r", L["Colors page"])
+    local text = string.format(L["Set the per-dispel-type colours on the %s."], link)
+    return GUI:CreateLink(parent, text, {
+        width = width,
+        onLinkClick = function()
+            GUI:LinkToSetting({
+                page    = "display_classcolors",
+                section = L["Dispel Type Colors"],
+                flash   = { border = true, fill = false },
+            })
+        end,
+    })
 end
 
 -- Apply the standard button look to an existing Button frame — the single
@@ -2604,7 +3105,8 @@ function GUI:CreateSeeAlso(parent, links)
         link:SetWidth(link.textWidth)
         
         link:SetScript("OnEnter", function(self)
-            linkText:SetTextColor(1, 1, 1)
+            local h = GUI:LinkHoverColor(c)
+            linkText:SetTextColor(h.r, h.g, h.b)
         end)
         link:SetScript("OnLeave", function(self)
             linkText:SetTextColor(c.r, c.g, c.b)
@@ -2780,7 +3282,11 @@ function GUI:CreateOverrideMarker(parent, size)
     btn:SetSize(size + 6, size + 6)
     -- Only ever a hover-tooltip target; let clicks fall through so a marker
     -- placed on a clickable parent (e.g. a nav tab) doesn't eat its clicks.
-    if btn.SetPropagateMouseClicks then btn:SetPropagateMouseClicks(true) end
+    -- SetPropagateMouseClicks is PROTECTED on 12.1 (ADDON_ACTION_BLOCKED if called
+    -- under combat lockdown — e.g. opening/refreshing settings in combat); skip it
+    -- there. Only matters when the marker sits on a clickable parent, and combat
+    -- GUI edits are the rare case.
+    if btn.SetPropagateMouseClicks and not InCombatLockdown() then btn:SetPropagateMouseClicks(true) end
     local icon = btn:CreateTexture(nil, "OVERLAY")
     icon:SetPoint("CENTER")
     icon:SetSize(size, size)
@@ -3155,6 +3661,8 @@ end
 function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, customSet, overrideKey)
     local container = CreateFrame("Frame", nil, parent)
     container:SetSize(220, 24)
+    container.preferredHeight = GUI.RowHeight.checkbox   -- factory-owned slot height (see GUI.RowHeight)
+    container.fixedRowHeight = true
 
     local cb = CreateFrame("CheckButton", nil, container, "BackdropTemplate")
     cb:SetPoint("LEFT", 0, 0)
@@ -3283,6 +3791,88 @@ function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, 
 end
 
 -- ============================================================
+-- SEGMENT TOGGLE
+-- A compact segmented control: the labels sit ON the buttons, all
+-- of them boxed inside one recessed track so the pair reads as a
+-- single control rather than two loose buttons. This is the
+-- "Border Mode: [Shared][Custom]" idiom (AuraDesigner/Options.lua)
+-- with the track added; use it for short mutually-exclusive values
+-- that want to sit next to the field they qualify (s / %).
+--
+-- API: GUI:CreateSegmentToggle(parent, segments, dbTable, dbKey, callback, opts)
+--   segments : ordered { value =, label =, tooltip = } — label is what
+--              shows on the button, tooltip the full name behind a terse one
+--   opts.segmentWidth (26) / opts.height (18)
+--   opts.fallbackValue : treated as selected when the stored value matches
+--              no segment, so an unset key still lights the right button
+-- Returns the container with :Refresh(), :refreshContent() and :SetEnabled().
+-- ============================================================
+function GUI:CreateSegmentToggle(parent, segments, dbTable, dbKey, callback, opts)
+    opts = opts or {}
+    local segW = opts.segmentWidth or 26
+    local h = opts.height or 18
+    local pad = 1   -- track lip around the buttons
+
+    local container = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    container:SetSize(segW * #segments + pad * 2, h + pad * 2)
+    CreateElementBackdrop(container)   -- the recessed track behind every segment
+
+    local buttons = {}
+    for i, seg in ipairs(segments) do
+        local btn = CreateFrame("Button", nil, container, "BackdropTemplate")
+        GUI:StyleButton(btn, { width = segW, height = h, text = seg.label })
+        GUI:SetSettingsFont(btn.Text, 9, "")
+        btn:SetPoint("TOPLEFT", container, "TOPLEFT", pad + (i - 1) * segW, -pad)
+        btn.value = seg.value
+        if seg.tooltip then
+            btn:HookScript("OnEnter", function(self)
+                GUI:ShowTooltip(self, { title = seg.tooltip, lines = opts.tooltipLines })
+            end)
+            btn:HookScript("OnLeave", function() GUI:HideTooltip() end)
+        end
+        btn:SetScript("OnClick", function(self)
+            if not (dbTable and dbKey) then return end
+            if dbTable[dbKey] == self.value then return end
+            dbTable[dbKey] = self.value
+            container:Refresh()
+            if callback then callback(self.value) end
+        end)
+        buttons[i] = btn
+    end
+
+    -- Selection: the shared accent border/fill via SetActive, plus a bright/dim
+    -- label so the state still reads at a glance in a themed accent that is close
+    -- to the resting border colour.
+    function container:Refresh()
+        local cur = dbTable and dbKey and dbTable[dbKey]
+        local matched = false
+        for _, b in ipairs(buttons) do if b.value == cur then matched = true end end
+        if not matched then cur = opts.fallbackValue end
+        for _, b in ipairs(buttons) do
+            local on = (b.value == cur)
+            b:SetActive(on)
+            if b.Text then
+                local c = on and C_TEXT or C_TEXT_DIM
+                b.Text:SetTextColor(c.r, c.g, c.b)
+            end
+        end
+    end
+    container.refreshContent = function(self) self:Refresh() end
+
+    container.SetEnabled = function(self, enabled)
+        self:SetAlpha(enabled and 1 or 0.4)
+        for _, b in ipairs(buttons) do b:EnableMouse(enabled) end
+    end
+
+    container.UpdateTheme = function() container:Refresh() end
+    if not parent.ThemeListeners then parent.ThemeListeners = {} end
+    table.insert(parent.ThemeListeners, container)
+
+    container:Refresh()
+    return container
+end
+
+-- ============================================================
 -- TOGGLE SWITCH
 -- A two-state toggle for mutually exclusive options. Two labels
 -- flank a pill-shaped track with a sliding thumb. The active
@@ -3296,6 +3886,8 @@ end
 function GUI:CreateToggleSwitch(parent, labelA, labelB, dbTable, dbKey, valueA, valueB, callback)
     local container = CreateFrame("Frame", nil, parent)
     container:SetSize(260, 24)
+    container.preferredHeight = GUI.RowHeight.toggle   -- factory-owned slot height (see GUI.RowHeight)
+    container.fixedRowHeight = true
 
     -- Left label
     local txtA = container:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
@@ -3627,6 +4219,8 @@ end
 function GUI:CreateEditBox(parent, label, dbTable, dbKey, callback, width, placeholder)
     local frame = CreateFrame("Frame", nil, parent)
     frame:SetSize(width or 180, 44)
+    frame.preferredHeight = GUI.RowHeight.editbox   -- factory-owned slot height (see GUI.RowHeight)
+    frame.fixedRowHeight = true
     
     local lbl = frame:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     lbl:SetPoint("TOPLEFT", 0, 0)
@@ -3765,6 +4359,8 @@ end
 function GUI:CreateSlider(parent, label, minVal, maxVal, step, dbTable, dbKey, callback, lightweightUpdate, usePreviewMode, customGet, customSet, accentColor)
     local container = CreateFrame("Frame", nil, parent)
     container:SetSize(260, 50)
+    container.preferredHeight = GUI.RowHeight.slider   -- factory-owned slot height (see GUI.RowHeight)
+    container.fixedRowHeight = true
     
     -- Label
     local lbl = container:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
@@ -3914,6 +4510,24 @@ function GUI:CreateSlider(parent, label, minVal, maxVal, step, dbTable, dbKey, c
         end
     end
     
+    -- Re-read the bound value (customGet or dbTable[dbKey]) and redraw. For a slider whose
+    -- source can change under it — e.g. one bound through customGet to whichever key an
+    -- account-wide unit dial currently selects — called from refreshContent.
+    container.RefreshValue = function(self)
+        local v = ReadValue()
+        if v ~= nil then UpdateValue(math.max(minVal, math.min(maxVal, v))) end
+    end
+    -- Runtime range. A slider whose UNIT is decided elsewhere (seconds vs percent) is built
+    -- once but must re-scale in place, or flipping that dial leaves a 1-60 track in front of
+    -- a percentage until the panel is rebuilt. Pair with container.label for the caption.
+    container.SetRange = function(self, newMin, newMax)
+        if newMin ~= minVal or newMax ~= maxVal then
+            minVal, maxVal = newMin, newMax
+            slider:SetMinMaxValues(minVal, maxVal)
+        end
+        self:RefreshValue()
+    end
+
     -- Track drag start - pass the lightweight update function, name for debug, and preview mode
     slider:SetScript("OnMouseDown", function(self, button)
         if button == "LeftButton" then
@@ -4202,6 +4816,8 @@ end
 function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback, lightweightCallback, useLightweight)
     local container = CreateFrame("Frame", nil, parent)
     container:SetSize(260, 28)
+    container.preferredHeight = GUI.RowHeight.colorpicker   -- factory-owned slot height (see GUI.RowHeight)
+    container.fixedRowHeight = true
     
     -- Button - use relative anchoring so it resizes with container
     local btn = CreateFrame("Button", nil, container, "BackdropTemplate")
@@ -4445,6 +5061,12 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
 
     local container = CreateFrame("Frame", nil, parent)
     container:SetSize(260, opts.inline and 24 or 50)
+    -- Inline dropdowns embed in a caller-managed layout (label hidden), so only the standalone
+    -- form owns a fixed slot height; inline keeps whatever height its host passes.
+    if not opts.inline then
+        container.preferredHeight = GUI.RowHeight.dropdown   -- factory-owned slot (see GUI.RowHeight)
+        container.fixedRowHeight = true
+    end
 
     -- Label
     local lbl = container:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
@@ -5602,6 +6224,218 @@ function GUI:CreateTextControls(group, dbTable, prefix, opts)
     return widgets
 end
 
+-- ============================================================
+-- EXPIRATION CONTROLS (shared) — the 12.1-safe Expiration panel. Pairs with the
+-- DF.Expiration engine (Features/Expiration.lua): the engine turns the expiryAlert* keys
+-- into a secret-safe reveal, this builds the UI for them, so every consumer (AD icon/square
+-- now; frame-level indicators later) renders the same flow with no hand-rolled copy.
+--
+-- Flow: a master Enable toggle, then Threshold, then a Type dropdown (Border / Tint / Text /
+-- Glyph — no Off; Enable owns on/off), then the Type-specific controls.
+--
+-- HIDE-vs-GREY policy (the rework rule): a control that does NOT belong to the current Type is
+-- HIDDEN (its row collapses via hideOn + the group's LayoutChildren + the caller's reflow); a
+-- control that belongs but is momentarily inactive is GREYED via disableOn / the group's
+-- disableChildrenOn (the standard grey-out). So:
+--   Enable off -> everything below the toggle GREYS (stays visible to preview), like
+--                 CreateBorderControls' "Show Border off => grey".
+--   TEXT/GLYPH -> the text box / glyph dropdown + Anchor (plus Threshold/Offsets/Size).
+--   BORDER     -> Match, Colour Mode, Colour (GREY under By-Time), Style, Inset, Opacity
+--                 (plus Threshold/Offsets/Size — Size GREYS under Match). No Anchor (centres).
+--   TINT       -> as BORDER but no Style (a wash has no thickness).
+--
+-- Keys are the fixed expiryAlert* set on the passed dbTable (the AD per-aura proxy, or any
+-- consumer's table) — every consumer stores the same keys, so no key map is needed. hideOn/
+-- disableOn predicates read dbTable directly (ignoring the arg LayoutChildren/RefreshChildStates
+-- pass, which is DF.db[SelectedMode]) — the CreateBorderControls convention, and the only way
+-- a per-aura proxy's state is seen.
+--
+-- opts:
+--   parent         REQUIRED — the card/page scroll child (widgets parent to it).
+--   fullUpdate     value-change callback (re-render preview + live frames).
+--   refreshStates  relayout callback — MUST re-run hideOn (LayoutChildren), disableOn
+--                  (RefreshChildStates) and the sibling reflow so a mode change collapses the
+--                  now-irrelevant rows and slides neighbours. The mode / match / colour-mode
+--                  controls fire it. Called once by the caller after build for the initial state.
+--   include        { text, glyph, border, tint } — default all true; a consumer can drop modes.
+--   anchorOptions  the Anchor dropdown's option table (default: the standard 9-anchor set).
+-- Returns the widget table keyed by role so a consumer can attach extra gates.
+-- ============================================================
+function GUI:CreateExpirationControls(group, dbTable, opts)
+    opts = opts or {}
+    local parent        = opts.parent
+    local include       = opts.include or {}
+    local fullUpdate    = opts.fullUpdate or function() end
+    local refreshStates = opts.refreshStates or function() end
+    local L = DF.L
+
+    -- include.match (default true): square consumers (icon/square) offer Match Icon Size + a
+    -- manual Size for frame modes. A RECTANGULAR consumer (bar/health) passes match=false — its
+    -- Tint always fills the target, so there's no Match toggle and no manual Size for it.
+    local includeMatch = include.match ~= false
+    local function enabled() return dbTable.expiryAlertEnabled and true or false end
+    local function mode() return dbTable.expiryAlertMode or "BORDER" end
+    local function isFrame() local m = mode(); return m == "BORDER" or m == "TINT" end
+    -- A Type / Match / Colour-Mode change alters which rows show and which grey, so it must
+    -- relayout + reflow AND re-render. (Value-only edits ride fullUpdate alone.)
+    local function onStructural() refreshStates(); fullUpdate() end
+
+    local w = {}
+
+    -- Master enable. When off, the whole section GREYS (group.disableChildrenOn below) — the
+    -- controls stay visible so the panel still previews them, matching CreateBorderControls'
+    -- "Show Border off => grey, don't hide". keepEnabled keeps this toggle itself clickable.
+    w.enable = group:AddWidget(GUI:CreateCheckbox(parent, L["Enable"], dbTable,
+        "expiryAlertEnabled", onStructural), 28)
+    w.enable.keepEnabled = true
+
+    -- Threshold + its UNIT (right under Enable): the "show when remaining time drops below
+    -- N" gate every type shares. The unit is PER INDICATOR — a glyph revealing at 5 seconds
+    -- and a border revealing at 30% are both legitimate — and it also selects which shared
+    -- Colours-page ramp a by-time Border/Tint reads, because the threshold and the bands
+    -- are ONE formatter sampled against ONE duration property (see Features/Auras.lua).
+    -- Percent tops out at 100; seconds keep the original 60s ceiling.
+    -- ONE STORED VALUE PER UNIT (mirrors the ramps, and DF.Expiration:Threshold reads the
+    -- same pair): a threshold cannot be reinterpreted between units, so each keeps its own
+    -- and switching back finds it untouched.
+    -- The shared threshold row (AD's design, six other cards already use it): the slider
+    -- with a compact unit button sitting directly above its value box, so the number and
+    -- the unit read as one control. unitKeys gives it the per-unit key pair, so toggling
+    -- swaps which value is live rather than reinterpreting one.
+    -- Structural: the formatter is bind-frozen, so a unit change must Rebuild the companion
+    -- (DF.Expiration:StructSig folds the unit in) — refreshPage carries onStructural, and
+    -- the row also re-captions and re-ranges itself in place.
+    w.threshold = group:AddWidget(GUI:CreateExpiringThresholdRow(parent, dbTable, {
+        thresholdModeKey = "expiryAlertThresholdUnit",
+        unitKeys  = { SECONDS = "expiryAlertThreshold", PERCENT = "expiryAlertThresholdPercent" },
+        labels    = { SECONDS = L["Alert Below (seconds)"], PERCENT = L["Alert Below (%)"] },
+        ranges    = { SECONDS = { min = 1, max = 60, step = 1 },
+                      PERCENT = { min = 1, max = 100, step = 1 } },
+        -- Seeded on first use: an unset percent threshold would read 1 and hide the
+        -- reveal in the final 1% of the aura.
+        defaults  = { SECONDS = 5,
+                      PERCENT = (DF.Expiration and DF.Expiration.PERCENT_THRESHOLD_DEFAULT) or 30 },
+        refreshPage = onStructural,
+    }), 54)
+
+    -- Type — the reveal kind (no Off; the Enable toggle owns on/off). Border / Tint lead (the
+    -- primary reveals), then the Text / Glyph payloads. Consumers can drop types via include.
+    local modeOptions = { _order = {} }
+    local function addMode(key, label, on)
+        if on == false then return end
+        modeOptions[key] = label
+        modeOptions._order[#modeOptions._order + 1] = key
+    end
+    addMode("BORDER", L["Border"], include.border)
+    addMode("TINT", L["Tint"], include.tint)
+    addMode("TEXT", L["Custom Text"], include.text)
+    addMode("GLYPH", L["Glyph"], include.glyph)
+    w.mode = group:AddWidget(GUI:CreateDropdown(parent, L["Type"], modeOptions,
+        dbTable, "expiryAlertMode", onStructural), 54)
+
+    -- TEXT: the custom alert string.
+    w.text = group:AddWidget(GUI:CreateEditBox(parent, L["Alert Text"], dbTable, "expiryAlertText"), 48)
+    w.text.hideOn = function() return mode() ~= "TEXT" end
+
+    -- GLYPH: the glyph dropdown. Labels embed the atlas escape as a live preview via the
+    -- shared escape builder, so the dropdown can never drift from the live band string.
+    local glyphOptions = { _order = {} }
+    for i, gl in ipairs(DF.ExpiryAlertGlyphs) do
+        glyphOptions[gl.key] = DF:GetExpiryAlertGlyphEscape(gl.key, 16) .. " " .. L[gl.name]
+        glyphOptions._order[i] = gl.key
+    end
+    w.glyph = group:AddWidget(GUI:CreateDropdown(parent, L["Glyph"], glyphOptions, dbTable, "expiryAlertGlyph"), 54)
+    w.glyph.hideOn = function() return mode() ~= "GLYPH" end
+
+    -- ── BORDER / TINT appearance: a secret-safe |T overlay revealed below the threshold,
+    -- tinted statically OR stepped through the same Colours-page breakpoints the duration text
+    -- uses. Colour Mode, Colour, Style, Opacity — every row here hides outside the frame modes.
+    local function hideNonFrame() return not isFrame() end
+
+    w.colorMode = group:AddWidget(GUI:CreateDropdown(parent, L["Color Mode"],
+        { STATIC = L["Static"], BYTIME = L["Color by Time Remaining"] },
+        dbTable, "expiryAlertBorderColorMode", onStructural), 54)   -- By-Time greys the picker
+    w.colorMode.hideOn = hideNonFrame
+
+    -- Cross-link to the shared Colours-page editor those By-Time breakpoints live in. Frame
+    -- modes only (like Color Mode itself) — a rectangular consumer with no Border/Tint (bar)
+    -- never reaches here, so its fixed ramp gets no link. Fixed-layout note, so size it up front.
+    local expLinkW = math.max(40, (group:GetWidth() or 260) - 2 * (group.padding or 10))
+    w.colorsLink = GUI:CreateColorsPageLink(parent, expLinkW)
+    group:AddWidget(w.colorsLink, (w.colorsLink.layoutHeight or 16) + 2)
+    w.colorsLink.hideOn = hideNonFrame
+
+    -- Say the blend limitation WHERE the by-time mode is chosen, not only on the
+    -- Colours page: the reveal's |T escapes ignore the vertex colour a curve writes,
+    -- so it steps even while duration text blends.
+    w.stepNote = group:AddWidget(GUI:CreateNote(parent,
+        L["The expiry border and tint always step between colors."], { width = expLinkW }))
+    w.stepNote.hideOn = function()
+        return not isFrame() or dbTable.expiryAlertBorderColorMode ~= "BYTIME"
+    end
+
+    w.color = group:AddWidget(GUI:CreateColorPicker(parent, L["Border Color"], dbTable,
+        "expiryAlertBorderColor", false, fullUpdate, fullUpdate, true), 28)
+    w.color.hideOn = hideNonFrame
+    -- By-Time follows the Colours page, so the static picker is inert then — GREY (not hide)
+    -- so it reads as "switch to Static to use this".
+    w.color.disableOn = function() return dbTable.expiryAlertBorderColorMode == "BYTIME" end
+
+    -- Style = the frame outline art (Thin/Medium/Thick — a scaled bitmap can't vary its own
+    -- line weight, hence discrete arts). BORDER only; a Tint is a solid wash with no thickness.
+    w.style = group:AddWidget(GUI:CreateDropdown(parent, L["Style"],
+        { THIN = L["Thin"], MEDIUM = L["Medium"], THICK = L["Thick"], _order = { "THIN", "MEDIUM", "THICK" } },
+        dbTable, "expiryAlertBorderThickness"), 54)
+    w.style.hideOn = function() return mode() ~= "BORDER" end
+
+    -- Opacity: region alpha on the |T overlay (0 = invisible, 1 = full). Multiplies the art's
+    -- own alpha, so a Tint (50% art) tops out at a 50% wash while a frame can be fully opaque.
+    -- Grouped with the other appearance controls, NOT the placement run further down.
+    w.opacity = group:AddWidget(GUI:CreateSlider(parent, L["Opacity"], 0, 1, 0.05, dbTable, "expiryAlertBorderAlpha"), 54)
+    w.opacity.hideOn = hideNonFrame
+
+    -- ── Size: Match Icon Size (auto) sits directly above Size (manual). Match is the auto/manual
+    -- switch and Size greys under it, so their adjacency shows the relationship. A rectangular
+    -- consumer (include.match = false) has no Match — its Tint always fills the target.
+    if includeMatch then
+        w.match = group:AddWidget(GUI:CreateCheckbox(parent, L["Match Icon Size"], dbTable,
+            "expiryAlertBorderMatchIcon", onStructural), 28)   -- BORDER/TINT only
+        w.match.hideOn = hideNonFrame
+    end
+
+    -- Size: TEXT/GLYPH use it as the font/glyph size. For a frame/tint it's the manual square
+    -- size — HIDDEN for a rectangular consumer (the tint auto-fills), and GREYED for a square
+    -- one while Match is on (auto-sized).
+    w.size = group:AddWidget(GUI:CreateSlider(parent, L["Size"], 6, 48, 1, dbTable, "expiryAlertSize"), 54)
+    w.size.hideOn = function() return not includeMatch and isFrame() end
+    w.size.disableOn = function() return includeMatch and isFrame() and dbTable.expiryAlertBorderMatchIcon ~= false end
+
+    -- ── Placement: Inset (a frame/tint's fit off the icon edge), Anchor (Text/Glyph), Offsets.
+    w.inset = group:AddWidget(GUI:CreateSlider(parent, L["Inset"], -10, 10, 1, dbTable, "expiryAlertBorderInset"), 54)
+    w.inset.hideOn = hideNonFrame
+
+    -- Anchor: Text/Glyph only — a frame/tint always centres (the engine forces CENTER), so
+    -- hide it in those modes rather than let a stale anchor de-centre the overlay.
+    w.anchor = group:AddWidget(GUI:CreateDropdown(parent, L["Anchor"],
+        opts.anchorOptions or {
+            CENTER = L["Center"], TOP = L["Top"], BOTTOM = L["Bottom"], LEFT = L["Left"], RIGHT = L["Right"],
+            TOPLEFT = L["Top Left"], TOPRIGHT = L["Top Right"], BOTTOMLEFT = L["Bottom Left"], BOTTOMRIGHT = L["Bottom Right"],
+            _order = { "TOPLEFT", "TOP", "TOPRIGHT", "LEFT", "CENTER", "RIGHT", "BOTTOMLEFT", "BOTTOM", "BOTTOMRIGHT" },
+        }, dbTable, "expiryAlertAnchor"), 54)
+    w.anchor.hideOn = function() local m = mode(); return m ~= "TEXT" and m ~= "GLYPH" end
+
+    -- 0.5 step: the reveal rides the text engine (sub-pixel positioning we can't snap), so
+    -- half-steps let the user split a stubborn half-pixel offset integer steps jump over.
+    w.offsetX = group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 0.5, dbTable, "expiryAlertOffsetX"), 54)
+    w.offsetY = group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 0.5, dbTable, "expiryAlertOffsetY"), 54)
+
+    -- Master gate: Enable off greys every control below the toggle (keepEnabled spares it).
+    -- Composes with each control's own disableOn (By-Time colour, Match-Icon size).
+    group.disableChildrenOn = function() return not enabled() end
+
+    return w
+end
+
 -- Small dim inline subheader (section divider inside a SettingsGroup), matching
 -- AD's "State Overrides" / "Icon Effects" dividers.
 function GUI:CreateExpiringSubheader(parent, text)
@@ -5616,252 +6450,135 @@ function GUI:CreateExpiringSubheader(parent, text)
     return frame
 end
 
--- Threshold slider + a compact Percent/Seconds TOGGLE BUTTON (AD's design).
--- The slider's label/range switch with the mode, so the row rebuilds the page
--- on toggle via opts.refreshPage.  Keys are parameterised (thresholdKey /
--- thresholdModeKey) so any consumer's DB schema works.
+-- Threshold slider + a compact s / % SEGMENT TOGGLE sitting directly above the
+-- slider's value box, so the number and the unit read as one control. The slider's
+-- label/range switch with the mode, so the row rebuilds the page on toggle via
+-- opts.refreshPage. Keys are parameterised (thresholdKey / thresholdModeKey) so any
+-- consumer's DB schema works.
+--
+-- opts.unitKeys = { SECONDS = key, PERCENT = key } switches the row to ONE STORED
+-- VALUE PER UNIT instead of a single key reinterpreted between them. A threshold
+-- cannot be reinterpreted (5 seconds is not 5 percent), so with this set the toggle
+-- swaps which value is live and leaves the other untouched — no clamping, no reset.
+-- The slider then binds through customGet/customSet and re-labels/re-ranges itself
+-- from refreshContent, so the row is correct even if a consumer's refresh does not
+-- rebuild it. opts.labels / opts.ranges override the slider caption and range per
+-- unit; opts.modeText overrides the segment labels (default s / %); opts.resetValues
+-- the single-key reset pair. Every default preserves the original behaviour.
 function GUI:CreateExpiringThresholdRow(parent, dbTable, opts)
     opts = opts or {}
     local tKey = opts.thresholdKey
     local mKey = opts.thresholdModeKey
+    local unitKeys = opts.unitKeys
     local refresh = opts.refreshPage or function() end
     local width = opts.width or 248
-    local isSeconds = mKey and dbTable[mKey] == "SECONDS"
+    local labels = opts.labels or {}
+    local ranges = opts.ranges or {}
+    local modeText = opts.modeText or {}
+    local function secondsNow() return mKey and dbTable[mKey] == "SECONDS" or false end
+    local isSeconds = secondsNow()
 
     local container = CreateFrame("Frame", nil, parent)
     container:SetHeight(54)
     container:SetWidth(width)
 
-    local label, minV, maxV, step
-    if isSeconds then
-        label = L["Expiring Threshold (seconds)"]
-        minV, maxV, step = 1, 60, 1
-        if tKey and dbTable[tKey] and dbTable[tKey] > 60 then dbTable[tKey] = 10 end
-    else
-        label = L["Expiring Threshold (%)"]
-        minV, maxV, step = 5, 100, 5
-        if tKey and dbTable[tKey] and dbTable[tKey] < 5 then dbTable[tKey] = 30 end
+    -- Caption + range for a unit. Ranges default to the original pair (seconds
+    -- 1-60 step 1; percent 5-100 step 5).
+    local function unitSpec(sec)
+        local r = ranges[sec and "SECONDS" or "PERCENT"]
+        if sec then
+            return labels.SECONDS or L["Expiring Threshold (seconds)"],
+                   (r and r.min) or 1, (r and r.max) or 60, (r and r.step) or 1
+        end
+        return labels.PERCENT or L["Expiring Threshold (%)"],
+               (r and r.min) or 5, (r and r.max) or 100, (r and r.step) or 5
     end
 
-    local slider = GUI:CreateSlider(container, label, minV, maxV, step, dbTable, tKey)
+    local label, minV, maxV, step = unitSpec(isSeconds)
+    local slider
+    if unitKeys then
+        -- Per-unit keys: resolve on EVERY access so a toggle can never write one
+        -- unit's number into the other's key, and seed a unit's value on first use.
+        local function keyNow() return secondsNow() and unitKeys.SECONDS or unitKeys.PERCENT end
+        local function readValue()
+            local k = keyNow()
+            local v = tonumber(dbTable and dbTable[k])
+            if v == nil then
+                local _, dMin = unitSpec(secondsNow())
+                v = (opts.defaults and opts.defaults[secondsNow() and "SECONDS" or "PERCENT"]) or dMin
+                if dbTable then dbTable[k] = v end
+            end
+            return v
+        end
+        slider = GUI:CreateSlider(container, label, minV, maxV, step,
+            nil, nil, nil, nil, nil,
+            readValue, function(v) if dbTable then dbTable[keyNow()] = v end end)
+        slider.refreshContent = function(self)
+            local sec = secondsNow()
+            local lbl, lo, hi = unitSpec(sec)
+            if self.label then self.label:SetText(lbl) end
+            self:SetRange(lo, hi)   -- also re-reads the value through customGet
+        end
+    else
+        -- Single key reinterpreted between units: clamp it into the new range.
+        if isSeconds then
+            if tKey and dbTable[tKey] and dbTable[tKey] > maxV then dbTable[tKey] = 10 end
+        else
+            if tKey and dbTable[tKey] and dbTable[tKey] < minV then dbTable[tKey] = 30 end
+        end
+        slider = GUI:CreateSlider(container, label, minV, maxV, step, dbTable, tKey)
+    end
     slider:SetPoint("TOPLEFT", 0, 0)
     slider:SetWidth(width)
 
-    local modeBtn = CreateFrame("Button", nil, container, "BackdropTemplate")
-    modeBtn:SetPoint("BOTTOMRIGHT", slider, "TOPRIGHT", -10, 2)
-    GUI:StyleButton(modeBtn, {
-        width = 56, height = 18,
-        text = isSeconds and L["Seconds"] or L["Percent"],
-    })
-    GUI:SetSettingsFont(modeBtn.Text, 9, "")
-    modeBtn:SetActive(isSeconds)
-
-    modeBtn:HookScript("OnEnter", function(self)
-        GUI:ShowTooltip(self, {
-            title = L["Threshold Mode"],
-            lines = { isSeconds and L["Currently: Seconds. Click for Percent."] or L["Currently: Percent. Click for Seconds."] },
-        })
-    end)
-    modeBtn:HookScript("OnLeave", function()
-        GameTooltip:Hide()
-    end)
-    modeBtn:SetScript("OnClick", function()
-        if not mKey then return end
-        if dbTable[mKey] == "SECONDS" then
-            dbTable[mKey] = "PERCENT"
-            if tKey then dbTable[tKey] = 30 end
-        else
-            dbTable[mKey] = "SECONDS"
-            if tKey then dbTable[tKey] = 10 end
+    -- Unit picker: a two-segment toggle with the units ON the buttons, boxed in one
+    -- track, sitting directly above the slider's value box. Terse labels (s / %) keep
+    -- it to the button's footprint; each segment tooltips its full name.
+    local modeBtn = GUI:CreateSegmentToggle(container, {
+        { value = "SECONDS", label = modeText.SECONDS or L["s"], tooltip = L["Seconds"] },
+        { value = "PERCENT", label = modeText.PERCENT or L["%"], tooltip = L["Percent"] },
+    }, dbTable, mKey, function(newVal)
+        local toSeconds = (newVal == "SECONDS")
+        -- Reset the value ONLY when one key is being reinterpreted between units.
+        -- With unitKeys each unit keeps its own, so switching back finds it intact.
+        if not unitKeys and tKey then
+            local r = opts.resetValues or {}
+            dbTable[tKey] = toSeconds and (r.SECONDS or 10) or (r.PERCENT or 30)
         end
         refresh()
-    end)
+        -- Re-sync in place as well as asking for a rebuild: a consumer whose refresh
+        -- only re-evaluates states would otherwise leave a stale caption and range.
+        if slider.refreshContent then slider:refreshContent() end
+    end, {
+        segmentWidth = opts.modeSegmentWidth or 26,
+        fallbackValue = "PERCENT",   -- matches isSeconds: an unset mode key reads as percent
+        tooltipLines = { L["Threshold Mode"] },
+    })
+    modeBtn:SetPoint("BOTTOMRIGHT", slider, "TOPRIGHT", -10, 2)
 
-    -- Composite row: forward grey-out (disableOn) to its slider + mode button so the
-    -- whole row dims when the expiring feature is off. Dim the row uniformly via
-    -- SetAlpha and block interaction with slider:SetEnabled + modeBtn:EnableMouse —
-    -- NOT modeBtn:SetDisabled (which fights the hover wash) nor native
-    -- modeBtn:SetEnabled alone (blocks clicks but leaves the custom backdrop/label
-    -- full-brightness, so the toggle wouldn't visually grey with its row).
+    -- Composite row: forward grey-out (disableOn) to its slider + unit toggle so the
+    -- whole row dims when the expiring feature is off. The row dims uniformly via
+    -- SetAlpha; each child blocks its own interaction (the toggle's SetEnabled dims and
+    -- un-mouses its segments) — deliberately NOT SetDisabled or a raw Button:SetEnabled
+    -- on the segments, both of which fight the shared hover wash / SetActive state.
     container.SetEnabled = function(_, enabled)
         container:SetAlpha(enabled and 1 or 0.4)
         if slider.SetEnabled then slider:SetEnabled(enabled) end
-        modeBtn:EnableMouse(enabled)
+        modeBtn:SetEnabled(enabled)
+    end
+    -- Keep the unit toggle in sync on external changes (profile switch, page refresh).
+    container.refreshContent = function()
+        modeBtn:Refresh()
+        if slider.refreshContent then slider:refreshContent() end
     end
 
     return container
 end
 
--- The full shared expiring panel.  opts:
---   parent, fullUpdate, lightColors, lightGeometry, refreshStates, refreshPage,
---   width, masterLabel, colorLabel,
---   keys = { master, threshold, thresholdMode, borderEnable, colorByTime,
---            colorOverride, color, borderColor, alphaHandleColor, thickness,
---            inset, animPrefix, tintEnable, tintColor,
---            fillPulsate, wholeAlpha, bounce },
---   include = { threshold, borderEnable, colorByTime, colorOverride, alpha,
---               dualColor, thickness, thicknessMin, thicknessMax, inset,
---               animation, tint, iconEffects = {fillPulsate,wholeAlpha,bounce} }
-function GUI:CreateExpiringControls(group, dbTable, opts)
-    opts = opts or {}
-    local parent        = opts.parent
-    local K             = opts.keys or {}
-    local inc           = opts.include or {}
-    local fullUpdate    = opts.fullUpdate or function() end
-    local lightColors   = opts.lightColors
-    local lightGeometry = opts.lightGeometry
-    local refreshStates = opts.refreshStates or function() end
-    local refreshPage   = opts.refreshPage or function() end
-
-    local w = {}
-
-    -- Master gate (whole feature off) and the border-row gate (master off OR a
-    -- separate Show-Expiring-Border toggle off, when the consumer has one).
-    local function masterOff()
-        return (K.master and dbTable[K.master] == false) or false
-    end
-    local function borderOff()
-        if masterOff() then return true end
-        if K.borderEnable and dbTable[K.borderEnable] == false then return true end
-        return false
-    end
-    -- GREY (not hide) rows that don't apply, so the panel previews them. The gate
-    -- (masterOff / borderOff — both boolean enables) drives disableOn; refreshStates
-    -- + RefreshChildStates re-apply on toggle. Labels/subheaders have no SetEnabled
-    -- so they stay full-color (fine).
-    local function addGated(widget, h, gate)
-        widget.disableOn = gate or masterOff
-        return group:AddWidget(widget, h)
-    end
-
-    if K.master then
-        w.master = group:AddWidget(GUI:CreateCheckbox(parent, opts.masterLabel or L["Enable Expiring"], dbTable, K.master, function()
-            -- Reflow (collapse/expand the gated rows) + repaint; no full page
-            -- rebuild — only the threshold-mode toggle needs refreshPage.
-            refreshStates(); fullUpdate()
-        end), 30)
-    end
-
-    if inc.threshold ~= false and K.threshold then
-        addGated(GUI:CreateExpiringThresholdRow(parent, dbTable, {
-            thresholdKey = K.threshold, thresholdModeKey = K.thresholdMode,
-            width = opts.width,
-            refreshPage = function() refreshStates(); refreshPage() end,
-        }), 54)
-    end
-
-    -- Consumer hook for an extra row directly under the threshold (e.g. AD bar's
-    -- duration-priority row).  Receives addGated(widget, height[, gate]).
-    if opts.afterThreshold then opts.afterThreshold(addGated, masterOff) end
-
-    if inc.borderEnable and K.borderEnable then
-        w.borderEnable = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Expiring Border"], dbTable, K.borderEnable, function()
-            refreshStates(); fullUpdate()
-        end), 30)
-        w.borderEnable.disableOn = masterOff
-    end
-
-    addGated(GUI:CreateExpiringSubheader(parent, L["State Overrides"]), 18, borderOff)
-
-    if inc.thickness ~= false and K.thickness then
-        addGated(GUI:CreateSlider(parent, L["Expiring Border Thickness"],
-            inc.thicknessMin or 0, inc.thicknessMax or 5, 1,
-            dbTable, K.thickness, fullUpdate, lightGeometry, true), 55, borderOff)
-    end
-
-    if inc.inset and K.inset then
-        addGated(GUI:CreateSlider(parent, L["Expiring Border Inset"],
-            -3, 3, 1, dbTable, K.inset, fullUpdate, lightGeometry, true), 55, borderOff)
-    end
-
-    if inc.colorByTime and K.colorByTime then
-        w.colorByTime = addGated(GUI:CreateCheckbox(parent, L["Color by Time Remaining"], dbTable, K.colorByTime, function()
-            refreshStates(); fullUpdate()
-        end), 30, borderOff)
-    end
-
-    if inc.colorOverride and K.colorOverride then
-        addGated(GUI:CreateCheckbox(parent, L["Expiring Color Override"], dbTable, K.colorOverride, fullUpdate), 30, borderOff)
-    end
-
-    if K.color then
-        -- Single-colour consumers (icon / bar / buff) label it "Expiring Border
-        -- Color" to match the square's border picker; the square's dual case adds
-        -- a separate "Expiring Fill Color" above it.
-        local label = opts.colorLabel or (inc.dualColor and L["Expiring Fill Color"] or L["Expiring Border Color"])
-        local cp = GUI:CreateColorPicker(parent, label, dbTable, K.color, true, fullUpdate, lightColors, lightColors ~= nil)
-        -- Greyed when the border is off; HIDDEN only when (buff) Color-by-Time owns
-        -- the colour (a variant — the time curve replaces this static picker).
-        cp.disableOn = borderOff
-        cp.hideOn = function()
-            return (K.colorByTime and dbTable[K.colorByTime]) and true or false
-        end
-        group:AddWidget(cp, 35)
-        w.color = cp
-    end
-
-    if inc.dualColor and K.borderColor then
-        addGated(GUI:CreateColorPicker(parent, L["Expiring Border Color"], dbTable, K.borderColor, true, fullUpdate, lightColors, lightColors ~= nil), 35, borderOff)
-    end
-
-    if inc.alpha then
-        local alphaKey = K.alphaHandleColor or K.color
-        addGated(GUI:CreateSlider(parent, L["Expiring Border Alpha"], 0, 1, 0.05, nil, nil, fullUpdate, lightColors, true,
-            function() local c = dbTable[alphaKey]; return (c and (c.a or c[4])) or 1 end,
-            function(v) local c = dbTable[alphaKey]; if type(c) == "table" then c.a = v end end), 55, borderOff)
-    end
-
-    if inc.animation ~= false and K.animPrefix then
-        local aw = GUI:CreateAnimationControls(group, dbTable, K.animPrefix, {
-            parent      = parent,
-            fullUpdate  = fullUpdate,
-            lightUpdate = lightGeometry,
-            lightColors = lightColors,
-            typeLabel   = L["Expiring Animation"],
-            perfBanner  = true,
-            -- No hideExtra gate: animation rows stay visible and GREY when the
-            -- expiring border is off (post-loop below); only their per-type variant
-            -- gating (internal to CreateAnimationControls) still hides.
-            onTypeChange = function() refreshStates() end,
-        })
-        for k, v in pairs(aw) do
-            w[k] = v
-            if type(v) == "table" and v.SetEnabled then
-                local prev = v.disableOn
-                v.disableOn = function(d) return borderOff() or (prev and prev(d)) end
-            end
-        end
-    end
-
-    -- "Expiring Effects" — whole-element responses to the aura crossing its
-    -- threshold (anim effects + Tint), under ONE shared subheader so every
-    -- consumer reads the same.  Rows appear per consumer via include flags.
-    local fx = inc.iconEffects
-    local hasTint = inc.tint and K.tintEnable
-    if fx or hasTint then
-        addGated(GUI:CreateExpiringSubheader(parent, L["Expiring Effects"]), 18)
-    end
-    if fx then
-        if fx.fillPulsate and K.fillPulsate then addGated(GUI:CreateCheckbox(parent, L["Pulsate"], dbTable, K.fillPulsate, fullUpdate), 30) end
-        if fx.wholeAlpha and K.wholeAlpha then addGated(GUI:CreateCheckbox(parent, L["Whole Alpha Pulse"], dbTable, K.wholeAlpha, fullUpdate), 30) end
-        if fx.bounce and K.bounce then addGated(GUI:CreateCheckbox(parent, L["Bounce"], dbTable, K.bounce, fullUpdate), 30) end
-    end
-    if hasTint then
-        -- Toggling tint must reflow the section so the Tint Color picker's hideOn
-        -- re-evaluates (else the picker only appears after a full page rebuild).
-        addGated(GUI:CreateCheckbox(parent, L["Show Expiring Tint"], dbTable, K.tintEnable, function()
-            refreshStates(); fullUpdate()
-        end), 30)
-        if K.tintColor then
-            local lightTint = opts.lightTint
-            local tc = GUI:CreateColorPicker(parent, L["Tint Color"], dbTable, K.tintColor, true, fullUpdate, lightTint, lightTint ~= nil)
-            tc.disableOn = function() return masterOff() or dbTable[K.tintEnable] == false end
-            group:AddWidget(tc, 35)
-        end
-    end
-
-    return w
-end
+-- (GUI:CreateExpiringControls removed 2026-07-25 with the pre-12.1 Expiring system:
+--  it drove the remaining-time border/tint panel, which is unreadable on the 12.1
+--  container path. The 12.1-safe panel is GUI:CreateExpirationControls above --
+--  note the near-identical name; that one is current and engine-backed.)
 
 -- ============================================================
 -- GROWTH DIRECTION CONTROL
@@ -9682,7 +10399,8 @@ function DF:CreateGUI()
         btn.label = label
         
         btn:SetScript("OnEnter", function()
-            label:SetTextColor(1, 1, 1)
+            local h = GUI:LinkHoverColor(color)
+            label:SetTextColor(h.r, h.g, h.b)
         end)
         btn:SetScript("OnLeave", function()
             label:SetTextColor(color.r, color.g, color.b)
@@ -10193,7 +10911,7 @@ function DF:CreateGUI()
             local function Add(widget, height, col)
                 table.insert(self.children, widget)
                 widget:SetParent(parent)
-                widget.layoutHeight = height or 55
+                widget.layoutHeight = ResolveRowHeight(widget, height)
                 widget.layoutCol = col or 1
                 return widget
             end
