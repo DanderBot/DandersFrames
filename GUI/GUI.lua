@@ -6128,18 +6128,6 @@ function GUI:CreateBorderControls(group, dbTable, prefix, opts)
 end
 
 -- ============================================================
--- EXPIRING CONTROLS (shared) — the Aura Designer expiring panel is the
--- reference design; this helper reproduces it EXACTLY (master enable →
--- Percent/Seconds toggle threshold → State Overrides → thickness / colour /
--- alpha / animation → optional extras) so EVERY expiring consumer (AD
--- icon/square/bar AND the standard buff aura icons) renders the same flow and
--- look.  Per-consumer differences are `include.*` flags + an explicit `keys`
--- map (expiring DB key names diverge: AD uses `expiring*`/`Expiring*` on a
--- proxy, buff uses `buffExpiring*`), so a row simply HIDES when it doesn't apply
--- to that consumer — never a separate hand-built panel.
--- ============================================================
-
--- ============================================================
 -- SHARED TEXT-STYLE CONTROLS (pairs with DF.TextStyle — the engine consumers
 -- style FontStrings through). Mirrors CreateBorderControls: one builder, every
 -- text block in the addon renders the same control flow instead of a hand-rolled

@@ -457,8 +457,13 @@ end
 -- now means BorderWithIcon (Blizzard's art WITH a badge, drawn over our gradient) and
 -- `0` means Border — either would silently replace our own art, so the last-resort
 -- literals below are the NEW values, not the old ones.
-local DISPEL_STYLE_NEW = { Color = "PreserveAsset", Atlas = "BorderWithIcon" }
-local DISPEL_STYLE_LITERAL = { Color = 3, Atlas = 1 }
+-- ★ Atlas maps to Border, NOT to the shim's BorderWithIcon: the shim mirrors the OLD
+-- default (showIcon defaulted true), but both DF bind sites pass showIcon = false, so
+-- the faithful equivalent of DF's "Atlas" is the badge-LESS variant. `showIcon` no
+-- longer exists on 68914's options, so the style is the only place that intent can
+-- live. Use "BorderWithIcon" here if a corner dispel badge is ever wanted.
+local DISPEL_STYLE_NEW = { Color = "PreserveAsset", Atlas = "Border" }
+local DISPEL_STYLE_LITERAL = { Color = 3, Atlas = 0 }
 function DF:ResolveDispelTextureStyle(styleName)
     styleName = (styleName == "Color" or styleName == "Atlas") and styleName or "Atlas"
     local newEnum = Enum and Enum.CustomAuraButtonDispelTypeTextureStyle
