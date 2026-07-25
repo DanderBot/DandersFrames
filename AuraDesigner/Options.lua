@@ -4269,11 +4269,12 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             -- Draw order: lift this border above the frame's own class/role
             -- border so it fully covers it (on by default).  Off tucks it back
             -- underneath the frame border (the pre-5.4 stacking).
-            local drawAboveChk = g:AddWidget(GUI:CreateCheckbox(parent, L["Draw above frame border"], proxy, "drawAboveFrameBorder", RPL), 28)
-            -- 12.1: border stacking is engine-managed on the container path —
-            -- not wired yet; planned with the z-order polish pass.
-            GUI:BlockControl12_1(drawAboveChk, "roadmap", { id = "ad:drawaboveborder", page = L["Aura Designer"],
-                when = function() return DF.AuraContainer and DF.AuraContainer.IsSupported and DF.AuraContainer.IsSupported() end })
+            -- WIRED 2026-07-25 (was frosted as "engine-managed, not wired yet"). The frame's own
+            -- class/role border is a DF.Border child at frame+10, and the AD border container was
+            -- pinned at exactly +10 too -- same level, so which one won came down to creation
+            -- order. buildBorderConfig now resolves this flag to +11 (above) or +9 (below), and
+            -- the flag rides the border structSig so toggling it rebuilds at the new offset.
+            g:AddWidget(GUI:CreateCheckbox(parent, L["Draw above frame border"], proxy, "drawAboveFrameBorder", RPL), 28)
             swmCheck = GUI:CreateCheckbox(parent, L["Show When Missing"], proxy, "showWhenMissing", function()
                 DF.AuraDesigner.Engine:ForceRefreshAllFrames()
             end)

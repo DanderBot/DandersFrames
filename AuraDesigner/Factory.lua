@@ -487,14 +487,20 @@ end
 -- secret visibility. levelOffset 10 lifts the ring above the class border (frame+10 inside
 -- the slot) so it reads as an AD border, mirroring the legacy draw-above default
 -- (Indicators.lua:1145-1147). Z-order polish is a P4.7 concern.
-local function buildBorderConfig(unit, map, spec, filter)
+-- drawAbove (the indicator's `drawAboveFrameBorder`, default true) picks which side of the
+-- frame's own class/role border this ring lands on. That border is a DF.Border child at
+-- frame+10 (Frames/Border.lua:69), so 10 put the two at the SAME level and left the order to
+-- creation sequence -- the toggle's whole point. 11 = definitively above (the legacy
+-- draw-above default), 9 = definitively tucked underneath. Wired 2026-07-25; the flag rides
+-- the border structSig so toggling it rebuilds with the new offset.
+local function buildBorderConfig(unit, map, spec, filter, drawAbove)
     return {
         unit = unit,
         mode = "overlay",
         filter = filter or "HELPFUL",
         candidateFilters = { includeSpellIDs = map },
         enabled = true,
-        frameLevelOffset = 10,
+        frameLevelOffset = (drawAbove ~= false) and 11 or 9,
         style = { border = { spec = spec } },
     }
 end
@@ -3107,18 +3113,21 @@ function Factory:SyncFrame(frame)
             syncFrameLevelMissing(bd, bestName, bestMap, frame, frame, frame, mw, mh, 10, coSig,
                 function(handle) styleBorderMissingBadge(handle, capturedSpec) end, filt)
           else
-            local structSig = includeSig(bestMap) .. "|" .. filt
+            -- drawAboveFrameBorder rides the STRUCT sig: it resolves to frameLevelOffset in
+            -- buildBorderConfig, which only a Rebuild re-reads (ApplyStyle carries the spec only).
+            local drawAbove = bestCfg.drawAboveFrameBorder ~= false
+            local structSig = includeSig(bestMap) .. "|" .. filt .. "|da=" .. tostring(drawAbove)
             local coSig = borderSpecSig(bestSpec)
 
             local entry = bd[bestName]
             if not entry then
-                local handle = DF.AuraContainer:Create(frame, buildBorderConfig(frame.unit, bestMap, bestSpec, filt))
+                local handle = DF.AuraContainer:Create(frame, buildBorderConfig(frame.unit, bestMap, bestSpec, filt, drawAbove))
                 if handle then
                     bd[bestName] = { handle = handle, structSig = structSig, coSig = coSig }
                 end
             elseif entry.structSig ~= structSig then
                 entry.structSig, entry.coSig = structSig, coSig
-                entry.handle:Rebuild(buildBorderConfig(frame.unit, bestMap, bestSpec, filt))
+                entry.handle:Rebuild(buildBorderConfig(frame.unit, bestMap, bestSpec, filt, drawAbove))
             elseif entry.coSig ~= coSig then
                 entry.coSig = coSig
                 entry.handle:ApplyStyle({ border = { spec = bestSpec } })
