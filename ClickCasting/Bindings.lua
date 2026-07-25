@@ -494,6 +494,20 @@ function CC:RestoreBlizzardDefaults(frame)
     -- Clear the binding snippet so OnEnter won't apply any bindings
     frame:SetAttribute("dfBindingSnippet", "")
     
+    -- Undo the modified-click suppression from ClearBlizzardClickCastFromFrame.
+    -- Those writes are deliberately NOT in the manifest (they belong to the
+    -- Blizzard-click-cast lifecycle, not to a binding apply, and manifesting
+    -- them would let a routine apply drop the suppression mid-session), so the
+    -- manifest walk above cannot reach them. Without this, every
+    -- <modifier>-type1/type2 stayed "" after unregistering and modified clicks
+    -- on Blizzard's frames kept doing nothing -- no fall-through to the
+    -- wildcard *type attributes or to Blizzard's own click-casting -- until a
+    -- reload.
+    for _, mod in ipairs(CC.BLIZZARD_SUPPRESSED_MODIFIERS) do
+        frame:SetAttribute(mod .. "type1", nil)
+        frame:SetAttribute(mod .. "type2", nil)
+    end
+
     -- Set standard Blizzard unit frame behavior
     -- type1 = left click = target
     -- type2 = right click = togglemenu
@@ -584,10 +598,12 @@ function CC:ApplyBindings()
     -- With ElvUI or other addons, 100-150+ frames can be registered. Each frame requires
     -- ~300+ SetAttribute calls, so processing them all synchronously exceeds Lua's time limit.
     -- Frames are processed in batches of 10 with a yield between each batch.
-    if self.registeredFrames then
+    do
         local allFrames = {}
-        for frame in pairs(self.registeredFrames) do
-            allFrames[#allFrames + 1] = frame
+        if self.registeredFrames then
+            for frame in pairs(self.registeredFrames) do
+                allFrames[#allFrames + 1] = frame
+            end
         end
 
         if #allFrames > 0 then
@@ -623,6 +639,13 @@ function CC:ApplyBindings()
 
             -- Process first batch immediately (synchronous), defer the rest
             ProcessNextBatch()
+        else
+            -- An empty (or absent) registry does NOT mean there are no snippets
+            -- to rewrite: RefreshKeyboardBindings also walks DF.unitFrames. With
+            -- nothing Blizzard or third-party registered -- only our own frames
+            -- -- the batch-end call above was unreachable, so hover keyboard
+            -- binds silently stopped tracking binding edits.
+            self:RefreshKeyboardBindings()
         end
     end
 

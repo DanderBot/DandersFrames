@@ -124,7 +124,12 @@ function CC:RegisterEvents()
                 -- guard here would only duplicate that one decision point.
                 -- (The original call-site guard DROPPED the check outright
                 -- when zone-in+1s landed in combat — the arena-load race.)
-                CC:DeferAfter("loadoutCheck", 1, function()
+                --
+                -- Distinct timer key from the TRAIT_CONFIG_UPDATED settle above:
+                -- that callback also runs ApplyBindings and a UI refresh, so
+                -- sharing a key let a loading screen cancel a pending talent
+                -- reapply and strand every frame on the old loadout's macros.
+                CC:DeferAfter("zoneLoadoutCheck", 1, function()
                     CC:CheckLoadoutProfileSwitch()
                 end)
             end)
@@ -246,7 +251,13 @@ local DEFERRED_JOBS = {
         -- first-write-wins: the earliest reason is the one that diagnosed the
         -- breakage; later requeues during the same combat are the same repair
         kind = "value", policy = "first",
-        run = function(self, reason) self:RunBindingRepair(reason) end,
+        -- forced: CombatGuard cannot carry RunBindingRepair's `force` argument
+        -- into the queue, so a repair that was explicitly unconditional (the
+        -- zone-in self-heal passes force=true) came back through the drain as a
+        -- cooldown-gated one and could be dropped by any repair that happened to
+        -- run in the 5s before combat ended. This job runs at most once per
+        -- drain, so the cooldown buys nothing here and only loses repairs.
+        run = function(self, reason) self:RunBindingRepair(reason, true) end,
     },
     bindingRefresh = {
         kind = "flag",
@@ -271,11 +282,15 @@ local DEFERRED_JOBS = {
 
 -- Queue work for the next time we are out of combat.
 -- Safe to call repeatedly: flags dedupe, values follow their policy, sets accumulate.
+-- Returns true when the job was queued. CombatGuard relies on that: a typo'd
+-- job name must not read as "queued", or the caller aborts and the work is lost
+-- with only an INFO line to show for it -- and INFO is exactly what the log's
+-- eviction policy discards first.
 function CC:Defer(job, payload)
     local def = DEFERRED_JOBS[job]
     if not def then
-        DF:Debug("CLICK", "Defer: unknown job '%s'", tostring(job))
-        return
+        DF:DebugError("CLICK", "Defer: unknown job '%s' — work dropped", tostring(job))
+        return false
     end
 
     self.deferred = self.deferred or {}
@@ -289,12 +304,14 @@ function CC:Defer(job, payload)
         if payload ~= nil then set[payload] = true end
     elseif def.kind == "value" then
         if def.policy == "first" and self.deferred[job] ~= nil then
-            return  -- keep the earliest value
+            return true  -- keep the earliest value; still queued
         end
         self.deferred[job] = payload
     else
         self.deferred[job] = true
     end
+
+    return true
 end
 
 -- Run queued work. Pass a job name to drain only that job (used at init, where
@@ -317,7 +334,16 @@ function CC:DrainDeferred(onlyJob)
                 -- wiped by this one
                 queue[job] = nil
                 ran = ran and (ran .. "," .. job) or job
-                if DEFERRED_JOBS[job].run(self, payload) then
+                -- pcall'd: the payload is already gone, so an error inside one
+                -- job must not (a) abandon it silently -- the old flag drains
+                -- cleared AFTER the work, so a failure retried next combat end
+                -- -- or (b) skip every job after it in DRAIN_ORDER. Report it
+                -- and carry on; the queue keeps draining.
+                local ok, wantsRefresh = pcall(DEFERRED_JOBS[job].run, self, payload)
+                if not ok then
+                    DF:DebugError("CLICK", "Deferred job '%s' errored during drain: %s",
+                        job, tostring(wantsRefresh))
+                elseif wantsRefresh then
                     needsUIRefresh = true
                 end
             end
@@ -370,8 +396,10 @@ end
 -- a caller further up the stack to have set a flag.
 function CC:CombatGuard(job, payload)
     if not InCombatLockdown() then return false end
-    self:Defer(job, payload)
-    return true
+    -- Only tell the caller to abort if the work is genuinely queued. On an
+    -- unrecognised job name Defer returns false, and aborting then would drop
+    -- the work silently; better to let the caller proceed and fail loudly.
+    return self:Defer(job, payload) and true or false
 end
 
 function CC:OnCombatEnd()

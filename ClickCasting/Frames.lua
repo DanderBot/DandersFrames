@@ -558,8 +558,14 @@ function CC:CreateClickCastHeader()
     ]])
     RegisterStateDriver(self.header, "mouseoverstate", "[@mouseover, exists] true; false")
     
-    -- Track registered frames
-    self.registeredFrames = {}
+    -- Track registered frames. Preserve an existing registry: this function is
+    -- no longer called only once before anything is registered — the header
+    -- validation above and the two recovery paths (SetupSecureHandlers,
+    -- RewrapSecureHandlers) can re-enter it mid-session, and blanking the
+    -- registry there would silently strip every Blizzard and third-party frame
+    -- while leaving frame.dfClickCastRegistered true, so nothing would notice
+    -- or re-register them.
+    self.registeredFrames = self.registeredFrames or {}
     
     -- Store reference to module in header for secure snippets
     self.header.module = self
@@ -713,9 +719,10 @@ function CC:ClearBlizzardClickCastFromFrame(frame)
     frame:SetAttribute("unit1", nil)
     frame:SetAttribute("unit2", nil)
     
-    -- Also clear common modifiers with empty string
-    local modifiers = {"shift-", "ctrl-", "alt-", "shift-ctrl-", "shift-alt-", "ctrl-alt-", "shift-ctrl-alt-"}
-    for _, mod in ipairs(modifiers) do
+    -- Also clear common modifiers with empty string. Shared list so
+    -- RestoreBlizzardDefaults undoes exactly these -- see the note on
+    -- CC.BLIZZARD_SUPPRESSED_MODIFIERS in Constants.lua.
+    for _, mod in ipairs(CC.BLIZZARD_SUPPRESSED_MODIFIERS) do
         frame:SetAttribute(mod .. "type1", "")
         frame:SetAttribute(mod .. "type2", "")
     end
@@ -1104,6 +1111,11 @@ function CC:RegisterBlizzardFrames()
         return
     end
     
+    -- Frames skipped because the client returned secret values for the checks
+    -- below. Tracked so the "registered" flag is not latched on a pass that
+    -- actually registered nothing -- see the end of this function.
+    local skippedSecret = 0
+
     -- Helper to validate and register a Blizzard frame
     local function registerBlizzardFrame(frameName)
         local frame = _G[frameName]
@@ -1121,6 +1133,9 @@ function CC:RegisterBlizzardFrames()
         
         -- Bail out if any values are secret (can't do boolean operations on them)
         if issecretvalue(protected) or issecretvalue(name) or issecretvalue(anchorRestricted) then
+            skippedSecret = skippedSecret + 1
+            DF:DebugWarn("CLICK", "Blizzard frame %s skipped — client returned secret values for the suitability checks",
+                tostring(frameName))
             return
         end
         
@@ -1154,6 +1169,17 @@ function CC:RegisterBlizzardFrames()
         registerBlizzardFrame(frameName)
     end
     
+    -- Only latch on a pass that was not cut short. UpdateBlizzardFrameRegistration
+    -- is gated on `not blizzardFramesRegistered`, so setting this after a pass
+    -- that skipped frames on secret values meant click casting stayed dead on
+    -- Blizzard's raid/party/boss/arena frames for the whole session, with nothing
+    -- in the log and the flag claiming success. Frames that are simply absent do
+    -- not count -- there is nothing to retry for those.
+    if skippedSecret > 0 then
+        DF:DebugWarn("CLICK", "Blizzard frame registration incomplete (%d skipped on secret values) — will retry",
+            skippedSecret)
+        return
+    end
     self.blizzardFramesRegistered = true
 end
 
@@ -1208,12 +1234,10 @@ function CC:UpdateBlizzardFrameRegistration()
         end
     end
     
-    -- Also check for nameplate needs
-    if needsNameplates then
-        if not InCombatLockdown() then
-        else
-        end
-    end
+    -- (No nameplate pass here: nameplate registration is driven entirely by
+    -- NAME_PLATE_UNIT_ADDED/REMOVED. There used to be an `if needsNameplates`
+    -- block with two empty branches, reading an undeclared global that nothing
+    -- ever assigned -- it advertised a re-registration pass that did not exist.)
 end
 
 -- ============================================================
@@ -1457,12 +1481,19 @@ function CC:StartDiagnosticTicker(frame)
         -- but the restricted environment no longer considers it the mouseoverbutton
         -- (some other frame's WrapScript OnEnter fired and took ownership)
         if not isSecureMouseover then
+            -- The latch suppresses only the LOG. It used to gate the repair
+            -- request too, and it is cleared only when the desync ends -- which
+            -- cannot happen while the desync persists -- so if that single
+            -- request landed inside another repair's 5s cooldown it was dropped
+            -- and never retried. The log then showed a loud DESYNC followed by
+            -- silence, reading as though the repair had run. Keep asking; the
+            -- repair is itself cooldown-throttled, so this cannot spin.
             if not CC.diagDesyncReported then
                 CC.diagDesyncReported = true
                 DF:DebugError("CLICK", "MOUSEOVERBUTTON DESYNC on %s at tick %d! dfIsSecureMouseover=nil wrapEnter=%d wrapLeave=%d kbActive=%s",
                     frameName, CC.diagTickCount, wrapEnterCount, wrapLeaveCount, tostring(bindingsActive))
-                CC:RequestBindingRepair("mouseover-desync")
             end
+            CC:RequestBindingRepair("mouseover-desync")
         else
             CC.diagDesyncReported = nil
         end
@@ -2160,6 +2191,11 @@ function CC:RunBindingRepair(reason, force)
 
     if not force then
         if self.lastBindingRepair and (GetTime() - self.lastBindingRepair) < REPAIR_COOLDOWN then
+            -- Say so. A silent return here made a refused repair indistinguishable
+            -- from a completed one in the log, right after a detector had reported
+            -- the breakage that asked for it.
+            DF:Debug("CLICK", "Binding repair (%s) skipped — %0.1fs into the %ds cooldown",
+                tostring(reason), GetTime() - self.lastBindingRepair, REPAIR_COOLDOWN)
             return
         end
     end
