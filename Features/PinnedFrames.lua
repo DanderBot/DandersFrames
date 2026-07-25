@@ -2554,10 +2554,107 @@ function PinnedFrames:Initialize()
         if set then self:SetEnabled(i, set.enabled) end
     end
 
+    -- Enforce the visibility invariant over ALL pinned frames — including
+    -- untracked strays from before this init (profile-switch orphans, frames
+    -- from a previous session's state). Runs on every init so login itself
+    -- cleans a stuck frame no matter how it was stranded.
+    self:PruneOrphanedSets()
+
     DF:Debug("PINNED", "Initialized pinned frames")
 end
 
--- Reinitialize for mode change (party <-> raid)
+-- Enforce the pinned visibility invariant: nothing pinned may be visible unless
+-- the CURRENT profile/mode justifies it. Pinned containers/movers/labels are
+-- parented to UIParent under fixed global names and can outlive the module's
+-- self.containers references (profile switch to a fewer-set profile is the
+-- confirmed case: the extra index's frames stay live but untracked, and every
+-- hide path gates on GetSetDB — so nothing ever hides them; the "stuck orange
+-- box that survives everything" reports). Rather than only reaping known
+-- orphans, this asserts the full invariant by global name so ANY stranded or
+-- wrongly-shown frame is cleaned regardless of how it got that way:
+--   1. inactive-mode containers: never legitimate — always hidden
+--   2. set missing at an index: everything for that index hidden + untracked
+--   3. set disabled / solo-gated: container+label hidden; mover also requires
+--      the global unlock (moversShown)
+-- Runs at the end of Initialize (login + every rebuild) and on profile switch
+-- (FullProfileRefresh). Skips live-frame writes during test mode (live frames
+-- are hidden then; ExitTestMode re-asserts state on the way out). Combat-safe:
+-- movers/labels are genuinely non-secure and hide immediately, but the
+-- CONTAINERS are implicitly protected (the secure header is a child), so —
+-- like SetEnabled's pendingVisibilityUpdate — container and header hides are
+-- deferred to PLAYER_REGEN_ENABLED (pendingPrune re-runs the whole prune).
+local PRUNE_MODE_SUFFIXES = { "Party", "Raid" }
+
+-- Hide a frame from the container tree. The secure header is parented to the
+-- container, which makes the container implicitly protected — Hide() from
+-- insecure code in lockdown is a blocked action. In combat: leave it, flag
+-- the re-run at regen instead.
+local function hideContainerSafe(self, f)
+    if not f then return end
+    if InCombatLockdown() then
+        if f:IsShown() then self.pendingPrune = true end
+        return
+    end
+    f:Hide()
+end
+
+function PinnedFrames:PruneOrphanedSets()
+    if self.testModeActive then return end
+    local inCombat = InCombatLockdown()
+    local activeSuffix = (GetActualMode() == "raid") and "Raid" or "Party"
+
+    for i = 1, PinnedFrames.MAX_SETS do
+        -- 1) Inactive-mode containers are never legitimate (runtime frames only
+        --    exist for the active mode) — hide by name, tracked or not.
+        for _, suffix in ipairs(PRUNE_MODE_SUFFIXES) do
+            if suffix ~= activeSuffix then
+                hideContainerSafe(self, _G["DandersPinned" .. i .. suffix .. "Container"])
+            end
+        end
+
+        local set = GetSetDB(i)
+        local mover = _G["DandersPinned" .. i .. "Mover"]
+        local label = _G["DandersPinned" .. i .. "Label"]
+        local activeC = _G["DandersPinned" .. i .. activeSuffix .. "Container"]
+
+        if not set then
+            -- 2) No set at this index in the current profile/mode: hide + untrack
+            --    everything. Header/container hides are combat-protected; in
+            --    lockdown the tracking is left intact too, so the pendingPrune
+            --    re-run at regen repeats the full teardown.
+            if self.headers[i] then
+                if inCombat then
+                    self.pendingPrune = true
+                else
+                    self.headers[i]:Hide()
+                    self.headers[i] = nil
+                end
+            end
+            if self.containers[i] then
+                if self.containers[i].mover then self.containers[i].mover:Hide() end
+                if inCombat then
+                    self.pendingPrune = true
+                else
+                    self.containers[i]:Hide()
+                    self.containers[i] = nil
+                end
+            end
+            if self.labels[i] then self.labels[i]:Hide() end
+            if not inCombat then self.labels[i] = nil end
+            if mover then mover:Hide() end
+            if label then label:Hide() end
+            hideContainerSafe(self, activeC)
+        else
+            -- 3) Set exists: chrome may only show when the set is effectively
+            --    visible; the mover additionally requires the global unlock.
+            local visible = set.enabled and PinnedSoloAllowed(set)
+            if mover and (not visible or not self.moversShown) then mover:Hide() end
+            if label and (not visible or not set.showLabel) then label:Hide() end
+            if activeC and not visible then hideContainerSafe(self, activeC) end
+        end
+    end
+end
+
 function PinnedFrames:Reinitialize()
     -- Cannot reinitialize during combat
     if InCombatLockdown() then
@@ -2616,9 +2713,9 @@ function PinnedFrames:Reinitialize()
         end
         self.labels[i] = nil
     end
-    
+
     self.initialized = false
-    self:Initialize()
+    self:Initialize()  -- ends with PruneOrphanedSets: reaps untracked strays too
 
     -- If Test Mode was active before Reinitialize (e.g. user changed
     -- frame type in the settings panel while test mode was on), re-enter
@@ -2962,6 +3059,14 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1, ...)
             PinnedFrames.pendingVisibilityUpdate = nil
         end
 
+        -- Replay a prune whose container/header hides were blocked by combat
+        -- (PruneOrphanedSets defers protected-frame writes; see hideContainerSafe).
+        -- After the SetEnabled replays above, so the re-run sees final state.
+        if PinnedFrames.pendingPrune then
+            PinnedFrames.pendingPrune = nil
+            PinnedFrames:PruneOrphanedSets()
+        end
+
         -- Replay layout changes (Direction/spacing/size/anchor) that were attempted
         -- in combat. Skipped harmlessly when pendingReinitialize already ran above
         -- (it returns early and re-applies every set's layout via ProcessAllSets).
@@ -3029,6 +3134,9 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1, ...)
                         local set = GetSetDB(i)
                         if set then PinnedFrames:SetEnabled(i, set.enabled) end
                     end
+                    -- And the hide side of the invariant: reap strays/disabled
+                    -- chrome on every zone-in, not just logins and mode changes.
+                    PinnedFrames:PruneOrphanedSets()
                     PinnedFrames:RequestProcessAllSets()
                 end
             end

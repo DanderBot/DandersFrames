@@ -2,10 +2,17 @@
 
 ## [5.0.0]
 
+## [4.8.0]
+
+### Bug Fixes
+
+* (Click Casting) Fixed all binds being dead in your first arena or dungeon of a session until a reload. (by Krathe)
+* (Pinned Frames) Fixed an empty "drag to move" box getting stuck on screen after a profile switch, surviving reloads. (by Krathe)
+
 ### Improvements
 
-* (Click Casting) Enabling a targeting fallback (Global, Target, Self or Always Cast) on a key that already does something in WoW now asks for confirmation and names exactly what the key will stop doing — these options make the key active everywhere, not just over the frames. The fallback tooltips explain this too.
-* (Click Casting) The "Clear Blizzard Bindings" button now warns that clearing is permanent, and it no longer silently re-clears Blizzard's click-casting profile every time click casting is enabled — clearing only happens when you press the button.
+* (Click Casting) Enabling a targeting fallback on a key that already does something now asks for confirmation and names what the key will stop doing.
+* (Click Casting) "Clear Blizzard Bindings" now warns that clearing is permanent, and only clears when you press it.
 
 ### WoW 12.1 (Midnight) Rework
 
@@ -162,8 +169,7 @@ DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally chan
 
 ### Bug Fixes
 
-* (Click Casting) **Fixed the 4.7.4 regression where every key bound in DF stopped working on the action bars ("like my keyboard is unplugged") after hovering a party/raid frame, until a reload.** 4.7.4's hover-bind rework applied binds under one owner but released them under another — so leaving a frame looked clean but never actually freed the keys. Bind ownership is now genuinely held by one permanent frame (applied and released in the same secure context), every release point additionally clears both possible owners as insurance, and the combat safety-check regression from 4.7.4 is reverted — keys release the moment the cursor leaves a frame. (by Krathe)
-* (Click Casting) Added extra recovery layers on top: stuck hover binds detected after leaving a frame are released immediately out of combat (or at combat end / next frame hover in combat), and the loading-screen self-repair now releases lingering hover binds unconditionally instead of trusting a state flag. (by Krathe)
+* (Click Casting) **Fixed keybinds going dead after hovering a party or raid frame (a 4.7.4 regression)** — keys now release the moment the cursor leaves a frame, with extra self-recovery layers if binds ever stick again. (by Krathe)
 
 ## [4.7.4]
 
