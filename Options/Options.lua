@@ -6347,51 +6347,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         durationGroup.disableChildrenOn = function(d) return not d.showBuffs end
         AddToSection(durationGroup, nil, 2)
 
-        -- Expiring Indicator Group (col1 — placed under Border, matching the
-        -- Aura Designer's Border→Expiring ordering)
-        local expiringGroup = GUI:CreateSettingsGroup(self.child, 280)
-        expiringGroup:AddWidget(GUI:CreateHeader(self.child, L["Expiring Indicator"]), 40)
-        -- Unified expiring panel — SAME shared helper + flow as the Aura Designer
-        -- (which is the reference design): master enable → Percent/Seconds toggle
-        -- threshold → State Overrides → thickness/inset/colour/alpha/animation →
-        -- Tint.  Buff-only rows (Show Expiring Border, Color-by-Time, Inset, Tint)
-        -- appear via include flags; rows that don't apply simply hide.
-        GUI:CreateExpiringControls(expiringGroup, db, {
-            parent        = self.child,
-            masterLabel   = L["Enable Expiring Indicators"],
-            fullUpdate    = function() DF:UpdateAllFrames() end,
-            lightColors   = function() DF:LightweightUpdateExpiringBorderColor() end,
-            lightGeometry = function() DF:LightweightUpdateAuraBorder("buff") end,
-            lightTint     = function() DF:LightweightUpdateExpiringTintColor() end,
-            refreshStates = function() self:RefreshStates() end,
-            refreshPage   = function() self:Refresh() end,
-            keys = {
-                master           = "buffExpiringEnabled",
-                threshold        = "buffExpiringThreshold",
-                thresholdMode    = "buffExpiringThresholdMode",
-                borderEnable     = "buffExpiringBorderEnabled",
-                colorByTime      = "buffExpiringBorderColorByTime",
-                color            = "buffExpiringBorderColor",
-                alphaHandleColor = "buffExpiringBorderColor",
-                thickness        = "buffExpiringBorderThickness",
-                inset            = "buffExpiringBorderInset",
-                animPrefix       = "buffExpiringBorderAnimation",
-                tintEnable       = "buffExpiringTintEnabled",
-                tintColor        = "buffExpiringTintColor",
-            },
-            include = {
-                threshold    = true,
-                borderEnable = true,
-                colorByTime  = true,
-                alpha        = true,
-                thickness    = true, thicknessMin = 1, thicknessMax = 5,
-                inset        = true,
-                animation    = true,
-                tint         = true,
-            },
-        })
-        AddToSection(expiringGroup, nil, 1)
-        GUI:BlockControl12_1(expiringGroup, "roadmap", { id = "buffs:expiring", page = L["Buffs"], when = function(d) return DF:FactoryOwnsBuffRow(d) end })
+        -- (No Expiring Indicator group: the pre-12.1 expiring border/tint was driven by a
+        -- ~3 Hz ticker reading remaining time, which is SECRET on 12.1. Removed 2026-07-25
+        -- rather than left frosted. The 12.1-safe replacement is the DF.Expiration engine
+        -- (Features/Expiration.lua) + GUI:CreateExpirationControls, currently adopted by the
+        -- Aura Designer only -- rolling it out to these rows is a separate, unscheduled job.)
 
         currentSection = nil
         AddSpace(10, "both")

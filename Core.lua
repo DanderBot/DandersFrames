@@ -1986,16 +1986,10 @@ function DF:LightweightUpdateSelectionHighlightColor()
     DF:LightweightUpdateHighlight("selection")
 end
 
--- Update expiring border color on buff icons
-function DF:LightweightUpdateExpiringBorderColor()
-    -- 12.1: expiring borders can't run on the game's aura rows (secret time);
-    -- the GUI controls are marked as a game limitation. Nothing to restyle.
-end
-
--- Update expiring tint color on buff icons
-function DF:LightweightUpdateExpiringTintColor()
-    -- 12.1: expiring tint can't run on the game's aura rows (see above).
-end
+-- (LightweightUpdateExpiringBorderColor / ...TintColor removed 2026-07-25 with the
+-- pre-12.1 Expiring system: both had already degenerated to empty stubs because
+-- remaining time is secret on the container rows. The 12.1-safe reveal is the
+-- DF.Expiration engine, which re-specs through the normal drive.)
 
 -- Update missing buff icon border color
 function DF:LightweightUpdateMissingBuffBorderColor()
@@ -2751,13 +2745,9 @@ function DF:MigrateAuraBorderKeys(modeDb)
             modeDb[p .. "BorderSize"] = modeDb[p .. "BorderThickness"]
         end
     end
-    -- Expiring border: the legacy single Pulsate bool becomes the unified
-    -- Expiring Animation type (true -> DF Pulsate, false -> None).  Only seed
-    -- when an old key exists and the new one hasn't been set yet, so existing
-    -- configs keep their pulse and new profiles use their own default.
-    if modeDb.buffExpiringBorderAnimationType == nil and modeDb.buffExpiringBorderPulsate ~= nil then
-        modeDb.buffExpiringBorderAnimationType = modeDb.buffExpiringBorderPulsate and "DF_PULSATE" or "NONE"
-    end
+    -- (The buffExpiringBorderPulsate -> ...AnimationType migration was removed with the
+    -- pre-12.1 Expiring system on 2026-07-25 — both keys are gone, so there is nothing
+    -- left to migrate between.)
 end
 
 -- ============================================================
