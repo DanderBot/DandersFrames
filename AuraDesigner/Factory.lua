@@ -561,10 +561,19 @@ local function buildBorderSpec(frame, borderCfg)
     return spec
 end
 
--- Order-stable cosmetic signature of a DF.Border spec (scalars + one-level subtables).
+-- Order-stable cosmetic signature of a DF.Border spec (scalars + NESTED subtables).
 -- Field-name-agnostic so it survives BuildSpec schema tweaks; any change → ApplyStyle
 -- (in-place restyle), never a rebuild (only the identity set is structural).
-local function subSig(t)
+--
+-- ★ RECURSES (fixed 2026-07-25). This used to serialise only ONE level and silently drop
+-- any table it found inside a subtable, which made whole settings invisible to the sig:
+-- spec.gradient holds startColor/endColor as COLOUR TABLES, so editing a gradient colour
+-- left coSig unchanged, ApplyStyle never ran, and the border kept the colours it was first
+-- painted with (field-caught: "I can see the gradient but not the colours I set" -- the
+-- direction dropdown worked, because direction is a scalar). spec.shadow.color had the
+-- same latent hole. Depth-capped purely as a cycle guard; real specs are 2-3 deep.
+local function subSig(t, depth)
+    depth = depth or 1
     local keys = {}
     for kk in pairs(t) do keys[#keys + 1] = kk end
     tsort(keys)
@@ -572,7 +581,11 @@ local function subSig(t)
     for _, kk in ipairs(keys) do
         local v = t[kk]
         local tv = type(v)
-        if tv ~= "table" and tv ~= "function" and tv ~= "userdata" and tv ~= "thread" then
+        if tv == "table" then
+            if depth < 4 then
+                parts[#parts + 1] = tostring(kk) .. "={" .. subSig(v, depth + 1) .. "}"
+            end
+        elseif tv ~= "function" and tv ~= "userdata" and tv ~= "thread" then
             parts[#parts + 1] = tostring(kk) .. "=" .. tostring(v)
         end
     end
