@@ -6059,10 +6059,9 @@ CreateEffectCard = function(parent, yPos, effect)
         -- Show trigger count for frame-level effects
         local triggers = GetFrameEffectTriggers(effect.auraName, effect.typeKey)
         if #triggers > 1 then
-            local auraCfg = CurrentAuraPool()[effect.auraName]
-            local typeCfg = auraCfg and auraCfg[effect.typeKey]
-            local opLabel = (typeCfg and typeCfg.triggerOperator == "AND") and (" (" .. L["AND"] .. ")") or ""
-            infoStr = infoStr .. "  -  " .. format(L["+%d triggers"], #triggers - 1) .. opLabel
+            -- No "(AND)" suffix: the operator toggle is gone (12.1 cannot evaluate
+            -- triggers together read-free), so multiple triggers always mean ANY/OR.
+            infoStr = infoStr .. "  -  " .. format(L["+%d triggers"], #triggers - 1)
         end
     end
     -- Other Buffs: surface the per-effect Others Only state on the collapsed
@@ -6233,65 +6232,11 @@ CreateEffectCard = function(parent, yPos, effect)
             trigLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
             -- AND/OR operator toggle (only shown with 2+ triggers)
-            if #triggers > 1 then
-                local auraCfgOp = CurrentAuraPool()[effect.auraName]
-                local typeCfgOp = auraCfgOp and auraCfgOp[effect.typeKey]
-                local isAnd = typeCfgOp and typeCfgOp.triggerOperator == "AND"
-
-                local opBtn = CreateFrame("Button", nil, trigContainer, "BackdropTemplate")
-                opBtn:SetHeight(18)
-                opBtn:SetPoint("LEFT", trigLabel, "RIGHT", 6, 0)
-
-                local opText = opBtn:CreateFontString(nil, "OVERLAY")
-                GUI:SetSettingsFont(opText, 9, "")
-                opText:SetPoint("CENTER", 0, 0)
-                opText:SetText(isAnd and L["ALL (AND)"] or L["ANY (OR)"])
-                opText:SetTextColor(isAnd and 0.9 or 0.6, isAnd and 0.7 or 0.8, isAnd and 0.5 or 0.6)
-
-                local opW = opText:GetStringWidth() + 16
-                if opW < 52 then opW = 52 end
-                opBtn:SetWidth(opW)
-                -- Shared styler (rest + accent-wash hover). Two-state operator
-                -- toggle; keep the custom AND/OR label colour (set above) and
-                -- mark active on AND (row rebuilds on click).
-                GUI:StyleButton(opBtn)
-                opBtn:SetActive(isAnd)
-
-                opBtn:HookScript("OnEnter", function(self)
-                    GUI:ShowTooltip(self, {
-                        title = isAnd and L["ALL triggers must be active"] or L["ANY trigger activates the effect"],
-                        lines = {
-                            { text = L["Click to toggle"], hint = true },
-                        },
-                    })
-                end)
-                opBtn:HookScript("OnLeave", function()
-                    GUI:HideTooltip()
-                end)
-                opBtn:SetScript("OnClick", function()
-                    local cfg = EnsureTypeConfig(effect.auraName, effect.typeKey)
-                    if cfg.triggerOperator == "AND" then
-                        cfg.triggerOperator = nil  -- OR is default
-                    else
-                        cfg.triggerOperator = "AND"
-                    end
-                    SwitchTab("effects")
-                    RefreshPreviewEffects()
-                end)
-
-                -- P4.7 (12.1 limitation): the multi-trigger AND operator needs to
-                -- evaluate every trigger together, which the 12.1 aura system can't
-                -- do read-free for secret-anchored triggers. Frost the toggle (a
-                -- hand-rolled button, so block it directly) — the trigger tags
-                -- beside it stay editable. Gated on DF:FactoryOwnsAD, so legacy /
-                -- 12.0.x is untouched. Permanent.
-                GUI:BlockControl12_1(opBtn, "limitation", {
-                    id   = "ad:trigger:operator",
-                    page = L["Aura Designer"],
-                    when = function(d) return DF:FactoryOwnsAD(d) end,
-                })
-
-            end
+            -- (No multi-trigger ALL/ANY operator button: evaluating every trigger together
+            --  needs a read the 12.1 aura system cannot do for secret-anchored triggers, so
+            --  it was permanently frosted. Removed 2026-07-25 -- triggerOperator was never
+            --  read by the render path either, only by this editor's own label, so the
+            --  toggle changed nothing. Triggers combine as ANY/OR. The tags stay editable.)
 
             -- Build display name lookup for tags. Other-pool trigger names are
             -- SpellDB names / ad-hoc keys — resolved live per tag below.

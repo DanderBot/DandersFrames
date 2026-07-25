@@ -1757,10 +1757,6 @@ L["+ Create Group"] = true
 L["+ Debuff Group"] = true
 L["+ Filter Group"] = true
 L["ACTIVE INDICATORS"] = true
-L["ALL (AND)"] = true
-L["ALL triggers must be active"] = true
-L["ANY (OR)"] = true
-L["ANY trigger activates the effect"] = true
 L["Active"] = true
 L["Add Filter"] = true
 L["Alert if anyone is missing the buff"] = true
@@ -1778,7 +1774,6 @@ L["COPY APPEARANCE FROM"] = true
 L["Categories shown here are hidden from the main debuff bar automatically."] = true
 L["Channel"] = true
 L["Click"] = true
-L["Click to toggle"] = true
 L["Combat Mode"] = true
 L["Copy Settings to %s"] = true
 L["Currently can't track: %s"] = true
@@ -2066,7 +2061,6 @@ L["Preview placeholder (visual mockup)"] = true
 
 -- GUI rework localization pass: widget labels + ClickCasting chat messages
 L["+%d triggers"] = true
-L["AND"] = true
 L["Group %d"] = true
 L["Changelog"] = true
 L["(Global: %s)"] = true
