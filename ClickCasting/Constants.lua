@@ -441,22 +441,28 @@ local FRAME_INFO = {
 CC.FRAME_INFO = FRAME_INFO
 
 -- Targeting Fallback info (checkboxes - for keyboard/hover bindings)
+-- Shared warning: every fallback below forces the binding's key onto the
+-- PERMANENT global bind list (BuildHovercastSetupScript) — the key then does
+-- this binding everywhere and stops performing its normal action, even away
+-- from the frames. The editor also confirms via ConfirmGlobalKeyCapture when
+-- the key already has a Blizzard binding.
+local GLOBAL_CAPTURE_WARNING = " While enabled, the key is captured everywhere — it performs this binding instead of its normal action, even away from the frames."
 local FALLBACK_INFO = {
     mouseover = {
         name = "Global",
-        desc = "Cast on nameplates or characters in the world. Not needed for party/raid frames.",
+        desc = "Cast on nameplates or characters in the world. Not needed for party/raid frames." .. GLOBAL_CAPTURE_WARNING,
     },
     target = {
         name = "Target",
-        desc = "Cast on your current target if no frame or mouseover unit is found.",
+        desc = "Cast on your current target if no frame or mouseover unit is found." .. GLOBAL_CAPTURE_WARNING,
     },
     selfCast = {
         name = "Self",
-        desc = "Cast on yourself as a last resort if no other valid target is found.",
+        desc = "Cast on yourself as a last resort if no other valid target is found." .. GLOBAL_CAPTURE_WARNING,
     },
     alwaysCast = {
         name = "Always Cast",
-        desc = "If no rule above matches (hovering nothing, or an ineligible unit), cast anyway using the spell's normal targeting. Lets ground-targeted spells show their aiming circle when pressed in the open. If Self is also enabled, Self applies first.",
+        desc = "If no rule above matches (hovering nothing, or an ineligible unit), cast anyway using the spell's normal targeting. Lets ground-targeted spells show their aiming circle when pressed in the open. If Self is also enabled, Self applies first." .. GLOBAL_CAPTURE_WARNING,
     },
     stopSpellTarget = {
         name = "Cancel Targeting",

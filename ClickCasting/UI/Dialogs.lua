@@ -877,7 +877,7 @@ function CC:ShowBlizzardClickCastWarning(enableCheckbox, onConfirm)
     
     -- Create popup frame
     local popup = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
-    popup:SetSize(420, 200)
+    popup:SetSize(420, 224)
     popup:SetPoint("CENTER")
     -- Shared dialog-root chrome with the CC theme-coloured border + 0.1 fill.
     DF.GUI:CreatePanelBackdrop(popup, { bgAlpha = 0.98, borderColor = themeColor })
@@ -905,6 +905,17 @@ function CC:ShowBlizzardClickCastWarning(enableCheckbox, onConfirm)
     msg:SetJustifyH("CENTER")
     msg:SetText(L["Blizzard's built-in click-casting may conflict with\nDandersFrames click-casting settings.\n\nWe recommend clearing Blizzard's bindings from\nframes where you use DandersFrames bindings."])
     msg:SetTextColor(0.9, 0.9, 0.9)
+
+    -- Permanence warning: ResetCurrentProfile is irreversible — the user's
+    -- native click-cast profile cannot be restored afterwards. Must be said
+    -- BEFORE the button is pressed.
+    local permWarn = popup:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    permWarn:SetPoint("TOP", msg, "BOTTOM", 0, -10)
+    permWarn:SetPoint("LEFT", 25, 0)
+    permWarn:SetPoint("RIGHT", -25, 0)
+    permWarn:SetJustifyH("CENTER")
+    permWarn:SetText(L["Clearing is permanent — Blizzard's click-casting bindings cannot be restored afterwards."])
+    permWarn:SetTextColor(1, 0.55, 0.3)
     
     -- Helper function to create buttons
     local function CreateButton(parent, text, isPrimary)
@@ -928,9 +939,11 @@ function CC:ShowBlizzardClickCastWarning(enableCheckbox, onConfirm)
             print("|cff33cc33DandersFrames:|r " .. L["Blizzard click-casting profile reset to default."])
         end
         
-        -- Remember to clear on future enables
-        CC.db.clearBlizzardOnEnable = true
-        
+        -- Deliberately NOT persisted: clearing is a destructive one-time action
+        -- the user just confirmed. The old clearBlizzardOnEnable flag silently
+        -- re-wiped the profile on every future enable; it is retired (and the
+        -- stored key is stripped in InitializeSavedVariables).
+
         -- Also clear from our registered frames
         CC:RefreshBlizzardClickCastClearing()
         

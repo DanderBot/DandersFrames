@@ -29,6 +29,9 @@ function CC:RegisterEvents()
     -- Nameplate events for click-casting on nameplates
     eventFrame:RegisterEvent("NAME_PLATE_UNIT_ADDED")
     eventFrame:RegisterEvent("NAME_PLATE_UNIT_REMOVED")
+
+    -- Spell data arrival — resolves a provisional (cold-start) binding map
+    eventFrame:RegisterEvent("SPELLS_CHANGED")
     
     eventFrame:SetScript("OnEvent", function(_, event, ...)
         if event == "PLAYER_REGEN_ENABLED" then
@@ -39,6 +42,12 @@ function CC:RegisterEvents()
         elseif event == "PLAYER_SPECIALIZATION_CHANGED" or event == "ACTIVE_PLAYER_SPECIALIZATION_CHANGED" then
             -- Spec changed - check for profile switch
             CC:OnSpecChanged()
+            -- Cold-start resolve: a map built before GetSpecialization()
+            -- resolved dropped every spec-scoped binding — rebuild it now
+            CC:ResolveProvisionalMap("spec-resolved")
+        elseif event == "SPELLS_CHANGED" then
+            -- Spell data arrived/changed — no-op unless the map is provisional
+            CC:ResolveProvisionalMap("spells-changed")
         elseif event == "TRAIT_CONFIG_UPDATED" or event == "TRAIT_CONFIG_CREATED" or event == "ACTIVE_COMBAT_CONFIG_CHANGED" then
             -- Loadout/talent changed - check for profile switch and reapply bindings (with debounce)
             if not InCombatLockdown() then
@@ -96,15 +105,26 @@ function CC:RegisterEvents()
                 -- so a broken hover-bind state never survives a zone change
                 CC:RunBindingRepair("zone-in", true)
 
-                -- Check for loadout-based profile on initial load
+                -- Cold-start resolve: if the login build ran before spec data
+                -- was available, the map is provisional — rebuild it on the
+                -- first loading screen so it is correct BEFORE the first
+                -- arena/dungeon of the session, not only after a /reload
+                CC:ResolveProvisionalMap("zone-in")
+
+                -- Check for loadout-based profile on initial load. No combat
+                -- guard here: CheckLoadoutProfileSwitch defers itself via
+                -- pendingLoadoutCheck in lockdown — the old call-site guard
+                -- silently DROPPED the check when zone-in+1s landed in combat
+                -- (the arena-load race), leaving the previous spec's profile
+                -- active for the whole match.
                 C_Timer.After(1, function()
-                    if not InCombatLockdown() then
-                        CC:CheckLoadoutProfileSwitch()
-                    end
+                    CC:CheckLoadoutProfileSwitch()
                 end)
             end)
         elseif event == "ARENA_PREP_OPPONENT_SPECIALIZATIONS" then
             -- Arena frames should now exist
+            -- Belt: never enter an arena on a provisional (cold-start) map
+            CC:ResolveProvisionalMap("arena-prep")
             CC:OnArenaPrep()
         elseif event == "INSTANCE_ENCOUNTER_ENGAGE_UNIT" then
             -- Boss frames should now exist

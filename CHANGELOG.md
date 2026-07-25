@@ -1,5 +1,17 @@
 # DandersFrames Changelog
 
+## [4.8.0]
+
+### Bug Fixes
+
+* (Click Casting) Fixed all binds being dead in your first arena or dungeon of a session until a reload. (by Krathe)
+* (Pinned Frames) Fixed an empty "drag to move" box getting stuck on screen after a profile switch, surviving reloads. (by Krathe)
+
+### Improvements
+
+* (Click Casting) Enabling a targeting fallback on a key that already does something now asks for confirmation and names what the key will stop doing.
+* (Click Casting) "Clear Blizzard Bindings" now warns that clearing is permanent, and only clears when you press it.
+
 ## [4.7.5]
 
 ### Bug Fixes
