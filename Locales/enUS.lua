@@ -1121,7 +1121,6 @@ L["Max Name Length"] = true
 L["Max Text Width"] = true
 L["Medium"] = true
 L["Medium Health (50%)"] = true
-L["Min Stacks to Show"] = true
 L["Minimal"] = true
 L["Minimap"] = true
 L["Minimum Log Level"] = true

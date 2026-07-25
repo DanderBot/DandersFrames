@@ -1089,7 +1089,7 @@ local function EnsureTypeConfig(auraName, typeKey, pool)
                 durationAnchor = "CENTER", durationX = 0, durationY = 0,
                 durationColorByTime = true,   -- DELIBERATE hardcode (v4 parity): new placements always start coloured, even in profiles whose global default is OFF — Krathe's call. Already-placed indicators are never touched.
                 -- Stack count
-                showStacks = gd.showStacks ~= false, stackMinimum = 2,
+                showStacks = gd.showStacks ~= false,
                 stackFont = gd.stackFont or "DF Roboto SemiBold",
                 stackScale = gd.stackScale or 1.0,
                 stackOutline = gd.stackOutline or "SHADOW;OUTLINE",
@@ -1118,7 +1118,7 @@ local function EnsureTypeConfig(auraName, typeKey, pool)
                 durationAnchor = "CENTER", durationX = 0, durationY = 0,
                 durationColorByTime = true,   -- DELIBERATE hardcode (v4 parity): new placements always start coloured, even in profiles whose global default is OFF — Krathe's call. Already-placed indicators are never touched.
                 -- Stack count
-                showStacks = gd.showStacks ~= false, stackMinimum = 2,
+                showStacks = gd.showStacks ~= false,
                 stackFont = gd.stackFont or "DF Roboto SemiBold",
                 stackScale = gd.stackScale or 1.0,
                 stackOutline = gd.stackOutline or "SHADOW;OUTLINE",
@@ -1305,7 +1305,7 @@ local TYPE_DEFAULTS = {
         expiryAlertBorderColorMode = "STATIC", expiryAlertBorderThickness = "MEDIUM",
         expiryAlertBorderAlpha = 1,
         expiryAlertBorderColor = {r = 1, g = 0.2, b = 0.2, a = 1},
-        showStacks = true, stackMinimum = 2,
+        showStacks = true,
         stackFont = "DF Roboto SemiBold", stackScale = 1.0,
         stackOutline = "SHADOW;OUTLINE", stackAnchor = "BOTTOMRIGHT",
         stackX = 2, stackY = -2,
@@ -1418,7 +1418,7 @@ local TYPE_DEFAULTS = {
         expiryAlertBorderColorMode = "STATIC", expiryAlertBorderThickness = "MEDIUM",
         expiryAlertBorderAlpha = 1,
         expiryAlertBorderColor = {r = 1, g = 0.2, b = 0.2, a = 1},
-        showStacks = true, stackMinimum = 2,
+        showStacks = true,
         stackFont = "DF Roboto SemiBold", stackScale = 1.0,
         stackOutline = "SHADOW;OUTLINE", stackAnchor = "BOTTOMRIGHT",
         stackX = 2, stackY = -2,
@@ -1759,7 +1759,7 @@ local GLOBAL_DEFAULT_MAP = {
         durationColorByTime = "durationColorByTime", durationColor = "durationColor",
         stackFont = "stackFont", stackScale = "stackScale", stackOutline = "stackOutline",
         stackAnchor = "stackAnchor", stackX = "stackX", stackY = "stackY",
-        stackMinimum = "stackMinimum", stackColor = "stackColor",
+        stackColor = "stackColor",
         hideSwipe = "hideSwipe", hideIcon = "hideIcon",
         frameLevel = "indicatorFrameLevel", frameStrata = "indicatorFrameStrata",
     },
@@ -1770,7 +1770,7 @@ local GLOBAL_DEFAULT_MAP = {
         durationColorByTime = "durationColorByTime", durationColor = "durationColor",
         stackFont = "stackFont", stackScale = "stackScale", stackOutline = "stackOutline",
         stackAnchor = "stackAnchor", stackX = "stackX", stackY = "stackY",
-        stackMinimum = "stackMinimum", stackColor = "stackColor",
+        stackColor = "stackColor",
         hideSwipe = "hideSwipe", hideIcon = "hideIcon",
         frameLevel = "indicatorFrameLevel", frameStrata = "indicatorFrameStrata",
     },
@@ -3756,13 +3756,11 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
     -- end of BuildTypeContent can frost the effect-settings groups the factory
     -- can't (yet) drive, WITHOUT touching the trigger tags above (built into
     -- `parent` before this function runs — the working "which aura" layer).
-    -- expiringGroup / swmCheck / borderCtl / stackMinCtl are captured for the surgical
-    -- blocks (Expiring, Show When Missing, gradient border style, min stacks). See block
-    -- pass below.
+    -- expiringGroup / swmCheck / borderCtl are captured for the surgical blocks
+    -- (Expiring, Show When Missing, gradient border style). See block pass below.
     local builtGroups = {}
     local expiringGroup, swmCheck, borderCtl, wholeBarCheck, swmGroup, durColorByTimeCtl
     local missingTriggerGroup, expireAlertGroup   -- sound casualties (P4.5 limitation blocks)
-    local stackMinCtl   -- Min Stacks slider (inert on 12.1 containers — limitation block)
 
     local function AddWidget(widget, height)
         widget:SetPoint("TOPLEFT", parent, "TOPLEFT", 5, -totalHeight)
@@ -4232,8 +4230,6 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- Stack Count
         AddGroup(L["Stack Count"], function(g)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Show Stacks"], proxy, "showStacks"), 28)
-            stackMinCtl = GUI:CreateSlider(parent, L["Min Stacks to Show"], 1, 10, 1, proxy, "stackMinimum")
-            g:AddWidget(stackMinCtl, 54)
             g:AddWidget(GUI:CreateFontDropdown(parent, L["Stack Font"], proxy, "stackFont"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Stack Scale"], 0.5, 2.0, 0.1, proxy, "stackScale"), 54)
             g:AddWidget(GUI:CreateOutlineDropdown(parent, L["Stack Outline"], proxy, "stackOutline"), 54)
@@ -4368,8 +4364,6 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- Stack Count
         AddGroup(L["Stack Count"], function(g)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Show Stacks"], proxy, "showStacks"), 28)
-            stackMinCtl = GUI:CreateSlider(parent, L["Min Stacks to Show"], 1, 10, 1, proxy, "stackMinimum")
-            g:AddWidget(stackMinCtl, 54)
             g:AddWidget(GUI:CreateFontDropdown(parent, L["Stack Font"], proxy, "stackFont"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Stack Scale"], 0.5, 2.0, 0.1, proxy, "stackScale"), 54)
             g:AddWidget(GUI:CreateOutlineDropdown(parent, L["Stack Outline"], proxy, "stackOutline"), 54)
@@ -5066,15 +5060,12 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             GUI:BlockControl12_1(expiringGroup, "limitation",
                 { id = "ad:" .. typeKey .. ":expiring", page = L["Aura Designer"], when = ADgate })
         end
-        --   * Min Stacks to Show — permanent limitation. Stack counts render on the native
-        --     no-formatter path (a formatter would receive the SECRET application count and
-        --     trap — see Features/Auras.lua's stacks-formatter warning), so a custom minimum
-        --     other than the native "shown at >1" is not expressible. Frosted rather than
-        --     removed: the stored stackMinimum key stays, in case a future API allows it.
-        if stackMinCtl then
-            GUI:BlockControl12_1(stackMinCtl, "limitation",
-                { id = "ad:" .. typeKey .. ":stackmin", page = L["Aura Designer"], when = ADgate })
-        end
+        --   * Min Stacks to Show — REMOVED 2026-07-25 (was a permanent limitation, then a
+        --     confirmed no-op). Stack counts render on the native no-formatter path (a
+        --     formatter would receive the SECRET application count and trap — see
+        --     Features/Auras.lua's stacks-formatter warning), so a custom minimum other than
+        --     the native "shown at >1" is not expressible. The control, its key and its
+        --     defaults are gone rather than frosted.
         --   * Duration "Colour by Time" — P4.4 SHIPPED: the duration text now colours by
         --     time via the native bucket formatter (C-side |c escapes), so the roadmap
         --     overlay is gone and the control is fully editable under the factory.
@@ -5182,7 +5173,6 @@ local GLOBAL_DEFAULTS_FALLBACK = {
     stackX = 2, stackY = -2,
     stackColor = {r = 1, g = 1, b = 1, a = 1},
     iconBorderEnabled = true, iconBorderThickness = 1,
-    stackMinimum = 2,
     hideSwipe = false, hideIcon = false,
 }
 

@@ -6294,12 +6294,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             onChange = function() DF:LightweightUpdateAuraStackText("buff") end,
             onDrag   = function() DF:LightweightUpdateAuraStackText("buff") end,
         })
-        local buffStackMin = stackCountGroup:AddWidget(GUI:CreateSlider(self.child, L["Min Stacks to Show"], 1, 10, 1, db, "buffStackMinimum", nil, function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 55)
-        -- 12.1: a stacks formatter is FORBIDDEN on container rows (it throws on the secret
-        -- combat stack count inside Blizzard's dirty pass and bricks the container — see the
-        -- Features/Auras.lua tombstone). Native display = counts > 1, so a custom minimum
-        -- is not expressible on the factory row.
-        GUI:BlockControl12_1(buffStackMin, "limitation", { id = "buffs:stackminimum", page = L["Buffs"], when = function(d) return DF:FactoryOwnsBuffRow(d) end })
+        -- (No "Min Stacks to Show": a stacks formatter is FORBIDDEN on container rows — it
+        -- throws on the secret combat stack count inside Blizzard's dirty pass and bricks
+        -- the container (see the Features/Auras.lua tombstone). Native display is
+        -- "counts > 1", so a custom minimum cannot be expressed; the setting is gone.)
         -- Grey the whole group when Buffs are off, matching Settings/Position/Grid.
         stackCountGroup.disableChildrenOn = function(d) return not d.showBuffs end
         AddToSection(stackCountGroup, nil, 2)
@@ -6618,8 +6616,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         stackCountGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -150, 150, 1, db, "debuffStackX", nil, function() DF:LightweightUpdateAuraStackText("debuff") end, true), 55)
         stackCountGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -150, 150, 1, db, "debuffStackY", nil, function() DF:LightweightUpdateAuraStackText("debuff") end, true), 55)
         stackCountGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Color"], db, "debuffStackColor", false, function() DF:LightweightUpdateAuraStackText("debuff") end, function() DF:LightweightUpdateAuraStackText("debuff") end, true), 30)
-        local debuffStackMin = stackCountGroup:AddWidget(GUI:CreateSlider(self.child, L["Min Stacks to Show"], 1, 10, 1, db, "debuffStackMinimum", nil), 55)
-        GUI:BlockControl12_1(debuffStackMin, "limitation", { id = "debuffs:stackminimum", page = L["Debuffs"], when = function(d) return DF:FactoryOwnsDebuffRow(d) end })
+        -- (No "Min Stacks to Show" — see the Buffs page for why it cannot exist on 12.1.)
         -- Grey the whole group when Debuffs are off, matching Settings/Position/Grid.
         stackCountGroup.disableChildrenOn = function(d) return not d.showDebuffs end
         AddToSection(stackCountGroup, nil, 1)
@@ -9042,9 +9039,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- unified overlay every appearance control simply follows the toggle.
         local HideDispelOptions = HideIfDisabled
 
-        -- 12.1: the container factory owns the overlay — the era frosts below
-        -- lift when it does (mirrors the Missing Buffs page's conditional lift).
-        local dispelFactoryOwns = DF.FactoryOwnsDispelOverlay and DF:FactoryOwnsDispelOverlay(db)
+        -- 12.1: the container factory owns the overlay unconditionally
+        -- (FactoryOwnsDispelOverlay == AuraContainer.IsSupported()), so the
+        -- Display/Icon/Border/Gradient groups are always live here. The legacy
+        -- "frost while the old path owns it" guards were unreachable and are gone.
 
         -- Every dispel-page callback funnels through here: the version bump
         -- breaks the 12.1 factory drive's fast-path latch, so structural changes
@@ -9126,7 +9124,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         GUI:BlockControl12_1(nameTextCheck, "roadmap", { id = "dispel:nametext", page = L["Dispel Overlay"] })
         displayGroup.hideOn = HideDispelOptions
         dfSection:RegisterChild(displayGroup)
-        if not dispelFactoryOwns then GUI:BlockControl12_1(displayGroup, "roadmap", { id = "dispel:display", page = L["Dispel Overlay"] }) end
         Add(displayGroup, nil, 1)
 
         -- ===== ICON GROUP (Column 2) =====
@@ -9170,7 +9167,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         iconOffsetY.disableOn = DisableIfNoIcon
         iconGroup.hideOn = HideDispelOptions
         dfSection:RegisterChild(iconGroup)
-        if not dispelFactoryOwns then GUI:BlockControl12_1(iconGroup, "roadmap", { id = "dispel:icon", page = L["Dispel Overlay"] }) end
         Add(iconGroup, nil, 2)
 
         -- ===== BORDER GROUP (Column 1) =====
@@ -9198,7 +9194,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         borderAlpha.disableOn = DisableIfNoBorder
         borderGroup.hideOn = HideDispelOptions   -- works in BOTH modes (game = ring slot)
         dfSection:RegisterChild(borderGroup)
-        if not dispelFactoryOwns then GUI:BlockControl12_1(borderGroup, "roadmap", { id = "dispel:border", page = L["Dispel Overlay"] }) end
         Add(borderGroup, nil, 1)
 
         -- ===== GRADIENT GROUP (Column 1) =====
@@ -9259,7 +9254,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end
         gradientGroup.hideOn = HideDispelOptions
         dfSection:RegisterChild(gradientGroup)
-        if not dispelFactoryOwns then GUI:BlockControl12_1(gradientGroup, "limitation", { id = "dispel:gradient", page = L["Dispel Overlay"] }) end
         Add(gradientGroup, nil, 1)
 
 
