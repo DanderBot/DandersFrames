@@ -4,13 +4,13 @@
 
 ### Bug Fixes
 
-* (Click Casting) **Fixed all binds being dead in the first arena/dungeon of a fresh session until a reload.** At the first login of a session, the per-spec profile auto-switch could run before the game had your specialization ready — and instead of waiting, it fell back to spec 1 and switched your click-casting to the wrong spec's profile for the rest of the session. The check now recognises when spec data isn't ready yet and re-runs automatically as soon as it arrives (and again at loading screens and arena preparation as a safety net); it is also deferred instead of skipped when it lands during combat. (by Krathe)
-* (Pinned Frames) Fixed a leftover pinned-frame handle (an empty "drag to move" box, often orange) that could stay stuck on screen and survive reloads. The confirmed trigger was switching to a profile with fewer pinned sets than the previous one — the extra set's frame was left behind with no way to hide it. The cleanup now enforces the full rule at every login, profile switch and party/raid change: any pinned frame that the active profile doesn't define, has disabled, or that belongs to the other mode is hidden — so a stuck box is cleaned up no matter how it got stranded. (by Krathe)
+* (Click Casting) Fixed all binds being dead in your first arena or dungeon of a session until a reload. (by Krathe)
+* (Pinned Frames) Fixed an empty "drag to move" box getting stuck on screen after a profile switch, surviving reloads. (by Krathe)
 
 ### Improvements
 
-* (Click Casting) Enabling a targeting fallback (Global, Target, Self or Always Cast) on a key that already does something in WoW now asks for confirmation and names exactly what the key will stop doing — these options make the key active everywhere, not just over the frames. The fallback tooltips explain this too.
-* (Click Casting) The "Clear Blizzard Bindings" button now warns that clearing is permanent, and it no longer silently re-clears Blizzard's click-casting profile every time click casting is enabled — clearing only happens when you press the button.
+* (Click Casting) Enabling a targeting fallback on a key that already does something now asks for confirmation and names what the key will stop doing.
+* (Click Casting) "Clear Blizzard Bindings" now warns that clearing is permanent, and only clears when you press it.
 
 ## [4.7.5]
 
