@@ -42,3 +42,6 @@ cache/
 .gitnexus/*
 !.gitnexus/wow-config.json
 !.gitnexus/wow-api.json
+
+# Working docs — local only, never published (plans, reviews, state-of-play).
+docs/
