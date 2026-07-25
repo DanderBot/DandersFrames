@@ -260,17 +260,6 @@ local function renameIconBorderKeys(t)
         if t.BorderInset == nil then t.BorderInset = t.borderInset end
         t.borderInset = nil
     end
-    -- Stage 5.1d.2: legacy expiringPulsate (boolean) → ExpiringAnimationType
-    -- (string).  expiringPulsate = true means the user wanted the AD legacy
-    -- alpha-fade pulse during expiring; that effect is now first-class as
-    -- DF_PULSATE.  False just clears the boolean — the new key defaults to
-    -- "NONE" which means no expiring animation override.
-    if t.expiringPulsate ~= nil then
-        if t.ExpiringAnimationType == nil and t.expiringPulsate == true then
-            t.ExpiringAnimationType = "DF_PULSATE"
-        end
-        t.expiringPulsate = nil
-    end
 end
 
 -- Square (Stage 5.2): border-key renames ONLY.  The square's enable key is
@@ -1095,11 +1084,7 @@ local function EnsureTypeConfig(auraName, typeKey, pool)
                 stackOutline = gd.stackOutline or "SHADOW;OUTLINE",
                 stackAnchor = "BOTTOMRIGHT",
                 stackX = 2, stackY = -2,
-                -- Expiring
-                expiringEnabled = false, expiringThreshold = 30, expiringThresholdMode = "PERCENT",
-                expiringColor = {r = 1, g = 0.2, b = 0.2, a = 1},
-                expiringWholeAlphaPulse = false, expiringBounce = false,
-            }
+                }
         elseif typeKey == "square" then
             auraCfg[typeKey] = {
                 -- Placement
@@ -1124,11 +1109,7 @@ local function EnsureTypeConfig(auraName, typeKey, pool)
                 stackOutline = gd.stackOutline or "SHADOW;OUTLINE",
                 stackAnchor = "BOTTOMRIGHT",
                 stackX = 2, stackY = -2,
-                -- Expiring
-                expiringEnabled = false, expiringThreshold = 30, expiringThresholdMode = "PERCENT",
-                expiringColor = {r = 1, g = 0.2, b = 0.2, a = 1},
-                expiringWholeAlphaPulse = false, expiringBounce = false,
-            }
+                }
         elseif typeKey == "bar" then
             auraCfg[typeKey] = {
                 -- Placement
@@ -1147,9 +1128,6 @@ local function EnsureTypeConfig(auraName, typeKey, pool)
                 alpha = 1.0,
                 -- Bar color by time
                 barColorByTime = false,
-                -- Expiring color
-                expiringEnabled = false, expiringThreshold = 30, expiringThresholdMode = "PERCENT",
-                expiringColor = {r = 1, g = 0.2, b = 0.2, a = 1},
                 -- Duration text
                 showDuration = true,
                 durationFont = gd.durationFont or "DF Roboto SemiBold",
@@ -1165,47 +1143,32 @@ local function EnsureTypeConfig(auraName, typeKey, pool)
                 ShowBorder = true, BorderStyle = "SOLID", BorderSize = 2, BorderInset = 0,
                 BorderColor = {r = 1, g = 1, b = 1, a = 1},
                 drawAboveFrameBorder = true,
-                expiringEnabled = false, expiringThreshold = 30, expiringThresholdMode = "PERCENT",
-                expiringColor = {r = 1, g = 0.2, b = 0.2, a = 1},
-                expiringPulsate = false,
                 showWhenMissing = false,
             }
         elseif typeKey == "healthbar" then
             auraCfg[typeKey] = {
                 mode = "Replace", color = {r = 1, g = 1, b = 1, a = 1}, blend = 0.5,
                 tintWholeBar = false,
-                expiringEnabled = false, expiringThreshold = 30, expiringThresholdMode = "PERCENT",
-                expiringColor = {r = 1, g = 0.2, b = 0.2, a = 1},
-                expiringPulsate = false,
                 showWhenMissing = false,
             }
         elseif typeKey == "background" then
             auraCfg[typeKey] = {
                 mode = "Tint", color = {r = 1, g = 1, b = 1, a = 1}, blend = 0.5,
-                expiringEnabled = false, expiringThreshold = 30, expiringThresholdMode = "PERCENT",
-                expiringColor = {r = 1, g = 0.2, b = 0.2, a = 1},
-                expiringPulsate = false,
                 showWhenMissing = false,
             }
         elseif typeKey == "nametext" then
             auraCfg[typeKey] = {
                 color = {r = 1, g = 1, b = 1, a = 1},
-                expiringEnabled = false, expiringThreshold = 30, expiringThresholdMode = "PERCENT",
-                expiringColor = {r = 1, g = 0.2, b = 0.2, a = 1},
                 showWhenMissing = false,
             }
         elseif typeKey == "healthtext" then
             auraCfg[typeKey] = {
                 color = {r = 1, g = 1, b = 1, a = 1},
-                expiringEnabled = false, expiringThreshold = 30, expiringThresholdMode = "PERCENT",
-                expiringColor = {r = 1, g = 0.2, b = 0.2, a = 1},
                 showWhenMissing = false,
             }
         elseif typeKey == "framealpha" then
             auraCfg[typeKey] = {
                 alpha = 0.5,
-                expiringEnabled = false, expiringThreshold = 30, expiringThresholdMode = "PERCENT",
-                expiringAlpha = 1.0,
                 showWhenMissing = false,
             }
         elseif typeKey == "sound" then
@@ -1310,38 +1273,21 @@ local TYPE_DEFAULTS = {
         stackOutline = "SHADOW;OUTLINE", stackAnchor = "BOTTOMRIGHT",
         stackX = 2, stackY = -2,
         stackColor = {r = 1, g = 1, b = 1, a = 1},
-        expiringEnabled = false, expiringThreshold = 30, expiringThresholdMode = "PERCENT",
-        expiringColor = {r = 1, g = 0.2, b = 0.2, a = 1},
         -- Expiring Tint overlay (secret-safe).  Default OFF, red — also feeds the
         -- colour picker's Default button via the proxy's __dfDefaults = TYPE_DEFAULTS.
-        expiringTintEnabled = false,
-        expiringTintColor = {r = 1, g = 0.2, b = 0.2, a = 0.5},  -- #FF3333 @ 50% (matches expiring border red)
-        expiringPulsate = false,  -- legacy; migrated to ExpiringAnimationType
+        -- #FF3333 @ 50% (matches expiring border red)
+        -- legacy; migrated to ExpiringAnimationType
         -- Master enable for the whole Expiring feature.  Default true so
         -- existing configs are unaffected; turning it OFF disables every
         -- expiring override (colour / thickness / alpha / animation / pulse /
         -- bounce) regardless of their individual settings, and hides the rest
         -- of the Expiring panel.
-        expiringFeatureEnabled = true,
         -- Stage 5.1d.2 + parity: full Border Animation effect set as the value
         -- the expiring callback swaps into spec.animation when remaining <
         -- threshold.  NONE = no animation override.  The expiring animation
         -- carries its OWN complete tunable set (colour, particles, thickness,
         -- offset, …) independent of the base Border Animation — mirrors the
         -- base defaults so the two panels read identically.
-        ExpiringAnimationType         = "NONE",
-        ExpiringAnimationColor        = {r = 0.95, g = 0.95, b = 0.32, a = 1},
-        ExpiringAnimationFrequency    = 1,
-        ExpiringAnimationParticles    = 8,
-        ExpiringAnimationLength       = 8,
-        ExpiringAnimationThickness    = 3,
-        ExpiringAnimationScale        = 1,
-        ExpiringAnimationInset        = 0,
-        ExpiringAnimationOffsetX      = 0,
-        ExpiringAnimationOffsetY      = 0,
-        ExpiringAnimationMask         = false,
-        ExpiringAnimationSidesAxis    = "HORIZONTAL",
-        ExpiringAnimationCornerLength = 10,
         -- Stage 5.1d.3: per-state thickness + alpha overrides.  Default to
         -- 1 / 1 — same thickness as the base (1) and slightly more opaque
         -- than the base alpha (0.8), so out of the box a user enabling
@@ -1350,9 +1296,6 @@ local TYPE_DEFAULTS = {
         -- higher / lower for stronger emphasis.  Only take effect when the
         -- expiring ticker is running (i.e. user has at least one expiring
         -- feature on — colour override, animation, alpha pulse, or bounce).
-        ExpiringBorderSize  = 1,
-        ExpiringBorderAlpha = 1,
-        expiringWholeAlphaPulse = false, expiringBounce = false,
         -- Duration bar strip (mirrors the buff/debuff rows + filter-group cards):
         -- a native SetDurationBar-driven strip under/over the icon. OFF by default;
         -- render fallbacks live in DF:BuildDurationBarSpec — these seed the editor.
@@ -1425,33 +1368,11 @@ local TYPE_DEFAULTS = {
         stackColor = {r = 1, g = 1, b = 1, a = 1},
         -- Master enable for the whole Expiring feature (Stage 5.2 — mirrors
         -- the icon).  Default true so existing configs are unaffected.
-        expiringFeatureEnabled = true,
-        expiringEnabled = false, expiringThreshold = 30, expiringThresholdMode = "PERCENT",
-        expiringColor = {r = 1, g = 0.2, b = 0.2, a = 1},
-        expiringTintEnabled = false,
-        expiringTintColor = {r = 1, g = 0.2, b = 0.2, a = 0.5},  -- #FF3333 @ 50% (matches expiring border red)
-        expiringPulsate = false,
+        -- #FF3333 @ 50% (matches expiring border red)
         -- Stage 5.2 expiring-border overrides (shared backend with the icon).
         -- ExpiringBorderColor is SEPARATE from the fill's expiringColor — the
         -- fill and border each get their own expiring tint.  Defaults to the
         -- same red so out of the box both "turn red", but they're independent.
-        ExpiringBorderColor = {r = 1, g = 0.2, b = 0.2, a = 1},
-        ExpiringBorderSize  = 1,
-        ExpiringBorderAlpha = 1,
-        ExpiringAnimationType         = "NONE",
-        ExpiringAnimationColor        = {r = 0.95, g = 0.95, b = 0.32, a = 1},
-        ExpiringAnimationFrequency    = 1,
-        ExpiringAnimationParticles    = 8,
-        ExpiringAnimationLength       = 8,
-        ExpiringAnimationThickness    = 3,
-        ExpiringAnimationScale        = 1,
-        ExpiringAnimationInset        = 0,
-        ExpiringAnimationOffsetX      = 0,
-        ExpiringAnimationOffsetY      = 0,
-        ExpiringAnimationMask         = false,
-        ExpiringAnimationSidesAxis    = "HORIZONTAL",
-        ExpiringAnimationCornerLength = 10,
-        expiringWholeAlphaPulse = false, expiringBounce = false,
         -- Duration bar strip (mirrors the icon card): a native SetDurationBar-driven
         -- strip under/over the square. OFF by default; render fallbacks live in
         -- DF:BuildDurationBarSpec — these seed the editor.
@@ -1503,10 +1424,7 @@ local TYPE_DEFAULTS = {
         BorderAnimationCornerLength = 10,
         alpha = 1.0,
         barColorByTime = false,
-        expiringEnabled = false, expiringThreshold = 5,
-        expiringColor = {r = 1, g = 0.2, b = 0.2, a = 1},
-        expiringTintEnabled = false,
-        expiringTintColor = {r = 1, g = 0.2, b = 0.2, a = 0.5},  -- #FF3333 @ 50% (matches expiring border red)
+        -- #FF3333 @ 50% (matches expiring border red)
         -- FALSE to match the factory's bar render default (buildDurationTextSpec is
         -- called with defaultShow = false for bars — no text out of the box). It was
         -- `true` here, so a never-toggled bar showed a TICKED checkbox while rendering
@@ -1565,58 +1483,27 @@ local TYPE_DEFAULTS = {
         -- Draw above the frame's class border (parent+10) / aggro (parent+9).
         drawAboveFrameBorder = true,
         -- Expiring-border overrides (Stage 5.4 parity with icon/square).
-        expiringFeatureEnabled = true,
-        expiringEnabled = false, expiringThreshold = 30, expiringThresholdMode = "PERCENT",
-        expiringColor = {r = 1, g = 0.2, b = 0.2, a = 1},
-        expiringPulsate = false,
-        ExpiringBorderSize  = 2,
-        ExpiringBorderAlpha = 1,
-        ExpiringAnimationType         = "NONE",
-        ExpiringAnimationColor        = {r = 0.95, g = 0.95, b = 0.32, a = 1},
-        ExpiringAnimationFrequency    = 1,
-        ExpiringAnimationParticles    = 8,
-        ExpiringAnimationLength       = 8,
-        ExpiringAnimationThickness    = 3,
-        ExpiringAnimationScale        = 1,
-        ExpiringAnimationInset        = 0,
-        ExpiringAnimationOffsetX      = 0,
-        ExpiringAnimationOffsetY      = 0,
-        ExpiringAnimationMask         = false,
-        ExpiringAnimationSidesAxis    = "HORIZONTAL",
-        ExpiringAnimationCornerLength = 10,
         showWhenMissing = false,
     },
     healthbar = {
         mode = "Replace", color = {r = 1, g = 1, b = 1, a = 1}, blend = 0.5,
         tintWholeBar = false,
-        expiringEnabled = false, expiringThreshold = 30, expiringThresholdMode = "PERCENT",
-        expiringColor = {r = 1, g = 0.2, b = 0.2, a = 1},
-        expiringPulsate = false,
         showWhenMissing = false,
     },
     background = {
         mode = "Tint", color = {r = 1, g = 1, b = 1, a = 1}, blend = 0.5,
-        expiringEnabled = false, expiringThreshold = 30, expiringThresholdMode = "PERCENT",
-        expiringColor = {r = 1, g = 0.2, b = 0.2, a = 1},
-        expiringPulsate = false,
         showWhenMissing = false,
     },
     nametext = {
         color = {r = 1, g = 1, b = 1, a = 1},
-        expiringEnabled = false, expiringThreshold = 30, expiringThresholdMode = "PERCENT",
-        expiringColor = {r = 1, g = 0.2, b = 0.2, a = 1},
         showWhenMissing = false,
     },
     healthtext = {
         color = {r = 1, g = 1, b = 1, a = 1},
-        expiringEnabled = false, expiringThreshold = 30, expiringThresholdMode = "PERCENT",
-        expiringColor = {r = 1, g = 0.2, b = 0.2, a = 1},
         showWhenMissing = false,
     },
     framealpha = {
         alpha = 0.5,
-        expiringEnabled = false, expiringThreshold = 30, expiringThresholdMode = "PERCENT",
-        expiringAlpha = 1.0,
         showWhenMissing = false,
     },
 }
@@ -3221,7 +3108,6 @@ local function RefreshPlacedIndicators()
         end
     end
 
-
     -- Build layout group position lookup for preview
     -- In preview all indicators are visible, so compute positions for all members.
     -- The preview renders the ACTIVE tab's pool, so the group pass reads the
@@ -3657,88 +3543,6 @@ end
 -- (Tile strip removed in v4 redesign)
 -- ============================================================
 
--- Build the widget content for a given indicator type
--- optProxy: optional proxy table; if nil, creates one via CreateProxy (frame-level types)
--- yOffset: optional vertical offset to start content below other elements (e.g. trigger tags)
--- Helper: the shared expiring threshold row (slider + s / % segment toggle above its
--- value box). Delegates to GUI:CreateExpiringThresholdRow -- this used to be a verbatim
--- copy of it, so the two drifted apart in look. Defaults match what the copy hard-coded:
--- captions "Expiring Threshold (seconds/%)", ranges 1-60 step 1 / 5-100 step 5, and the
--- 10 / 30 reset when the single stored value is reinterpreted between units.
-local function CreateExpiringThresholdRow(parent, proxy, width)
-    return GUI:CreateExpiringThresholdRow(parent, proxy, {
-        thresholdKey     = "expiringThreshold",
-        thresholdModeKey = "expiringThresholdMode",
-        width            = width or 248,
-        refreshPage      = function() DF:AuraDesigner_RefreshPage() end,
-    })
-end
-
--- Duration priority toggle + secret aura warning for frame-level expiring indicators
--- Only shown when there are 2+ triggers on the effect
-local function CreateExpiringDurationPriorityRow(parent, auraName, typeKey, width)
-    local auraCfg = CurrentAuraPool()[auraName]
-    local typeCfg = auraCfg and auraCfg[typeKey]
-    local triggers = typeCfg and typeCfg.triggers
-    if not triggers or #triggers < 2 then return nil, 0 end
-
-    local container = CreateFrame("Frame", nil, parent)
-    container:SetWidth(width or 248)
-    local totalH = 0
-
-    -- Duration priority toggle: Lowest / Highest
-    local isHighest = typeCfg.triggerDurationPriority == "HIGHEST"
-
-    local durBtn = CreateFrame("Button", nil, container, "BackdropTemplate")
-    durBtn:SetHeight(18)
-    durBtn:SetPoint("TOPLEFT", 0, 0)
-
-    local durText = durBtn:CreateFontString(nil, "OVERLAY")
-    GUI:SetSettingsFont(durText, 9, "")
-    durText:SetPoint("CENTER", 0, 0)
-    durText:SetText(isHighest and L["Track Highest Duration"] or L["Track Lowest Duration"])
-    durText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-
-    local durW = durText:GetStringWidth() + 16
-    if durW < 80 then durW = 80 end
-    durBtn:SetWidth(durW)
-    -- Shared styler (rest + accent-wash hover). Two-state toggle; mark active
-    -- when tracking Highest so the engaged state reads via the accent border
-    -- (page rebuilds on click).
-    GUI:StyleButton(durBtn)
-    durBtn:SetActive(isHighest)
-
-    durBtn:HookScript("OnEnter", function(self)
-        GUI:ShowTooltip(self, {
-            title = isHighest and L["Using highest duration trigger"] or L["Using lowest duration trigger"],
-            lines = {
-                isHighest and L["Expiring indicator tracks the trigger with the most time remaining."]
-                    or L["Expiring indicator tracks the trigger with the least time remaining."],
-                { text = L["Click to toggle"], hint = true },
-            },
-        })
-    end)
-    durBtn:HookScript("OnLeave", function()
-        GUI:HideTooltip()
-    end)
-    durBtn:SetScript("OnClick", function()
-        local cfg = CurrentAuraPool()[auraName]
-        local tc = cfg and cfg[typeKey]
-        if tc then
-            if tc.triggerDurationPriority == "HIGHEST" then
-                tc.triggerDurationPriority = nil  -- LOWEST is default
-            else
-                tc.triggerDurationPriority = "HIGHEST"
-            end
-            DF:AuraDesigner_RefreshPage()
-        end
-    end)
-    totalH = totalH + 22
-
-
-    container:SetHeight(totalH)
-    return container, totalH
-end
 
 -- layoutGroup: optional layout group table; if set, anchor/offset controls are replaced with a note
 -- indicatorID: optional indicator ID for placed indicators (used by Copy From)
@@ -3756,10 +3560,10 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
     -- end of BuildTypeContent can frost the effect-settings groups the factory
     -- can't (yet) drive, WITHOUT touching the trigger tags above (built into
     -- `parent` before this function runs — the working "which aura" layer).
-    -- expiringGroup / swmCheck / borderCtl are captured for the surgical blocks
-    -- (Expiring, Show When Missing, gradient border style). See block pass below.
+    -- swmCheck / borderCtl are captured for the surgical blocks (Show When Missing,
+    -- gradient border style). See block pass below.
     local builtGroups = {}
-    local expiringGroup, swmCheck, borderCtl, wholeBarCheck, swmGroup, durColorByTimeCtl
+    local swmCheck, borderCtl, wholeBarCheck, swmGroup, durColorByTimeCtl
     local missingTriggerGroup, expireAlertGroup   -- sound casualties (P4.5 limitation blocks)
 
     local function AddWidget(widget, height)
@@ -3809,7 +3613,6 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- P4.7: track every effect-settings group so the 12.1 block pass can
         -- frost them per-type. Tag the Expiring group for its own limitation block.
         builtGroups[#builtGroups + 1] = group
-        if header == L["Expiring"] then expiringGroup = group end
         if header == L["Show When Missing"] then swmGroup = group end
         if header == L["Missing Trigger"] then missingTriggerGroup = group end
         if header == L["Expire Alert"] then expireAlertGroup = group end
@@ -3970,86 +3773,6 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         end)
     end
 
-    -- Shared Expiring "State Overrides" panel for the BORDERED placed indicators
-    -- (icon / square / bar).  These three blocks were near-identical; this
-    -- collapses them to one builder parameterised by the few real differences
-    -- (opts): dualColor (square's separate fill+border colours), alphaHandleKey
-    -- (which colour's alpha the slider edits), thicknessMax, durationPriority
-    -- (bar), and iconEffects {fillPulsate, wholeAlpha, bounce}.  The master
-    -- enable, threshold row, State-Overrides rows, and the shared
-    -- CreateAnimationControls block are identical across all three.
-    -- (healthbar's Expiring is a different, border-less panel — not built here.)
-    -- AD's Expiring panel now renders through the SHARED GUI:CreateExpiringControls
-    -- (the same helper the standard buff aura icons use) — AD's design IS the
-    -- reference, so this is a thin adapter mapping AD's proxy keys + per-type
-    -- options (dualColor, alphaHandleKey, thicknessMax, durationPriority,
-    -- iconEffects) onto the shared helper.  RPL = repaint; AuraDesigner_RefreshPage
-    -- = full rebuild (threshold-mode toggle needs it).
-    local function AddExpiringBorderGroup(opts)
-        opts = opts or {}
-        -- Text-only mode hides the icon texture, so the border-specific expiring
-        -- controls are hidden. Scoped to the ICON type only — squares/bars are
-        -- unaffected (this border-visibility change is icon-only by design).
-        local iconTextOnly = (typeKey == "icon") and proxy.hideIcon
-        AddGroup(L["Expiring"], function(g)
-            GUI:CreateExpiringControls(g, proxy, {
-                parent        = parent,
-                width         = contentWidth - 10,
-                masterLabel   = L["Enable Expiring"],
-                fullUpdate    = RPL,
-                lightColors   = RPL,
-                lightGeometry = RPL,
-                refreshStates = function()
-                    g:LayoutChildren()
-                    if parent.dfAD_ReflowWidgets then parent.dfAD_ReflowWidgets() end
-                end,
-                refreshPage   = function() DF:AuraDesigner_RefreshPage() end,
-                afterThreshold = opts.durationPriority and function(addGated)
-                    local dpRow, dpH = CreateExpiringDurationPriorityRow(parent, auraName, typeKey, contentWidth - 10)
-                    if dpRow then addGated(dpRow, dpH) end
-                end or nil,
-                keys = {
-                    master           = "expiringFeatureEnabled",
-                    threshold        = "expiringThreshold",
-                    thresholdMode    = "expiringThresholdMode",
-                    colorOverride    = "expiringEnabled",
-                    color            = "expiringColor",
-                    borderColor      = "ExpiringBorderColor",
-                    alphaHandleColor = opts.alphaHandleKey or "expiringColor",
-                    thickness        = "ExpiringBorderSize",
-                    animPrefix       = "ExpiringAnimation",
-                    fillPulsate      = "expiringPulsate",
-                    wholeAlpha       = "expiringWholeAlphaPulse",
-                    bounce           = "expiringBounce",
-                    tintEnable       = "expiringTintEnabled",
-                    tintColor        = "expiringTintColor",
-                },
-                include = {
-                    threshold     = true,
-                    -- Border-specific expiring overrides (colour override + its
-                    -- border colour/alpha, and thickness) are hidden for a
-                    -- text-only ICON, which draws no border. Threshold, animation,
-                    -- tint and the whole-frame icon effects still apply. Squares
-                    -- and bars are never gated here (iconTextOnly is icon-only),
-                    -- so their controls always stay on.
-                    colorOverride = not iconTextOnly,
-                    dualColor     = opts.dualColor,
-                    alpha         = not iconTextOnly,
-                    thickness     = not iconTextOnly, thicknessMin = 0, thicknessMax = opts.thicknessMax or 5,
-                    -- Animation rides the border, which a text-only icon doesn't
-                    -- draw, so hide it there too (no border = nowhere to attach).
-                    animation     = not iconTextOnly,
-                    iconEffects   = opts.iconEffects,
-                    -- secret-safe; works on all auras. Opt out via opts.tint=false
-                    -- for indicator types whose render can't apply a tint (e.g. the
-                    -- border type draws no fill, so SetupExpiringTint is never called).
-                    tint          = (opts.tint ~= false),
-                },
-                lightTint = RPL,
-            })
-        end)
-    end
-
     if typeKey == "icon" then
         -- Position
         AddGroup(L["Position"], function(g)
@@ -4170,10 +3893,6 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- them adjacent reads more naturally than burying Expiring at the
         -- bottom of the panel.)
         -- Icon: single Expiring Colour, Whole Alpha Pulse + Bounce effects.
-        AddExpiringBorderGroup({
-            thicknessMax = 5,
-            iconEffects = { wholeAlpha = true, bounce = true },
-        })
         -- Duration Text
         AddGroup(L["Duration Text"], function(g)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Show Duration"], proxy, "showDuration"), 28)
@@ -4305,12 +4024,6 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- reads more naturally than burying Expiring at the bottom.)
         -- Square: separate fill + border Expiring colours (alpha handle edits the
         -- BORDER colour); Fill Pulsate + Whole Alpha Pulse + Bounce effects.
-        AddExpiringBorderGroup({
-            thicknessMax = 5,
-            dualColor = true,
-            alphaHandleKey = "ExpiringBorderColor",
-            iconEffects = { fillPulsate = true, wholeAlpha = true, bounce = true },
-        })
         -- Duration Text
         AddGroup(L["Duration Text"], function(g)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Show Duration"], proxy, "showDuration"), 28)
@@ -4460,37 +4173,6 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 sizeMin = 1, sizeMax = 5, sizeStep = 1,
             })
         end)
-        -- Expiring
-        AddGroup(L["Expiring"], function(g)
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Color by Time Remaining"], proxy, "barColorByTime"), 28)
-            -- Expiring Color Override gates the Expiring Color picker; grey it when off.
-            local expColorPicker
-            local function UpdateExpColorGrey()
-                if not expColorPicker then return end
-                expColorPicker:SetEnabled(proxy.expiringEnabled and true or false)
-            end
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Expiring Color Override"], proxy, "expiringEnabled", UpdateExpColorGrey), 28)
-            g:AddWidget(CreateExpiringThresholdRow(parent, proxy, contentWidth - 10), 54)
-            expColorPicker = GUI:CreateColorPicker(parent, L["Expiring Color"], proxy, "expiringColor", true, RPL, RPL, true)
-            g:AddWidget(expColorPicker, 28)
-            -- Expiring tint overlay: the bar render (ConfigureBar/UpdateBar) is fully
-            -- wired for these keys via SetupExpiringTint, but the hand-built bar group
-            -- never exposed them. Surface them so the wired feature is reachable.
-            -- Show Expiring Tint gates the Tint Color picker; grey it when off.
-            local tintColorPicker
-            local function UpdateTintColorGrey()
-                if not tintColorPicker then return end
-                tintColorPicker:SetEnabled(proxy.expiringTintEnabled and true or false)
-            end
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Show Expiring Tint"], proxy, "expiringTintEnabled", function()
-                UpdateTintColorGrey()
-                RPL()
-            end), 28)
-            tintColorPicker = GUI:CreateColorPicker(parent, L["Tint Color"], proxy, "expiringTintColor", true, RPL, RPL, true)
-            g:AddWidget(tintColorPicker, 28)
-            UpdateExpColorGrey()
-            UpdateTintColorGrey()
-        end)
         -- Duration Text
         AddGroup(L["Duration Text"], function(g)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Show Duration"], proxy, "showDuration"), 28)
@@ -4620,11 +4302,6 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- The border type draws no fill, so the expiring "tint" overlay has nothing
         -- to tint and ApplyBorderToOverlay never calls SetupExpiringTint — hide the
         -- otherwise-dead "Show Expiring Tint" / "Tint Color" controls for this type.
-        AddExpiringBorderGroup({
-            thicknessMax = 8,
-            durationPriority = true,
-            tint = false,
-        })
 
     elseif typeKey == "healthbar" then
         -- Appearance
@@ -4652,26 +4329,6 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             end)
             g:AddWidget(swmCheck, 28)
         end)
-        -- Expiring
-        AddGroup(L["Expiring"], function(g)
-            -- Expiring Color Override gates the Expiring Color picker + Pulsate;
-            -- grey them when off.
-            local expColorPicker, pulsateCheck
-            local function UpdateExpGrey()
-                local on = proxy.expiringEnabled and true or false
-                if expColorPicker then expColorPicker:SetEnabled(on) end
-                if pulsateCheck then pulsateCheck:SetEnabled(on) end
-            end
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Expiring Color Override"], proxy, "expiringEnabled", UpdateExpGrey), 28)
-            g:AddWidget(CreateExpiringThresholdRow(parent, proxy, contentWidth - 10), 54)
-            do local dpRow, dpH = CreateExpiringDurationPriorityRow(parent, auraName, typeKey, contentWidth - 10)
-            if dpRow then g:AddWidget(dpRow, dpH) end end
-            expColorPicker = GUI:CreateColorPicker(parent, L["Expiring Color"], proxy, "expiringColor", true, RPL, RPL, true)
-            g:AddWidget(expColorPicker, 28)
-            pulsateCheck = GUI:CreateCheckbox(parent, L["Pulsate"], proxy, "expiringPulsate")
-            g:AddWidget(pulsateCheck, 24)
-            UpdateExpGrey()
-        end)
 
     elseif typeKey == "background" then
         -- Appearance — mirrors Health Bar Color. A colour overlay over the frame
@@ -4690,26 +4347,6 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             end)
             g:AddWidget(swmCheck, 28)
         end)
-        -- Expiring
-        AddGroup(L["Expiring"], function(g)
-            -- Expiring Color Override gates the Expiring Color picker + Pulsate;
-            -- grey them when off.
-            local expColorPicker, pulsateCheck
-            local function UpdateExpGrey()
-                local on = proxy.expiringEnabled and true or false
-                if expColorPicker then expColorPicker:SetEnabled(on) end
-                if pulsateCheck then pulsateCheck:SetEnabled(on) end
-            end
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Expiring Color Override"], proxy, "expiringEnabled", UpdateExpGrey), 28)
-            g:AddWidget(CreateExpiringThresholdRow(parent, proxy, contentWidth - 10), 54)
-            do local dpRow, dpH = CreateExpiringDurationPriorityRow(parent, auraName, typeKey, contentWidth - 10)
-            if dpRow then g:AddWidget(dpRow, dpH) end end
-            expColorPicker = GUI:CreateColorPicker(parent, L["Expiring Color"], proxy, "expiringColor", true, RPL, RPL, true)
-            g:AddWidget(expColorPicker, 28)
-            pulsateCheck = GUI:CreateCheckbox(parent, L["Pulsate"], proxy, "expiringPulsate")
-            g:AddWidget(pulsateCheck, 24)
-            UpdateExpGrey()
-        end)
 
     elseif typeKey == "nametext" then
         -- Appearance
@@ -4719,21 +4356,6 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 DF.AuraDesigner.Engine:ForceRefreshAllFrames()
             end)
             g:AddWidget(swmCheck, 28)
-        end)
-        -- Expiring
-        AddGroup(L["Expiring"], function(g)
-            -- Expiring Color Override gates the Expiring Color picker; grey it when off.
-            local expColorPicker
-            local function UpdateExpColorGrey()
-                if expColorPicker then expColorPicker:SetEnabled(proxy.expiringEnabled and true or false) end
-            end
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Expiring Color Override"], proxy, "expiringEnabled", UpdateExpColorGrey), 28)
-            g:AddWidget(CreateExpiringThresholdRow(parent, proxy, contentWidth - 10), 54)
-            do local dpRow, dpH = CreateExpiringDurationPriorityRow(parent, auraName, typeKey, contentWidth - 10)
-            if dpRow then g:AddWidget(dpRow, dpH) end end
-            expColorPicker = GUI:CreateColorPicker(parent, L["Expiring Color"], proxy, "expiringColor", true, RPL, RPL, true)
-            g:AddWidget(expColorPicker, 28)
-            UpdateExpColorGrey()
         end)
 
     elseif typeKey == "healthtext" then
@@ -4745,21 +4367,6 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             end)
             g:AddWidget(swmCheck, 28)
         end)
-        -- Expiring
-        AddGroup(L["Expiring"], function(g)
-            -- Expiring Color Override gates the Expiring Color picker; grey it when off.
-            local expColorPicker
-            local function UpdateExpColorGrey()
-                if expColorPicker then expColorPicker:SetEnabled(proxy.expiringEnabled and true or false) end
-            end
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Expiring Color Override"], proxy, "expiringEnabled", UpdateExpColorGrey), 28)
-            g:AddWidget(CreateExpiringThresholdRow(parent, proxy, contentWidth - 10), 54)
-            do local dpRow, dpH = CreateExpiringDurationPriorityRow(parent, auraName, typeKey, contentWidth - 10)
-            if dpRow then g:AddWidget(dpRow, dpH) end end
-            expColorPicker = GUI:CreateColorPicker(parent, L["Expiring Color"], proxy, "expiringColor", true, RPL, RPL, true)
-            g:AddWidget(expColorPicker, 28)
-            UpdateExpColorGrey()
-        end)
 
     elseif typeKey == "framealpha" then
         -- Appearance
@@ -4768,21 +4375,6 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateCheckbox(parent, L["Show When Missing"], proxy, "showWhenMissing", function()
                 DF.AuraDesigner.Engine:ForceRefreshAllFrames()
             end), 28)
-        end)
-        -- Expiring
-        AddGroup(L["Expiring"], function(g)
-            -- Expiring Alpha Override gates the Expiring Alpha slider; grey it when off.
-            local expAlphaSlider
-            local function UpdateExpAlphaGrey()
-                if expAlphaSlider then expAlphaSlider:SetEnabled(proxy.expiringEnabled and true or false) end
-            end
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Expiring Alpha Override"], proxy, "expiringEnabled", UpdateExpAlphaGrey), 28)
-            g:AddWidget(CreateExpiringThresholdRow(parent, proxy, contentWidth - 10), 54)
-            do local dpRow, dpH = CreateExpiringDurationPriorityRow(parent, auraName, typeKey, contentWidth - 10)
-            if dpRow then g:AddWidget(dpRow, dpH) end end
-            expAlphaSlider = GUI:CreateSlider(parent, L["Expiring Alpha"], 0, 1, 0.05, proxy, "expiringAlpha")
-            g:AddWidget(expAlphaSlider, 54)
-            UpdateExpAlphaGrey()
         end)
 
     elseif typeKey == "sound" then
@@ -5053,13 +4645,9 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- the read-free missing-mode container (static spell icon / colour square while absent).
         -- The whole-type roadmap and the Show-When-Missing roadmap overlays are gone. Two
         -- surgical blocks remain:
-        --   * Expiring — permanent limitation. The whole group (Expiring Colour Override /
-        --     colour-swap, pulse / bounce / whole-alpha-pulse, threshold, duration priority)
-        --     is remaining-time-driven, which is unreadable on the container path.
-        if expiringGroup then
-            GUI:BlockControl12_1(expiringGroup, "limitation",
-                { id = "ad:" .. typeKey .. ":expiring", page = L["Aura Designer"], when = ADgate })
-        end
+        --   * Expiring -- REMOVED 2026-07-25. The whole group was remaining-time-driven,
+        --     unreadable on the container path, so it is gone rather than frosted. The
+        --     12.1-safe replacement is the DF.Expiration engine (the Expiry Alert group).
         --   * Min Stacks to Show — REMOVED 2026-07-25 (was a permanent limitation, then a
         --     confirmed no-op). Stack counts render on the native no-formatter path (a
         --     formatter would receive the SECRET application count and trap — see
@@ -5073,15 +4661,9 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- P4.4 SHIPPED: the bar renders on the container engine (native SetDurationBar fill
         -- + texture/colour/orientation + border + duration text). The whole-type roadmap
         -- overlay is gone. One surgical block remains:
-        --   * Expiring — permanent limitation. The whole group (Bar "Color by Time"/FILL
-        --     colour-by-time, Expiring Colour Override, Expiring Tint, threshold) is
-        --     remaining-time-driven, which is unreadable on the container path. (The
-        --     DURATION-TEXT colour-by-time lives in the separate Duration Text group and
-        --     stays editable — it ports via the bucket formatter, same as icon/square.)
-        if expiringGroup then
-            GUI:BlockControl12_1(expiringGroup, "limitation",
-                { id = "ad:bar:expiring", page = L["Aura Designer"], when = ADgate })
-        end
+        --   * Expiring -- REMOVED 2026-07-25. The whole group was remaining-time-driven,
+        --     unreadable on the container path, so it is gone rather than frosted. The
+        --     12.1-safe replacement is the DF.Expiration engine (the Expiry Alert group).
     elseif typeKey == "sound" then
         -- P4.5 SHIPPED: the sound indicator plays natively ON APPLY via
         -- C_UnitAuras.AddAuraAppliedSound (read-free, on-apply only). The whole-type roadmap
@@ -5116,21 +4698,15 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             GUI:BlockControl12_1(swmCheck, "limitation",
                 { id = "ad:" .. typeKey .. ":swm", page = L["Aura Designer"], when = ADgate })
         end
-        --   * Expiring — permanent limitation (the colour swap near expiry needs
-        --     remaining-time, unreadable on the container path).
-        if expiringGroup then
-            GUI:BlockControl12_1(expiringGroup, "limitation",
-                { id = "ad:" .. typeKey .. ":expiring", page = L["Aura Designer"], when = ADgate })
-        end
+        --   * Expiring -- REMOVED 2026-07-25. The whole group was remaining-time-driven,
+        --     unreadable on the container path, so it is gone rather than frosted. The
+        --     12.1-safe replacement is the DF.Expiration engine (the Expiry Alert group).
     elseif typeKey == "healthbar" or typeKey == "background" or typeKey == "border" then
         -- Base effect settings (colour / mode / style) work on the container
         -- engine. Two surgical blocks on top:
-        --   * Expiring — permanent limitation (near-expiry pulse / colour-swap /
-        --     alpha ramp all need remaining-time, impossible read-free).
-        if expiringGroup then
-            GUI:BlockControl12_1(expiringGroup, "limitation",
-                { id = "ad:" .. typeKey .. ":expiring", page = L["Aura Designer"], when = ADgate })
-        end
+        --   * Expiring -- REMOVED 2026-07-25. The whole group was remaining-time-driven,
+        --     unreadable on the container path, so it is gone rather than frosted. The
+        --     12.1-safe replacement is the DF.Expiration engine (the Expiry Alert group).
         --   * Show When Missing — P4.5 SHIPPED: the effect now renders via the read-free
         --     missing-mode container (tint / ring shown while the buff is absent), so the
         --     roadmap overlay is gone and the checkbox is fully editable under the factory.
@@ -5662,8 +5238,6 @@ local function CreateSpecDropdown(parent)
     return specDrop, UpdateSpecText
 end
 
-
-
 -- ============================================================
 -- FRAME PREVIEW
 -- Mock unit frame with health bar, power bar, name, health %,
@@ -5952,7 +5526,6 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef)
 
     return container
 end
-
 
 -- ============================================================
 -- TAB SYSTEM, SPELL PICKER & EFFECT CARDS (v4 redesign)
@@ -6494,7 +6067,6 @@ local function OpenGroupSpellPicker(groupID)
         end,
     })
 end
-
 
 -- ── CREATE EFFECT CARD ──
 -- Creates a collapsible card for one effect in the effects list.
