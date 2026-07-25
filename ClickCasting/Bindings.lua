@@ -2418,10 +2418,9 @@ end
 -- Returns: { [keyString] = { macroText = "...", templateBinding = binding } }
 -- Re-resolve click-casting state once cold-start data becomes available.
 -- CheckLoadoutProfileSwitch can run before GetSpecialization() resolves at the
--- first login of a session; GetCurrentSpec()'s `or 1` fallback would then MASK
--- the missing data and switch to spec 1's profile — the wrong profile for
--- anyone playing spec 2+, and it stayed wrong all day until a /reload ("none of
--- my binds work in my first arena of the day"). The check records
+-- first login of a session. Picking a profile off an unknown spec sent spec-2+
+-- players to spec 1's profile, and it stayed wrong all day until a /reload
+-- ("none of my binds work in my first arena of the day"). The check now records
 -- loadoutCheckUnresolved instead of guessing, and this resolver re-runs it once
 -- real spec data arrives.
 --
