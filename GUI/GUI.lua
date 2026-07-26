@@ -1398,6 +1398,14 @@ INFO_BANNER_TONES.warning = INFO_BANNER_TONES.caution
 -- info/caution/danger/success language as the banners instead of an ad-hoc colour.
 -- Uses the tone's dedicated inline `accent` (NOT the banner iconColor, which is
 -- tuned to sit on the banner's own bg and would make danger paler than caution).
+-- The {r, g, b} behind a tone name, for callers that set a colour directly
+-- rather than embedding inline markup. Same resolution order as ToneHex, so a
+-- toned title and toned inline text always match.
+function GUI:GetToneColor(toneName)
+    local t = INFO_BANNER_TONES[toneName] or INFO_BANNER_TONES.caution
+    return t.accent or t.iconColor or t.textColor or {1, 1, 1}
+end
+
 function GUI:ToneHex(toneName)
     local t = INFO_BANNER_TONES[toneName] or INFO_BANNER_TONES.caution
     local c = t.accent or t.iconColor or t.textColor or {1, 1, 1}
@@ -2817,61 +2825,55 @@ end
 -- Returns the bar frame; call bar:Refresh() to resync.
 -- ============================================================
 
--- One reusable name-input popup (callback + default passed via `data`).
--- Structural dialog definitions; per-call handlers are assigned in the launchers
--- below (closures capturing default/callback) — the StaticPopup `data` field and
--- the editbox field name both vary across client versions, so we avoid relying
--- on them. The editbox is `self.EditBox` on current retail (12.0 GameDialog).
-StaticPopupDialogs["DANDERSFRAMES_PRESET_NAME"] = {
-    text = "%s",
-    button1 = ACCEPT or "Accept",
-    button2 = CANCEL or "Cancel",
-    hasEditBox = true,
-    editBoxWidth = 220,
-    maxLetters = 40,
-    EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
-    timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
-}
+-- The addon's ONE name prompt. This was hand-rolled twice against Blizzard's
+-- StaticPopup edit box — here and in the Filter Designer — each copy carrying
+-- the same `self.EditBox or self.editBox or self:GetEditBox()` fallback for a
+-- field name that moves between client versions. Both now come through here and
+-- get DF chrome, so there is nothing left to keep in step.
+-- opts = { title, message, default, acceptLabel, maxLetters, onAccept(text) }
+function GUI:PromptName(opts)
+    opts = opts or {}
+    DF:ShowPopupInput({
+        title       = opts.title,
+        message     = opts.message,
+        text        = opts.default or "",
+        acceptLabel = opts.acceptLabel,
+        maxLetters  = opts.maxLetters or 40,
+        onAccept    = function(text)
+            -- Trim here so every caller's uniqueness check and empty-name
+            -- fallback sees the same thing.
+            if opts.onAccept then opts.onAccept(strtrim(text or "")) end
+        end,
+    })
+end
 
-StaticPopupDialogs["DANDERSFRAMES_PRESET_DELETE"] = {
-    text = "%s",
-    button1 = DELETE or "Delete",
-    button2 = CANCEL or "Cancel",
-    timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
-}
-
-local function PromptPresetName(titleText, default, callback)
-    local dialog = StaticPopupDialogs["DANDERSFRAMES_PRESET_NAME"]
-    dialog.OnShow = function(self)
-        local eb = self.EditBox or self.editBox or (self.GetEditBox and self:GetEditBox())
-        if eb then
-            eb:SetText(default or "")
-            eb:HighlightText()
-            eb:SetFocus()
-        end
-    end
-    dialog.OnAccept = function(self)
-        local eb = self.EditBox or self.editBox or (self.GetEditBox and self:GetEditBox())
-        if callback and eb then callback(eb:GetText()) end
-    end
-    dialog.EditBoxOnEnterPressed = function(self)
-        if callback then callback(self:GetText()) end
-        local p = self:GetParent()
-        if p then p:Hide() end
-    end
-    StaticPopup_Show("DANDERSFRAMES_PRESET_NAME", titleText)
+local function PromptPresetName(message, default, acceptLabel, callback)
+    GUI:PromptName({
+        title       = L["Preset Name"],
+        message     = message,
+        default     = default,
+        acceptLabel = acceptLabel,
+        onAccept    = callback,
+    })
 end
 
 local function ConfirmDeletePreset(kind, name, onDone)
-    local dialog = StaticPopupDialogs["DANDERSFRAMES_PRESET_DELETE"]
-    dialog.OnAccept = function()
-        if DF.DeleteDesignerPreset then
-            DF:DeleteDesignerPreset(kind, name)
-            if onDone then onDone() end
-        end
-    end
-    StaticPopup_Show("DANDERSFRAMES_PRESET_DELETE",
-        format(L["Delete preset \"%s\"? Anything using it reverts to Default."], name))
+    DF:ShowPopupAlert({
+        title   = L["Delete Preset"],
+        message = format(L["Delete preset \"%s\"? Anything using it reverts to Default."], name),
+        buttons = {
+            {
+                label = L["Delete"],
+                onClick = function()
+                    if DF.DeleteDesignerPreset then
+                        DF:DeleteDesignerPreset(kind, name)
+                        if onDone then onDone() end
+                    end
+                end,
+            },
+            { label = L["Cancel"] },
+        },
+    })
 end
 
 function GUI:CreateDesignerPresetBar(parent, opts)
@@ -3068,7 +3070,7 @@ function GUI:CreateDesignerPresetBar(parent, opts)
     end
 
     local newBtn = CreateAction(L["New"], "add", 48, function()
-        PromptPresetName(L["Name the new preset:"], EditingLayoutName() or "", function(text)
+        PromptPresetName(L["Name the new preset:"], EditingLayoutName() or "", L["Create"], function(text)
             local n = DF:CreateDesignerPreset(kind, text)
             if n then
                 DF:SetModeDesignerPreset(kind, getMode(), n)
@@ -3082,7 +3084,7 @@ function GUI:CreateDesignerPresetBar(parent, opts)
         local cur = CurrentName()
         -- Duplicate defaults to "<source> copy" (New uses the layout name, but a
         -- duplicate is of a specific preset, so name it after the source).
-        PromptPresetName(L["Name the duplicated preset:"], cur .. " copy", function(text)
+        PromptPresetName(L["Name the duplicated preset:"], cur .. " copy", L["Duplicate"], function(text)
             local n = DF:DuplicateDesignerPreset(kind, cur, text)
             if n then
                 DF:SetModeDesignerPreset(kind, getMode(), n)
@@ -3095,7 +3097,7 @@ function GUI:CreateDesignerPresetBar(parent, opts)
     local renameBtn = CreateAction(L["Rename"], "edit", 62, function()
         local cur = CurrentName()
         if cur == DF.DEFAULT_PRESET then return end
-        PromptPresetName(L["Rename preset:"], cur, function(text)
+        PromptPresetName(L["Rename preset:"], cur, L["Rename"], function(text)
             DF:RenameDesignerPreset(kind, cur, text)
             bar:Refresh(); onChange()
         end)

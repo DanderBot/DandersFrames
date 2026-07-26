@@ -35,9 +35,6 @@ end
 -- Local alias for helper functions (defined in UI/Main.lua)
 local function GetFallbackDisplayText(f) return CC.GetFallbackDisplayText and CC.GetFallbackDisplayText(f) or nil end
 
--- Local alias for helper functions (defined in UI/ProfilesPanel.lua)
-local function ShowPopupOnTop(name) return CC.ShowPopupOnTop and CC.ShowPopupOnTop(name) or StaticPopup_Show(name) end
-
 -- ADD/EDIT BINDING DIALOG
 -- ============================================================
 
@@ -1062,19 +1059,17 @@ end
 
 -- Show warning about Mac Command+Left Click not working
 function CC:ShowMacMetaClickWarning()
-    StaticPopupDialogs["DF_MAC_META_CLICK_WARNING"] = {
-        text = "|c" .. DF.GUI:ToneHex("caution") .. L["Mac Limitation"] .. "|r\n\n" ..
-               L["Command + Left Click bindings do not work on macOS. "] ..
-               L["This is a World of Warcraft client limitation, not an addon bug."] .. "\n\n" ..
-               L["The binding will be saved, but it will not trigger in-game."] .. "\n\n" ..
-               "|c" .. DF.GUI:ToneHex("success") .. L["Recommendation:"] .. "|r " .. L["Use "] .. "|cffffffff" .. L["Option (Alt)"] .. "|r " .. L["or "] .. "|cffffffff" .. L["Control"] .. "|r " .. L["instead of Command for left click modifiers."],
-        button1 = L["OK"],
-        timeout = 0,
-        whileDead = true,
-        hideOnEscape = true,
-        preferredIndex = 3,
-    }
-    ShowPopupOnTop("DF_MAC_META_CLICK_WARNING")
+    -- The caution-toned lead line becomes the title: our popup has a header of
+    -- its own, where Blizzard's had only a body.
+    DF:ShowPopupAlert({
+        title   = L["Mac Limitation"],
+        tone    = "caution",
+        message = L["Command + Left Click bindings do not work on macOS. "] ..
+                  L["This is a World of Warcraft client limitation, not an addon bug."] .. "\n\n" ..
+                  L["The binding will be saved, but it will not trigger in-game."] .. "\n\n" ..
+                  "|c" .. DF.GUI:ToneHex("success") .. L["Recommendation:"] .. "|r " .. L["Use "] .. "|cffffffff" .. L["Option (Alt)"] .. "|r " .. L["or "] .. "|cffffffff" .. L["Control"] .. "|r " .. L["instead of Command for left click modifiers."],
+        buttons = { { label = L["OK"] } },
+    })
 end
 
 function CC:UpdateBindingButtonText()
@@ -1540,19 +1535,16 @@ function CC:FinalizeSaveBinding()
         local keyText = self:GetBindingKeyText(binding)
         
         -- Show warning popup
-        StaticPopupDialogs["DF_KEY_CONFLICT_WARNING"] = {
-            text = "|c" .. DF.GUI:ToneHex("danger") .. L["Warning:"] .. "|r " .. keyText .. " " .. L["is already bound to:"] .. "\n\n" .. conflictDesc .. "\n\n" .. L["Multiple bindings on the same key may not work as expected. Save anyway?"],
-            button1 = L["Save Anyway"],
-            button2 = L["Cancel"],
-            OnAccept = function()
-                CC:CommitBindingSave()
-            end,
-            timeout = 0,
-            whileDead = true,
-            hideOnEscape = true,
-            preferredIndex = 3,
-        }
-        ShowPopupOnTop("DF_KEY_CONFLICT_WARNING")
+        DF:ShowPopupAlert({
+            title   = L["Key Already Bound"],
+            tone    = "danger",
+            message = keyText .. " " .. L["is already bound to:"] .. "\n\n" .. conflictDesc .. "\n\n" ..
+                      L["Multiple bindings on the same key may not work as expected. Save anyway?"],
+            buttons = {
+                { label = L["Save Anyway"], onClick = function() CC:CommitBindingSave() end },
+                { label = L["Cancel"] },
+            },
+        })
         return
     end
     
@@ -1589,24 +1581,24 @@ function CC:DeleteFromEditBindingPanel()
     local binding = self.db.bindings[panel.existingIndex]
     if not binding then return end
     
-    StaticPopupDialogs["DF_EDITPANEL_CONFIRM_DELETE"] = {
-        text = format(L["Delete binding for %s?"], self:GetBindingKeyText(binding)),
-        button1 = L["Yes"],
-        button2 = L["No"],
-        OnAccept = function()
-            table.remove(CC.db.bindings, panel.existingIndex)
-            CC:HideEditBindingPanel()
-            CC:UpdateBlizzardFrameRegistration()
-            CC:ApplyBindings()
-            CC:RefreshActiveBindings()
-            CC:RefreshSpellGrid(true)  -- Skip scroll reset to maintain position
-        end,
-        timeout = 0,
-        whileDead = true,
-        hideOnEscape = true,
-        preferredIndex = 3,
-    }
-    ShowPopupOnTop("DF_EDITPANEL_CONFIRM_DELETE")
+    DF:ShowPopupAlert({
+        title   = L["Delete Binding"],
+        message = format(L["Delete binding for %s?"], self:GetBindingKeyText(binding)),
+        buttons = {
+            {
+                label = L["Delete"],
+                onClick = function()
+                    table.remove(CC.db.bindings, panel.existingIndex)
+                    CC:HideEditBindingPanel()
+                    CC:UpdateBlizzardFrameRegistration()
+                    CC:ApplyBindings()
+                    CC:RefreshActiveBindings()
+                    CC:RefreshSpellGrid(true)  -- Skip scroll reset to maintain position
+                end,
+            },
+            { label = L["Cancel"] },
+        },
+    })
 end
 
 -- Process a keybind from the quick bind popup
@@ -1718,19 +1710,16 @@ function CC:ProcessKeybind(bindType, key)
         local keyText = self:GetBindingKeyText(newBinding)
         
         -- Show warning popup
-        StaticPopupDialogs["DF_QUICKBIND_CONFLICT_WARNING"] = {
-            text = "|c" .. DF.GUI:ToneHex("danger") .. L["Warning:"] .. "|r " .. keyText .. " " .. L["is already bound to:"] .. "\n\n" .. conflictDesc .. "\n\n" .. L["Multiple bindings on the same key may not work as expected. Save anyway?"],
-            button1 = L["Save Anyway"],
-            button2 = L["Cancel"],
-            OnAccept = function()
-                CC:CommitQuickBinding()
-            end,
-            timeout = 0,
-            whileDead = true,
-            hideOnEscape = true,
-            preferredIndex = 3,
-        }
-        ShowPopupOnTop("DF_QUICKBIND_CONFLICT_WARNING")
+        DF:ShowPopupAlert({
+            title   = L["Key Already Bound"],
+            tone    = "danger",
+            message = keyText .. " " .. L["is already bound to:"] .. "\n\n" .. conflictDesc .. "\n\n" ..
+                      L["Multiple bindings on the same key may not work as expected. Save anyway?"],
+            buttons = {
+                { label = L["Save Anyway"], onClick = function() CC:CommitQuickBinding() end },
+                { label = L["Cancel"] },
+            },
+        })
         return
     end
     

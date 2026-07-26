@@ -11,9 +11,6 @@ local PROFILE_TEMPLATE = CC.PROFILE_TEMPLATE
 -- Local aliases for helper functions (defined in Profiles.lua)
 local GetPlayerClass = function() return CC.GetPlayerClass() end
 
--- Local alias for helper functions (defined in UI/ProfilesPanel.lua)
-local function ShowPopupOnTop(name) return CC.ShowPopupOnTop and CC.ShowPopupOnTop(name) or StaticPopup_Show(name) end
-
 -- IMPORT POPUP DIALOG
 -- ============================================================
 
@@ -1185,21 +1182,21 @@ function CC:ShowMacroEditorDialog(existingMacro)
         deleteBtn:SetPoint("LEFT", cancelBtn, "RIGHT", 8, 0)
         DF.GUI:StyleButton(deleteBtn, { width = 80, height = 28, text = L["Delete"], tone = "danger" })
         deleteBtn:SetScript("OnClick", function()
-            StaticPopupDialogs["DF_CONFIRM_DELETE_MACRO"] = {
-                text = format(L["Delete macro '%s'?\nAny bindings using this macro will be removed."], existingMacro.name),
-                button1 = L["Delete"],
-                button2 = L["Cancel"],
-                OnAccept = function()
-                    CC:DeleteMacro(existingMacro.id)
-                    CC:RefreshSpellGrid()
-                    thisDialog:Hide()
-                    -- Macro deleted
-                end,
-                timeout = 0,
-                whileDead = true,
-                hideOnEscape = true,
-            }
-            ShowPopupOnTop("DF_CONFIRM_DELETE_MACRO")
+            DF:ShowPopupAlert({
+                title   = L["Delete Macro"],
+                message = format(L["Delete macro '%s'?\nAny bindings using this macro will be removed."], existingMacro.name),
+                buttons = {
+                    {
+                        label = L["Delete"],
+                        onClick = function()
+                            CC:DeleteMacro(existingMacro.id)
+                            CC:RefreshSpellGrid()
+                            thisDialog:Hide()
+                        end,
+                    },
+                    { label = L["Cancel"] },
+                },
+            })
         end)
     end
     
@@ -1210,21 +1207,21 @@ function CC:ShowMacroEditorDialog(existingMacro)
         deleteBtn:SetPoint("LEFT", cancelBtn, "RIGHT", 8, 0)
         DF.GUI:StyleButton(deleteBtn, { width = 80, height = 28, text = L["Delete"], tone = "danger" })
         deleteBtn:SetScript("OnClick", function()
-            StaticPopupDialogs["DF_CONFIRM_DELETE_IMPORTED_MACRO"] = {
-                text = format(L["Delete imported macro '%s'?\nAny bindings using this macro will be removed.\n\n(The original WoW macro will not be affected)"], existingMacro.name),
-                button1 = L["Delete"],
-                button2 = L["Cancel"],
-                OnAccept = function()
-                    CC:DeleteMacro(existingMacro.id)
-                    CC:RefreshSpellGrid()
-                    thisDialog:Hide()
-                    -- Macro deleted
-                end,
-                timeout = 0,
-                whileDead = true,
-                hideOnEscape = true,
-            }
-            ShowPopupOnTop("DF_CONFIRM_DELETE_IMPORTED_MACRO")
+            DF:ShowPopupAlert({
+                title   = L["Delete Macro"],
+                message = format(L["Delete imported macro '%s'?\nAny bindings using this macro will be removed.\n\n(The original WoW macro will not be affected)"], existingMacro.name),
+                buttons = {
+                    {
+                        label = L["Delete"],
+                        onClick = function()
+                            CC:DeleteMacro(existingMacro.id)
+                            CC:RefreshSpellGrid()
+                            thisDialog:Hide()
+                        end,
+                    },
+                    { label = L["Cancel"] },
+                },
+            })
         end)
 
         -- Sync button

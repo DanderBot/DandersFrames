@@ -44,57 +44,32 @@ end
 
 -- ============================================================
 -- NAME PROMPT + DELETE CONFIRM
--- Same StaticPopup idiom as the Designer preset bar in GUI/GUI.lua:
--- structural dialog definitions here, per-call handlers assigned in
--- the launchers (the StaticPopup `data` field and the editbox field
--- name both vary across client versions, so we avoid relying on them).
+-- Both go through the addon's own popup: GUI:PromptName for the name, and a
+-- plain alert for the confirm. This file used to carry its own copy of the
+-- Blizzard StaticPopup idiom, duplicated from the Designer preset bar.
 -- ============================================================
 
-StaticPopupDialogs["DANDERSFRAMES_FILTER_NAME"] = {
-    text = "%s",
-    button1 = ACCEPT or "Accept",
-    button2 = CANCEL or "Cancel",
-    hasEditBox = true,
-    editBoxWidth = 220,
-    maxLetters = 40,
-    EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
-    timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
-}
-
-StaticPopupDialogs["DANDERSFRAMES_FILTER_DELETE"] = {
-    text = "%s",
-    button1 = DELETE or "Delete",
-    button2 = CANCEL or "Cancel",
-    timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
-}
-
-local function PromptFilterName(titleText, default, callback)
-    local dialog = StaticPopupDialogs["DANDERSFRAMES_FILTER_NAME"]
-    dialog.OnShow = function(self)
-        local eb = self.EditBox or self.editBox or (self.GetEditBox and self:GetEditBox())
-        if eb then
-            eb:SetText(default or "")
-            eb:HighlightText()
-            eb:SetFocus()
-        end
-    end
-    dialog.OnAccept = function(self)
-        local eb = self.EditBox or self.editBox or (self.GetEditBox and self:GetEditBox())
-        if callback and eb then callback(eb:GetText()) end
-    end
-    dialog.EditBoxOnEnterPressed = function(self)
-        if callback then callback(self:GetText()) end
-        local p = self:GetParent()
-        if p then p:Hide() end
-    end
-    StaticPopup_Show("DANDERSFRAMES_FILTER_NAME", titleText)
+-- DF.GUI, not GUI: this file's `GUI` is a local inside BuildFilterDesignerPage,
+-- so at this scope the bare name would be a nil global.
+local function PromptFilterName(message, default, acceptLabel, callback)
+    DF.GUI:PromptName({
+        title       = L["Filter Name"],
+        message     = message,
+        default     = default,
+        acceptLabel = acceptLabel,
+        onAccept    = callback,
+    })
 end
 
 local function ConfirmDeleteFilter(displayName, onAccept)
-    local dialog = StaticPopupDialogs["DANDERSFRAMES_FILTER_DELETE"]
-    dialog.OnAccept = function() onAccept() end
-    StaticPopup_Show("DANDERSFRAMES_FILTER_DELETE",
-        format(L["Delete filter \"%s\"? It will also be removed from every profile that uses it."], displayName))
+    DF:ShowPopupAlert({
+        title   = L["Delete Filter"],
+        message = format(L["Delete filter \"%s\"? It will also be removed from every profile that uses it."], displayName),
+        buttons = {
+            { label = L["Delete"], onClick = onAccept },
+            { label = L["Cancel"] },
+        },
+    })
 end
 
 -- Deleting a custom filter must also unhook it from every profile's
@@ -679,7 +654,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         font    = "DFFontHighlightSmall",
     })
     addRow:SetScript("OnClick", function()
-        PromptFilterName(L["Name the new filter:"], "", function(text)
+        PromptFilterName(L["Name the new filter:"], "", L["Create"], function(text)
             text = Trim(text)
             if text == "" then return end
             SelectFilter("custom", R:CreateCustomFilter(text))
@@ -701,7 +676,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     local dupBtn = GUI:CreateButton(leftPanel, L["Duplicate"], LEFT_BTN_W, 22, function(self)
         if self.dfDisabled or not selKey then return end
         local src = selKey -- capture: selection may move before the prompt closes
-        PromptFilterName(L["Name the duplicated filter:"], CurrentDisplayName() .. " copy", function(text)
+        PromptFilterName(L["Name the duplicated filter:"], CurrentDisplayName() .. " copy", L["Duplicate"], function(text)
             text = Trim(text)
             if text == "" then return end
             SelectFilter("custom", R:DuplicateFilter(src, text))
@@ -714,7 +689,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         local id = selKey
         local f = R:GetCustomFilter(id)
         if not f then return end
-        PromptFilterName(L["Rename filter:"], f.name or "", function(text)
+        PromptFilterName(L["Rename filter:"], f.name or "", L["Rename"], function(text)
             text = Trim(text)
             if text == "" then return end
             R:RenameCustomFilter(id, text)

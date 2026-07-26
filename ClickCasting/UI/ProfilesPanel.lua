@@ -806,120 +806,72 @@ end
 -- PROFILE DIALOGS
 -- =========================================================================
 
--- Helper to show StaticPopup and raise it above our UI
-local function ShowPopupOnTop(popupName)
-    local dialog = StaticPopup_Show(popupName)
-    if dialog then
-        dialog:SetFrameStrata("FULLSCREEN_DIALOG")
-        dialog:Raise()
-    end
-    return dialog
-end
-
--- Export to CC namespace for use in other UI files
-CC.ShowPopupOnTop = ShowPopupOnTop
+-- These all used to be Blizzard StaticPopups raised above our UI by hand, because
+-- the settings window sits at FULLSCREEN_DIALOG and a StaticPopup opens behind it.
+-- DF's own popup lives at that strata already, so the raise helper is gone.
 
 function CC:ShowNewProfileDialog()
-    StaticPopupDialogs["DFCC_NEW_PROFILE"] = {
-        text = L["Enter new profile name:"],
-        button1 = L["Create"],
-        button2 = L["Cancel"],
-        hasEditBox = true,
-        editBoxWidth = 200,
-        OnAccept = function(self)
-            local name = self.EditBox:GetText()
-            if name and name ~= "" then
-                if CC:CreateProfile(name, CC:GetActiveProfileName()) then
-                    CC:RefreshProfilesPanel()
-                end
-            end
-        end,
-        OnShow = function(self)
-            self.EditBox:SetText("")
-            self.EditBox:SetFocus()
-        end,
-        timeout = 0,
-        whileDead = true,
-        hideOnEscape = true,
-        preferredIndex = 3,
-    }
-    ShowPopupOnTop("DFCC_NEW_PROFILE")
-end
-
-function CC:ShowCopyProfileDialog(sourceName)
-    StaticPopupDialogs["DFCC_COPY_PROFILE"] = {
-        text = format(L["Enter name for copy of '%s':"], sourceName),
-        button1 = L["Copy"],
-        button2 = L["Cancel"],
-        hasEditBox = true,
-        editBoxWidth = 200,
-        OnAccept = function(self)
-            local name = self.EditBox:GetText()
-            if name and name ~= "" then
-                if CC:CreateProfile(name, sourceName) then
-                    CC:RefreshProfilesPanel()
-                end
-            end
-        end,
-        OnShow = function(self)
-            self.EditBox:SetText(sourceName .. " Copy")
-            self.EditBox:SetFocus()
-            self.EditBox:HighlightText()
-        end,
-        timeout = 0,
-        whileDead = true,
-        hideOnEscape = true,
-        preferredIndex = 3,
-    }
-    ShowPopupOnTop("DFCC_COPY_PROFILE")
-end
-
-function CC:ShowRenameProfileDialog(oldName)
-    StaticPopupDialogs["DFCC_RENAME_PROFILE"] = {
-        text = format(L["Enter new name for '%s':"], oldName),
-        button1 = L["Rename"],
-        button2 = L["Cancel"],
-        hasEditBox = true,
-        editBoxWidth = 200,
-        OnAccept = function(self)
-            local name = self.EditBox:GetText()
-            if name and name ~= "" and name ~= oldName then
-                if CC:RenameProfile(oldName, name) then
-                    CC.selectedProfileName = name
-                    CC:RefreshProfilesPanel()
-                end
-            end
-        end,
-        OnShow = function(self)
-            self.EditBox:SetText(oldName)
-            self.EditBox:SetFocus()
-            self.EditBox:HighlightText()
-        end,
-        timeout = 0,
-        whileDead = true,
-        hideOnEscape = true,
-        preferredIndex = 3,
-    }
-    ShowPopupOnTop("DFCC_RENAME_PROFILE")
-end
-
-function CC:ShowDeleteProfileDialog(profileName)
-    StaticPopupDialogs["DFCC_DELETE_PROFILE"] = {
-        text = format(L["Delete profile '%s'?\n\nThis cannot be undone."], profileName),
-        button1 = L["Delete"],
-        button2 = L["Cancel"],
-        OnAccept = function()
-            if CC:DeleteProfile(profileName) then
-                CC.selectedProfileName = nil
+    DF.GUI:PromptName({
+        title       = L["New Profile"],
+        message     = L["Enter new profile name:"],
+        acceptLabel = L["Create"],
+        onAccept    = function(name)
+            if name == "" then return end
+            if CC:CreateProfile(name, CC:GetActiveProfileName()) then
                 CC:RefreshProfilesPanel()
             end
         end,
-        timeout = 0,
-        whileDead = true,
-        hideOnEscape = true,
-        preferredIndex = 3,
-    }
-    ShowPopupOnTop("DFCC_DELETE_PROFILE")
+    })
+end
+
+function CC:ShowCopyProfileDialog(sourceName)
+    DF.GUI:PromptName({
+        title       = L["Copy Profile"],
+        message     = format(L["Enter name for copy of '%s':"], sourceName),
+        default     = sourceName .. " Copy",
+        acceptLabel = L["Copy"],
+        onAccept    = function(name)
+            if name == "" then return end
+            if CC:CreateProfile(name, sourceName) then
+                CC:RefreshProfilesPanel()
+            end
+        end,
+    })
+end
+
+function CC:ShowRenameProfileDialog(oldName)
+    DF.GUI:PromptName({
+        title       = L["Rename Profile"],
+        message     = format(L["Enter new name for '%s':"], oldName),
+        default     = oldName,
+        acceptLabel = L["Rename"],
+        onAccept    = function(name)
+            if name == "" or name == oldName then return end
+            if CC:RenameProfile(oldName, name) then
+                CC.selectedProfileName = name
+                CC:RefreshProfilesPanel()
+            end
+        end,
+    })
+end
+
+function CC:ShowDeleteProfileDialog(profileName)
+    DF:ShowPopupAlert({
+        title   = L["Delete Profile"],
+        message = format(L["Delete profile '%s'?\n\nThis cannot be undone."], profileName),
+        buttons = {
+            {
+                label = L["Delete"],
+                onClick = function()
+                    if CC:DeleteProfile(profileName) then
+                        CC.selectedProfileName = nil
+                        CC:RefreshProfilesPanel()
+                    end
+                end,
+            },
+            { label = L["Cancel"] },
+        },
+    })
 end
 
 function CC:ShowClearAllConfirmation()
@@ -931,19 +883,15 @@ function CC:ShowClearAllConfirmation()
         return
     end
     
-    StaticPopupDialogs["DFCC_CLEAR_ALL_BINDINGS"] = {
-        text = format(L["Reset all bindings to defaults?\n\nThis will set:\n• Left Click = Target Unit\n• Right Click = Open Menu\n\n%sThis cannot be undone.%s"], "|c" .. DF.GUI:ToneHex("danger"), "|r"),
-        button1 = L["Reset to Defaults"],
-        button2 = L["Cancel"],
-        OnAccept = function()
-            CC:ResetBindingsToDefaults()
-        end,
-        timeout = 0,
-        whileDead = true,
-        hideOnEscape = true,
-        preferredIndex = 3,
-    }
-    ShowPopupOnTop("DFCC_CLEAR_ALL_BINDINGS")
+    DF:ShowPopupAlert({
+        title   = L["Reset to Defaults"],
+        message = format(L["Reset all bindings to defaults?\n\nThis will set:\n• Left Click = Target Unit\n• Right Click = Open Menu\n\n%sThis cannot be undone.%s"], "|c" .. DF.GUI:ToneHex("danger"), "|r"),
+        buttons = {
+            { label = L["Reset to Defaults"], onClick = function() CC:ResetBindingsToDefaults() end },
+            { label = L["Cancel"] },
+        },
+        buttonWidth = 130,
+    })
 end
 
 -- Reset bindings to Blizzard-style defaults (Target + Menu)
@@ -1000,68 +948,44 @@ function CC:ShowExportDialog()
     
     if not exportString or exportString == "" then
         -- Error message already printed by ExportProfile
-        StaticPopupDialogs["DFCC_EXPORT_ERROR"] = {
-            text = L["Export failed. Please try again or check for errors."],
-            button1 = L["OK"],
-            timeout = 0,
-            whileDead = true,
-            hideOnEscape = true,
-            preferredIndex = 3,
-        }
-        ShowPopupOnTop("DFCC_EXPORT_ERROR")
+        DF:ShowPopupAlert({
+            title   = L["Export Failed"],
+            tone    = "danger",
+            message = L["Export failed. Please try again or check for errors."],
+            buttons = { { label = L["OK"] } },
+        })
         return
     end
-    
-    StaticPopupDialogs["DFCC_EXPORT_PROFILE"] = {
-        text = L["Copy this string to share your profile:"],
-        button1 = L["Done"],
-        hasEditBox = true,
-        editBoxWidth = 350,
-        OnShow = function(self)
-            self.EditBox:SetText(exportString)
-            self.EditBox:SetFocus()
-            self.EditBox:HighlightText()
-        end,
-        EditBoxOnEscapePressed = function(self)
-            self:GetParent():Hide()
-        end,
-        timeout = 0,
-        whileDead = true,
-        hideOnEscape = true,
-        preferredIndex = 3,
-    }
-    ShowPopupOnTop("DFCC_EXPORT_PROFILE")
+
+    -- readOnly: the string is there to be selected and copied, not edited. It
+    -- opens fully selected, so Ctrl+C alone is enough.
+    DF:ShowPopupInput({
+        title       = L["Export Profile"],
+        message     = L["Copy this string to share your profile:"],
+        text        = exportString,
+        multiline   = true,
+        readOnly    = true,
+        cancelLabel = L["Done"],
+    })
 end
 
 function CC:ShowImportDialog()
-    StaticPopupDialogs["DFCC_IMPORT_PROFILE"] = {
-        text = L["Paste a profile string to import:"],
-        button1 = L["Import"],
-        button2 = L["Cancel"],
-        hasEditBox = true,
-        editBoxWidth = 350,
-        OnAccept = function(self)
-            local importString = self.EditBox:GetText()
-            if importString and importString ~= "" then
-                local success, result = CC:ImportProfile(importString)
-                if success then
-                    print("|cff33cc33DandersFrames:|r Profile imported: " .. result)
-                    CC:RefreshProfilesPanel()
-                else
-                    print("|cffff0000DandersFrames:|r Import failed: " .. (result or "unknown error"))
-                end
+    DF:ShowPopupInput({
+        title       = L["Import Profile"],
+        message     = L["Paste a profile string to import:"],
+        multiline   = true,
+        acceptLabel = L["Import"],
+        onAccept    = function(importString)
+            if not importString or importString == "" then return end
+            local success, result = CC:ImportProfile(importString)
+            if success then
+                print("|cff33cc33DandersFrames:|r Profile imported: " .. result)
+                CC:RefreshProfilesPanel()
+            else
+                print("|cffff0000DandersFrames:|r Import failed: " .. (result or "unknown error"))
             end
         end,
-        OnShow = function(self)
-            self.EditBox:SetText("")
-            self.EditBox:SetFocus()
-        end,
-        timeout = 0,
-        whileDead = true,
-        hideOnEscape = true,
-        preferredIndex = 3,
-    }
-    ShowPopupOnTop("DFCC_IMPORT_PROFILE")
+    })
 end
 
 -- =========================================================================

@@ -1496,20 +1496,20 @@ function AutoProfilesUI:CreateProfileRow(GUI, pageFrame, parent, contentType, pr
         GUI:HideTooltip()
     end)
     deleteBtn:SetScript("OnClick", function()
-        -- Confirm deletion
-        StaticPopupDialogs["DANDERSFRAMES_DELETE_AUTOPROFILE"] = {
-            text = format(L["Delete layout \"%s\"?"], profile.name),
-            button1 = L["Delete"],
-            button2 = L["Cancel"],
-            OnAccept = function()
-                AutoProfilesUI:DeleteProfile(contentType.key, index)
-                if pageFrame.Refresh then pageFrame:Refresh() end
-            end,
-            timeout = 0,
-            whileDead = true,
-            hideOnEscape = true,
-        }
-        StaticPopup_Show("DANDERSFRAMES_DELETE_AUTOPROFILE")
+        DF:ShowPopupAlert({
+            title   = L["Delete Layout"],
+            message = format(L["Delete layout \"%s\"?"], profile.name),
+            buttons = {
+                {
+                    label = L["Delete"],
+                    onClick = function()
+                        AutoProfilesUI:DeleteProfile(contentType.key, index)
+                        if pageFrame.Refresh then pageFrame:Refresh() end
+                    end,
+                },
+                { label = L["Cancel"] },
+            },
+        })
     end)
     
     return row

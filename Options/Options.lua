@@ -2291,27 +2291,31 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end
         end
 
-        if not StaticPopupDialogs["DANDERS_PINNED_REMOVE_SET"] then
-            StaticPopupDialogs["DANDERS_PINNED_REMOVE_SET"] = {
-                text = L["Remove this pinned set? Its members and settings will be lost."],
-                button1 = YES, button2 = NO,
-                timeout = 0, whileDead = true, hideOnEscape = true, showAlert = true,
-                OnAccept = function(_, data)
-                    if data and DF.PinnedFrames and DF.PinnedFrames:RemoveSet(data.idx, data.mode) then
-                        if pagePinnedFrames.persistedTab > 1 then
-                            pagePinnedFrames.persistedTab = pagePinnedFrames.persistedTab - 1
-                        end
-                        if data.rebuild then data.rebuild() end
-                    end
-                end,
-            }
-        end
-
         local function DoRemoveSet(idx)
             if not DF.PinnedFrames then return end
             -- Capture the edited mode at click time (robust if the GUI mode changes
             -- while the confirm popup is open). Party/raid set lists are independent.
-            StaticPopup_Show("DANDERS_PINNED_REMOVE_SET", nil, nil, { idx = idx, mode = GUI.SelectedMode, rebuild = RebuildPinnedPage })
+            -- The closure replaces what used to travel as the StaticPopup `data`
+            -- payload, which is the field whose behaviour varies across clients.
+            local mode = GUI.SelectedMode
+            DF:ShowPopupAlert({
+                title   = L["Remove Pinned Set"],
+                message = L["Remove this pinned set? Its members and settings will be lost."],
+                buttons = {
+                    {
+                        label = L["Remove"],
+                        onClick = function()
+                            if DF.PinnedFrames:RemoveSet(idx, mode) then
+                                if pagePinnedFrames.persistedTab > 1 then
+                                    pagePinnedFrames.persistedTab = pagePinnedFrames.persistedTab - 1
+                                end
+                                RebuildPinnedPage()
+                            end
+                        end,
+                    },
+                    { label = L["Cancel"] },
+                },
+            })
         end
 
         local function GetCurrentSet()
@@ -9383,53 +9387,46 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local actionsGroup = GUI:CreateSettingsGroup(self.child, 280)
         actionsGroup:AddWidget(GUI:CreateHeader(self.child, L["Profile Actions"]), 40)
         
-        -- Register delete confirmation popup
-        if not StaticPopupDialogs["DANDERSFRAMES_DELETE_PROFILE_CONFIRM"] then
-            StaticPopupDialogs["DANDERSFRAMES_DELETE_PROFILE_CONFIRM"] = {
-                text = L["Delete profile '%s'?\n\nThis cannot be undone."],
-                button1 = L["Delete"],
-                button2 = L["Cancel"],
-                OnAccept = function(self, data)
-                    DF:SetProfile("Default")
-                    DF:DeleteProfile(data)
-                    if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
-                end,
-                timeout = 0,
-                whileDead = true,
-                hideOnEscape = true,
-            }
-        end
-        
         actionsGroup:AddWidget(GUI:CreateIconButton(self.child, "delete", L["Delete Current Profile"], 240, 26, function()
             local p = DF:GetCurrentProfile()
-            if p == "Default" then 
-                print("|cffff6666DandersFrames:|r Cannot delete Default profile.") 
-            else
-                local dialog = StaticPopup_Show("DANDERSFRAMES_DELETE_PROFILE_CONFIRM", p)
-                if dialog then
-                    dialog.data = p
-                end
+            if p == "Default" then
+                print("|cffff6666DandersFrames:|r Cannot delete Default profile.")
+                return
             end
+            -- The profile name rides the closure rather than the StaticPopup
+            -- `data` field it used to be poked onto after the fact.
+            DF:ShowPopupAlert({
+                title   = L["Delete Profile"],
+                message = format(L["Delete profile '%s'?\n\nThis cannot be undone."], p),
+                buttons = {
+                    {
+                        label = L["Delete"],
+                        onClick = function()
+                            DF:SetProfile("Default")
+                            DF:DeleteProfile(p)
+                            if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
+                        end,
+                    },
+                    { label = L["Cancel"] },
+                },
+            })
         end, nil, "left"), 32)
-        
-        -- Register reset confirmation popup
-        if not StaticPopupDialogs["DANDERSFRAMES_RESET_PROFILE_CONFIRM"] then
-            StaticPopupDialogs["DANDERSFRAMES_RESET_PROFILE_CONFIRM"] = {
-                text = L["Reset current profile to defaults?\nThis will reset BOTH Party and Raid settings."],
-                button1 = L["Yes"],
-                button2 = L["No"],
-                OnAccept = function()
-                    DF:ResetFullProfile()
-                    if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
-                end,
-                timeout = 0,
-                whileDead = true,
-                hideOnEscape = true,
-            }
-        end
-        
+
         actionsGroup:AddWidget(GUI:CreateIconButton(self.child, "refresh", L["Reset Profile to Defaults"], 240, 26, function()
-            StaticPopup_Show("DANDERSFRAMES_RESET_PROFILE_CONFIRM")
+            DF:ShowPopupAlert({
+                title   = L["Reset Profile to Defaults"],
+                message = L["Reset current profile to defaults?\nThis will reset BOTH Party and Raid settings."],
+                buttons = {
+                    {
+                        label = L["Reset"],
+                        onClick = function()
+                            DF:ResetFullProfile()
+                            if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
+                        end,
+                    },
+                    { label = L["Cancel"] },
+                },
+            })
         end, nil, "left"), 32)
         
         AddToSection(actionsGroup, nil, 2)
@@ -9439,43 +9436,32 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         copyGroup:AddWidget(GUI:CreateHeader(self.child, L["Copy Settings"]), 40)
         copyGroup:AddWidget(GUI:CreateLabel(self.child, L["Copy all settings between Party and Raid modes."], 240), 25)
         
-        -- Register copy confirmation popups
-        if not StaticPopupDialogs["DANDERSFRAMES_COPY_PARTY_TO_RAID"] then
-            StaticPopupDialogs["DANDERSFRAMES_COPY_PARTY_TO_RAID"] = {
-                text = L["Copy Party settings to Raid?\n\nThis will overwrite all Raid settings with your current Party settings."],
-                button1 = L["Copy"],
-                button2 = L["Cancel"],
-                OnAccept = function()
-                    DF:CopyProfile("party", "raid")
-                    if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
-                end,
-                timeout = 0,
-                whileDead = true,
-                hideOnEscape = true,
-            }
+        -- Both directions are the same confirm with the modes swapped.
+        local function ConfirmCopyProfile(src, dest, message)
+            DF:ShowPopupAlert({
+                title   = L["Copy Settings"],
+                message = message,
+                buttons = {
+                    {
+                        label = L["Copy"],
+                        onClick = function()
+                            DF:CopyProfile(src, dest)
+                            if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
+                        end,
+                    },
+                    { label = L["Cancel"] },
+                },
+            })
         end
-        
-        if not StaticPopupDialogs["DANDERSFRAMES_COPY_RAID_TO_PARTY"] then
-            StaticPopupDialogs["DANDERSFRAMES_COPY_RAID_TO_PARTY"] = {
-                text = L["Copy Raid settings to Party?\n\nThis will overwrite all Party settings with your current Raid settings."],
-                button1 = L["Copy"],
-                button2 = L["Cancel"],
-                OnAccept = function()
-                    DF:CopyProfile("raid", "party")
-                    if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
-                end,
-                timeout = 0,
-                whileDead = true,
-                hideOnEscape = true,
-            }
-        end
-        
+
         copyGroup:AddWidget(GUI:CreateIconButton(self.child, "chevron_right", L["Party to Raid"], 240, 26, function()
-            StaticPopup_Show("DANDERSFRAMES_COPY_PARTY_TO_RAID")
+            ConfirmCopyProfile("party", "raid",
+                L["Copy Party settings to Raid?\n\nThis will overwrite all Raid settings with your current Party settings."])
         end, nil, "left"), 32)
-        
+
         copyGroup:AddWidget(GUI:CreateIconButton(self.child, "chevron_right", L["Raid to Party"], 240, 26, function()
-            StaticPopup_Show("DANDERSFRAMES_COPY_RAID_TO_PARTY")
+            ConfirmCopyProfile("raid", "party",
+                L["Copy Raid settings to Party?\n\nThis will overwrite all Party settings with your current Raid settings."])
         end, nil, "left"), 32)
         
         AddToSection(copyGroup, nil, 2)
@@ -9971,33 +9957,25 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 confirmText = L["Import settings into current profile?\n\n"] .. "|c" .. GUI:ToneHex("danger") .. L["WARNING: This will permanently overwrite settings in your '"] .. currentProfile .. L["' profile."] .. "|r\n\n" .. L["Tip: Check 'Create New Profile' to import without affecting your current settings."]
             end
             
-            StaticPopupDialogs["DANDERSFRAMES_IMPORT_CONFIRM"] = {
-                text = confirmText,
-                button1 = L["Import"],
-                button2 = L["Cancel"],
-                OnAccept = function(dialog)
-                    local data = dialog.data
-                    if data and data.importData then
-                        DF:ApplyImportedProfile(data.importData, data.selectedCats, data.selectedFrameTypes, data.profileName, data.createNew)
-                        if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
-                    end
-                end,
-                timeout = 0,
-                whileDead = true,
-                hideOnEscape = true,
-                preferredIndex = 3,
-            }
-            
-            local dialog = StaticPopup_Show("DANDERSFRAMES_IMPORT_CONFIRM")
-            if dialog then
-                dialog.data = {
-                    importData = self.parsedImportData,
-                    selectedCats = selectedCats,
-                    selectedFrameTypes = selectedFrameTypes,
-                    profileName = profileName,
-                    createNew = createNew,
-                }
-            end
+            -- Everything the accept needs is captured here rather than stapled
+            -- onto the dialog afterwards, so there is no window in which the
+            -- popup exists without its payload.
+            local importData = self.parsedImportData
+            DF:ShowPopupAlert({
+                title   = L["Import Profile"],
+                message = confirmText,
+                buttons = {
+                    {
+                        label = L["Import"],
+                        onClick = function()
+                            if not importData then return end
+                            DF:ApplyImportedProfile(importData, selectedCats, selectedFrameTypes, profileName, createNew)
+                            if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
+                        end,
+                    },
+                    { label = L["Cancel"] },
+                },
+            })
         end), 32)
         
         -- Clear button
