@@ -6052,13 +6052,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
     -- Auras > Aura Designer
     local pageAuraDesigner = CreateSubTab("auras", "auras_auradesigner", L["Aura Designer"])
-    -- 12.1: the Aura Designer is being rebuilt on the native aura container.
-    -- Unblock the page once the factory owns AD (mirrors the Debuffs/Missing Buffs
-    -- pages); per-control API-limit overlays for the not-yet-portable settings land
-    -- in the P4.7 GUI pass.
-    GUI:BlockPage12_1(pageAuraDesigner, "roadmap", function(d)
-        return GUI:IsAuraFactoryActive() and not DF:FactoryOwnsAD(d)
-    end)
     BuildPage(pageAuraDesigner, function(self, db, Add, AddSpace, AddSyncPoint)
         if DF.BuildAuraDesignerPage then
             DF.BuildAuraDesignerPage(GUI, self, db)
@@ -6235,16 +6228,25 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local gridGroup = GUI:CreateSettingsGroup(self.child, 280)
         gridGroup:AddWidget(GUI:CreateHeader(self.child, L["Grid Layout"]), 40)
         local buffWrap = gridGroup:AddWidget(GUI:CreateSlider(self.child, L["Icons Per Row"], 1, 8, 1, db, "buffWrap", nil, function() DF:LightweightUpdateAuraPosition("buff") end, true), 55)
-        buffWrap.disableOn = function(d) return not d.showBuffs end
-        -- 12.1: the native flow layout is row-primary — Vertical orientation renders a single
-        -- column, so a per-column wrap count is not expressible there. Blocked only while the
-        -- growth is vertical-primary (flipping Orientation un-frosts it live via RefreshStates).
-        GUI:BlockControl12_1(buffWrap, "limitation", { id = "buffs:wrapvertical", page = L["Buffs"], when = function(d)
+        -- Greys out (NOT a 12.1 frost) whenever the row can't have more than one icon per
+        -- line: the row is off, or the growth is vertical-primary, where the native flow
+        -- renders a single column and "icons per row" has nothing to count. That's ordinary
+        -- contextual state — the control works fine horizontally — so it uses the normal grey
+        -- seam rather than the 12.1 blocked registry, which is reserved for "the game cannot
+        -- do this". Flipping Orientation re-enables it live via RefreshStates.
+        -- (Why a vertical column is unavoidable, re-verified against the 68914 dump:
+        --  ValidateAuraGroupLayoutOptions accepts only elementSpacing / lineSpacing /
+        --  groupSpacing / groupLineSpacing / forceNewLine / elementWidth / elementHeight /
+        --  layoutIndex — no primary-axis field and no wrap count — and
+        --  SetFlowLayoutGrowthDirection(h, v) picks which way lines grow, not whether the
+        --  flow is column-primary.)
+        buffWrap.disableOn = function(d)
+            if not d.showBuffs then return true end
             local g = d.buffGrowth or ""
             -- Vertical-primary AND vertical-centred growth both render a single column.
             return DF:FactoryOwnsBuffRow(d) and (g:sub(1, 2) == "UP" or g:sub(1, 4) == "DOWN"
                 or g == "CENTER_LEFT" or g == "CENTER_RIGHT")
-        end })
+        end
         -- CENTER growth direction: supported on factory rows since the centre-pinned
         -- box in AuraContainer.lua resolveGrowthLayout (the self-sizing container
         -- keeps the row centred) — the old blocked-registry entry is gone.
@@ -6415,12 +6417,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
     -- Auras > Debuffs (combined Layout + Appearance with collapsible sections)
     local pageDebuffs = CreateSubTab("auras", "auras_debuffs", L["Debuffs"])
-    -- 12.1: the debuff row is factory-served (P3). The page blocks only when the
-    -- 12.1 aura system is active but the factory does NOT own the row (dev toggle
-    -- off) -- the same lift pattern the Defensive Icon page used.
-    GUI:BlockPage12_1(pageDebuffs, "roadmap", function(d)
-        return GUI:IsAuraFactoryActive() and not DF:FactoryOwnsDebuffRow(d)
-    end)
     BuildPage(pageDebuffs, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top
         Add(CreateCopyButton(self.child, {"debuff", "showDebuffs"}, L["Debuffs"], "auras_debuffs"), 25, 2)
@@ -6685,12 +6681,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     
     -- Auras > Missing Buffs
     local pageMissingBuffs = CreateSubTab("auras", "auras_missingbuffs", L["Missing Buffs"])
-    -- 12.1: missing buffs are factory-served (read-free layout-push widget). The page
-    -- blocks only when the 12.1 aura system is active but the factory does NOT own the
-    -- feature (dev toggle off) -- the same lift pattern the Debuffs page used.
-    GUI:BlockPage12_1(pageMissingBuffs, "roadmap", function(d)
-        return GUI:IsAuraFactoryActive() and not DF:FactoryOwnsMissingBuff(d)
-    end)
     BuildPage(pageMissingBuffs, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top
         Add(CreateCopyButton(self.child, {"missingBuff"}, L["Missing Buffs"], "auras_missingbuffs"), 25, 2)
@@ -7143,14 +7133,17 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local defWrap = layoutGroup:AddWidget(GUI:CreateSlider(self.child, L["Icons Per Row"], 1, 5, 1, db, "defensiveBarWrap", function()
             if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
         end, nil, true), 55)
-        -- 12.1: row-primary flow — vertical orientation = single column, wrap count not
-        -- expressible (mirrors the Buffs-page block).
-        GUI:BlockControl12_1(defWrap, "limitation", { id = "defensive:wrapvertical", page = L["Defensive Icon"], when = function(d)
+        -- Greys out on vertical-primary growth, where the native row-primary flow renders a
+        -- single column and there is nothing for a per-row count to do. Normal contextual
+        -- state via the grey seam, NOT a 12.1 frost — the control works horizontally, and the
+        -- blocked registry is for things the game genuinely cannot do. Mirrors the Buffs page,
+        -- including its 68914 re-verification of the flow-layout options.
+        defWrap.disableOn = function(d)
             local g = d.defensiveBarGrowth or ""
             -- Vertical-primary AND vertical-centred growth both render a single column.
             return DF:FactoryOwnsDefensiveRow(d) and (g:sub(1, 2) == "UP" or g:sub(1, 4) == "DOWN"
                 or g == "CENTER_LEFT" or g == "CENTER_RIGHT")
-        end })
+        end
 
         layoutGroup:AddWidget(GUI:CreateSlider(self.child, L["Spacing"], -10, 10, 1, db, "defensiveBarSpacing", function()
             if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
@@ -9070,13 +9063,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             ApplyDispelSettings()
         end), 30)
         animate.hideOn = HideDispelOptions
-        local nameTextCheck = displayGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Color Name Text"], db, "dispelNameText", function()
-            ApplyDispelSettings()
-        end), 30)
-        nameTextCheck.hideOn = HideDispelOptions
-        -- Not yet wired to the 12.1 slot overlay (needs the occlusion-safe name
-        -- tint fast-follow) — marked in place even while the factory owns.
-        GUI:BlockControl12_1(nameTextCheck, "roadmap", { id = "dispel:nametext", page = L["Dispel Overlay"] })
+        -- (Color Name Text removed 2026-07-25 — see Features/Dispel.lua. Its only render
+        -- path was the legacy test-mode show, so it tinted the preview and did nothing
+        -- live; a real version needs an occlusion-safe name tint on the slot overlay.)
         displayGroup.hideOn = HideDispelOptions
         dfSection:RegisterChild(displayGroup)
         Add(displayGroup, nil, 1)

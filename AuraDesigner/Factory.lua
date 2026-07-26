@@ -1028,7 +1028,9 @@ local function resolveDefCBT(adDB)
     -- inherits the default deaf to the Colours page's Blend / Measure By settings.
     return true
 end
-Factory.ResolveDefaultColorByTime = resolveDefCBT   -- editor preview passes this into BuildPreviewConfig
+-- (Deliberately NOT exported on its own any more: the editor preview takes the whole
+-- defaults bundle via Factory.ResolveDefaults, which calls this. A colour-by-time-only
+-- accessor would be a second way to resolve the same thing, and the two could drift.)
 
 -- The art (icon / square fill) insets by the border's RENDERED thickness so the ring frames
 -- it flush. DF.Border:Apply snaps its thickness through Border:SnapThickness (pixel-perfect
@@ -1048,7 +1050,7 @@ end
 -- hideIcon = text-only); square = solid config colour fill (no SetIcon). Both keep the
 -- native cooldown swipe, the styleable duration-text fontstring, the native stack count,
 -- and the static border.
-local function buildPlacedStyle(indicator, isSquare, borderSpec, defCBT)
+local function buildPlacedStyle(indicator, isSquare, borderSpec, defs)
     local hideIcon = indicator.hideIcon and true or false
     local style = {}
 
@@ -1078,7 +1080,7 @@ local function buildPlacedStyle(indicator, isSquare, borderSpec, defCBT)
     -- Duration text: a DF-owned fontstring the native SetDurationText fills secret-safe
     -- (Blizzard formats the remaining time C-side; no Lua read). Colour-by-time now routes
     -- through the #205 bucket formatter — see buildDurationTextSpec. Default show = true.
-    style.duration = buildDurationTextSpec(indicator, true, 1.2, defCBT)   -- placed icon/square baseline: 1.2 scale, colour-by-time per adDB.defaults
+    style.duration = buildDurationTextSpec(indicator, true, 1.2, defs.cbt)   -- placed icon/square baseline: 1.2 scale, colour-by-time per adDB.defaults
 
     -- Stacks: native count, shown at >1. NO formatter (secret trap — see bindNative). A
     -- custom stackMinimum is NOT expressible on the no-formatter native path (deferred).
@@ -1121,7 +1123,52 @@ local function testEntryForMap(map)
     return { { spellID = id, name = name, icon = icon, duration = 12, stacks = 0 } }
 end
 
-local function buildPlacedConfig(unit, map, indicator, isSquare, borderSpec, defCBT, mine)
+-- Per-indicator FRAME STRATA. Companion to frameLevelOffset: level orders within a strata
+-- band, strata picks the band. "INHERIT" (the stored default, and the only value that ships
+-- on an untouched profile) means DON'T TOUCH — the holder keeps the unit frame's strata and
+-- z-order stays governed by frameLevelOffset alone, exactly as before this was wired.
+-- Returns nil for INHERIT/unset so the apply site falls back to the parent's strata, which
+-- is also what RESTORES inheritance when a user switches back (a frame always has a strata;
+-- there is no "unset" to write). Whitelisted rather than passed through: SetFrameStrata
+-- errors on an unknown string, and this value can arrive from an imported profile.
+local STRATA_VALID = { BACKGROUND = true, LOW = true, MEDIUM = true, HIGH = true }
+-- defStrata = the resolved GLOBAL default (defs.strata). Fallback order matches the editor
+-- proxy exactly: instance -> global default -> nothing. An instance holding the literal
+-- "INHERIT" is an explicit CHOICE and stops the chain (the editor shows Inherit for it), so
+-- it must NOT fall through to the global — only a genuinely unset key does.
+local function resolveStrata(indicator, defStrata)
+    local s = indicator and indicator.frameStrata
+    if type(s) == "string" then
+        return STRATA_VALID[s] and s or nil     -- includes "INHERIT" -> nil, deliberately
+    end
+    return defStrata
+end
+
+-- Per-indicator FRAME LEVEL, same chain: instance -> global default -> 0. Callers add it to
+-- their own base offset (40 for placed, 41 for the alert companion).
+local function resolveLevel(indicator, defLevel)
+    return tonumber(indicator and indicator.frameLevel) or defLevel or 0
+end
+
+-- The GLOBAL AD defaults the RENDER honours, resolved ONCE per drive pass and threaded as a
+-- single named table rather than as more positional arguments. That is the point: with a
+-- table a missed call site fails as a nil index on a named key, whereas a fourth positional
+-- boolean/number silently slides into whatever parameter sits next to it. Same reason
+-- resolveDefCBT exists — render and editor must walk the SAME fallback chain, or a stored
+-- default shows in the editor and does nothing live.
+local function resolveDefs(adDB)
+    local d = adDB and adDB.defaults
+    if type(d) ~= "table" then d = nil end
+    local strata = d and d.indicatorFrameStrata
+    return {
+        cbt    = resolveDefCBT(adDB),
+        level  = (d and tonumber(d.indicatorFrameLevel)) or 0,
+        strata = (type(strata) == "string" and STRATA_VALID[strata]) and strata or nil,
+    }
+end
+Factory.ResolveDefaults = resolveDefs   -- editor preview passes this into BuildPreviewConfig
+
+local function buildPlacedConfig(unit, map, indicator, isSquare, borderSpec, defs, mine)
     return {
         unit = unit,
         mode = "row",
@@ -1137,9 +1184,10 @@ local function buildPlacedConfig(unit, map, indicator, isSquare, borderSpec, def
         -- off our own secretRect border textures via the external UIParent driver, not the LCG
         -- glows (which stay stripped by SAFE_OVERLAY_ANIM regardless).
         adBorderAnim = true,
-        frameLevelOffset = 40 + (tonumber(indicator.frameLevel) or 0),
+        frameLevelOffset = 40 + resolveLevel(indicator, defs.level),
+        frameStrata = resolveStrata(indicator, defs.strata),
         layout = buildPlacedLayout(indicator),
-        style = buildPlacedStyle(indicator, isSquare, borderSpec, defCBT),
+        style = buildPlacedStyle(indicator, isSquare, borderSpec, defs),
     }
 end
 
@@ -1151,15 +1199,16 @@ end
 -- toggling a region OFF must Rebuild the container to drop it; a plain ApplyStyle would leave
 -- the old region visible. A change here forces a whole-container Rebuild (slots can't be
 -- patched). Cosmetic styling of a live region is coSig.
-local function placedStructSig(map, isSquare, hideIcon, showStacks, showDuration, borderOn, indicator, defCBT, mine)
+local function placedStructSig(map, isSquare, hideIcon, showStacks, showDuration, borderOn, indicator, defs, mine)
     return includeSig(map)
         .. "|" .. (isSquare and "sq" or "ic")
         .. "|" .. (hideIcon and "hi" or "")
         .. "|" .. (showStacks and "st" or "")
         .. "|" .. (showDuration and "du" or "")
         .. "|" .. (borderOn and "bd" or "")
-        .. "|fl=" .. tostring(tonumber(indicator.frameLevel) or 0)
-        .. "|df=" .. durationFmtKey(indicator, true, defCBT)
+        .. "|fl=" .. tostring(resolveLevel(indicator, defs.level))
+        .. "|fs=" .. tostring(resolveStrata(indicator, defs.strata) or "")   -- strata applies at Create, like the level
+        .. "|df=" .. durationFmtKey(indicator, true, defs.cbt)
         -- (No alert keys: the expiry alert lives on the COMPANION slot, whose own
         -- structSig carries alertElemStructKey — an alert edit rebuilds only it.)
         .. "|f=" .. poolFilter(indicator, mine)   -- filter string binds at build (pool/othersOnly change -> Rebuild)
@@ -1341,7 +1390,7 @@ end
 -- config; native SetDurationBar (bindNative) drives the value. Duration text via the shared
 -- styleable fontstring (colour-by-time buckets). Interpolation/direction are creation-frozen
 -- opts (bind-once) — Immediate + RemainingTime match the legacy bar's SetTimerDuration call.
-local function buildBarStyle(indicator, borderSpec, defCBT)
+local function buildBarStyle(indicator, borderSpec, defs)
     local fr, fg, fb, fa = readADColor(indicator.fillColor)
     -- Colour Mode: a curve (DF / Classic) swaps the fill texture for a green->red ramp the
     -- native RemainingTime drain reveals, and forces a white tint (styleBarShared honours
@@ -1365,7 +1414,7 @@ local function buildBarStyle(indicator, borderSpec, defCBT)
         },
     }
     -- Legacy bar default for Show Duration is OFF (unlike icon/square, which default ON).
-    style.duration = buildDurationTextSpec(indicator, false, 1.2, defCBT)   -- placed bar baseline: 1.2 scale, colour-by-time per adDB.defaults
+    style.duration = buildDurationTextSpec(indicator, false, 1.2, defs.cbt)   -- placed bar baseline: 1.2 scale, colour-by-time per adDB.defaults
     if borderSpec then style.border = { spec = borderSpec } end
     -- Expiry Alert element: rendered by a separate COMPANION SLOT, never by this
     -- button (one duration binding per button — see EXPIRY ALERT COMPANION SLOT).
@@ -1374,7 +1423,7 @@ end
 
 -- Full row config for one placed bar (max=1 single-slot container). Same frame-level band as
 -- the icon/square placed indicators (40 + per-indicator frameLevel).
-local function buildBarConfig(frame, unit, map, indicator, borderSpec, defCBT, mine)
+local function buildBarConfig(frame, unit, map, indicator, borderSpec, defs, mine)
     return {
         unit = unit,
         mode = "row",
@@ -1385,9 +1434,10 @@ local function buildBarConfig(frame, unit, map, indicator, borderSpec, defCBT, m
         enabled = true,
         tooltips = false,
         adBorderAnim = true,   -- opt into DF-owned border animations (see buildPlacedConfig)
-        frameLevelOffset = 40 + (tonumber(indicator.frameLevel) or 0),
+        frameLevelOffset = 40 + resolveLevel(indicator, defs.level),
+        frameStrata = resolveStrata(indicator, defs.strata),
         layout = buildBarLayout(frame, indicator),
-        style = buildBarStyle(indicator, borderSpec, defCBT),
+        style = buildBarStyle(indicator, borderSpec, defs),
     }
 end
 
@@ -1419,7 +1469,7 @@ end
 -- (GetADTrackedSpellIDs) is built from the CONFIG records, not from live
 -- handles — the companion adds nothing to it.
 -- ============================================================
-local function buildAlertCompanionConfig(unit, map, indicator, layout, mine, geom)
+local function buildAlertCompanionConfig(unit, map, indicator, layout, mine, geom, defs)
     -- The reveal's duration spec (formatter + placement + opacity) is engine-owned; the factory
     -- only wraps it in the AuraContainer plumbing. nil = alert off, or the pre-12.1 formatter
     -- API is missing (no companion). geom (alertGeometry) is the target's shape — a square for
@@ -1439,7 +1489,11 @@ local function buildAlertCompanionConfig(unit, map, indicator, layout, mine, geo
         -- One level above the indicator's own container band so the alert text
         -- draws over the icon / a bar's fill (the companion subtree carries
         -- nothing but the text, so nothing of the indicator is covered).
-        frameLevelOffset = 41 + (tonumber(indicator.frameLevel) or 0),
+        frameLevelOffset = 41 + resolveLevel(indicator, defs.level),
+        -- MUST mirror the indicator's strata: the +41 level only orders the alert above the
+        -- indicator WITHIN a band, so leaving the companion in the frame's band while the
+        -- indicator moves to HIGH would strand the alert text underneath it.
+        frameStrata = resolveStrata(indicator, defs.strata),
         layout = layout,   -- the INDICATOR's own layout: the invisible button coincides with its rect
         style = {
             icon     = { show = false },
@@ -1455,11 +1509,12 @@ end
 -- geometry — dragging / resizing the indicator hot-moves its companion — plus
 -- font and alpha. Raw-config, alloc-light, computed per pass like the other
 -- placed sigs (FIX C discipline).
-local function alertCompanionStructSig(map, indicator, mine, geom)
+local function alertCompanionStructSig(map, indicator, mine, geom, defs)
     return includeSig(map)
         .. "|xalert"
         .. "|xa=" .. alertElemStructKey(indicator, geom)
-        .. "|fl=" .. tostring(tonumber(indicator.frameLevel) or 0)
+        .. "|fl=" .. tostring(resolveLevel(indicator, defs.level))
+        .. "|fs=" .. tostring(resolveStrata(indicator, defs.strata) or "")
         .. "|f=" .. poolFilter(indicator, mine)
 end
 
@@ -1489,11 +1544,11 @@ end
 -- indicators carry their companion to the arranged position. Marks its key
 -- live on success; alert OFF / indicator death leave the key dead and the
 -- caller's end-of-pass sweep destroys the handle.
-local function syncAlertCompanion(frame, placed, live, key, map, indicator, isBar, alpha, mine)
+local function syncAlertCompanion(frame, placed, live, key, map, indicator, isBar, alpha, mine, defs)
     if not alertElemMode(indicator) then return end
     local akey = key .. ":alert"
     local geom = alertGeometry(frame, indicator, isBar)   -- square (icon) or rect (bar)
-    local structSig = alertCompanionStructSig(map, indicator, mine, geom)
+    local structSig = alertCompanionStructSig(map, indicator, mine, geom, defs)
     local coSig = alertCompanionCoSig(frame, indicator, isBar, alpha)
     local entry = placed[akey]
     if entry and entry.structSig == structSig and entry.coSig == coSig then
@@ -1501,7 +1556,7 @@ local function syncAlertCompanion(frame, placed, live, key, map, indicator, isBa
         return
     end
     local layout = isBar and buildBarLayout(frame, indicator) or buildPlacedLayout(indicator)
-    local cfg = buildAlertCompanionConfig(frame.unit, map, indicator, layout, mine, geom)
+    local cfg = buildAlertCompanionConfig(frame.unit, map, indicator, layout, mine, geom, defs)
     if not cfg then return end   -- formatter unavailable: key stays dead -> sweep
     if not entry then
         local handle = DF.AuraContainer:Create(frame, cfg)
@@ -1547,8 +1602,11 @@ local function buildAlertPreview(indicator, geom)
         geom or { baseSize = indicator.size, font = indicator.durationFont })
 end
 
-function Factory:BuildPreviewConfig(frame, indicator, typeKey, spellID, defCBT)
-    if defCBT == nil then defCBT = true end   -- caller passes resolveDefCBT(adDB); nil = baseline ON
+function Factory:BuildPreviewConfig(frame, indicator, typeKey, spellID, defs)
+    -- caller passes Factory.ResolveDefaults(adDB); nil = baseline (colour-by-time ON,
+    -- no global level/strata). The canvas is a standalone preview, not layered over a
+    -- unit frame, so level/strata are meaningless here and are simply not applied.
+    if type(defs) ~= "table" then defs = { cbt = true, level = 0, strata = nil } end
     local entries = spellID and testEntryForMap({ [spellID] = true }) or nil
     if typeKey == "bar" then
         local borderSpec = placedBorderOn(indicator, false)
@@ -1557,13 +1615,13 @@ function Factory:BuildPreviewConfig(frame, indicator, typeKey, spellID, defCBT)
             mode = "row", max = 1, filter = "HELPFUL",
             adBorderAnim = true,
             layout = buildBarLayout(frame, indicator),
-            style = buildBarStyle(indicator, borderSpec, defCBT),
+            style = buildBarStyle(indicator, borderSpec, defs),
             testEntries = entries,
             alertPreview = buildAlertPreview(indicator, alertGeometry(frame, indicator, true)),
         }
         local sig = "bar|" .. tostring(borderSpec ~= nil)
             .. "|" .. tostring(cfg.style.duration ~= nil)
-            .. "|" .. durationFmtKey(indicator, false, defCBT)
+            .. "|" .. durationFmtKey(indicator, false, defs.cbt)
         return cfg, sig
     end
     local isSquare = (typeKey == "square")
@@ -1574,7 +1632,7 @@ function Factory:BuildPreviewConfig(frame, indicator, typeKey, spellID, defCBT)
         mode = "row", max = 1, filter = "HELPFUL",
         adBorderAnim = true,
         layout = buildPlacedLayout(indicator),
-        style = buildPlacedStyle(indicator, isSquare, borderSpec, defCBT),
+        style = buildPlacedStyle(indicator, isSquare, borderSpec, defs),
         testEntries = entries,
         alertPreview = buildAlertPreview(indicator),
     }
@@ -1582,20 +1640,21 @@ function Factory:BuildPreviewConfig(frame, indicator, typeKey, spellID, defCBT)
         .. "|" .. tostring(cfg.style.stacks ~= nil)
         .. "|" .. tostring(cfg.style.duration ~= nil)
         .. "|" .. tostring(borderSpec ~= nil)
-        .. "|" .. durationFmtKey(indicator, true, defCBT)
+        .. "|" .. durationFmtKey(indicator, true, defs.cbt)
     return cfg, sig
 end
 
 -- STRUCTURAL signature: identity, duration-text on/off + format key (SetDurationText / SetDuration
 -- Bar bind ONCE), border on/off, frame level. Cosmetic bar styling is barCoSig.
-local function barStructSig(map, indicator, borderOn, defCBT, mine)
+local function barStructSig(map, indicator, borderOn, defs, mine)
     return includeSig(map)
         .. "|bar"
-        .. "|df=" .. durationFmtKey(indicator, false, defCBT)
+        .. "|df=" .. durationFmtKey(indicator, false, defs.cbt)
         -- (No alert keys: the expiry alert lives on the COMPANION slot, whose own
         -- structSig carries alertElemStructKey — an alert edit rebuilds only it.)
         .. "|" .. (borderOn and "bd" or "")
-        .. "|fl=" .. tostring(tonumber(indicator.frameLevel) or 0)
+        .. "|fl=" .. tostring(resolveLevel(indicator, defs.level))
+        .. "|fs=" .. tostring(resolveStrata(indicator, defs.strata) or "")
         .. "|f=" .. poolFilter(indicator, mine)   -- filter string binds at build (pool/othersOnly change -> Rebuild)
 end
 
@@ -2167,7 +2226,7 @@ end
 -- Missing-mode config for a PLACED icon/square: mode="missing", badge sized to the indicator's
 -- square art. Same frame-level band as the present placed indicators. candidateFilters is the
 -- static identity map (structural — bound at build).
-local function buildPlacedMissingConfig(unit, map, indicator, mine)
+local function buildPlacedMissingConfig(unit, map, indicator, mine, defs)
     local size = math.max(8, tonumber(indicator.size) or 24)
     return {
         unit = unit,
@@ -2179,7 +2238,8 @@ local function buildPlacedMissingConfig(unit, map, indicator, mine)
         candidateFilters = { includeSpellIDs = map },
         badge = { w = size, h = size },
         enabled = true,
-        frameLevelOffset = 40 + (tonumber(indicator.frameLevel) or 0),
+        frameLevelOffset = 40 + resolveLevel(indicator, defs.level),
+        frameStrata = resolveStrata(indicator, defs.strata),
     }
 end
 
@@ -2550,7 +2610,7 @@ end
 -- Expiry-alert companions ride the same `placed`/`live` stores under
 -- "<key>:alert" keys (syncAlertCompanion) — the shared end-of-pass sweep
 -- retires them exactly like their indicators.
-local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSpec, defCBT)
+local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSpec, defs)
     -- Spec pool (My Buffs) = player-cast only; the OTHER_PREFIX pool stays anyone-cast.
     local mine = keyPrefix == ""
     for auraName, auraCfg in pairs(auras) do
@@ -2574,14 +2634,14 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                         local eff = memberEffective(hasMG, key, indicator)
                         local borderOn = placedBorderOn(indicator, false)
                         local alpha = tonumber(indicator.alpha) or 1
-                        local structSig = barStructSig(map, indicator, borderOn, defCBT, mine)
+                        local structSig = barStructSig(map, indicator, borderOn, defs, mine)
                         local coSig = barCoSig(frame, eff, borderOn, alpha)
 
                         local entry = placed[key]
                         if not entry then
                             local borderSpec = borderOn and buildBarBorderSpec(frame, indicator) or nil
                             local handle = DF.AuraContainer:Create(frame,
-                                buildBarConfig(frame, frame.unit, map, eff, borderSpec, defCBT, mine))
+                                buildBarConfig(frame, frame.unit, map, eff, borderSpec, defs, mine))
                             if handle then
                                 applyPlacedAlpha(handle, alpha)
                                 placed[key] = { handle = handle, structSig = structSig, coSig = coSig }
@@ -2589,20 +2649,20 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                         elseif entry.structSig ~= structSig then
                             local borderSpec = borderOn and buildBarBorderSpec(frame, indicator) or nil
                             entry.structSig, entry.coSig = structSig, coSig
-                            entry.handle:Rebuild(buildBarConfig(frame, frame.unit, map, eff, borderSpec, defCBT, mine))
+                            entry.handle:Rebuild(buildBarConfig(frame, frame.unit, map, eff, borderSpec, defs, mine))
                             applyPlacedAlpha(entry.handle, alpha)
                         elseif entry.coSig ~= coSig then
                             local borderSpec = borderOn and buildBarBorderSpec(frame, indicator) or nil
                             entry.coSig = coSig
                             entry.handle:ApplyStyle(
-                                buildBarStyle(indicator, borderSpec, defCBT),
+                                buildBarStyle(indicator, borderSpec, defs),
                                 buildBarLayout(frame, eff))
                             applyPlacedAlpha(entry.handle, alpha)
                         end
 
                         -- Expiry-alert companion slot (own container, own sigs —
                         -- see the EXPIRY ALERT COMPANION SLOT section).
-                        syncAlertCompanion(frame, placed, live, key, map, eff, true, alpha, mine)
+                        syncAlertCompanion(frame, placed, live, key, map, eff, true, alpha, mine, defs)
                     end
                 elseif isSquare or indicator.type == "icon" then
                     local ids = DF:BuildADIdentityFilters(idSpec, auraName)
@@ -2632,7 +2692,8 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                         local oxM, oyM = tonumber(eff.offsetX) or 0, tonumber(eff.offsetY) or 0
                         local scaleM = tonumber(indicator.scale) or 1
                         local structSig = includeSig(map) .. "|" .. (isSquare and "sq" or "ic")
-                            .. "|miss|fl=" .. tostring(tonumber(indicator.frameLevel) or 0)
+                            .. "|miss|fl=" .. tostring(resolveLevel(indicator, defs.level))
+                            .. "|fs=" .. tostring(resolveStrata(indicator, defs.strata) or "")
                             .. "|f=" .. poolFilter(indicator, mine)
                         local coSig = tconcat({
                             "sz=" .. tostring(size), "sc=" .. tostring(scaleM),
@@ -2679,7 +2740,7 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                         end
                         if not entry then
                             local handle = DF.AuraContainer:Create(frame,
-                                buildPlacedMissingConfig(frame.unit, map, indicator, mine))
+                                buildPlacedMissingConfig(frame.unit, map, indicator, mine, defs))
                             if handle then
                                 placeM(handle)
                                 stylePlacedMissingBadge(handle, frame, idSpec, auraName, indicator, isSquare)
@@ -2703,14 +2764,14 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                         -- alloc — FIX C); the actual border spec is built ONLY inside a
                         -- create/rebuild/restyle branch below, never per pass.
                         local structSig = placedStructSig(map, isSquare, hideIcon, showStacks,
-                            showDuration, borderOn, indicator, defCBT, mine)
+                            showDuration, borderOn, indicator, defs, mine)
                         local coSig = placedCoSig(eff, isSquare, borderOn, alpha)
 
                         local entry = placed[key]
                         if not entry then
                             local borderSpec = borderOn and buildPlacedBorderSpec(frame, indicator, hideIcon) or nil
                             local handle = DF.AuraContainer:Create(frame,
-                                buildPlacedConfig(frame.unit, map, eff, isSquare, borderSpec, defCBT, mine))
+                                buildPlacedConfig(frame.unit, map, eff, isSquare, borderSpec, defs, mine))
                             if handle then
                                 applyPlacedAlpha(handle, alpha)
                                 placed[key] = { handle = handle, structSig = structSig, coSig = coSig }
@@ -2718,20 +2779,20 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                         elseif entry.structSig ~= structSig then
                             local borderSpec = borderOn and buildPlacedBorderSpec(frame, indicator, hideIcon) or nil
                             entry.structSig, entry.coSig = structSig, coSig
-                            entry.handle:Rebuild(buildPlacedConfig(frame.unit, map, eff, isSquare, borderSpec, defCBT, mine))
+                            entry.handle:Rebuild(buildPlacedConfig(frame.unit, map, eff, isSquare, borderSpec, defs, mine))
                             applyPlacedAlpha(entry.handle, alpha)
                         elseif entry.coSig ~= coSig then
                             local borderSpec = borderOn and buildPlacedBorderSpec(frame, indicator, hideIcon) or nil
                             entry.coSig = coSig
                             entry.handle:ApplyStyle(
-                                buildPlacedStyle(indicator, isSquare, borderSpec, defCBT),
+                                buildPlacedStyle(indicator, isSquare, borderSpec, defs),
                                 buildPlacedLayout(eff))
                             applyPlacedAlpha(entry.handle, alpha)
                         end
 
                         -- Expiry-alert companion slot (own container, own sigs —
                         -- see the EXPIRY ALERT COMPANION SLOT section).
-                        syncAlertCompanion(frame, placed, live, key, map, eff, false, alpha, mine)
+                        syncAlertCompanion(frame, placed, live, key, map, eff, false, alpha, mine, defs)
                       end
                     end
                 end
@@ -3223,16 +3284,16 @@ function Factory:SyncFrame(frame)
         -- walk is allocation-free and per-UNIT_AURA hot) and threaded into every placed/
         -- bar spec + struct sig, so nil-instance indicators follow adDB.defaults exactly
         -- like the editor's proxy does.
-        local defCBT = resolveDefCBT(adDB)
+        local defs = resolveDefs(adDB)
 
         if specAuras then
-            syncPlacedPool(frame, placed, live, hasMG, specAuras, "", spec, defCBT)
+            syncPlacedPool(frame, placed, live, hasMG, specAuras, "", spec, defs)
         end
         -- OTHER BUFFS pool: same store, same live/sweep — keys carry OTHER_PREFIX so
         -- the pools can't collide (the arranger's scratch keys carry it too) and NIL
         -- idSpec (spec-independent identity).
         if otherAuras then
-            syncPlacedPool(frame, placed, live, hasOtherMG, otherAuras, OTHER_PREFIX, nil, defCBT)
+            syncPlacedPool(frame, placed, live, hasOtherMG, otherAuras, OTHER_PREFIX, nil, defs)
         end
 
         -- Tear down any placed container whose indicator is gone / de-configured —

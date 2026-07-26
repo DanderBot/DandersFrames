@@ -911,11 +911,6 @@ function DF:UpdateUnitFrame(frame, source)
     end
     
 
-    -- Update AD tint overlay if it's tracking current health
-    if DF.UpdateADTintHealth then
-        DF:UpdateADTintHealth(frame)
-    end
-
     -- ========================================
     -- RANGE CHECK
     -- ========================================
@@ -1170,11 +1165,6 @@ function DF:UpdateHealthFast(frame)
         DF:UpdateDispelGradientHealth(frame)
     end
     
-
-    -- Update AD tint overlay if it's tracking current health
-    if DF.UpdateADTintHealth then
-        DF:UpdateADTintHealth(frame)
-    end
     -- NOTE: the TextDesigner "health" refresh is driven from the central
     -- event dispatcher (Frames/Headers.lua), not here. UpdateHealthFast has
     -- fast-path early returns (e.g. lines ~1024/1071) that a tail hook would
@@ -1390,11 +1380,6 @@ function DF:UpdateHealth(frame)
         DF:UpdateDispelGradientHealth(frame)
     end
     
-
-    -- Update AD tint overlay if it's tracking current health
-    if DF.UpdateADTintHealth then
-        DF:UpdateADTintHealth(frame)
-    end
 
     -- Apply colors
     DF:ApplyHealthColors(frame)

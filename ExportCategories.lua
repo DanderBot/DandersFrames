@@ -290,6 +290,7 @@ DF.ExportCategories = {
         "buffWrap",
         "debuffAlpha",
         "debuffAnchor",
+        "debuffBlacklist",
         "debuffBorderBlendMode",
         "debuffBorderColor",
         "debuffBorderColorBleed",
@@ -404,7 +405,6 @@ DF.ExportCategories = {
         "dispelIconOffsetY",
         "dispelIconPosition",
         "dispelIconSize",
-        "dispelNameText",
         "dispelOverlayDispelType",
         "dispelOverlayEnabled",
         "dispelShowBorder",
@@ -1342,11 +1342,6 @@ function DF:BuildCategoryLookup()
     return self._categoryLookup
 end
 
--- Get category for a setting key
-function DF:GetSettingCategory(key)
-    local lookup = self:BuildCategoryLookup()
-    return lookup[key]
-end
 
 -- Extract settings for specific categories from a profile
 function DF:ExtractCategorySettings(profile, categories, frameType)

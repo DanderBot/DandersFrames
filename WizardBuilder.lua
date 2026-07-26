@@ -1123,6 +1123,19 @@ WB.BuildWizardConfig = BuildWizardConfig
 
 -- Built-in wizard registry
 -- Each entry: { name, description, build = function() return wizard config end }
+--
+-- ⚠ CURRENTLY UNUSED, KEPT ON PURPOSE (reviewed 2026-07-25). Nothing anywhere calls
+-- RegisterBuiltinWizard, so this list is permanently empty and GetBuiltinWizards()
+-- always returns {} — which is why the Options > Wizards page always renders its
+-- "No built-in wizards available yet. Check back after updates!" placeholder. The
+-- rest of WizardBuilder is very much alive (user-created wizards, import/export,
+-- the /df commands); it is only the BUILT-IN half that has never been populated.
+--
+-- Krathe's call: keep the framework, we may yet use it. If a later pass finds we
+-- still have not shipped a single built-in wizard, delete this registry, the two
+-- accessors, and the placeholder branch on the Wizards page together — and drop the
+-- user-facing "check back after updates" promise with them, since it is the part
+-- that actually costs us something while it stays unkept.
 local builtinWizards = {}
 
 function WB:RegisterBuiltinWizard(entry)

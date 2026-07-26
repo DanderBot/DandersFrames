@@ -2103,13 +2103,6 @@ end
 -- (DF:LightweightUpdateDispelColors was removed with the dispel Custom Colors
 -- mode, 2026-07-11 — its per-type picker callbacks were its only callers.)
 
--- Update debuff border colors directly (for test mode preview only)
--- Note: icon.debuffType is only set in test mode, so this only affects test frames
-function DF:LightweightUpdateDebuffBorderColors()
-    -- 12.1: the container rows own this styling; bump the layout version and
-    -- re-drive them so the change applies live (sig-gated, cheap when unchanged).
-    DF:InvalidateAuraLayout()
-end
 
 -- ============================================================
 -- UTF-8 STRING HELPERS
@@ -3396,8 +3389,14 @@ DF._MainEventDispatcher = function(self, event, arg1)
                         if ad.defaults.indicatorFrameStrata == nil then
                             ad.defaults.indicatorFrameStrata = "INHERIT"
                         end
+                        -- 0, matching the Config baseline: the render adds 40 + this, so a
+                        -- seeded profile keeps its indicators exactly where they are today.
+                        -- Seeding 30 here (the old value) would move every untouched
+                        -- indicator to +70 the moment the global default is wired to the
+                        -- render. Only ever SEEDS a missing key — a stored value, including
+                        -- an auto-stamped 30 from before this change, is left untouched.
                         if ad.defaults.indicatorFrameLevel == nil then
-                            ad.defaults.indicatorFrameLevel = 30
+                            ad.defaults.indicatorFrameLevel = 0
                         end
                     end
                 end
@@ -4539,7 +4538,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- /df subcommand diagnostics (hand-listed — keep in sync with this handler)
                 print("  |cffffcc00" .. L["/df diagnostics"] .. ":|r")
                 print("    |cff00ff00/df exportaudit|r - " .. L["export category drift check"])
-                print("    |cff00ff00/df blocked|r - " .. L["settings disabled by the 12.1 aura system"])
                 print("    |cff00ff00/df overrides|r - " .. L["active auto-layout overrides"])
                 print("    |cff00ff00/df attached|r - " .. L["foreign frames anchored to ours"])
                 print("    |cff00ff00/df headers|r / |cff00ff00auras|r / |cff00ff00dispel|r - " .. L["subsystem state dumps"])
@@ -4788,12 +4786,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     DF.FilterRegistry:AuditSpellData()
                 else
                     print("|cffff0000DandersFrames:|r Filter Registry not available")
-                end
-            elseif msg == "blocked" then
-                -- Dev: inventory of settings disabled by the 12.1 aura system
-                -- (the running "what we've lost / restored" audit).
-                if DF.PrintBlockedSettings then
-                    DF:PrintBlockedSettings()
                 end
             elseif msg == "testids" then
                 -- Dev: audit the test pool's spell IDs against this client —

@@ -1037,17 +1037,29 @@ local function bindNative(slot, config)
                 DF:DebugWarn(DBG, "SetAuraBorder failed (build still ok): %s", tostring(err))
             end
         end
-        if slot.dfSymbol and slot.SetAuraSymbol and not slot._boundSymbol then
+        if slot.dfSymbol and (slot.SetDispelTypeText or slot.SetAuraSymbol) and not slot._boundSymbol then
             slot._boundSymbol = true
             local ok, err = pcall(function()
-                slot:SetAuraSymbol(slot.dfSymbol, {
+                local opts = {
                     showWhenHarmful = dispelSpec.showWhenHarmful ~= false,
                     showWhenHelpful = dispelSpec.showWhenHelpful == true,
-                })
+                }
+                -- 68914: SetAuraSymbol sits in the same "removed after 12.1" deprecation
+                -- block as SetAuraBorder, but unlike that one it is a PLAIN ALIAS —
+                -- `SetAuraSymbol = SetDispelTypeText`, same (fontString, options)
+                -- signature, no clear-then-add semantics to mirror. So this is a straight
+                -- rename: prefer the real name, keep the alias only for older builds.
+                -- Without the fallback the gate above would simply stop matching when the
+                -- aliases go, and the dispel symbol would vanish SILENTLY.
+                if slot.SetDispelTypeText then
+                    slot:SetDispelTypeText(slot.dfSymbol, opts)
+                else
+                    slot:SetAuraSymbol(slot.dfSymbol, opts)
+                end
             end)
             if not ok and not warnedNativeDispel then
                 warnedNativeDispel = true
-                DF:DebugWarn(DBG, "SetAuraSymbol failed (build still ok): %s", tostring(err))
+                DF:DebugWarn(DBG, "SetDispelTypeText failed (build still ok): %s", tostring(err))
             end
         end
     end
@@ -3088,7 +3100,42 @@ end
 -- sample data provider feeds them and initializeFrame paints the curated preview
 -- (see AuraContainer.SetTestMode). The backend owns the container + slot
 -- production; the handle owns styling/layout/lifecycle.
+
+-- Z-ORDER — frame level + frame strata, from self.config. Level: legacy renders host aura
+-- icons ABOVE contentOverlay (parent+25, name/health text). Raising self.frame raises the
+-- whole subtree — the native container + AuraButtons + their holders are all descendants with
+-- relative levels (Blizzard sets no fixed levels). Default +40 = legacy buff-icon level; the
+-- defensive row passes +51 (= contentOverlay+26). Strata picks the BAND; the level offset only
+-- orders WITHIN a band.
+--
+-- ★ Called from Create AND from every _build. It MUST run on rebuild: Rebuild() swaps
+-- self.config and calls _build WITHOUT recreating self.frame, so a config whose z-order keys
+-- changed would otherwise keep whatever Create stamped — which is why a struct-sig change to
+-- Frame Level did not take effect until a reload. Recomputing is a couple of setter calls, so
+-- an unconditional call per build costs nothing.
+--
+-- Strata is deliberately OPT-IN. Calling SetFrameStrata PINS a frame: it stops tracking the
+-- parent's band. Containers that never set frameStrata are therefore left untouched and keep
+-- inheriting, exactly as before. Only once an explicit strata has been applied do we re-assert
+-- the parent's band on the way back to Inherit (there is no "unset" to write) — tracked by
+-- _strataPinned so the restore happens once and never on a container that never opted in.
+function Handle:_applyZOrder()
+    local f, cfg = self.frame, self.config
+    if not f or not cfg then return end
+    local parent = f:GetParent()
+    if not parent then return end
+    f:SetFrameLevel(math.max(0, parent:GetFrameLevel() + (cfg.frameLevelOffset or 40)))
+    if cfg.frameStrata then
+        f:SetFrameStrata(cfg.frameStrata)
+        self._strataPinned = true
+    elseif self._strataPinned then
+        f:SetFrameStrata(parent:GetFrameStrata())
+        self._strataPinned = nil
+    end
+end
+
 function Handle:_build()
+    self:_applyZOrder()        -- level/strata track config changes across Rebuild
     self:_ppPrepare()          -- pp flag + quantized layout BEFORE any geometry runs
     self.backend = NativeBackend.new(self)
     self.backend:build()
@@ -3280,11 +3327,7 @@ function AuraContainer:Create(parent, config)
             end)
         end
     end
-    -- Z-order: legacy renders host aura icons ABOVE contentOverlay (parent+25, name/health
-    -- text). Raising h.frame raises the whole subtree — the native container + AuraButtons +
-    -- their holders are all descendants with relative levels (Blizzard sets no fixed levels).
-    -- Default +40 = legacy buff-icon level; the defensive row passes +51 (= contentOverlay+26).
-    h.frame:SetFrameLevel(math.max(0, parent:GetFrameLevel() + (cfg.frameLevelOffset or 40)))
+    h:_applyZOrder()   -- level + strata; also re-runs on every _build (see the method)
 
     if InCombatLockdown() then
         -- Can't safely stand up secure container state in combat; build on regen.

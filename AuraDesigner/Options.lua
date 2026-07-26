@@ -59,7 +59,11 @@ local function RefreshLocaleStrings()
         { key = "background", label = L["Background Color"],  placed = false },
         { key = "nametext",   label = L["Name Text Color"],  placed = false },
         { key = "healthtext", label = L["Health Text Color"], placed = false },
-        { key = "framealpha", label = L["Frame Alpha"],      placed = false },
+        -- (framealpha removed 2026-07-25 — 12.1 casualty, see the Factory's CASUALTIES note.
+        --  Whole-frame alpha needs frame:SetAlpha gated on SECRET aura presence, and it also
+        --  fights the range / out-of-range alpha owners for the same property. It never had a
+        --  render path on the container engine — only the editor canvas applied it — so the
+        --  effect showed in the preview and did nothing in game.)
         { key = "sound",      label = L["Sound Alert"],      placed = false },
     }
 
@@ -1166,11 +1170,6 @@ local function EnsureTypeConfig(auraName, typeKey, pool)
                 color = {r = 1, g = 1, b = 1, a = 1},
                 showWhenMissing = false,
             }
-        elseif typeKey == "framealpha" then
-            auraCfg[typeKey] = {
-                alpha = 0.5,
-                showWhenMissing = false,
-            }
         elseif typeKey == "sound" then
             auraCfg[typeKey] = {
                 enabled = false,
@@ -1490,10 +1489,6 @@ local TYPE_DEFAULTS = {
     },
     healthtext = {
         color = {r = 1, g = 1, b = 1, a = 1},
-        showWhenMissing = false,
-    },
-    framealpha = {
-        alpha = 0.5,
         showWhenMissing = false,
     },
 }
@@ -2265,7 +2260,7 @@ local effectCardPool = {}   -- Reusable card frames
 -- the new Effects tab. Replaces the old per-aura view.
 -- ============================================================
 
-local FRAME_LEVEL_TYPE_KEYS = { "border", "healthbar", "background", "nametext", "healthtext", "framealpha", "sound" }
+local FRAME_LEVEL_TYPE_KEYS = { "border", "healthbar", "background", "nametext", "healthtext", "sound" }
 
 -- Remove an ad-hoc "#<id>" aura's config entry once it holds no effects at
 -- all (empty/absent indicators array AND no frame-level type keys). Ad-hoc
@@ -2299,7 +2294,6 @@ local function RefreshEffectLabels()
         background  = L["Background"],
         nametext   = L["Name Text"],
         healthtext = L["Health Text"],
-        framealpha = L["Frame Alpha"],
         sound      = L["Sound Alert"],
     }
 
@@ -2322,7 +2316,6 @@ local BADGE_COLORS = {
     background = { r = 0.40, g = 0.55, b = 0.65 },  -- Slate
     nametext   = { r = 0.72, g = 0.72, b = 0.94 },  -- Light blue
     healthtext = { r = 0.72, g = 0.72, b = 0.94 },  -- Light blue
-    framealpha = { r = 0.60, g = 0.60, b = 0.60 },  -- Grey
     sound      = { r = 0.94, g = 0.76, b = 0.24 },  -- Gold/yellow
 }
 
@@ -2711,10 +2704,12 @@ local function RenderPreviewIndicator(mockFrame, spec, auraName, info, indicator
         local rec = R and R.GetSpellByName and R:GetSpellByName(auraName)
         spellID = rec and rec.id
     end
-    -- Resolve the global colour-by-time default with the Factory's OWN resolver so the
-    -- canvas preview and the live render can never disagree on the fallback.
-    local defCBT = Factory.ResolveDefaultColorByTime and Factory.ResolveDefaultColorByTime(GetAuraDesignerDB())
-    local cfg, sig = Factory:BuildPreviewConfig(mockFrame, effectiveConfig, indicator.type or "icon", spellID, defCBT)
+    -- Resolve the global defaults with the Factory's OWN resolver so the canvas preview and
+    -- the live render can never disagree on the fallback chain. (Level/strata come along in
+    -- the table but the preview ignores them: the canvas is standalone, not layered over a
+    -- unit frame, so there is nothing for a z-order band to mean there.)
+    local defs = Factory.ResolveDefaults and Factory.ResolveDefaults(GetAuraDesignerDB())
+    local cfg, sig = Factory:BuildPreviewConfig(mockFrame, effectiveConfig, indicator.type or "icon", spellID, defs)
     if not (cfg.testEntries and cfg.testEntries[1]) then
         -- No resolvable spell ID: synthesize an entry from the configured art so
         -- the paint can never fall back to the generic curated pool.
@@ -3399,12 +3394,6 @@ local function RefreshPreviewEffects()
         framePreview.hpText:SetTextColor(clr.r, clr.g, clr.b, clr.a or 1)
     end
 
-    -- Frame alpha (first claim wins)
-    if not claimed.framealpha and auraCfg.framealpha and auraCfg.framealpha.enabled ~= false then
-        claimed.framealpha = true
-        mockFrame:SetAlpha(auraCfg.framealpha.alpha or 0.5)
-    end
-
     end  -- for _, entry in sortedAuras
 end
 
@@ -3551,7 +3540,6 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
     -- can't (yet) drive, WITHOUT touching the trigger tags above (built into
     -- `parent` before this function runs — the working "which aura" layer).
     -- swmCheck is captured for the surgical Show-When-Missing block. See block pass below.
-    local builtGroups = {}
     local swmCheck, wholeBarCheck, swmGroup, durColorByTimeCtl
 
     local function AddWidget(widget, height)
@@ -3598,9 +3586,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         buildFn(group)
         local h = group:LayoutChildren()
         AddWidget(group, h)
-        -- P4.7: track every effect-settings group so the 12.1 block pass can
-        -- frost them per-type. Tag the Expiring group for its own limitation block.
-        builtGroups[#builtGroups + 1] = group
+        -- Tag the Show-When-Missing group so the surgical 12.1 block can find it.
         if header == L["Show When Missing"] then swmGroup = group end
         return group
     end
@@ -3779,12 +3765,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateSlider(parent, L["Scale"], 0.5, 3.0, 0.05, proxy, "scale"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Alpha"], 0, 1, 0.05, proxy, "alpha"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Frame Level"], -10, 30, 1, proxy, "frameLevel"), 54)
-            local strataDD = g:AddWidget(GUI:CreateDropdown(parent, L["Frame Strata"], OPTS.FRAME_STRATA_OPTIONS, proxy, "frameStrata"), 54)
-            -- 12.1: indicator z-order is engine-managed (fixed per-family level
-            -- offsets; Frame Level above IS applied). Strata isn't wired on the
-            -- container path yet — planned with the z-order polish pass.
-            GUI:BlockControl12_1(strataDD, "roadmap", { id = "ad:framestrata", page = L["Aura Designer"],
-                when = function() return DF.AuraContainer and DF.AuraContainer.IsSupported and DF.AuraContainer.IsSupported() end })
+            g:AddWidget(GUI:CreateDropdown(parent, L["Frame Strata"], OPTS.FRAME_STRATA_OPTIONS, proxy, "frameStrata"), 54)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Cooldown Swipe"], proxy, "hideSwipe"), 28)
             -- Text-only mode: the icon TEXTURE is hidden, so a border (static OR
             -- expiring) would frame nothing. Rebuild the page on toggle so the
@@ -3968,12 +3949,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateColorPicker(parent, L["Color"], proxy, "color", true, RPL, RPL, true), 28)
             g:AddWidget(GUI:CreateSlider(parent, L["Alpha"], 0, 1, 0.05, proxy, "alpha"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Frame Level"], -10, 30, 1, proxy, "frameLevel"), 54)
-            local strataDD = g:AddWidget(GUI:CreateDropdown(parent, L["Frame Strata"], OPTS.FRAME_STRATA_OPTIONS, proxy, "frameStrata"), 54)
-            -- 12.1: indicator z-order is engine-managed (fixed per-family level
-            -- offsets; Frame Level above IS applied). Strata isn't wired on the
-            -- container path yet — planned with the z-order polish pass.
-            GUI:BlockControl12_1(strataDD, "roadmap", { id = "ad:framestrata", page = L["Aura Designer"],
-                when = function() return DF.AuraContainer and DF.AuraContainer.IsSupported and DF.AuraContainer.IsSupported() end })
+            g:AddWidget(GUI:CreateDropdown(parent, L["Frame Strata"], OPTS.FRAME_STRATA_OPTIONS, proxy, "frameStrata"), 54)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Cooldown Swipe"], proxy, "hideSwipe"), 28)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Icon (Text Only)"], proxy, "hideIcon"), 28)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Show When Missing"], proxy, "showWhenMissing", function()
@@ -4126,12 +4102,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateColorPicker(parent, L["Background Color"], proxy, "bgColor", true, RPL, RPL, true), 28)
             g:AddWidget(GUI:CreateSlider(parent, L["Alpha"], 0, 1, 0.05, proxy, "alpha"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Frame Level"], -10, 30, 1, proxy, "frameLevel"), 54)
-            local strataDD = g:AddWidget(GUI:CreateDropdown(parent, L["Frame Strata"], OPTS.FRAME_STRATA_OPTIONS, proxy, "frameStrata"), 54)
-            -- 12.1: indicator z-order is engine-managed (fixed per-family level
-            -- offsets; Frame Level above IS applied). Strata isn't wired on the
-            -- container path yet — planned with the z-order polish pass.
-            GUI:BlockControl12_1(strataDD, "roadmap", { id = "ad:framestrata", page = L["Aura Designer"],
-                when = function() return DF.AuraContainer and DF.AuraContainer.IsSupported and DF.AuraContainer.IsSupported() end })
+            g:AddWidget(GUI:CreateDropdown(parent, L["Frame Strata"], OPTS.FRAME_STRATA_OPTIONS, proxy, "frameStrata"), 54)
             UpdateColorModeGrey()   -- initial grey for the curve-gated Texture / Fill Color
         end)
         -- Border (Stage 5.3 — unified controls via CreateBorderControls).
@@ -4339,30 +4310,14 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- Appearance
         AddGroup(L["Appearance"], function(g)
             g:AddWidget(GUI:CreateColorPicker(parent, L["Color"], proxy, "color", true, RPL, RPL, true), 28)
-            swmCheck = GUI:CreateCheckbox(parent, L["Show When Missing"], proxy, "showWhenMissing", function()
-                DF.AuraDesigner.Engine:ForceRefreshAllFrames()
-            end)
-            g:AddWidget(swmCheck, 28)
         end)
 
     elseif typeKey == "healthtext" then
         -- Appearance
         AddGroup(L["Appearance"], function(g)
             g:AddWidget(GUI:CreateColorPicker(parent, L["Color"], proxy, "color", true, RPL, RPL, true), 28)
-            swmCheck = GUI:CreateCheckbox(parent, L["Show When Missing"], proxy, "showWhenMissing", function()
-                DF.AuraDesigner.Engine:ForceRefreshAllFrames()
-            end)
-            g:AddWidget(swmCheck, 28)
         end)
 
-    elseif typeKey == "framealpha" then
-        -- Appearance
-        AddGroup(L["Appearance"], function(g)
-            g:AddWidget(GUI:CreateSlider(parent, L["Alpha"], 0, 1, 0.05, proxy, "alpha"), 54)
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Show When Missing"], proxy, "showWhenMissing", function()
-                DF.AuraDesigner.Engine:ForceRefreshAllFrames()
-            end), 28)
-        end)
 
     elseif typeKey == "sound" then
         -- Enable checkbox
@@ -4523,12 +4478,6 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
     -- ============================================================
     local ADgate = function(d) return DF:FactoryOwnsAD(d) end
 
-    local function BlockGroups(wording, idBase)
-        for _, g in ipairs(builtGroups) do
-            GUI:BlockControl12_1(g, wording, { id = idBase, page = L["Aura Designer"], when = ADgate })
-        end
-    end
-
     if typeKey == "icon" or typeKey == "square" then
         -- P4.3/P4.5 SHIPPED: icon/square render on the container engine (native icon / solid
         -- fill + cooldown + stacks + border + position), AND Show When Missing now renders via
@@ -4563,20 +4512,20 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- buff FADES" is remaining-time-driven. Both were permanently frosted, and Expire
         -- Alert's intent is now served natively by Buff Dropped (the Removed trigger), so
         -- the groups and their ten inert keys are gone rather than left as dead controls.
-    elseif typeKey == "framealpha" then
-        -- Permanent: whole-frame alpha needs frame:SetAlpha gated on secret presence
-        -- and collides with the range/OOR alpha owners — the whole effect is unavailable.
-        BlockGroups("limitation", "ad:framealpha")
     elseif typeKey == "nametext" or typeKey == "healthtext" then
         -- RECOVERED (colour-by-cover): the base Color works — the Text Designer keeps a
         -- glyph-identical coloured cover in sync with the real element (Render mirrors)
         -- and the aura slot's secret visibility shows it on presence. Two surgical blocks:
-        --   * Show When Missing — unsupported for text covers (drawing the cover in
-        --     present-mode would invert the intent; a text missing-window is future work).
-        if swmCheck then
-            GUI:BlockControl12_1(swmCheck, "limitation",
-                { id = "ad:" .. typeKey .. ":swm", page = L["Aura Designer"], when = ADgate })
-        end
+        --   * Show When Missing is not built for text covers at all - the checkbox is
+        --     simply never created for them. A cover is SetAllPoints onto the real
+        --     FontString, so its screen rect belongs to the text it mirrors; missing mode
+        --     hides by MOVING a badge, so parking/pushing could never change what shows.
+        --     (Same control SHIPPED for border/healthbar/background, whose art really does
+        --     live inside the window.) Candidate path if it is ever wanted:
+        --     SetAlphaFromBoolean(presence, 0, 255) on the mirror - on SimpleRegion as well
+        --     as SimpleFrame, AllowedWhenTainted, and taking both alphas makes inversion
+        --     free. Open question is sourcing `presence` as a SECRET BOOLEAN we can pass
+        --     through without reading: an unrun in-game probe.
         --   * Expiring -- REMOVED 2026-07-25. The whole group was remaining-time-driven,
         --     unreadable on the container path, so it is gone rather than frosted. The
         --     12.1-safe replacement is the DF.Expiration engine (the Expiry Alert group).
@@ -4681,15 +4630,14 @@ local function BuildGlobalView(parent)
     AddGroup(L["General"], function(g)
         g:AddWidget(GUI:CreateSlider(parent, L["Default Icon Size"], 8, 64, 1, defaults, "iconSize"), 50)
         g:AddWidget(GUI:CreateSlider(parent, L["Default Scale"], 0.5, 3.0, 0.05, defaults, "iconScale"), 50)
-        local defLevelSl = g:AddWidget(GUI:CreateSlider(parent, L["Default Frame Level"], -10, 30, 1, defaults, "indicatorFrameLevel"), 50)
-        local defStrataDD = g:AddWidget(GUI:CreateDropdown(parent, L["Default Frame Strata"], OPTS.FRAME_STRATA_OPTIONS, defaults, "indicatorFrameStrata"), 50)
-        -- 12.1: the container render reads only the PER-INDICATOR Frame Level
-        -- (tonumber(indicator.frameLevel) or 0) — these global defaults aren't
-        -- applied (the editor proxy displays them as fallbacks, live ignores
-        -- them) and strata isn't wired at all. Planned with the z-order polish.
-        local zGate = function() return DF.AuraContainer and DF.AuraContainer.IsSupported and DF.AuraContainer.IsSupported() end
-        GUI:BlockControl12_1(defLevelSl, "roadmap", { id = "ad:defaultframelevel", page = L["Aura Designer"], when = zGate })
-        GUI:BlockControl12_1(defStrataDD, "roadmap", { id = "ad:defaultframestrata", page = L["Aura Designer"], when = zGate })
+        -- Both LIVE on the container path: Factory.ResolveDefaults bundles them into the
+        -- per-pass `defs` table, resolveLevel/resolveStrata walk instance -> global default
+        -- (the same chain GLOBAL_DEFAULT_MAP gives the editor proxy, so the two agree), and
+        -- AuraContainer's _applyZOrder sets level and strata from the resolved config.
+        -- Both ship as no-ops -- level 0, strata INHERIT -- so an untouched profile renders
+        -- exactly where it did before they were wired.
+        g:AddWidget(GUI:CreateSlider(parent, L["Default Frame Level"], -10, 30, 1, defaults, "indicatorFrameLevel"), 50)
+        g:AddWidget(GUI:CreateDropdown(parent, L["Default Frame Strata"], OPTS.FRAME_STRATA_OPTIONS, defaults, "indicatorFrameStrata"), 50)
         g:AddWidget(GUI:CreateCheckbox(parent, L["Show Duration"], defaults, "showDuration"), 24)
         g:AddWidget(GUI:CreateCheckbox(parent, L["Show Stacks"], defaults, "showStacks"), 24)
         g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Cooldown Swipe"], defaults, "hideSwipe"), 24)
@@ -6585,7 +6533,6 @@ BuildEffectsTab = function()
         { label = L["Background Color"],  type = "background" },
         { label = L["Name Text Color"],   type = "nametext"   },
         { label = L["Health Text Color"], type = "healthtext" },
-        { label = L["Frame Alpha"],       type = "framealpha" },
         { label = L["Sound Alert"],       type = "sound"      },
     }
 
@@ -6694,7 +6641,6 @@ BuildEffectsTab = function()
         { key = "healthbar",   label = L["Health"] },
         { key = "nametext",    label = L["Name"]   },
         { key = "healthtext",  label = L["HP"]     },
-        { key = "framealpha",  label = L["Alpha"]  },
     }
 
     local CHIP_H = 22

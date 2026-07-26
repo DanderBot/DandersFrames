@@ -859,14 +859,6 @@ function DF:UpdateAFKIcon(frame)
     end
 end
 
--- Clear AFK cache for a unit
-function DF:ClearAFKCache(unit)
-    if unit then
-        local key = GetAFKKey(unit)
-        afkStartTimes[key] = nil
-        afkStateCache[key] = nil
-    end
-end
 
 -- ============================================================
 -- UPDATE VEHICLE ICON

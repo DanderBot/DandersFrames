@@ -157,7 +157,8 @@ local unitLeaderCache = nil -- tracks current leader unit (single value, not tab
 -- DandersFrames never displays the same unit in two frames simultaneously,
 -- so this is a simple 1:1 mapping (no set-based multi-frame tracking needed).
 --
--- Pet frames are NOT indexed here (separate InitializePetHeaderChild path).
+-- Pet frames are NOT indexed here — they come up through the pet header's own
+-- child-init path rather than this one.
 -- ============================================================
 local unitFrameMap = {}    -- "raid17" => frame, "party2" => frame, etc.
 DF.unitFrameMap = unitFrameMap  -- Expose for cross-file access (e.g., Auras.lua hook)
@@ -992,23 +993,6 @@ function DF:InitializeHeaderChild(frame)
     end
 end
 
-function DF:InitializePetHeaderChild(frame)
-    if not frame then return end
-    if frame.dfInitialized then return end
-    
-    frame.dfIsDandersFrame = true
-    frame.dfIsHeaderChild = true
-    frame.dfIsPetFrame = true
-    
-    -- Pet frames use simpler elements (implemented in Phase 6)
-    -- For now, create basic elements
-    DF:CreateFrameElements(frame)
-    
-    frame:RegisterForClicks("AnyUp")
-    frame.dfInitialized = true
-    
-    DF:RegisterFrameWithClickCast(frame)
-end
 
 -- ============================================================
 -- CONTAINER CREATION
@@ -4436,82 +4420,6 @@ function DF:BuildSortedNameList(members, db, selfPosition, includesPlayer)
     return result
 end
 
--- ============================================================
--- FLAT RAID NAMELIST SORTING
--- Builds a nameList for ALL raid members (flat layout mode)
--- ============================================================
-function DF:BuildRaidFlatNameList(selfPosition)
-    local db = DF:GetRaidDB()
-    local members = {}
-    local playerName = UnitName("player")
-    local playerFound = false
-    
-    -- Collect all raid members using GetRaidRosterInfo (includes realm for cross-realm)
-    if IsInRaid() then
-        for i = 1, GetNumGroupMembers() do
-            local name, _, subgroup = GetRaidRosterInfo(i)
-            if name then
-                -- Check if this is the player by comparing names (same as group-based version)
-                local isPlayer = (name == playerName)
-                if isPlayer then
-                    playerFound = true
-                end
-                table.insert(members, {
-                    unit = isPlayer and "player" or ("raid" .. i),
-                    name = name,
-                    isPlayer = isPlayer
-                })
-            end
-        end
-    elseif IsInGroup() then
-        -- Party mode (shouldn't happen in flat raid mode, but handle gracefully)
-        if UnitExists("player") then
-            table.insert(members, {
-                unit = "player",
-                name = playerName,
-                isPlayer = true
-            })
-            playerFound = true
-        end
-        for i = 1, 4 do
-            local unit = "party" .. i
-            if UnitExists(unit) then
-                local name, realm = UnitName(unit)
-                local fullName = name
-                if realm and realm ~= "" then
-                    fullName = name .. "-" .. realm
-                end
-                if name then
-                    table.insert(members, {
-                        unit = unit,
-                        name = fullName,
-                        isPlayer = false
-                    })
-                end
-            end
-        end
-    else
-        -- Solo
-        if UnitExists("player") then
-            table.insert(members, {
-                unit = "player",
-                name = playerName,
-                isPlayer = true
-            })
-            playerFound = true
-        end
-    end
-    
-    if DF.debugHeaders then
-        print("|cFF00FF00[DF Headers]|r BuildRaidFlatNameList: found", #members, "members, selfPosition=", selfPosition, "playerFound=", tostring(playerFound))
-        for _, m in ipairs(members) do
-            print("|cFF00FF00[DF Headers]|r   -", m.name, m.isPlayer and "(PLAYER)" or "")
-        end
-    end
-    
-    -- Use the unified sorting function
-    return DF:BuildSortedNameList(members, db, selfPosition, playerFound)
-end
 
 -- Apply sorting to flat raid layout (uses FlatRaidFrames)
 function DF:ApplyRaidFlatSorting()
@@ -7078,11 +6986,6 @@ function DF:RefreshAllHeaderChildFrames()
             DF:UpdateHealAbsorb(frame)
         end
         
-        -- Incoming heals
-        if DF.UpdateIncomingHeals then
-            DF:UpdateIncomingHeals(frame)
-        end
-        
         -- Raid target icon
         if DF.UpdateRaidTargetIcon then
             DF:UpdateRaidTargetIcon(frame)
@@ -8695,9 +8598,6 @@ SlashCmdList["DFHEADERS"] = function(msg)
     if cmd == "debug" then
         DF.debugHeaders = not DF.debugHeaders
         print("|cFF00FF00[DF Headers]|r Debug:", DF.debugHeaders and "ON" or "OFF")
-    
-    elseif cmd == "enable" then
-        DF:EnableHeaderMode()
     
     elseif cmd == "init" then
         DF:CreateHeaderFrames()

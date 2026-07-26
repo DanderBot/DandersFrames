@@ -149,7 +149,7 @@ DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally chan
 
 * The 12.1 aura displays are rebuilt on Blizzard's new container system and are under active testing — please report any case where buff, debuff, defensive or missing-buff displays stop updating, **especially in combat**.
 * A debuff that counts as both a Priority debuff and a Boss/Role debuff can show one icon per matching filter when both are enabled — the only duplicate case the new filter system can't remove. "Show All Debuffs" avoids it.
-* Dispel Overlay: "Color Name Text" is not yet wired to the new overlay (marked in place). A unit with dispellable debuffs of two different types can show both type icons overlapped (rare).
+* Dispel Overlay: a unit with dispellable debuffs of two different types can show both type icons overlapped (rare).
 * Aura Designer text colouring is drawn as a cover over the text: it ignores the out-of-range text fade, and group parts with their own inline colours keep them.
 * Dragging certain aura sliders can briefly stutter.
 

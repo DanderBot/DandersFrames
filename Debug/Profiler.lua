@@ -344,7 +344,6 @@ local PROFILED_FUNCTIONS = {
     -- ----------------------------------------------------------
     -- Aura Designer (per-frame)
     -- ----------------------------------------------------------
-    "UpdateADTintHealth",
     "GetADTrackedSpellIDs",
     "GetClaimedDebuffCategories",
     "BuildADIdentityFilters",

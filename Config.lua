@@ -643,24 +643,6 @@ function DF:GetSoundPath(soundName)
     return nil
 end
 
--- Get font path by name (for SharedMedia compatibility)
-function DF:GetFont(name)
-    local LSM = GetLSM()
-    if LSM then
-        return LSM:Fetch("font", name) or name
-    end
-    -- Check if name is already a path
-    if DF.SharedFonts[name] then
-        return name
-    end
-    -- Try to find path by display name
-    for path, displayName in pairs(DF.SharedFonts) do
-        if displayName == name then
-            return path
-        end
-    end
-    return name
-end
 
 -- Default fallback font
 local FALLBACK_FONT = "Fonts\\FRIZQT__.TTF"
@@ -859,29 +841,6 @@ function DF:SafeSetFont(fontString, fontNameOrPath, fontSize, outline)
     return success
 end
 
--- Get texture path by name (for SharedMedia compatibility)
-function DF:GetTexture(name)
-    -- Special case for Solid - shouldn't reach here but safeguard
-    if name == "Solid" then
-        return nil
-    end
-    
-    local LSM = GetLSM()
-    if LSM then
-        return LSM:Fetch(LSM.MediaType.STATUSBAR, name) or name
-    end
-    -- Check if name is already a path
-    if DF.SharedTextures[name] then
-        return name
-    end
-    -- Try to find path by display name
-    for path, displayName in pairs(DF.SharedTextures) do
-        if displayName == name then
-            return path
-        end
-    end
-    return name
-end
 
 -- ============================================================
 -- GLOBAL (account-wide) DEFAULTS
@@ -1428,7 +1387,6 @@ DF.PartyDefaults = {
     dispelShowBorder = true,
     dispelShowGradient = true,
     dispelShowIcon = true,
-    dispelNameText = false,
 
     -- Unified dispel overlay (12.1 container-slot driven, Features/Dispel.lua)
     dispelOverlayEnabled = true,
@@ -2443,7 +2401,14 @@ DF.PartyDefaults = {
             durationColor = {r = 1, g = 1, b = 1, a = 1},
             stackColor = {r = 1, g = 1, b = 1, a = 1},
             hideIcon = false,
-            indicatorFrameLevel = 30,
+            -- Global AD indicator z-order defaults. BOTH are no-ops at their shipped value,
+            -- deliberately: the render adds frameLevelOffset 40 + this, so 0 keeps an
+            -- indicator that has never had a level set exactly where it renders today (+40,
+            -- below the defensive row at +51). Was 30 — which the editor displayed as the
+            -- default while the render ignored it entirely, so wiring it up would have moved
+            -- every untouched indicator to +70 and above the defensive row. Baseline changed
+            -- rather than migrated: saved profiles keep whatever they hold.
+            indicatorFrameLevel = 0,
             indicatorFrameStrata = "INHERIT",
         },
         auras = {},

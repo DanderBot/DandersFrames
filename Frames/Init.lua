@@ -129,12 +129,6 @@ function DF:InitializeRaidFrames()
     end
 end
 
-function DF:CreateRaidFrame(unit, index)
-    local frame = DF:CreateUnitFrame(unit, index, true)
-    -- Apply initial layout
-    DF:ApplyFrameLayout(frame)
-    return frame
-end
 
 function DF:UpdateRaidLayout()
     local db = DF:GetRaidDB()

@@ -844,38 +844,12 @@ local GRADIENT_TEXTURES = {
     FULL = "Interface\\Buttons\\WHITE8x8",                          -- Solid fill
 }
 
--- ============================================================
--- DISPEL NAME TEXT COLORING
--- Colors the unit name text with dispel type color
--- ============================================================
-
-local function ApplyDispelNameText(frame, r, g, b)
-    local nameText = frame.nameText
-    if not nameText then return end
-    if not frame.dfDispelNameTextOrigColor then
-        local cr, cg, cb, ca = nameText:GetTextColor()
-        frame.dfDispelNameTextOrigColor = { r = cr, g = cg, b = cb, a = ca }
-    end
-    nameText:SetTextColor(r, g, b, 1)
-    frame.dfDispelNameTextActive = true
-end
-
-local function RevertDispelNameText(frame)
-    if not frame or not frame.dfDispelNameTextActive then return end
-    local nameText = frame.nameText
-    if not nameText then return end
-    -- If AD nametext is active, restore to AD's color
-    local adState = frame.dfAD
-    if adState and adState.nametext and adState.savedNameColor then
-        local c = adState.savedNameColor
-        nameText:SetTextColor(c.r, c.g, c.b, c.a or 1)
-    elseif frame.dfDispelNameTextOrigColor then
-        local c = frame.dfDispelNameTextOrigColor
-        nameText:SetTextColor(c.r, c.g, c.b, c.a or 1)
-    end
-    frame.dfDispelNameTextOrigColor = nil
-    frame.dfDispelNameTextActive = false
-end
+-- (DISPEL NAME TEXT COLORING removed 2026-07-25. The pair of Apply/Revert helpers and
+-- the dispelNameText setting are gone: the only caller was ShowOverlayWithRGB, which is
+-- the LEGACY test-mode show path -- the 12.1 slot path styles via StyleOverlayRegions
+-- alone and never tinted the name. So the toggle coloured the name in the preview and
+-- did nothing on a live frame, which is worse than inert. Re-adding it needs an
+-- occlusion-safe name tint on the slot overlay, not this.)
 
 -- ============================================================
 -- SHOW OVERLAY WITH RGB (for test mode)
@@ -1066,10 +1040,6 @@ local function ShowOverlayWithRGB(overlay, r, g, b, db, dispelType, oorAlphaMult
         overlay.gradient:SetValue(testHealth)
     end
 
-    -- Name text coloring — uses the explicit RGB passed to this function
-    if db.dispelNameText and frame then
-        ApplyDispelNameText(frame, r, g, b)
-    end
 end
 
 -- ============================================================
@@ -1131,7 +1101,6 @@ local function HideDispelAndInvalidate(frame)
     if frame.dfDispelOverlay then
         HideOverlay(frame.dfDispelOverlay)
     end
-    RevertDispelNameText(frame)
     frame.dfLastDispelAuraID = nil
 end
 
@@ -1712,10 +1681,6 @@ function DF:UseFactoryForDispelOverlay(frame, db)
         and not (DF.testMode or DF.raidTestMode)
 end
 
--- GUI-facing predicate (does NOT exclude test mode — mirrors FactoryOwnsBuffRow).
-function DF:FactoryOwnsDispelOverlay(db)
-    return (DF.AuraContainer and DF.AuraContainer.IsSupported()) or false
-end
 
 -- Drive the factory overlay for one frame. Mirrors the row drives: lazy create,
 -- recreate on a structural signature change, keep the container on the frame's unit,
@@ -1725,7 +1690,6 @@ function DF:DriveDispelOverlayFactory(frame, db)
     -- No double render: the legacy overlay stays hidden while the factory owns.
     if frame.dfDispelOverlay and frame.dfDispelOverlay:IsShown() then
         HideOverlay(frame.dfDispelOverlay)
-        RevertDispelNameText(frame)
     end
     frame.dfLastDispelAuraID = nil
 
@@ -1839,7 +1803,6 @@ function DF:UpdateDispelOverlay(frame)
         -- matters in combat where UpdateDispelOverlay fires many times per
         -- second per frame.
         local hasState = (frame.dfDispelOverlay and frame.dfDispelOverlay:IsShown())
-                       or frame.dfDispelNameTextActive
                        or (frame.dfLastDispelAuraID ~= nil)
         if hasState then
             HideDispelAndInvalidate(frame)

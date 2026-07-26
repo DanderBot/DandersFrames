@@ -573,7 +573,7 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     
     local db = DF:GetFrameDB(frame)
     
-    -- Set dfInRange for test mode - this is used by ApplyAuraLayout and other systems
+    -- Set dfInRange for test mode - consumed by the range/alpha systems
     -- If testShowOutOfRange is enabled and this unit is marked as out of range, set false
     -- Otherwise set true (in range)
     local isTestOutOfRange = db.testShowOutOfRange and testData.outOfRange and not testData.status
@@ -2210,12 +2210,6 @@ function DF:ApplyTestFrameLayout(frame)
     -- Apply fonts using ApplyFrameStyle (handles name, health, status text fonts)
     if DF.ApplyFrameStyle then
         DF:ApplyFrameStyle(frame)
-    end
-    
-    -- Apply aura layouts (handles aura fonts, sizes, positions, swipe settings)
-    if DF.ApplyAuraLayout then
-        DF:ApplyAuraLayout(frame, "BUFF")
-        DF:ApplyAuraLayout(frame, "DEBUFF")
     end
     
     -- Apply power bar layout (delegate to shared function which handles

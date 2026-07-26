@@ -1835,10 +1835,14 @@ end
 
 -- ============================================================
 -- DEBUFF FACTORY BRIDGE (P3) — mirror of the buff bridge with debuff keys.
--- Filter list = the native direct-debuff filters; dispel colouring = the native
--- SetAuraBorder Color style (Blizzard palette — custom per-type colours are not
--- expressible on 12.1; pickers frosted). Debuff rows get NO spell-ID candidate
--- filters: harmful spell-ID maps do nothing on friendly frames (Meorawr gate).
+-- Filter list = the native direct-debuff filters; dispel colouring binds through
+-- AddDispelTypeTexture (68914's replacement for the deprecated SetAuraBorder alias)
+-- in the Color style, carrying customDispelColorMap — so custom per-type colours ARE
+-- expressible and the account-wide Colors-page palette drives this row. (This comment
+-- previously said the opposite and named the pickers as frosted; both were true on
+-- 68824 and were fixed by the dispel round — the palette ships and the pickers are
+-- live.) Debuff rows get NO spell-ID candidate filters: harmful spell-ID maps do
+-- nothing on friendly frames (Meorawr gate).
 -- ============================================================
 
 -- Render gate (excludes test mode, which paints legacy icons directly).

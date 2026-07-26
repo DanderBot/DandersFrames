@@ -110,13 +110,6 @@ function DF:CreatePetFrame(unit, ownerFrame, isRaid)
     frame:RegisterUnitEvent("UNIT_MAXPOWER", unit)           -- Pet max power
     frame:RegisterUnitEvent("UNIT_DISPLAYPOWER", unit)       -- Pet power type change
     
-    --[[ OLD CODE - Remove after testing (was causing event flooding in cities)
-    frame:RegisterEvent("UNIT_HEALTH")
-    frame:RegisterEvent("UNIT_MAXHEALTH")
-    frame:RegisterEvent("UNIT_NAME_UPDATE")
-    frame:RegisterEvent("UNIT_FLAGS")  -- For detecting death
-    frame:RegisterEvent("UNIT_PET")    -- For detecting pet summon/dismiss
-    --]]
     
     -- Mouse interaction - use HookScript to not interfere with other handlers
     frame:HookScript("OnEnter", function(self)
