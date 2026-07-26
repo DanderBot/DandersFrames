@@ -62,8 +62,6 @@ local function buildPicker()
 
     local f = CreateFrame("Frame", "DFNicknamePicker", UIParent, "BackdropTemplate")
     -- Ride the shared GUI pixel grid: this surface is parented to UIParent, so it
-    -- never passes through a settings-page build. See GUI:AttachPixelSnap.
-    if DF.GUI and DF.GUI.AttachPixelSnap then DF.GUI:AttachPixelSnap(f) end
     f:SetSize(380, 440)
     f:SetFrameStrata("FULLSCREEN_DIALOG")
     f:SetToplevel(true)

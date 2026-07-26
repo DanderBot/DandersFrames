@@ -205,8 +205,6 @@ local function CreateColorPickerFrame(hasAlpha)
     -- Main frame
     testFrame = CreateFrame("Frame", "DFColorPickerTest", UIParent, "BackdropTemplate")
     -- Ride the shared GUI pixel grid: this surface is parented to UIParent, so it
-    -- never passes through a settings-page build. See GUI:AttachPixelSnap.
-    if DF.GUI and DF.GUI.AttachPixelSnap then DF.GUI:AttachPixelSnap(testFrame) end
     testFrame:SetSize(320, 450)
     GUI:CreateElementBackdrop(testFrame, {
         bgColor     = { C_BG.r, C_BG.g, C_BG.b, 1 },

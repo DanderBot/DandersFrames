@@ -423,158 +423,40 @@ local function PixelsPerUnit(frame)
     return eff * physH / 768
 end
 
--- Land a box's 1px backdrop edge on the physical pixel grid.
+-- ⚠ THERE IS NO RUNTIME GEOMETRY CORRECTION, AND THERE SHOULD NOT BE ONE.
 --
--- A backdrop edge that falls on a fractional device-pixel row is filtered across
--- two rows at half intensity each. On a typical setup one UI unit is very close
--- to one device pixel, so a 1px edge splits almost evenly -- and the settings
--- group edge is 8% alpha over a 3% background, which at half intensity is
--- indistinguishable from the background. That is the box whose top border
--- vanishes and reappears as you scroll the page.
+-- This GUI used to carry a registry that nudged every bordered box onto the
+-- pixel grid after the layout had placed it. It is gone, and the reason is
+-- structural rather than a bug in the implementation: Lua-side snapping can only
+-- correct a frame at REST, and the symptom it was chasing -- a thin border going
+-- soft -- is at its worst while the content is MOVING, during a scroll.
+-- Correcting mid-scroll does not fix that, it adds a half-pixel jump on top of
+-- it, which reads as flicker. It also cost us the button-row drift, where an
+-- unordered sweep corrected chained anchors in a different order each pass.
 --
--- Three things have to line up, and snapping only one of them does nothing:
---   * position -- the box is anchored inside a scroll child at an arbitrary offset
---   * size     -- the bottom/left edge can be on-grid while the top/right is not
---   * edgeSize -- a 1-UI-unit edge is a fractional number of device pixels
---
--- GEOMETRY (position + size) is corrected ONLY for structural boxes
--- (frame._ppSnapSize) -- the settings groups, section header bars and panels
--- whose dimensions and placement a layout owns, and which carry the faint
--- 8%-over-3% edge that actually disappears when it splits. Controls are
--- deliberately left alone, for two separate reasons:
---
---   * size -- their factories size them and callers measure them to compute
---     scroll ranges and row flows, so silently resizing several hundred of them
---     is a bad trade for a border already visible at 50% alpha;
---   * position -- and this is the one that bit us. Controls are routinely
---     CHAINED to each other rather than to a common parent: Copy <- Sync <-
---     Reset in the page button row, Clicks <- Test <- Unlock in the toolbar.
---     SnapAllBoxes iterates an UNORDERED pairs() table, so a chain member is as
---     likely to be corrected BEFORE its anchor target as after -- and when the
---     target then moves, the correction that was just computed is against a base
---     that no longer exists. The row converges over several rebuilds and settles
---     somewhere slightly different each time. Symptom: click between pages and
---     the Reset/Sync/Copy row and the Test/Unlock pair shuffle by a pixel, with
---     no scrolling involved, while the PARTY/RAID/BINDS tabs (not chained) sit
---     still. Structural boxes have no such dependency -- the page layout anchors
---     every one of them to the same scroll child -- so order cannot matter.
---
--- The layout-side answer for controls is SnapLen at the point the offset or size
--- is chosen (see below), which is order-independent by construction.
---
--- The edgeSize correction at the bottom still applies to EVERY registered frame:
--- it changes how thick the border is drawn, not where the frame sits, so it
--- cannot move anything.
---
--- Bounded: the position moves by at most half a pixel, so this can never
--- mis-place a box. Idempotent, so it cannot drive an OnSizeChanged loop -- the
--- second call computes the same snapped value and writes nothing.
-local function SnapBoxToPixelGrid(frame)
-    if not frame or not frame.GetNumPoints then return end
-    local ppu = PixelsPerUnit(frame)
-    if not ppu then return end
-
-    -- Geometry can only be corrected on a SINGLE-anchor frame: nudging one that
-    -- is pinned by two corners would resize it rather than move it, and such a
-    -- frame derives its geometry from its parent anyway. The edge snap at the
-    -- bottom still applies to those -- most of the window chrome is two-point.
-    if frame._ppSnapSize and frame:GetNumPoints() == 1 then
-        -- Size first: the position snap below reads GetLeft/GetBottom, and the
-        -- far edges are those plus the size, so both have to be whole pixels for
-        -- all four edges to land.
-        local w, h = frame:GetWidth(), frame:GetHeight()
-        if w and w > 0 then
-            local sw = math.floor(w * ppu + 0.5) / ppu
-            if math.abs(sw - w) > 1e-4 then frame:SetWidth(sw) end
-        end
-        if h and h > 0 then
-            local sh = math.floor(h * ppu + 0.5) / ppu
-            if math.abs(sh - h) > 1e-4 then frame:SetHeight(sh) end
-        end
-
-        local point, relTo, relPoint, x, y = frame:GetPoint(1)
-        local l, b = frame:GetLeft(), frame:GetBottom()
-        if x and y and l and b then
-            -- Correct against the offset the LAYOUT asked for, not against
-            -- wherever our own previous nudge left the frame. Re-snapping on
-            -- every scroll and adding each correction to the last would
-            -- random-walk the box away from its laid-out position -- a repeated
-            -- 0.4px scroll step would drift it visibly after a dozen scrolls.
-            local px, py = frame._ppDX or 0, frame._ppDY or 0
-
-            -- ...but that stored delta is only meaningful while the frame is still
-            -- sitting where WE last put it. The page layout re-anchors on every
-            -- rebuild (ClearAllPoints + SetPoint), which hands back a FRESH base
-            -- offset with no nudge in it -- subtracting a stale delta from that
-            -- corrupts the base, and the frame lands somewhere slightly different
-            -- each time. Symptom: click the same page repeatedly and the
-            -- Reset/Sync/Copy row snaps to a different spot on every refresh, with
-            -- no scrolling involved, and the gap under it reads differently from
-            -- page to page.
-            --
-            -- So: trust the delta only if the current offset is exactly what we
-            -- wrote last time. Otherwise someone else set this point and the
-            -- offset we can see IS the base.
-            if not (frame._ppLastX and frame._ppLastY
-                    and math.abs(x - frame._ppLastX) <= 1e-4
-                    and math.abs(y - frame._ppLastY) <= 1e-4) then
-                px, py = 0, 0
-            end
-
-            local baseX, baseY = x - px, y - py
-            local baseL, baseB = l - px, b - py
-            local dx = (math.floor(baseL * ppu + 0.5) - baseL * ppu) / ppu
-            local dy = (math.floor(baseB * ppu + 0.5) - baseB * ppu) / ppu
-            local newX, newY = baseX + dx, baseY + dy
-            if math.abs(newX - x) > 1e-4 or math.abs(newY - y) > 1e-4 then
-                frame:SetPoint(point, relTo, relPoint, newX, newY)
-            end
-            -- Recorded unconditionally, including when no write was needed: the
-            -- next call has to be able to tell "still where we left it" from
-            -- "re-anchored by the layout", and it can only do that if we always
-            -- know what the resolved offset was.
-            frame._ppDX, frame._ppDY = dx, dy
-            frame._ppLastX, frame._ppLastY = newX, newY
-        end
-    end
-
-    -- Whole number of device pixels, minimum one. Re-issue the backdrop only when
-    -- the width actually changes (i.e. on a scale change, not on every layout):
-    -- SetBackdrop is a full rebuild and drops the current colours, so they have
-    -- to be read back and re-applied.
-    local edge = math.max(1, math.floor(ppu + 0.5)) / ppu
-    if frame.SetBackdrop and frame.GetBackdrop
-       and math.abs((frame._ppEdge or 0) - edge) > 1e-4 then
-        local bd = frame:GetBackdrop()
-        if bd and bd.edgeFile then
-            frame._ppEdge = edge
-            local br, bgc, bb, ba = frame:GetBackdropColor()
-            local er, eg, eb, ea = frame:GetBackdropBorderColor()
-            bd.edgeSize = edge
-            frame:SetBackdrop(bd)
-            if br then frame:SetBackdropColor(br, bgc, bb, ba) end
-            if er then frame:SetBackdropBorderColor(er, eg, eb, ea) end
-        end
-    end
-end
-GUI.SnapBoxToPixelGrid = SnapBoxToPixelGrid
+-- Three things replaced it, and between them they are enough:
+--   * the LAYOUT picks whole-pixel numbers in the first place (SnapLen below, at
+--     the point an offset, width or height is chosen). No runtime cost, nothing
+--     to drift, nothing to flicker -- it just picks better numbers.
+--   * the CLIP SURFACES are snapped (page viewport insets, the content panel,
+--     the nav chain). Those were real bugs: a box clipped by a fractional edge
+--     loses part of its border no matter how well the box itself is placed.
+--   * the BORDER is drawn as two device pixels of our own texture rather than a
+--     one-unit backdrop edge, so it cannot land badly in the first place. See
+--     PIXEL BORDER further down -- that is the part that actually solved it.
 
 -- Round a LENGTH or OFFSET (in UI units) to a whole number of device pixels at
 -- the scale `frame` is drawn at. This is the layout-side half of the pixel-grid
 -- work, and the half that was missing.
 --
--- SnapBoxToPixelGrid corrects a box after the fact, but it corrects the box's
--- LEFT and BOTTOM edges -- that is what GetLeft/GetBottom are. The RIGHT edge is
--- left + width and the TOP edge is bottom + height, so those two only land on the
--- grid if the width and height the box was GIVEN were whole pixels already. They
--- usually are not: a group's inner width is (its width - 2 * padding), and its
--- padding is 10 UI units, which is a whole number of pixels only when the GUI is
--- at exactly 1:1 scale. Everywhere else the top border of a section header, or a
--- banner, splits across two device rows at half intensity and reads as missing.
+-- A box lands on the grid only if the numbers it was GIVEN were whole pixels.
+-- They usually are not: a group's inner width is (its width - 2 * padding), and
+-- its padding is 10 UI units, which is a whole number of device pixels only when
+-- the GUI is at exactly 1:1 scale. Everywhere else the box's right and bottom
+-- edges fall mid-pixel, and anything clipped by them loses part of itself.
 --
--- Snapping here fixes it BY CONSTRUCTION for everything a layout places, with no
--- per-widget opt-in to forget -- which is the same reason RegisterPixelSnap is
--- called from the backdrop helpers rather than from call sites.
+-- Snapping at the point the number is CHOSEN fixes that by construction, for
+-- everything a layout places, with no per-widget opt-in for anyone to forget.
 local function SnapLen(frame, v)
     if not v then return v end
     local ppu = PixelsPerUnit(frame)
@@ -615,6 +497,13 @@ end
 GUI.SnapHeightEven = SnapHeightEven
 
 -- ============================================================
+-- Stamped once when this file loads, so it identifies THIS session (and therefore
+-- this build) for the pixelcheck and gapcheck captures. Declared HERE, above the
+-- first function that reads it: a local declared further down the file is not an
+-- upvalue for a function defined above it -- the read would silently resolve to a
+-- nil global and every capture would look like a new session.
+local GAP_SESSION = date and date("%Y-%m-%d %H:%M:%S") or "?"
+
 -- /df pixelcheck -- measure, don't guess
 --
 -- The "top border of a box goes missing until you scroll" bug has now been
@@ -658,14 +547,20 @@ local function DescribeFrame(f)
     return (f.GetObjectType and f:GetObjectType()) or "Frame"
 end
 
--- Every SHOWN descendant carrying a bordered backdrop -- the only frames that can
--- exhibit this bug (a fill-only backdrop has no edge to lose).
+-- Every SHOWN descendant carrying a border -- the only frames that can exhibit
+-- this bug (a fill-only surface has no edge to lose).
+--
+-- Both mechanisms, deliberately. Testing edgeFile alone was right when that was
+-- the only way a border got drawn; now that most surfaces own their four
+-- textures instead, an edgeFile-only sweep would report a converted page as
+-- having no bordered frames at all and the probe would quietly stop being able
+-- to see the thing it exists to measure.
 local function CollectBorderedFrames(root, out, depth)
     if not root or depth > 10 then return out end
     for _, child in ipairs({ root:GetChildren() }) do
         if child:IsShown() then
             local bd = child.GetBackdrop and child:GetBackdrop()
-            if bd and bd.edgeFile then out[#out + 1] = child end
+            if (bd and bd.edgeFile) or child._pxBorder then out[#out + 1] = child end
             CollectBorderedFrames(child, out, depth + 1)
         end
     end
@@ -726,9 +621,14 @@ function GUI.PixelCheck()
 
     print(("|cff7373f2DandersFrames|r pixelcheck  page=|cffffffff%s|r  scale=%.4f  px/unit=%.4f")
         :format(tostring(pageName), page:GetEffectiveScale() or 0, ppu))
-    print(("  scroll offset = %.3f  (%.2f px off grid%s)")
-        :format(scroll, scrollOff or 0,
-            (scrollOff and math.abs(scrollOff) > 0.05) and " |cffff6060<-- NOT SNAPPED|r" or ""))
+    -- Reported, not judged. This used to print a red NOT SNAPPED when the offset
+    -- was off-grid, back when the scroll offset was quantised and being off-grid
+    -- meant something had gone wrong. Nothing quantises it now -- a 2px border
+    -- draws the same ink at any offset -- so an off-grid figure here is the
+    -- normal state of a scrolled page, and flagging it as a fault sends the next
+    -- person reading this output after a bug that is not there.
+    print(("  scroll offset = %.3f  (%.2f px off grid -- expected; nothing quantises this)")
+        :format(scroll, scrollOff or 0))
 
     -- THE CLIP BOUNDARY ITSELF. Earlier runs measured each box's DISTANCE to this
     -- edge but never whether the edge is on-grid. A ScrollFrame clips to its own
@@ -740,10 +640,19 @@ function GUI.PixelCheck()
     local dPageTop = PixelOffsetOf(page:GetTop(), ppu)
     local dPageBot = PixelOffsetOf(page:GetBottom(), ppu)
     local dPageH   = PixelOffsetOf(page:GetHeight(), ppu)
+    -- Flag EITHER edge. This used to test only the top, so it printed
+    -- "bot-0.38" on every run for weeks and never once marked it -- and an
+    -- unflagged number in a wall of numbers is an invisible one. The bottom
+    -- edge clips whatever rests against it just as hard as the top does, which
+    -- is the entire See-Also footer bug.
+    local badTop = dPageTop and math.abs(dPageTop) > 0.05
+    local badBot = dPageBot and math.abs(dPageBot) > 0.05
     print(("  viewport (the clip edge): top%+.2f bot%+.2f h%+.2f%s")
         :format(dPageTop or 0, dPageBot or 0, dPageH or 0,
-            (dPageTop and math.abs(dPageTop) > 0.05)
-                and " |cffff6060<-- CLIP EDGE OFF-GRID|r" or ""))
+            (badTop or badBot)
+                and (" |cffff6060<-- CLIP EDGE OFF-GRID (%s)|r"):format(
+                    badTop and (badBot and "top+bottom" or "top") or "bottom")
+                or ""))
     local kid = page.child or (page.GetScrollChild and page:GetScrollChild())
     if kid then
         local kppu = PixelsPerUnit(kid) or ppu
@@ -777,16 +686,26 @@ function GUI.PixelCheck()
         local clipGap = (top and clipTop) and ((clipTop - top) * fppu) or nil
         if dTop and math.abs(dTop) > 0.05 then offGrid = offGrid + 1 end
         if clipGap and clipGap > -1.5 and clipGap < 1.5 then nearClip = nearClip + 1 end
-        -- The THIRD leg of the snap triad (position / size / edgeSize), and the
-        -- one the first two revisions did not capture. A box can measure a perfect
-        -- 0.00 on every edge and still lose its border if the edge is drawn a
-        -- fractional number of device pixels wide: it bleeds into the next row at
-        -- partial intensity, and a settings-group edge is only ~8% alpha over a 3%
-        -- fill, so both halves can land under the visibility floor. Alpha is
-        -- reported alongside because it is what sets that floor.
+        -- Edge THICKNESS, which is the leg two earlier revisions of this probe
+        -- did not capture and the one that turned out to matter. A box can
+        -- measure a perfect 0.00 on every edge and still lose its border if the
+        -- edge is drawn a fractional number of device pixels wide: it bleeds
+        -- into the next row at partial intensity, and a settings-group edge is
+        -- only ~8% alpha over a 3% fill, so both halves can land under the
+        -- visibility floor. Alpha is reported alongside because it sets that
+        -- floor.
+        --
+        -- A pixel border reports its own thickness instead: it is authored in
+        -- device pixels, so it is a whole number by construction and edgeFrac
+        -- is 0 -- which is exactly the point of it, and worth being able to SEE
+        -- next to a surface still on the old edge.
         local bdInfo = f.GetBackdrop and f:GetBackdrop()
         local edgeUnits = bdInfo and bdInfo.edgeSize or nil
-        local edgePx = edgeUnits and (edgeUnits * fppu) or nil
+        -- f._pxDevicePx, not a recomputation from PX_BORDER_THICKNESS: that
+        -- constant is declared several hundred lines below this probe, so
+        -- naming it here would resolve to a nil GLOBAL, silently. Reading what
+        -- LayoutPixelBorder actually drew is both safer and more truthful.
+        local edgePx = edgeUnits and (edgeUnits * fppu) or f._pxDevicePx or nil
         local edgeFrac = edgePx and (edgePx - math.floor(edgePx + 0.5)) or nil
         -- NOT `local _,_,_,a = (f:GetBackdropBorderColor())` -- the parentheses
         -- truncate a multi-return to ONE value, so alpha came back nil every time
@@ -868,7 +787,50 @@ function GUI.PixelCheck()
     print("  worst overall -- topOff/botOff/heightOff are px from the grid; clip is px below the viewport top:")
     for i = 1, math.min(#rows, 10) do emit(rows[i]) end
     print("  |cff808080Read: OFF-GRID = geometry. SOFT-EDGE = the edge is a fractional number of device px wide, so it bleeds into the next row -- a box can be a perfect 0.00 and still lose its border this way. FAINT = so little alpha that any split is invisible.|r")
-    print("  |cff808080BOX rows are the ones that matter: only structural boxes are geometry-corrected. Controls are snapped by their FACTORY at construction and never nudged afterwards (nudging them made chained button rows drift), so an off-grid control is expected after a scale change and is not the bug this was built to find.|r")
+    print("  |cff808080Nothing is corrected at runtime any more. Every widget gets its whole-pixel numbers from its FACTORY at construction (nudging them afterwards is what made chained button rows drift), so an off-grid row after a scale change is expected and is not a bug. What still matters here is SOFT-EDGE and FAINT.|r")
+
+    -- Persist, for the same reason gapcheck does: transcribing a screenful of
+    -- numbers out of the chat frame is not practical remotely, and every reading
+    -- of this symptom that came from eyeballing rather than the file has been
+    -- wrong. Same session stamp, so a capture never mixes two builds.
+    DandersFramesDebugDB = DandersFramesDebugDB or {}
+    if DandersFramesDebugDB.pixelSession ~= GAP_SESSION then
+        DandersFramesDebugDB.pixelcheck = nil
+        DandersFramesDebugDB.pixelSession = GAP_SESSION
+    end
+    DandersFramesDebugDB.pixelcheck = DandersFramesDebugDB.pixelcheck or {}
+    local pdump = {
+        when = date("%Y-%m-%d %H:%M:%S"),
+        ppu = ppu, scroll = scroll,
+        viewTop = dPageTop, viewBot = dPageBot, viewH = dPageH,
+        rows = {},
+    }
+    for i, r in ipairs(rows) do
+        pdump.rows[i] = {
+            label = tostring(r.label):sub(1, 40), kind = r.kind,
+            dTop = r.dTop, dBot = r.dBot, dH = r.dH,
+            edgePx = r.edgePx, alpha = r.alpha, clipGap = r.clipGap,
+            level = r.level,
+            -- Raw geometry too: the deltas alone cannot distinguish "off-grid"
+            -- from "the right size but drawn somewhere unexpected".
+            top = r.frame and r.frame:GetTop() or nil,
+            bottom = r.frame and r.frame:GetBottom() or nil,
+            height = r.frame and r.frame:GetHeight() or nil,
+            width = r.frame and r.frame:GetWidth() or nil,
+            points = r.frame and r.frame:GetNumPoints() or nil,
+        }
+    end
+    -- Never overwrite an earlier run of the SAME page: the whole point of running
+    -- this twice is to compare a broken state against a working one, and keying
+    -- purely by page silently threw the first away. Numbered within the session.
+    local key, n = tostring(pageName), 1
+    while DandersFramesDebugDB.pixelcheck[key] do
+        n = n + 1
+        key = ("%s #%d"):format(tostring(pageName), n)
+    end
+    DandersFramesDebugDB.pixelcheck[key] = pdump
+    print(("  |cff00ff00saved|r %d rows to DandersFramesDebugDB.pixelcheck[\"%s\"] -- |cffffcc00/reload to flush.|r")
+        :format(#rows, key))
 end
 
 -- ============================================================
@@ -895,10 +857,6 @@ end
 -- mouse), then a live trace of every change in focus and in each row's plate
 -- alpha, stamped with the frame number. (a) and (b) show up as repeated
 -- transitions within a single crossing; (c) as a run of frames with nothing lit.
--- Stamped once when this file loads, so it identifies THIS session (and therefore
--- this build) for the gapcheck capture below.
-local GAP_SESSION = date and date("%Y-%m-%d %H:%M:%S") or "?"
-
 local navTrace
 function GUI.NavProbe(seconds)
     local container = GUI.tabContainer
@@ -1294,71 +1252,267 @@ GUI.GapCheckAll = function() GUI.GapCheck("all") end
 -- without any page needing to know what it contains. Weak keys: a retired page's
 -- widgets are reparented to the trash frame rather than destroyed, and this must
 -- not be what keeps them reachable.
-local pixelSnapped = setmetatable({}, { __mode = "k" })
 
--- Opt a frame into pixel-grid snapping. Called from the shared backdrop helpers,
--- NOT from call sites -- that is the whole point: every consumer of
--- CreateElementBackdrop / CreatePanelBackdrop / CreateSettingsGroup inherits this
--- with no code of its own, and a new one cannot forget to.
---   snapSize -- structural boxes only; see SnapBoxToPixelGrid.
-local function RegisterPixelSnap(frame, snapSize)
-    if not frame or not frame.HookScript then return frame end
-    if snapSize then frame._ppSnapSize = true end
-    if pixelSnapped[frame] then return frame end
-    pixelSnapped[frame] = true
-    -- On-demand surfaces (dropdown menus, popups, dialogs) are built once and
-    -- then re-anchored every time they open, so snapping at creation is not
-    -- enough and they never pass through a page layout. OnShow is safe to drive
-    -- this from -- snapping shows and hides nothing, so it cannot re-enter.
-    frame:HookScript("OnShow", function(self) SnapBoxToPixelGrid(self) end)
+-- Re-derive the BORDER THICKNESS of everything currently on screen. Since the
+-- geometry correction was removed this no longer moves or resizes anything, so
+-- the only thing it can change is how many device pixels an edge is drawn at --
+-- which only matters when the SCALE changes. That is why its callers are the
+-- scale slider and the window drag/resize handlers, not anything per-frame.
+--
+-- IsVisible (not IsShown) keeps it cheap: a widget on a page that is not open
+-- has a hidden ancestor and is skipped, so the work stays proportional to what
+-- is displayed rather than to everything the registry has accumulated. Safe to
+-- call repeatedly -- it writes only when the computed edge width actually
+-- differs, so a second call in the same state does nothing at all.
+
+-- ============================================================
+-- PIXEL BORDER -- how every outlined GUI surface draws its edge.
+--
+-- Four textures we own, instead of a backdrop's edgeFile, because a backdrop
+-- edge is drawn one UI unit wide and we cannot control how that lands on the
+-- physical pixel grid. At the scales people play at, one unit is about one
+-- device pixel, and a one-device-pixel line has exactly two states: [1.0, 0]
+-- when it lands on the grid and [0.5, 0.5] when it does not. Identical ink,
+-- completely different appearance -- so an edge that crosses the grid while the
+-- page scrolls appears to flicker, and at the low alphas this GUI uses, both
+-- halves of the split can fall under the visibility floor and the border simply
+-- is not there.
+--
+-- The long way round to this was trying to place that 1px line perfectly. It
+-- cannot be done. Lua-side snapping runs at discrete moments -- build,
+-- scroll-settle, show -- but the line crosses the grid on EVERY frame of a
+-- scroll: correcting at moment N does nothing for the next thirty frames, and
+-- correcting mid-motion adds a visible jump on top of the softness. Handing it
+-- to the renderer (SetSnapToPixelGrid) is worse still: it rounds the two edges
+-- of a thin texture independently, so a 1px line can round to zero height and
+-- vanish outright.
+--
+-- The answer is to stop placing a thin line accurately and draw one that does
+-- not care where it lands. See PX_BORDER_THICKNESS below.
+local pixelBordered = setmetatable({}, { __mode = "k" })
+local PX_SIDES = { "top", "bottom", "left", "right" }
+
+-- THE dial. Border thickness in DEVICE PIXELS, before any per-surface weight.
+--
+-- The floor is what matters, not the exact value: anything above 1 always covers
+-- at least one FULL pixel row plus a partial, so the line can never vanish and
+-- never changes its total ink as the content moves. Only 1.0 has the two-state
+-- failure ([1.0, 0] when it lands on the grid, [0.5, 0.5] when it does not --
+-- identical ink, completely different appearance), which is the flicker that
+-- started this.
+--
+-- Back to 2, and the alpha carries the weight instead. THICKNESS and WEIGHT are
+-- separate dials and conflating them was the mistake:
+--
+--   * thickness decides how UNIFORM the line looks. At 1.5 the rows come out
+--     [0.25, 1.0, 0.25] or [0.5, 1.0] depending on where the box lands, so
+--     neighbouring boxes render visibly different widths -- Krathe's "one
+--     thinner, one thicker". The bigger the base, the smaller that proportion,
+--     so 2 is noticeably more even than 1.5.
+--   * alpha decides how HEAVY it looks, and does not vary with position at all.
+--
+-- So: hold thickness at the value that renders evenly, and take the weight out
+-- of the alpha. 2px at 0.7 alpha is about the same total ink as 1.5px at full,
+-- but without the width wobble.
+--
+-- The floor still matters if this is ever tuned down: anything above 1 always
+-- covers a full row plus a partial, so it cannot vanish. Only 1.0 has the
+-- two-state failure -- [1.0, 0] on the grid, [0.5, 0.5] off it, identical ink
+-- and completely different appearance -- which was the original flicker.
+local PX_BORDER_THICKNESS = 2
+
+-- Applied to every pixel border's alpha. The authored colours were all chosen
+-- for a 1px hairline; drawing them at 2px would read heavier than intended, and
+-- this puts that correction in ONE place rather than re-tuning six call sites
+-- (and whatever opts in later) by hand.
+local PX_BORDER_ALPHA = 0.7
+
+-- Thickness and anchors, re-derived whenever the scale changes.
+-- frame._pxWeight is the caller's edgeSize (1 = the standard hairline), so a
+-- surface that asked for a heavier outline keeps its relative weight.
+local function LayoutPixelBorder(frame)
+    local b = frame._pxBorder
+    if not b then return end
+    local ppu = PixelsPerUnit(frame)
+    if not ppu then return end
+    -- TWO device pixels, not one, and this is the whole finding.
+    --
+    -- A 1px line cannot be drawn reliably at a fractional offset. With vertex
+    -- snapping ON, the top and bottom of a 1px-tall texture can round to the SAME
+    -- pixel row -- height zero, line GONE. That is what the red diagnostic showed:
+    -- verticals solid (X is stable), horizontals absent at certain scroll
+    -- positions (Y carries the scroll's fractional phase). The old backdrop edge
+    -- did it too, so this is not specific to either mechanism.
+    --
+    -- With snapping OFF at 2px the rows come out [partial, full, partial] --
+    -- roughly 0.5 / 1.0 / 0.5 -- for ANY offset. The total ink is constant and
+    -- there is always at least one fully-lit row, so the line can neither vanish
+    -- nor visibly change weight as the page scrolls. A 1px line has only the two
+    -- states [1.0, 0] and [0.5, 0.5]: same ink, completely different appearance,
+    -- which IS the flicker.
+    --
+    -- So: stop trying to place a 1px line perfectly, and draw one that does not
+    -- care where it lands.
+    local devicePx = PX_BORDER_THICKNESS * (frame._pxWeight or 1)
+    local px = devicePx / ppu
+    frame._pxDevicePx = devicePx   -- what /df pixelcheck reports for this surface
+    frame._pxPpu = ppu             -- the scale this thickness was derived at
+
+    b.top:ClearAllPoints()
+    b.top:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 0)
+    b.top:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, 0)
+    b.top:SetHeight(px)
+
+    b.bottom:ClearAllPoints()
+    b.bottom:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 0, 0)
+    b.bottom:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
+    b.bottom:SetHeight(px)
+
+    b.left:ClearAllPoints()
+    b.left:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 0)
+    b.left:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 0, 0)
+    b.left:SetWidth(px)
+
+    b.right:ClearAllPoints()
+    b.right:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, 0)
+    b.right:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
+    b.right:SetWidth(px)
+end
+
+-- THE SHIM, and the reason buttons could not adopt this until now.
+--
+-- A pixel border has no backdrop edgeFile, so SetBackdropBorderColor -- which is
+-- how ~150 call sites across the addon drive hover, active and disabled states
+-- -- would silently do nothing. Converting those by hand meant finding all of
+-- them, and missing one meant a button whose hover just stops working, with
+-- nothing to see in a log.
+--
+-- So the frame gets its own method that shadows the mixin's. Every existing
+-- caller keeps working unchanged, and there is no list to be exhaustive about.
+-- Assigning onto the frame table is enough: SetBackdropBorderColor is not a
+-- native widget method, it arrives via BackdropTemplateMixin, so it is already
+-- a plain table entry and ours simply takes its place.
+local function SetPixelBorderColor(self, r, g, b, a)
+    local bd = self._pxBorder
+    if not bd then return end
+    a = a or 1
+    -- Mutated, not replaced. This is the hover path for every button, dropdown
+    -- and swatch in the GUI -- OnEnter and OnLeave both land here -- so a fresh
+    -- table per call would be pure garbage.
+    local c = self._pxColor
+    if c then c[1], c[2], c[3], c[4] = r, g, b, a
+    else      self._pxColor = { r, g, b, a } end
+    -- Alpha scaled once, here, so the authored colours stay the values a reader
+    -- would expect to see (8%, 50%, 80%) rather than pre-compensated numbers.
+    local drawn = a * PX_BORDER_ALPHA
+    for _, side in ipairs(PX_SIDES) do
+        bd[side]:SetColorTexture(r, g, b, drawn)
+    end
+end
+
+-- Returns the AUTHORED colour, not the drawn one. PX_BORDER_ALPHA is a
+-- rendering correction, so a caller that reads a colour back and writes it again
+-- must not end up with it applied twice.
+local function GetPixelBorderColor(self)
+    local c = self._pxColor
+    if not c then return end
+    return c[1], c[2], c[3], c[4]
+end
+
+-- Re-derive on show, so a surface built at one UI scale and opened after a scale
+-- change comes up at the right thickness. Self-registering on purpose: this
+-- used to be an explicit call that six floating windows each had to remember to
+-- make, and a bordered frame maintaining its own border cannot be forgotten.
+--
+-- Guarded on the scale it was last laid out at, because this fires for every
+-- widget on every page open. In the ordinary case -- nothing has changed since
+-- the widget was built -- it costs one float compare and returns.
+local function RelayoutPixelBorderOnShow(self)
+    if PixelsPerUnit(self) ~= self._pxPpu then LayoutPixelBorder(self) end
+end
+
+-- color = {r, g, b, a}; weight mirrors backdrop edgeSize (1 = standard hairline)
+function GUI:ApplyPixelBorder(frame, color, weight)
+    frame._pxWeight = weight or frame._pxWeight or 1
+    local b = frame._pxBorder
+    if not b then
+        b = {}
+        for _, side in ipairs(PX_SIDES) do
+            -- ARTWORK at the top sublevel, not BORDER. The colour picker is
+            -- what forces it up: its hue square lays a full-size ARTWORK
+            -- gradient over the frame, which would cover a BORDER-layer edge
+            -- completely -- and that is a trap, because the border would
+            -- disappear for a reason nothing about the border explains.
+            --
+            -- Not OVERLAY, though. Every label, icon, check mark, grip and
+            -- slider thumb in this GUI is OVERLAY, and those belong above the
+            -- edge they sit inside. Sublevel 7 of ARTWORK clears the interior
+            -- fills and gradients and nothing else.
+            local tex = frame:CreateTexture(nil, "ARTWORK", nil, 7)
+            -- Snapping OFF, deliberately, and this is a reversal of what this
+            -- started out as. Vertex snapping is what COLLAPSES a thin line:
+            -- rounding a 2px texture's edges independently gives a height of 1,
+            -- 2 or 3 px depending on where it lands, so the border would
+            -- visibly change weight as you scroll. Left un-snapped it is always
+            -- exactly 2px of ink, wherever it falls -- constant, which is what
+            -- the eye actually wants. Crispness was never the goal; STABILITY
+            -- was.
+            if tex.SetSnapToPixelGrid then tex:SetSnapToPixelGrid(false) end
+            -- No half-texel offset, so the 2px spans the rows we asked for.
+            if tex.SetTexelSnappingBias then tex:SetTexelSnappingBias(0) end
+            b[side] = tex
+        end
+        frame._pxBorder = b
+        pixelBordered[frame] = true
+        if frame.HookScript then
+            frame:HookScript("OnShow", RelayoutPixelBorderOnShow)
+        end
+    end
+    -- Outside the create block on purpose: the textures are kept when a surface
+    -- is re-issued, so keying the shim off their creation would leave a
+    -- re-adopted frame with the real methods still in place and its recolours
+    -- going nowhere. Assigning every time is idempotent and cannot get this
+    -- wrong.
+    frame.SetPixelBorderColor    = SetPixelBorderColor
+    frame.SetBackdropBorderColor = SetPixelBorderColor
+    frame.GetBackdropBorderColor = GetPixelBorderColor
+    local c = color or { 1, 1, 1, 0.08 }
+    SetPixelBorderColor(frame, c[1], c[2], c[3], c[4] or 1)
+    -- Re-shown because a surface can be re-issued as fill-only and back again
+    -- (FlashWidget does this on every pulse).
+    for _, side in ipairs(PX_SIDES) do b[side]:Show() end
+    LayoutPixelBorder(frame)
     return frame
 end
-GUI.RegisterPixelSnap = RegisterPixelSnap
 
--- Register every frame in a subtree that carries a bordered backdrop, whether it
--- was built by the shared helpers or hand-rolled with its own SetBackdrop call.
--- Plenty of the older GUI surfaces do the latter, and a new one always can, so
--- membership is discovered rather than declared -- nobody has to remember to opt
--- in. Reads backdropInfo directly (BackdropTemplateMixin's own field) because
--- GetBackdrop returns a fresh copy every call, and this walks a lot of frames.
---
--- Runs ONCE per subtree, not per layout: registration is permanent, so the
--- repeated work is the cheap IsVisible sweep in SnapAllBoxes, not this walk.
-function GUI:HarvestPixelSnaps(root, depth)
-    if not root or (depth or 0) > 20 then return end
-    local bd = root.backdropInfo
-    if bd and bd.edgeFile and bd.edgeFile ~= "" then
-        RegisterPixelSnap(root, root._ppSnapSize)
-    end
-    if not root.GetChildren then return end
-    for _, child in ipairs({ root:GetChildren() }) do
-        GUI:HarvestPixelSnaps(child, (depth or 0) + 1)
-    end
+-- Hand the frame its own methods back, and take the textures down. Needed by the
+-- one path that leaves the pixel border behind: a surface re-issued with
+-- opts.backdropEdge after it had one. Nothing does that today, but if the shim
+-- were left installed the backdrop recolour that follows would go nowhere at
+-- all -- a hover that silently stops working, which is precisely the failure
+-- this system exists to make impossible.
+local function RevertPixelBorder(frame)
+    if not frame or not frame._pxBorder then return end
+    GUI:HidePixelBorder(frame)
+    frame.SetPixelBorderColor    = nil
+    frame.SetBackdropBorderColor = BackdropTemplateMixin.SetBackdropBorderColor
+    frame.GetBackdropBorderColor = BackdropTemplateMixin.GetBackdropBorderColor
 end
 
--- Wire a detached surface (a popup, dialog or picker parented to UIParent rather
--- than to the settings window) into the pixel grid. Harvesting on OnShow rather
--- than at creation is deliberate: these build their rows lazily, so at creation
--- time the subtree is mostly empty.
-function GUI:AttachPixelSnap(root)
-    if not root or not root.HookScript or root._ppAttached then return root end
-    root._ppAttached = true
-    root:HookScript("OnShow", function(self)
-        GUI:HarvestPixelSnaps(self)
-        GUI:SnapAllBoxes()
-    end)
-    return root
+-- Take the border down without discarding it. The textures are ours, so unlike a
+-- backdrop edge nothing else will remove them when the surface is re-issued
+-- without an outline.
+function GUI:HidePixelBorder(frame)
+    local b = frame and frame._pxBorder
+    if not b then return end
+    for _, side in ipairs(PX_SIDES) do b[side]:Hide() end
 end
 
--- Re-snap everything currently on screen. IsVisible (not IsShown) is what keeps
--- this cheap: a widget belonging to a page that is not open has a hidden
--- ancestor and is skipped, so the work stays proportional to what is actually
--- displayed rather than to everything the registry has accumulated. Safe to call
--- repeatedly -- each call corrects to the same grid point rather than
--- accumulating.
-function GUI:SnapAllBoxes()
-    for frame in pairs(pixelSnapped) do
-        if frame:IsVisible() then SnapBoxToPixelGrid(frame) end
+-- Re-derive thickness on a scale change. Rides the same sweep that already
+-- re-derives backdrop edge widths, so there is no new per-frame work.
+function GUI:RefreshPixelBorders()
+    for frame in pairs(pixelBordered) do
+        if frame:IsVisible() then LayoutPixelBorder(frame) end
     end
 end
 
@@ -1373,21 +1527,32 @@ end
 --
 -- opts.bgColor / opts.borderColor take {r,g,b[,a]} or {[1],[2],[3][,4]} and
 -- override the C_ELEMENT / C_BORDER defaults. opts.edgeSize thickens the outline
--- (the popup and wizard chrome use 2). opts.snapSize opts a structural box into
--- size snapping (see SnapBoxToPixelGrid); controls leave it off, because their
--- size belongs to their factory and to whatever measures them. opts.inset (a
+-- (the popup and wizard chrome use 2). opts.inset (a
 -- single number, applied to all four sides) pulls the fill in from the edge so it
 -- does not underlap a translucent border -- default 0, i.e. the fill runs to the
--- frame edge.
+-- frame edge. opts.backdropEdge draws the outline the old way, as a backdrop
+-- edgeFile; see below for why nothing should want that.
 local function CreateElementBackdrop(frame, opts)
     opts = opts or {}
     local fill, outline = opts.fill ~= false, opts.outline ~= false
+    -- The outline is drawn as our own textures, not a backdrop edgeFile. See
+    -- ApplyPixelBorder -- a 1px backdrop edge cannot be drawn reliably at a
+    -- fractional offset, which is the whole missing-border story.
+    --
+    -- This was an opt-in while the hover states were still a problem: a pixel
+    -- border is not repainted by SetBackdropBorderColor, so converting buttons
+    -- blind would have silently killed every hover in the GUI. The shim in
+    -- ApplyPixelBorder settles that -- the frame gets its own
+    -- SetBackdropBorderColor -- so it is now the default for everything that
+    -- comes through here, and opts.backdropEdge is the escape hatch for a
+    -- surface that genuinely needs the old edgeFile.
+    local usePixel = outline and not opts.backdropEdge
     if not frame.SetBackdrop then Mixin(frame, BackdropTemplateMixin) end
     local inset = opts.inset
     frame:SetBackdrop({
         bgFile   = fill and "Interface\\Buttons\\WHITE8x8" or nil,
-        edgeFile = outline and "Interface\\Buttons\\WHITE8x8" or nil,
-        edgeSize = outline and (opts.edgeSize or 1) or nil,
+        edgeFile = (outline and not usePixel) and "Interface\\Buttons\\WHITE8x8" or nil,
+        edgeSize = (outline and not usePixel) and (opts.edgeSize or 1) or nil,
         insets   = inset and { left = inset, right = inset,
                                top = inset, bottom = inset } or nil,
     })
@@ -1398,57 +1563,60 @@ local function CreateElementBackdrop(frame, opts)
     end
     if outline then
         local c = opts.borderColor
-        if c then frame:SetBackdropBorderColor(c.r or c[1], c.g or c[2], c.b or c[3], c.a or c[4] or 1)
-        else      frame:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5) end
+        if usePixel then
+            GUI:ApplyPixelBorder(frame,
+                c and { c.r or c[1], c.g or c[2], c.b or c[3], c.a or c[4] or 1 }
+                  or { C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5 },
+                opts.edgeSize)
+        else
+            RevertPixelBorder(frame)
+            if c then
+                frame:SetBackdropBorderColor(c.r or c[1], c.g or c[2], c.b or c[3], c.a or c[4] or 1)
+            else
+                frame:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
+            end
+        end
+    else
+        -- A backdrop edge disappears on its own when the backdrop is re-issued
+        -- without one; our textures do not, so an outlined surface re-issued as
+        -- fill-only has to be told. FlashWidget does exactly this: it re-runs
+        -- this factory on every pulse, with outline true or false depending on
+        -- how the caller wants that pulse to read.
+        GUI:HidePixelBorder(frame)
     end
-    -- Only bordered surfaces are worth snapping: the geometry correction exists to
-    -- stop a 1px edge splitting across two device-pixel rows, and a fill-only
-    -- backdrop has no edge to split. This is also the rule HarvestPixelSnaps uses
-    -- (it registers on edgeFile), so both membership paths agree -- otherwise the
-    -- fill-only hover plates would be registered here but not by a harvest.
-    if outline then RegisterPixelSnap(frame, opts.snapSize) end
     return frame
 end
 
--- Helper to create panel backdrop (for main panels)
+-- The window chrome: the settings window itself, the changelog overlay and the
+-- dropdown menu panel. Distinct from the public GUI:CreatePanelBackdrop further
+-- down (dialogs and floating panels, colour-configurable) -- this one is always
+-- the dark background behind a hard black edge.
+--
+-- Routed through the factory rather than issuing its own backdrop, which is what
+-- it used to do. It was the last thing in the GUI still drawing a border as an
+-- edgeFile, and a black 1px line is the case where that reads least badly -- it
+-- has enough contrast that a split across two device rows softens it instead of
+-- losing it. Still worth converting: softening on every scroll is what the whole
+-- pixel border exists to stop, and while this was the last holdout the entire
+-- snap-registry existed to serve three call sites.
 local function CreatePanelBackdrop(frame)
-    if not frame.SetBackdrop then Mixin(frame, BackdropTemplateMixin) end
-    frame:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    return CreateElementBackdrop(frame, {
+        bgColor     = C_BACKGROUND,
+        borderColor = { 0, 0, 0, 1 },
     })
-    frame:SetBackdropColor(C_BACKGROUND.r, C_BACKGROUND.g, C_BACKGROUND.b, C_BACKGROUND.a)
-    frame:SetBackdropBorderColor(0, 0, 0, 1)
-    return RegisterPixelSnap(frame, true)   -- structural: snap size too
 end
-GUI.CreatePanelBackdrop = CreatePanelBackdrop
 
 -- Style a ScrollFrameTemplate scrollbar to use the pill-shaped thumb
 -- All scroll frames must use ScrollFrameTemplate (not UIPanelScrollFrameTemplate)
+--
+-- This used to also quantise the scroll offset to whole device pixels, on the
+-- reasoning that Blizzard's scrollbar drives the offset as a fraction of the
+-- range and so parks the content on an arbitrary sub-pixel row. That was true,
+-- and it did not help: a thin border is soft at SOME offsets no matter which
+-- offsets you allow, and quantising only changed which ones. The border being
+-- two device pixels wide is what made the question stop mattering -- it draws
+-- the same amount of ink wherever it lands. Do not add it back.
 local function StyleScrollBar(scrollFrame)
-    -- Quantise the scroll offset to whole device pixels. Blizzard's scrollbar
-    -- drives the offset as a fraction of the range, so it parks the content on an
-    -- arbitrary sub-pixel row and every 1px border inside goes soft or vanishes.
-    -- Snapping the offset means the content keeps the sub-pixel phase it was laid
-    -- out with, so nothing inside has to be re-snapped per scroll event -- which
-    -- is why this is worth doing here rather than sweeping the widgets. The
-    -- correction is under a pixel, so it cannot fight the scrollbar's own state.
-    if not scrollFrame._ppScrollHooked then
-        scrollFrame._ppScrollHooked = true
-        scrollFrame:HookScript("OnVerticalScroll", function(self, offset)
-            if self._ppScrolling or not offset then return end
-            local ppu = PixelsPerUnit(self)
-            if not ppu then return end
-            local snapped = math.floor(offset * ppu + 0.5) / ppu
-            if math.abs(snapped - offset) > 1e-4 then
-                self._ppScrolling = true
-                self:SetVerticalScroll(snapped)
-                self._ppScrolling = nil
-            end
-        end)
-    end
-
     local sb = scrollFrame.ScrollBar
     if not sb then return end
 
@@ -1550,18 +1718,11 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width)
     section.paddingAfter = 8  -- Padding space after header before first child
     
     -- Header bar with background. Same look as before, via the shared backdrop
-    -- helper rather than a private copy of it, so it picks up pixel-grid
-    -- snapping (and anything else that lands there) without its own wiring.
+    -- helper rather than a private copy of it, so it picks up the pixel border
+    -- (and anything else that lands there) without its own wiring.
     GUI:CreateElementBackdrop(section, {
         bgColor     = { r = C_PANEL.r,  g = C_PANEL.g,  b = C_PANEL.b,  a = 0.8 },
         borderColor = { r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5 },
-        -- Structural: this frame IS the header bar, its height is fixed at
-        -- construction and it has no OnSizeChanged, so size snapping is free of
-        -- the relayout cascades that keep it off the controls. Without it the bar
-        -- is 28 UI units tall, which is a whole number of DEVICE pixels only at
-        -- 1:1 scale -- so its top border splits across two rows and disappears,
-        -- which is exactly the black-at-50%-alpha edge you cannot afford to lose.
-        snapSize    = true,
     })
 
     -- Click area
@@ -1777,13 +1938,15 @@ function GUI:CreateSettingsGroup(parent, width, opts)
     group.padding = padding
     group.margin = margin
 
-    -- Structural box, and the faintest border in the GUI: an 8% edge over a 3%
-    -- fill is invisible once it is split across two device-pixel rows, so this one
-    -- opts into size snapping as well.
+    -- 8%, and worth knowing why it is not 16%: it was, for a while, because an
+    -- 8% edge that split across two device rows left 4% on each and neither was
+    -- visible. Doubling it made the surviving half readable at the cost of the
+    -- whole border reading too heavy when it did NOT split. The border no longer
+    -- has to survive being split, because it no longer splits -- so the alpha
+    -- went back to the value that was right in the first place.
     CreateElementBackdrop(group, {
         bgColor     = { 1, 1, 1, 0.03 },   -- very subtle white background (3%)
         borderColor = { 1, 1, 1, 0.08 },   -- subtle white border (8%)
-        snapSize    = true,
     })
 
     -- Bottom collapse bar (only for collapsible groups, shown when expanded)
@@ -2063,10 +2226,9 @@ function GUI:CreateSettingsGroup(parent, width, opts)
 
         -- Update group height (add padding at bottom)
         -- The group's own height, snapped for the same reason its children's
-        -- widths are: this is what puts its TOP border on the grid. (Its size is
-        -- also corrected by SnapBoxToPixelGrid via snapSize, but that runs off
-        -- OnShow / the layout sweep -- getting it right here means it is never
-        -- briefly wrong in between.)
+        -- widths are: this is what puts its TOP border on the grid. Since the
+        -- runtime geometry correction was removed, this IS the only thing that
+        -- does -- there is no after-the-fact pass to fall back on.
         local totalHeight = SnapLen(self, math.abs(y) + padding)
         if totalHeight < 1 then totalHeight = 1 end
         self:SetHeight(totalHeight)
@@ -2562,11 +2724,11 @@ function GUI:CreateInfoBanner(parent, opts)
             lastMeasuredWidth = w
             RecomputeHeight()
         end)
-        -- HookScript, not SetScript: CreateElementBackdrop already hooked OnShow to
-        -- snap this frame to the pixel grid, and a SetScript here would throw that
-        -- hook away. (The frame stays in the snap registry either way, so the
-        -- layout sweep still reaches it -- but it would lose the snap on its own
-        -- show, which is the one that matters for a banner that appears late.)
+        -- HookScript, not SetScript: CreateElementBackdrop already hooked OnShow,
+        -- to re-derive this frame's border thickness if the UI scale changed
+        -- while it was hidden, and a SetScript here would throw that hook away.
+        -- Nothing else would re-derive it -- a banner that appears late is
+        -- exactly the case that hook exists for.
         banner:HookScript("OnShow", function()
             if deferredWhileHidden then
                 deferredWhileHidden = false
@@ -3265,9 +3427,9 @@ function GUI:StyleButton(btn, opts)
     -- Land the height on an EVEN number of device pixels, whether it came from
     -- opts or the caller sized the button itself. Buttons are chained with
     -- centre-aligning anchors (Copy <- Sync <- Reset, Clicks <- Test <- Unlock),
-    -- so an odd height puts the whole row on a half pixel -- and since controls
-    -- are no longer position-corrected by SnapBoxToPixelGrid, getting the size
-    -- right at construction is the only thing that keeps their edges crisp.
+    -- so an odd height puts the whole row on a half pixel -- and since nothing
+    -- corrects a control's position at runtime, getting the size right at
+    -- construction is the only thing that keeps their edges crisp.
     -- Construction-time and once, so it cannot drive an OnSizeChanged cascade.
     local bh = btn:GetHeight()
     if bh and bh > 0 then
@@ -3833,9 +3995,9 @@ end
 
 -- The element backdrop, exposed to consumer files (the stylers in this file use
 -- the local directly). Nothing outside should be calling SetBackdrop itself --
--- route it through here so the look, and the pixel-grid snapping, stay in one
+-- route it through here so the look, and the border mechanism, stay in one
 -- place. See the local for the opts contract: fill, outline, bgColor,
--- borderColor, snapSize.
+-- borderColor, backdropEdge.
 function GUI:CreateElementBackdrop(frame, opts)
     return CreateElementBackdrop(frame, opts)
 end
@@ -4308,14 +4470,6 @@ function GUI:CreateSeeAlso(parent, links)
     CreateElementBackdrop(container, {
         bgColor     = { 0.1, 0.1, 0.1, 0.5 },
         borderColor = { 0.3, 0.3, 0.3, 0.8 },
-        -- STRUCTURAL. This is a full-width panel the PAGE layout positions and
-        -- sizes, not a control -- the same category as a settings group, and it
-        -- has to be flagged as one or SnapBoxToPixelGrid skips its geometry
-        -- (correction is structural-boxes-only, to stop chained controls
-        -- drifting). Without it the box lands off the grid and its 1px top edge
-        -- splits across two device rows: the missing-border symptom, back again
-        -- on the one surface that was never a group.
-        snapSize    = true,
     })
     
     local label = container:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
@@ -4429,8 +4583,16 @@ function GUI:CreateSeeAlso(parent, links)
             end
         end
         
-        -- Adjust container height based on rows
-        local newHeight = 10 + (rowCount * lineHeight)
+        -- Adjust container height based on rows.
+        --
+        -- Snapped HERE, where the number is computed, because this widget
+        -- MEASURES ITSELF: LayoutLinks runs from OnSizeChanged and from a
+        -- C_Timer.After(0), i.e. a frame AFTER the page layout has run.
+        -- Correcting the height after the fact cannot win -- whatever sets a
+        -- grid-aligned height, this function overwrites it on the next frame,
+        -- and the bar's bottom edge ends up split across two device rows.
+        -- Measured: 28 units at 1.40625 px/unit is 39.375px, 0.375 off.
+        local newHeight = SnapLen(container, 10 + (rowCount * lineHeight))
         container:SetHeight(newHeight)
         container.layoutHeight = newHeight + 5
     end
@@ -5255,7 +5417,7 @@ function GUI:CreateInput(parent, label, width)
     
     local editbox = CreateFrame("EditBox", nil, frame)
     -- Two-corner anchored, so the offset and the height are the ONLY levers --
-    -- SnapBoxToPixelGrid cannot nudge a two-point frame, and controls are not
+    -- Nothing corrects a frame's position at runtime, and controls are not
     -- position-corrected at all any more. Snap both and all four edges land.
     local ebY = SnapLen(editbox, -15) or -15
     editbox:SetPoint("TOPLEFT", 0, ebY)
@@ -5319,7 +5481,7 @@ function GUI:CreateEditBox(parent, label, dbTable, dbKey, callback, width, place
     
     local editbox = CreateFrame("EditBox", nil, frame)
     -- Two-corner anchored, so the offset and the height are the ONLY levers --
-    -- SnapBoxToPixelGrid cannot nudge a two-point frame, and controls are not
+    -- Nothing corrects a frame's position at runtime, and controls are not
     -- position-corrected at all any more. Snap both and all four edges land.
     local ebY = SnapLen(editbox, -15) or -15
     editbox:SetPoint("TOPLEFT", 0, ebY)
@@ -10819,7 +10981,6 @@ function DF:CreateGUI()
     CreatePanelBackdrop(frame)
     frame:Hide()
     DF.GUIFrame = frame
-    GUI:AttachPixelSnap(frame)
     
     -- Allow closing with Escape key
     tinsert(UISpecialFrames, "DandersFramesGUI")
@@ -10852,7 +11013,6 @@ function DF:CreateGUI()
             DF.db.party.guiX = x
             DF.db.party.guiY = y
         end
-        GUI:SnapAllBoxes()
     end)
     titleBar:SetFrameStrata("FULLSCREEN_DIALOG")
     titleBar:SetFrameLevel(200)
@@ -11271,9 +11431,11 @@ function DF:CreateGUI()
         if DF.TestPanel then
             DF.TestPanel:SetScale(value)
         end
-        -- A new scale changes how many device pixels a UI unit covers, so both
-        -- the box positions and their edge thickness have to be re-derived.
-        GUI:SnapAllBoxes()
+        -- A new scale changes how many device pixels a UI unit covers, so
+        -- every border on screen has to be re-derived at the new thickness.
+        -- This is the ONLY action that does: nothing else in the GUI writes
+        -- guiScale, and moving or resizing the window leaves it alone.
+        GUI:RefreshPixelBorders()
     end)
 
     GUI.ScaleSlider = scaleSlider
@@ -11498,8 +11660,8 @@ function DF:CreateGUI()
     
     -- Tab container (left side) - with scrolling
     -- ★ Every offset in the nav chain is SNAPPED, for the same structural reason
-    -- the page viewport is: these frames are anchored by two corners, so
-    -- SnapBoxToPixelGrid cannot nudge them, and the numbers going in are the only
+    -- the page viewport is: these frames are anchored by two corners, nothing
+    -- nudges them afterwards, and the numbers going in are the only
     -- lever. Unsnapped, the whole list inherits the fraction -- /df navprobe
     -- measured every one of 42 rows at top+0.38, which is the 4-unit inset below
     -- (5.625 device px at 1.4062 px/unit) propagated down the chain. A row that
@@ -11600,9 +11762,28 @@ function DF:CreateGUI()
 
 
     -- Content area (right side) - no BackdropTemplate in CreateFrame
+    -- ★ THE content panel, and therefore the ancestor of every page viewport --
+    -- so its edges are the surface every page is clipped against. Snapped for
+    -- the same structural reason the nav chain is: it is anchored by two corners,
+    -- Nothing nudges it afterwards, and the offsets going in are the only
+    -- lever.
+    --
+    -- The BOTTOM one is what mattered. A raw 36 is 50.625 device px at 1.4062
+    -- px/unit, i.e. 0.625 above a grid line -- and /df pixelcheck reported
+    -- exactly that on every page it was ever run on: "viewport top+0.00
+    -- bot-0.375". The page's own inset was already snapped, but a snapped inset
+    -- off a fractional PARENT edge is still fractional, so the viewport's bottom
+    -- clip boundary sat between two device rows. Anything resting against it --
+    -- now the See-Also bar, since it was made a footer -- loses part of its
+    -- border to the cut.
+    --
+    -- Same shape as the original bug at the TOP of the page: the box measures
+    -- perfect and the surface it is clipped against is what is wrong. Krathe
+    -- spotted the symmetry before the numbers did.
     local content = CreateFrame("Frame", nil, frame)
-    content:SetPoint("TOPLEFT", tabFrame, "TOPRIGHT", 8, 0)
-    content:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -12, 36)
+    content:SetPoint("TOPLEFT", tabFrame, "TOPRIGHT", SnapLen(frame, 8), 0)
+    content:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT",
+        SnapLen(frame, -12), SnapLen(frame, 36))
     CreateElementBackdrop(content)
     content:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.3)
     GUI.contentFrame = content
@@ -11618,10 +11799,7 @@ function DF:CreateGUI()
     clickCastPanel:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.3)
     clickCastPanel:Hide()
     GUI.clickCastPanel = clickCastPanel
-    -- Built lazily and swapped in over the normal content, so it never passes
-    -- through a page build -- harvest it on its own show instead.
-    GUI:AttachPixelSnap(clickCastPanel)
-    
+
     -- =========================================================================
     -- FOOTER BAR (Discord & Donation links + bottom drag handle)
     -- =========================================================================
@@ -11643,7 +11821,6 @@ function DF:CreateGUI()
             DF.db.party.guiX = x
             DF.db.party.guiY = y
         end
-        GUI:SnapAllBoxes()
     end)
 
     local footer = CreateFrame("Frame", nil, bottomBar)
@@ -12121,10 +12298,10 @@ function DF:CreateGUI()
         -- box inside reported a flawless top+0.00. The boxes were never the
         -- problem; the surface they are clipped against was.
         --
-        -- Nothing corrected it because this frame is anchored by TWO corners, and
-        -- SnapBoxToPixelGrid only geometry-corrects single-anchor frames (a
-        -- two-corner frame would resize rather than move). So the one frame every
-        -- page is measured against was structurally excluded from the engine.
+        -- Nothing corrects it afterwards -- this frame is anchored by TWO
+        -- corners, so even the geometry correction that used to exist skipped it
+        -- (nudging a two-corner frame resizes it rather than moving it). The one
+        -- surface every page is measured against was the one it could not touch.
         -- Snapping the OFFSETS is the fix that works for a two-corner frame:
         -- correct the numbers going in, since the box itself can't be nudged.
         local inset = SnapLen(content, 8) or 8
@@ -12157,7 +12334,7 @@ function DF:CreateGUI()
         -- Every number here is snapped, and the running `y` is built ONLY out of
         -- snapped steps, so each row lands on the pixel grid rather than each one
         -- picking up a different sub-pixel phase down the list. The nav rows are
-        -- two-corner anchored, so SnapBoxToPixelGrid structurally cannot correct
+        -- two-corner anchored, so nothing downstream could correct
         -- them (and would not anyway -- they are not structural boxes): the
         -- offsets going in are the only lever, same as the page viewport.
         --
@@ -12316,10 +12493,6 @@ function DF:CreateGUI()
             end
 
             builderFunc(self, db, Add, AddSpace, AddSyncPoint)
-            -- Pick up every bordered box this page just built, including any that
-            -- rolled its own backdrop instead of going through the helpers. Once
-            -- per build; RefreshStates only re-snaps what is already registered.
-            GUI:HarvestPixelSnaps(self.child)
             self.builtForMode = GUI.SelectedMode
             self.builtForDisabled = false
             self.cacheValid = true
@@ -12524,10 +12697,6 @@ function DF:CreateGUI()
                     end
                     
                     widget:ClearAllPoints()
-                    -- Drop any pixel-grid nudge from the previous layout: the
-                    -- offsets set below are the new base that SnapBoxToPixelGrid
-                    -- corrects against.
-                    widget._ppDX, widget._ppDY = nil, nil
 
                     -- Set height for frame-based widgets (like header containers)
                     if widget.text and widget.SetHeight and h > 0 then
@@ -12613,11 +12782,6 @@ function DF:CreateGUI()
             end
 
             self.child:SetHeight(contentH)
-
-            -- Land every box on the physical pixel grid. Must run after the loop
-            -- above: the snap measures each frame's RESOLVED screen position, so
-            -- the SetPoint has to have happened first.
-            GUI:SnapAllBoxes()
 
             -- Update scroll child width to match content area
             if self.child and GUI.contentFrame then

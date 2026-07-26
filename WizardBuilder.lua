@@ -269,8 +269,6 @@ local function CreateBuilderFrame()
 
     local f = CreateFrame("Frame", "DFBuilderFrame", UIParent, "BackdropTemplate")
     -- Ride the shared GUI pixel grid: this surface is parented to UIParent, so it
-    -- never passes through a settings-page build. See GUI:AttachPixelSnap.
-    if DF.GUI and DF.GUI.AttachPixelSnap then DF.GUI:AttachPixelSnap(f) end
     f:SetSize(BUILDER_WIDTH, 500)
     f:SetPoint("CENTER")
     f:SetFrameStrata("FULLSCREEN_DIALOG")

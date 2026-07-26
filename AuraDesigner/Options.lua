@@ -8942,11 +8942,4 @@ function DF:AuraDesigner_RefreshPage()
         and DF.InvalidateAuraLayout then
         DF:InvalidateAuraLayout()
     end
-
-    -- This page rebuilds its cards outside the shared page-build path, so the
-    -- pixel-grid harvest that runs there never sees anything created here.
-    if GUI and GUI.HarvestPixelSnaps then
-        GUI:HarvestPixelSnaps(mainFrame)
-        GUI:SnapAllBoxes()
-    end
 end

@@ -886,8 +886,6 @@ local function CreatePopupFrame()
 
     local f = CreateFrame("Frame", "DFPopupFrame", UIParent, "BackdropTemplate")
     -- Ride the shared GUI pixel grid: this surface is parented to UIParent, so it
-    -- never passes through a settings-page build. See GUI:AttachPixelSnap.
-    if DF.GUI and DF.GUI.AttachPixelSnap then DF.GUI:AttachPixelSnap(f) end
     f:SetSize(FRAME_WIDTH, 300)
     f:SetPoint("CENTER")
     f:SetFrameStrata("FULLSCREEN_DIALOG")

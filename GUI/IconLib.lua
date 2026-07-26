@@ -53,8 +53,6 @@ local function CreateIconPreview()
     -- Main frame
     local frame = CreateFrame("Frame", "DFIconPreview", UIParent, "BackdropTemplate")
     -- Ride the shared GUI pixel grid: this surface is parented to UIParent, so it
-    -- never passes through a settings-page build. See GUI:AttachPixelSnap.
-    if DF.GUI and DF.GUI.AttachPixelSnap then DF.GUI:AttachPixelSnap(frame) end
     frame:SetSize(520, 480)
     frame:SetPoint("CENTER")
     DF.GUI:CreateElementBackdrop(frame, {
