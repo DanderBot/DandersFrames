@@ -2939,9 +2939,14 @@ function GUI:CreateElementBackdrop(frame, opts)
 end
 
 -- ============================================================
--- DESIGNER PRESET BAR (shared by the Aura / Text Designer editors)
--- Compact row: "Preset: [dropdown ▾]  [New][Duplicate][Rename][Delete]".
--- Picking a preset assigns it to the mode (opts.getMode()) AND retargets the
+-- DESIGNER TEMPLATE BAR (shared by the Aura / Text Designer editors)
+-- Compact row: "Template: [dropdown ▾]  [New][Duplicate][Rename][Delete]".
+-- NOTE: the saved keys are still auraDesignerPreset(s) / textDesignerPreset(s) --
+-- only the LABELS became "template". The keys are persisted and exported, so
+-- renaming them would cost a profile migration for nothing a user can see.
+-- "Preset" now means only the built-in filter sets (FilterRegistry) and the
+-- export/test quick-picks.
+-- Picking a template assigns it to the mode (opts.getMode()) AND retargets the
 -- editor; the buttons manage the library. After any change the bar calls
 -- opts.onChange() so the host page can rebuild + refresh live frames.
 -- opts = { kind = "aura"|"text", getMode = fn->mode, onChange = fn }.
@@ -2972,7 +2977,7 @@ end
 
 local function PromptPresetName(message, default, acceptLabel, callback)
     GUI:PromptName({
-        title       = L["Preset Name"],
+        title       = L["Template Name"],
         message     = message,
         default     = default,
         acceptLabel = acceptLabel,
@@ -2982,8 +2987,8 @@ end
 
 local function ConfirmDeletePreset(kind, name, onDone)
     DF:ShowPopupAlert({
-        title   = L["Delete Preset"],
-        message = format(L["Delete preset \"%s\"? Anything using it reverts to Default."], name),
+        title   = L["Delete Template"],
+        message = format(L["Delete template \"%s\"? Anything using it reverts to Default."], name),
         buttons = {
             {
                 label = L["Delete"],
@@ -3010,7 +3015,7 @@ function GUI:CreateDesignerPresetBar(parent, opts)
 
     local label = bar:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     label:SetPoint("LEFT", 0, 0)
-    label:SetText(L["Preset:"])
+    label:SetText(L["Template:"])
     label:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
     local function CurrentName()
@@ -3138,7 +3143,7 @@ function GUI:CreateDesignerPresetBar(parent, opts)
     -- other pages. Explained here once, for both designers.
     ddBtn:SetScript("OnEnter", function(self)
         local lines = {
-            L["A preset is a saved designer setup, kept under a name."],
+            L["A template is a saved designer setup, kept under a name."],
             L["Party and Raid each pick one, so they can share a setup or use different ones."],
             L["Auto layouts and pinned frame sets can pick their own, or inherit the one their mode is using."],
         }
@@ -3146,9 +3151,9 @@ function GUI:CreateDesignerPresetBar(parent, opts)
         if #shared > 0 then
             lines[#lines + 1] = " "
             lines[#lines + 1] = { text = format(L["Shared with: %s"], table.concat(shared, ", ")), accent = true }
-            lines[#lines + 1] = L["Editing this preset changes all of them."]
+            lines[#lines + 1] = L["Editing this template changes all of them."]
         end
-        GUI:ShowTooltip(self, { title = L["Presets"], lines = lines })
+        GUI:ShowTooltip(self, { title = L["Templates"], lines = lines })
     end)
     ddBtn:SetScript("OnLeave", function() GUI:HideTooltip() end)
 
@@ -3193,7 +3198,7 @@ function GUI:CreateDesignerPresetBar(parent, opts)
     end
 
     local newBtn = CreateAction(L["New"], "add", 48, function()
-        PromptPresetName(L["Name the new preset:"], EditingLayoutName() or "", L["Create"], function(text)
+        PromptPresetName(L["Name the new template:"], EditingLayoutName() or "", L["Create"], function(text)
             local n = DF:CreateDesignerPreset(kind, text)
             if n then
                 DF:SetModeDesignerPreset(kind, getMode(), n)
@@ -3207,7 +3212,7 @@ function GUI:CreateDesignerPresetBar(parent, opts)
         local cur = CurrentName()
         -- Duplicate defaults to "<source> copy" (New uses the layout name, but a
         -- duplicate is of a specific preset, so name it after the source).
-        PromptPresetName(L["Name the duplicated preset:"], cur .. " copy", L["Duplicate"], function(text)
+        PromptPresetName(L["Name the duplicated template:"], cur .. " copy", L["Duplicate"], function(text)
             local n = DF:DuplicateDesignerPreset(kind, cur, text)
             if n then
                 DF:SetModeDesignerPreset(kind, getMode(), n)
@@ -3220,7 +3225,7 @@ function GUI:CreateDesignerPresetBar(parent, opts)
     local renameBtn = CreateAction(L["Rename"], "edit", 62, function()
         local cur = CurrentName()
         if cur == DF.DEFAULT_PRESET then return end
-        PromptPresetName(L["Rename preset:"], cur, L["Rename"], function(text)
+        PromptPresetName(L["Rename template:"], cur, L["Rename"], function(text)
             DF:RenameDesignerPreset(kind, cur, text)
             bar:Refresh(); onChange()
         end)
@@ -3301,12 +3306,12 @@ function GUI:DesignerCopyHooks(kind)
 
     return {
         copyLine = function(src, dest)
-            return format(L["Points %s at the preset %s is using, so both share one setup."], dest, src)
+            return format(L["Points %s at the template %s is using, so both share one setup."], dest, src)
         end,
 
         copyMessage = function(mode, dest)
             return format(
-                L["Use the preset \"%s\" for %s as well?\n\nThis shares one setup rather than copying it — editing either mode then changes both. %s's current preset \"%s\" stays in the list."],
+                L["Use the template \"%s\" for %s as well?\n\nThis shares one setup rather than copying it — editing either mode then changes both. %s's current template \"%s\" stays in the list."],
                 NameFor(mode), dest, dest, NameFor(Other(mode)))
         end,
 
@@ -3315,16 +3320,16 @@ function GUI:DesignerCopyHooks(kind)
             if destName == cur then
                 -- Already sharing by hand: syncing adds the running link, not the sharing.
                 return format(
-                    L["Keep %s and %s on the preset \"%s\", and keep the choice in step?\n\nThey already share it, so nothing changes on screen."],
+                    L["Keep %s and %s on the template \"%s\", and keep the choice in step?\n\nThey already share it, so nothing changes on screen."],
                     ModeLabel(mode), dest, cur)
             end
             return format(
-                L["Use the preset \"%s\" for %s as well, and keep the choice in step?\n\nEditing either mode then changes both. %s's current preset \"%s\" stays in the list and is not deleted."],
+                L["Use the template \"%s\" for %s as well, and keep the choice in step?\n\nEditing either mode then changes both. %s's current template \"%s\" stays in the list and is not deleted."],
                 cur, dest, dest, destName)
         end,
 
         unsyncLine = function()
-            return L["Party & Raid are keeping their preset choice in step.\nClick to stop, and optionally give each its own copy."]
+            return L["Party & Raid are keeping their template choice in step.\nClick to stop, and optionally give each its own copy."]
         end,
 
         onUnsync = function(mode, doUnsync)
@@ -3346,7 +3351,7 @@ function GUI:DesignerCopyHooks(kind)
                 width = 500,
                 buttonWidth = 150,
                 message = format(
-                    L["%s and %s are both using the preset \"%s\".\n\nGive %s its own copy so the two can differ from here? The copy starts out identical, so nothing changes on screen and nothing is deleted or overwritten."],
+                    L["%s and %s are both using the template \"%s\".\n\nGive %s its own copy so the two can differ from here? The copy starts out identical, so nothing changes on screen and nothing is deleted or overwritten."],
                     L["Party"], L["Raid"], cur, L["Raid"]),
                 buttons = {
                     {
@@ -4663,10 +4668,16 @@ function GUI:CreateSlider(parent, label, minVal, maxVal, step, dbTable, dbKey, c
         AddOverrideIndicators(container, lbl, dbKey, onReset, 6, nil, dbTable)
     end
 
-    -- Background track
+    -- Background track.
+    -- Left edge and height here; the RIGHT edge is pinned to the value box further
+    -- down, once that exists. The track used to be a fixed 180px while a dropdown
+    -- anchors TOPLEFT+TOPRIGHT and fills its container, so on any panel wider than
+    -- the 260 default the two controls ended at visibly different x positions --
+    -- and drifted further apart the wider the panel got. Both are container-driven
+    -- now, so they line up at any width instead of at one magic number.
     local track = CreateFrame("Frame", nil, container, "BackdropTemplate")
     track:SetPoint("TOPLEFT", 0, -18)
-    track:SetSize(180, 8)
+    track:SetHeight(8)
     CreateElementBackdrop(track)
     
     -- Fill track (colored portion)
@@ -4679,7 +4690,7 @@ function GUI:CreateSlider(parent, label, minVal, maxVal, step, dbTable, dbKey, c
     -- Slider
     local slider = CreateFrame("Slider", nil, container)
     slider:SetPoint("TOPLEFT", 0, -18)
-    slider:SetSize(180, 8)
+    slider:SetHeight(8)   -- right edge pinned to the value box, same as the track
     slider:SetOrientation("HORIZONTAL")
     slider:SetMinMaxValues(minVal, maxVal)
     slider:SetValueStep(step)
@@ -4701,8 +4712,13 @@ function GUI:CreateSlider(parent, label, minVal, maxVal, step, dbTable, dbKey, c
     
     -- Value input
     local input = CreateFrame("EditBox", nil, container, "BackdropTemplate")
-    input:SetPoint("LEFT", track, "RIGHT", 8, 0)
     input:SetSize(50, 20)
+    -- Pinned to the container's RIGHT edge -- the same edge a dropdown's opener
+    -- ends on -- and the track/slider then stretch from the left to meet it.
+    -- y = -12 keeps the 20px box centred on the 8px track at -18.
+    input:SetPoint("TOPRIGHT", 0, -12)
+    track:SetPoint("RIGHT", input, "LEFT", -8, 0)
+    slider:SetPoint("RIGHT", input, "LEFT", -8, 0)
     CreateElementBackdrop(input)
     input:SetFontObject(DFFontHighlightSmall)
     input:SetJustifyH("CENTER")
@@ -4712,8 +4728,17 @@ function GUI:CreateSlider(parent, label, minVal, maxVal, step, dbTable, dbKey, c
     local function UpdateFill()
         local val = slider:GetValue()
         local pct = (val - minVal) / (maxVal - minVal)
-        fill:SetWidth(math.max(1, pct * 178))
+        -- Measured off the LIVE track, not the old hardcoded 178 (= the fixed 180
+        -- track minus the fill's 1px inset each side). The track stretches now, so
+        -- a constant here would under-fill on any panel wider than the default.
+        local usable = (track:GetWidth() or 0) - 2
+        if usable < 1 then usable = 1 end
+        fill:SetWidth(math.max(1, pct * usable))
     end
+    -- The track's width is only known once the page layout has resolved its
+    -- anchors, and changes again if the panel is resized -- so repaint the fill
+    -- whenever it does, or the bar renders at its pre-layout width.
+    track:SetScript("OnSizeChanged", function() UpdateFill() end)
     
     container.SetEnabled = function(self, enabled)
         slider:SetEnabled(enabled)

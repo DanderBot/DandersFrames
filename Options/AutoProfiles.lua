@@ -14,6 +14,58 @@ local format = string.format
 local C_RAID = {r = 1.0, g = 0.5, b = 0.2, a = 1}
 local C_WARNING = {r = 1.0, g = 0.67, b = 0.0, a = 1}
 
+-- ============================================================
+-- OVERRIDE KEY LABELS
+-- The override tooltip and /df overrides both list which settings a layout has
+-- overridden. They used to print the RAW saved key -- "auraDesignerPreset",
+-- "buffBorderSize" -- so users were shown internal camelCase identifiers. Noise at
+-- best, and actively misleading where a key's wording no longer matches the UI:
+-- the designer keys still say "preset" ON PURPOSE (they are exported, so renaming
+-- them would cost a saved-profile migration to change a name nobody should have
+-- been seeing) while the UI now calls those Templates.
+--
+-- Derived labels can't be translated -- they come from an identifier, not a string
+-- table -- but that is no worse than the raw key they replace, and the cases where
+-- the wording actually matters are pinned to real locale keys below.
+-- ============================================================
+
+-- Prettifying these would be WRONG, not merely ugly.
+local KEY_LABEL_OVERRIDES = {
+    auraDesignerPreset = "Aura Designer Template",
+    textDesignerPreset = "Text Designer Template",
+}
+
+-- Initialisms that must not be title-cased into nonsense ("Oor", "Bg", "Dps").
+local KEY_ACRONYMS = {
+    oor = "OOR", bg = "BG", pvp = "PvP", ui = "UI", hp = "HP",
+    dps = "DPS", afk = "AFK", cc = "CC", ad = "AD", td = "TD",
+}
+
+local keyLabelCache = {}
+
+local function KeyLabel(key)
+    if type(key) ~= "string" then return tostring(key) end
+    local cached = keyLabelCache[key]
+    if cached then return cached end
+
+    local out
+    local override = KEY_LABEL_OVERRIDES[key]
+    if override then
+        out = L[override] or override
+    else
+        -- camelCase -> spaced, digits split off, then title-case each word.
+        local spaced = key:gsub("(%l)(%u)", "%1 %2"):gsub("(%a)(%d)", "%1 %2")
+        local words = {}
+        for w in spaced:gmatch("%S+") do
+            words[#words + 1] = KEY_ACRONYMS[w:lower()] or (w:sub(1, 1):upper() .. w:sub(2))
+        end
+        out = table.concat(words, " ")
+    end
+
+    keyLabelCache[key] = out
+    return out
+end
+
 -- Deep-copy a value (recursive for nested tables)
 local function DeepCopyValue(value)
     if type(value) ~= "table" then return value end
@@ -1294,7 +1346,7 @@ function AutoProfilesUI:CreateProfileRow(GUI, pageFrame, parent, contentType, pr
                 local value = profile.overrides[key]
                 if type(value) == "table" and not (value.r and value.g and value.b) then
                     if not canEmit() then return end
-                    lines[#lines + 1] = { text = "  " .. key .. ":", color = { lr, lg, lb } }
+                    lines[#lines + 1] = { text = "  " .. KeyLabel(key) .. ":", color = { lr, lg, lb } }
                     WalkOverrideDiff(value, realRaid and realRaid[key], "", "    ", 1, 8, budget, emitTT)
                 else
                     if not canEmit() then return end
@@ -1306,7 +1358,7 @@ function AutoProfilesUI:CreateProfileRow(GUI, pageFrame, parent, contentType, pr
                     else
                         displayVal = tostring(value)
                     end
-                    lines[#lines + 1] = { left = "  " .. key, right = displayVal, color = { lr, lg, lb } }
+                    lines[#lines + 1] = { left = "  " .. KeyLabel(key), right = displayVal, color = { lr, lg, lb } }
                 end
             end
 
@@ -2857,9 +2909,9 @@ function AutoProfilesUI:UpdateEditingBanner()
         local GUI = DF.GUI
         local pageName = GUI and GUI.CurrentPageName
         if pageName == "auras_auradesigner" then
-            editingBanner.infoText:SetText(info.rangeText .. " · |cffffcc66" .. L["Pick an Aura Designer preset below for this layout. 'Inherit (Global)' follows your global one."] .. "|r")
+            editingBanner.infoText:SetText(info.rangeText .. " · |cffffcc66" .. L["Pick an Aura Designer template below for this layout. 'Inherit (Global)' follows your global one."] .. "|r")
         elseif pageName == "text_designer" then
-            editingBanner.infoText:SetText(info.rangeText .. " · |cffffcc66" .. L["Pick a Text Designer preset below for this layout. 'Inherit (Global)' follows your global one."] .. "|r")
+            editingBanner.infoText:SetText(info.rangeText .. " · |cffffcc66" .. L["Pick a Text Designer template below for this layout. 'Inherit (Global)' follows your global one."] .. "|r")
         else
             editingBanner.infoText:SetText(info.rangeText .. " · " .. L["Only changed settings will be saved"])
         end
@@ -3846,10 +3898,18 @@ function AutoProfilesUI:PrintOverrides()
             print(indent .. label .. " = |cffffffff" .. val .. "|r")
         end
     end
+    -- Chat is the DIAGNOSTIC surface -- people paste it for support -- so it shows
+    -- the readable label AND the raw saved key, unlike the tooltip which shows the
+    -- label alone.
+    local function chatKey(key)
+        local label = KeyLabel(key)
+        if label == key then return key end
+        return label .. " |cff808080(" .. key .. ")|r"
+    end
     local function printKey(key, indentBase)
         local value = profile.overrides[key]
         if type(value) == "table" and not (value.r and value.g and value.b) then
-            print(indentBase .. key .. ":")
+            print(indentBase .. chatKey(key) .. ":")
             WalkOverrideDiff(value, realRaid and realRaid[key], "", indentBase .. "  ", 1, 8, budget, emitChat)
         else
             local displayValue
@@ -3860,7 +3920,7 @@ function AutoProfilesUI:PrintOverrides()
             else
                 displayValue = "|cffffffff" .. tostring(value) .. "|r"
             end
-            print(indentBase .. key .. " = " .. displayValue)
+            print(indentBase .. chatKey(key) .. " = " .. displayValue)
         end
     end
 

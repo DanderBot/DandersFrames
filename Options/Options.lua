@@ -3565,9 +3565,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- are created and edited on the Aura/Text Designer pages — here you only choose
         -- which one this pinned set renders with. The Text picker shows whenever the
         -- Text Designer module is loaded.
-        layoutGroup:AddWidget(CreatePinnedPresetDropdown(self.child, L["Aura Designer Preset"], "aura", "auraDesignerPreset", RefreshPinnedDisplay), 55)
+        layoutGroup:AddWidget(CreatePinnedPresetDropdown(self.child, L["Aura Designer Template"], "aura", "auraDesignerPreset", RefreshPinnedDisplay), 55)
         if DF.TextDesigner then
-            layoutGroup:AddWidget(CreatePinnedPresetDropdown(self.child, L["Text Designer Preset"], "text", "textDesignerPreset", RefreshPinnedDisplay), 55)
+            layoutGroup:AddWidget(CreatePinnedPresetDropdown(self.child, L["Text Designer Template"], "text", "textDesignerPreset", RefreshPinnedDisplay), 55)
         end
 
         -- Border Override (Stage 2b): a single toggle. Off → inherit the Based-on
