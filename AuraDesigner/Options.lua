@@ -7561,10 +7561,12 @@ BuildLayoutGroupsTab = function()
                         GUI.SelectTab("auras_filterdesigner")
                         -- Page content builds on first show (inside SelectTab), so
                         -- the button reference exists by now.
+                        -- The add action is a row inside the Filter Designer's
+                        -- scrolling left list, so the page scrolls it into view and
+                        -- pulses it itself rather than handing back a bare widget.
                         local fdPage = GUI.Pages["auras_filterdesigner"]
-                        local newFilterBtn = fdPage and fdPage._fdNewFilterBtn
-                        if newFilterBtn and DF.HighlightWidget then
-                            DF:HighlightWidget(newFilterBtn)
+                        if fdPage and fdPage._fdFocusNewFilter then
+                            fdPage._fdFocusNewFilter()
                         end
                     end
                 end)

@@ -5663,29 +5663,46 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             local function L_link(text, pageId)
                 return linkColor .. "|HdfPage:" .. pageId .. "|h" .. text .. "|h|r"
             end
-            local bodyText = L["Choose which filters are active here. Buffs: full control — toggle individual spells or create your own filters in the"] .. " "
-                .. L_link(L["Filter Designer"], "auras_filterdesigner") .. ". "
-                .. L["Debuffs: you can only pick from Blizzard's fixed categories (boss, dispellable, crowd control, and so on) — no editing, no custom debuff filters, no per-spell filtering. The debuff Blacklist is the only per-spell control."]
+            -- Two format strings rather than a dozen concatenated fragments: the
+            -- links are %s placeholders, so a translator can reorder the sentence
+            -- around them. Concatenation locked English word order in place.
+            local bodyText = string.format(
+                    L["Choose which filters are active. Buff filters can be fully customised in the %s; debuff filters are limited to Blizzard's fixed categories, with the %s the only per-spell control."],
+                    L_link(L["Filter Designer"], "auras_filterdesigner"),
+                    -- Pseudo-id, resolved in onLinkClick below. It cannot be
+                    -- "auras_filterdesigner:blacklist": the banner's link parser
+                    -- strsplits on ":" and keeps only the second field, so the
+                    -- anchor would be dropped and this would land on whatever mode
+                    -- the Filter Designer was last left in.
+                    L_link(L["Debuff Blacklist"], "auras_blacklist"))
                 .. "\n\n"
-                .. L["The filters you enable here apply to the"] .. " "
-                .. L_link(L["Buff Bar"], "auras_buffs") .. " "
-                .. L["and"] .. " "
-                .. L_link(L["Debuff Bar"], "auras_debuffs") .. "."
-                .. "\n"
-                .. L["Other surfaces choose their own: the"] .. " "
-                .. L_link(L["Defensive Icon"], "auras_defensiveicon") .. " "
-                .. L["and"] .. " "
-                .. L_link(L["Aura Designer"], "auras_auradesigner") .. " "
-                .. L["(per placed indicator) pick which filters to use on their own pages. The"] .. " "
-                .. L_link(L["Dispel Overlay"], "auras_dispel") .. " "
-                .. L["is fixed and takes no filter selection."]
+                .. string.format(
+                    L["These filters apply to the %s and %s only. The %s and %s pick their own (per indicator), and the %s takes no filter selection."],
+                    L_link(L["Buff Bar"], "auras_buffs"),
+                    L_link(L["Debuff Bar"], "auras_debuffs"),
+                    L_link(L["Defensive Icon"], "auras_defensiveicon"),
+                    L_link(L["Aura Designer"], "auras_auradesigner"),
+                    L_link(L["Dispel Overlay"], "auras_dispel"))
 
             local infoBanner = GUI:CreateInfoBanner(self.child, {
                 tone = "info",
                 html = true,
                 text = bodyText,
                 onLinkClick = function(pageId)
-                    if GUI.SelectTab then GUI.SelectTab(pageId) end
+                    if not GUI.SelectTab then return end
+                    -- The Blacklist is a MODE of the Filter Designer, not a page, so
+                    -- it takes the same two-step as the "Edit Debuff Blacklist" button
+                    -- further down this page: select the page (which builds its
+                    -- content on first show, so the ref exists straight after), then
+                    -- jump to the section.
+                    if pageId == "auras_blacklist" then
+                        if not (GUI.Pages and GUI.Pages["auras_filterdesigner"]) then return end
+                        GUI.SelectTab("auras_filterdesigner")
+                        local fdPage = GUI.Pages["auras_filterdesigner"]
+                        if fdPage and fdPage._fdSelectBlacklist then fdPage._fdSelectBlacklist() end
+                        return
+                    end
+                    GUI.SelectTab(pageId)
                 end,
                 minHeight = 90,
             })
@@ -5870,7 +5887,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- Top-of-section link: the debuff categories are set here; the one per-spell
         -- debuff control (the Blacklist) lives in the Filter Designer, so land there.
-        local dfManage = debuffGroup:AddWidget(GUI:CreateButton(self.child, L["Edit debuff Blacklist"], 220, 22, function()
+        local dfManage = debuffGroup:AddWidget(GUI:CreateButton(self.child, L["Edit Debuff Blacklist"], 220, 22, function()
             if not (GUI.SelectTab and GUI.Pages and GUI.Pages["auras_filterdesigner"]) then return end
             GUI.SelectTab("auras_filterdesigner")
             -- Page content builds on first show (inside SelectTab), so the entry

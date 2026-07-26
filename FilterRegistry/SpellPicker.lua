@@ -56,7 +56,11 @@ end
 -- isCurrent(row, spellID): is the (pooled, rebindable) row still showing
 -- this spell? Guards the async re-render against rebinds and hover moves.
 local function ShowSpellTooltip(row, spellID, fallbackName, isCurrent)
-    GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
+    -- ANCHOR_CURSOR, not ANCHOR_RIGHT: the owner is a full-width list row, so
+    -- anchoring to its right edge threw the tooltip out to the far side of the
+    -- panel, nowhere near what you were pointing at. The owner stays the ROW so
+    -- IsOwned / IsMouseOver / isCurrent below keep working against row identity.
+    GameTooltip:SetOwner(row, "ANCHOR_CURSOR")
     -- pcall: SetSpellByID errors outright on ids the client considers
     -- invalid (possible for stale DB entries) — treat that as "no data".
     local ok = pcall(GameTooltip.SetSpellByID, GameTooltip, spellID)

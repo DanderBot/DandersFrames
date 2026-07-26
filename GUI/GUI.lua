@@ -2446,12 +2446,24 @@ function GUI:StyleButton(btn, opts)
         end
     end
 
-    btn.ApplyThemeColor = function(c)
+    -- The hover wash's colour, factored out so it can be re-resolved at HOVER time
+    -- rather than only at build time. The theme listener registered below lands on
+    -- the button's PARENT, and a button parented into a scroll child -- every row
+    -- in the Filter Designer, the spell list, the binding editor -- hangs it on a
+    -- frame no theme walk ever visits. Its wash then stays frozen at whatever the
+    -- accent was when the page was built, so a raid-mode hover drew an orange
+    -- border (computed live in OnEnter) over a party-blue fill. The border was
+    -- always right; the wash simply wasn't asking again.
+    local function applyWash(c)
         if neutralHover then
             hl:SetVertexColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 0.55)
         else
             hl:SetVertexColor(c.r, c.g, c.b, (isTabStyle or ghost) and 0.15 or 0.30)
         end
+    end
+
+    btn.ApplyThemeColor = function(c)
+        applyWash(c)
         if isTabStyle then
             restBackdrop(btn, c)  -- keep the tab transparent (no fill/border)
             -- refresh the stripe colour + the active label to the new accent
@@ -2560,6 +2572,11 @@ function GUI:StyleButton(btn, opts)
     end
 
     btn:SetScript("OnEnter", function(self)
+        -- Re-resolve the wash against the CURRENT theme, exactly as the border does
+        -- below (see applyWash). Skipped when the caller pinned a fixed accent, and
+        -- while disabled -- SetDisabled parks the wash at alpha 0 and it must stay
+        -- parked, or a disabled button would light up under the mouse.
+        if not accent and not self.dfDisabled then applyWash(GetThemeColor()) end
         -- tab/ghost/neutral: only the auto wash, no accent border
         if isTabStyle or ghost or neutralHover then return end
         if self:IsEnabled() and not self.dfDisabled then

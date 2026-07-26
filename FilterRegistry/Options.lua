@@ -13,6 +13,7 @@ local format = string.format
 local tinsert = table.insert
 local tsort = table.sort
 local mmax = math.max
+local mfloor = math.floor
 local CreateFrame = CreateFrame
 local C_Timer = C_Timer
 local GetBuildInfo = GetBuildInfo
@@ -220,6 +221,10 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
             pageRef._fdSpacer:SetParent(p)
             table.insert(pageRef.children, pageRef._fdSpacer)
         end
+        -- Re-fit to the window before refreshing: the spacer the guard just
+        -- re-adopted carries a height from the LAST build, and the window may have
+        -- been resized since. Without this the page's scroll range is stale.
+        if pageRef._fdResolvePanelHeight then pageRef._fdResolvePanelHeight() end
         if pageRef._fdRefreshAll then pageRef._fdRefreshAll() end
         return
     end
@@ -237,9 +242,45 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     local ShowSpellTooltip = R.ShowSpellTooltip
 
     -- ========== LAYOUT CONSTANTS ==========
-    local PANEL_H = 490
+    -- Panel height tracks the window instead of being pinned at 490. The page has
+    -- two independently scrolling lists, so any height the window can give them is
+    -- height they can use — a fixed value left a dead band under both panels on
+    -- anything but a short window.
+    --
+    -- Measured from GUI.contentFrame, which is anchored to the window's edges and
+    -- is therefore the real viewport. CHROME is everything this page stacks above
+    -- and below the panels: top pad + banner + gap, and below, the spell-database
+    -- freshness label and the bottom pad. It matches the spacer's own arithmetic
+    -- further down; both read this constant so they cannot drift apart.
+    local PANEL_CHROME_H = 66
+    local PANEL_H_MIN = 320
+    -- Take 90% of what's left rather than all of it. Filling the viewport exactly
+    -- still tips the page's own scroll frame over its range — RefreshStates adds
+    -- its own bottom padding to the content height — and the main window grows a
+    -- scrollbar for a few pixels of overflow. The slack absorbs that without
+    -- needing to know the layout's padding, which is not this page's business.
+    local PANEL_H_FRACTION = 0.90
+    local PANEL_H = 490   -- replaced by ResolvePanelHeight() before first layout
     local LEFT_W = 240
     local LEFT_ROW_H = 24
+
+    -- Row shading, shared by BOTH lists (filters on the left, spells on the right).
+    -- Pulled from the shared palette rather than re-typed, so a retheme moves them.
+    --
+    -- ⚠ Both panels take CreatePanelBackdrop's DEFAULT, which is C_PANEL (0.12) —
+    -- not the darker C_BACKGROUND. Getting that backwards once already cost a round
+    -- trip, so it is written down here:
+    --   rest  = the BACKGROUND tone at 0.6, which lands UNDER the panel it sits on,
+    --           so each row reads as a recessed well. That well is what makes the
+    --           list look like a set of things you can click rather than lines of
+    --           text — it was never the problem and must not be flattened.
+    --   hover = C_HOVER, the value the main nav uses, well clear of the panel.
+    -- The old hover was 0.12, exactly the panel's own value, so hovering dissolved a
+    -- row INTO the background instead of lighting it up. That was the whole bug.
+    local C = GUI.Colors
+    local ROW_REST_R,  ROW_REST_G,  ROW_REST_B  = C.background.r, C.background.g, C.background.b
+    local ROW_HOVER_R, ROW_HOVER_G, ROW_HOVER_B = C.hover.r, C.hover.g, C.hover.b
+    local ROW_REST_A, ROW_HOVER_A = 0.6, 1
     local SECTION_H = 26 -- section-label slot (bumped for the larger DFFontNormal labels)
     local SPELL_ROW_H = 26
     local CLASS_HEADER_H = 22
@@ -397,7 +438,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
 
     local leftScroll = CreateFrame("ScrollFrame", nil, leftPanel, "ScrollFrameTemplate")
     leftScroll:SetPoint("TOPLEFT", 4, -4)
-    leftScroll:SetPoint("BOTTOMRIGHT", -24, 60) -- bottom strip: 2 rows of action buttons
+    leftScroll:SetPoint("BOTTOMRIGHT", -24, 34) -- bottom strip: 1 row of action buttons
     DF.GUI.StyleScrollBar(leftScroll)
 
     local leftContent = CreateFrame("Frame", nil, leftScroll)
@@ -412,8 +453,8 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         fs:SetText(text)
         return fs
     end
-    local presetLabel = CreateSectionLabel(L["Buff Presets"])
-    local customLabel = CreateSectionLabel(L["Custom Filters"])
+    local presetLabel = CreateSectionLabel(L["Buff Filter Presets"])
+    local customLabel = CreateSectionLabel(L["Custom Buff Filters"])
     local debuffLabel = CreateSectionLabel(L["Debuffs"])
 
     -- ========== RIGHT COLUMN: HEADER PANEL + SPELL LIST ==========
@@ -602,7 +643,10 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     -- ========== LEFT COLUMN ACTION BUTTONS ==========
     -- Created after the search box on purpose: SelectFilter clears the active
     -- search, so these handlers must close over the searchBox local.
-    local LEFT_BTN_W = (LEFT_W - 12 - 4) / 2 -- two per row: 6px margins, 4px gap
+    -- Three across one row: 6px margins, two 4px gaps. Was two rows of two, until
+    -- New Filter moved into the list above and left these three — all of which act
+    -- on the SELECTED filter, which is what the strip now uniformly means.
+    local LEFT_BTN_W = (LEFT_W - 12 - 8) / 3
 
     local function SelectFilter(kind, key)
         selKind, selKey = kind, key
@@ -614,17 +658,45 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         RefreshAll()
     end
 
-    local newBtn = GUI:CreateButton(leftPanel, L["New Filter"], LEFT_BTN_W, 22, function()
+    -- The add action lives INSIDE the Custom buff filters section, not in the
+    -- bottom strip. Down there it sat directly beneath the Debuffs header AND was
+    -- the only never-disabled button in the strip, so it read as "add a debuff
+    -- filter" — which is not a thing that exists. A row in the section it creates
+    -- into cannot be misread. Parented to the scroll content and positioned by
+    -- RefreshLeft along with the rest of the list.
+    local addRow = CreateFrame("Button", nil, leftContent, "BackdropTemplate")
+    addRow:SetHeight(LEFT_ROW_H - 2)
+    -- `tinted`, not `ghost`: ghost draws NO border at all (it is meant to sit in a
+    -- tab strip), which left this looking like an oddly-coloured label rather than
+    -- something you can act on. Tinted gives it a faint accent fill and an accent
+    -- edge at rest — a visible affordance that still reads quieter than a preset
+    -- row, and it marks the row as the odd one out in a list of plain rows.
+    GUI:StyleButton(addRow, {
+        tinted  = true,
+        text    = L["+ New Buff Filter"],
+        align   = "left",
+        leftPad = 10,
+        font    = "DFFontHighlightSmall",
+    })
+    addRow:SetScript("OnClick", function()
         PromptFilterName(L["Name the new filter:"], "", function(text)
             text = Trim(text)
             if text == "" then return end
             SelectFilter("custom", R:CreateCustomFilter(text))
         end)
     end)
-    newBtn:SetPoint("BOTTOMLEFT", 6, 32)
-    -- Expose for cross-page affordances: the Aura Designer's "Create Filter"
-    -- button navigates here and pulses this button (DF:HighlightWidget).
-    pageRef._fdNewFilterBtn = newBtn
+    -- Cross-page affordance: the Aura Designer's "Create Filter" button navigates
+    -- here and pulses this row. Exposed as a FUNCTION rather than the raw widget
+    -- (which is what it used to be, back when the button was pinned to the bottom
+    -- strip and therefore always on screen): the row now lives in a scroll frame,
+    -- so scrolling it into view is part of the cue. A pulse below the fold is no
+    -- cue at all, and it would fail silently.
+    local addRowY = 0   -- set by RefreshLeft, which owns the list's geometry
+    pageRef._fdFocusNewFilter = function()
+        local range = leftScroll:GetVerticalScrollRange() or 0
+        leftScroll:SetVerticalScroll(math.max(0, math.min(addRowY - 8, range)))
+        if DF.HighlightWidget then DF:HighlightWidget(addRow) end
+    end
 
     local dupBtn = GUI:CreateButton(leftPanel, L["Duplicate"], LEFT_BTN_W, 22, function(self)
         if self.dfDisabled or not selKey then return end
@@ -635,7 +707,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
             SelectFilter("custom", R:DuplicateFilter(src, text))
         end)
     end)
-    dupBtn:SetPoint("BOTTOMRIGHT", -6, 32)
+    dupBtn:SetPoint("BOTTOMLEFT", 6, 6)
 
     local renameBtn = GUI:CreateButton(leftPanel, L["Rename"], LEFT_BTN_W, 22, function(self)
         if self.dfDisabled then return end
@@ -649,7 +721,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
             RefreshAll()
         end)
     end)
-    renameBtn:SetPoint("BOTTOMLEFT", 6, 6)
+    renameBtn:SetPoint("BOTTOM", 0, 6)
 
     local delBtn = GUI:CreateButton(leftPanel, L["Delete"], LEFT_BTN_W, 22, function(self)
         if self.dfDisabled then return end
@@ -827,12 +899,12 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         end)
         row:SetScript("OnEnter", function(self)
             if not self._selected then
-                self:SetBackdropColor(0.12, 0.12, 0.12, 0.8)
+                self:SetBackdropColor(ROW_HOVER_R, ROW_HOVER_G, ROW_HOVER_B, ROW_HOVER_A)
             end
         end)
         row:SetScript("OnLeave", function(self)
             if not self._selected then
-                self:SetBackdropColor(0.08, 0.08, 0.08, 0.6)
+                self:SetBackdropColor(ROW_REST_R, ROW_REST_G, ROW_REST_B, ROW_REST_A)
             end
         end)
 
@@ -856,7 +928,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
             row:SetBackdropColor(tc.r * 0.30, tc.g * 0.30, tc.b * 0.30, 0.9)
             row.name:SetTextColor(0.95, 0.95, 0.95)
         else
-            row:SetBackdropColor(0.08, 0.08, 0.08, 0.6)
+            row:SetBackdropColor(ROW_REST_R, ROW_REST_G, ROW_REST_B, ROW_REST_A)
             row.name:SetTextColor(0.70, 0.70, 0.70)
         end
     end
@@ -888,7 +960,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         row:SetHeight(SPELL_ROW_H - 2)
         DF.GUI:CreateElementBackdrop(row, {
             outline = false,
-            bgColor     = { 0.08, 0.08, 0.08, 0.6 },
+            bgColor     = { ROW_REST_R, ROW_REST_G, ROW_REST_B, ROW_REST_A },
         })
 
         -- Spell icon
@@ -941,18 +1013,43 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         row.name:SetPoint("RIGHT", row.chip, "LEFT", -6, 0)
         row.name:SetJustifyH("LEFT")
 
+        -- Tooltip hotspot: the icon and name only. The whole row used to raise the
+        -- spell tooltip, so it fired while you were reaching for Enable/Disable or
+        -- the info button, and it anchored off the row's full width. Three anchor
+        -- points give it the row's full height but stop at the name's right edge.
+        --   motion propagates -> the ROW still gets OnEnter/OnLeave for its shading
+        --   clicks propagate  -> the row's toggle still fires over the name
+        -- SetPropagateMouseClicks is protected on 12.1, hence the combat guard —
+        -- same pattern as CreateOverrideMarker and the resurrection icon.
+        -- ⚠ Width is set per BIND, from the name's STRING width — not from row.name
+        -- itself. That fontstring is anchored left AND right, so it spans the whole
+        -- row whatever the spell is called; anchoring to its right edge made the
+        -- hotspot the full bar again, which is the thing this exists to avoid.
+        local hot = CreateFrame("Frame", nil, row)
+        hot:SetPoint("TOPLEFT", row, "TOPLEFT", 0, 0)
+        hot:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 0, 0)
+        hot:EnableMouse(true)
+        if hot.SetPropagateMouseMotion then hot:SetPropagateMouseMotion(true) end
+        if hot.SetPropagateMouseClicks and not InCombatLockdown() then
+            hot:SetPropagateMouseClicks(true)
+        end
+        hot:SetScript("OnEnter", function()
+            if row._spellID and not row._raw then
+                ShowSpellTooltip(row, row._spellID, row._infoTitle, SpellRowStillShows)
+            end
+        end)
+        hot:SetScript("OnLeave", function() GUI:HideTooltip() end)
+        row.hot = hot
+
         -- Row click mirrors the action button in the preset view
         row:SetScript("OnClick", function(self)
             if self._rowToggles and self._onAction then self._onAction() end
         end)
         row:SetScript("OnEnter", function(self)
-            self:SetBackdropColor(0.12, 0.12, 0.12, 0.8)
-            if self._spellID and not self._raw then
-                ShowSpellTooltip(self, self._spellID, self._infoTitle, SpellRowStillShows)
-            end
+            self:SetBackdropColor(ROW_HOVER_R, ROW_HOVER_G, ROW_HOVER_B, ROW_HOVER_A)
         end)
         row:SetScript("OnLeave", function(self)
-            self:SetBackdropColor(0.08, 0.08, 0.08, 0.6)
+            self:SetBackdropColor(ROW_REST_R, ROW_REST_G, ROW_REST_B, ROW_REST_A)
             GUI:HideTooltip()
         end)
 
@@ -971,6 +1068,10 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         row.icon:SetTexture(item.icon or FALLBACK_ICON)
         row.name:SetText(item.name)
         row.chip:SetText(item.chip or "")
+        -- Fit the tooltip hotspot to the icon plus the name's ACTUAL rendered text.
+        -- Must be per bind: the fontstring is full-width, so only the string width
+        -- tells us where the visible label ends. 32 = 6 left inset + 20 icon + 6 gap.
+        row.hot:SetWidth(32 + (row.name:GetStringWidth() or 0) + 4)
         -- Info button hugs the row's action control: 64px Enable/Disable
         -- button in the preset view, 18px remove "x" in the custom view.
         -- The chip is anchored to the info button, so it follows.
@@ -1044,6 +1145,12 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         presetLabel:SetTextColor(tc.r, tc.g, tc.b)
         customLabel:SetTextColor(tc.r, tc.g, tc.b)
         debuffLabel:SetTextColor(tc.r, tc.g, tc.b)
+        -- Re-theme the add row here too. StyleButton registers its own theme
+        -- listener on the button's PARENT, which for this row is the scroll child —
+        -- and the page's theme walk only visits pageRef.child, so that registration
+        -- is never reached and the row stayed party-blue in raid mode. This refresh
+        -- already owns "make the left list match the theme"; the row joins it.
+        if addRow.UpdateTheme then addRow.UpdateTheme() end
 
         local y = 4
         presetLabel:ClearAllPoints()
@@ -1066,6 +1173,16 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         customLabel:ClearAllPoints()
         customLabel:SetPoint("TOPLEFT", 6, -(y + 4))
         y = y + SECTION_H
+
+        -- Add row FIRST, directly under its header, rather than after the filters:
+        -- with none created yet the section would otherwise be a labelled void, and
+        -- this is the one position where the action cannot be read as belonging to
+        -- the Debuffs section below.
+        addRow:ClearAllPoints()
+        addRow:SetPoint("TOPLEFT", 0, -y)
+        addRow:SetPoint("TOPRIGHT", 0, -y)
+        addRowY = y
+        y = y + LEFT_ROW_H
 
         for _, cfId in ipairs(SortedCustomIDs()) do
             local f = R:GetCustomFilter(cfId)
@@ -1357,7 +1474,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         end
     end
     pageRef._fdRefreshAll = RefreshAll
-    -- Cross-page entry: the Aura Filters "Edit debuff Blacklist" button navigates
+    -- Cross-page entry: the Aura Filters "Edit Debuff Blacklist" button navigates
     -- here (SelectTab builds synchronously) then calls this to land directly on
     -- the Blacklist entry instead of the default buff preset.
     pageRef._fdSelectBlacklist = function() SelectFilter("blacklist", "blacklist") end
@@ -1394,13 +1511,48 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     local spacer = CreateFrame("Frame", nil, parent)
     spacer:SetSize(1, 1)
     spacer.layoutCol = "both"
-    local bannerH = (banner:GetHeight() > 0) and banner:GetHeight() or (banner.layoutHeight or 34)
-    -- +24: the database-freshness label hangs below the left panel
-    spacer.layoutHeight = 22 + bannerH + PANEL_H + 24 + 20
     pageRef._fdSpacer = spacer
     if pageRef.children then
         tinsert(pageRef.children, spacer)
     end
 
+    -- Size the two panels to whatever the window currently offers, and keep the
+    -- spacer (which is what tells the page layout how tall this page is) in step.
+    -- Called on build, on every refresh, and when the window is resized.
+    local function ResolvePanelHeight()
+        local bannerH = (banner:GetHeight() > 0) and banner:GetHeight()
+                        or (banner.layoutHeight or 34)
+        local viewport = GUI.contentFrame and GUI.contentFrame:GetHeight() or 0
+        local h = PANEL_H_MIN
+        if viewport > 0 then
+            local available = viewport - PANEL_CHROME_H - bannerH
+            h = mmax(PANEL_H_MIN, mfloor(available * PANEL_H_FRACTION))
+        end
+        if h ~= PANEL_H then
+            PANEL_H = h
+            leftPanel:SetHeight(PANEL_H)
+            rightArea:SetHeight(PANEL_H)
+        end
+        -- Always re-assert: the banner can change height independently of the
+        -- viewport (it re-wraps when the window narrows), and the page's scroll
+        -- range is wrong until this matches what the panels actually occupy.
+        spacer.layoutHeight = PANEL_CHROME_H + bannerH + PANEL_H
+    end
+    pageRef._fdResolvePanelHeight = ResolvePanelHeight
+
+    -- Re-fit when the window is resized. HookScript so we don't displace anything
+    -- else listening; guarded so repeated builds don't stack hooks.
+    if GUI.contentFrame and not GUI.contentFrame._fdHeightHooked then
+        GUI.contentFrame._fdHeightHooked = true
+        GUI.contentFrame:HookScript("OnSizeChanged", function()
+            local p = GUI.Pages and GUI.Pages["auras_filterdesigner"]
+            if p and p._fdResolvePanelHeight then
+                p._fdResolvePanelHeight()
+                if p.RefreshStates then p:RefreshStates() end
+            end
+        end)
+    end
+
+    ResolvePanelHeight()
     RefreshAll()
 end
