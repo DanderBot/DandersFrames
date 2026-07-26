@@ -348,11 +348,34 @@ end
 --   * size     -- the bottom/left edge can be on-grid while the top/right is not
 --   * edgeSize -- a 1-UI-unit edge is a fractional number of device pixels
 --
--- Size is snapped only for structural boxes (frame._ppSnapSize), i.e. the ones
--- whose dimensions a layout owns. Controls are deliberately left alone: their
--- factories size them, and callers measure them to compute scroll ranges and row
--- flows, so silently resizing several hundred of them to gain a crisp top edge
--- on a border that is already visible at 50% alpha is a bad trade.
+-- GEOMETRY (position + size) is corrected ONLY for structural boxes
+-- (frame._ppSnapSize) -- the settings groups, section header bars and panels
+-- whose dimensions and placement a layout owns, and which carry the faint
+-- 8%-over-3% edge that actually disappears when it splits. Controls are
+-- deliberately left alone, for two separate reasons:
+--
+--   * size -- their factories size them and callers measure them to compute
+--     scroll ranges and row flows, so silently resizing several hundred of them
+--     is a bad trade for a border already visible at 50% alpha;
+--   * position -- and this is the one that bit us. Controls are routinely
+--     CHAINED to each other rather than to a common parent: Copy <- Sync <-
+--     Reset in the page button row, Clicks <- Test <- Unlock in the toolbar.
+--     SnapAllBoxes iterates an UNORDERED pairs() table, so a chain member is as
+--     likely to be corrected BEFORE its anchor target as after -- and when the
+--     target then moves, the correction that was just computed is against a base
+--     that no longer exists. The row converges over several rebuilds and settles
+--     somewhere slightly different each time. Symptom: click between pages and
+--     the Reset/Sync/Copy row and the Test/Unlock pair shuffle by a pixel, with
+--     no scrolling involved, while the PARTY/RAID/BINDS tabs (not chained) sit
+--     still. Structural boxes have no such dependency -- the page layout anchors
+--     every one of them to the same scroll child -- so order cannot matter.
+--
+-- The layout-side answer for controls is SnapLen at the point the offset or size
+-- is chosen (see below), which is order-independent by construction.
+--
+-- The edgeSize correction at the bottom still applies to EVERY registered frame:
+-- it changes how thick the border is drawn, not where the frame sits, so it
+-- cannot move anything.
 --
 -- Bounded: the position moves by at most half a pixel, so this can never
 -- mis-place a box. Idempotent, so it cannot drive an OnSizeChanged loop -- the
@@ -366,20 +389,18 @@ local function SnapBoxToPixelGrid(frame)
     -- is pinned by two corners would resize it rather than move it, and such a
     -- frame derives its geometry from its parent anyway. The edge snap at the
     -- bottom still applies to those -- most of the window chrome is two-point.
-    if frame:GetNumPoints() == 1 then
+    if frame._ppSnapSize and frame:GetNumPoints() == 1 then
         -- Size first: the position snap below reads GetLeft/GetBottom, and the
         -- far edges are those plus the size, so both have to be whole pixels for
         -- all four edges to land.
-        if frame._ppSnapSize then
-            local w, h = frame:GetWidth(), frame:GetHeight()
-            if w and w > 0 then
-                local sw = math.floor(w * ppu + 0.5) / ppu
-                if math.abs(sw - w) > 1e-4 then frame:SetWidth(sw) end
-            end
-            if h and h > 0 then
-                local sh = math.floor(h * ppu + 0.5) / ppu
-                if math.abs(sh - h) > 1e-4 then frame:SetHeight(sh) end
-            end
+        local w, h = frame:GetWidth(), frame:GetHeight()
+        if w and w > 0 then
+            local sw = math.floor(w * ppu + 0.5) / ppu
+            if math.abs(sw - w) > 1e-4 then frame:SetWidth(sw) end
+        end
+        if h and h > 0 then
+            local sh = math.floor(h * ppu + 0.5) / ppu
+            if math.abs(sh - h) > 1e-4 then frame:SetHeight(sh) end
         end
 
         local point, relTo, relPoint, x, y = frame:GetPoint(1)
@@ -391,14 +412,40 @@ local function SnapBoxToPixelGrid(frame)
             -- random-walk the box away from its laid-out position -- a repeated
             -- 0.4px scroll step would drift it visibly after a dozen scrolls.
             local px, py = frame._ppDX or 0, frame._ppDY or 0
+
+            -- ...but that stored delta is only meaningful while the frame is still
+            -- sitting where WE last put it. The page layout re-anchors on every
+            -- rebuild (ClearAllPoints + SetPoint), which hands back a FRESH base
+            -- offset with no nudge in it -- subtracting a stale delta from that
+            -- corrupts the base, and the frame lands somewhere slightly different
+            -- each time. Symptom: click the same page repeatedly and the
+            -- Reset/Sync/Copy row snaps to a different spot on every refresh, with
+            -- no scrolling involved, and the gap under it reads differently from
+            -- page to page.
+            --
+            -- So: trust the delta only if the current offset is exactly what we
+            -- wrote last time. Otherwise someone else set this point and the
+            -- offset we can see IS the base.
+            if not (frame._ppLastX and frame._ppLastY
+                    and math.abs(x - frame._ppLastX) <= 1e-4
+                    and math.abs(y - frame._ppLastY) <= 1e-4) then
+                px, py = 0, 0
+            end
+
             local baseX, baseY = x - px, y - py
             local baseL, baseB = l - px, b - py
             local dx = (math.floor(baseL * ppu + 0.5) - baseL * ppu) / ppu
             local dy = (math.floor(baseB * ppu + 0.5) - baseB * ppu) / ppu
-            if dx ~= px or dy ~= py then
-                frame._ppDX, frame._ppDY = dx, dy
-                frame:SetPoint(point, relTo, relPoint, baseX + dx, baseY + dy)
+            local newX, newY = baseX + dx, baseY + dy
+            if math.abs(newX - x) > 1e-4 or math.abs(newY - y) > 1e-4 then
+                frame:SetPoint(point, relTo, relPoint, newX, newY)
             end
+            -- Recorded unconditionally, including when no write was needed: the
+            -- next call has to be able to tell "still where we left it" from
+            -- "re-anchored by the layout", and it can only do that if we always
+            -- know what the resolved offset was.
+            frame._ppDX, frame._ppDY = dx, dy
+            frame._ppLastX, frame._ppLastY = newX, newY
         end
     end
 
@@ -446,6 +493,451 @@ local function SnapLen(frame, v)
     return math.floor(v * ppu + 0.5) / ppu
 end
 GUI.SnapLen = SnapLen
+
+-- SnapLen rounds to the NEAREST device pixel, which can round a width DOWN and
+-- clip the text it was measured from. This rounds up instead: for anything whose
+-- length comes from a measurement (a button sized to its own label), the width
+-- has to be at least what was asked for, and on the grid.
+local function SnapLenUp(frame, v)
+    if not v then return v end
+    local ppu = PixelsPerUnit(frame)
+    if not ppu then return v end
+    return math.ceil(v * ppu) / ppu
+end
+GUI.SnapLenUp = SnapLenUp
+
+-- Round a HEIGHT to an EVEN number of device pixels (minimum two).
+--
+-- Rows of controls are chained with centre-aligning anchors -- SetPoint("RIGHT",
+-- prev, "LEFT", gap, 0) aligns the two frames' vertical CENTRES, and the toolbar
+-- does the same with LEFT/RIGHT. A frame's centre is bottom + height/2, so if the
+-- height is an ODD number of device pixels the centre falls on a half pixel, and
+-- every frame chained off it inherits that half-pixel offset no matter how well
+-- its own edges are snapped. Even heights make the whole row land together.
+--
+-- Used for control heights, which the factories set once at construction. Widths
+-- do not need this: nothing centre-anchors horizontally off a control.
+local function SnapHeightEven(frame, v)
+    if not v then return v end
+    local ppu = PixelsPerUnit(frame)
+    if not ppu then return v end
+    return math.max(2, math.floor(v * ppu / 2 + 0.5) * 2) / ppu
+end
+GUI.SnapHeightEven = SnapHeightEven
+
+-- ============================================================
+-- /df pixelcheck -- measure, don't guess
+--
+-- The "top border of a box goes missing until you scroll" bug has now been
+-- diagnosed twice from reasoning about the layout and fixed twice, and it is
+-- still here. The two remaining explanations look IDENTICAL in a screenshot:
+--
+--   (a) sub-pixel  -- the box's top edge lands between two device rows, so the
+--                     1px line is filtered across both at half intensity;
+--   (b) clipping   -- the box's top edge sits within a pixel of the ScrollFrame's
+--                     own clip boundary, so the line is simply cut off.
+--
+-- Scrolling "fixes" both, which is exactly why the screenshot can't separate
+-- them. This reports the numbers for the open page so the next change is aimed.
+-- Debug output: deliberately raw, like the other /df dumps.
+-- ============================================================
+
+-- Signed distance from `v` (UI units) to the nearest whole device pixel.
+local function PixelOffsetOf(v, ppu)
+    if not v or not ppu then return nil end
+    local px = v * ppu
+    return px - math.floor(px + 0.5)
+end
+
+local function DescribeFrame(f)
+    -- Prefer a human label so the output names the card, not "Frame".
+    for _, key in ipairs({ "label", "title", "titleText", "Text", "header" }) do
+        local o = f[key]
+        if type(o) == "table" and o.GetText then
+            local t = o:GetText()
+            if t and t ~= "" then return t end
+        end
+    end
+    if f.GetRegions then
+        for _, r in ipairs({ f:GetRegions() }) do
+            if r.GetObjectType and r:GetObjectType() == "FontString" then
+                local t = r:GetText()
+                if t and t ~= "" then return t end
+            end
+        end
+    end
+    return (f.GetObjectType and f:GetObjectType()) or "Frame"
+end
+
+-- Every SHOWN descendant carrying a bordered backdrop -- the only frames that can
+-- exhibit this bug (a fill-only backdrop has no edge to lose).
+local function CollectBorderedFrames(root, out, depth)
+    if not root or depth > 10 then return out end
+    for _, child in ipairs({ root:GetChildren() }) do
+        if child:IsShown() then
+            local bd = child.GetBackdrop and child:GetBackdrop()
+            if bd and bd.edgeFile then out[#out + 1] = child end
+            CollectBorderedFrames(child, out, depth + 1)
+        end
+    end
+    return out
+end
+
+-- What sits ON the box's top border row.
+--
+-- Geometry came back perfect on BOTH a broken and a working page (BOX 0/n,
+-- top+0.00, edge=1.00px, nothing near the clip edge), so the difference is not
+-- anything the box itself measures. The one thing that tracked the symptom was
+-- how far the first box sits from the top: 62.7px on a page that loses its
+-- border vs 76.8px on one that doesn't -- 14.1px apart, which at 1.4062 px/unit
+-- is exactly the 10-unit group padding. A box that starts hard against whatever
+-- is above it loses the line; one with a gap keeps it. That is the signature of
+-- the row above covering it, so: find any sibling whose rect spans the box's top
+-- border row, and report it with its frame level.
+local function FindTopRowOverlaps(box)
+    local out = {}
+    local top, bL, bR = box:GetTop(), box:GetLeft(), box:GetRight()
+    local parent = box:GetParent()
+    if not (top and bL and bR and parent) then return out end
+    -- ~1.5 device px expressed in UI units: the border row plus a hair.
+    local band = 1.5 / (PixelsPerUnit(box) or 1)
+    for _, sib in ipairs({ parent:GetChildren() }) do
+        if sib ~= box and sib.IsShown and sib:IsShown() then
+            local sT, sB, sL, sR = sib:GetTop(), sib:GetBottom(), sib:GetLeft(), sib:GetRight()
+            if sT and sB and sL and sR
+                and sB <= top + band and sT >= top - band   -- spans the border row
+                and sR > bL and sL < bR then                -- and overlaps horizontally
+                out[#out + 1] = ("%s(lvl%d)"):format(
+                    DescribeFrame(sib):sub(1, 16), sib:GetFrameLevel() or 0)
+            end
+        end
+    end
+    return out
+end
+
+function GUI.PixelCheck()
+    local page, pageName
+    for name, p in pairs(GUI.Pages or {}) do
+        if p.IsShown and p:IsShown() then page, pageName = p, name; break end
+    end
+    if not page then
+        print("|cff7373f2DandersFrames|r pixelcheck: no settings page is open.")
+        return
+    end
+
+    local ppu = PixelsPerUnit(page)
+    if not ppu then
+        print("|cff7373f2DandersFrames|r pixelcheck: scale unresolved (is the window shown?).")
+        return
+    end
+
+    local scroll = page.GetVerticalScroll and page:GetVerticalScroll() or 0
+    local scrollOff = PixelOffsetOf(scroll, ppu)
+    local clipTop = page:GetTop()
+
+    print(("|cff7373f2DandersFrames|r pixelcheck  page=|cffffffff%s|r  scale=%.4f  px/unit=%.4f")
+        :format(tostring(pageName), page:GetEffectiveScale() or 0, ppu))
+    print(("  scroll offset = %.3f  (%.2f px off grid%s)")
+        :format(scroll, scrollOff or 0,
+            (scrollOff and math.abs(scrollOff) > 0.05) and " |cffff6060<-- NOT SNAPPED|r" or ""))
+
+    -- THE CLIP BOUNDARY ITSELF. Earlier runs measured each box's DISTANCE to this
+    -- edge but never whether the edge is on-grid. A ScrollFrame clips to its own
+    -- rect, so if that rect's top sits on a fractional device row the cut takes a
+    -- partial row off whatever is nearest it -- which is exactly the reported
+    -- pattern: pages whose boxes start at the top lose the border, pages with a
+    -- gap do not. The scroll child is included because content is positioned
+    -- against it, so its phase is what every box inherits.
+    local dPageTop = PixelOffsetOf(page:GetTop(), ppu)
+    local dPageBot = PixelOffsetOf(page:GetBottom(), ppu)
+    local dPageH   = PixelOffsetOf(page:GetHeight(), ppu)
+    print(("  viewport (the clip edge): top%+.2f bot%+.2f h%+.2f%s")
+        :format(dPageTop or 0, dPageBot or 0, dPageH or 0,
+            (dPageTop and math.abs(dPageTop) > 0.05)
+                and " |cffff6060<-- CLIP EDGE OFF-GRID|r" or ""))
+    local kid = page.child or (page.GetScrollChild and page:GetScrollChild())
+    if kid then
+        local kppu = PixelsPerUnit(kid) or ppu
+        print(("  scroll child:             top%+.2f w%+.2f%s")
+            :format(PixelOffsetOf(kid:GetTop(), kppu) or 0,
+                    PixelOffsetOf(kid:GetWidth(), kppu) or 0,
+                    (math.abs(PixelOffsetOf(kid:GetTop(), kppu) or 0) > 0.05)
+                        and " |cffff6060<-- CHILD OFF-GRID|r" or ""))
+    end
+
+    -- "Is it the section BOXES or the controls inside them?" is the question the
+    -- first version of this could not answer -- it ranked worst-first and the top
+    -- of the list was all controls, so the groups never showed. Classify, and
+    -- report the boxes separately no matter where they rank.
+    local function KindOf(f)
+        if f.LayoutChildren then return "BOX" end        -- CreateSettingsGroup
+        if f.slider then return "slider" end
+        return (f.GetObjectType and f:GetObjectType()) or "frame"
+    end
+
+    local frames = CollectBorderedFrames(page.child or page, {}, 0)
+    local rows, offGrid, nearClip = {}, 0, 0
+    local byKind = {}
+    for _, f in ipairs(frames) do
+        local top, bottom, h = f:GetTop(), f:GetBottom(), f:GetHeight()
+        local fppu = PixelsPerUnit(f) or ppu
+        local dTop = PixelOffsetOf(top, fppu)
+        local dBot = PixelOffsetOf(bottom, fppu)
+        local dH   = PixelOffsetOf(h, fppu)
+        -- Distance from the scroll viewport's top clip edge, in device pixels.
+        local clipGap = (top and clipTop) and ((clipTop - top) * fppu) or nil
+        if dTop and math.abs(dTop) > 0.05 then offGrid = offGrid + 1 end
+        if clipGap and clipGap > -1.5 and clipGap < 1.5 then nearClip = nearClip + 1 end
+        -- The THIRD leg of the snap triad (position / size / edgeSize), and the
+        -- one the first two revisions did not capture. A box can measure a perfect
+        -- 0.00 on every edge and still lose its border if the edge is drawn a
+        -- fractional number of device pixels wide: it bleeds into the next row at
+        -- partial intensity, and a settings-group edge is only ~8% alpha over a 3%
+        -- fill, so both halves can land under the visibility floor. Alpha is
+        -- reported alongside because it is what sets that floor.
+        local bdInfo = f.GetBackdrop and f:GetBackdrop()
+        local edgeUnits = bdInfo and bdInfo.edgeSize or nil
+        local edgePx = edgeUnits and (edgeUnits * fppu) or nil
+        local edgeFrac = edgePx and (edgePx - math.floor(edgePx + 0.5)) or nil
+        -- NOT `local _,_,_,a = (f:GetBackdropBorderColor())` -- the parentheses
+        -- truncate a multi-return to ONE value, so alpha came back nil every time
+        -- and every row printed "a=n/a". Alpha is the whole point here: a
+        -- settings-group edge is ~8% over a 3% fill, so it has almost no margin.
+        local borderA
+        if f.GetBackdropBorderColor then
+            local _, _, _, a = f:GetBackdropBorderColor()
+            borderA = a
+        end
+        local kind = KindOf(f)
+        local bad = (dTop and math.abs(dTop) > 0.05) or false
+        local k = byKind[kind]
+        if not k then k = { n = 0, bad = 0 }; byKind[kind] = k end
+        k.n = k.n + 1
+        if bad then k.bad = k.bad + 1 end
+        rows[#rows + 1] = {
+            label = DescribeFrame(f), kind = kind, bad = bad,
+            frame = f, level = f.GetFrameLevel and f:GetFrameLevel() or nil,
+            dTop = dTop or 0, dBot = dBot or 0,
+            dH = dH or 0, clipGap = clipGap,
+            edgePx = edgePx, edgeFrac = edgeFrac, alpha = borderA,
+            score = math.max(math.abs(dTop or 0),
+                             (clipGap and math.abs(clipGap) < 1.5) and 1 or 0),
+        }
+    end
+
+    table.sort(rows, function(a, b) return a.score > b.score end)
+    print(("  %d bordered frames | %d with an OFF-GRID top | %d within 1px of the clip edge")
+        :format(#rows, offGrid, nearClip))
+
+    -- Per-kind tally: this is the line that says whether fixing controls would
+    -- also fix the section boxes, or whether they are a separate problem.
+    local kindLine = {}
+    for kind, k in pairs(byKind) do
+        kindLine[#kindLine + 1] = ("%s %d/%d"):format(kind, k.bad, k.n)
+    end
+    table.sort(kindLine)
+    print("  off-grid by kind (bad/total): " .. table.concat(kindLine, "  "))
+
+    local function emit(r)
+        local flag = ""
+        if r.bad then flag = " |cffff6060OFF-GRID|r" end
+        if r.clipGap and math.abs(r.clipGap) < 1.5 then flag = flag .. " |cffffaa00AT-CLIP|r" end
+        -- A fractional edge width is the failure a perfect 0.00 box can still have.
+        if r.edgeFrac and math.abs(r.edgeFrac) > 0.05 then flag = flag .. " |cffff6060SOFT-EDGE|r" end
+        if r.alpha and r.alpha < 0.15 then flag = flag .. " |cffffaa00FAINT|r" end
+        print(("    [%s] %-22s top%+.2f bot%+.2f h%+.2f edge=%s a=%s clip=%s%s"):format(
+            r.kind:sub(1, 6), r.label:sub(1, 22), r.dTop, r.dBot, r.dH,
+            r.edgePx and ("%.2fpx"):format(r.edgePx) or "n/a",
+            r.alpha and ("%.2f"):format(r.alpha) or "n/a",
+            r.clipGap and ("%.1f"):format(r.clipGap) or "n/a", flag))
+    end
+
+    -- The section boxes ALWAYS get listed, however they rank -- they are the ones
+    -- you can actually see, and ranking buried them last time.
+    local boxes = 0
+    for _, r in ipairs(rows) do if r.kind == "BOX" then boxes = boxes + 1 end end
+    if boxes > 0 then
+        print(("  section boxes (%d) -- these are the outlines around each section:"):format(boxes))
+        local shown = 0
+        for _, r in ipairs(rows) do
+            if r.kind == "BOX" and shown < 10 then
+                emit(r)
+                -- Anything sitting ON this box's top border row is the prime
+                -- suspect now that the box's own geometry measures clean.
+                local over = r.frame and FindTopRowOverlaps(r.frame) or {}
+                if #over > 0 then
+                    print(("           |cffff6060^ COVERED BY:|r %s  (box is lvl%s)")
+                        :format(table.concat(over, ", "), tostring(r.level)))
+                end
+                shown = shown + 1
+            end
+        end
+    else
+        print("  |cffffaa00no section boxes found on this page|r")
+    end
+
+    print("  worst overall -- topOff/botOff/heightOff are px from the grid; clip is px below the viewport top:")
+    for i = 1, math.min(#rows, 10) do emit(rows[i]) end
+    print("  |cff808080Read: OFF-GRID = geometry. SOFT-EDGE = the edge is a fractional number of device px wide, so it bleeds into the next row -- a box can be a perfect 0.00 and still lose its border this way. FAINT = so little alpha that any split is invisible.|r")
+    print("  |cff808080BOX rows are the ones that matter: only structural boxes are geometry-corrected. Controls are snapped by their FACTORY at construction and never nudged afterwards (nudging them made chained button rows drift), so an off-grid control is expected after a scale change and is not the bug this was built to find.|r")
+end
+
+-- ============================================================
+-- /df navprobe -- catch the left-nav hover flash in the act
+--
+-- The symptom: sweeping the cursor down the nav list shows a "ghost" -- of the
+-- row's text, or of the bottom part of the hover plate. It happens at moderate
+-- speed, not just fast, and it survived snapping the row geometry.
+--
+-- Four causes would produce that, and they are INDISTINGUISHABLE in a
+-- screenshot, which is why this measures instead of reasoning:
+--
+--   (a) two rows lit at once -- the previous row's OnLeave never ran, so two
+--       plates are visible together for a frame or two;
+--   (b) focus thrash -- the cursor sits still over one row but mouse focus
+--       alternates between it and something else (the scroll frame, a sibling,
+--       an overlapping rect), so the plate flickers on and off in place;
+--   (c) geometry -- rows overlap, or leave a dead band between them where
+--       NOTHING is lit, so crossing it reads as the plate breaking up;
+--   (d) none of the above -- a pure rendering artefact, in which case the trace
+--       shows exactly one clean enter/leave per row and the answer is elsewhere.
+--
+-- Static geometry first (overlaps and dead bands are visible without moving the
+-- mouse), then a live trace of every change in focus and in each row's plate
+-- alpha, stamped with the frame number. (a) and (b) show up as repeated
+-- transitions within a single crossing; (c) as a run of frames with nothing lit.
+local navTrace
+function GUI.NavProbe(seconds)
+    local container = GUI.tabContainer
+    if not (container and container:IsVisible()) then
+        print("|cff7373f2DandersFrames|r navprobe: the settings window is not open.")
+        return
+    end
+    local ppu = PixelsPerUnit(container) or 1
+
+    -- Rows in LAYOUT order (top to bottom), which is what makes the neighbour
+    -- comparison below meaningful -- GetChildren order is creation order.
+    local rows = {}
+    for _, catName in ipairs(GUI.CategoryOrder or {}) do
+        local cat = GUI.Categories and GUI.Categories[catName]
+        if cat and cat:IsShown() then
+            rows[#rows + 1] = { f = cat, label = "[" .. tostring(catName) .. "]" }
+            for _, btn in ipairs(cat.children or {}) do
+                if btn:IsShown() then
+                    rows[#rows + 1] = { f = btn, label = DescribeFrame(btn) }
+                end
+            end
+        end
+    end
+
+    print(("|cff7373f2DandersFrames|r navprobe  %d visible rows  px/unit=%.4f"):format(#rows, ppu))
+
+    -- The ANCESTOR CHAIN, because a row cannot be on the grid if the frame it
+    -- hangs off is not: every ancestor here is two-corner anchored, so nothing
+    -- corrects them after the fact and a fraction anywhere propagates to all 42
+    -- rows identically. If the rows read a uniform offset, this line says which
+    -- link introduced it -- that is how the 4-unit nav inset (0.375px) was found
+    -- after the rows themselves measured clean on height.
+    local chain, node = {}, container
+    while node and #chain < 6 do
+        local t = node:GetTop()
+        chain[#chain + 1] = ("%s top%+.2f"):format(
+            (node.GetObjectType and node:GetObjectType() or "?"):sub(1, 6),
+            PixelOffsetOf(t, PixelsPerUnit(node) or ppu) or 0)
+        node = node:GetParent()
+    end
+    print("  chain (row -> window): " .. table.concat(chain, " | "))
+
+    -- Geometry: the gap to the row above, in DEVICE pixels. Negative = the rows
+    -- overlap (both can claim the cursor); more than ~1px positive = a dead band
+    -- with no row under the cursor at all. Either one produces a visible break.
+    local overlaps, bands = 0, 0
+    for i, r in ipairs(rows) do
+        local f = r.f
+        local top, bot, h = f:GetTop(), f:GetBottom(), f:GetHeight()
+        local dTop = PixelOffsetOf(top, ppu) or 0
+        local dH = PixelOffsetOf(h, ppu) or 0
+        local gap
+        if i > 1 then
+            local prevBot = rows[i - 1].f:GetBottom()
+            if prevBot and top then gap = (prevBot - top) * ppu end
+        end
+        local flag = ""
+        if gap and gap < -0.05 then flag = " |cffff6060OVERLAPS ABOVE|r"; overlaps = overlaps + 1
+        elseif gap and gap > 1.05 then flag = " |cffffaa00DEAD BAND|r"; bands = bands + 1 end
+        if math.abs(dTop) > 0.05 or math.abs(dH) > 0.05 then
+            flag = flag .. " |cffffaa00OFF-GRID|r"
+        end
+        print(("    %-24s top%+.2f h%+.2f gap=%s lvl%d%s"):format(
+            r.label:sub(1, 24), dTop, dH,
+            gap and ("%.2fpx"):format(gap) or "n/a",
+            f:GetFrameLevel() or 0, flag))
+    end
+    print(("  %d overlapping rows, %d dead bands between rows"):format(overlaps, bands))
+
+    -- Live trace.
+    navTrace = navTrace or CreateFrame("Frame")
+    navTrace:SetScript("OnUpdate", nil)
+    local dur = tonumber(seconds) or 8
+    local elapsed, frames, events = 0, 0, 0
+    local lastLit, lastFocus = nil, nil
+    print(("  |cff00ff00tracing for %ds|r -- sweep the cursor across the nav list now."):format(dur))
+
+    navTrace:SetScript("OnUpdate", function(_, dt)
+        elapsed = elapsed + dt
+        frames = frames + 1
+
+        -- Which row the shared plate is parked on. There is only one plate now, so
+        -- "TWO LIT" is structurally impossible -- that is the point of the change,
+        -- and this still checks for it in case the plate is ever reintroduced
+        -- per-row. No parentheses around the colour call: they would truncate the
+        -- multi-return to one value and alpha would read nil every frame -- the
+        -- exact mistake that cost three rounds on the border bug.
+        local lit = {}
+        local hl = GUI.navHover
+        if hl and hl:IsShown() and hl.owner then
+            local _, _, _, a = hl:GetBackdropColor()
+            if a and a > 0.01 then
+                for _, r in ipairs(rows) do
+                    if r.f == hl.owner then lit[#lit + 1] = r.label:sub(1, 18) break end
+                end
+            end
+        end
+        local litKey = table.concat(lit, "+")
+
+        -- What actually owns the mouse. If this is NOT the lit row, the plate and
+        -- the focus disagree, which is cause (b).
+        local focus = "-"
+        local foci = GetMouseFoci and GetMouseFoci()
+        local top = (foci and foci[1]) or (GetMouseFocus and GetMouseFocus())
+        if top then
+            for _, r in ipairs(rows) do if r.f == top then focus = r.label:sub(1, 18) break end end
+            if focus == "-" then
+                focus = "<" .. ((top.GetObjectType and top:GetObjectType()) or "?") .. ">"
+            end
+        end
+
+        if litKey ~= lastLit or focus ~= lastFocus then
+            events = events + 1
+            if events <= 120 then
+                print(("    f%-5d t=%.3f  lit=%-24s focus=%s%s"):format(
+                    frames, elapsed,
+                    (litKey ~= "" and litKey or "(none)"),
+                    focus,
+                    (#lit > 1) and " |cffff6060TWO LIT|r"
+                        or ((litKey == "" and focus ~= "-") and " |cffffaa00FOCUS BUT UNLIT|r" or "")))
+            end
+            lastLit, lastFocus = litKey, focus
+        end
+
+        if elapsed >= dur then
+            navTrace:SetScript("OnUpdate", nil)
+            print(("  |cff00ff00navprobe done|r -- %d frames, %d state changes%s"):format(
+                frames, events, events > 120 and " (first 120 shown)" or ""))
+            print("  |cff808080Read: one enter + one leave per row = clean, look elsewhere. Repeated flips inside one crossing = focus thrash. TWO LIT = a stale plate. lit=(none) with focus on a row = the handler did not fire.|r")
+        end
+    end)
+end
 
 -- Every frame that carries a 1px backdrop edge, so the sweep below can find them
 -- without any page needing to know what it contains. Weak keys: a retired page's
@@ -2371,6 +2863,18 @@ function GUI:StyleButton(btn, opts)
     opts = opts or {}
     if opts.width or opts.height then
         btn:SetSize(opts.width or btn:GetWidth(), opts.height or btn:GetHeight())
+    end
+    -- Land the height on an EVEN number of device pixels, whether it came from
+    -- opts or the caller sized the button itself. Buttons are chained with
+    -- centre-aligning anchors (Copy <- Sync <- Reset, Clicks <- Test <- Unlock),
+    -- so an odd height puts the whole row on a half pixel -- and since controls
+    -- are no longer position-corrected by SnapBoxToPixelGrid, getting the size
+    -- right at construction is the only thing that keeps their edges crisp.
+    -- Construction-time and once, so it cannot drive an OnSizeChanged cascade.
+    local bh = btn:GetHeight()
+    if bh and bh > 0 then
+        local sh = SnapHeightEven(btn, bh)
+        if sh and math.abs(sh - bh) > 1e-4 then btn:SetHeight(sh) end
     end
     CreateElementBackdrop(btn)  -- mixes in BackdropTemplate if needed
 
@@ -4339,9 +4843,13 @@ function GUI:CreateInput(parent, label, width)
     lbl:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
     
     local editbox = CreateFrame("EditBox", nil, frame)
-    editbox:SetPoint("TOPLEFT", 0, -15)
-    editbox:SetPoint("TOPRIGHT", 0, -15)
-    editbox:SetHeight(24)
+    -- Two-corner anchored, so the offset and the height are the ONLY levers --
+    -- SnapBoxToPixelGrid cannot nudge a two-point frame, and controls are not
+    -- position-corrected at all any more. Snap both and all four edges land.
+    local ebY = SnapLen(editbox, -15) or -15
+    editbox:SetPoint("TOPLEFT", 0, ebY)
+    editbox:SetPoint("TOPRIGHT", 0, ebY)
+    editbox:SetHeight(SnapLen(editbox, 24) or 24)
     GUI:StyleEditBox(editbox)   -- shared input chrome: fill, border, font, insets
     editbox:SetAutoFocus(false)
     editbox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
@@ -4398,9 +4906,13 @@ function GUI:CreateEditBox(parent, label, dbTable, dbKey, callback, width, place
     end
     
     local editbox = CreateFrame("EditBox", nil, frame)
-    editbox:SetPoint("TOPLEFT", 0, -15)
-    editbox:SetPoint("TOPRIGHT", 0, -15)
-    editbox:SetHeight(24)
+    -- Two-corner anchored, so the offset and the height are the ONLY levers --
+    -- SnapBoxToPixelGrid cannot nudge a two-point frame, and controls are not
+    -- position-corrected at all any more. Snap both and all four edges land.
+    local ebY = SnapLen(editbox, -15) or -15
+    editbox:SetPoint("TOPLEFT", 0, ebY)
+    editbox:SetPoint("TOPRIGHT", 0, ebY)
+    editbox:SetHeight(SnapLen(editbox, 24) or 24)
     GUI:StyleEditBox(editbox)   -- shared input chrome: fill, border, font, insets
     editbox:SetAutoFocus(false)
 
@@ -4676,8 +5188,8 @@ function GUI:CreateSlider(parent, label, minVal, maxVal, step, dbTable, dbKey, c
     -- and drifted further apart the wider the panel got. Both are container-driven
     -- now, so they line up at any width instead of at one magic number.
     local track = CreateFrame("Frame", nil, container, "BackdropTemplate")
-    track:SetPoint("TOPLEFT", 0, -18)
-    track:SetHeight(8)
+    track:SetPoint("TOPLEFT", 0, SnapLen(track, -18) or -18)
+    track:SetHeight(SnapLen(track, 8) or 8)
     CreateElementBackdrop(track)
     
     -- Fill track (colored portion)
@@ -4689,8 +5201,10 @@ function GUI:CreateSlider(parent, label, minVal, maxVal, step, dbTable, dbKey, c
     
     -- Slider
     local slider = CreateFrame("Slider", nil, container)
-    slider:SetPoint("TOPLEFT", 0, -18)
-    slider:SetHeight(8)   -- right edge pinned to the value box, same as the track
+    -- Same snapped offset/height as the track it sits on, or the invisible hit
+    -- area drifts off the visible bar by a fraction of a pixel.
+    slider:SetPoint("TOPLEFT", 0, SnapLen(slider, -18) or -18)
+    slider:SetHeight(SnapLen(slider, 8) or 8)   -- right edge pinned to the value box, same as the track
     slider:SetOrientation("HORIZONTAL")
     slider:SetMinMaxValues(minVal, maxVal)
     slider:SetValueStep(step)
@@ -5144,9 +5658,9 @@ function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback
     local btn = CreateFrame("Button", nil, container, "BackdropTemplate")
     btn:SetPoint("TOPLEFT", 0, 0)
     btn:SetPoint("TOPRIGHT", 0, 0)
-    btn:SetHeight(24)
+    btn:SetHeight(SnapLen(btn, 24) or 24)
     CreateElementBackdrop(btn)
-    
+
     -- Label
     local txt = btn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     txt:SetPoint("LEFT", 8, 0)
@@ -5424,9 +5938,10 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
         -- size the container to match the surrounding row, e.g. 140x18 / 110x16).
         btn:SetAllPoints(container)
     else
-        btn:SetPoint("TOPLEFT", 0, -16)
-        btn:SetPoint("TOPRIGHT", 0, -16)
-        btn:SetHeight(24)
+        local dY = SnapLen(btn, -16) or -16
+        btn:SetPoint("TOPLEFT", 0, dY)
+        btn:SetPoint("TOPRIGHT", 0, dY)
+        btn:SetHeight(SnapLen(btn, 24) or 24)
     end
     CreateElementBackdrop(btn)
 
@@ -10069,19 +10584,21 @@ function DF:CreateGUI()
     
     -- Party/Raid mode toggle buttons
     local btnParty = CreateFrame("Button", nil, frame, "BackdropTemplate")
-    btnParty:SetPoint("TOPLEFT", 12, -32)
+    -- Head of the toolbar chain (Party <- Raid <- Clicks <- Test <- Unlock), so
+    -- this offset is what every button along it inherits.
+    btnParty:SetPoint("TOPLEFT", SnapLen(frame, 12), SnapLen(frame, -32))
     -- Shared underline-tab style; SetActive (in UpdateThemeColors) drives it.
     GUI:StyleButton(btnParty, { tab = true, text = L["PARTY"], accent = C_ACCENT, width = 70, height = 24, font = "DFFontHighlight" })
     GUI.PartyButton = btnParty  -- Store for external access
     
     local btnRaid = CreateFrame("Button", nil, frame, "BackdropTemplate")
-    btnRaid:SetPoint("LEFT", btnParty, "RIGHT", 4, 0)
+    btnRaid:SetPoint("LEFT", btnParty, "RIGHT", SnapLen(btnRaid, 4), 0)
     GUI:StyleButton(btnRaid, { tab = true, text = L["RAID"], accent = C_RAID, width = 70, height = 24, font = "DFFontHighlight" })
     GUI.RaidButton = btnRaid  -- Store for external access
     
     -- Click Casting tab button
     local btnClicks = CreateFrame("Button", nil, frame, "BackdropTemplate")
-    btnClicks:SetPoint("LEFT", btnRaid, "RIGHT", 4, 0)
+    btnClicks:SetPoint("LEFT", btnRaid, "RIGHT", SnapLen(btnClicks, 4), 0)
     GUI:StyleButton(btnClicks, { tab = true, text = L["BINDS"], accent = { r = 0.2, g = 0.8, b = 0.4 }, width = 70, height = 24, font = "DFFontHighlight" })
     GUI.ClicksButton = btnClicks
 
@@ -10089,7 +10606,11 @@ function DF:CreateGUI()
     -- TEST MODE BUTTON (next to CLICKS tab)
     -- =========================================================================
     local btnTest = CreateFrame("Button", nil, frame, "BackdropTemplate")
-    btnTest:SetPoint("LEFT", btnClicks, "RIGHT", 12, 0)
+    -- Snapped gap + snapped width below: the toolbar is a CHAIN (Clicks <- Test
+    -- <- Unlock <- override marker) and controls are not position-corrected after
+    -- the fact, so every offset and width in the chain has to be a whole number
+    -- of device pixels or the fraction accumulates rightwards.
+    btnTest:SetPoint("LEFT", btnClicks, "RIGHT", SnapLen(btnTest, 12), 0)
     GUI:StyleButton(btnTest, {
         width = 75, height = 24,
         icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\preview_off", size = 18, color = C_TEXT_DIM },
@@ -10098,14 +10619,14 @@ function DF:CreateGUI()
     GUI:SetSettingsFont(btnTest.Text, 11, "")  -- 11px (between Small 10 and Highlight 12)
     btnTest.Text:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     -- Content-fit width (less dead space)
-    btnTest:SetWidth(math.ceil(btnTest.Text:GetStringWidth()) + 38)
+    btnTest:SetWidth(SnapLenUp(btnTest, math.ceil(btnTest.Text:GetStringWidth()) + 38))
     GUI.TestButton = btnTest
     
     -- =========================================================================
     -- LOCK/UNLOCK BUTTON (next to Test button)
     -- =========================================================================
     local btnLock = CreateFrame("Button", nil, frame, "BackdropTemplate")
-    btnLock:SetPoint("LEFT", btnTest, "RIGHT", 4, 0)
+    btnLock:SetPoint("LEFT", btnTest, "RIGHT", SnapLen(btnLock, 4), 0)
     GUI:StyleButton(btnLock, {
         width = 80, height = 24,
         icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\lock", size = 18, color = C_TEXT_DIM },
@@ -10115,14 +10636,14 @@ function DF:CreateGUI()
     btnLock.Text:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     -- Size to the wider "Unlock" label so toggling Lock/Unlock doesn't resize the
     -- button (real label set in UpdateLockButtonState).
-    btnLock:SetWidth(math.ceil(btnLock.Text:GetStringWidth()) + 38)
+    btnLock:SetWidth(SnapLenUp(btnLock, math.ceil(btnLock.Text:GetStringWidth()) + 38))
     GUI.LockButton = btnLock
     
     -- Position override marker (shown next to the lock button when the frame
     -- position is overridden in the layout being edited). Shared marker helper →
     -- dot + hover tooltip, one colour with every other override marker.
     local positionOverrideStar = GUI:CreateOverrideMarker(frame, 14)
-    positionOverrideStar:SetPoint("LEFT", btnLock, "RIGHT", 4, 0)
+    positionOverrideStar:SetPoint("LEFT", btnLock, "RIGHT", SnapLen(positionOverrideStar, 4), 0)
     positionOverrideStar.tooltipText = L["Override active"]
     positionOverrideStar.tooltipSubText = L["The frame position is overridden in this layout."]
     GUI.PositionOverrideStar = positionOverrideStar
@@ -10550,10 +11071,20 @@ function DF:CreateGUI()
     end)
     
     -- Tab container (left side) - with scrolling
+    -- ★ Every offset in the nav chain is SNAPPED, for the same structural reason
+    -- the page viewport is: these frames are anchored by two corners, so
+    -- SnapBoxToPixelGrid cannot nudge them, and the numbers going in are the only
+    -- lever. Unsnapped, the whole list inherits the fraction -- /df navprobe
+    -- measured every one of 42 rows at top+0.38, which is the 4-unit inset below
+    -- (5.625 device px at 1.4062 px/unit) propagated down the chain. A row that
+    -- starts on a fractional device row draws its hover plate's top and bottom
+    -- edges across two rows each at partial intensity, and its label on a
+    -- fractional baseline -- which is what is left of the nav ghost now that the
+    -- dead band between rows is gone.
     local tabFrame = CreateFrame("Frame", nil, frame, "BackdropTemplate")
-    tabFrame:SetPoint("TOPLEFT", 12, -64)
-    tabFrame:SetPoint("BOTTOMLEFT", 12, 36)
-    tabFrame:SetWidth(155)
+    tabFrame:SetPoint("TOPLEFT", SnapLen(frame, 12), SnapLen(frame, -64))
+    tabFrame:SetPoint("BOTTOMLEFT", SnapLen(frame, 12), SnapLen(frame, 36))
+    tabFrame:SetWidth(SnapLen(frame, 155))
     CreateElementBackdrop(tabFrame)
     tabFrame:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.5)
     
@@ -10561,33 +11092,87 @@ function DF:CreateGUI()
     -- SEARCH BAR
     -- =========================================================================
     local searchBar = nil
-    local tabScrollStartY = -4
+    local navPad = SnapLen(tabFrame, 4) or 4
+    local navRight = SnapLen(tabFrame, -14) or -14
+    local tabScrollStartY = -navPad
     if DF.Search then
         searchBar = DF.Search:CreateSearchBar(tabFrame)
-        searchBar:SetPoint("TOPLEFT", 4, -4)
-        searchBar:SetPoint("TOPRIGHT", -14, -4)
-        tabScrollStartY = -36
+        searchBar:SetPoint("TOPLEFT", navPad, -navPad)
+        searchBar:SetPoint("TOPRIGHT", navRight, -navPad)
+        tabScrollStartY = SnapLen(tabFrame, -36) or -36
     end
-    
+
     local tabScroll = CreateFrame("ScrollFrame", nil, tabFrame, "ScrollFrameTemplate")
-    tabScroll:SetPoint("TOPLEFT", 4, tabScrollStartY)
-    tabScroll:SetPoint("BOTTOMRIGHT", -14, 4)
-    
+    tabScroll:SetPoint("TOPLEFT", navPad, tabScrollStartY)
+    tabScroll:SetPoint("BOTTOMRIGHT", navRight, navPad)
+
     StyleScrollBar(tabScroll)
     -- Custom positioning for tab scrollbar
     if tabScroll.ScrollBar then
         tabScroll.ScrollBar:ClearAllPoints()
-        tabScroll.ScrollBar:SetPoint("TOPRIGHT", tabFrame, "TOPRIGHT", -4, tabScrollStartY)
-        tabScroll.ScrollBar:SetPoint("BOTTOMRIGHT", tabFrame, "BOTTOMRIGHT", -4, 4)
+        tabScroll.ScrollBar:SetPoint("TOPRIGHT", tabFrame, "TOPRIGHT", -navPad, tabScrollStartY)
+        tabScroll.ScrollBar:SetPoint("BOTTOMRIGHT", tabFrame, "BOTTOMRIGHT", -navPad, navPad)
     end
-    
+
     local tabContainer = CreateFrame("Frame", nil, tabScroll)
-    tabContainer:SetWidth(130)
+    tabContainer:SetWidth(SnapLen(tabScroll, 130) or 130)
     tabContainer:SetHeight(600) -- Will be updated dynamically
     tabScroll:SetScrollChild(tabContainer)
     GUI.tabContainer = tabContainer
     GUI.tabScroll = tabScroll
-    
+
+    -- ONE hover plate for the whole nav, MOVED to the row under the cursor --
+    -- rather than 42 plates that each switch themselves off and on.
+    --
+    -- Why, after the geometry was already proven clean: navprobe showed no dead
+    -- band, no overlap, no stale plate, no focus thrash, and every row at
+    -- top-0.00. Two facts then rule out layout entirely -- the ghost is on LIVE
+    -- too, which shares none of this branch's GUI work, and its severity varies
+    -- across identical crossings. Geometry is deterministic; the same path would
+    -- give the same result every time. Something that varies run to run is
+    -- timing: the frame in which one row's colour change lands relative to the
+    -- next row's, which Lua cannot observe and cannot control.
+    --
+    -- So stop relying on the two changes landing in the same frame. With a single
+    -- plate there is no pair to synchronise: the texture is already on screen and
+    -- only its anchors move, so no frame can ever show two plates or none.
+    local navHover = CreateFrame("Frame", nil, tabContainer, "BackdropTemplate")
+    navHover:EnableMouse(false)   -- must never take focus from the row beneath it
+    -- Container level, i.e. strictly below the rows (children default to +1), so
+    -- the plate stays behind every label and accent bar.
+    navHover:SetFrameLevel(math.max(0, tabContainer:GetFrameLevel() or 1))
+    CreateElementBackdrop(navHover, { outline = false, bgColor = { 0, 0, 0, 0 } })
+    navHover:Hide()
+    GUI.navHover = navHover
+
+    local function NavHoverShow(row, alpha)
+        navHover.owner = row
+        navHover:ClearAllPoints()
+        navHover:SetAllPoints(row)
+        navHover:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, alpha)
+        navHover:Show()
+    end
+
+    -- Deferred by one frame ON PURPOSE. The rows tile, so leaving one and
+    -- entering the next happens in the same frame and WoW does not guarantee
+    -- which handler runs first. Hiding immediately would put back exactly the
+    -- dark frame this exists to remove; instead the hide only lands if no row
+    -- claimed the plate in the meantime.
+    local function NavHoverHide(row)
+        if navHover.owner ~= row then return end
+        C_Timer.After(0, function()
+            if navHover.owner == row then
+                navHover:Hide()
+                navHover.owner = nil
+            end
+        end)
+    end
+    GUI.HideNavHover = function()
+        navHover:Hide()
+        navHover.owner = nil
+    end
+
+
     -- Content area (right side) - no BackdropTemplate in CreateFrame
     local content = CreateFrame("Frame", nil, frame)
     content:SetPoint("TOPLEFT", tabFrame, "TOPRIGHT", 8, 0)
@@ -10980,7 +11565,11 @@ function DF:CreateGUI()
         local cat = CreateFrame("Button", nil, tabContainer, "BackdropTemplate")
         cat:SetPoint("TOPLEFT", 4, categoryY)
         cat:SetPoint("TOPRIGHT", -4, categoryY)
-        cat:SetHeight(28)
+        -- Placeholder only: UpdateTabLayout owns the real height and sets it to
+        -- the row STRIDE so the rows tile with no dead band between them (see the
+        -- comment there -- that band was the hover flash). Matched here so the
+        -- row is never briefly the wrong size before the first layout pass.
+        cat:SetHeight(SnapLen(cat, 30) or 30)
         -- Hover plate only: transparent at rest, tinted by OnEnter/OnLeave.
         CreateElementBackdrop(cat, { outline = false, bgColor = { 0, 0, 0, 0 } })
         cat.name = name
@@ -11009,12 +11598,11 @@ function DF:CreateGUI()
         catNewBadge:Hide()
         cat.newBadge = catNewBadge
 
-        cat:SetScript("OnEnter", function(self)
-            self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 0.3)
-        end)
-        cat:SetScript("OnLeave", function(self)
-            self:SetBackdropColor(0, 0, 0, 0)
-        end)
+        -- Hover is the SHARED moving plate, not this row's own backdrop -- see
+        -- navHover. The row's backdrop stays permanently transparent (SelectTab
+        -- still resets it, harmlessly).
+        cat:SetScript("OnEnter", function(self) NavHoverShow(self, 0.3) end)
+        cat:SetScript("OnLeave", function(self) NavHoverHide(self) end)
         cat:SetScript("OnClick", function(self)
             self.expanded = not self.expanded
             self.arrow:SetText(self.expanded and "-" or "+")
@@ -11047,7 +11635,7 @@ function DF:CreateGUI()
         if not cat then return end
         
         local btn = CreateFrame("Button", nil, tabContainer, "BackdropTemplate")
-        btn:SetHeight(26)
+        btn:SetHeight(SnapLen(btn, 28) or 28)   -- placeholder; see CreateCategory
         -- Hover/selected plate only: the accent bar carries the selected state.
         CreateElementBackdrop(btn, { outline = false, bgColor = { 0, 0, 0, 0 } })
         btn.isTab = true
@@ -11083,16 +11671,13 @@ function DF:CreateGUI()
             end
         end
 
+        -- Shared moving plate (see navHover). The active tab still shows no hover
+        -- tint -- its accent bar and label colour are its state -- so crossing it
+        -- parks the plate rather than moving it.
         btn:SetScript("OnEnter", function(self)
-            if not self.isActive then
-                self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 0.5)
-            end
+            if not self.isActive then NavHoverShow(self, 0.5) end
         end)
-        btn:SetScript("OnLeave", function(self)
-            if not self.isActive then
-                self:SetBackdropColor(0, 0, 0, 0)
-            end
-        end)
+        btn:SetScript("OnLeave", function(self) NavHoverHide(self) end)
         btn:SetScript("OnClick", function(self)
             if self.disabled then return end
             SelectTab(name)
@@ -11101,13 +11686,32 @@ function DF:CreateGUI()
         
         -- Create the page
         local page = CreateFrame("ScrollFrame", nil, content, "ScrollFrameTemplate")
-        page:SetPoint("TOPLEFT", 8, -8)
-        page:SetPoint("BOTTOMRIGHT", -8, 8)
-        
+        -- ★ The insets are SNAPPED, and this is the frame the whole pixel grid
+        -- was hanging off. A ScrollFrame clips to its own rect, so its top edge is
+        -- the boundary every box near the top of a page is cut against -- and a
+        -- raw 8-unit inset is 11.25 DEVICE PIXELS at 0.75 scale, i.e. a quarter
+        -- pixel off the grid. /df pixelcheck measured exactly that: viewport
+        -- top-0.25, scroll child top-0.25 (it inherits the phase), while every
+        -- box inside reported a flawless top+0.00. The boxes were never the
+        -- problem; the surface they are clipped against was.
+        --
+        -- Nothing corrected it because this frame is anchored by TWO corners, and
+        -- SnapBoxToPixelGrid only geometry-corrects single-anchor frames (a
+        -- two-corner frame would resize rather than move). So the one frame every
+        -- page is measured against was structurally excluded from the engine.
+        -- Snapping the OFFSETS is the fix that works for a two-corner frame:
+        -- correct the numbers going in, since the box itself can't be nudged.
+        local inset = SnapLen(content, 8) or 8
+        page:SetPoint("TOPLEFT", inset, -inset)
+        page:SetPoint("BOTTOMRIGHT", -inset, inset)
+
         StyleScrollBar(page)
 
         local child = CreateFrame("Frame", nil, page)
-        child:SetSize(content:GetWidth() - 30, 1)
+        -- Snapped for the same reason: content is positioned against this child,
+        -- so a fractional width put every right edge inside it off-grid too
+        -- (pixelcheck reported w-0.16).
+        child:SetSize(SnapLen(page, (content:GetWidth() or 0) - 30) or 1, 1)
         page:SetScrollChild(child)
         page.child = child
         page.tabName = name
@@ -11124,16 +11728,47 @@ function DF:CreateGUI()
     
     -- Update tab positions based on expanded/collapsed state
     function GUI:UpdateTabLayout()
-        local y = -8
-        
+        -- Every number here is snapped, and the running `y` is built ONLY out of
+        -- snapped steps, so each row lands on the pixel grid rather than each one
+        -- picking up a different sub-pixel phase down the list. The nav rows are
+        -- two-corner anchored, so SnapBoxToPixelGrid structurally cannot correct
+        -- them (and would not anyway -- they are not structural boxes): the
+        -- offsets going in are the only lever, same as the page viewport.
+        --
+        -- The rows TILE: each one's height IS the stride to the next, so there is
+        -- no strip between them where the cursor is over nothing.
+        --
+        -- They used to be 28 tall on a 30 stride (and 26 on 28), leaving a 2-unit
+        -- dead band -- about 3 device pixels -- between every pair. /df navprobe
+        -- caught what that costs: crossing the band puts mouse focus on the plain
+        -- container Frame behind the list for a single frame, with NO row lit, so
+        -- the hover plate blinks off and back on mid-sweep. That one dark frame is
+        -- the "ghost" -- and because whether you land in the band depends on how
+        -- fast you are moving, the same crossing sometimes flashed and sometimes
+        -- did not, which is why it looked like a render hitch rather than layout.
+        --
+        -- Tiling costs nothing visually: only one row is ever lit, so the plates
+        -- have no neighbour to sit flush against. The height is taken FROM the
+        -- stride rather than snapped separately, so they cannot disagree by a
+        -- pixel and reopen a hairline gap.
+        -- Park the shared hover plate: expanding or collapsing can hide the row it
+        -- is anchored to, and a plate anchored to a hidden frame is a stray.
+        if GUI.HideNavHover then GUI.HideNavHover() end
+
+        local container = GUI.tabContainer
+        local y = SnapLen(container, -8) or -8
+        local catStride = SnapLen(container, 30) or 30
+        local tabStride = SnapLen(container, 28) or 28
+
         for _, catName in ipairs(GUI.CategoryOrder) do
             local cat = GUI.Categories[catName]
             if cat then
                 cat:ClearAllPoints()
                 cat:SetPoint("TOPLEFT", 0, y)
                 cat:SetPoint("TOPRIGHT", 0, y)
-                y = y - 30
-                
+                cat:SetHeight(catStride)
+                y = y - catStride
+
                 if cat.expanded then
                     for _, btn in ipairs(cat.children) do
                         -- Party-only tabs are hidden entirely in raid mode.
@@ -11144,7 +11779,8 @@ function DF:CreateGUI()
                             btn:ClearAllPoints()
                             btn:SetPoint("TOPLEFT", 0, y)
                             btn:SetPoint("TOPRIGHT", 0, y)
-                            y = y - 28
+                            btn:SetHeight(tabStride)
+                            y = y - tabStride
                         end
                     end
                 else
@@ -11406,22 +12042,41 @@ function DF:CreateGUI()
             for _, widget in ipairs(self.children) do
                 if widget.rightAlign and widget:IsShown() then
                     widget:ClearAllPoints()
-                    widget:SetPoint("TOPRIGHT", self.child, "TOPRIGHT", -10, -5 - bannerOffset)
+                    -- Both offsets snapped: this widget is the HEAD of the
+                    -- Reset/Sync/Copy chain, so a fraction here is inherited by
+                    -- every button to its left, and the buttons are no longer
+                    -- nudged back onto the grid individually.
+                    widget:SetPoint("TOPRIGHT", self.child, "TOPRIGHT",
+                        SnapLen(self.child, -10), SnapLen(self.child, -5 - bannerOffset))
                 end
             end
             
-            -- Reserve space below right-aligned elements
-            local hasRightAligned = false
+            -- Reserve space below the right-aligned row (Reset Page / Sync / Copy).
+            --
+            -- This used to subtract a flat 40 with the comment "button height ~26 +
+            -- 14 padding" -- a GUESS, not a measurement. Any page whose row is not
+            -- exactly 26 tall got a different gap under it, so the first box sat at
+            -- a different height on every page and the row appeared to shift.
+            -- Measure the row instead and add a fixed pad, so the gap below the
+            -- buttons is identical everywhere by construction.
+            --
+            -- The scan is ALSO gated on IsShown() now, matching the positioning loop
+            -- above. It was not, so a page carrying a HIDDEN right-aligned widget
+            -- still reserved the 40 and opened with an empty band above its first
+            -- box -- the pages Krathe saw "starting further down" with nothing there.
+            local RIGHT_ROW_PAD = 14
+            local rightRowH = 0
             for _, widget in ipairs(self.children) do
-                if widget.rightAlign then
-                    hasRightAligned = true
-                    break
+                if widget.rightAlign and widget:IsShown() then
+                    rightRowH = math.max(rightRowH, widget:GetHeight() or 0)
                 end
             end
-            if hasRightAligned then
-                -- Add padding below the copy button (button height ~26 + 14 padding)
-                y1 = y1 - 40
-                y2 = y2 - 40
+            if rightRowH > 0 then
+                -- Snapped for the same reason every other layout number is: an
+                -- unsnapped offset puts everything below it off the pixel grid.
+                local reserve = SnapLen(self.child, rightRowH + RIGHT_ROW_PAD)
+                y1 = y1 - reserve
+                y2 = y2 - reserve
             end
             
             for _, widget in ipairs(self.children) do

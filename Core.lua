@@ -4509,6 +4509,24 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     DF.GUIFrame:Show()
                 end
                 print("|cff00ff00DandersFrames:|r " .. L["GUI reset to default size, scale, and position."])
+            elseif msg == "pixelcheck" then
+                -- Measures the open settings page against the device pixel grid.
+                -- Separates "border split across two rows" from "border cut off by
+                -- the scroll frame's clip edge" -- the two look the same on screen.
+                if DF.GUI and DF.GUI.PixelCheck then
+                    DF.GUI.PixelCheck()
+                else
+                    print("|cff00ff00DandersFrames:|r GUI module not loaded.")
+                end
+            elseif msg == "navprobe" or msg:match("^navprobe%s+%d+$") then
+                -- Traces the left nav's hover state to separate a stale plate /
+                -- focus thrash / a dead band between rows from a pure rendering
+                -- artefact. All four look the same on screen.
+                if DF.GUI and DF.GUI.NavProbe then
+                    DF.GUI.NavProbe(tonumber(msg:match("(%d+)$")))
+                else
+                    print("|cff00ff00DandersFrames:|r GUI module not loaded.")
+                end
             elseif msg == "overrides" then
                 if DF.AutoProfilesUI and DF.AutoProfilesUI.PrintOverrides then
                     DF.AutoProfilesUI:PrintOverrides()
@@ -4526,6 +4544,8 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 print("  |cff00ff00/df clearoverride <key|all>|r - " .. L["clear stuck auto-layout overrides"])
                 print("  |cff00ff00/df resetgui|r - " .. L["reset settings window size/position"])
                 print("  |cff00ff00/df reset|r - |cffff6060" .. L["reset party + raid profiles to defaults"] .. "|r")
+                print("  |cff00ff00/df pixelcheck|r - " .. L["measure the open settings page against the pixel grid"])
+                print("  |cff00ff00/df navprobe [secs]|r - " .. L["trace the left nav's hover state while you move the cursor"])
                 print("  |cff00ff00/df console|r - " .. L["open the debug console page"])
                 print("  |cff00ff00/df debug|r - " .. L["list debug commands (on/off toggles debug logging)"])
             elseif msg == "test" then

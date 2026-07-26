@@ -57,7 +57,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         if pageId then
             linkBtn = CreateFrame("Button", nil, btn, "BackdropTemplate")
             linkBtn:SetSize(120, 26)
-            linkBtn:SetPoint("RIGHT", btn, "LEFT", -4, 0)
+            -- Snapped gap: the row is a CHAIN (Copy <- Sync <- Reset) and controls
+            -- are no longer nudged onto the grid after the fact, so the offset
+            -- itself has to be a whole number of device pixels or every button to
+            -- the left of this one inherits the fraction.
+            linkBtn:SetPoint("RIGHT", btn, "LEFT", GUI.SnapLen(linkBtn, -4), 0)
             -- Sync is a toggle (SetActive when linked) on the shared styler.
             -- fadeActiveText: the synced label recedes slightly while linked.
             GUI:StyleButton(linkBtn, {
@@ -78,7 +82,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 btn.Text:SetText(L["Copy to Party"])
             end
             -- Content-size so short labels aren't swimming in padding (icon+gap ~18 + ~9px each side).
-            btn:SetWidth(math.ceil(btn.Text:GetStringWidth()) + 36)
+            btn:SetWidth(GUI.SnapLenUp(btn, math.ceil(btn.Text:GetStringWidth()) + 36))
 
             -- Copy is a normal button; StyleButton owns its backdrop/hover.
             btn.Text:SetTextColor(0.9, 0.9, 0.9)
@@ -95,7 +99,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 linkBtn.Text:SetText(isLinked and format(L["Synced with %s"], dest) or format(L["Sync with %s"], dest))
                 linkBtn.Text:SetTextColor(0.9, 0.9, 0.9)
                 linkBtn.Icon:SetVertexColor(0.9, 0.9, 0.9)
-                linkBtn:SetWidth(math.ceil(linkBtn.Text:GetStringWidth()) + 36)
+                linkBtn:SetWidth(GUI.SnapLenUp(linkBtn, math.ceil(linkBtn.Text:GetStringWidth()) + 36))
             end
         end
         
@@ -214,10 +218,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         if not omitReset then
             local resetBtn = CreateFrame("Button", nil, btn, "BackdropTemplate")
             resetBtn:SetSize(115, 26)
+            local gap = GUI.SnapLen(resetBtn, -4)   -- see the Sync gap above
             if linkBtn then
-                resetBtn:SetPoint("RIGHT", linkBtn, "LEFT", -4, 0)
+                resetBtn:SetPoint("RIGHT", linkBtn, "LEFT", gap, 0)
             else
-                resetBtn:SetPoint("RIGHT", btn, "LEFT", -4, 0)
+                resetBtn:SetPoint("RIGHT", btn, "LEFT", gap, 0)
             end
 
             -- Destructive Reset: the shared danger tone owns the red label/icon +
@@ -227,7 +232,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\refresh", size = 18 },
                 text = L["Reset Page"],
             })
-            resetBtn:SetWidth(math.ceil(resetBtn.Text:GetStringWidth()) + 36)
+            resetBtn:SetWidth(GUI.SnapLenUp(resetBtn, math.ceil(resetBtn.Text:GetStringWidth()) + 36))
 
             resetBtn:HookScript("OnEnter", function(self)
                 local mode = GUI.SelectedMode or "party"
@@ -295,7 +300,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\refresh", size = 18 },
             text = L["Reset Page"],
         })
-        resetBtn:SetWidth(math.ceil(resetBtn.Text:GetStringWidth()) + 36)
+        resetBtn:SetWidth(GUI.SnapLenUp(resetBtn, math.ceil(resetBtn.Text:GetStringWidth()) + 36))
 
         resetBtn:HookScript("OnEnter", function(self)
             GUI:ShowTooltip(self, {
@@ -598,9 +603,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     BuildPage(pageFading, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top right
         Add(CreateCopyButton(self.child, {"rangeFade", "oor", "dead", "offline", "healthFade", "hf"}, L["Fading"], "display_fading"), 25, 2)
-        
-        -- Sync point: ensures both columns start below the copy button
-        AddSpace(10, "both")
         
         -- Element-specific alpha sliders grey out (disabled-in-place) when the
         -- "Enable Element-Specific Alpha" toggle is off. The frame-level alpha
@@ -6016,7 +6018,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         Add(CreateCopyButton(self.child, {"buff", "showBuffs"}, L["Buffs"], "auras_buffs"), 25, 2)
 
         -- ===== DEDUPLICATION =====
-        AddSpace(10, "both")
         local dedupGroup = GUI:CreateSettingsGroup(self.child, 280)
         dedupGroup:AddWidget(GUI:CreateHeader(self.child, L["Deduplication"]), 40)
         -- 12.1: dedup semantics changed (Aura Designer auras only; the Defensive Bar's
@@ -6301,7 +6302,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Copy button at top
         Add(CreateCopyButton(self.child, {"debuff", "showDebuffs"}, L["Debuffs"], "auras_debuffs"), 25, 2)
         
-        AddSpace(10, "both")
         
         local currentSection = nil
         
@@ -6565,7 +6565,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Copy button at top
         Add(CreateCopyButton(self.child, {"missingBuff"}, L["Missing Buffs"], "auras_missingbuffs"), 25, 2)
         
-        AddSpace(10, "both")
         
         -- Dependent controls GREY OUT (disabled-in-place) when the feature is off.
         local function HideMissingBuffOptions(d)
@@ -7085,7 +7084,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Copy button at top
         Add(CreateCopyButton(self.child, {"targetedSpell"}, L["Targeted Spells"], "indicators_targetedspells"), 25, 2)
         
-        AddSpace(10, "both")
         
         local currentSection = nil
         
@@ -7447,7 +7445,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- Copy button at top
             Add(CreateCopyButton(self.child, {"targetedList"}, L["Targeted List"], "indicators_targetedlist"), 25, 2)
 
-            AddSpace(6, "both")
 
             local currentSection = nil
 
@@ -7775,7 +7772,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Copy button at top
         Add(CreateCopyButton(self.child, {"personalTargeted"}, L["Personal Targeted"], "indicators_personal_targeted"), 25, 2)
         
-        AddSpace(10, "both")
         
         local currentSection = nil
         
@@ -8702,7 +8698,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Copy button at top
         Add(CreateCopyButton(self.child, {"selectionHighlight", "hoverHighlight", "aggroHighlight", "aggro"}, L["Highlights"], "indicators_highlights"), 25, 2)
         
-        AddSpace(10, "both")
         
         local currentSection = nil
         
@@ -8857,7 +8852,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Copy button at top
         Add(CreateCopyButton(self.child, {"dispel"}, L["Dispel Overlay"], "auras_dispel"), 25, 2)
 
-        AddSpace(10, "both")
 
         local function HideIfDisabled(d)
             return d.dispelOverlayEnabled == false
