@@ -588,7 +588,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- Sync point before See Also
         AddSyncPoint()
-        AddSpace(20, "both")
+        AddSpace(GUI.Space.block, "both")
 
         -- See Also links
         Add(GUI:CreateSeeAlso(self.child, {
@@ -831,7 +831,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         Add(deadGroup, nil, 2)
         
         -- ===== HEALTH THRESHOLD FADING (above health threshold) =====
-        AddSpace(20, "both")
+        AddSpace(GUI.Space.block, "both")
         local hfGroup = GUI:CreateSettingsGroup(self.child, 560)
         hfGroup:AddWidget(GUI:CreateHeader(self.child, L["Health Threshold Fading"]), 40)
         hfGroup.tooltip = L["Fade frames or elements when a unit's health is above the set threshold (e.g. 100% or 80%)."]
@@ -870,7 +870,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         Add(hfGroup, nil, "both")
         
         -- See Also links
-        AddSpace(20, "both")
+        AddSpace(GUI.Space.block, "both")
         Add(GUI:CreateSeeAlso(self.child, {
             {pageId = "display_visibility", label = L["Visibility"]},
             -- LEGACY-TEXT-CLEANUP: legacy text page hidden; link removed
@@ -1924,7 +1924,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         Add(permMoverGroup, nil, 2)
 
         -- See Also links
-        AddSpace(20, "both")
+        AddSpace(GUI.Space.block, "both")
         Add(GUI:CreateSeeAlso(self.child, {
             {pageId = "general_sorting", label = L["Sorting"]},
             {pageId = "bars_health", label = L["Health Bar"]},
@@ -2650,7 +2650,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         AddSpace(6, "both")  -- breathing room between the tab strip and the sub-row
         Add(subTabContainer, 26, "both")
 
-        AddSpace(10, "both")
+        AddSpace(GUI.Space.section, "both")
 
         -- Helper to get the pinned override key for the current active tab
         local function GetPinnedKey(dbKey)
@@ -4029,7 +4029,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         Add(classPriorityGroup, nil, 2)
         
         -- See Also links
-        AddSpace(20, "both")
+        AddSpace(GUI.Space.block, "both")
         Add(GUI:CreateSeeAlso(self.child, {
             {pageId = "general_frame", label = L["Frame"]},
             {pageId = "general_labels", label = L["Group Labels"]},
@@ -4092,7 +4092,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- had no effect. Tooltips are governed by the Tooltips page instead.)
 
         -- See Also links
-        AddSpace(20, "both")
+        AddSpace(GUI.Space.block, "both")
         Add(GUI:CreateSeeAlso(self.child, {
             {pageId = "auras_buffs", label = L["Buffs"]},
             {pageId = "auras_debuffs", label = L["Debuffs"]},
@@ -4839,7 +4839,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         AddToSection(bgGroup, nil, 1)
         
         currentSection = nil
-        AddSpace(10, "both")
+        AddSpace(GUI.Space.section, "both")
         
         -- ===== MISSING HEALTH SECTION =====
         local missingSection = Add(GUI:CreateCollapsibleSection(self.child, L["Missing Health"], true), 36, "both")
@@ -4917,7 +4917,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         currentSection = nil
 
-        AddSpace(10, "both")
+        AddSpace(GUI.Space.section, "both")
 
         -- ===== REDUCED MAX HEALTH SECTION =====
         local reducedSection = Add(GUI:CreateCollapsibleSection(self.child, L["Reduced Max Health"], true), 36, "both")
@@ -4939,7 +4939,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         currentSection = nil
 
         -- See Also links
-        AddSpace(20, "both")
+        AddSpace(GUI.Space.block, "both")
         Add(GUI:CreateSeeAlso(self.child, {
             {pageId = "general_frame", label = L["Frame"]},
             -- LEGACY-TEXT-CLEANUP: legacy text page hidden; link removed
@@ -5299,7 +5299,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         levelSlider.hideOn = function(d) return d.absorbBarMode ~= "FLOATING" end
         
         currentSection = nil
-        AddSpace(10, "both")
+        AddSpace(GUI.Space.section, "both")
         
         -- ===== HEAL ABSORB SECTION =====
         local healAbsorbSection = Add(GUI:CreateCollapsibleSection(self.child, L["Heal Absorb"], true), 36, "both")
@@ -6047,7 +6047,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         dedupGroup:AddWidget(dedupCb, 30)
         Add(dedupGroup, nil, 1)
 
-        AddSpace(10, "both")
+        AddSpace(GUI.Space.section, "both")
 
         local currentSection = nil
         
@@ -6138,7 +6138,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         AddToSection(gridGroup, nil, 1)
         
         currentSection = nil
-        AddSpace(10, "both")
+        AddSpace(GUI.Space.section, "both")
         
         -- ===== APPEARANCE SECTION =====
         local appearanceSection = Add(GUI:CreateCollapsibleSection(self.child, L["Appearance"], true), 36, "both")
@@ -6237,7 +6237,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Aura Designer only -- rolling it out to these rows is a separate, unscheduled job.)
 
         currentSection = nil
-        AddSpace(10, "both")
+        AddSpace(GUI.Space.section, "both")
 
         -- ===== DURATION BAR SECTION ===== (12.1 factory rows only — the native
         -- container drains the strip render-side; the legacy renderer has no bar)
@@ -6287,7 +6287,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         currentSection = nil
 
         -- See Also links
-        AddSpace(20, "both")
+        AddSpace(GUI.Space.block, "both")
         Add(GUI:CreateSeeAlso(self.child, {
             {pageId = "display_tooltips", label = L["Buff Tooltips"]},
             {pageId = "general_integrations", label = L["Integrations"]},
@@ -6365,7 +6365,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         
         
         currentSection = nil
-        AddSpace(10, "both")
+        AddSpace(GUI.Space.section, "both")
         
         -- ===== APPEARANCE SECTION =====
         local appearanceSection = Add(GUI:CreateCollapsibleSection(self.child, L["Appearance"], true), 36, "both")
@@ -6503,7 +6503,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         AddToSection(durationGroup, nil, 2)
 
         currentSection = nil
-        AddSpace(10, "both")
+        AddSpace(GUI.Space.section, "both")
 
         -- ===== DURATION BAR SECTION ===== (12.1 factory rows only — mirrors the
         -- Buffs page's block; see there for the sig-split routing note)
@@ -6550,7 +6550,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         currentSection = nil
 
         -- See Also links
-        AddSpace(20, "both")
+        AddSpace(GUI.Space.block, "both")
         Add(GUI:CreateSeeAlso(self.child, {
             {pageId = "display_tooltips", label = L["Debuff Tooltips"]},
             {pageId = "general_integrations", label = L["Integrations"]},
@@ -6709,7 +6709,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         Add(borderGroup, nil, 1)
         
         -- See Also links
-        AddSpace(20, "both")
+        AddSpace(GUI.Space.block, "both")
         Add(GUI:CreateSeeAlso(self.child, {
             {pageId = "auras_buffs", label = L["Buffs"]},
         }), 30, "both")
@@ -7064,7 +7064,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         Add(durBarGroup, nil, 1)
 
         -- See Also links
-        AddSpace(20, "both")
+        AddSpace(GUI.Space.block, "both")
         Add(GUI:CreateSeeAlso(self.child, {
             {pageId = "auras_buffs", label = L["Buffs"]},
             {pageId = "auras_debuffs", label = L["Debuffs"]},
@@ -7181,7 +7181,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end)
         Add(historyBtn, 30, 1)
         
-        AddSpace(10, "both")
+        AddSpace(GUI.Space.section, "both")
         
         -- ===== LAYOUT SECTION =====
         local layoutSection = Add(GUI:CreateCollapsibleSection(self.child, L["Layout"], true), 36, "both")
@@ -7218,7 +7218,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         AddToSection(sizeGroup, nil, 2)
         
         currentSection = nil
-        AddSpace(10, "both")
+        AddSpace(GUI.Space.section, "both")
         
         -- ===== APPEARANCE SECTION =====
         local appearanceSection = Add(GUI:CreateCollapsibleSection(self.child, L["Appearance"], true), 36, "both")
@@ -7273,7 +7273,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         AddToSection(durationGroup, nil, 2)
         
         currentSection = nil
-        AddSpace(10, "both")
+        AddSpace(GUI.Space.section, "both")
         
         -- ===== IMPORTANT SPELLS SECTION =====
         local importantSection = Add(GUI:CreateCollapsibleSection(self.child, L["Important Spells"], true), 36, "both")
@@ -7305,7 +7305,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         AddToSection(highlightGroup, nil, 1)
         
         currentSection = nil
-        AddSpace(10, "both")
+        AddSpace(GUI.Space.section, "both")
         
         -- ===== INTERRUPTED VISUAL SECTION =====
         local interruptedSection = Add(GUI:CreateCollapsibleSection(self.child, L["Interrupted Visual"], true), 36, "both")
@@ -7346,7 +7346,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         currentSection = nil
         
         -- See Also links
-        AddSpace(20, "both")
+        AddSpace(GUI.Space.block, "both")
         Add(GUI:CreateSeeAlso(self.child, {
             {pageId = "auras_buffs", label = L["Buffs"]},
             {pageId = "auras_debuffs", label = L["Debuffs"]},
@@ -7499,7 +7499,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             tlMaxBars.disableOn = HideTLOptions
             Add(settingsGroup, nil, 1)
 
-            AddSpace(10, "both")
+            AddSpace(GUI.Space.section, "both")
 
             -- ===== LAYOUT SECTION =====
             local layoutSection = Add(GUI:CreateCollapsibleSection(self.child, L["Layout"], true), 36, "both")
@@ -7567,7 +7567,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             AddToSection(presetGroup, nil, 2)
 
             currentSection = nil
-            AddSpace(10, "both")
+            AddSpace(GUI.Space.section, "both")
 
             -- ===== APPEARANCE SECTION =====
             local appearanceSection = Add(GUI:CreateCollapsibleSection(self.child, L["Appearance"], true), 36, "both")
@@ -7627,7 +7627,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             AddToSection(iconGroup, nil, 2)
 
             currentSection = nil
-            AddSpace(10, "both")
+            AddSpace(GUI.Space.section, "both")
 
             -- ===== TEXT SECTION =====
             local textSection = Add(GUI:CreateCollapsibleSection(self.child, L["Text"], true), 36, "both")
@@ -7665,7 +7665,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             AddToSection(fontGroup, nil, 2)
 
             currentSection = nil
-            AddSpace(10, "both")
+            AddSpace(GUI.Space.section, "both")
 
             -- ===== TEXT POSITION SECTION =====
             -- Per-element anchor + X/Y offset. Each text element
@@ -7742,7 +7742,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             AddToSection(interruptPosGroup, nil, 2)
 
             currentSection = nil
-            AddSpace(10, "both")
+            AddSpace(GUI.Space.section, "both")
 
             -- ===== BEHAVIOR SECTION =====
             local behaviorSection = Add(GUI:CreateCollapsibleSection(self.child, L["Behavior"], true), 36, "both")
@@ -7759,7 +7759,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             currentSection = nil
 
             -- See Also links
-            AddSpace(20, "both")
+            AddSpace(GUI.Space.block, "both")
             Add(GUI:CreateSeeAlso(self.child, {
                 {pageId = "indicators_targetedspells", label = L["Targeted Spells"]},
                 {pageId = "indicators_personal_targeted", label = L["Personal Targeted"]},
@@ -7826,7 +7826,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         contentGroup.hideOn = HidePersonalOptions
         Add(contentGroup, nil, 2)
         
-        AddSpace(10, "both")
+        AddSpace(GUI.Space.section, "both")
         
         -- ===== LAYOUT SECTION =====
         local layoutSection = Add(GUI:CreateCollapsibleSection(self.child, L["Layout"], true), 36, "both")
@@ -7855,7 +7855,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         AddToSection(growthGroup, nil, 2)
         
         currentSection = nil
-        AddSpace(10, "both")
+        AddSpace(GUI.Space.section, "both")
         
         -- ===== APPEARANCE SECTION =====
         local appearanceSection = Add(GUI:CreateCollapsibleSection(self.child, L["Appearance"], true), 36, "both")
@@ -7911,7 +7911,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         AddToSection(durationGroup, nil, 2)
         
         currentSection = nil
-        AddSpace(10, "both")
+        AddSpace(GUI.Space.section, "both")
         
         -- ===== IMPORTANT SPELLS SECTION =====
         local highlightSection = Add(GUI:CreateCollapsibleSection(self.child, L["Important Spells"], true), 36, "both")
@@ -7943,7 +7943,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         AddToSection(highlightGroup, nil, 1)
         
         currentSection = nil
-        AddSpace(10, "both")
+        AddSpace(GUI.Space.section, "both")
         
         -- ===== INTERRUPTED VISUAL SECTION =====
         local interruptSection = Add(GUI:CreateCollapsibleSection(self.child, L["Interrupted Visual"], true), 36, "both")
@@ -7984,7 +7984,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         currentSection = nil
         
         -- See Also links
-        AddSpace(20, "both")
+        AddSpace(GUI.Space.block, "both")
         Add(GUI:CreateSeeAlso(self.child, {
             {pageId = "indicators_targetedspells", label = L["Targeted Spells (on frames)"]},
         }), 30, "both")
@@ -8097,7 +8097,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- Settings
         local roleSettings = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "roleIcon:Settings" })
-        roleSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 25)
+        roleSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), GUI.RowHeight.sectionHeader)
         roleSettings:AddWidget(GUI:CreateDropdown(self.child, L["Icon Style"], roleStyleOptions, db, "roleIconStyle", function() DF:UpdateAllRoleIcons(); UpdateRolePreview() end), 55)
         local roleExtTank = roleSettings:AddWidget(GUI:CreateEditBox(self.child, L["Tank Icon Path"], db, "roleIconExternalTank", function() DF:UpdateAllRoleIcons(); UpdateRolePreview() end, nil, "Interface\\MyIcons\\Tank.tga"), 55)
         roleExtTank.hideOn = function(d) return d.roleIconStyle ~= "EXTERNAL" end
@@ -8117,7 +8117,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- Appearance
         local roleAppearance = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "roleIcon:Appearance" })
-        roleAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 25)
+        roleAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), GUI.RowHeight.sectionHeader)
         roleAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "roleIconScale", nil, function() DF:LightweightUpdateIconPosition("role") end, true), 55)
         roleAppearance:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "roleIconAlpha", nil, function() DF:LightweightUpdateIconAlpha("role") end, true), 55)
         roleAppearance:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "roleIconFrameLevel", nil, function() DF:LightweightUpdateFrameLevel("role") end, true)), 55)
@@ -8127,7 +8127,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- Position
         local rolePosition = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "roleIcon:Position" })
-        rolePosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), 25)
+        rolePosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), GUI.RowHeight.sectionHeader)
         rolePosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "roleIconAnchor", function() DF:LightweightUpdateIconPosition("role") end), 55)
         rolePosition:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "roleIconX", nil, function() DF:LightweightUpdateIconPosition("role") end, true), 55)
         rolePosition:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -50, 50, 1, db, "roleIconY", nil, function() DF:LightweightUpdateIconPosition("role") end, true), 55)
@@ -8203,7 +8203,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- Settings
         local leaderSettings = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "leaderIcon:Settings" })
-        leaderSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 25)
+        leaderSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), GUI.RowHeight.sectionHeader)
         leaderSettings.disableChildrenOn = function(d) return not d.leaderIconEnabled end
         local leaderIconEnableCb = leaderSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Leader Icon"], db, "leaderIconEnabled", function() DF:UpdateAllFrames() end), 30)
         leaderIconEnableCb.keepEnabled = true
@@ -8212,7 +8212,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- Appearance
         local leaderAppearance = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "leaderIcon:Appearance" })
-        leaderAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 25)
+        leaderAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), GUI.RowHeight.sectionHeader)
         leaderAppearance.disableChildrenOn = function(d) return not d.leaderIconEnabled end
         leaderAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "leaderIconScale", nil, function() DF:LightweightUpdateIconPosition("leader") end, true), 55)
         leaderAppearance:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "leaderIconAlpha", nil, function() DF:LightweightUpdateIconAlpha("leader") end, true), 55)
@@ -8223,7 +8223,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- Position
         local leaderPosition = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "leaderIcon:Position" })
-        leaderPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), 25)
+        leaderPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), GUI.RowHeight.sectionHeader)
         leaderPosition.disableChildrenOn = function(d) return not d.leaderIconEnabled end
         leaderPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "leaderIconAnchor", function() DF:LightweightUpdateIconPosition("leader") end), 55)
         leaderPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "leaderIconX", nil, function() DF:LightweightUpdateIconPosition("leader") end, true), 55)
@@ -8250,7 +8250,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- Settings
         local rtSettings = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "raidTargetIcon:Settings" })
-        rtSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 25)
+        rtSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), GUI.RowHeight.sectionHeader)
         rtSettings.disableChildrenOn = function(d) return not d.raidTargetIconEnabled end
         local raidTargetIconEnableCb = rtSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Target Marker Icon"], db, "raidTargetIconEnabled", function() DF:UpdateAllFrames() end), 30)
         raidTargetIconEnableCb.keepEnabled = true
@@ -8259,7 +8259,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- Appearance
         local rtAppearance = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "raidTargetIcon:Appearance" })
-        rtAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 25)
+        rtAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), GUI.RowHeight.sectionHeader)
         rtAppearance.disableChildrenOn = function(d) return not d.raidTargetIconEnabled end
         rtAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "raidTargetIconScale", nil, function() DF:LightweightUpdateIconPosition("raidTarget") end, true), 55)
         rtAppearance:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "raidTargetIconAlpha", nil, function() DF:LightweightUpdateIconAlpha("raidTarget") end, true), 55)
@@ -8270,7 +8270,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- Position
         local rtPosition = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "raidTargetIcon:Position" })
-        rtPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), 25)
+        rtPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), GUI.RowHeight.sectionHeader)
         rtPosition.disableChildrenOn = function(d) return not d.raidTargetIconEnabled end
         rtPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "raidTargetIconAnchor", function() DF:LightweightUpdateIconPosition("raidTarget") end), 55)
         rtPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "raidTargetIconX", nil, function() DF:LightweightUpdateIconPosition("raidTarget") end, true), 55)
@@ -8290,7 +8290,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- Settings
         local rcSettings = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "readyCheckIcon:Settings" })
-        rcSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 25)
+        rcSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), GUI.RowHeight.sectionHeader)
         rcSettings.disableChildrenOn = function(d) return not d.readyCheckIconEnabled end
         local readyCheckIconEnableCb = rcSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Ready Check Icon"], db, "readyCheckIconEnabled", function() DF:UpdateAllFrames() end), 30)
         readyCheckIconEnableCb.keepEnabled = true
@@ -8300,7 +8300,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- Appearance
         local rcAppearance = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "readyCheckIcon:Appearance" })
-        rcAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 25)
+        rcAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), GUI.RowHeight.sectionHeader)
         rcAppearance.disableChildrenOn = function(d) return not d.readyCheckIconEnabled end
         rcAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "readyCheckIconScale", nil, function() DF:LightweightUpdateIconPosition("readyCheck") end, true), 55)
         rcAppearance:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "readyCheckIconAlpha", nil, function() DF:LightweightUpdateIconAlpha("readyCheck") end, true), 55)
@@ -8311,7 +8311,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- Position
         local rcPosition = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "readyCheckIcon:Position" })
-        rcPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), 25)
+        rcPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), GUI.RowHeight.sectionHeader)
         rcPosition.disableChildrenOn = function(d) return not d.readyCheckIconEnabled end
         rcPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "readyCheckIconAnchor", function() DF:LightweightUpdateIconPosition("readyCheck") end), 55)
         rcPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "readyCheckIconX", nil, function() DF:LightweightUpdateIconPosition("readyCheck") end, true), 55)
@@ -8331,7 +8331,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- Settings
         local sumSettings = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "summonIcon:Settings" })
-        sumSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 25)
+        sumSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), GUI.RowHeight.sectionHeader)
         sumSettings.disableChildrenOn = function(d) return not d.summonIconEnabled end
         local summonIconEnableCb = sumSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Summon Icon"], db, "summonIconEnabled", function() DF:UpdateAllFrames() end), 30)
         summonIconEnableCb.keepEnabled = true
@@ -8344,7 +8344,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- Appearance
         local sumAppearance = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "summonIcon:Appearance" })
-        sumAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 25)
+        sumAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), GUI.RowHeight.sectionHeader)
         sumAppearance.disableChildrenOn = function(d) return not d.summonIconEnabled end
         sumAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "summonIconScale", nil, function() DF:LightweightUpdateIconPosition("summon") end, true), 55)
         sumAppearance:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "summonIconAlpha", nil, function() DF:LightweightUpdateIconAlpha("summon") end, true), 55)
@@ -8355,7 +8355,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- Position
         local sumPosition = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "summonIcon:Position" })
-        sumPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), 25)
+        sumPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), GUI.RowHeight.sectionHeader)
         sumPosition.disableChildrenOn = function(d) return not d.summonIconEnabled end
         sumPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "summonIconAnchor", function() DF:LightweightUpdateIconPosition("summon") end), 55)
         sumPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "summonIconX", nil, function() DF:LightweightUpdateIconPosition("summon") end, true), 55)
@@ -8378,7 +8378,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- Settings
         local bgcSettings = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "bgCarrierIcon:Settings" })
-        bgcSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 25)
+        bgcSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), GUI.RowHeight.sectionHeader)
         bgcSettings.disableChildrenOn = function(d) return not d.bgCarrierIconEnabled end
         local bgCarrierIconEnableCb = bgcSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable BG Carrier Icon"], db, "bgCarrierIconEnabled", function() DF:UpdateAllFrames() end), 30)
         bgCarrierIconEnableCb.keepEnabled = true
@@ -8390,7 +8390,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- Appearance
         local bgcAppearance = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "bgCarrierIcon:Appearance" })
-        bgcAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 25)
+        bgcAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), GUI.RowHeight.sectionHeader)
         bgcAppearance.disableChildrenOn = function(d) return not d.bgCarrierIconEnabled end
         bgcAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "bgCarrierIconScale", nil, function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end, true), 55)
         bgcAppearance:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "bgCarrierIconAlpha", nil, function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end, true), 55)
@@ -8400,7 +8400,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- Position
         local bgcPosition = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "bgCarrierIcon:Position" })
-        bgcPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), 25)
+        bgcPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), GUI.RowHeight.sectionHeader)
         bgcPosition.disableChildrenOn = function(d) return not d.bgCarrierIconEnabled end
         bgcPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "bgCarrierIconAnchor", function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end), 55)
         bgcPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "bgCarrierIconX", nil, function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end, true), 55)
@@ -8421,7 +8421,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- Settings
         local combatSettings = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "combatIcon:Settings" })
-        combatSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 25)
+        combatSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), GUI.RowHeight.sectionHeader)
         combatSettings.disableChildrenOn = function(d) return not d.combatIconEnabled end
         local combatIconEnableCb = combatSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Combat Icon"], db, "combatIconEnabled", function() DF:UpdateAllFrames() end), 30)
         combatIconEnableCb.keepEnabled = true
@@ -8431,7 +8431,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- Appearance
         local combatAppearance = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "combatIcon:Appearance" })
-        combatAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 25)
+        combatAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), GUI.RowHeight.sectionHeader)
         combatAppearance.disableChildrenOn = function(d) return not d.combatIconEnabled end
         combatAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "combatIconScale", nil, function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end, true), 55)
         combatAppearance:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "combatIconAlpha", nil, function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end, true), 55)
@@ -8441,7 +8441,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- Position
         local combatPosition = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "combatIcon:Position" })
-        combatPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), 25)
+        combatPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), GUI.RowHeight.sectionHeader)
         combatPosition.disableChildrenOn = function(d) return not d.combatIconEnabled end
         combatPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "combatIconAnchor", function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end), 55)
         combatPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "combatIconX", nil, function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end, true), 55)
@@ -8461,7 +8461,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- Settings
         local resSettings = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "resurrectionIcon:Settings" })
-        resSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 25)
+        resSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), GUI.RowHeight.sectionHeader)
         resSettings.disableChildrenOn = function(d) return not d.resurrectionIconEnabled end
         local resurrectionIconEnableCb = resSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Resurrection Icon"], db, "resurrectionIconEnabled", function() DF:UpdateAllFrames() end), 30)
         resurrectionIconEnableCb.keepEnabled = true
@@ -8475,7 +8475,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- Appearance
         local resAppearance = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "resurrectionIcon:Appearance" })
-        resAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 25)
+        resAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), GUI.RowHeight.sectionHeader)
         resAppearance.disableChildrenOn = function(d) return not d.resurrectionIconEnabled end
         resAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "resurrectionIconScale", nil, function() DF:LightweightUpdateIconPosition("resurrection") end, true), 55)
         resAppearance:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "resurrectionIconAlpha", nil, function() DF:LightweightUpdateIconAlpha("resurrection") end, true), 55)
@@ -8485,7 +8485,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- Position
         local resPosition = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "resurrectionIcon:Position" })
-        resPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), 25)
+        resPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), GUI.RowHeight.sectionHeader)
         resPosition.disableChildrenOn = function(d) return not d.resurrectionIconEnabled end
         resPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "resurrectionIconAnchor", function() DF:LightweightUpdateIconPosition("resurrection") end), 55)
         resPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "resurrectionIconX", nil, function() DF:LightweightUpdateIconPosition("resurrection") end, true), 55)
@@ -8505,7 +8505,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- Settings
         local phSettings = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "phasedIcon:Settings" })
-        phSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 25)
+        phSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), GUI.RowHeight.sectionHeader)
         phSettings.disableChildrenOn = function(d) return not d.phasedIconEnabled end
         local phasedIconEnableCb = phSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Phased Icon"], db, "phasedIconEnabled", function() DF:UpdateAllFrames() end), 30)
         phasedIconEnableCb.keepEnabled = true
@@ -8517,7 +8517,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- Appearance
         local phAppearance = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "phasedIcon:Appearance" })
-        phAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 25)
+        phAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), GUI.RowHeight.sectionHeader)
         phAppearance.disableChildrenOn = function(d) return not d.phasedIconEnabled end
         phAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "phasedIconScale", nil, function() DF:LightweightUpdateIconPosition("phased") end, true), 55)
         phAppearance:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "phasedIconAlpha", nil, function() DF:LightweightUpdateIconAlpha("phased") end, true), 55)
@@ -8528,7 +8528,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- Position
         local phPosition = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "phasedIcon:Position" })
-        phPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), 25)
+        phPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), GUI.RowHeight.sectionHeader)
         phPosition.disableChildrenOn = function(d) return not d.phasedIconEnabled end
         phPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "phasedIconAnchor", function() DF:LightweightUpdateIconPosition("phased") end), 55)
         phPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "phasedIconX", nil, function() DF:LightweightUpdateIconPosition("phased") end, true), 55)
@@ -8554,7 +8554,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- Settings
         local afkSettings = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "afkIcon:Settings" })
-        afkSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 25)
+        afkSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), GUI.RowHeight.sectionHeader)
         afkSettings.disableChildrenOn = function(d) return not d.afkIconEnabled end
         local afkIconEnableCb = afkSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable AFK Icon"], db, "afkIconEnabled", function() DF:UpdateAllFrames() end), 30)
         afkIconEnableCb.keepEnabled = true
@@ -8571,7 +8571,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Timer Text — elapsed-time text under the icon. Icon mode only (Show as
         -- Text off) with Show Timer on, so the whole box is gated.
         local afkTimerGroup = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "afkIcon:TimerText" })
-        afkTimerGroup:AddWidget(GUI:CreateHeader(self.child, L["Timer Text"]), 25)
+        afkTimerGroup:AddWidget(GUI:CreateHeader(self.child, L["Timer Text"]), GUI.RowHeight.sectionHeader)
         afkTimerGroup.disableChildrenOn = function(d) return not d.afkIconEnabled end
         afkTimerGroup:AddWidget(GUI:CreateFontDropdown(self.child, L["Font"], db, "afkIconTimerFont", afkTimerCB, "statusIconFont"), 55)
         afkTimerGroup:AddWidget(GUI:CreateSlider(self.child, L["Size"], 6, 24, 1, db, "afkIconTimerFontSize", afkTimerCB, afkTimerCB, true), 55)
@@ -8585,7 +8585,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- Appearance
         local afkAppearance = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "afkIcon:Appearance" })
-        afkAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 25)
+        afkAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), GUI.RowHeight.sectionHeader)
         afkAppearance.disableChildrenOn = function(d) return not d.afkIconEnabled end
         afkAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "afkIconScale", nil, function() DF:LightweightUpdateIconPosition("afk") end, true), 55)
         afkAppearance:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "afkIconAlpha", nil, function() DF:LightweightUpdateIconAlpha("afk") end, true), 55)
@@ -8596,7 +8596,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- Position
         local afkPosition = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "afkIcon:Position" })
-        afkPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), 25)
+        afkPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), GUI.RowHeight.sectionHeader)
         afkPosition.disableChildrenOn = function(d) return not d.afkIconEnabled end
         afkPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "afkIconAnchor", function() DF:LightweightUpdateIconPosition("afk") end), 55)
         afkPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "afkIconX", nil, function() DF:LightweightUpdateIconPosition("afk") end, true), 55)
@@ -8616,7 +8616,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- Settings
         local vehSettings = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "vehicleIcon:Settings" })
-        vehSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 25)
+        vehSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), GUI.RowHeight.sectionHeader)
         vehSettings.disableChildrenOn = function(d) return not d.vehicleIconEnabled end
         local vehicleIconEnableCb = vehSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Vehicle Icon"], db, "vehicleIconEnabled", function() DF:UpdateAllFrames() end), 30)
         vehicleIconEnableCb.keepEnabled = true
@@ -8627,7 +8627,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- Appearance
         local vehAppearance = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "vehicleIcon:Appearance" })
-        vehAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 25)
+        vehAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), GUI.RowHeight.sectionHeader)
         vehAppearance.disableChildrenOn = function(d) return not d.vehicleIconEnabled end
         vehAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "vehicleIconScale", nil, function() DF:LightweightUpdateIconPosition("vehicle") end, true), 55)
         vehAppearance:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "vehicleIconAlpha", nil, function() DF:LightweightUpdateIconAlpha("vehicle") end, true), 55)
@@ -8638,7 +8638,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- Position
         local vehPosition = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "vehicleIcon:Position" })
-        vehPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), 25)
+        vehPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), GUI.RowHeight.sectionHeader)
         vehPosition.disableChildrenOn = function(d) return not d.vehicleIconEnabled end
         vehPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "vehicleIconAnchor", function() DF:LightweightUpdateIconPosition("vehicle") end), 55)
         vehPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "vehicleIconX", nil, function() DF:LightweightUpdateIconPosition("vehicle") end, true), 55)
@@ -8658,7 +8658,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- Settings
         local rrSettings = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "raidRoleIcon:Settings" })
-        rrSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 25)
+        rrSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), GUI.RowHeight.sectionHeader)
         rrSettings.disableChildrenOn = function(d) return not d.raidRoleIconEnabled end
         local raidRoleIconEnableCb = rrSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Raid Role Icon"], db, "raidRoleIconEnabled", function() DF:UpdateAllFrames() end), 30)
         raidRoleIconEnableCb.keepEnabled = true
@@ -8672,7 +8672,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- Appearance
         local rrAppearance = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "raidRoleIcon:Appearance" })
-        rrAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 25)
+        rrAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), GUI.RowHeight.sectionHeader)
         rrAppearance.disableChildrenOn = function(d) return not d.raidRoleIconEnabled end
         rrAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "raidRoleIconScale", nil, function() DF:LightweightUpdateIconPosition("raidRole") end, true), 55)
         rrAppearance:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "raidRoleIconAlpha", nil, function() DF:LightweightUpdateIconAlpha("raidRole") end, true), 55)
@@ -8683,7 +8683,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- Position
         local rrPosition = GUI:CreateSettingsGroup(self.child, 280, { collapsible = true, collapseKey = "raidRoleIcon:Position" })
-        rrPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), 25)
+        rrPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), GUI.RowHeight.sectionHeader)
         rrPosition.disableChildrenOn = function(d) return not d.raidRoleIconEnabled end
         rrPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "raidRoleIconAnchor", function() DF:LightweightUpdateIconPosition("raidRole") end), 55)
         rrPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "raidRoleIconX", nil, function() DF:LightweightUpdateIconPosition("raidRole") end, true), 55)
@@ -8740,7 +8740,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         AddToSection(selGroup, nil, 1)
         
         currentSection = nil
-        AddSpace(10, "both")
+        AddSpace(GUI.Space.section, "both")
         
         -- ========================================
         -- HOVER HIGHLIGHT SECTION
@@ -8766,7 +8766,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         AddToSection(hoverGroup, nil, 1)
         
         currentSection = nil
-        AddSpace(10, "both")
+        AddSpace(GUI.Space.section, "both")
         
         -- ========================================
         -- AGGRO HIGHLIGHT SECTION
@@ -8840,7 +8840,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         currentSection = nil
         
         -- See Also links
-        AddSpace(20, "both")
+        AddSpace(GUI.Space.block, "both")
         Add(GUI:CreateSeeAlso(self.child, {
             {pageId = "auras_dispel", label = L["Dispel Overlay"]},
         }), 30, "both")
@@ -8915,7 +8915,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- entirely when the overlay is off; groups hide via their own hideOn
         -- + the section's collapsed state.
         AddSyncPoint()
-        AddSpace(10, "both")
+        AddSpace(GUI.Space.section, "both")
         local dfSection = GUI:CreateCollapsibleSection(self.child, L["Appearance"], true, 560)
         dfSection.hideOn = HideIfDisabled
         Add(dfSection, 36, "both")
@@ -9075,7 +9075,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
 
         -- See Also links
-        AddSpace(20, "both")
+        AddSpace(GUI.Space.block, "both")
         Add(GUI:CreateSeeAlso(self.child, {
             {pageId = "auras_debuffs", label = L["Debuffs"]},
             {pageId = "indicators_highlights", label = L["Highlights"]},
@@ -9351,7 +9351,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         AddToSection(specGroup, nil, 2)
         
         -- See Also links
-        AddSpace(20, "both")
+        AddSpace(GUI.Space.block, "both")
         Add(GUI:CreateSeeAlso(self.child, {
             {pageId = "profiles_importexport", label = L["Import/Export"]},
         }), 30, "both")
@@ -9783,7 +9783,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         AddToSection(importActionsGroup, nil, 2)
         
         -- See Also
-        AddSpace(15, "both")
+        AddSpace(GUI.Space.block, "both")
         Add(GUI:CreateSeeAlso(self.child, {
             {pageId = "profiles_manage", label = L["Manage Profiles"]},
         }), 30, "both")

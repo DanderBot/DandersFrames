@@ -4518,6 +4518,17 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 else
                     print("|cff00ff00DandersFrames:|r GUI module not loaded.")
                 end
+            elseif msg == "gapcheck" or msg == "gapcheck all" or msg == "gapcheck clear" then
+                -- Measures the vertical rhythm of the open page: how much slack
+                -- each row type carries below it, and the gap that actually lands
+                -- between stacked rows. RowHeight sets SLOTS, not gaps. Also
+                -- persists the raw rows to DandersFramesDebugDB for offline
+                -- analysis -- a hundred rows is not readable in the chat frame.
+                if DF.GUI and DF.GUI.GapCheck then
+                    DF.GUI.GapCheck(msg:match("^gapcheck%s+(%a+)$"))
+                else
+                    print("|cff00ff00DandersFrames:|r GUI module not loaded.")
+                end
             elseif msg == "navprobe" or msg:match("^navprobe%s+%d+$") then
                 -- Traces the left nav's hover state to separate a stale plate /
                 -- focus thrash / a dead band between rows from a pure rendering
@@ -4546,6 +4557,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 print("  |cff00ff00/df reset|r - |cffff6060" .. L["reset party + raid profiles to defaults"] .. "|r")
                 print("  |cff00ff00/df pixelcheck|r - " .. L["measure the open settings page against the pixel grid"])
                 print("  |cff00ff00/df navprobe [secs]|r - " .. L["trace the left nav's hover state while you move the cursor"])
+                print("  |cff00ff00/df gapcheck [all|clear]|r - " .. L["measure the spacing between rows on the open settings page"])
                 print("  |cff00ff00/df console|r - " .. L["open the debug console page"])
                 print("  |cff00ff00/df debug|r - " .. L["list debug commands (on/off toggles debug logging)"])
             elseif msg == "test" then

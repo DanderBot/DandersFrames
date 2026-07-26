@@ -1091,7 +1091,7 @@ function AutoProfilesUI:BuildPage(GUI, pageFrame, db, Add, AddSpace)
     
     Add(infoContainer, infoHeaderHeight + (infoCollapsed and 0 or infoBodyHeight), "both")
     
-    AddSpace(10, "both")
+    AddSpace(GUI.Space.section, "both")
     
     -- =============================================
     -- Content Type Sections (dynamic height via layoutHeight)

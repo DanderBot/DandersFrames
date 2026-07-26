@@ -7,7 +7,7 @@
 ## X-Curse-Project-ID: 1389690
 ## X-Wago-ID: RNL9B46o
 ## IconTexture: Interface\AddOns\DandersFrames\Media\DF_Icon
-## SavedVariables: DandersFramesDB_v2, DandersFramesClickCastingDB
+## SavedVariables: DandersFramesDB_v2, DandersFramesClickCastingDB, DandersFramesDebugDB
 ## SavedVariablesPerCharacter: DandersFramesCharDB
 ## AllowAddOnTableAccess: 1
 ## OptionalDeps: LibSharedMedia-3.0, SharedMedia, SharedMedia_MyMedia, SharedMediaAdditionalFonts, FrameSort

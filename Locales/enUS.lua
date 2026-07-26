@@ -76,6 +76,7 @@ L["lock/unlock party frames"] = true
 L["lock/unlock raid frames"] = true
 L["Mouseover resolution debug"] = true
 L["measure the open settings page against the pixel grid"] = true
+L["measure the spacing between rows on the open settings page"] = true
 L["open settings"] = true
 L["trace the left nav's hover state while you move the cursor"] = true
 L["open the debug console page"] = true

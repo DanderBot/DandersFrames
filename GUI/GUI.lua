@@ -68,20 +68,109 @@ GUI.DialogColors = {
 -- page. New callers can omit the height entirely; legacy call-site numbers on fixed widgets are
 -- ignored (harmless, strippable later). Variable widgets (labels, headers, spacers) are NOT stamped
 -- and keep whatever height they are given. One place to retune the whole GUI's vertical rhythm.
+-- THE vertical rhythm of the whole GUI.
+--
+-- These are SLOT heights, not gaps -- LayoutChildren stacks rows flush
+-- (y = y - height), so the gap the eye sees between two rows is:
+--
+--     (slot - content) of the row above  +  (content's top inset) of the row below
+--
+-- which means a row whose content is short inside a tall slot silently gets a big
+-- gap. That is how the GUI ended up with a 4x spread. /df gapcheck measured it
+-- across four pages (267 rows), and the content heights came back IDENTICAL on
+-- every page, so the slots can be derived rather than guessed:
+--
+--     kind          content   old slot   old gap      new slot   new gap
+--     slider          32.0       55        23.0          46        14
+--     dropdown        39.8       55        15.2          54        14
+--     editbox         39.0       55        16.0          53        14
+--     colorpicker     23.9       30         6.1          38        14
+--     checkbox        18.2       30        11.8*         35        14*
+--     header          11.9    34 / 40   11.0 / 17.0      37        14
+--
+-- So: ONE gap, and every slot is content + RowGap. 14 is not arbitrary -- it is
+-- what the dropdown rows already had (15.2), the one spacing Krathe confirmed
+-- reads correctly. Sliders lose 9px of slack, colour pickers gain 8.
+--
+-- * the checkbox's content sits 2.9px below its slot top, so a row landing ON a
+--   checkbox reads 14 + 2.9. Zeroing that would mean re-anchoring the checkbox
+--   art itself, which moves the tick 3px for 3px -- not worth it.
+--
+-- A header keeps its 11.1px top inset, so the gap ABOVE a header is 14 + 11.1.
+-- That is deliberate: a section title wants air above it and to sit close to
+-- what it labels.
+GUI.RowGap = 14
+
+-- ...with ONE exception: a RUN of the same COMPACT row type closes up.
+--
+-- A uniform gap everywhere is right between DIFFERENT kinds -- that is the
+-- boundary the eye uses to tell one control apart from the next. But eight
+-- checkboxes in a column are one list, not eight things, and 14 between each of
+-- them reads as a stack of unrelated rows. So consecutive rows of the same
+-- compact kind get RowGapTight, and the first row of a different kind after them
+-- gets the full RowGap back. Same spacing between TYPES, tighter within a type.
+--
+-- Compact means the label sits INLINE with the control (a checkbox's text is
+-- beside its tick). Slider, dropdown and edit box are deliberately NOT compact:
+-- their label sits ABOVE the control, so tightening the gap there would push the
+-- next row's label into the control above it -- the same reasoning already
+-- recorded on labelPad, and the reason a stack of sliders needs real air even
+-- though a stack of checkboxes does not.
+GUI.RowGapTight = 8
+GUI.RowCompact = {
+    checkbox    = true,
+    toggle      = true,
+    colorpicker = true,
+}
+
+-- PAGE-level spacing, a different axis from the row rhythm above: AddSpace
+-- inserts a spacer into the page's COLUMN flow, between groups, not between rows
+-- inside one. Groups already carry a 10px margin of their own, so these stack ON
+-- TOP of that -- a `section` break reads as 20 between two groups, a `block` as
+-- 30.
+--
+-- The audit found 58 AddSpace calls passing 9 different numbers, which looked
+-- worse than it was: classified by INTENT rather than by value, two idioms cover
+-- 42 of them and both were already internally consistent --
+--
+--   section break (after `currentSection = nil`, or a bare gap after a group)
+--       19/19 at 10, plus 7 more following an Add(<group>)
+--   before the See-Also links at the foot of a page
+--       15/16 at 20, one stray 15
+--
+-- The real inconsistency was three files each picking their own number for the
+-- SAME intent (NicknamesPage used 12 throughout), not 9 competing rhythms.
+GUI.Space = {
+    section = 10,   -- between logical sections in a page column
+    block   = 20,   -- before a distinct trailing block (the See-Also links)
+    footer  = 12,   -- below the See-Also bar when it is parked at the viewport bottom
+}
+
 GUI.RowHeight = {
-    checkbox    = 30,
-    slider      = 55,
-    dropdown    = 55,
-    colorpicker = 30,   -- match the checkbox row (both ~24px of content) so the rhythm reads even
-    editbox     = 55,
-    toggle      = 30,   -- two-state switch; same ~24px of content as a checkbox, same row
+    checkbox    = 35,   -- 2.9 top inset + 18.2 content + RowGap
+    slider      = 46,   -- 32.0 content + RowGap  (was 55: a slot sized for the dropdown)
+    dropdown    = 54,   -- 39.8 content + RowGap
+    colorpicker = 38,   -- 23.9 content + RowGap
+    editbox     = 53,   -- 39.0 content + RowGap (box at -15, h24)
+    toggle      = 35,   -- two-state switch; same content as a checkbox, same row
     -- Labels are VARIABLE height (they wrap), so they have no fixed row — but they do
     -- have fixed CHROME, which CreateLabel adds to the measured text height: the 5px top
-    -- inset its FontString sits at, plus 13px below. That 13 IS the whole visible gap to
-    -- the next row — LayoutChildren stacks rows flush (y = y - height) and a labelled
-    -- control (dropdown/slider/editbox) puts its own label at TOPLEFT 0,0 — so a smaller
-    -- pad reads as a blurb crowding the control it describes.
-    labelPad    = 18,
+    -- inset its FontString sits at, plus the gap below. That gap IS the whole visible
+    -- space to the next row — LayoutChildren stacks rows flush (y = y - height) and a
+    -- labelled control (dropdown/slider/editbox) puts its own label at TOPLEFT 0,0 — so a
+    -- smaller pad reads as a blurb crowding the control it describes.
+    labelPad    = 5 + GUI.RowGap,
+    -- EVERY section header, collapsible or not. CreateHeader's container is 25
+    -- tall with its text pinned to the BOTTOM, so its 11.1px of internal padding
+    -- all sits ABOVE the text and this slot minus 25 is the entire visible gap
+    -- below it -- at exactly 25 there is none.
+    --
+    -- The old split was never designed: collapsible groups were handed 25 (no
+    -- gap) and plain ones 40, across both files, for the same construct. Rather
+    -- than sweep ~200 call sites, CreateHeader now marks itself fixedRowHeight,
+    -- so ResolveRowHeight IGNORES the literal a call site passes and every header
+    -- lands here. That is the same rule the other factory rows already follow.
+    sectionHeader = 11.1 + 11.9 + GUI.RowGap,   -- top inset + text + the gap
 }
 
 -- Resolve the layout slot height for a widget being added to a group/page. Fixed-height widgets
@@ -806,6 +895,10 @@ end
 -- mouse), then a live trace of every change in focus and in each row's plate
 -- alpha, stamped with the frame number. (a) and (b) show up as repeated
 -- transitions within a single crossing; (c) as a run of frames with nothing lit.
+-- Stamped once when this file loads, so it identifies THIS session (and therefore
+-- this build) for the gapcheck capture below.
+local GAP_SESSION = date and date("%Y-%m-%d %H:%M:%S") or "?"
+
 local navTrace
 function GUI.NavProbe(seconds)
     local container = GUI.tabContainer
@@ -938,6 +1031,264 @@ function GUI.NavProbe(seconds)
         end
     end)
 end
+
+-- ============================================================
+-- /df gapcheck -- measure the vertical rhythm, don't eyeball it
+--
+-- The question this answers: "which rows are too far apart, and which are too
+-- close?" It cannot be answered from GUI.RowHeight alone, because those numbers
+-- are SLOT heights, not gaps. LayoutChildren stacks rows flush (y = y - height),
+-- so the visible gap between two rows is:
+--
+--     (slot height - content bottom) of the row above
+--   + (slot top - content top)      of the row below
+--
+-- A row whose content is short inside a tall slot gets a big gap and nothing
+-- flags it. The slider is the worst case by construction: it shares the 55 slot
+-- with the dropdown and edit box, whose openers reach ~40, while a slider only
+-- draws to ~32 (label, an 8px track, a 20px value box) -- so it carries ~23px of
+-- slack against their ~15.
+--
+-- Measured, not derived, for a reason: labels WRAP, override markers hang off
+-- rows, banners re-measure themselves after construction, and hideOn rows drop
+-- out. Only the live rects know the real content extent, which is exactly the
+-- lesson from the border bug -- the arithmetic looked right there too.
+--
+-- Rows are compared only against their SIBLINGS IN THE SAME GROUP. That is where
+-- the rhythm actually reads, and it sidesteps having to reconstruct which column
+-- a widget landed in.
+local function ContentExtent(f)
+    local top, bottom
+    local function acc(o)
+        if not o or not o.IsShown or not o:IsShown() then return end
+        -- Skip things that draw NOTHING: an empty label or a fully transparent
+        -- placeholder still has a rect, and counting it would inflate the content
+        -- and hide the very slack we are looking for.
+        --
+        -- FontStrings ONLY. An EditBox also answers GetText, and an empty one
+        -- would have been skipped here even though its box is plainly drawn --
+        -- which would have under-measured every blank input on the page.
+        if o.GetObjectType and o:GetObjectType() == "FontString" then
+            local s = o:GetText()
+            if s == nil or s == "" then return end
+        end
+        if o.GetAlpha and (o:GetAlpha() or 1) <= 0.01 then return end
+        local t, b = o:GetTop(), o:GetBottom()
+        if t and b then
+            top = (top and math.max(top, t)) or t
+            bottom = (bottom and math.min(bottom, b)) or b
+        end
+    end
+    if f.GetRegions then for _, r in ipairs({ f:GetRegions() }) do acc(r) end end
+    if f.GetChildren then for _, c in ipairs({ f:GetChildren() }) do acc(c) end end
+    return top, bottom
+end
+
+-- Every SHOWN SettingsGroup under the page, at any depth (the Aura Designer nests
+-- its groups inside cards).
+local function CollectGroups(root, out, depth)
+    if not root or (depth or 0) > 8 then return out end
+    if root.groupChildren and root.IsShown and root:IsShown() then out[#out + 1] = root end
+    if root.GetChildren then
+        for _, c in ipairs({ root:GetChildren() }) do
+            if c.IsShown and c:IsShown() then CollectGroups(c, out, (depth or 0) + 1) end
+        end
+    end
+    return out
+end
+
+function GUI.GapCheck(mode)
+    if mode == "clear" then
+        DandersFramesDebugDB = DandersFramesDebugDB or {}
+        DandersFramesDebugDB.gapcheck = nil
+        print("|cff7373f2DandersFrames|r gapcheck: saved capture cleared (/reload to flush).")
+        return
+    end
+
+    local page, pageName
+    for name, p in pairs(GUI.Pages or {}) do
+        if p.IsShown and p:IsShown() then page, pageName = p, name break end
+    end
+    if not page then
+        print("|cff7373f2DandersFrames|r gapcheck: no settings page is open.")
+        return
+    end
+
+    local groups = CollectGroups(page.child or page, {}, 0)
+    local rows, byKind, pairs_, nRows = {}, {}, {}, 0
+
+    for _, group in ipairs(groups) do
+        local prev
+        for _, entry in ipairs(group.groupChildren or {}) do
+            local w = entry.widget
+            if w and w.IsShown and w:IsShown() and entry.height then
+                local slotTop = w:GetTop()
+                local cTop, cBot = ContentExtent(w)
+                if slotTop and cTop and cBot then
+                    -- The slot is entry.height from the widget's TOP -- NOT the
+                    -- widget's own rect. LayoutChildren only sets TOPLEFT (and
+                    -- width), so a container constructed at 50 sitting in a 55
+                    -- slot would under-report by 5 if we used GetBottom().
+                    local slotBot = slotTop - entry.height
+                    local kind = w.rowKind or (w.LayoutChildren and "group")
+                        or (w.GetObjectType and w:GetObjectType()) or "?"
+                    local r = {
+                        kind    = kind,
+                        label   = (w.GetText and w:GetText()) or (w.Text and w.Text.GetText and w.Text:GetText()) or kind,
+                        slot    = entry.height,
+                        content = cTop - cBot,
+                        padTop  = slotTop - cTop,
+                        padBot  = cBot - slotBot,
+                        -- Absolute edges, because the gap has to be measured from
+                        -- where the rows LANDED, not from entry.height. The layout
+                        -- can shorten a row after the fact (the compact-run
+                        -- tightening does exactly that), and slot arithmetic
+                        -- cannot see it -- the first version of this reported the
+                        -- untightened number and made the feature look inert.
+                        cTop    = cTop,
+                        cBot    = cBot,
+                        -- The slot's own top, so the height the layout ACTUALLY
+                        -- used is derivable offline (prev.slotTop - this.slotTop)
+                        -- and can be compared against entry.height.
+                        slotTop  = slotTop,
+                        tight    = w._rowTightened or false,
+                        nextKind = w._rowNextKind,
+                    }
+                    nRows = nRows + 1
+                    rows[#rows + 1] = r
+
+                    local k = byKind[kind]
+                    if not k then k = { n = 0, slot = 0, content = 0, padTop = 0, padBot = 0 } byKind[kind] = k end
+                    k.n, k.slot, k.content = k.n + 1, k.slot + r.slot, k.content + r.content
+                    k.padTop, k.padBot = k.padTop + r.padTop, k.padBot + r.padBot
+
+                    -- The gap the eye actually sees: the distance between where
+                    -- the previous row's content ENDED and this one's STARTS,
+                    -- straight off the resolved rects.
+                    if prev then
+                        local gap = prev.cBot - r.cTop
+                        local key = ("%s -> %s"):format(prev.kind, kind)
+                        local p = pairs_[key]
+                        if not p then p = { n = 0, sum = 0, min = gap, max = gap } pairs_[key] = p end
+                        p.n, p.sum = p.n + 1, p.sum + gap
+                        p.min, p.max = math.min(p.min, gap), math.max(p.max, gap)
+                    end
+                    prev = r
+                end
+            end
+        end
+    end
+
+    if nRows == 0 then
+        print(("|cff7373f2DandersFrames|r gapcheck  page=|cffffffff%s|r -- no measurable rows (all collapsed?)")
+            :format(tostring(pageName)))
+        return
+    end
+
+    print(("|cff7373f2DandersFrames|r gapcheck  page=|cffffffff%s|r  %d groups  %d rows  (UI units)")
+        :format(tostring(pageName), #groups, nRows))
+
+    print("  per kind -- slot is what RowHeight hands out, content is what it actually draws:")
+    local kinds = {}
+    for kind in pairs(byKind) do kinds[#kinds + 1] = kind end
+    table.sort(kinds, function(a, b) return (byKind[a].padBot / byKind[a].n) > (byKind[b].padBot / byKind[b].n) end)
+    for _, kind in ipairs(kinds) do
+        local k = byKind[kind]
+        print(("    %-12s n=%-3d slot %5.1f  content %5.1f  padTop %4.1f  |cffffcc00padBottom %4.1f|r")
+            :format(kind, k.n, k.slot / k.n, k.content / k.n, k.padTop / k.n, k.padBot / k.n))
+    end
+
+    -- Did the compact-run tightening actually fire? The gap alone cannot say --
+    -- it only shows the result -- and reading the source said it should while the
+    -- measurement said it had not. So count the decision directly, and when a run
+    -- did NOT close up, name the kind that broke it.
+    local tightened, compactRows, breakers = 0, 0, {}
+    for _, r in ipairs(rows) do
+        if GUI.RowCompact[r.kind] then
+            compactRows = compactRows + 1
+            if r.tight then
+                tightened = tightened + 1
+            elseif r.nextKind then
+                breakers[r.nextKind] = (breakers[r.nextKind] or 0) + 1
+            end
+        end
+    end
+    if compactRows > 0 then
+        local why = {}
+        for k, n in pairs(breakers) do why[#why + 1] = ("%s x%d"):format(k, n) end
+        table.sort(why)
+        print(("  compact-run tightening: |cffffcc00%d/%d|r compact rows closed up%s")
+            :format(tightened, compactRows,
+                #why > 0 and ("  |cff808080(run broken by: %s)|r"):format(table.concat(why, ", ")) or ""))
+    end
+
+    print("  gaps between stacked rows (padBottom above + padTop below) -- widest first:")
+    local keys = {}
+    for key in pairs(pairs_) do keys[#keys + 1] = key end
+    table.sort(keys, function(a, b) return (pairs_[a].sum / pairs_[a].n) > (pairs_[b].sum / pairs_[b].n) end)
+    for _, key in ipairs(keys) do
+        local p = pairs_[key]
+        local avg = p.sum / p.n
+        -- A pair whose min and max differ is NOT a spacing constant -- something
+        -- (a wrapped label, a hand-rolled AddSpace) is varying it, and averaging
+        -- would hide exactly that.
+        local spread = (p.max - p.min > 0.5)
+            and ("  |cffff6060varies %.1f..%.1f|r"):format(p.min, p.max) or ""
+        print(("    %6.1f  %-26s x%d%s"):format(avg, key, p.n, spread))
+    end
+
+    if mode == "all" then
+        print("  every row, in layout order:")
+        for _, r in ipairs(rows) do
+            print(("    %-12s %-22s slot %5.1f  content %5.1f  padTop %4.1f  padBottom %4.1f")
+                :format(r.kind, tostring(r.label):sub(1, 22), r.slot, r.content, r.padTop, r.padBot))
+        end
+    end
+
+    -- Persist the RAW rows to SavedVariables. Reading a hundred rows out of the
+    -- chat frame is not practical, and transcribing them by hand would introduce
+    -- exactly the kind of error this probe exists to avoid.
+    --
+    -- Keyed BY PAGE so visiting several pages accumulates one dataset instead of
+    -- each run overwriting the last -- walk the pages you care about, then
+    -- /reload ONCE. SavedVariables are only flushed on logout or reload, so a run
+    -- that is never followed by one is never written.
+    --
+    -- Its own saved variable, not a corner of DandersFramesDB_v2: diagnostics
+    -- must not sit inside the profile DB, where they would ride along with every
+    -- export and show up in the export audit.
+    DandersFramesDebugDB = DandersFramesDebugDB or {}
+    DandersFramesDebugDB.gapcheck = DandersFramesDebugDB.gapcheck or {}
+    -- Drop everything from a PREVIOUS session first. Accumulating by page is what
+    -- makes a multi-page capture possible, but it also means a page you did not
+    -- revisit after a code change keeps its stale rows -- and mixing two builds
+    -- invents variance that is not in either of them. (It already cost one wrong
+    -- diagnosis: three stale pages made the row heights look like they had not
+    -- applied at all.) One /reload = one dataset.
+    if DandersFramesDebugDB.gapSession ~= GAP_SESSION then
+        wipe(DandersFramesDebugDB.gapcheck)
+        DandersFramesDebugDB.gapSession = GAP_SESSION
+    end
+    local dump = { when = date("%Y-%m-%d %H:%M:%S"), rows = {} }
+    if page.GetEffectiveScale then dump.scale = page:GetEffectiveScale() end
+    for i, r in ipairs(rows) do
+        dump.rows[i] = {
+            kind = r.kind, label = tostring(r.label):sub(1, 40),
+            slot = r.slot, content = r.content,
+            padTop = r.padTop, padBot = r.padBot,
+            cTop = r.cTop, cBot = r.cBot,   -- so gaps can be re-derived offline
+            slotTop = r.slotTop, tight = r.tight, nextKind = r.nextKind,
+        }
+    end
+    DandersFramesDebugDB.gapcheck[tostring(pageName)] = dump
+
+    local nPages = 0
+    for _ in pairs(DandersFramesDebugDB.gapcheck) do nPages = nPages + 1 end
+    print(("  |cff00ff00saved|r %d rows to DandersFramesDebugDB.gapcheck[\"%s\"] -- %d page(s) captured. |cffffcc00Visit the pages you care about, then /reload to flush.|r")
+        :format(#rows, tostring(pageName), nPages))
+    print("  |cff808080Read: padBottom is the slack under a row -- the knob is GUI.RowHeight[kind], and slot - content IS that slack. A kind sorting to the top of the first list is over-spaced; one near zero is cramped. In the second list, 'varies' means the gap is not coming from RowHeight alone. Add 'all' for every row, 'clear' to wipe the saved capture.|r")
+end
+GUI.GapCheckAll = function() GUI.GapCheck("all") end
 
 -- Every frame that carries a 1px backdrop edge, so the sweep below can find them
 -- without any page needing to know what it contains. Weak keys: a retired page's
@@ -1140,7 +1491,15 @@ function GUI:CreateHeader(parent, text)
     local container = CreateFrame("Frame", nil, parent)
     container:SetSize(200, 25)
     container:Show()
-    
+    container.rowKind = "header"
+    -- Factory-owned slot, and fixed so ResolveRowHeight ignores whatever the call
+    -- site passes. Headers were handed 25 in collapsible groups and 40 in plain
+    -- ones -- the same widget, two rhythms, across ~200 sites. Owning it here
+    -- unifies them without touching any of those call sites, which is exactly the
+    -- rule the other factory rows already follow (see GUI.RowHeight).
+    container.preferredHeight = GUI.RowHeight.sectionHeader
+    container.fixedRowHeight = true
+
     local h = container:CreateFontString(nil, "OVERLAY", "DFFontNormal")
     h:SetPoint("BOTTOMLEFT", container, "BOTTOMLEFT", 0, 2)
     h:SetText(text)
@@ -1581,9 +1940,48 @@ function GUI:CreateSettingsGroup(parent, width, opts)
         local innerWidth = SnapLen(self, (self:GetWidth() or 0) - (padding * 2))
         local canSize = innerWidth > 0
 
+        -- Will this entry be laid out on this pass? Factored out of the loop below
+        -- so the run look-ahead cannot drift from the loop's own visibility test:
+        -- a hidden row must not break a run, or toggling one row's hideOn would
+        -- silently change the spacing of the rows around it.
+        local layoutDB = DF.db[GUI.SelectedMode]
+        local function entryVisible(entry, index)
+            if self.collapsed and index > 1 then return false end
+            local w = entry and entry.widget
+            if not w then return false end
+            if w.hideOn and layoutDB and w.hideOn(layoutDB) then return false end
+            return true
+        end
+
         for i, entry in ipairs(self.groupChildren) do
             local widget = entry.widget
             local height = entry.height
+
+            -- Close up a RUN of the same compact kind (see GUI.RowGapTight). The
+            -- reduction is taken off THIS row's slot, so it only ever affects the
+            -- gap to the row below -- and only when that row is the same compact
+            -- kind, which is what keeps the boundary between different kinds at
+            -- the full RowGap.
+            local kind = widget.rowKind
+            widget._rowTightened, widget._rowNextKind = false, nil
+            if kind and GUI.RowCompact[kind] then
+                for j = i + 1, #self.groupChildren do
+                    if entryVisible(self.groupChildren[j], j) then
+                        -- Recorded even when it does NOT match, so /df gapcheck can
+                        -- say WHY a run did not close up: a row with no rowKind
+                        -- sitting between two checkboxes breaks the run for the
+                        -- layout while being invisible to the report (a widget
+                        -- that draws nothing is skipped there), which would look
+                        -- like the tightening was simply inert.
+                        widget._rowNextKind = self.groupChildren[j].widget.rowKind or "<none>"
+                        if self.groupChildren[j].widget.rowKind == kind then
+                            height = height - (GUI.RowGap - GUI.RowGapTight)
+                            widget._rowTightened = true
+                        end
+                        break   -- only the NEXT visible row decides
+                    end
+                end
+            end
 
             -- If collapsed, only show the header (first widget)
             if self.collapsed and i > 1 then
@@ -3903,9 +4301,21 @@ end
 function GUI:CreateSeeAlso(parent, links)
     local container = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     container:SetHeight(32)
+    -- The page's own footer: pinned to the bottom of the viewport on a SHORT
+    -- page instead of floating wherever the content happened to end. See the
+    -- footer block in the page layout.
+    container.isPageFooter = true
     CreateElementBackdrop(container, {
         bgColor     = { 0.1, 0.1, 0.1, 0.5 },
         borderColor = { 0.3, 0.3, 0.3, 0.8 },
+        -- STRUCTURAL. This is a full-width panel the PAGE layout positions and
+        -- sizes, not a control -- the same category as a settings group, and it
+        -- has to be flagged as one or SnapBoxToPixelGrid skips its geometry
+        -- (correction is structural-boxes-only, to stop chained controls
+        -- drifting). Without it the box lands off the grid and its 1px top edge
+        -- splits across two device rows: the missing-border symptom, back again
+        -- on the one surface that was never a group.
+        snapSize    = true,
     })
     
     local label = container:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
@@ -4487,6 +4897,7 @@ function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, 
     local container = CreateFrame("Frame", nil, parent)
     container:SetSize(220, 24)
     container.preferredHeight = GUI.RowHeight.checkbox   -- factory-owned slot height (see GUI.RowHeight)
+    container.rowKind = "checkbox"       -- /df gapcheck groups the spacing report by this
     container.fixedRowHeight = true
 
     local cb = CreateFrame("CheckButton", nil, container, "BackdropTemplate")
@@ -4876,6 +5287,7 @@ function GUI:CreateEditBox(parent, label, dbTable, dbKey, callback, width, place
     local frame = CreateFrame("Frame", nil, parent)
     frame:SetSize(width or 180, 44)
     frame.preferredHeight = GUI.RowHeight.editbox   -- factory-owned slot height (see GUI.RowHeight)
+    frame.rowKind = "editbox"
     frame.fixedRowHeight = true
     
     local lbl = frame:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
@@ -5150,6 +5562,7 @@ function GUI:CreateSlider(parent, label, minVal, maxVal, step, dbTable, dbKey, c
     local container = CreateFrame("Frame", nil, parent)
     container:SetSize(260, 50)
     container.preferredHeight = GUI.RowHeight.slider   -- factory-owned slot height (see GUI.RowHeight)
+    container.rowKind = "slider"
     container.fixedRowHeight = true
     
     -- Label
@@ -5652,6 +6065,7 @@ function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback
     local container = CreateFrame("Frame", nil, parent)
     container:SetSize(260, 28)
     container.preferredHeight = GUI.RowHeight.colorpicker   -- factory-owned slot height (see GUI.RowHeight)
+    container.rowKind = "colorpicker"
     container.fixedRowHeight = true
     
     -- Button - use relative anchoring so it resizes with container
@@ -5896,6 +6310,7 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
     -- form owns a fixed slot height; inline keeps whatever height its host passes.
     if not opts.inline then
         container.preferredHeight = GUI.RowHeight.dropdown   -- factory-owned slot (see GUI.RowHeight)
+        container.rowKind = "dropdown"
         container.fixedRowHeight = true
     end
 
@@ -8516,7 +8931,12 @@ function GUI:CreateRoleOrderList(parent, dbTable, dbKey, callback, separateMelee
     }
     
     local roleItems = {}
-    local ITEM_HEIGHT = 30
+    -- Snapped stride + gap: a raw 30-unit stride is 42.19 device px, so every
+    -- row would sit on a different sub-pixel phase and the error would
+    -- ACCUMULATE down the list (row 3 off by twice row 2). Rows are anchored
+    -- by two corners, so nothing corrects them after the fact.
+    local ITEM_HEIGHT = SnapLen(parent, 30) or 30
+    local ITEM_GAP = SnapLen(parent, 2) or 2
     local draggingItem = nil
     local dragOffsetY = 0
     
@@ -8612,7 +9032,7 @@ function GUI:CreateRoleOrderList(parent, dbTable, dbKey, callback, separateMelee
         local order = GetCurrentOrder()
         local numRoles = #order
         
-        container:SetHeight(numRoles * ITEM_HEIGHT + 5)
+        container:SetHeight(numRoles * ITEM_HEIGHT + (SnapLen(container, 5) or 5))
         
         for _, item in pairs(roleItems) do
             item:Hide()
@@ -8661,7 +9081,7 @@ function GUI:CreateRoleOrderList(parent, dbTable, dbKey, callback, separateMelee
         if not info then return nil end
         
         local item = CreateFrame("Frame", nil, container, "BackdropTemplate")
-        item:SetHeight(ITEM_HEIGHT - 2)
+        item:SetHeight(ITEM_HEIGHT - ITEM_GAP)
         item:EnableMouse(true)
         CreateElementBackdrop(item, {
             bgColor     = { 0.12, 0.12, 0.12, 0.9 },
@@ -8875,7 +9295,9 @@ function GUI:CreateClassOrderList(parent, dbTable, dbKey, callback)
     }
     
     local classItems = {}
-    local ITEM_HEIGHT = 24  -- Slightly smaller to fit all classes
+    -- Snapped; see CreateRoleOrderList.
+    local ITEM_HEIGHT = SnapLen(parent, 24) or 24   -- smaller, to fit all classes
+    local ITEM_GAP = SnapLen(parent, 2) or 2
     local draggingItem = nil
     local dragOffsetY = 0
     
@@ -8934,7 +9356,7 @@ function GUI:CreateClassOrderList(parent, dbTable, dbKey, callback)
         local order = GetCurrentOrder()
         local numClasses = #order
         
-        container:SetHeight(numClasses * ITEM_HEIGHT + 5)
+        container:SetHeight(numClasses * ITEM_HEIGHT + (SnapLen(container, 5) or 5))
         
         for _, item in pairs(classItems) do
             item:Hide()
@@ -8983,7 +9405,7 @@ function GUI:CreateClassOrderList(parent, dbTable, dbKey, callback)
         if not info then return nil end
         
         local item = CreateFrame("Frame", nil, container, "BackdropTemplate")
-        item:SetHeight(ITEM_HEIGHT - 2)
+        item:SetHeight(ITEM_HEIGHT - ITEM_GAP)
         item:EnableMouse(true)
         CreateElementBackdrop(item, {
             bgColor     = { 0.12, 0.12, 0.12, 0.9 },
@@ -9182,7 +9604,9 @@ function GUI:CreateGroupOrderList(parent, dbTable, dbKey, callback, playerGroupF
     }
     
     local groupItems = {}
-    local ITEM_HEIGHT = 28
+    -- Snapped; see CreateRoleOrderList.
+    local ITEM_HEIGHT = SnapLen(parent, 28) or 28
+    local ITEM_GAP = SnapLen(parent, 2) or 2
     local draggingItem = nil
     local dragOffsetY = 0
     
@@ -9285,7 +9709,7 @@ function GUI:CreateGroupOrderList(parent, dbTable, dbKey, callback, playerGroupF
         local color = GROUP_COLORS[groupNum]
         
         local item = CreateFrame("Frame", nil, container, "BackdropTemplate")
-        item:SetHeight(ITEM_HEIGHT - 2)
+        item:SetHeight(ITEM_HEIGHT - ITEM_GAP)
         item:EnableMouse(true)
         CreateElementBackdrop(item, {
             bgColor     = { 0.12, 0.12, 0.12, 0.9 },
@@ -9478,7 +9902,9 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
     local container = CreateFrame("Frame", nil, parent)
     container:SetSize(460, 340)
     
-    local ITEM_HEIGHT = 26
+    -- Snapped; see CreateRoleOrderList.
+    local ITEM_HEIGHT = SnapLen(parent, 26) or 26
+    local ITEM_GAP = SnapLen(parent, 2) or 2
     local COL_WIDTH = 224  -- Wider columns
     local COL_GAP = 12     -- Smaller gap between columns
     
@@ -9690,7 +10116,7 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
     -- ========== ROSTER ITEM (Left Column) ==========
     local function CreateRosterItem(playerData, index)
         local item = CreateFrame("Frame", nil, leftContent, "BackdropTemplate")
-        item:SetHeight(ITEM_HEIGHT - 2)
+        item:SetHeight(ITEM_HEIGHT - ITEM_GAP)
         item:SetPoint("TOPLEFT", 0, -((index - 1) * ITEM_HEIGHT))
         item:SetPoint("TOPRIGHT", 0, -((index - 1) * ITEM_HEIGHT))
         -- Transparent plate: the hover/selected states tint it, so it needs a fill
@@ -9791,7 +10217,7 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
     -- ========== HIGHLIGHT ITEM (Right Column - Draggable) ==========
     local function CreateHighlightItem(fullName, index, totalCount)
         local item = CreateFrame("Frame", nil, rightContent, "BackdropTemplate")
-        item:SetHeight(ITEM_HEIGHT - 2)
+        item:SetHeight(ITEM_HEIGHT - ITEM_GAP)
         item:SetPoint("TOPLEFT", 0, -((index - 1) * ITEM_HEIGHT))
         item:SetPoint("TOPRIGHT", 0, -((index - 1) * ITEM_HEIGHT))
         item:EnableMouse(true)
@@ -12157,7 +12583,36 @@ function DF:CreateGUI()
                     if math.abs(currentBottom) > maxY then maxY = math.abs(currentBottom) end
                 end
             end
-            self.child:SetHeight(maxY + 40 + bannerOffset)
+            local contentH = maxY + 40 + bannerOffset
+
+            -- FOOTER: the See-Also bar is designed as one, so on a page whose
+            -- content does not fill the viewport it should sit at the BOTTOM
+            -- rather than floating halfway down with dead space under it. On a
+            -- page that does fill (or overflow) the viewport it already lands at
+            -- the end of the flow, which reads correctly -- so this only moves it
+            -- when there is spare room, and the long-page case is untouched.
+            --
+            -- Done by stretching the scroll child to the viewport height and
+            -- anchoring the footer to the child's BOTTOM: the child is what the
+            -- flow is measured against, so this keeps the footer inside the
+            -- scrolled content (it still scrolls with a long page) instead of
+            -- floating over it.
+            local footer
+            for _, w in ipairs(self.children) do
+                if w.isPageFooter and w:IsShown() then footer = w break end
+            end
+            if footer then
+                local viewH = self:GetHeight() or 0
+                if viewH > contentH then
+                    contentH = viewH
+                    footer:ClearAllPoints()
+                    footer:SetPoint("BOTTOMLEFT", self.child, "BOTTOMLEFT",
+                        SnapLen(self.child, x1), SnapLen(self.child, GUI.Space.footer))
+                    footer:SetWidth(SnapLen(footer, usableWidth))
+                end
+            end
+
+            self.child:SetHeight(contentH)
 
             -- Land every box on the physical pixel grid. Must run after the loop
             -- above: the snap measures each frame's RESOLVED screen position, so
