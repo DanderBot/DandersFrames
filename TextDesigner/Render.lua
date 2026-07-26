@@ -545,26 +545,7 @@ end
 -- recolours the live FontStrings immediately (and on each expiring-ticker tick).
 -- ============================================================
 
-function Render:SetAuraColorOverride(frame, category, color)
-    if not frame or not category or not color then return end
-    frame._tdAuraColor = frame._tdAuraColor or {}
-    frame._tdAuraColor[category] = color
-    if frame._tdFontStrings then
-        for _, fs in pairs(frame._tdFontStrings) do
-            if fs._tdCategory == category then
-                fs:SetTextColor(color.r, color.g, color.b, color.a or 1)
-            end
-        end
-    end
-end
 
-function Render:ClearAuraColorOverride(frame, category)
-    if not frame or not category then return end
-    if not (frame._tdAuraColor and frame._tdAuraColor[category] ~= nil) then return end
-    frame._tdAuraColor[category] = nil
-    -- Re-render this category so TD reapplies its normal / class colour.
-    DF:UpdateTextDesigner(frame, category)
-end
 
 -- ============================================================
 -- DIAGNOSTICS — /df tdmirror

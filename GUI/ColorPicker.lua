@@ -1611,26 +1611,6 @@ local function HideBlizzardPicker()
     blizzardPickerHidden = true
 end
 
--- Restore Blizzard's color picker to normal state
-local function RestoreBlizzardPicker()
-    if not ColorPickerFrame then return end
-    
-    -- Re-register the close event
-    ColorPickerFrame:RegisterEvent("GLOBAL_MOUSE_DOWN")
-    
-    -- Restore scale
-    ColorPickerFrame:SetScale(1)
-    
-    -- Restore visibility
-    ColorPickerFrame:SetAlpha(1)
-    ColorPickerFrame:EnableMouse(true)
-    
-    -- Restore position (Blizzard will handle this on next open)
-    ColorPickerFrame:ClearAllPoints()
-    ColorPickerFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
-    
-    blizzardPickerHidden = false
-end
 
 -- Sync color to Blizzard's hidden picker (this triggers addon callbacks automatically!)
 local function SyncColorToBlizzard(r, g, b, a)
@@ -1660,28 +1640,6 @@ local function SyncColorToBlizzard(r, g, b, a)
     end
 end
 
--- Click Blizzard's OK button (handles all callback execution properly)
-local function ClickBlizzardOK()
-    if ColorPickerFrame and ColorPickerFrame.Footer and ColorPickerFrame.Footer.OkayButton then
-        -- Mark as not hidden first (prevents cleanup hook from running)
-        blizzardPickerHidden = false
-        
-        -- Keep scale tiny during click to prevent flicker
-        -- Restore other properties so callbacks work
-        ColorPickerFrame:RegisterEvent("GLOBAL_MOUSE_DOWN")
-        ColorPickerFrame:SetAlpha(1)
-        ColorPickerFrame:EnableMouse(true)
-        -- Scale stays tiny!
-        
-        -- Click OK - Blizzard will hide the frame
-        ColorPickerFrame.Footer.OkayButton:Click()
-        
-        -- Now restore scale for next time (frame is hidden now)
-        ColorPickerFrame:SetScale(1)
-        ColorPickerFrame:ClearAllPoints()
-        ColorPickerFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
-    end
-end
 
 -- Click Blizzard's OK button with color sync (for external addon use)
 local function ClickBlizzardOKWithColor(r, g, b, a)

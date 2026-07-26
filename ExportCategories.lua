@@ -1331,18 +1331,6 @@ DF.ExportPresets = {
 -- HELPER FUNCTIONS
 -- ===========================================
 
--- Build a reverse lookup: setting key -> category
-function DF:BuildCategoryLookup()
-    if self._categoryLookup then return self._categoryLookup end
-    
-    self._categoryLookup = {}
-    for category, keys in pairs(self.ExportCategories) do
-        for _, key in ipairs(keys) do
-            self._categoryLookup[key] = category
-        end
-    end
-    return self._categoryLookup
-end
 
 
 -- Extract settings for specific categories from a profile

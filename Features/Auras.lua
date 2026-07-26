@@ -406,14 +406,6 @@ local function borderEscapeHex(width, height, hex, texture)
         .. ":0:" .. ts .. ":0:" .. ts .. ":" .. r .. ":" .. g .. ":" .. b .. "|t"
 end
 
--- Public: one tinted escape at `width` x `height` px (height defaults to width = square) /
--- `color` ({r,g,b} 0-1) / `thickness` (THIN/MEDIUM/THICK/FILL). The AD editor's canvas preview
--- uses this; the live formatter calls borderEscapeHex per band.
-function DF:GetExpiryBorderEscape(width, height, color, thickness)
-    local w = math.max(1, math.floor(tonumber(width) or 18))
-    local h = math.max(1, math.floor(tonumber(height) or tonumber(width) or 18))
-    return borderEscapeHex(w, h, colorToHex(color or { r = 1, g = 0.2, b = 0.2 }), borderTexture(thickness))
-end
 
 -- Account-wide colour-by-time breakpoints (editable on the Colours page). Resolve to a
 -- threshold-DESCENDING list of { threshold, hex } so the first match (highest threshold <=
@@ -962,13 +954,6 @@ function DF:GetAuraDurationUpdateInterval()
     return c or nil
 end
 
--- Shared with the Aura Designer factory (P4.4): its placed icon/square/bar duration text
--- reuses the EXACT same secret-safe colour-by-time BUCKET formatter as the #205 buff/debuff
--- rows (|cRRGGBB escapes baked into the native NumericRuleFormatter bands, evaluated C-side).
--- Cached, so repeated SyncFrame calls return the same shared formatter object.
-function DF:GetFactoryDurationFormatter(format, hideAboveT, colorByTime, alertMode, alertThreshold, alertText, alertGlyphKey)
-    return GetDurationFormatter(format, hideAboveT, colorByTime, alertMode, alertThreshold, alertText, alertGlyphKey)
-end
 
 -- Percent renderer for the percent-family duration formats ("45%"): one band,
 -- rounding down, min 1 so a dying aura reads "1%" until it drops (mirrors the
@@ -1618,33 +1603,6 @@ local function cfSig(cf)
     return table.concat(parts, "&")
 end
 
--- Serialize cfg.filter for the row signature. Handles the three shapes
--- normalizeFilters accepts: plain string, array of strings (buff row — MUST
--- produce the exact same sig as the old table.concat(f, ";") so upgrades
--- don't spuriously rebuild buff rows), and array of records
--- { filter, key, candidateFilters } (debuff row).
-local function filterListSig(f)
-    if type(f) ~= "table" then return f end
-    local parts = {}
-    for i = 1, #f do
-        local entry = f[i]
-        if type(entry) == "table" then
-            parts[i] = tostring(entry.filter) .. "#" .. tostring(entry.key) .. "#" .. cfSig(entry.candidateFilters)
-        else
-            parts[i] = entry
-        end
-    end
-    return table.concat(parts, ";")
-end
-
--- Public form of filterListSig for the AD debuff-group containers (C1): the
--- records DF:BuildDebuffFilterRecords returns are the exact record shape the
--- row folds into its own signature, so AD groups reuse the same serializer for
--- their structural sigs (a selection edit moves the records, the sig follows).
-function DF:DebuffFilterRecordsSig(records)
-    return filterListSig(records)
-end
-
 -- STRUCTURAL half of a filter list: token strings + record keys only — the parts
 -- AddAuraGroup freezes (a group's filterString can't be changed live; the record SET
 -- defines the groups themselves). Per-record candidateFilters are deliberately
@@ -1864,7 +1822,7 @@ end
 -- claimed-category set (DF:GetClaimedDebuffCategories — nil when AD is off /
 -- doesn't own AD / has no debuff groups), so categories an enabled AD debuff
 -- group displays are dropped from the row. Claims fold into the row signature
--- for free — they change the RECORDS, and filterListSig serializes the records
+-- for free — they change the RECORDS, and filterStructSig serializes the records
 -- — so a claim/unclaim (which rides an auraLayoutVersion bump from the AD GUI's
 -- structural refresh) re-enters the version gate below and rebuilds.
 --

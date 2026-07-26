@@ -1685,14 +1685,6 @@ function DF:RegisterFrameForPing(frame)
         -- Set the ping-receiver attribute
         frame:SetAttribute("ping-receiver", true)
         
-        -- Return the live GUID for the frame's current unit
-        -- No caching needed - UnitGUID is cheap and frame.unit is always current
-        function frame:GetTargetPingGUID()
-            if self.unit and UnitExists(self.unit) then
-                return UnitGUID(self.unit)
-            end
-            return nil
-        end
     end
 end
 

@@ -155,12 +155,6 @@ local function GetGroupRoster()
     return roster
 end
 
--- Get player's full name (Name-Realm)
-local function GetPlayerFullName()
-    local name = UnitName("player")
-    local realm = GetRealmName()
-    return name .. "-" .. realm
-end
 
 -- ============================================================
 -- NAMELIST BUILDING
@@ -1308,12 +1302,6 @@ function FlatRaidFrames:Initialize()
         return
     end
     
-    -- Only initialize if the toggle is enabled
-    if false then -- useNewFlatRaid always true
-        DebugPrint("useNewFlatRaid is false, skipping initialization")
-        return
-    end
-    
     DebugPrint("Initializing FlatRaidFrames...")
     
     self:CreateFrames()
@@ -1479,10 +1467,6 @@ SlashCmdList["DFFLATRAID"] = function(msg)
         
     elseif msg == "test" then
         -- Quick test - initialize and enable
-        if false then -- useNewFlatRaid always true
-            print("|cFF00FFFF[DF FlatRaid]|r Toggle is OFF. Use /dfnewflat to enable first.")
-            return
-        end
         FlatRaidFrames:Initialize()
         FlatRaidFrames:SetEnabled(true)
         print("|cFF00FFFF[DF FlatRaid]|r Test: Initialized and enabled")

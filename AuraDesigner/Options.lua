@@ -3712,24 +3712,6 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         return group
     end
 
-    -- Lightweight subheader for inline section dividers inside a
-    -- SettingsGroup.  Smaller and dimmer than GUI:CreateHeader (which is
-    -- for top-level group headers) — used in the Expiring section to
-    -- separate State Overrides from Icon Effects.  Returned as a Frame
-    -- so it composes with g:AddWidget like every other widget.
-    local function CreateInlineSubheader(text)
-        local frame = CreateFrame("Frame", nil, parent)
-        frame:SetHeight(18)
-        local label = frame:CreateFontString(nil, "OVERLAY")
-        if GUI.SetSettingsFont then
-            GUI:SetSettingsFont(label, 8, "")
-        end
-        label:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 2, 1)
-        label:SetText(text)
-        local c = GetThemeColor()
-        label:SetTextColor(c.r, c.g, c.b, 0.75)
-        return frame
-    end
 
     -- ── COPY FROM (placed indicators only: icon, square, bar) ──
     if indicatorID and (typeKey == "icon" or typeKey == "square" or typeKey == "bar") then

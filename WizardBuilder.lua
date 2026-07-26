@@ -71,23 +71,6 @@ end
 local LibSerialize = LibStub("LibSerialize", true)
 local LibDeflate = LibStub("LibDeflate", true)
 
-function WB:ExportWizard(name)
-    local configs = GetWizardConfigs()
-    local config = configs[name]
-    if not config then return nil, "Wizard not found" end
-    if not LibSerialize or not LibDeflate then return nil, "Missing libraries" end
-
-    local serialized = LibSerialize:Serialize(config)
-    if not serialized then return nil, "Serialization failed" end
-
-    local compressed = LibDeflate:CompressDeflate(serialized)
-    if not compressed then return nil, "Compression failed" end
-
-    local encoded = LibDeflate:EncodeForPrint(compressed)
-    if not encoded then return nil, "Encoding failed" end
-
-    return "!DFW1!" .. encoded
-end
 
 function WB:ImportWizard(str)
     if not str or str == "" then return nil, "Empty string" end
@@ -1129,13 +1112,7 @@ WB.BuildWizardConfig = BuildWizardConfig
 -- that actually costs us something while it stays unkept.
 local builtinWizards = {}
 
-function WB:RegisterBuiltinWizard(entry)
-    tinsert(builtinWizards, entry)
-end
 
-function WB:GetBuiltinWizards()
-    return builtinWizards
-end
 
 -- Import wizard via slash command
 function WB:HandleImportCommand(str)

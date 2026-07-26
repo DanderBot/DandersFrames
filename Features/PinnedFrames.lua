@@ -161,14 +161,6 @@ end
 -- 4 keeps the editor tab strip on one row and the active-header count sane.
 PinnedFrames.MAX_SETS = 4
 
--- Count of sets defined in this mode's pinned config, clamped to MAX_SETS.
-local function NumSets(hlDB)
-    hlDB = hlDB or GetPinnedDB()
-    if not hlDB or not hlDB.sets then return 0 end
-    local n = #hlDB.sets
-    if n > PinnedFrames.MAX_SETS then n = PinnedFrames.MAX_SETS end
-    return n
-end
 
 -- Get the current actual mode (not cached)
 local function GetActualMode()

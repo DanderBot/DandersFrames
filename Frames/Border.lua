@@ -314,15 +314,6 @@ function Border:IconGeometry(spec, thickness, borderInset)
     return spec
 end
 
--- Inset an icon's art/texture so the band frames it: by `thickness` when the
--- border is enabled, 0 when it's off (art fills the slot).
-function Border:SetIconArtInset(texture, thickness, enabled)
-    if not texture then return end
-    local i = (enabled and thickness) or 0
-    texture:ClearAllPoints()
-    texture:SetPoint("TOPLEFT",     i, -i)
-    texture:SetPoint("BOTTOMRIGHT", -i,  i)
-end
 
 -- ============================================================
 -- COLOUR RESOLVERS (Stage 2)
@@ -1847,39 +1838,6 @@ function Border:StartAnimation(border, spec)
     end
 end
 
--- Recolour the border AND whatever animation is currently running, WITHOUT a
--- restart.  The expiring ticker calls this ~3×/sec; routing through
--- StartAnimation would re-hash, Stop (tearing down every dash / overlay) and
--- redraw each tick.  Recolours: base edges (via SetColor), DF_DASH bars
--- (the chasing-pixel textures), CORNERS_ONLY corner-overlay textures, and the
--- Blink overlays.  The DF particle/flipbook glows (Chase/Pixel/Proc/Flash) keep
--- their own colour (the expiring tint still applies to the edges underneath).
-function Border:RecolorActive(border, r, g, b, a)
-    if not border then return end
-    a = a or 1
-    if border.SetColor then border:SetColor(r, g, b, a) end
-    local active = border.activeAnimation
-    if active == "DF_DASH" then
-        -- DF Dash: recolour the live dashes + stash for the next redraw.
-        border._dfDashR, border._dfDashG, border._dfDashB, border._dfDashA = r, g, b, a
-        if border.dashPool then
-            -- Recolour all pooled dashes (hidden ones stay hidden) — never read
-            -- IsShown(), which is a SECRET boolean on container-button borders.
-            for _, edge in pairs(border.dashPool) do
-                for _, d in ipairs(edge) do d:SetColorTexture(r, g, b, a) end
-            end
-        end
-    elseif active == "CORNERS_ONLY" then
-        if border.cornerOverlays then
-            for _, e in pairs(border.cornerOverlays) do e:SetColorTexture(r, g, b, a) end
-        end
-        if border.animOverlay then
-            for _, e in pairs(border.animOverlay) do e:SetColorTexture(r, g, b, a) end
-        end
-    elseif border.animOverlay then
-        for _, e in pairs(border.animOverlay) do e:SetColorTexture(r, g, b, a) end
-    end
-end
 
 -- ============================================================
 -- ANCHOR-ONLY TEXTURE BORDER (secretRect widgets)

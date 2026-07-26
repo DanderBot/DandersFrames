@@ -1077,12 +1077,6 @@ local function bindNative(slot, config)
     end
 end
 
--- Custom-path wrapper: regions then native bind, preserving the original order + behaviour.
--- (_build and ApplyStyle call this. Increment 2 calls the two halves separately per backend.)
-local function styleButton(slot, config)
-    styleButton_regions(slot, config)
-    bindNative(slot, config)
-end
 
 -- ============================================================
 -- LAYOUT  (row mode)
@@ -1981,11 +1975,6 @@ end
 local Handle = {}
 Handle.__index = Handle
 
--- Backend contract (layout half): the backend calls these to hand produced slots in and
--- to lay them out. The handle owns positioning/styling/lifecycle; the backend owns the
--- source object + slot production.
-function Handle:_getConfig() return self.config end
-function Handle:_getAnchorFrame() return self.frame end
 function Handle:_slotCount()
     local mode = self.config.mode
     if mode == "overlay" or mode == "missing" then return 1 end
@@ -2513,15 +2502,6 @@ function Handle:_positionTestTip(tip, index)
     local x = (L.offsetX or 0) + (pAxis.x * col + sAxis.x * row) * (sx + spX) * scale
     local y = (L.offsetY or 0) + ((pAxis.y * col + sAxis.y * row) * strideY + vSign * inset) * scale
     tip:SetPoint(G.anchor, self.frame, G.anchor, x, y)
-end
-function Handle:_layoutSlots()
-    -- NATIVE row mode = the container's own flow layout anchors the buttons (wired via
-    -- applyContainerLayout at build; hot-applied via NativeBackend:applyLayout) — never
-    -- hand-anchor those (SetPoint would fight the secure flow layout). PLAIN slots
-    -- (a future non-native "slots" mode) would hand-anchor via layoutRow.
-    if self.config.mode == "overlay" then return end
-    if self.backend and self.backend:isNativeSlots() then return end
-    layoutRow(self)
 end
 
 -- Build the per-button styling callback Blizzard invokes (securecallfunction) for each
