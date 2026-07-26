@@ -26,7 +26,18 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     -- Helper function to create a themed "Copy to Raid/Party" button for a section.
     -- Pass omitReset=true for pages that manage their own reset flow (Aura Designer,
     -- Click Casting) so they only get the Sync/Copy pair, not the destructive trio.
-    local function CreateCopyButton(parent, prefixes, sectionName, pageId, omitReset)
+    -- `hooks` (optional) lets a page whose section is not a bag of plain settings
+    -- describe what Copy/Sync really do there. Every field is optional and every
+    -- absent field keeps the generic wording and the generic behaviour, so the
+    -- ~25 pages that pass no hooks are untouched:
+    --   copyLine(src, dest)          -> replacement Copy tooltip line
+    --   copyMessage(mode, dest)      -> replacement Copy confirm message
+    --   syncMessage(mode, dest)      -> replacement Sync-on confirm message
+    --   unsyncLine(sectionName)      -> replacement "already synced" tooltip line
+    --   onUnsync(mode, doUnsync)     -> owns turning sync OFF; must call doUnsync
+    -- Used by the Aura and Text Designers, whose section is a single preset NAME:
+    -- see GUI:DesignerCopyHooks.
+    local function CreateCopyButton(parent, prefixes, sectionName, pageId, omitReset, hooks)
         -- Register section in the sync registry
         if pageId then
             DF.SectionRegistry[pageId] = prefixes
@@ -100,7 +111,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             GUI:ShowTooltip(self, {
                 title = format(L["Copy %s Settings"], sectionName),
                 lines = {
-                    format(L["Copies these settings from %s to %s."], src, dest),
+                    (hooks and hooks.copyLine and hooks.copyLine(src, dest))
+                        or format(L["Copies these settings from %s to %s."], src, dest),
                 },
             })
         end)
@@ -114,7 +126,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             local dest = mode == "party" and L["Raid"] or L["Party"]
             DF:ShowPopupAlert({
                 title = format(L["Copy %s Settings"], sectionName),
-                message = format(L["Copy %s settings to %s?"], sectionName, dest),
+                message = (hooks and hooks.copyMessage and hooks.copyMessage(mode, dest))
+                    or format(L["Copy %s settings to %s?"], sectionName, dest),
                 buttons = {
                     {
                         label = L["Copy"],
@@ -136,7 +149,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                     GUI:ShowTooltip(self, {
                         title = format(L["Synced: %s"], sectionName),
                         lines = {
-                            format(L["Party & Raid %s settings are synced.\nClick to stop syncing."], sectionName),
+                            (hooks and hooks.unsyncLine and hooks.unsyncLine(sectionName))
+                                or format(L["Party & Raid %s settings are synced.\nClick to stop syncing."], sectionName),
                         },
                     })
                 else
@@ -158,14 +172,26 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 if not DF.db.linkedSections then DF.db.linkedSections = {} end
 
                 if DF.db.linkedSections[pageId] then
-                    DF.db.linkedSections[pageId] = nil
-                    UpdateAppearance()
+                    -- onUnsync owns the whole turn-off flow (it may need to ask
+                    -- first), so it is handed the plain unlink to finish with.
+                    local function doUnsync()
+                        DF.db.linkedSections[pageId] = nil
+                        UpdateAppearance()
+                        if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
+                    end
+                    if hooks and hooks.onUnsync then
+                        hooks.onUnsync(GUI.SelectedMode or "party", doUnsync)
+                    else
+                        DF.db.linkedSections[pageId] = nil
+                        UpdateAppearance()
+                    end
                 else
                     local mode = GUI.SelectedMode or "party"
                     local dest = mode == "party" and L["Raid"] or L["Party"]
                     DF:ShowPopupAlert({
                         title = format(L["Sync: %s"], sectionName),
-                        message = format(L["Sync %s settings?\n\nThis will copy current %s settings to %s and keep them in sync."], sectionName, sectionName, dest),
+                        message = (hooks and hooks.syncMessage and hooks.syncMessage(mode, dest))
+                            or format(L["Sync %s settings?\n\nThis will copy current %s settings to %s and keep them in sync."], sectionName, sectionName, dest),
                         buttons = {
                             {
                                 label = L["Sync"],

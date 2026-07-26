@@ -5527,7 +5527,7 @@ end
 -- and every add path is blocked.
 local function ADCrossBlockText(rec)
     if IsCandidateCrossBlocked(rec.auraName, ResolveSpec()) then
-        return IsOtherTab() and L["In My Buffs"] or L["In Other Buffs"]
+        return IsOtherTab() and L["In My Buffs"] or L["In Any Buff"]
     end
     return nil
 end
@@ -5769,7 +5769,7 @@ local function ADAddByID(idNum, idText, picker, mode, typeKey, groupID)
         end
     end
     if crossBlocked then
-        picker:Echo(isOther and L["Already tracked in My Buffs."] or L["Already tracked in Other Buffs."])
+        picker:Echo(isOther and L["Already tracked in My Buffs."] or L["Already tracked in Any Buff."])
         return
     end
 
@@ -8541,7 +8541,11 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     enableBanner:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", 0, yPos)
 
     if GUI.CreateCopyButton then
-        local copyBtn = GUI.CreateCopyButton(enableBanner, {"auraDesigner"}, L["Aura Designer"], "auras_auradesigner", true)
+        -- Preset-aware Copy/Sync wording + an additive un-sync (GUI:DesignerCopyHooks):
+        -- the one key this section owns is the preset NAME, so both buttons SHARE a
+        -- preset rather than copy one.
+        local copyBtn = GUI.CreateCopyButton(enableBanner, {"auraDesigner"}, L["Aura Designer"], "auras_auradesigner", true,
+            GUI.DesignerCopyHooks and GUI:DesignerCopyHooks("aura"))
         copyBtn:ClearAllPoints()
         -- Row 1 centre is 16px above banner centre, so y = +16.
         copyBtn:SetPoint("RIGHT", enableBanner, "RIGHT", -5, 16)
@@ -8594,10 +8598,24 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     buffTabBar:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 0, yPos)
     buffTabBar:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", 0, yPos)
 
+    -- The three pools differ on two axes the labels can't carry — WHOSE casts
+    -- count, and whether the pool is per-spec — so each tab explains itself on
+    -- hover. (Any Buff is caster-agnostic by default; "Others Only" is the
+    -- per-effect opt-in that ignores your own casts.)
     local MAIN_TAB_DEFS = {
-        { key = "my",      label = L["My Buffs"]    },
-        { key = "debuffs", label = L["Debuffs"]     },
-        { key = "other",   label = L["Other Buffs"] },
+        { key = "my",      label = L["My Buffs"], tooltip = {
+            L["Buffs from your own class, and only when you cast them."],
+            L["Set up separately for each specialization."],
+        } },
+        { key = "debuffs", label = L["Debuffs"], tooltip = {
+            L["Groups of debuffs picked by category — boss, crowd control, dispellable and so on — rather than one spell at a time."],
+            L["Shared across all your specializations."],
+        } },
+        { key = "other",   label = L["Any Buff"], tooltip = {
+            L["Any buff in the spell database, from any caster — including your own."],
+            L["Turn on Others Only for an effect to ignore your own casts."],
+            L["Shared across all your specializations."],
+        } },
     }
     wipe(mainTabButtons)
     local prevMainBtn
@@ -8614,6 +8632,13 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
         end
         local capturedKey = def.key
         btn:SetScript("OnClick", function() SetMainTab(capturedKey) end)
+        -- HookScript, not SetScript: StyleButton owns OnEnter/OnLeave for the
+        -- hover wash, and replacing them would leave the tab stuck lit.
+        local tipTitle, tipLines = def.label, def.tooltip
+        btn:HookScript("OnEnter", function(self)
+            GUI:ShowTooltip(self, { title = tipTitle, lines = tipLines, anchor = "ANCHOR_BOTTOM" })
+        end)
+        btn:HookScript("OnLeave", function() GUI:HideTooltip() end)
         btn:SetActive(activeBuffTab == def.key)
         mainTabButtons[def.key] = btn
         prevMainBtn = btn

@@ -2987,6 +2987,46 @@ function GUI:CreateDesignerPresetBar(parent, opts)
         if menu:IsShown() then menu:Hide() else BuildMenu(); menu:Show() end
     end)
 
+    -- SHARING MARKER. A preset can be pointed at by the other mode, a pinned set
+    -- or an auto layout, and editing it then changes every one of them — which
+    -- nothing on this bar used to say. The dropdown is a fixed 150px, so the
+    -- FACT rides as a glyph and the NAMES go in the tooltip, which is free.
+    local shareIcon = ddBtn:CreateTexture(nil, "OVERLAY")
+    shareIcon:SetSize(12, 12)
+    shareIcon:SetPoint("RIGHT", arrow, "LEFT", -3, 0)
+    shareIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\sync")
+    shareIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    shareIcon:Hide()
+
+    -- Read off the REFS, not the party/raid sync flag: sharing by hand (picking
+    -- the other mode's preset from this dropdown) counts exactly the same, and a
+    -- ref can't fall out of step with itself.
+    local function SharedWith()
+        if IsEditingLayout() and DF.IsLayoutDesignerInheriting and DF:IsLayoutDesignerInheriting(kind) then
+            return {}   -- inheriting: this bar isn't sitting on a preset of its own
+        end
+        return (DF.ListDesignerPresetUsers and DF:ListDesignerPresetUsers(kind, CurrentName(), getMode())) or {}
+    end
+
+    -- What a preset IS isn't guessable from a dropdown of names, and the
+    -- consumers (party/raid, auto layouts, pinned sets) are spread across three
+    -- other pages. Explained here once, for both designers.
+    ddBtn:SetScript("OnEnter", function(self)
+        local lines = {
+            L["A preset is a saved designer setup, kept under a name."],
+            L["Party and Raid each pick one, so they can share a setup or use different ones."],
+            L["Auto layouts and pinned frame sets can pick their own, or inherit the one their mode is using."],
+        }
+        local shared = SharedWith()
+        if #shared > 0 then
+            lines[#lines + 1] = " "
+            lines[#lines + 1] = { text = format(L["Shared with: %s"], table.concat(shared, ", ")), accent = true }
+            lines[#lines + 1] = L["Editing this preset changes all of them."]
+        end
+        GUI:ShowTooltip(self, { title = L["Presets"], lines = lines })
+    end)
+    ddBtn:SetScript("OnLeave", function() GUI:HideTooltip() end)
+
     -- When editing a raid auto-layout, default the NEW preset name to the
     -- layout's name (e.g. editing "31-40" → prefill "31-40") so making a
     -- per-layout preset is one click + Enter. nil (blank) otherwise. (Duplicate
@@ -3084,6 +3124,13 @@ function GUI:CreateDesignerPresetBar(parent, opts)
 
     function bar:Refresh()
         ddBtn.text:SetText(CurrentLabel())
+        -- Make room for the share glyph only while it's up, so an unshared
+        -- preset keeps the full label width.
+        local isShared = #SharedWith() > 0
+        shareIcon:SetShown(isShared)
+        ddBtn.text:ClearAllPoints()
+        ddBtn.text:SetPoint("LEFT", 6, 0)
+        ddBtn.text:SetPoint("RIGHT", isShared and -30 or -16, 0)
         -- Rename/Delete act on the resolved preset; disable for the non-editable
         -- Default and while a layout is inheriting (you're following the global,
         -- not sitting on a layout-specific preset).
@@ -3095,7 +3142,101 @@ function GUI:CreateDesignerPresetBar(parent, opts)
     end
 
     bar:Refresh()
+    -- The sharing glyph reflects the OTHER mode's ref, which Copy / Sync / a
+    -- split all change without changing THIS mode's — and both designer pages
+    -- early-return their rebuild when their own preset is unchanged, so the
+    -- glyph would sit stale. Register the live bar so the shared page refresh
+    -- can reach it. One slot per kind: a rebuilt page overwrites its own entry,
+    -- and a torn-down bar is hidden, so nothing accumulates.
+    GUI._designerPresetBars = GUI._designerPresetBars or {}
+    GUI._designerPresetBars[kind] = bar
     return bar
+end
+
+function GUI:RefreshDesignerPresetBars()
+    for _, bar in pairs(GUI._designerPresetBars or {}) do
+        if bar.Refresh and bar:IsShown() then bar:Refresh() end
+    end
+end
+
+-- Copy/Sync hooks for the two designer pages (see CreateCopyButton's `hooks`).
+--
+-- Their "section" is not a bag of settings — the migration moved the configs
+-- into the preset library and strips the inline table on every load, so the ONE
+-- key Copy/Sync move is the preset NAME. That makes both buttons share a preset
+-- rather than duplicate one, which the generic wording does not say, and it made
+-- un-syncing a no-op: the other mode stayed on your preset with nothing to
+-- signal it. These hooks say what actually happens, and give un-sync a way out
+-- that is purely additive — never a revert, never an overwrite.
+function GUI:DesignerCopyHooks(kind)
+    local sectionLabel = (kind == "aura") and L["Aura Designer"] or L["Text Designer"]
+    local function ModeLabel(mode) return (mode == "raid") and L["Raid"] or L["Party"] end
+    local function Other(mode) return (mode == "party") and "raid" or "party" end
+    local function NameFor(mode) return DF:GetModeDesignerPresetName(kind, mode) end
+
+    return {
+        copyLine = function(src, dest)
+            return format(L["Points %s at the preset %s is using, so both share one setup."], dest, src)
+        end,
+
+        copyMessage = function(mode, dest)
+            return format(
+                L["Use the preset \"%s\" for %s as well?\n\nThis shares one setup rather than copying it — editing either mode then changes both. %s's current preset \"%s\" stays in the list."],
+                NameFor(mode), dest, dest, NameFor(Other(mode)))
+        end,
+
+        syncMessage = function(mode, dest)
+            local cur, destName = NameFor(mode), NameFor(Other(mode))
+            if destName == cur then
+                -- Already sharing by hand: syncing adds the running link, not the sharing.
+                return format(
+                    L["Keep %s and %s on the preset \"%s\", and keep the choice in step?\n\nThey already share it, so nothing changes on screen."],
+                    ModeLabel(mode), dest, cur)
+            end
+            return format(
+                L["Use the preset \"%s\" for %s as well, and keep the choice in step?\n\nEditing either mode then changes both. %s's current preset \"%s\" stays in the list and is not deleted."],
+                cur, dest, dest, destName)
+        end,
+
+        unsyncLine = function()
+            return L["Party & Raid are keeping their preset choice in step.\nClick to stop, and optionally give each its own copy."]
+        end,
+
+        onUnsync = function(mode, doUnsync)
+            -- Nothing to split when the two modes are already on different
+            -- presets (someone changed a dropdown by hand) — plain unlink.
+            local cur = NameFor(mode)
+            if NameFor(Other(mode)) ~= cur then
+                doUnsync()
+                return
+            end
+            -- The copy always goes to RAID, whichever tab you are standing on.
+            -- It is byte-identical to the original, so which mode "moves" is
+            -- purely cosmetic — but the copy gets named after its mode, and
+            -- "Raid" is the only naming that reads right. Party is the base mode
+            -- everywhere else in the addon (DefaultPresetNameForMode included).
+            DF:ShowPopupAlert({
+                title = format(L["Stop syncing: %s"], sectionLabel),
+                -- Three buttons at 150 need 466px; the alert default is 440.
+                width = 500,
+                buttonWidth = 150,
+                message = format(
+                    L["%s and %s are both using the preset \"%s\".\n\nGive %s its own copy so the two can differ from here? The copy starts out identical, so nothing changes on screen and nothing is deleted or overwritten."],
+                    L["Party"], L["Raid"], cur, L["Raid"]),
+                buttons = {
+                    {
+                        label = format(L["Give %s a Copy"], L["Raid"]),
+                        onClick = function()
+                            if DF.SplitDesignerPreset then DF:SplitDesignerPreset(kind, "raid") end
+                            doUnsync()
+                        end,
+                    },
+                    { label = L["Stop Syncing Only"], onClick = doUnsync },
+                    { label = L["Cancel"] },
+                },
+            })
+        end,
+    }
 end
 
 -- Creates a button with an icon and text
@@ -10711,6 +10852,9 @@ function DF:CreateGUI()
         end
         -- Refresh override indicators
         RefreshAllOverrideIndicators()
+        -- A designer preset bar can need re-reading even when its page skipped
+        -- the rebuild (the sharing glyph tracks the OTHER mode's preset).
+        if GUI.RefreshDesignerPresetBars then GUI:RefreshDesignerPresetBars() end
     end
 
     -- Invalidate EVERY page's build cache so the next time each tab is shown it

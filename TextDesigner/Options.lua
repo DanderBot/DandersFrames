@@ -2683,12 +2683,15 @@ function DF.BuildTextDesignerPage(GUI, page, db)
     -- Copy / Sync trio anchored to the right edge of the controls bar.
     -- omitReset = true matches the prior decision to hide the Reset Page
     -- button until we have a dedicated reset flow.
+    -- Preset-aware Copy/Sync wording + an additive un-sync — see the Aura
+    -- Designer's matching call and GUI:DesignerCopyHooks.
     local copyBtnContainer = GUI.CreateCopyButton(
         controlsBar,
         {"textDesigner"},
         L["Text Designer"],
         "text_designer",
-        true
+        true,
+        GUI.DesignerCopyHooks and GUI:DesignerCopyHooks("text")
     )
     copyBtnContainer:SetPoint("RIGHT", controlsBar, "RIGHT", -8, 0)
     state.copyBtnContainer = copyBtnContainer
