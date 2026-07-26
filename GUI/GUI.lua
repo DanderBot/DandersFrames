@@ -35,6 +35,33 @@ GUI.Colors = {
     warning    = C_WARNING,  -- soft red for behaviour-change / caution notes
 }
 
+-- Dialog chrome. Popup.lua and WizardBuilder.lua are standalone dialogs rather
+-- than settings pages, and both wanted the same handful of extras on top of the
+-- shared neutrals — so both had grown a private copy of the WHOLE palette, one
+-- of them complete (11 hardcoded colours) and matching today only by luck.
+-- One owner: the neutrals below are the SAME tables as GUI.Colors, so they
+-- theme-track in lockstep, and only what genuinely differs is declared here.
+-- Read-only by convention — these tables are shared, so nothing may mutate them.
+GUI.DialogColors = {
+    -- Dialogs use the SAME ground as the pages. This was a bespoke 0.97 in three
+    -- separate copies, a shade denser than the pages' 0.95 for no reason anyone
+    -- could point at; consolidating the copies made the difference visible and
+    -- it went. Chrome now reads identically whether it's a page or a dialog.
+    background = C_BACKGROUND,
+    panel      = C_PANEL,
+    element    = C_ELEMENT,
+    border     = C_BORDER,
+    accent     = C_ACCENT,     -- fallback only; live dialogs read GetThemeColor()
+    hover      = C_HOVER,
+    text       = C_TEXT,
+    textDim    = C_TEXT_DIM,
+    selected   = {r = 0.28, g = 0.28, b = 0.45, a = 1},
+    -- Status pair for dialog content (valid/invalid rows, ok/error dots).
+    green      = {r = 0.2,  g = 0.9,  b = 0.2},
+    red        = {r = 0.9,  g = 0.25, b = 0.25},
+    orange     = {r = 0.85, g = 0.55, b = 0.1},
+}
+
 -- Canonical row heights (the "airier" scale). A fixed-height widget factory stamps its own slot
 -- height onto the widget (widget.preferredHeight + widget.fixedRowHeight), so the layout uses THAT
 -- and a call-site number can't make the same widget type render at a different height on a different
@@ -2202,6 +2229,40 @@ end
 --       { text = , accent = true } -> mode/context accent colour, wrapped
 --       { text = , color = {r,g,b} } -> explicit colour, wrapped
 -- ============================================================
+-- The line grammar, shared by ShowTooltip and ShowGameTooltip so a DF line
+-- appended under a spell tooltip reads exactly like one under a plain title.
+local function AddTooltipLines(lines)
+    if not lines then return end
+    local acc
+    for _, line in ipairs(lines) do
+        if line == " " or line == "" then
+            GameTooltip:AddLine(" ")
+        elseif type(line) == "string" then
+            GameTooltip:AddLine(line, 0.7, 0.7, 0.7, true)
+        elseif type(line) == "table" and (line.text or line.left) then
+            local r, g, b = 0.7, 0.7, 0.7
+            if line.hint then
+                r, g, b = 0.55, 0.55, 0.55
+            elseif line.accent then
+                acc = acc or GetThemeColor()
+                r, g, b = acc.r, acc.g, acc.b
+            elseif line.color then
+                -- Accept {r=,g=,b=} or {r,g,b}: the palette uses the first, most
+                -- call sites building a colour inline reach for the second.
+                local c = line.color
+                r, g, b = c.r or c[1], c.g or c[2], c.b or c[3]
+            end
+            if line.left then
+                -- Two-column form (label … value), for key/value dumps. Never
+                -- wraps -- AddDoubleLine has no wrap argument.
+                GameTooltip:AddDoubleLine(line.left, line.right, r, g, b, 1, 1, 1)
+            else
+                GameTooltip:AddLine(line.text, r, g, b, true)
+            end
+        end
+    end
+end
+
 function GUI:ShowTooltip(owner, opts)
     if not owner or not opts or not opts.title then return end
     GameTooltip:SetOwner(owner, opts.anchor or "ANCHOR_RIGHT")
@@ -2214,28 +2275,90 @@ function GUI:ShowTooltip(owner, opts)
     else
         GameTooltip:SetText(opts.title, 1, 1, 1)
     end
-    if opts.lines then
-        local acc
-        for _, line in ipairs(opts.lines) do
-            if line == " " or line == "" then
-                GameTooltip:AddLine(" ")
-            elseif type(line) == "string" then
-                GameTooltip:AddLine(line, 0.7, 0.7, 0.7, true)
-            elseif type(line) == "table" and line.text then
-                local r, g, b = 0.7, 0.7, 0.7
-                if line.hint then
-                    r, g, b = 0.55, 0.55, 0.55
-                elseif line.accent then
-                    acc = acc or GetThemeColor()
-                    r, g, b = acc.r, acc.g, acc.b
-                elseif line.color then
-                    r, g, b = line.color.r, line.color.g, line.color.b
-                end
-                GameTooltip:AddLine(line.text, r, g, b, true)
+    AddTooltipLines(opts.lines)
+    GameTooltip:Show()
+end
+
+-- ============================================================
+-- GAME-DATA TOOLTIP  (a spell / item / equipped item / aura, plus our own lines)
+-- The shape ShowTooltip cannot express: the game writes the header, we append
+-- underneath. Six settings-UI surfaces hand-rolled it — the whole binding editor
+-- plus the spell picker — and only the picker handled the case that actually
+-- bites: GameTooltip:SetSpellByID renders NOTHING when the client has not loaded
+-- that spell's data yet, so a bare call leaves an empty tooltip. Everywhere else
+-- silently showed nothing on a cold cache.
+--
+-- opts (pick ONE source):
+--   spellID                    a spell — gets the load-on-demand retry below
+--   itemID                     an item by id
+--   inventorySlot [+ unit]     an equipped item ("player" unless unit is given)
+--   unit + auraInstanceID      a live aura
+-- plus:
+--   fallbackTitle   shown when the game has no data at all, so a hover is never
+--                   blank (for a spell, the id is added under it)
+--   isCurrent(owner, spellID)  is this owner STILL showing this spell? Guards the
+--                   async re-render on pooled / rebindable rows. Omit for a row
+--                   that only ever shows one thing.
+--   anchor, lines   exactly as ShowTooltip
+-- ============================================================
+
+-- Fill from the game. Returns whether it actually produced content.
+local function SeedGameTooltip(opts)
+    local ok
+    if opts.spellID then
+        -- pcall: SetSpellByID errors outright on ids the client considers
+        -- invalid (possible for stale DB entries) — treat that as "no data".
+        ok = pcall(GameTooltip.SetSpellByID, GameTooltip, opts.spellID)
+    elseif opts.itemID then
+        ok = pcall(GameTooltip.SetItemByID, GameTooltip, opts.itemID)
+    elseif opts.inventorySlot then
+        ok = pcall(GameTooltip.SetInventoryItem, GameTooltip, opts.unit or "player", opts.inventorySlot)
+    elseif opts.unit and opts.auraInstanceID then
+        ok = pcall(GameTooltip.SetUnitAura, GameTooltip, opts.unit, opts.auraInstanceID)
+    else
+        return false
+    end
+    return ok and GameTooltip:NumLines() > 0
+end
+
+function GUI:ShowGameTooltip(owner, opts)
+    if not owner or not opts then return end
+
+    -- Render the whole thing: game data (or the fallback), then our lines. Used
+    -- for the first paint AND the re-paint after a late spell load, so the
+    -- appended lines survive the reload instead of vanishing with it.
+    local function Fill()
+        local seeded = SeedGameTooltip(opts)
+        if not seeded then
+            if opts.fallbackTitle and opts.fallbackTitle ~= "" then
+                GameTooltip:AddLine(opts.fallbackTitle, 1, 1, 1)
+            end
+            if opts.spellID then
+                GameTooltip:AddLine(format(L["Spell IDs: %s"], tostring(opts.spellID)), 0.5, 0.5, 0.5)
             end
         end
+        AddTooltipLines(opts.lines)
+        GameTooltip:Show()
+        return seeded
     end
-    GameTooltip:Show()
+
+    GameTooltip:SetOwner(owner, opts.anchor or "ANCHOR_RIGHT")
+    if Fill() or not opts.spellID then return end
+
+    -- Nothing rendered. If the data exists server-side but is not loaded yet,
+    -- this both requests the load and re-renders when it arrives. A cached spell
+    -- never reaches here (SetSpellByID already had its chance), so the callback
+    -- cannot double-add the fallback.
+    local spell = Spell and Spell.CreateFromSpellID and Spell:CreateFromSpellID(opts.spellID)
+    if not spell or spell:IsSpellEmpty() or spell:IsSpellDataCached() then return end
+    local spellID, isCurrent = opts.spellID, opts.isCurrent
+    spell:ContinueOnSpellLoad(function()
+        if GameTooltip:IsShown() and GameTooltip:IsOwned(owner) and owner:IsMouseOver()
+            and (not isCurrent or isCurrent(owner, spellID)) then
+            GameTooltip:ClearLines()
+            Fill()
+        end
+    end)
 end
 
 -- Counterpart to ShowTooltip: hide the shared GameTooltip. Wrapped so callers
@@ -4350,6 +4473,13 @@ function GUI:CreateDebugCategoryRow(parent, categoryKey, description, width)
     return row
 end
 
+-- The one input "well": translucent-black fill + dim edge. Shared by StyleEditBox
+-- (the single-line field) and CreateTextArea (the scrolling multi-line container)
+-- so a text area and a text field read as the same control at two sizes. Passed
+-- straight to CreateElementBackdrop, which only reads them.
+local INPUT_FILL = { 0, 0, 0, 0.5 }
+local INPUT_EDGE = { 0.3, 0.3, 0.3, 1 }
+
 -- StyleEditBox: normalize a bare (label-less) EditBox to the standard input
 -- chrome used by CreateInput/CreateEditBox — translucent-black fill + dim border
 -- + standard font/insets. The caller still owns size/position/scripts. Pass
@@ -4357,8 +4487,8 @@ end
 function GUI:StyleEditBox(eb, opts)
     opts = opts or {}
     CreateElementBackdrop(eb, {
-        bgColor     = { 0, 0, 0, 0.5 },
-        borderColor = { 0.3, 0.3, 0.3, 1 },
+        bgColor     = INPUT_FILL,
+        borderColor = INPUT_EDGE,
     })
     if not opts.skipFont then
         eb:SetFontObject(DFFontHighlightSmall)
@@ -4528,6 +4658,144 @@ function GUI:CreateEditBox(parent, label, dbTable, dbKey, callback, width, place
 
     frame.EditBox = editbox
     return frame
+end
+
+-- ============================================================
+-- TEXT AREA — the multi-line cousin of CreateEditBox
+-- A bordered well holding a scrolling multi-line EditBox. Eight surfaces built
+-- this same container + ScrollFrame + EditBox stack by hand (export/import blobs,
+-- the debug log viewer and script runner, the macro body, the popup's input mode,
+-- the changelog), each picking its own well colour and three of them forgetting
+-- the click-to-focus, so clicking the empty space below the text did nothing.
+-- One owner, and the same well as every single-line input.
+--
+-- opts:
+--   width, height        size the well; omit and anchor it yourself
+--   text                 initial contents
+--   fontObject           default DFFontHighlightSmall
+--   fontSize, fontFlags  use the settings font at a size instead of a font object
+--   maxLetters
+--   readOnly             show-and-copy (export strings, the changelog): user
+--                        edits bounce back, but it stays selectable + copyable
+--   autoFocus            take focus and select all on creation (copy-me popups)
+--   onTextChanged(text, userInput)
+--   onEscape(editBox)    default: clear focus
+--   bgColor, borderColor override the standard input well
+--   plain                skip the well entirely — for a text area that fills a
+--                        surface which already has its own panel (the changelog)
+--   insets               text insets, default 4
+-- Returns the well, with .EditBox / .ScrollFrame and SetText / GetText /
+-- HighlightText / SetFocus / ClearFocus / SetEnabled forwarded to the field.
+-- ============================================================
+local TEXTAREA_PAD    = 4    -- gap between the well's edge and the scroll frame
+local TEXTAREA_GUTTER = 18   -- room right of the scroll for the themed scrollbar
+
+function GUI:CreateTextArea(parent, opts)
+    opts = opts or {}
+
+    local well = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    if opts.width and opts.height then well:SetSize(opts.width, opts.height) end
+    local pad = opts.plain and 0 or TEXTAREA_PAD
+    if not opts.plain then
+        CreateElementBackdrop(well, {
+            bgColor     = opts.bgColor or INPUT_FILL,
+            borderColor = opts.borderColor or INPUT_EDGE,
+        })
+    end
+
+    local scroll = CreateFrame("ScrollFrame", nil, well, "ScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", pad, -pad)
+    scroll:SetPoint("BOTTOMRIGHT", -(pad + TEXTAREA_GUTTER), pad)
+    StyleScrollBar(scroll)
+
+    local eb = CreateFrame("EditBox", nil, scroll)
+    eb:SetMultiLine(true)
+    eb:SetAutoFocus(false)
+    if opts.fontSize then
+        GUI:SetSettingsFont(eb, opts.fontSize, opts.fontFlags or "")
+    else
+        eb:SetFontObject(opts.fontObject or DFFontHighlightSmall)
+    end
+    eb:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+    local inset = opts.insets or (opts.plain and 0 or TEXTAREA_PAD)
+    eb:SetTextInsets(inset, inset, inset, inset)
+    if opts.maxLetters then eb:SetMaxLetters(opts.maxLetters) end
+    eb:SetScript("OnEscapePressed", opts.onEscape or function(s) s:ClearFocus() end)
+    scroll:SetScrollChild(eb)
+
+    -- A scroll child has to be told its size, and that is only known once the
+    -- well has been sized or its anchors have resolved — which for an anchored
+    -- (rather than SetSize'd) well is not this frame. So do it here AND on every
+    -- resize, which is also what lets a text area sit in a resizable window
+    -- without the caller re-setting the width by hand on every show.
+    --
+    -- Height is seeded ONCE and then left alone: after that the field owns it,
+    -- growing its own rect as text is added, which is what makes the scroll
+    -- frame scroll. Re-seeding on resize would clamp a grown field back down.
+    local heightSeeded = false
+    local function SyncSize(w, h)
+        if w and w > 0 then eb:SetWidth(w) end
+        if h and h > 0 and not heightSeeded then
+            heightSeeded = true
+            eb:SetHeight(h)
+        end
+    end
+    scroll:SetScript("OnSizeChanged", function(_, w, h) SyncSize(w, h) end)
+    SyncSize(scroll:GetWidth(), scroll:GetHeight())
+
+    -- Clicking anywhere in the well lands in the field, not just on the text
+    -- itself — the contents rarely fill the box.
+    well:EnableMouse(true)
+    well:SetScript("OnMouseDown", function() eb:SetFocus() end)
+    scroll:EnableMouse(true)
+    scroll:SetScript("OnMouseDown", function() eb:SetFocus() end)
+
+    well.EditBox, well.ScrollFrame = eb, scroll
+    well.GetText       = function(_) return eb:GetText() end
+    well.HighlightText = function(_, ...) eb:HighlightText(...) end
+    well.SetFocus      = function(_) eb:SetFocus() end
+    well.ClearFocus    = function(_) eb:ClearFocus() end
+    well.SetText       = function(_, text)
+        eb:SetText(text or "")
+        eb:SetCursorPosition(0)   -- long blobs open at the top, not the tail
+    end
+
+    -- Grey-when-disabled, per the GUI conventions: dim the whole widget AND stop
+    -- it accepting edits.
+    well.SetEnabled = function(self, enabled)
+        self:SetAlpha(enabled and 1 or 0.4)
+        eb:SetEnabled(enabled)
+    end
+
+    -- WoW has no read-only EditBox. Bouncing the text back on any USER change
+    -- keeps Ctrl+A / Ctrl+C working, which EnableKeyboard(false) would not.
+    if opts.readOnly then
+        local locked = opts.text or ""
+        eb:SetScript("OnTextChanged", function(s, user)
+            if user and s:GetText() ~= locked then
+                s:SetText(locked)
+                s:HighlightText()
+            end
+        end)
+        well.SetText = function(_, text)
+            locked = text or ""
+            eb:SetText(locked)
+            eb:SetCursorPosition(0)
+        end
+    elseif opts.onTextChanged then
+        eb:SetScript("OnTextChanged", function(s, user)
+            opts.onTextChanged(s:GetText(), user)
+        end)
+    end
+
+    if opts.text then well:SetText(opts.text) end
+    if opts.autoFocus then
+        eb:SetAutoFocus(true)
+        eb:SetFocus()
+        eb:HighlightText()
+    end
+
+    return well
 end
 
 -- customGet / customSet (optional, matches CreateDropdown's pattern): when
@@ -9727,10 +9995,8 @@ function DF:ToggleGUI()
         -- Auto-show changelog on first open after update
         if DandersFramesDB_v2 and DandersFramesDB_v2.lastSeenVersion ~= DF.VERSION then
             DandersFramesDB_v2.lastSeenVersion = DF.VERSION
-            if GUI.changelogOverlay and GUI.changelogContent and GUI.changelogScroll then
-                GUI.changelogContent:SetWidth(GUI.changelogScroll:GetWidth())
-                GUI.changelogContent:SetText(GUI.FormatChangelog(DF.CHANGELOG_TEXT))
-                GUI.changelogContent:SetCursorPosition(0)
+            if GUI.changelogOverlay and GUI.changelogArea then
+                GUI.changelogArea:SetText(GUI.FormatChangelog(DF.CHANGELOG_TEXT))
                 GUI.changelogOverlay:Show()
             end
         end
@@ -9907,34 +10173,25 @@ function DF:CreateGUI()
         return table.concat(lines, "\n")
     end
 
-    local changelogScroll = CreateFrame("ScrollFrame", nil, changelogOverlay, "ScrollFrameTemplate")
-    changelogScroll:SetPoint("TOPLEFT", 8, -38)
-    changelogScroll:SetPoint("BOTTOMRIGHT", -26, 8)
-
-    local changelogContent = CreateFrame("EditBox", nil, changelogScroll)
-    changelogContent:SetMultiLine(true)
-    changelogContent:SetAutoFocus(false)
-    changelogContent:SetFontObject(DFFontHighlightSmall)
-    changelogContent:SetWidth(changelogScroll:GetWidth() or 500)
-    changelogContent:SetText(FormatChangelog(DF.CHANGELOG_TEXT))
-    changelogContent:SetCursorPosition(0)
-    changelogContent:EnableMouse(true)
-    changelogContent:EnableKeyboard(false)
-    changelogContent:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-    changelogContent:SetScript("OnEditFocusGained", function(self) self:HighlightText(0, 0) end)
-    changelogScroll:SetScrollChild(changelogContent)
-    StyleScrollBar(changelogScroll)
+    -- plain: the overlay already IS the panel, so the text area contributes only
+    -- the scrolling field. readOnly rather than EnableKeyboard(false) — the
+    -- changelog stays uneditable but becomes selectable and copyable.
+    local changelogArea = GUI:CreateTextArea(changelogOverlay, {
+        plain    = true,
+        readOnly = true,
+        text     = FormatChangelog(DF.CHANGELOG_TEXT),
+    })
+    changelogArea:SetPoint("TOPLEFT", 8, -38)
+    changelogArea:SetPoint("BOTTOMRIGHT", -8, 8)
     GUI.FormatChangelog = FormatChangelog
-    GUI.changelogContent = changelogContent
-    GUI.changelogScroll = changelogScroll
+    GUI.changelogArea = changelogArea   -- .EditBox for the field itself
 
     infoBtn:SetScript("OnClick", function()
         if changelogOverlay:IsShown() then
             changelogOverlay:Hide()
         else
-            changelogContent:SetWidth(changelogScroll:GetWidth())
-            changelogContent:SetText(FormatChangelog(DF.CHANGELOG_TEXT))
-            changelogContent:SetCursorPosition(0)
+            -- No width fix-up needed: the text area re-syncs its own scroll child.
+            changelogArea:SetText(FormatChangelog(DF.CHANGELOG_TEXT))
             changelogOverlay:Show()
         end
     end)

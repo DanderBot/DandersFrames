@@ -24,24 +24,11 @@ local Mixin = Mixin
 -- THEME COLORS (matching GUI/GUI.lua)
 -- ============================================================
 
--- Neutral tones are shared with the main GUI palette (GUI.lua loads first) so
--- they theme-track in lockstep and aren't re-declared here. Only colours that
--- differ from GUI.Colors stay private: `background` (higher 0.97 dialog alpha),
--- `accent` (kept as a fallback for GetThemeColor below), `selected`, `green`, `red`.
-local GUIColors = DF.GUI.Colors
-local C = {
-    background = {r = 0.08, g = 0.08, b = 0.08, a = 0.97},
-    panel      = GUIColors.panel,
-    element    = GUIColors.element,
-    border     = GUIColors.border,
-    accent     = {r = 0.45, g = 0.45, b = 0.95, a = 1},
-    hover      = GUIColors.hover,
-    selected   = {r = 0.28, g = 0.28, b = 0.45, a = 1},
-    text       = GUIColors.text,
-    textDim    = GUIColors.textDim,
-    green      = {r = 0.2,  g = 0.9,  b = 0.2},
-    red        = {r = 0.9,  g = 0.25, b = 0.25},
-}
+-- The shared dialog palette (GUI.lua loads first). Neutrals are the same tables
+-- as GUI.Colors so they theme-track in lockstep; the dialog-specific tones
+-- (denser background, selected, green, red) live there too, alongside the ones
+-- the wizard builder needs, so there is exactly one copy in the addon.
+local C = DF.GUI.DialogColors
 
 -- Live theme accent (party purple / raid orange). The popup is a standalone
 -- dialog outside the settings page tree, so GUI ThemeListeners never reach it;
@@ -2040,32 +2027,12 @@ local function EnsureInputWidgets(f)
     eb:Hide()
     f.InputBox = eb
 
-    -- Multi line: container + scroll + child, mirroring the export text area on
-    -- the Profiles page so a settings blob looks the same wherever it appears.
-    local box = CreateFrame("Frame", nil, f.Content, "BackdropTemplate")
-    DF.GUI:CreateElementBackdrop(box, {
-        bgColor     = { 0, 0, 0, 0.5 },
-        borderColor = { 0.3, 0.3, 0.3, 1 },
-    })
-    local scroll = CreateFrame("ScrollFrame", nil, box, "ScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", 4, -4)
-    scroll:SetPoint("BOTTOMRIGHT", -22, 4)
-    DF.GUI.StyleScrollBar(scroll)
-    local area = CreateFrame("EditBox", nil, scroll)
-    area:SetMultiLine(true)
-    area:SetFontObject(DFFontHighlightSmall)
-    area:SetAutoFocus(false)
-    area:SetTextInsets(4, 4, 4, 4)
-    area:SetScript("OnEscapePressed", function(s) s:ClearFocus() end)
-    scroll:SetScrollChild(area)
-    -- Clicking anywhere in the well should land in the field, not just on the
-    -- text itself (the blob rarely fills the box).
-    box:EnableMouse(true)
-    box:SetScript("OnMouseDown", function() area:SetFocus() end)
-    scroll:EnableMouse(true)
-    scroll:SetScript("OnMouseDown", function() area:SetFocus() end)
+    -- Multi line: the shared text area, so a settings blob reads the same in a
+    -- dialog as it does on the Profiles page. Read-only mode is NOT set here —
+    -- this is a singleton reconfigured per call, so ShowPopupInput installs it.
+    local box = DF.GUI:CreateTextArea(f.Content)
     box:Hide()
-    f.InputArea, f.InputAreaBox = area, box
+    f.InputArea, f.InputAreaBox = box.EditBox, box
 
     -- Escape closes via UISpecialFrames, which just HIDES the frame — no button
     -- handler runs. Without this, dismissing with Escape would silently skip
@@ -2138,12 +2105,9 @@ function DF:ShowPopupInput(config)
     widget:SetHeight(fieldH)
     widget:Show()
 
-    if multiline then
-        -- Derived from the frame width rather than measured: the box was
-        -- anchored a moment ago and has no resolved width yet this frame.
-        f.InputArea:SetWidth(width - (CONTENT_PADDING * 2) - 30)
-        f.InputArea:SetHeight(INPUT_AREA_H - 8)
-    else
+    -- The multi-line shape needs nothing here: the text area sizes its own
+    -- scroll child off the well we just anchored. Only the single line does.
+    if not multiline then
         f.InputBox:SetMaxLetters(config.maxLetters or 0)
         f.InputBox:SetScript("OnEnterPressed", function()
             if not config.readOnly then Accept() end

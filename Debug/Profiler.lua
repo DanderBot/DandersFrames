@@ -1410,29 +1410,26 @@ function Profiler:CreateUI()
     local btnH = 20
     local btnW = 68
 
-    f.toggleBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    f.toggleBtn:SetSize(btnW, btnH)
+    f.toggleBtn = CreateFrame("Button", nil, f, "BackdropTemplate")
+    DF.GUI:StyleButton(f.toggleBtn, { width = btnW, height = btnH, text = "Start" })
     f.toggleBtn:SetPoint("TOPLEFT", 10, btnY)
-    f.toggleBtn:SetText("Start")
     f.toggleBtn:SetScript("OnClick", function()
         Profiler:Toggle()
         UpdateUI()
         UpdateColumnHeaders()
     end)
 
-    local resetBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    resetBtn:SetSize(btnW, btnH)
+    local resetBtn = CreateFrame("Button", nil, f, "BackdropTemplate")
+    DF.GUI:StyleButton(resetBtn, { width = btnW, height = btnH, text = "Reset" })
     resetBtn:SetPoint("LEFT", f.toggleBtn, "RIGHT", 4, 0)
-    resetBtn:SetText("Reset")
     resetBtn:SetScript("OnClick", function()
         Profiler:Reset()
         UpdateUI()
     end)
 
-    local printBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    printBtn:SetSize(88, btnH)
+    local printBtn = CreateFrame("Button", nil, f, "BackdropTemplate")
+    DF.GUI:StyleButton(printBtn, { width = 88, height = btnH, text = "Print to Chat" })
     printBtn:SetPoint("LEFT", resetBtn, "RIGHT", 4, 0)
-    printBtn:SetText("Print to Chat")
     printBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     printBtn:SetScript("OnClick", function(self, button)
         if button == "RightButton" then
@@ -1442,11 +1439,13 @@ function Profiler:CreateUI()
         end
     end)
     printBtn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Print to Chat", 1, 1, 1)
-        GameTooltip:AddLine("Left-click: dump the current view (functions/events/onupdate)", 0.7, 0.7, 0.7, true)
-        GameTooltip:AddLine("Right-click: print Top 5 across all categories (summary)", 0.7, 0.7, 0.7, true)
-        GameTooltip:Show()
+        DF.GUI:ShowTooltip(self, {
+            title = "Print to Chat", anchor = "ANCHOR_TOP",
+            lines = {
+                "Left-click: dump the current view (functions/events/onupdate)",
+                "Right-click: print Top 5 across all categories (summary)",
+            },
+        })
     end)
     printBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
@@ -1477,10 +1476,9 @@ function Profiler:CreateUI()
     f.durationInput = durationInput
 
     -- "s Run" button (triggers timed profile with input value)
-    local runBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    runBtn:SetSize(48, btnH)
+    local runBtn = CreateFrame("Button", nil, f, "BackdropTemplate")
+    DF.GUI:StyleButton(runBtn, { width = 48, height = btnH, text = "s Run" })
     runBtn:SetPoint("LEFT", durationInput, "RIGHT", 2, 0)
-    runBtn:SetText("s Run")
     runBtn:SetScript("OnClick", function()
         durationInput:ClearFocus()
         local dur = tonumber(durationInput:GetText()) or 30
@@ -1491,8 +1489,10 @@ function Profiler:CreateUI()
     end)
 
     -- Combat Auto toggle button
-    f.combatBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    f.combatBtn:SetSize(78, btnH)
+    f.combatBtn = CreateFrame("Button", nil, f, "BackdropTemplate")
+    -- text = "" so StyleButton creates AND registers its fontstring; the
+    -- label itself is set by the Update*BtnText below, which needs it to exist.
+    DF.GUI:StyleButton(f.combatBtn, { width = 78, height = btnH, text = "" })
     f.combatBtn:SetPoint("LEFT", runBtn, "RIGHT", 8, 0)
     local function UpdateCombatBtnText()
         if Profiler.combatAuto then
@@ -1507,21 +1507,22 @@ function Profiler:CreateUI()
         UpdateUI()
     end)
     f.combatBtn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Combat Auto-Profile", 1, 1, 1)
-        if Profiler.combatAuto then
-            GameTooltip:AddLine("ON: Profiling starts on combat, stops + prints on combat end.", 0, 1, 0, true)
-        else
-            GameTooltip:AddLine("OFF: Click to enable automatic combat profiling.", 0.7, 0.7, 0.7, true)
-        end
-        GameTooltip:Show()
+        DF.GUI:ShowTooltip(self, {
+            title = "Combat Auto-Profile", anchor = "ANCHOR_TOP",
+            lines = { Profiler.combatAuto
+                and { text = "ON: Profiling starts on combat, stops + prints on combat end.",
+                      color = { 0, 1, 0 } }
+                or  "OFF: Click to enable automatic combat profiling." },
+        })
     end)
     f.combatBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
     UpdateCombatBtnText()
 
     -- View cycle button (Functions / Events / OnUpdate). Top-right, left of Split.
-    f.viewBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    f.viewBtn:SetSize(82, btnH)
+    f.viewBtn = CreateFrame("Button", nil, f, "BackdropTemplate")
+    -- text = "" so StyleButton creates AND registers its fontstring; the
+    -- label itself is set by the Update*BtnText below, which needs it to exist.
+    DF.GUI:StyleButton(f.viewBtn, { width = 82, height = btnH, text = "" })
     f.viewBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -84, btnY)
     local VIEW_LABELS = {
         functions = "Functions",
@@ -1543,20 +1544,24 @@ function Profiler:CreateUI()
         UpdateColumnHeaders()
     end)
     f.viewBtn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("View Mode", 1, 1, 1)
-        GameTooltip:AddLine("Click to cycle: Functions → Events → OnUpdate.", 0.7, 0.7, 0.7, true)
-        GameTooltip:AddLine("Functions: time per DF method", 0.7, 0.7, 0.7, true)
-        GameTooltip:AddLine("Events: time per WoW event (UNIT_AURA, etc.)", 0.7, 0.7, 0.7, true)
-        GameTooltip:AddLine("OnUpdate: time per OnUpdate handler (every-frame ticks)", 0.7, 0.7, 0.7, true)
-        GameTooltip:Show()
+        DF.GUI:ShowTooltip(self, {
+            title = "View Mode", anchor = "ANCHOR_TOP",
+            lines = {
+                "Click to cycle: Functions → Events → OnUpdate.",
+                "Functions: time per DF method",
+                "Events: time per WoW event (UNIT_AURA, etc.)",
+                "OnUpdate: time per OnUpdate handler (every-frame ticks)",
+            },
+        })
     end)
     f.viewBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
     UpdateViewBtnText()
 
     -- Split by Frame Type toggle button
-    f.splitBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    f.splitBtn:SetSize(50, btnH)
+    f.splitBtn = CreateFrame("Button", nil, f, "BackdropTemplate")
+    -- text = "" so StyleButton creates AND registers its fontstring; the
+    -- label itself is set by the Update*BtnText below, which needs it to exist.
+    DF.GUI:StyleButton(f.splitBtn, { width = 50, height = btnH, text = "" })
     f.splitBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -28, btnY)
     local function UpdateSplitBtnText()
         if Profiler.splitByFrame then
@@ -1571,14 +1576,13 @@ function Profiler:CreateUI()
         UpdateUI()
     end)
     f.splitBtn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Split by Frame Type", 1, 1, 1)
-        if Profiler.splitByFrame then
-            GameTooltip:AddLine("ON: Showing per-type breakdown (Party, Raid, HL-Party, HL-Raid).", 0, 1, 0, true)
-        else
-            GameTooltip:AddLine("OFF: Click to split results by frame type.", 0.7, 0.7, 0.7, true)
-        end
-        GameTooltip:Show()
+        DF.GUI:ShowTooltip(self, {
+            title = "Split by Frame Type", anchor = "ANCHOR_TOP",
+            lines = { Profiler.splitByFrame
+                and { text = "ON: Showing per-type breakdown (Party, Raid, HL-Party, HL-Raid).",
+                      color = { 0, 1, 0 } }
+                or  "OFF: Click to split results by frame type." },
+        })
     end)
     f.splitBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
     UpdateSplitBtnText()

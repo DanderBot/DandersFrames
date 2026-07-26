@@ -638,6 +638,43 @@ local function ApplyBackdrop(frame, bgColor, borderColor)
 end
 
 -- ============================================================
+-- COLLAPSIBLE CARD SHELL
+-- The effects list, the groups list and the debuff-category list each build the
+-- same thing: a card pinned to the parent's width, a 30px header button on top,
+-- and a chevron at its left edge that flips with the expanded state. Past that
+-- point the three diverge completely -- a spell icon and type badge, a group
+-- name and link count, a list of categories -- so this owns only the shell and
+-- hands back the chevron for the caller to anchor its own content to.
+--
+-- opts = { yPos, expanded, borderColor, chevronColor (default C_TEXT_DIM) }
+-- Returns card, header, chevron.
+-- ============================================================
+local CARD_HEADER_HEIGHT = 30
+local CHEVRON_EXPANDED = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more"
+local CHEVRON_COLLAPSED = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right"
+
+local function CreateCardShell(parent, opts)
+    local card = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    card:SetPoint("TOPLEFT", 8, opts.yPos)
+    card:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
+
+    local header = CreateFrame("Button", nil, card, "BackdropTemplate")
+    header:SetHeight(CARD_HEADER_HEIGHT)
+    header:SetPoint("TOPLEFT", 0, 0)
+    header:SetPoint("TOPRIGHT", 0, 0)
+    ApplyBackdrop(header, C_ELEMENT, opts.borderColor)
+
+    local chevron = header:CreateTexture(nil, "OVERLAY")
+    chevron:SetSize(12, 12)
+    chevron:SetPoint("LEFT", 8, 0)
+    chevron:SetTexture(opts.expanded and CHEVRON_EXPANDED or CHEVRON_COLLAPSED)
+    local cc = opts.chevronColor or C_TEXT_DIM
+    chevron:SetVertexColor(cc.r, cc.g, cc.b)
+
+    return card, header, chevron
+end
+
+-- ============================================================
 -- BUFF COEXISTENCE POPUP
 -- Shown once when the user enables Aura Designer, asking whether
 -- to keep standard buff icons or let AD fully replace them.
@@ -5939,28 +5976,12 @@ CreateEffectCard = function(parent, yPos, effect)
 
     local isExpanded = expandedCards[cardKey] or false
 
-    -- Card container
-    local card = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    card:SetPoint("TOPLEFT", 8, yPos)
-    card:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
-
-    -- ── HEADER ──
-    local header = CreateFrame("Button", nil, card, "BackdropTemplate")
-    header:SetHeight(30)
-    header:SetPoint("TOPLEFT", 0, 0)
-    header:SetPoint("TOPRIGHT", 0, 0)
-    ApplyBackdrop(header, C_ELEMENT, {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5})
-
-    -- Chevron
-    local chevron = header:CreateTexture(nil, "OVERLAY")
-    chevron:SetSize(12, 12)
-    chevron:SetPoint("LEFT", 8, 0)
-    if isExpanded then
-        chevron:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
-    else
-        chevron:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
-    end
-    chevron:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    -- ── CARD + HEADER ──
+    local card, header, chevron = CreateCardShell(parent, {
+        yPos        = yPos,
+        expanded    = isExpanded,
+        borderColor = {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5},
+    })
 
     -- Spell icon (small, before type badge). Other-pool records resolve
     -- icon/identity spec-independently (nil spec → ad-hoc / SpellDB fallback).
@@ -6558,36 +6579,43 @@ BuildEffectsTab = function()
     }
 
     local my = -4
+    local MENU_ROW_H = 24
 
-    -- Section: Placed on Frame
-    local placedHeader = menuFrame:CreateFontString(nil, "OVERLAY")
-    GUI:SetSettingsFont(placedHeader, 9, "")
-    placedHeader:SetPoint("TOPLEFT", 10, my)
-    placedHeader:SetText(L["PLACED ON FRAME"])
-    placedHeader:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    my = my - 14
+    -- The menu is two identical sections -- a small dim heading, then one row
+    -- per entry coloured by its type badge -- and both were written out in
+    -- full. `my` is the running cursor, so these close over it.
+    local function AddMenuSection(heading, items, scope)
+        local hdr = menuFrame:CreateFontString(nil, "OVERLAY")
+        GUI:SetSettingsFont(hdr, 9, "")
+        hdr:SetPoint("TOPLEFT", 10, my)
+        hdr:SetText(heading)
+        hdr:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+        my = my - 14
 
-    for _, item in ipairs(PLACED_ITEMS) do
-        local menuBtn = CreateFrame("Button", nil, menuFrame)
-        menuBtn:SetHeight(24)
-        menuBtn:SetPoint("TOPLEFT", 4, my)
-        menuBtn:SetPoint("RIGHT", menuFrame, "RIGHT", -4, 0)
-        local bc = BADGE_COLORS[item.type]
-        local lbl = menuBtn:CreateFontString(nil, "OVERLAY")
-        GUI:SetSettingsFont(lbl, 10, "")
-        lbl:SetPoint("LEFT", 8, 0)
-        lbl:SetText(item.label)
-        lbl:SetTextColor(bc.r, bc.g, bc.b)
-        local hl = menuBtn:CreateTexture(nil, "HIGHLIGHT")
-        hl:SetAllPoints()
-        hl:SetColorTexture(1, 1, 1, 0.05)
-        local capturedType = item.type
-        menuBtn:SetScript("OnClick", function()
-            menuFrame:Hide()
-            OpenIndicatorPicker(capturedType, "placed")
-        end)
-        my = my - 24
+        for _, item in ipairs(items) do
+            local menuBtn = CreateFrame("Button", nil, menuFrame)
+            menuBtn:SetHeight(MENU_ROW_H)
+            menuBtn:SetPoint("TOPLEFT", 4, my)
+            menuBtn:SetPoint("RIGHT", menuFrame, "RIGHT", -4, 0)
+            local bc = BADGE_COLORS[item.type]
+            local lbl = menuBtn:CreateFontString(nil, "OVERLAY")
+            GUI:SetSettingsFont(lbl, 10, "")
+            lbl:SetPoint("LEFT", 8, 0)
+            lbl:SetText(item.label)
+            lbl:SetTextColor(bc.r, bc.g, bc.b)
+            local hl = menuBtn:CreateTexture(nil, "HIGHLIGHT")
+            hl:SetAllPoints()
+            hl:SetColorTexture(1, 1, 1, 0.05)
+            local capturedType = item.type
+            menuBtn:SetScript("OnClick", function()
+                menuFrame:Hide()
+                OpenIndicatorPicker(capturedType, scope)
+            end)
+            my = my - MENU_ROW_H
+        end
     end
+
+    AddMenuSection(L["PLACED ON FRAME"], PLACED_ITEMS, "placed")
 
     -- Divider
     my = my - 4
@@ -6598,35 +6626,7 @@ BuildEffectsTab = function()
     mdiv:SetColorTexture(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.6)
     my = my - 6
 
-    -- Section: Frame-level Effects
-    local frameHeader = menuFrame:CreateFontString(nil, "OVERLAY")
-    GUI:SetSettingsFont(frameHeader, 9, "")
-    frameHeader:SetPoint("TOPLEFT", 10, my)
-    frameHeader:SetText(L["FRAME-LEVEL EFFECTS"])
-    frameHeader:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    my = my - 14
-
-    for _, item in ipairs(FRAME_ITEMS) do
-        local menuBtn = CreateFrame("Button", nil, menuFrame)
-        menuBtn:SetHeight(24)
-        menuBtn:SetPoint("TOPLEFT", 4, my)
-        menuBtn:SetPoint("RIGHT", menuFrame, "RIGHT", -4, 0)
-        local bc = BADGE_COLORS[item.type]
-        local lbl = menuBtn:CreateFontString(nil, "OVERLAY")
-        GUI:SetSettingsFont(lbl, 10, "")
-        lbl:SetPoint("LEFT", 8, 0)
-        lbl:SetText(item.label)
-        lbl:SetTextColor(bc.r, bc.g, bc.b)
-        local hl = menuBtn:CreateTexture(nil, "HIGHLIGHT")
-        hl:SetAllPoints()
-        hl:SetColorTexture(1, 1, 1, 0.05)
-        local capturedType = item.type
-        menuBtn:SetScript("OnClick", function()
-            menuFrame:Hide()
-            OpenIndicatorPicker(capturedType, "frame")
-        end)
-        my = my - 24
-    end
+    AddMenuSection(L["FRAME-LEVEL EFFECTS"], FRAME_ITEMS, "frame")
 
     menuFrame:SetHeight(-my + 6)
 
@@ -7112,28 +7112,13 @@ BuildLayoutGroupsTab = function()
             local expandKey = GroupExpandKey(group.id)
             local isExpanded = expandedGroups[expandKey] or false
 
-            -- Card container
-            local card = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-            card:SetPoint("TOPLEFT", 8, yPos)
-            card:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
-
-            -- ── HEADER ──
-            local header = CreateFrame("Button", nil, card, "BackdropTemplate")
-            header:SetHeight(30)
-            header:SetPoint("TOPLEFT", 0, 0)
-            header:SetPoint("TOPRIGHT", 0, 0)
-            ApplyBackdrop(header, C_ELEMENT, {r = gc.r * 0.35, g = gc.g * 0.35, b = gc.b * 0.35, a = 0.5})
-
-            -- Chevron
-            local chevron = header:CreateTexture(nil, "OVERLAY")
-            chevron:SetSize(12, 12)
-            chevron:SetPoint("LEFT", 8, 0)
-            if isExpanded then
-                chevron:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
-            else
-                chevron:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
-            end
-            chevron:SetVertexColor(gc.r, gc.g, gc.b)
+            -- ── CARD + HEADER ──
+            local card, header, chevron = CreateCardShell(parent, {
+                yPos          = yPos,
+                expanded      = isExpanded,
+                borderColor   = {r = gc.r * 0.35, g = gc.g * 0.35, b = gc.b * 0.35, a = 0.5},
+                chevronColor  = gc,
+            })
 
             -- Group name
             local nameText = header:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
@@ -8063,28 +8048,13 @@ BuildDebuffGroupsTab = function()
             local isExpanded = expandedGroups[cardKey] or false
             local capturedGroupID = group.id
 
-            -- Card container
-            local card = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-            card:SetPoint("TOPLEFT", 8, yPos)
-            card:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
-
-            -- ── HEADER ──
-            local header = CreateFrame("Button", nil, card, "BackdropTemplate")
-            header:SetHeight(30)
-            header:SetPoint("TOPLEFT", 0, 0)
-            header:SetPoint("TOPRIGHT", 0, 0)
-            ApplyBackdrop(header, C_ELEMENT, {r = gc.r * 0.35, g = gc.g * 0.35, b = gc.b * 0.35, a = 0.5})
-
-            -- Chevron
-            local chevron = header:CreateTexture(nil, "OVERLAY")
-            chevron:SetSize(12, 12)
-            chevron:SetPoint("LEFT", 8, 0)
-            if isExpanded then
-                chevron:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
-            else
-                chevron:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
-            end
-            chevron:SetVertexColor(gc.r, gc.g, gc.b)
+            -- ── CARD + HEADER ──
+            local card, header, chevron = CreateCardShell(parent, {
+                yPos          = yPos,
+                expanded      = isExpanded,
+                borderColor   = {r = gc.r * 0.35, g = gc.g * 0.35, b = gc.b * 0.35, a = 0.5},
+                chevronColor  = gc,
+            })
 
             -- Group name + collapsed summary: the selected category names
             -- (the A5 collapsed treatment, categories instead of link count).

@@ -1271,12 +1271,14 @@ function CC:CreateCollapsedBindingRow(parent, binding, index)
     row:SetScript("OnEnter", function(self)
         self:SetBackdropColor(C.element.r + 0.08, C.element.g + 0.08, C.element.b + 0.08, 1)
         self:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 0.8)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:AddLine(displayName, 1, 1, 1)
-        GameTooltip:AddLine(bindText, themeColor.r, themeColor.g, themeColor.b)
-        GameTooltip:AddLine(" ")
-        GameTooltip:AddLine(L["Click to edit"], 0.5, 0.5, 0.5)
-        GameTooltip:Show()
+        DF.GUI:ShowTooltip(self, {
+            title = displayName,
+            lines = {
+                { text = bindText, color = themeColor },
+                " ",
+                { text = L["Click to edit"], hint = true },
+            },
+        })
     end)
     row:SetScript("OnLeave", function(self)
         self:SetBackdropColor(C.element.r, C.element.g, C.element.b, 0.8)

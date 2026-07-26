@@ -9,13 +9,20 @@ local GUI = DF.GUI
 local L = DF.L
 local testFrame = nil
 
--- Theme colors (matching addon)
+-- Shared palette, so a change there reaches the picker too. These were all
+-- hardcoded copies; four already matched exactly, and the dim text was a
+-- bespoke 0.5 brought up to the norm's 0.6 (the same call the binding editor
+-- made -- see its C_TEXT_DIM). Affects the hex readout and the two empty-state
+-- lines.
+local C_ELEMENT  = GUI.Colors.element
+local C_BORDER   = GUI.Colors.border
+local C_ACCENT   = GUI.Colors.accent
+local C_TEXT     = GUI.Colors.text
+local C_TEXT_DIM = GUI.Colors.textDim
+-- The one colour that stays local. The picker floats OVER the settings window,
+-- so its ground deliberately sits between background (0.08) and panel (0.12) to
+-- read as a layer above both. Not drift -- don't "normalise" it.
 local C_BG = {r = 0.1, g = 0.1, b = 0.1}
-local C_ELEMENT = {r = 0.18, g = 0.18, b = 0.18}
-local C_BORDER = {r = 0.25, g = 0.25, b = 0.25}
-local C_ACCENT = {r = 0.45, g = 0.45, b = 0.95}
-local C_TEXT = {r = 0.9, g = 0.9, b = 0.9}
-local C_TEXT_DIM = {r = 0.5, g = 0.5, b = 0.5}
 
 -- Class colors. The swatch tooltip name is resolved from the CLIENT's own
 -- localised class table rather than a DF locale key -- the game already ships
@@ -1089,21 +1096,12 @@ local function CreateColorPickerFrame(hasAlpha)
     recentContent:SetAllPoints()
     recentContent:Hide()
     
-    -- Helper to show tooltip above the color picker
-    local function ShowTooltip(owner, anchor)
-        GameTooltip:SetOwner(owner, anchor or "ANCHOR_RIGHT")
-    end
-    
+    -- Swatch tooltips route through the shared GUI helpers. GameTooltip is
+    -- TOOLTIP strata, above our FULLSCREEN_DIALOG, so it shows over the picker.
     local function HideTooltip()
-        GameTooltip:Hide()
+        GUI:HideTooltip()
     end
-    
-    -- Helper to finalize tooltip display
-    local function FinalizeTooltip()
-        GameTooltip:Show()
-        -- GameTooltip is TOOLTIP strata, which is above our FULLSCREEN_DIALOG strata
-    end
-    
+
     local function SelectColor(r, g, b)
         currentHue, currentSat, currentVal = RGBtoHSV(r, g, b)
         UpdateAllColors()
@@ -1124,9 +1122,7 @@ local function CreateColorPickerFrame(hasAlpha)
         swatch:SetScript("OnEnter", function(self)
             self:SetBackdropBorderColor(1, 1, 1, 1)
             if tooltip then
-                ShowTooltip(self, "ANCHOR_RIGHT")
-                GameTooltip:SetText(tooltip)
-                FinalizeTooltip()
+                GUI:ShowTooltip(self, { title = tooltip })
             end
         end)
         swatch:SetScript("OnLeave", function(self)
@@ -1180,10 +1176,10 @@ local function CreateColorPickerFrame(hasAlpha)
             
             swatch:SetScript("OnEnter", function(self)
                 self:SetBackdropBorderColor(1, 1, 1, 1)
-                ShowTooltip(self, "ANCHOR_RIGHT")
-                GameTooltip:AddLine("Left-click to select")
-                GameTooltip:AddLine("Right-click to delete", 0.7, 0.7, 0.7)
-                FinalizeTooltip()
+                GUI:ShowTooltip(self, {
+                    title = L["Left-click to select"],
+                    lines = { L["Right-click to delete"] },
+                })
             end)
             swatch:SetScript("OnLeave", function(self)
                 self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
@@ -1289,10 +1285,10 @@ local function CreateColorPickerFrame(hasAlpha)
             
             swatch:SetScript("OnEnter", function(self)
                 self:SetBackdropBorderColor(1, 1, 1, 1)
-                ShowTooltip(self, "ANCHOR_RIGHT")
-                GameTooltip:AddLine("Left-click to select")
-                GameTooltip:AddLine("Right-click to save", 0.7, 0.7, 0.7)
-                FinalizeTooltip()
+                GUI:ShowTooltip(self, {
+                    title = L["Left-click to select"],
+                    lines = { L["Right-click to save"] },
+                })
             end)
             swatch:SetScript("OnLeave", function(self)
                 self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)

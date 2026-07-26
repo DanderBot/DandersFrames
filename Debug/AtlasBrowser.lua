@@ -489,10 +489,10 @@ local function CreateAtlasBrowser()
         icon:SetScript("OnEnter", function(self)
             self:SetBackdropBorderColor(C_ACCENT.r, C_ACCENT.g, C_ACCENT.b, 1)
             if self.atlasName then
-                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:AddLine(self.atlasName, 1, 1, 1)
-                GameTooltip:AddLine("Click to copy name", 0.7, 0.7, 0.7)
-                GameTooltip:Show()
+                DF.GUI:ShowTooltip(self, {
+                    title = self.atlasName,
+                    lines = { { text = "Click to copy name", hint = true } },
+                })
             end
         end)
         icon:SetScript("OnLeave", function(self)

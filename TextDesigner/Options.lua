@@ -8,17 +8,20 @@ local L = DF.L
 -- visual family as the rest of the addon.
 -- ============================================================
 
-local C_BACKGROUND = {r = 0.08, g = 0.08, b = 0.08, a = 0.95}
-local C_PANEL      = {r = 0.12, g = 0.12, b = 0.12, a = 1}
-local C_ELEMENT    = {r = 0.18, g = 0.18, b = 0.18, a = 1}
+-- Neutrals come from the shared palette, same as the Aura Designer does, so a
+-- palette change reaches both. These were a hand-copied set that happened to
+-- match; only the genuinely bespoke tones below stay local.
+local C_BACKGROUND = DF.GUI.Colors.background
+local C_PANEL      = DF.GUI.Colors.panel
+local C_ELEMENT    = DF.GUI.Colors.element
+local C_BORDER     = DF.GUI.Colors.border
+local C_HOVER      = DF.GUI.Colors.hover
+local C_TEXT       = DF.GUI.Colors.text
+local C_TEXT_DIM   = DF.GUI.Colors.textDim
 -- Card body backdrop — distinctly darker than C_ELEMENT (the header colour)
 -- so the body content visually separates from the header. Mirrors AD's
 -- two-layer card chrome (AuraDesigner/Options.lua:4463-4468).
 local C_BODY_BG    = {r = 0.09, g = 0.09, b = 0.09, a = 1}
-local C_BORDER     = {r = 0.25, g = 0.25, b = 0.25, a = 1}
-local C_HOVER      = {r = 0.22, g = 0.22, b = 0.22, a = 1}
-local C_TEXT       = {r = 0.9, g = 0.9, b = 0.9, a = 1}
-local C_TEXT_DIM   = {r = 0.6, g = 0.6, b = 0.6, a = 1}
 -- Recessed dark backdrop for the list panel — distinctly darker than C_ELEMENT
 -- (the card color) so cards visibly sit "on top" of the panel surface.
 local C_LIST_PANEL     = {r = 0.04, g = 0.04, b = 0.04, a = 1}

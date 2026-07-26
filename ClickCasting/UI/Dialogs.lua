@@ -18,25 +18,25 @@ local ImportPopupFrame = nil
 local pendingImportData = nil
 local pendingImportCallback = nil
 
--- Theme colors matching GUI/GUI.lua. Neutrals that match GUI.Colors exactly are
--- shared (same table references) so a palette change there flows through here too;
--- accent points at the ClickCasting green (CC.ACCENT) rather than the party purple.
--- The non-shared entries are intentionally distinct:
---   * background uses a = 0.97 (popups sit slightly more opaque than the panels)
---   * green/orange/red are popup-only status colours with no GUI.Colors equivalent.
-local GUIColors = DF.GUI.Colors
+-- The shared dialog palette (same tables as GUI.DialogColors, so a change there
+-- flows through), with two deliberate substitutions:
+--   * accent is the ClickCasting green (CC.ACCENT), not the party purple.
+--   * orange is a brighter warning than the dialog default -- it marks a
+--     "valid, but wrong spec" row and has to read apart from the green next to it.
+local GUIColors = DF.GUI.Colors          -- page neutrals, used directly further down
+local DialogColors = DF.GUI.DialogColors
 local POPUP_COLORS = {
-    background = {r = 0.08, g = 0.08, b = 0.08, a = 0.97},
-    panel = GUIColors.panel,
-    element = GUIColors.element,
-    border = GUIColors.border,
-    accent = CC.ACCENT,
-    hover = GUIColors.hover,
-    text = GUIColors.text,
-    textDim = GUIColors.textDim,
-    green = {r = 0.2, g = 0.9, b = 0.2},
-    orange = {r = 1.0, g = 0.6, b = 0.1},
-    red = {r = 0.9, g = 0.25, b = 0.25},
+    background = DialogColors.background,
+    panel      = DialogColors.panel,
+    element    = DialogColors.element,
+    border     = DialogColors.border,
+    accent     = CC.ACCENT,
+    hover      = DialogColors.hover,
+    text       = DialogColors.text,
+    textDim    = DialogColors.textDim,
+    green      = DialogColors.green,
+    red        = DialogColors.red,
+    orange     = {r = 1.0, g = 0.6, b = 0.1},
 }
 
 local function CreateStyledButton(parent, text, width, height)
@@ -1127,32 +1127,17 @@ function CC:ShowMacroEditorDialog(existingMacro)
     charCount:SetPoint("TOPRIGHT", -12, -105)
     charCount:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     
-    -- Body scroll frame
-    local bodyScroll = CreateFrame("ScrollFrame", nil, macroEditorDialog, "ScrollFrameTemplate")
-    bodyScroll:SetSize(370, 160)
-    bodyScroll:SetPoint("TOPLEFT", bodyLabel, "BOTTOMLEFT", 0, -4)
-    DF.GUI.StyleScrollBar(bodyScroll)
-
-    local bodyBg = CreateFrame("Frame", nil, bodyScroll, "BackdropTemplate")
-    bodyBg:SetAllPoints(bodyScroll)
-    DF.GUI:CreateElementBackdrop(bodyBg, {
-        bgColor     = { 0, 0, 0, 0.5 },
-        borderColor = { 0.3, 0.3, 0.3, 1 },
+    -- Body text area
+    local bodyArea = DF.GUI:CreateTextArea(macroEditorDialog, {
+        width = 370, height = 160,
+        fontSize = 11,
+        insets   = 6,
+        text     = existingMacro and existingMacro.body or "#showtooltip\n",
     })
-    bodyBg:SetFrameLevel(bodyScroll:GetFrameLevel() - 1)
-    
-    -- Body edit box
-    local bodyInput = CreateFrame("EditBox", nil, bodyScroll)
-    bodyInput:SetSize(360, 160)
-    DF.GUI:SetSettingsFont(bodyInput, 11, "")
-    bodyInput:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    bodyInput:SetMultiLine(true)
-    bodyInput:SetAutoFocus(false)
-    bodyInput:SetTextInsets(6, 6, 6, 6)
-    bodyInput:SetText(existingMacro and existingMacro.body or "#showtooltip\n")
+    bodyArea:SetPoint("TOPLEFT", bodyLabel, "BOTTOMLEFT", 0, -4)
+    local bodyInput = bodyArea.EditBox
     bodyInput:SetEnabled(not isImported)
-    bodyScroll:SetScrollChild(bodyInput)
-    
+
     local function UpdateCharCount()
         local text = bodyInput:GetText() or ""
         local len = #text
@@ -1566,12 +1551,9 @@ function CC:ShowImportMacroDialog()
             
             row:SetScript("OnEnter", function(self)
                 self:SetBackdropColor(1, 1, 1, 0.05)
-                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:AddLine(macro.name, 1, 1, 1)
                 local bodyPreview = macro.body or ""
                 if #bodyPreview > 150 then bodyPreview = bodyPreview:sub(1, 150) .. "..." end
-                GameTooltip:AddLine(bodyPreview, 0.7, 0.7, 0.7, true)
-                GameTooltip:Show()
+                DF.GUI:ShowTooltip(self, { title = macro.name, lines = { bodyPreview } })
             end)
             row:SetScript("OnLeave", function(self)
                 self:SetBackdropColor(0, 0, 0, 0)

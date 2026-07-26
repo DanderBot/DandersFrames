@@ -9711,33 +9711,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end), 32)
         
         -- Export text area
-        local exportScrollContainer = CreateFrame("Frame", nil, self.child, "BackdropTemplate")
-        exportScrollContainer:SetSize(240, 100)
-        GUI:CreateElementBackdrop(exportScrollContainer, {
-            bgColor = {0.08, 0.08, 0.08, 0.9},
-            borderColor = {0.25, 0.25, 0.25, 1},
-        })
-        
-        local exportScroll = CreateFrame("ScrollFrame", nil, exportScrollContainer, "ScrollFrameTemplate")
-        exportScroll:SetPoint("TOPLEFT", 4, -4)
-        exportScroll:SetPoint("BOTTOMRIGHT", -22, 4)
-        GUI.StyleScrollBar(exportScroll)
-        
-        local exportEditBox = CreateFrame("EditBox", nil, exportScroll)
-        exportEditBox:SetMultiLine(true)
-        exportEditBox:SetFontObject(DFFontHighlightSmall)
-        exportEditBox:SetWidth(210)
-        exportEditBox:SetHeight(90)
-        exportEditBox:SetAutoFocus(false)
-        exportEditBox:SetScript("OnEscapePressed", function(s) s:ClearFocus() end)
-        exportScroll:SetScrollChild(exportEditBox)
-        self.exportEditBox = exportEditBox
-        
-        exportScrollContainer:EnableMouse(true)
-        exportScrollContainer:SetScript("OnMouseDown", function() exportEditBox:SetFocus() end)
-        exportScroll:EnableMouse(true)
-        exportScroll:SetScript("OnMouseDown", function() exportEditBox:SetFocus() end)
-        
+        local exportScrollContainer = GUI:CreateTextArea(self.child, { width = 240, height = 100 })
+        self.exportEditBox = exportScrollContainer.EditBox
+
         exportActionsGroup:AddWidget(exportScrollContainer, 105)
         
         -- Select All button
@@ -9759,33 +9735,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         importStringGroup:AddWidget(GUI:CreateHeader(self.child, L["Import String"]), 40)
         
         -- Import text area
-        local importScrollContainer = CreateFrame("Frame", nil, self.child, "BackdropTemplate")
-        importScrollContainer:SetSize(240, 80)
-        GUI:CreateElementBackdrop(importScrollContainer, {
-            bgColor = {0.08, 0.08, 0.08, 0.9},
-            borderColor = {0.25, 0.25, 0.25, 1},
-        })
-        
-        local importScroll = CreateFrame("ScrollFrame", nil, importScrollContainer, "ScrollFrameTemplate")
-        importScroll:SetPoint("TOPLEFT", 4, -4)
-        importScroll:SetPoint("BOTTOMRIGHT", -22, 4)
-        GUI.StyleScrollBar(importScroll)
-        
-        local importEditBox = CreateFrame("EditBox", nil, importScroll)
-        importEditBox:SetMultiLine(true)
-        importEditBox:SetFontObject(DFFontHighlightSmall)
-        importEditBox:SetWidth(210)
-        importEditBox:SetHeight(70)
-        importEditBox:SetAutoFocus(false)
-        importEditBox:SetScript("OnEscapePressed", function(s) s:ClearFocus() end)
-        importScroll:SetScrollChild(importEditBox)
-        self.importEditBox = importEditBox
-        
-        importScrollContainer:EnableMouse(true)
-        importScrollContainer:SetScript("OnMouseDown", function() importEditBox:SetFocus() end)
-        importScroll:EnableMouse(true)
-        importScroll:SetScript("OnMouseDown", function() importEditBox:SetFocus() end)
-        
+        local importScrollContainer = GUI:CreateTextArea(self.child, { width = 240, height = 80 })
+        self.importEditBox = importScrollContainer.EditBox
+
         importStringGroup:AddWidget(importScrollContainer, 85)
         
         -- Parse button
@@ -10428,29 +10380,14 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             instructions:SetText(L["Press Ctrl+A to select all, then Ctrl+C to copy"])
             instructions:SetTextColor(0.6, 0.6, 0.6)
 
-            local scrollContainer = CreateFrame("Frame", nil, popup, "BackdropTemplate")
+            local scrollContainer = GUI:CreateTextArea(popup, {
+                text      = text,
+                readOnly  = true,   -- copy-me: selectable, but not editable
+                autoFocus = true,
+                onEscape  = function() popup:Hide() end,
+            })
             scrollContainer:SetPoint("TOPLEFT", 12, -45)
             scrollContainer:SetPoint("BOTTOMRIGHT", -12, 40)
-            GUI:CreateElementBackdrop(scrollContainer, {
-                bgColor = {0.05, 0.05, 0.05, 0.9},
-                borderColor = {0.2, 0.2, 0.2, 1},
-            })
-
-            local scroll = CreateFrame("ScrollFrame", nil, scrollContainer, "ScrollFrameTemplate")
-            scroll:SetPoint("TOPLEFT", 4, -4)
-            scroll:SetPoint("BOTTOMRIGHT", -22, 4)
-            GUI.StyleScrollBar(scroll)
-
-            local editBox = CreateFrame("EditBox", nil, scroll)
-            editBox:SetMultiLine(true)
-            editBox:SetFontObject(DFFontHighlightSmall)
-            editBox:SetWidth(440)
-            editBox:SetAutoFocus(true)
-            editBox:SetScript("OnEscapePressed", function() popup:Hide() end)
-            scroll:SetScrollChild(editBox)
-
-            editBox:SetText(text)
-            editBox:HighlightText()
 
             local closeBtn = GUI:CreateButton(popup, L["Close"], 80, 24, function() popup:Hide() end)
             closeBtn:SetPoint("BOTTOM", 0, 10)
@@ -10465,36 +10402,16 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         AddToSection(actionRow, 32, "both")
 
         -- Full-width log viewer
-        local logScrollContainer = CreateFrame("Frame", nil, self.child, "BackdropTemplate")
-        logScrollContainer:SetSize(540, 480)
-        GUI:CreateElementBackdrop(logScrollContainer, {
-            bgColor = {0.05, 0.05, 0.05, 0.9},
-            borderColor = {0.2, 0.2, 0.2, 1},
+        local logScrollContainer = GUI:CreateTextArea(self.child, {
+            width = 540, height = 480,
+            -- Typing in the log is not an edit — it just re-renders the buffer.
+            onTextChanged = function(_, userInput)
+                if userInput and DF.DebugConsole then
+                    DF.DebugConsole:RefreshDisplay()
+                end
+            end,
         })
-
-        local logScroll = CreateFrame("ScrollFrame", nil, logScrollContainer, "ScrollFrameTemplate")
-        logScroll:SetPoint("TOPLEFT", 4, -4)
-        logScroll:SetPoint("BOTTOMRIGHT", -22, 4)
-        GUI.StyleScrollBar(logScroll)
-
-        local logEditBox = CreateFrame("EditBox", nil, logScroll)
-        logEditBox:SetMultiLine(true)
-        logEditBox:SetFontObject(DFFontHighlightSmall)
-        logEditBox:SetWidth(510)
-        logEditBox:SetHeight(470)
-        logEditBox:SetAutoFocus(false)
-        logEditBox:SetScript("OnEscapePressed", function(s) s:ClearFocus() end)
-        logEditBox:SetScript("OnTextChanged", function(s, userInput)
-            if userInput and DF.DebugConsole then
-                DF.DebugConsole:RefreshDisplay()
-            end
-        end)
-        logScroll:SetScrollChild(logEditBox)
-
-        logScrollContainer:EnableMouse(true)
-        logScrollContainer:SetScript("OnMouseDown", function() logEditBox:SetFocus() end)
-        logScroll:EnableMouse(true)
-        logScroll:SetScript("OnMouseDown", function() logEditBox:SetFocus() end)
+        local logEditBox = logScrollContainer.EditBox
 
         AddToSection(logScrollContainer, 485, "both")
 
@@ -10520,40 +10437,17 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local scriptSection = Add(GUI:CreateCollapsibleSection(self.child, L["Script Runner"], true), 36, "both")
         currentSection = scriptSection
 
-        local scriptScrollContainer = CreateFrame("Frame", nil, self.child, "BackdropTemplate")
-        scriptScrollContainer:SetSize(540, 120)
-        GUI:CreateElementBackdrop(scriptScrollContainer, {
-            bgColor = {0.05, 0.05, 0.05, 0.9},
-            borderColor = {0.2, 0.2, 0.2, 1},
+        local scriptScrollContainer = GUI:CreateTextArea(self.child, {
+            width = 540, height = 120,
+            text = (DandersFramesDB_v2 and DandersFramesDB_v2.debug
+                    and DandersFramesDB_v2.debug.lastScript) or nil,
+            onTextChanged = function(text, userInput)
+                if userInput and DandersFramesDB_v2 and DandersFramesDB_v2.debug then
+                    DandersFramesDB_v2.debug.lastScript = text
+                end
+            end,
         })
-
-        local scriptScroll = CreateFrame("ScrollFrame", nil, scriptScrollContainer, "ScrollFrameTemplate")
-        scriptScroll:SetPoint("TOPLEFT", 4, -4)
-        scriptScroll:SetPoint("BOTTOMRIGHT", -22, 4)
-        GUI.StyleScrollBar(scriptScroll)
-
-        local scriptEditBox = CreateFrame("EditBox", nil, scriptScroll)
-        scriptEditBox:SetMultiLine(true)
-        scriptEditBox:SetFontObject(DFFontHighlightSmall)
-        scriptEditBox:SetWidth(510)
-        scriptEditBox:SetHeight(112)
-        scriptEditBox:SetAutoFocus(false)
-        scriptEditBox:SetScript("OnEscapePressed", function(s) s:ClearFocus() end)
-        scriptEditBox:SetScript("OnTextChanged", function(s, userInput)
-            if userInput and DandersFramesDB_v2 and DandersFramesDB_v2.debug then
-                DandersFramesDB_v2.debug.lastScript = s:GetText()
-            end
-        end)
-        scriptScroll:SetScrollChild(scriptEditBox)
-
-        if DandersFramesDB_v2 and DandersFramesDB_v2.debug and DandersFramesDB_v2.debug.lastScript then
-            scriptEditBox:SetText(DandersFramesDB_v2.debug.lastScript)
-        end
-
-        scriptScrollContainer:EnableMouse(true)
-        scriptScrollContainer:SetScript("OnMouseDown", function() scriptEditBox:SetFocus() end)
-        scriptScroll:EnableMouse(true)
-        scriptScroll:SetScript("OnMouseDown", function() scriptEditBox:SetFocus() end)
+        local scriptEditBox = scriptScrollContainer.EditBox
 
         AddToSection(scriptScrollContainer, 125, "both")
 

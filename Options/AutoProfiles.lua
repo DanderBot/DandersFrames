@@ -1250,10 +1250,7 @@ function AutoProfilesUI:CreateProfileRow(GUI, pageFrame, parent, contentType, pr
 
         overrideBtn:SetScript("OnEnter", function(self)
             overrideText:SetTextColor(1, 0.8, 0.2)
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText(L["Override Details"], 1, 0.67, 0)
-            GameTooltip:AddLine(" ")
-
+            local lines = { " " }
             local groups, unknownKeys = GroupOverridesByTab(profile.overrides)
             local tabOrder = {}
             for tabId in pairs(groups) do tinsert(tabOrder, tabId) end
@@ -1283,9 +1280,12 @@ function AutoProfilesUI:CreateProfileRow(GUI, pageFrame, parent, contentType, pr
             local function emitTT(indent, label, val)
                 if not canEmit() then return end
                 if val == nil then
-                    GameTooltip:AddLine(indent .. label, 0.6, 0.6, 0.6)
+                    lines[#lines + 1] = { text = indent .. label, color = { 0.6, 0.6, 0.6 } }
                 else
-                    GameTooltip:AddLine(indent .. label .. "  |cffffffff" .. val .. "|r", 0.8, 0.8, 0.8)
+                    lines[#lines + 1] = {
+                        text  = indent .. label .. "  |cffffffff" .. val .. "|r",
+                        color = { 0.8, 0.8, 0.8 },
+                    }
                 end
             end
             -- Render one override key: scalars shown directly; a table-valued override
@@ -1294,7 +1294,7 @@ function AutoProfilesUI:CreateProfileRow(GUI, pageFrame, parent, contentType, pr
                 local value = profile.overrides[key]
                 if type(value) == "table" and not (value.r and value.g and value.b) then
                     if not canEmit() then return end
-                    GameTooltip:AddLine("  " .. key .. ":", lr, lg, lb)
+                    lines[#lines + 1] = { text = "  " .. key .. ":", color = { lr, lg, lb } }
                     WalkOverrideDiff(value, realRaid and realRaid[key], "", "    ", 1, 8, budget, emitTT)
                 else
                     if not canEmit() then return end
@@ -1306,14 +1306,17 @@ function AutoProfilesUI:CreateProfileRow(GUI, pageFrame, parent, contentType, pr
                     else
                         displayVal = tostring(value)
                     end
-                    GameTooltip:AddDoubleLine("  " .. key, displayVal, lr, lg, lb, 1, 1, 1)
+                    lines[#lines + 1] = { left = "  " .. key, right = displayVal, color = { lr, lg, lb } }
                 end
             end
 
             for _, tabId in ipairs(tabOrder) do
                 if not canEmit() then break end
                 local group = groups[tabId]
-                GameTooltip:AddLine(group.tabLabel .. " (" .. #group.keys .. ")", 1, 0.67, 0)
+                lines[#lines + 1] = {
+                    text  = group.tabLabel .. " (" .. #group.keys .. ")",
+                    color = { 1, 0.67, 0 },
+                }
                 table.sort(group.keys)
                 for _, key in ipairs(group.keys) do
                     renderKey(key, 0.8, 0.8, 0.8)
@@ -1323,7 +1326,7 @@ function AutoProfilesUI:CreateProfileRow(GUI, pageFrame, parent, contentType, pr
             end
 
             if #unknownKeys > 0 and not truncated and canEmit() then
-                GameTooltip:AddLine(format(L["Other (%d)"], #unknownKeys), 0.5, 0.5, 0.5)
+                lines[#lines + 1] = { text = format(L["Other (%d)"], #unknownKeys), color = { 0.5, 0.5, 0.5 } }
                 table.sort(unknownKeys)
                 for _, key in ipairs(unknownKeys) do
                     renderKey(key, 0.5, 0.5, 0.5)
@@ -1331,14 +1334,22 @@ function AutoProfilesUI:CreateProfileRow(GUI, pageFrame, parent, contentType, pr
                 end
             end
 
-            GameTooltip:AddLine(" ")
+            lines[#lines + 1] = " "
             if truncated then
-                GameTooltip:AddLine(L["Too many to show here."], 1, 0.6, 0.2)
+                lines[#lines + 1] = { text = L["Too many to show here."], color = { 1, 0.6, 0.2 } }
             end
             -- /df overrides reports on the active layout (or one being edited), not
             -- whichever row is hovered — so note that inactive layouts need Edit first.
-            GameTooltip:AddLine(L["Use /df overrides for the full list — active layout, or Edit one to inspect it."], 0.4, 0.4, 0.4)
-            GameTooltip:Show()
+            lines[#lines + 1] = {
+                text  = L["Use /df overrides for the full list — active layout, or Edit one to inspect it."],
+                color = { 0.4, 0.4, 0.4 },
+            }
+
+            GUI:ShowTooltip(self, {
+                title = L["Override Details"],
+                tone  = "caution",   -- gold, matching the override text this hangs off
+                lines = lines,
+            })
         end)
 
         overrideBtn:SetScript("OnLeave", function()

@@ -162,10 +162,9 @@ local function CreatePerfTestFrame()
     local btnHeight = 22
     
     -- GC Button
-    local gcBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    gcBtn:SetSize(btnWidth, btnHeight)
+    local gcBtn = CreateFrame("Button", nil, frame, "BackdropTemplate")
+    DF.GUI:StyleButton(gcBtn, { width = btnWidth, height = btnHeight, text = "Force GC" })
     gcBtn:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 15, btnY)
-    gcBtn:SetText("Force GC")
     gcBtn:SetScript("OnClick", function()
         collectgarbage("collect")
         UpdateAddOnMemoryUsage()
@@ -175,10 +174,9 @@ local function CreatePerfTestFrame()
     end)
     
     -- Disable All button
-    local disableBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    disableBtn:SetSize(btnWidth, btnHeight)
+    local disableBtn = CreateFrame("Button", nil, frame, "BackdropTemplate")
+    DF.GUI:StyleButton(disableBtn, { width = btnWidth, height = btnHeight, text = "Disable All" })
     disableBtn:SetPoint("LEFT", gcBtn, "RIGHT", 5, 0)
-    disableBtn:SetText("Disable All")
     disableBtn:SetScript("OnClick", function()
         for key in pairs(DF.PerfTest) do
             DF.PerfTest[key] = false
@@ -191,10 +189,9 @@ local function CreatePerfTestFrame()
     end)
     
     -- Enable All button
-    local enableBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    enableBtn:SetSize(btnWidth, btnHeight)
+    local enableBtn = CreateFrame("Button", nil, frame, "BackdropTemplate")
+    DF.GUI:StyleButton(enableBtn, { width = btnWidth, height = btnHeight, text = "Enable All" })
     enableBtn:SetPoint("LEFT", disableBtn, "RIGHT", 5, 0)
-    enableBtn:SetText("Enable All")
     enableBtn:SetScript("OnClick", function()
         for key in pairs(DF.PerfTest) do
             DF.PerfTest[key] = true
@@ -207,10 +204,9 @@ local function CreatePerfTestFrame()
     end)
     
     -- Snapshot button (takes memory reading after GC for comparison)
-    local snapshotBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    snapshotBtn:SetSize(btnWidth, btnHeight)
+    local snapshotBtn = CreateFrame("Button", nil, frame, "BackdropTemplate")
+    DF.GUI:StyleButton(snapshotBtn, { width = btnWidth, height = btnHeight, text = "Snapshot" })
     snapshotBtn:SetPoint("LEFT", enableBtn, "RIGHT", 5, 0)
-    snapshotBtn:SetText("Snapshot")
     frame.snapshotMem = nil
     snapshotBtn:SetScript("OnClick", function()
         collectgarbage("collect")
@@ -224,10 +220,9 @@ local function CreatePerfTestFrame()
     
     -- Pause button
     frame.isPaused = false
-    local pauseBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    pauseBtn:SetSize(btnWidth, btnHeight)
+    local pauseBtn = CreateFrame("Button", nil, frame, "BackdropTemplate")
+    DF.GUI:StyleButton(pauseBtn, { width = btnWidth, height = btnHeight, text = "Pause Monitor" })
     pauseBtn:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 15, btnY2)
-    pauseBtn:SetText("Pause Monitor")
     pauseBtn:SetScript("OnClick", function(self)
         frame.isPaused = not frame.isPaused
         if frame.isPaused then
@@ -244,10 +239,9 @@ local function CreatePerfTestFrame()
     end)
     
     -- Run 10s Test button
-    local testBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    testBtn:SetSize(btnWidth + 20, btnHeight)
+    local testBtn = CreateFrame("Button", nil, frame, "BackdropTemplate")
+    DF.GUI:StyleButton(testBtn, { width = btnWidth + 20, height = btnHeight, text = "Run 10s Test" })
     testBtn:SetPoint("LEFT", pauseBtn, "RIGHT", 5, 0)
-    testBtn:SetText("Run 10s Test")
     testBtn:SetScript("OnClick", function(self)
         -- Pause the UI monitor during test
         local wasPaused = frame.isPaused
@@ -293,10 +287,9 @@ local function CreatePerfTestFrame()
     end)
     
     -- Run 30s Test button
-    local test30Btn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    test30Btn:SetSize(btnWidth + 20, btnHeight)
+    local test30Btn = CreateFrame("Button", nil, frame, "BackdropTemplate")
+    DF.GUI:StyleButton(test30Btn, { width = btnWidth + 20, height = btnHeight, text = "Run 30s Test" })
     test30Btn:SetPoint("LEFT", testBtn, "RIGHT", 5, 0)
-    test30Btn:SetText("Run 30s Test")
     test30Btn:SetScript("OnClick", function(self)
         -- Pause the UI monitor during test
         local wasPaused = frame.isPaused

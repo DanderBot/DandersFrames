@@ -35,6 +35,57 @@ end
 -- Local alias for helper functions (defined in UI/Main.lua)
 local function GetFallbackDisplayText(f) return CC.GetFallbackDisplayText and CC.GetFallbackDisplayText(f) or nil end
 
+-- ============================================================
+-- BINDING TOOLTIP TAIL
+-- Every bindable cell in this file -- spells, equipped items, consumables,
+-- macros, special actions -- ends its tooltip the same way: the keys already
+-- bound to it, then the click hint. Six handlers built that block by hand.
+-- Returns the `lines` array GUI:ShowTooltip / GUI:ShowGameTooltip expect.
+-- ============================================================
+local function BindingTooltipLines(bindings, color, hint)
+    local lines = {}
+    if bindings and #bindings > 0 then
+        local keys = {}
+        for _, b in ipairs(bindings) do
+            keys[#keys + 1] = CC:GetBindingKeyText(b, true)
+        end
+        lines[#lines + 1] = " "
+        lines[#lines + 1] = { text = format(L["Bound: %s"], table.concat(keys, ", ")), color = color }
+    end
+    if hint then
+        lines[#lines + 1] = " "
+        -- hint tone, not body tone: the click hints here were split between two
+        -- greys (0.7 and 0.5) for no reason anyone could name.
+        lines[#lines + 1] = { text = hint, hint = true }
+    end
+    return lines
+end
+
+-- Both macro surfaces -- the grid cell and the list row -- describe a macro
+-- identically: where it came from, what it is bound to, a body preview, then
+-- the two clicks. They were byte-identical handlers.
+local function MacroTooltipLines(macroData, bindings, color)
+    local lines = {}
+    if macroData.source == "global_import" then
+        lines[1] = { text = L["General Import"], color = { 0.6, 0.8, 1 } }
+    elseif macroData.source == "char_import" then
+        lines[1] = { text = L["Character Import"], color = { 0.8, 0.6, 1 } }
+    else
+        lines[1] = { text = L["Custom Macro"], color = { 0.6, 1, 0.6 } }
+    end
+    for _, line in ipairs(BindingTooltipLines(bindings, color)) do
+        lines[#lines + 1] = line
+    end
+    local body = macroData.body or ""
+    if #body > 100 then body = body:sub(1, 100) .. "..." end
+    lines[#lines + 1] = " "
+    lines[#lines + 1] = body
+    lines[#lines + 1] = " "
+    lines[#lines + 1] = { text = L["Left-click: Bind"], hint = true }
+    lines[#lines + 1] = { text = L["Right-click: Edit/View"], hint = true }
+    return lines
+end
+
 -- ADD/EDIT BINDING DIALOG
 -- ============================================================
 
@@ -202,33 +253,29 @@ function CC:CreateBindingRow(parent, binding, index)
     row:SetScript("OnEnter", function(self)
         self:SetBackdropColor(C.element.r + 0.08, C.element.g + 0.08, C.element.b + 0.08, 1)
         self:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 0.8)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:AddLine(displayName, 1, 1, 1)
-        GameTooltip:AddLine(bindText, themeColor.r, themeColor.g, themeColor.b)
-        
-        -- Show targeting info (not for macros - they handle their own targeting)
+        local lines = { { text = bindText, color = themeColor } }
+        -- Targeting is not shown for macros: they handle their own.
         if fallbackText and not isMacro then
-            GameTooltip:AddLine(format(L["Targeting: %s"], fallbackText), C.textDim.r, C.textDim.g, C.textDim.b)
+            lines[#lines + 1] = { text = format(L["Targeting: %s"], fallbackText), color = C.textDim }
         end
-        
-        -- Show combat state
         if combatSetting == "incombat" then
-            GameTooltip:AddLine(L["Combat Only"], C.combat.r, C.combat.g, C.combat.b)
+            lines[#lines + 1] = { text = L["Combat Only"], color = C.combat }
         elseif combatSetting == "outofcombat" then
-            GameTooltip:AddLine(L["Out of Combat Only"], C.nocombat.r, C.nocombat.g, C.nocombat.b)
+            lines[#lines + 1] = { text = L["Out of Combat Only"], color = C.nocombat }
         end
-        
-        -- Show frames info
+
         local frames = binding.frames or { dandersFrames = true, otherFrames = true }
         local framesParts = {}
         if frames.dandersFrames then table.insert(framesParts, "DandersFrames") end
         if frames.otherFrames then table.insert(framesParts, L["Other Frames"]) end
-        local framesText = format(L["Frames: %s"], #framesParts > 0 and table.concat(framesParts, ", ") or "None")
-        GameTooltip:AddLine(framesText, 0.6, 0.6, 0.6)
-        
-        GameTooltip:AddLine(" ")
-        GameTooltip:AddLine(L["Click to edit"], 0.5, 0.5, 0.5)
-        GameTooltip:Show()
+        lines[#lines + 1] = {
+            text  = format(L["Frames: %s"], #framesParts > 0 and table.concat(framesParts, ", ") or L["None"]),
+            color = { 0.6, 0.6, 0.6 },
+        }
+        lines[#lines + 1] = " "
+        lines[#lines + 1] = { text = L["Click to edit"], hint = true }
+
+        DF.GUI:ShowTooltip(self, { title = displayName, lines = lines })
     end)
     row:SetScript("OnLeave", function(self)
         self:SetBackdropColor(C.element.r, C.element.g, C.element.b, 0.8)
@@ -1866,28 +1913,14 @@ function CC:CreateSpellCell(parent, spellData, index)
     cell:SetScript("OnEnter", function(self)
         self:SetBackdropColor(themeColor.r * 0.3, themeColor.g * 0.3, themeColor.b * 0.3, 1)
         
-        -- Show tooltip (use current override spell ID for accurate tooltip)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        if self.displaySpellId or spellData.spellId then
-            GameTooltip:SetSpellByID(self.displaySpellId or spellData.spellId)
-        else
-            GameTooltip:SetText(spellData.name)
-        end
-        
-        -- Show existing bindings in tooltip if any
+        -- Tooltip: the current override spell id, so a talent-replaced spell
+        -- describes what it actually casts.
         local bindings = self.existingBindings or CC:GetBindingsForSpell(spellData.name, self.displaySpellId)
-        if #bindings > 0 then
-            GameTooltip:AddLine(" ")
-            local bindStrs = {}
-            for _, b in ipairs(bindings) do
-                table.insert(bindStrs, CC:GetBindingKeyText(b, true))
-            end
-            GameTooltip:AddLine(format(L["Bound: %s"], table.concat(bindStrs, ", ")), themeColor.r, themeColor.g, themeColor.b)
-        end
-        
-        GameTooltip:AddLine(" ")
-        GameTooltip:AddLine(L["Left-click to add/edit binding"], 0.7, 0.7, 0.7)
-        GameTooltip:Show()
+        DF.GUI:ShowGameTooltip(self, {
+            spellID       = self.displaySpellId or spellData.spellId,
+            fallbackTitle = spellData.name,
+            lines         = BindingTooltipLines(bindings, themeColor, L["Left-click to add/edit binding"]),
+        })
     end)
     
     cell:SetScript("OnLeave", function(self)
@@ -2504,8 +2537,7 @@ function CC:RefreshItemsGrid(skipScrollReset)
     local C_BORDER = DF.GUI.Colors.border
     local C_TEXT = DF.GUI.Colors.text
     local C_TEXT_DIM = DF.GUI.Colors.textDim
-    local C_BACKGROUND = {r = 0.12, g = 0.12, b = 0.12}
-    
+
     -- Initialize view mode button states
     if self.SetActiveLayout then
         self.SetActiveLayout(self.viewLayout or "grid")
@@ -2615,6 +2647,9 @@ function CC:RefreshItemsGrid(skipScrollReset)
             itemId = cons.itemId,
             itemInfo = itemInfo,
             savedIndex = i,
+            -- Carried through so the tooltip has something to show for an item
+            -- the client hasn't cached yet.
+            name = cons.name,
         }
         
         local cell
@@ -2813,28 +2848,16 @@ function CC:CreateItemCell(parent, itemData, index)
     cell:SetScript("OnEnter", function(self)
         self:SetBackdropColor(C_ELEMENT.r + 0.08, C_ELEMENT.g + 0.08, C_ELEMENT.b + 0.08, 1)
         
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        local lines = BindingTooltipLines(self.existingBindings, themeColor,
+            L["Left-click to add/edit binding"])
         if itemInfo then
-            GameTooltip:SetInventoryItem("player", itemData.slot)
+            DF.GUI:ShowGameTooltip(self, { inventorySlot = itemData.slot, lines = lines })
         else
-            GameTooltip:AddLine(itemData.slotName, 1, 1, 1)
-            GameTooltip:AddLine(L["No item equipped"], 0.5, 0.5, 0.5)
+            -- Empty slot: there is no item for the game to describe, so this is
+            -- an ordinary titled tooltip.
+            table.insert(lines, 1, { text = L["No item equipped"], color = { 0.5, 0.5, 0.5 } })
+            DF.GUI:ShowTooltip(self, { title = itemData.slotName, lines = lines })
         end
-        
-        -- Show existing bindings in tooltip
-        local myBindings = self.existingBindings
-        if myBindings and #myBindings > 0 then
-            GameTooltip:AddLine(" ")
-            local bindStrs = {}
-            for _, b in ipairs(myBindings) do
-                table.insert(bindStrs, CC:GetBindingKeyText(b, true))
-            end
-            GameTooltip:AddLine(format(L["Bound: %s"], table.concat(bindStrs, ", ")), themeColor.r, themeColor.g, themeColor.b)
-        end
-        
-        GameTooltip:AddLine(" ")
-        GameTooltip:AddLine(L["Left-click to add/edit binding"], 0.7, 0.7, 0.7)
-        GameTooltip:Show()
     end)
     cell:SetScript("OnLeave", function(self)
         self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
@@ -2922,28 +2945,16 @@ function CC:CreateItemListRow(parent, itemData, index)
     row:SetScript("OnEnter", function(self)
         self:SetBackdropColor(C_ELEMENT.r + 0.08, C_ELEMENT.g + 0.08, C_ELEMENT.b + 0.08, 1)
         
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        local lines = BindingTooltipLines(self.existingBindings, themeColor,
+            L["Left-click to add/edit binding"])
         if itemInfo then
-            GameTooltip:SetInventoryItem("player", itemData.slot)
+            DF.GUI:ShowGameTooltip(self, { inventorySlot = itemData.slot, lines = lines })
         else
-            GameTooltip:AddLine(itemData.slotName, 1, 1, 1)
-            GameTooltip:AddLine(L["No item equipped"], 0.5, 0.5, 0.5)
+            -- Empty slot: there is no item for the game to describe, so this is
+            -- an ordinary titled tooltip.
+            table.insert(lines, 1, { text = L["No item equipped"], color = { 0.5, 0.5, 0.5 } })
+            DF.GUI:ShowTooltip(self, { title = itemData.slotName, lines = lines })
         end
-        
-        -- Show existing bindings in tooltip
-        local myBindings = self.existingBindings
-        if myBindings and #myBindings > 0 then
-            GameTooltip:AddLine(" ")
-            local bindStrs = {}
-            for _, b in ipairs(myBindings) do
-                table.insert(bindStrs, CC:GetBindingKeyText(b, true))
-            end
-            GameTooltip:AddLine(format(L["Bound: %s"], table.concat(bindStrs, ", ")), themeColor.r, themeColor.g, themeColor.b)
-        end
-        
-        GameTooltip:AddLine(" ")
-        GameTooltip:AddLine(L["Left-click to add/edit binding"], 0.7, 0.7, 0.7)
-        GameTooltip:Show()
     end)
     row:SetScript("OnLeave", function(self)
         self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
@@ -3050,25 +3061,12 @@ function CC:CreateConsumableCell(parent, itemData, index)
     cell:SetScript("OnEnter", function(self)
         self:SetBackdropColor(C_ELEMENT.r + 0.08, C_ELEMENT.g + 0.08, C_ELEMENT.b + 0.08, 1)
         
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        if itemData.itemId then
-            GameTooltip:SetItemByID(itemData.itemId)
-        end
-        
-        -- Show existing bindings in tooltip
-        local myBindings = self.existingBindings
-        if myBindings and #myBindings > 0 then
-            GameTooltip:AddLine(" ")
-            local bindStrs = {}
-            for _, b in ipairs(myBindings) do
-                table.insert(bindStrs, CC:GetBindingKeyText(b, true))
-            end
-            GameTooltip:AddLine(format(L["Bound: %s"], table.concat(bindStrs, ", ")), themeColor.r, themeColor.g, themeColor.b)
-        end
-        
-        GameTooltip:AddLine(" ")
-        GameTooltip:AddLine(L["Left-click to add/edit binding"], 0.7, 0.7, 0.7)
-        GameTooltip:Show()
+        DF.GUI:ShowGameTooltip(self, {
+            itemID        = itemData.itemId,
+            fallbackTitle = itemData.name,
+            lines         = BindingTooltipLines(self.existingBindings, themeColor,
+                L["Left-click to add/edit binding"]),
+        })
     end)
     cell:SetScript("OnLeave", function(self)
         self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
@@ -3167,9 +3165,7 @@ function CC:CreateConsumableListRow(parent, itemData, index)
     row:SetScript("OnEnter", function(self)
         self:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
         if itemData.itemId then
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetItemByID(itemData.itemId)
-            GameTooltip:Show()
+            DF.GUI:ShowGameTooltip(self, { itemID = itemData.itemId })
         end
     end)
     row:SetScript("OnLeave", function(self)
@@ -3349,40 +3345,12 @@ function CC:CreateMacroCell(parent, macroData, index)
     cell:SetScript("OnEnter", function(self)
         self:SetBackdropColor(C_ELEMENT.r + 0.08, C_ELEMENT.g + 0.08, C_ELEMENT.b + 0.08, 1)
         
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:AddLine(macroData.name, 1, 1, 1)
-        if macroData.source == "global_import" then
-            GameTooltip:AddLine(L["General Import"], 0.6, 0.8, 1)
-        elseif macroData.source == "char_import" then
-            GameTooltip:AddLine(L["Character Import"], 0.8, 0.6, 1)
-        else
-            GameTooltip:AddLine(L["Custom Macro"], 0.6, 1, 0.6)
-        end
-        
-        -- Show existing bindings in tooltip
-        local myBindings = self.existingBindings
-        if myBindings and #myBindings > 0 then
-            GameTooltip:AddLine(" ")
-            local bindStrs = {}
-            for _, b in ipairs(myBindings) do
-                table.insert(bindStrs, CC:GetBindingKeyText(b, true))
-            end
-            GameTooltip:AddLine(format(L["Bound: %s"], table.concat(bindStrs, ", ")), themeColor.r, themeColor.g, themeColor.b)
-        end
-        
-        GameTooltip:AddLine(" ")
-        -- Show first 100 chars of body
-        local bodyPreview = macroData.body or ""
-        if #bodyPreview > 100 then
-            bodyPreview = bodyPreview:sub(1, 100) .. "..."
-        end
-        GameTooltip:AddLine(bodyPreview, 0.7, 0.7, 0.7, true)
-        GameTooltip:AddLine(" ")
-        GameTooltip:AddLine(L["Left-click: Bind"], 0.5, 0.5, 0.5)
-        GameTooltip:AddLine(L["Right-click: Edit/View"], 0.5, 0.5, 0.5)
-        GameTooltip:Show()
+        DF.GUI:ShowTooltip(self, {
+            title = macroData.name,
+            lines = MacroTooltipLines(macroData, self.existingBindings, themeColor),
+        })
     end)
-    
+
     cell:SetScript("OnLeave", function(self)
         self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
         GameTooltip:Hide()
@@ -3479,39 +3447,12 @@ function CC:CreateMacroListRow(parent, macroData, index)
     row:SetScript("OnEnter", function(self)
         self:SetBackdropColor(C_ELEMENT.r + 0.08, C_ELEMENT.g + 0.08, C_ELEMENT.b + 0.08, 1)
         
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:AddLine(macroData.name, 1, 1, 1)
-        if macroData.source == "global_import" then
-            GameTooltip:AddLine(L["General Import"], 0.6, 0.8, 1)
-        elseif macroData.source == "char_import" then
-            GameTooltip:AddLine(L["Character Import"], 0.8, 0.6, 1)
-        else
-            GameTooltip:AddLine(L["Custom Macro"], 0.6, 1, 0.6)
-        end
-        
-        -- Show existing bindings in tooltip
-        local myBindings = self.existingBindings
-        if myBindings and #myBindings > 0 then
-            GameTooltip:AddLine(" ")
-            local bindStrs = {}
-            for _, b in ipairs(myBindings) do
-                table.insert(bindStrs, CC:GetBindingKeyText(b, true))
-            end
-            GameTooltip:AddLine(format(L["Bound: %s"], table.concat(bindStrs, ", ")), themeColor.r, themeColor.g, themeColor.b)
-        end
-        
-        GameTooltip:AddLine(" ")
-        local bodyPreview = macroData.body or ""
-        if #bodyPreview > 100 then
-            bodyPreview = bodyPreview:sub(1, 100) .. "..."
-        end
-        GameTooltip:AddLine(bodyPreview, 0.7, 0.7, 0.7, true)
-        GameTooltip:AddLine(" ")
-        GameTooltip:AddLine(L["Left-click: Bind"], 0.5, 0.5, 0.5)
-        GameTooltip:AddLine(L["Right-click: Edit/View"], 0.5, 0.5, 0.5)
-        GameTooltip:Show()
+        DF.GUI:ShowTooltip(self, {
+            title = macroData.name,
+            lines = MacroTooltipLines(macroData, self.existingBindings, themeColor),
+        })
     end)
-    
+
     row:SetScript("OnLeave", function(self)
         self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
         GameTooltip:Hide()
@@ -3644,29 +3585,21 @@ function CC:CreateSpellListRow(parent, spellData, index, isSpecialAction, action
             self:SetBackdropColor(themeColor.r * 0.3, themeColor.g * 0.3, themeColor.b * 0.3, 1)
         end
         
-        -- Tooltip (use current override spell ID for accurate tooltip)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        -- Tooltip: the current override spell id, so a talent-replaced spell
+        -- describes what it actually casts. Special actions (target, focus…)
+        -- are not spells, so they get a plain titled tooltip.
+        local lines = BindingTooltipLines(self.existingBindings,
+            isSpecialAction and specialColor or themeColor,
+            L["Left-click to add/edit binding"])
         if isSpecialAction then
-            GameTooltip:SetText(spellData.name)
+            DF.GUI:ShowTooltip(self, { title = spellData.name, lines = lines })
         else
-            GameTooltip:SetSpellByID(self.displaySpellId or spellData.spellId)
+            DF.GUI:ShowGameTooltip(self, {
+                spellID       = self.displaySpellId or spellData.spellId,
+                fallbackTitle = spellData.name,
+                lines         = lines,
+            })
         end
-        
-        -- Show existing bindings in tooltip if any
-        local bindings = self.existingBindings
-        if bindings and #bindings > 0 then
-            GameTooltip:AddLine(" ")
-            local bindStrs = {}
-            for _, b in ipairs(bindings) do
-                table.insert(bindStrs, CC:GetBindingKeyText(b, true))
-            end
-            local bindColor = isSpecialAction and specialColor or themeColor
-            GameTooltip:AddLine(format(L["Bound: %s"], table.concat(bindStrs, ", ")), bindColor.r, bindColor.g, bindColor.b)
-        end
-        
-        GameTooltip:AddLine(" ")
-        GameTooltip:AddLine(L["Left-click to add/edit binding"], 0.7, 0.7, 0.7)
-        GameTooltip:Show()
     end)
     
     row:SetScript("OnLeave", function(self)
@@ -3763,23 +3696,11 @@ function CC:CreateSpecialActionCell(parent, actionType, label, iconPath)
     cell:SetScript("OnEnter", function(self)
         self:SetBackdropColor(specialColor.r * 0.4, specialColor.g * 0.4, specialColor.b * 0.4, 1)
         
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText(label)
-        
-        -- Show existing bindings in tooltip if any
-        local bindings = self.existingBindings
-        if bindings and #bindings > 0 then
-            GameTooltip:AddLine(" ")
-            local bindStrs = {}
-            for _, b in ipairs(bindings) do
-                table.insert(bindStrs, CC:GetBindingKeyText(b, true))
-            end
-            GameTooltip:AddLine(format(L["Bound: %s"], table.concat(bindStrs, ", ")), specialColor.r, specialColor.g, specialColor.b)
-        end
-        
-        GameTooltip:AddLine(" ")
-        GameTooltip:AddLine(L["Left-click to add/edit binding"], 0.7, 0.7, 0.7)
-        GameTooltip:Show()
+        DF.GUI:ShowTooltip(self, {
+            title = label,
+            lines = BindingTooltipLines(self.existingBindings, specialColor,
+                L["Left-click to add/edit binding"]),
+        })
     end)
     
     cell:SetScript("OnLeave", function(self)

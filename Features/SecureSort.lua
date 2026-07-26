@@ -1492,10 +1492,9 @@ function SecureSort:CreateTestUI()
     -- Helper to create buttons
     local buttonY = -50
     local function CreateButton(text, onClick, color)
-        local btn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-        btn:SetSize(150, 22)
+        local btn = CreateFrame("Button", nil, panel, "BackdropTemplate")
+        DF.GUI:StyleButton(btn, { width = 150, height = 22, text = text })
         btn:SetPoint("TOP", panel, "TOP", 0, buttonY)
-        btn:SetText(text)
         btn:SetScript("OnClick", function()
             panel.statusText:SetText("|cff00ff00Running...|r")
             onClick()

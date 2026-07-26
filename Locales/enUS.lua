@@ -354,6 +354,7 @@ L["Enter a spell name above..."] = true
 L["General Import"] = true
 L["Import WoW Macros"] = true
 L["Left-click to add/edit binding"] = true
+L["Left-click to select"] = true
 L["Left-click: Bind"] = true
 L["New Binding"] = true
 L["No item equipped"] = true
@@ -362,6 +363,8 @@ L["No macros yet.\nClick '+ New' to create one or 'Import' to import from WoW."]
 L["Pattern:"] = true
 L["Preview:"] = true
 L["Quick Macro Builder"] = true
+L["Right-click to delete"] = true
+L["Right-click to save"] = true
 L["Right-click: Edit/View"] = true
 L["Selected: %d"] = true
 L["Spell:"] = true

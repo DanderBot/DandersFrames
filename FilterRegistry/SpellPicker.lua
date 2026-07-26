@@ -12,7 +12,6 @@ local addonName, DF = ...
 -- ============================================================
 
 local pairs, ipairs, type, next = pairs, ipairs, type, next
-local format = string.format
 local tinsert = table.insert
 local tsort = table.sort
 local mmax = math.max
@@ -34,58 +33,29 @@ local function Trim(s)
 end
 
 -- ============================================================
--- SPELL TOOLTIP WITH LOAD-ON-DEMAND
--- GameTooltip:SetSpellByID renders nothing when the client hasn't
--- loaded the spell's data yet, and for server-side scripted auras
--- with no tooltip content at all (e.g. Strength of the Black Ox,
--- 443113). Ask the client to load the data and re-render if the
--- row is still hovered on the same spell when it arrives; when the
--- data is genuinely absent, fall back to a minimal name + id
--- tooltip so the hover never comes up empty.
+-- SPELL TOOLTIP
+-- The load-on-demand handling that used to live here is now
+-- GUI:ShowGameTooltip, so the binding editor gets it too. What
+-- stays local is the picker's own framing: the name to fall back
+-- on, and the anchor.
+--
+-- isCurrent(row, spellID): is the (pooled, rebindable) row still
+-- showing this spell? Guards the async re-render against rebinds
+-- and hover moves.
 -- ============================================================
-
-local function AddSpellTooltipFallback(spellID, fallbackName)
+local function ShowSpellTooltip(row, spellID, fallbackName, isCurrent)
     local name = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(spellID)
     if type(name) ~= "string" or name == "" then name = fallbackName end
-    if type(name) == "string" and name ~= "" then
-        GameTooltip:AddLine(name, 1, 1, 1)
-    end
-    GameTooltip:AddLine(format(L["Spell IDs: %s"], tostring(spellID)), 0.5, 0.5, 0.5)
-end
-
--- isCurrent(row, spellID): is the (pooled, rebindable) row still showing
--- this spell? Guards the async re-render against rebinds and hover moves.
-local function ShowSpellTooltip(row, spellID, fallbackName, isCurrent)
-    -- ANCHOR_CURSOR, not ANCHOR_RIGHT: the owner is a full-width list row, so
-    -- anchoring to its right edge threw the tooltip out to the far side of the
-    -- panel, nowhere near what you were pointing at. The owner stays the ROW so
-    -- IsOwned / IsMouseOver / isCurrent below keep working against row identity.
-    GameTooltip:SetOwner(row, "ANCHOR_CURSOR")
-    -- pcall: SetSpellByID errors outright on ids the client considers
-    -- invalid (possible for stale DB entries) — treat that as "no data".
-    local ok = pcall(GameTooltip.SetSpellByID, GameTooltip, spellID)
-    if not ok or GameTooltip:NumLines() == 0 then
-        local spell = Spell and Spell.CreateFromSpellID and Spell:CreateFromSpellID(spellID)
-        if spell and not spell:IsSpellEmpty() and not spell:IsSpellDataCached() then
-            -- Data exists server-side but isn't loaded yet: this both
-            -- requests the load and re-renders once it arrives. The cached
-            -- case never gets here (SetSpellByID already had its chance),
-            -- so the callback can't double-add the fallback lines below.
-            spell:ContinueOnSpellLoad(function()
-                if GameTooltip:IsShown() and GameTooltip:IsOwned(row)
-                    and row:IsMouseOver() and isCurrent(row, spellID) then
-                    GameTooltip:ClearLines()
-                    local ok2 = pcall(GameTooltip.SetSpellByID, GameTooltip, spellID)
-                    if not ok2 or GameTooltip:NumLines() == 0 then
-                        AddSpellTooltipFallback(spellID, fallbackName)
-                    end
-                    GameTooltip:Show()
-                end
-            end)
-        end
-        AddSpellTooltipFallback(spellID, fallbackName)
-    end
-    GameTooltip:Show()
+    DF.GUI:ShowGameTooltip(row, {
+        spellID   = spellID,
+        -- ANCHOR_CURSOR, not ANCHOR_RIGHT: the owner is a full-width list row, so
+        -- anchoring to its right edge threw the tooltip out to the far side of the
+        -- panel, nowhere near what you were pointing at. The owner stays the ROW so
+        -- IsOwned / IsMouseOver / isCurrent keep working against row identity.
+        anchor        = "ANCHOR_CURSOR",
+        fallbackTitle = name,
+        isCurrent     = isCurrent,
+    })
 end
 R.ShowSpellTooltip = ShowSpellTooltip
 

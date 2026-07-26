@@ -159,20 +159,10 @@ local builderWizardName = nil   -- Name key in SavedVariables
 local builderStepIndex = 1      -- Which step is currently shown
 local builderOnSave = nil       -- Callback when wizard is saved
 
--- Theme colors (matching Popup.lua)
-local BC = {
-    background = {r = 0.08, g = 0.08, b = 0.08, a = 0.97},
-    panel      = {r = 0.12, g = 0.12, b = 0.12, a = 1},
-    element    = {r = 0.18, g = 0.18, b = 0.18, a = 1},
-    border     = {r = 0.25, g = 0.25, b = 0.25, a = 1},
-    accent     = {r = 0.45, g = 0.45, b = 0.95, a = 1},
-    hover      = {r = 0.22, g = 0.22, b = 0.22, a = 1},
-    text       = {r = 0.9,  g = 0.9,  b = 0.9,  a = 1},
-    textDim    = {r = 0.6,  g = 0.6,  b = 0.6,  a = 1},
-    green      = {r = 0.2,  g = 0.9,  b = 0.2},
-    red        = {r = 0.9,  g = 0.25, b = 0.25},
-    orange     = {r = 0.85, g = 0.55, b = 0.1},
-}
+-- The shared dialog palette, same one Popup.lua uses. This was a complete
+-- private copy of all eleven colours, "matching Popup.lua" by hand -- so it
+-- matched only until either side moved.
+local BC = DF.GUI.DialogColors
 
 local BUILDER_WIDTH = 500
 local BUILDER_PADDING = 20
@@ -794,12 +784,11 @@ local function CreateOptionRowFrame(parent, optIndex, step, onUpdate)
             end
         end
         if #linked > 0 then
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText(L["Linked Settings"], 1, 1, 1)
+            local lines = {}
             for _, line in ipairs(linked) do
-                GameTooltip:AddLine(line, BC.orange.r, BC.orange.g, BC.orange.b)
+                lines[#lines + 1] = { text = line, color = BC.orange }
             end
-            GameTooltip:Show()
+            DF.GUI:ShowTooltip(self, { title = L["Linked Settings"], lines = lines })
         end
     end)
     row.GearBtn:SetScript("OnLeave", function(self)
@@ -810,15 +799,15 @@ local function CreateOptionRowFrame(parent, optIndex, step, onUpdate)
     -- Tooltip for branch
     row.BranchBtn:SetScript("OnEnter", function(self)
         self:SetBackdropColor(BC.hover.r, BC.hover.g, BC.hover.b, 1)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText(L["Branch"], 1, 1, 1)
-        if branchTarget ~= "" then
-            GameTooltip:AddLine(format(L["Goes to: %s"], branchTarget), BC.accent.r, BC.accent.g, BC.accent.b)
-        else
-            GameTooltip:AddLine(L["Click to set branch target"], BC.textDim.r, BC.textDim.g, BC.textDim.b)
-        end
-        GameTooltip:AddLine(L["Click to cycle through steps"], BC.textDim.r, BC.textDim.g, BC.textDim.b)
-        GameTooltip:Show()
+        DF.GUI:ShowTooltip(self, {
+            title = L["Branch"],
+            lines = {
+                branchTarget ~= ""
+                    and { text = format(L["Goes to: %s"], branchTarget), color = BC.accent }
+                    or  { text = L["Click to set branch target"], hint = true },
+                { text = L["Click to cycle through steps"], hint = true },
+            },
+        })
     end)
     row.BranchBtn:SetScript("OnLeave", function(self)
         ApplyBuilderBackdrop(self, BC.element, BC.border, 1)
