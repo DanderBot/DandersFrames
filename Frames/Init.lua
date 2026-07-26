@@ -717,13 +717,14 @@ function DF:CreateRaidMoverFrame()
     mover:SetScale(raidMoverScale)
     mover:SetPoint("CENTER", UIParent, "CENTER", (raidDb.raidAnchorX or 0) / raidMoverScale, (raidDb.raidAnchorY or 0) / raidMoverScale)
     
-    mover:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 2,
+    -- Raid orange now comes from the theme. Keeps its own louder alphas (the
+    -- original "-- More visible"): the raid container is large, so the shared
+    -- 0.30/0.80 default reads too faint stretched across it.
+    DF.GUI:CreateMoverBackdrop(mover, {
+        isRaid      = true,
+        fillAlpha   = 0.4,
+        borderAlpha = 1.0,
     })
-    mover:SetBackdropColor(1.0, 0.5, 0.2, 0.4)  -- More visible
-    mover:SetBackdropBorderColor(1.0, 0.5, 0.2, 1.0)
     mover:EnableMouse(true)
     mover:SetMovable(true)
     mover:RegisterForDrag("LeftButton")

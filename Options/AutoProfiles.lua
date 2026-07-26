@@ -902,13 +902,10 @@ function AutoProfilesUI:BuildPage(GUI, pageFrame, db, Add, AddSpace)
     
     local infoContainer = CreateFrame("Frame", nil, pageFrame.child, "BackdropTemplate")
     infoContainer:SetSize(500, infoHeaderHeight + (infoCollapsed and 0 or infoBodyHeight))
-    infoContainer:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(infoContainer, {
+        bgColor     = { 0.15, 0.1, 0.05, 0.5 },
+        borderColor = { 0.4, 0.25, 0.1, 0.5 },
     })
-    infoContainer:SetBackdropColor(0.15, 0.1, 0.05, 0.5)
-    infoContainer:SetBackdropBorderColor(0.4, 0.25, 0.1, 0.5)
     
     -- Clickable header
     local infoHeader = CreateFrame("Button", nil, infoContainer)
@@ -1080,13 +1077,10 @@ function AutoProfilesUI:CreateContentTypeSection(GUI, pageFrame, contentType)
     
     local section = CreateFrame("Frame", nil, pageFrame.child, "BackdropTemplate")
     section:SetSize(500, headerHeight)
-    section:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(section, {
+        bgColor     = { 0.12, 0.12, 0.12, 1 },
+        borderColor = { 0.25, 0.25, 0.25, 1 },
     })
-    section:SetBackdropColor(0.12, 0.12, 0.12, 1)
-    section:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
     section.expanded = true
     section.contentKey = contentType.key
     section.totalHeight = headerHeight + (section.expanded and bodyHeight or 0)
@@ -1185,10 +1179,10 @@ function AutoProfilesUI:CreateProfileRow(GUI, pageFrame, parent, contentType, pr
     
     local row = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     row:SetHeight(28)
-    row:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
+    DF.GUI:CreateElementBackdrop(row, {
+        outline = false,
+        bgColor     = { 0.08, 0.08, 0.08, 1 },
     })
-    row:SetBackdropColor(0.08, 0.08, 0.08, 1)
     
     -- Profile name
     local nameText = row:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
@@ -1201,13 +1195,10 @@ function AutoProfilesUI:CreateProfileRow(GUI, pageFrame, parent, contentType, pr
     local rangeBadge = CreateFrame("Button", nil, row, "BackdropTemplate")
     rangeBadge:SetSize(65, 18)
     rangeBadge:SetPoint("LEFT", 115, 0)
-    rangeBadge:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(rangeBadge, {
+        bgColor     = { 0.18, 0.18, 0.18, 1 },
+        borderColor = { 0.3, 0.3, 0.3, 1 },
     })
-    rangeBadge:SetBackdropColor(0.18, 0.18, 0.18, 1)
-    rangeBadge:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
     
     local rangeText = rangeBadge:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     rangeText:SetPoint("CENTER")
@@ -2791,13 +2782,10 @@ function AutoProfilesUI:CreateEditingBanner(parent)
     
     local banner = CreateFrame("Frame", "DandersAutoProfilesEditingBanner", parent, "BackdropTemplate")
     banner:SetHeight(50)
-    banner:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(banner, {
+        bgColor     = { 0.15, 0.08, 0.03, 1 },
+        borderColor = { 1, 0.5, 0.2, 1 },
     })
-    banner:SetBackdropColor(0.15, 0.08, 0.03, 1)
-    banner:SetBackdropBorderColor(1, 0.5, 0.2, 1)
     banner:SetFrameLevel(parent:GetFrameLevel() + 50)  -- Ensure banner is above page content
     banner:Hide()
     
@@ -2968,11 +2956,10 @@ function AutoProfilesUI:SetupEditingBanner()
     -- =============================================
     local sidebarHint = CreateFrame("Frame", nil, GUI.tabFrame, "BackdropTemplate")
     sidebarHint:SetAllPoints(GUI.tabFrame)
-    sidebarHint:SetBackdrop({
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(sidebarHint, {
+        fill = false,
+        borderColor = { 1, 0.5, 0.2, 0.8 },
     })
-    sidebarHint:SetBackdropBorderColor(1, 0.5, 0.2, 0.8)
     sidebarHint:SetFrameLevel(GUI.tabFrame:GetFrameLevel() + 10)
     sidebarHint:EnableMouse(false)  -- Don't block clicks on tabs underneath
     sidebarHint:Hide()
@@ -2982,10 +2969,10 @@ function AutoProfilesUI:SetupEditingBanner()
     hintBg:SetPoint("TOPLEFT", sidebarHint, "TOPLEFT", 1, -1)
     hintBg:SetPoint("TOPRIGHT", sidebarHint, "TOPRIGHT", -1, -1)
     hintBg:SetHeight(32)
-    hintBg:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
+    DF.GUI:CreateElementBackdrop(hintBg, {
+        outline = false,
+        bgColor     = { 0.12, 0.06, 0.02, 0.95 },
     })
-    hintBg:SetBackdropColor(0.12, 0.06, 0.02, 0.95)
     hintBg:EnableMouse(false)
 
     local hintText = hintBg:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")

@@ -609,20 +609,12 @@ local function GetThemeColor()
     return GUI.GetThemeColor()
 end
 
--- Shared backdrop info reused by every ApplyBackdrop call to avoid
--- per-card table allocation when the AD effects list rebuilds.
-local SHARED_BACKDROP_INFO = {
-    bgFile = "Interface\\Buttons\\WHITE8x8",
-    edgeFile = "Interface\\Buttons\\WHITE8x8",
-    edgeSize = 1,
-}
-
 local function ApplyBackdrop(frame, bgColor, borderColor)
-    if not frame.SetBackdrop then Mixin(frame, BackdropTemplateMixin) end
-
-    -- Only call SetBackdrop once per frame — the info table never changes.
+    -- Build through the shared GUI backdrop once per frame, then push only
+    -- vertex colours below. SetBackdrop is a full rebuild, so keeping it off the
+    -- re-render path still matters when the AD effects list rebuilds.
     if not frame.dfAD_backdropApplied then
-        frame:SetBackdrop(SHARED_BACKDROP_INFO)
+        DF.GUI:CreateElementBackdrop(frame)
         frame.dfAD_backdropApplied = true
     end
 
@@ -2480,12 +2472,10 @@ local function CreateDragGhost()
     dragGhost:Hide()
 
     if not dragGhost.SetBackdrop then Mixin(dragGhost, BackdropTemplateMixin) end
-    dragGhost:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
+    DF.GUI:CreateElementBackdrop(dragGhost, {
         edgeSize = 2,
+        bgColor     = { 0.05, 0.05, 0.05, 0.9 },
     })
-    dragGhost:SetBackdropColor(0.05, 0.05, 0.05, 0.9)
 
     -- Spell icon
     local icon = dragGhost:CreateTexture(nil, "ARTWORK")
@@ -6113,28 +6103,24 @@ CreateEffectCard = function(parent, yPos, effect)
     do
         local cfgTable = effect.config
         local mediaPath = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
-        local eyeBtn = CreateFrame("Button", nil, header)
-        eyeBtn:SetSize(18, 18)
+        local eyeBtn = DF.GUI:CreateGlyphButton(header, { size = 18 })
         if delBtn then
             eyeBtn:SetPoint("RIGHT", delBtn, "LEFT", -4, 0)
         else
             eyeBtn:SetPoint("RIGHT", header, "RIGHT", -6, 0)
         end
-        local eyeIcon = eyeBtn:CreateTexture(nil, "OVERLAY")
-        eyeIcon:SetAllPoints()
         local function shown() return not cfgTable or cfgTable.enabled ~= false end
+        -- SetGlyph makes the state colour the new REST colour, so OnLeave
+        -- restores the state; hover is suppressed while hidden.
         local function updateEyeIcon()
             if shown() then
-                eyeIcon:SetTexture(mediaPath .. "visibility")
-                eyeIcon:SetVertexColor(0.95, 0.95, 0.95)
+                eyeBtn:SetGlyph(mediaPath .. "visibility", { 0.95, 0.95, 0.95 })
             else
-                eyeIcon:SetTexture(mediaPath .. "visibility_off")
-                eyeIcon:SetVertexColor(0.45, 0.45, 0.45)
+                eyeBtn:SetGlyph(mediaPath .. "visibility_off", { 0.45, 0.45, 0.45 })
             end
+            eyeBtn:SetGlyphHover(shown())
         end
         updateEyeIcon()
-        eyeBtn:SetScript("OnEnter", function() if shown() then eyeIcon:SetVertexColor(1, 1, 1) end end)
-        eyeBtn:SetScript("OnLeave", function() updateEyeIcon() end)
         eyeBtn:RegisterForClicks("LeftButtonUp")
         eyeBtn:SetFrameLevel(header:GetFrameLevel() + 2)
         eyeBtn:SetScript("OnClick", function()
@@ -7200,24 +7186,20 @@ BuildLayoutGroupsTab = function()
             -- group container and the buff-row dedup union changes.
             if isFilterGroup then
                 local mediaPath = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
-                local eyeBtn = CreateFrame("Button", nil, header)
-                eyeBtn:SetSize(18, 18)
+                local eyeBtn = DF.GUI:CreateGlyphButton(header, { size = 18 })
                 eyeBtn:SetPoint("RIGHT", delBtn, "LEFT", -4, 0)
-                local eyeIcon = eyeBtn:CreateTexture(nil, "OVERLAY")
-                eyeIcon:SetAllPoints()
                 local function shown() return group.enabled ~= false end
+                -- SetGlyph makes the state colour the new REST colour, so OnLeave
+                -- restores the state; hover is suppressed while hidden.
                 local function updateEyeIcon()
                     if shown() then
-                        eyeIcon:SetTexture(mediaPath .. "visibility")
-                        eyeIcon:SetVertexColor(0.95, 0.95, 0.95)
+                        eyeBtn:SetGlyph(mediaPath .. "visibility", { 0.95, 0.95, 0.95 })
                     else
-                        eyeIcon:SetTexture(mediaPath .. "visibility_off")
-                        eyeIcon:SetVertexColor(0.45, 0.45, 0.45)
+                        eyeBtn:SetGlyph(mediaPath .. "visibility_off", { 0.45, 0.45, 0.45 })
                     end
+                    eyeBtn:SetGlyphHover(shown())
                 end
                 updateEyeIcon()
-                eyeBtn:SetScript("OnEnter", function() if shown() then eyeIcon:SetVertexColor(1, 1, 1) end end)
-                eyeBtn:SetScript("OnLeave", function() updateEyeIcon() end)
                 eyeBtn:RegisterForClicks("LeftButtonUp")
                 eyeBtn:SetFrameLevel(header:GetFrameLevel() + 2)
                 eyeBtn:SetScript("OnClick", function()
@@ -7366,16 +7348,13 @@ BuildLayoutGroupsTab = function()
                             {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.3})
 
                         -- Remove ✕ (mirror the member-row remove idiom)
-                        local remBtn = CreateFrame("Button", nil, chipRow)
-                        remBtn:SetSize(18, 18)
+                        local remBtn = DF.GUI:CreateGlyphButton(chipRow, {
+                            size = 18, iconSize = 12,
+                            texture    = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\close",
+                            color      = { 0.55, 0.30, 0.30 },
+                            hoverColor = { 1, 0.40, 0.40 },
+                        })
                         remBtn:SetPoint("RIGHT", -4, 0)
-                        local remIcon = remBtn:CreateTexture(nil, "OVERLAY")
-                        remIcon:SetSize(12, 12)
-                        remIcon:SetPoint("CENTER", 0, 0)
-                        remIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close")
-                        remIcon:SetVertexColor(0.55, 0.30, 0.30, 1)
-                        remBtn:SetScript("OnEnter", function() remIcon:SetVertexColor(1, 0.40, 0.40, 1) end)
-                        remBtn:SetScript("OnLeave", function() remIcon:SetVertexColor(0.55, 0.30, 0.30, 1) end)
                         local capturedLink = link
                         remBtn:SetScript("OnClick", function()
                             if capturedLink.kind == "preset" then
@@ -7616,15 +7595,13 @@ BuildLayoutGroupsTab = function()
                         local capturedMi = mi
 
                         if canMoveUp then
-                            local upBtn = CreateFrame("Button", nil, memberRow)
-                            upBtn:SetSize(20, 16)
+                            -- One arrow texture serves both directions via rotation.
+                            local upBtn = DF.GUI:CreateGlyphButton(memberRow, {
+                                width = 20, height = 16, iconSize = 14,
+                                texture  = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more",
+                                rotation = math.rad(180),
+                            })
                             upBtn:SetPoint("TOPLEFT", 2, -1)
-                            local upIcon = upBtn:CreateTexture(nil, "OVERLAY")
-                            upIcon:SetSize(14, 14)
-                            upIcon:SetPoint("CENTER", 0, 0)
-                            upIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
-                            upIcon:SetRotation(math.rad(180))  -- flip to point up
-                            upIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
                             upBtn:SetScript("OnClick", function()
                                 SwapGroupMembers(capturedGroupID, capturedMi, capturedMi - 1)
                                 SwitchTab("layout")
@@ -7632,18 +7609,13 @@ BuildLayoutGroupsTab = function()
                                 -- Positions moved (member index feeds the grid) — re-arrange live frames.
                                 DF.AuraDesigner.Engine:ForceRefreshAllFrames()
                             end)
-                            upBtn:SetScript("OnEnter", function() upIcon:SetVertexColor(1, 1, 1) end)
-                            upBtn:SetScript("OnLeave", function() upIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b) end)
                         end
                         if canMoveDown then
-                            local downBtn = CreateFrame("Button", nil, memberRow)
-                            downBtn:SetSize(20, 16)
+                            local downBtn = DF.GUI:CreateGlyphButton(memberRow, {
+                                width = 20, height = 16, iconSize = 14,
+                                texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more",
+                            })
                             downBtn:SetPoint("BOTTOMLEFT", 2, 1)
-                            local downIcon = downBtn:CreateTexture(nil, "OVERLAY")
-                            downIcon:SetSize(14, 14)
-                            downIcon:SetPoint("CENTER", 0, 0)
-                            downIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
-                            downIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
                             downBtn:SetScript("OnClick", function()
                                 SwapGroupMembers(capturedGroupID, capturedMi, capturedMi + 1)
                                 SwitchTab("layout")
@@ -7651,8 +7623,6 @@ BuildLayoutGroupsTab = function()
                                 -- Positions moved (member index feeds the grid) — re-arrange live frames.
                                 DF.AuraDesigner.Engine:ForceRefreshAllFrames()
                             end)
-                            downBtn:SetScript("OnEnter", function() downIcon:SetVertexColor(1, 1, 1) end)
-                            downBtn:SetScript("OnLeave", function() downIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b) end)
                         end
 
                         -- Spell icon (Other: nil spec — GetAuraIcon degrades to
@@ -7710,20 +7680,14 @@ BuildLayoutGroupsTab = function()
                         mBadge:SetWidth(max(mBadgeText:GetStringWidth() + 12, 32))
 
                         -- Remove button (using close icon)
-                        local remBtn = CreateFrame("Button", nil, memberRow)
-                        remBtn:SetSize(18, 18)
+                        -- Red at rest, brighter red on hover: an inline destructive remove.
+                        local remBtn = DF.GUI:CreateGlyphButton(memberRow, {
+                            size = 18, iconSize = 12,
+                            texture    = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\close",
+                            color      = { 0.55, 0.30, 0.30 },
+                            hoverColor = { 1, 0.40, 0.40 },
+                        })
                         remBtn:SetPoint("RIGHT", -4, 0)
-                        local remIcon = remBtn:CreateTexture(nil, "OVERLAY")
-                        remIcon:SetSize(12, 12)
-                        remIcon:SetPoint("CENTER", 0, 0)
-                        remIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close")
-                        remIcon:SetVertexColor(0.55, 0.30, 0.30, 1)
-                        remBtn:SetScript("OnEnter", function()
-                            remIcon:SetVertexColor(1, 0.40, 0.40, 1)
-                        end)
-                        remBtn:SetScript("OnLeave", function()
-                            remIcon:SetVertexColor(0.55, 0.30, 0.30, 1)
-                        end)
                         local capturedMember = member
                         remBtn:SetScript("OnClick", function()
                             RemoveGroupMember(capturedGroupID, capturedMember.auraName, capturedMember.indicatorID)
@@ -8154,24 +8118,20 @@ BuildDebuffGroupsTab = function()
             -- group eye (A3/A5). Toggling is STRUCTURAL: the factory tears
             -- down / stands up the container and the claims union moves.
             local mediaPath = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
-            local eyeBtn = CreateFrame("Button", nil, header)
-            eyeBtn:SetSize(18, 18)
+            local eyeBtn = DF.GUI:CreateGlyphButton(header, { size = 18 })
             eyeBtn:SetPoint("RIGHT", delBtn, "LEFT", -4, 0)
-            local eyeIcon = eyeBtn:CreateTexture(nil, "OVERLAY")
-            eyeIcon:SetAllPoints()
             local function shown() return group.enabled ~= false end
+            -- SetGlyph makes the state colour the new REST colour, so OnLeave
+            -- restores the state; hover is suppressed while hidden.
             local function updateEyeIcon()
                 if shown() then
-                    eyeIcon:SetTexture(mediaPath .. "visibility")
-                    eyeIcon:SetVertexColor(0.95, 0.95, 0.95)
+                    eyeBtn:SetGlyph(mediaPath .. "visibility", { 0.95, 0.95, 0.95 })
                 else
-                    eyeIcon:SetTexture(mediaPath .. "visibility_off")
-                    eyeIcon:SetVertexColor(0.45, 0.45, 0.45)
+                    eyeBtn:SetGlyph(mediaPath .. "visibility_off", { 0.45, 0.45, 0.45 })
                 end
+                eyeBtn:SetGlyphHover(shown())
             end
             updateEyeIcon()
-            eyeBtn:SetScript("OnEnter", function() if shown() then eyeIcon:SetVertexColor(1, 1, 1) end end)
-            eyeBtn:SetScript("OnLeave", function() updateEyeIcon() end)
             eyeBtn:RegisterForClicks("LeftButtonUp")
             eyeBtn:SetFrameLevel(header:GetFrameLevel() + 2)
             eyeBtn:SetScript("OnClick", function()
@@ -8947,5 +8907,12 @@ function DF:AuraDesigner_RefreshPage()
     if DF.AuraContainer and DF.AuraContainer.IsSupported and DF.AuraContainer.IsSupported()
         and DF.InvalidateAuraLayout then
         DF:InvalidateAuraLayout()
+    end
+
+    -- This page rebuilds its cards outside the shared page-build path, so the
+    -- pixel-grid harvest that runs there never sees anything created here.
+    if GUI and GUI.HarvestPixelSnaps then
+        GUI:HarvestPixelSnaps(mainFrame)
+        GUI:SnapAllBoxes()
     end
 end

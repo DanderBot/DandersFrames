@@ -2191,4 +2191,37 @@ L["The expiry border and tint always step between colors."] = true
 L["s"] = true
 L["%"] = true
 
+
+-- ============================================================
+-- COLOR PICKER (GUI/ColorPicker.lua)
+-- Class names in the Class tab are NOT here: they resolve from the
+-- client's own LOCALIZED_CLASS_NAMES_MALE. The R/G/B/A% channel letters
+-- stay untranslated (they are the standard colour-model abbreviations).
+-- ============================================================
+L["Circle"] = true
+L["Click 'Save' to add current color"] = true
+L["Color already saved"] = true
+L["Color deleted: %s"] = true
+L["Color picker debug %s"] = true
+L["Color picker hook installed"] = true
+L["Color picker hook removed"] = true
+L["Color saved: %s"] = true
+L["Colors appear here when you apply them"] = true
+L["Copy hex to clipboard"] = true
+L["DB not available"] = true
+L["DandersFrames Color Picker"] = true
+L["Failed to install hook (already hooked or API not available)"] = true
+L["Hex"] = true
+L["Maximum saved colors reached (%d)"] = true
+L["No recent colors yet"] = true
+L["No saved colors yet"] = true
+L["Okay"] = true
+L["Open a color picker to see debug output"] = true
+L["Press Ctrl+C to copy:"] = true
+L["Recent"] = true
+L["Saved"] = true
+L["Use %s or %s to toggle"] = true
+L["Use %s to show API info"] = true
+L["Use %s to toggle debug output"] = true
+
 --@end-do-not-package@

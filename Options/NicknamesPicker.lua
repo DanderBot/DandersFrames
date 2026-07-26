@@ -47,13 +47,10 @@ local function styleEditBox(eb)
     eb:SetAutoFocus(false)
     eb:SetFontObject(DFFontHighlightSmall)
     eb:SetTextInsets(6, 6, 0, 0)
-    eb:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(eb, {
+        bgColor     = { 0, 0, 0, 0.5 },
+        borderColor = { 0.3, 0.3, 0.3, 1 },
     })
-    eb:SetBackdropColor(0, 0, 0, 0.5)
-    eb:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
     eb:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
 end
 
@@ -64,19 +61,19 @@ local function buildPicker()
     local GUI = DF.GUI
 
     local f = CreateFrame("Frame", "DFNicknamePicker", UIParent, "BackdropTemplate")
+    -- Ride the shared GUI pixel grid: this surface is parented to UIParent, so it
+    -- never passes through a settings-page build. See GUI:AttachPixelSnap.
+    if DF.GUI and DF.GUI.AttachPixelSnap then DF.GUI:AttachPixelSnap(f) end
     f:SetSize(380, 440)
     f:SetFrameStrata("FULLSCREEN_DIALOG")
     f:SetToplevel(true)
     f:SetClampedToScreen(true)
     f:EnableMouse(true)
     f:SetPoint("CENTER")
-    f:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(f, {
+        bgColor     = { 0.08, 0.08, 0.08, 0.98 },
+        borderColor = { 0.25, 0.25, 0.25, 1 },
     })
-    f:SetBackdropColor(0.08, 0.08, 0.08, 0.98)
-    f:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
     f:SetMovable(true)
     f:RegisterForDrag("LeftButton")
     f:SetScript("OnDragStart", f.StartMoving)
@@ -111,13 +108,10 @@ local function buildPicker()
     local listBg = CreateFrame("Frame", nil, f, "BackdropTemplate")
     listBg:SetPoint("TOPLEFT", 12, -70)
     listBg:SetPoint("BOTTOMRIGHT", -12, 12)
-    listBg:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(listBg, {
+        bgColor     = { 0.05, 0.05, 0.05, 0.95 },
+        borderColor = { 0.2, 0.2, 0.2, 1 },
     })
-    listBg:SetBackdropColor(0.05, 0.05, 0.05, 0.95)
-    listBg:SetBackdropBorderColor(0.2, 0.2, 0.2, 1)
 
     local scroll = CreateFrame("ScrollFrame", nil, listBg, "ScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", 4, -4)

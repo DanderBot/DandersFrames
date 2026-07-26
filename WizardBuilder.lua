@@ -177,15 +177,14 @@ local BC = {
 local BUILDER_WIDTH = 500
 local BUILDER_PADDING = 20
 
+-- Thin wrapper over the shared GUI backdrop so this file's positional call style
+-- keeps working. The look, and the pixel-grid snapping, come from the one place.
 local function ApplyBuilderBackdrop(frame, bgColor, borderColor, edgeSize)
-    if not frame.SetBackdrop then Mixin(frame, BackdropTemplateMixin) end
-    frame:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = edgeSize or 1,
+    DF.GUI:CreateElementBackdrop(frame, {
+        bgColor     = bgColor,
+        borderColor = borderColor,
+        edgeSize    = edgeSize,
     })
-    frame:SetBackdropColor(bgColor.r, bgColor.g, bgColor.b, bgColor.a or 1)
-    frame:SetBackdropBorderColor(borderColor.r, borderColor.g, borderColor.b, borderColor.a or 1)
 end
 
 -- Create an edit box with dark theme styling
@@ -296,6 +295,9 @@ local function CreateBuilderFrame()
     if BuilderFrame then return BuilderFrame end
 
     local f = CreateFrame("Frame", "DFBuilderFrame", UIParent, "BackdropTemplate")
+    -- Ride the shared GUI pixel grid: this surface is parented to UIParent, so it
+    -- never passes through a settings-page build. See GUI:AttachPixelSnap.
+    if DF.GUI and DF.GUI.AttachPixelSnap then DF.GUI:AttachPixelSnap(f) end
     f:SetSize(BUILDER_WIDTH, 500)
     f:SetPoint("CENTER")
     f:SetFrameStrata("FULLSCREEN_DIALOG")

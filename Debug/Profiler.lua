@@ -1372,13 +1372,11 @@ function Profiler:CreateUI()
     local f = CreateFrame("Frame", "DFProfilerFrame", UIParent, "BackdropTemplate")
     f:SetSize(FRAME_WIDTH, DATA_START_Y * -1 + MAX_ROWS * ROW_HEIGHT + 30)
     f:SetPoint("CENTER", 0, 50)
-    f:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
+    DF.GUI:CreateElementBackdrop(f, {
         edgeSize = 2,
+        bgColor     = { 0.06, 0.06, 0.06, 0.98 },
+        borderColor = { 0.25, 0.25, 0.25, 1 },
     })
-    f:SetBackdropColor(0.06, 0.06, 0.06, 0.98)
-    f:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
     f:SetFrameStrata("HIGH")
     f:SetMovable(true)
     f:EnableMouse(true)
@@ -1456,13 +1454,10 @@ function Profiler:CreateUI()
     local durationInput = CreateFrame("EditBox", nil, f, "BackdropTemplate")
     durationInput:SetSize(36, btnH)
     durationInput:SetPoint("LEFT", printBtn, "RIGHT", 12, 0)
-    durationInput:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(durationInput, {
+        bgColor     = { 0.1, 0.1, 0.1, 1 },
+        borderColor = { 0.4, 0.4, 0.4, 1 },
     })
-    durationInput:SetBackdropColor(0.1, 0.1, 0.1, 1)
-    durationInput:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
     durationInput:SetFontObject(DFFontHighlightSmall)
     durationInput:SetJustifyH("CENTER")
     durationInput:SetAutoFocus(false)
@@ -1594,13 +1589,10 @@ function Profiler:CreateUI()
     hookBanner:SetHeight(28)
     hookBanner:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 10, 6)
     hookBanner:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -10, 6)
-    hookBanner:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(hookBanner, {
+        bgColor     = { 0.3, 0.15, 0, 0.9 },
+        borderColor = { 0.8, 0.5, 0, 1 },
     })
-    hookBanner:SetBackdropColor(0.3, 0.15, 0, 0.9)
-    hookBanner:SetBackdropBorderColor(0.8, 0.5, 0, 1)
     f.hookBanner = hookBanner
 
     local hookText = hookBanner:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")

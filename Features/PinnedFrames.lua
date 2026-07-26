@@ -25,25 +25,41 @@ PinnedFrames.currentMode = nil  -- Track what mode we initialized for
 -- retired per-set `set.locked`. Default false = locked (no drag handles).
 PinnedFrames.moversShown = false
 
--- Color palette per mode (raid = orange, party = purple-blue)
--- Matches C_RAID / C_ACCENT used across the GUI
+-- Mover palette per mode (raid = orange, party = purple-blue).
+--
+-- All five roles are DERIVED from the GUI theme constant for the mode rather than
+-- hand-picked, so retheming the addon carries the pinned movers with it and the
+-- shades cannot drift apart from each other again. (They had: the old literals
+-- claimed to match C_RAID / C_ACCENT but were a third, separately-tuned family.)
+--
+-- Keyed off IsInRaid() -- REAL group state, not the options window's selected mode
+-- -- because a pinned container's identity is the group you are actually in. That
+-- is why this resolves through GetThemeColorFor(isRaid) and not GetThemeColor().
+--
+-- The four plate roles are the base hue at descending brightness; the label is the
+-- base mixed toward white so it stays readable on moverBg.
+local MODE_TINTS = {
+    containerBg     = { mul = 0.30, alpha = 0.30 },   -- faintest: the unlocked wash
+    containerBorder = { mul = 0.80, alpha = 0.80 },
+    moverBg         = { mul = 0.40, alpha = 0.90 },
+    moverBorder     = { mul = 1.00, alpha = 1.00 },   -- the full accent
+}
+local MOVER_TEXT_WHITE_MIX = 0.60
+
 local function GetModeColors(isRaid)
-    if isRaid then
-        return {
-            containerBg     = { 0.30, 0.15, 0.05, 0.30 },
-            containerBorder = { 0.80, 0.40, 0.15, 0.80 },
-            moverBg         = { 0.40, 0.20, 0.05, 0.90 },
-            moverBorder     = { 1.00, 0.50, 0.20, 1.00 },
-            moverText       = { 1.00, 0.80, 0.50 },
-        }
+    local base = DF.GUI.GetThemeColorFor(isRaid)
+    local colors = {}
+    for role, tint in pairs(MODE_TINTS) do
+        colors[role] = { base.r * tint.mul, base.g * tint.mul, base.b * tint.mul, tint.alpha }
     end
-    return {
-        containerBg     = { 0.10, 0.10, 0.30, 0.30 },
-        containerBorder = { 0.40, 0.40, 0.80, 0.80 },
-        moverBg         = { 0.20, 0.20, 0.40, 0.90 },
-        moverBorder     = { 0.50, 0.50, 0.90, 1.00 },
-        moverText       = { 0.80, 0.80, 1.00 },
+    -- Three components only: this is unpacked straight into SetTextColor.
+    local m = MOVER_TEXT_WHITE_MIX
+    colors.moverText = {
+        base.r + (1 - base.r) * m,
+        base.g + (1 - base.g) * m,
+        base.b + (1 - base.b) * m,
     }
+    return colors
 end
 
 -- Make a pinned drag handle read as clickable and show which set the position
@@ -1351,11 +1367,12 @@ function PinnedFrames:CreateSetFrames(setIndex)
     -- Border when unlocked
     container.border = CreateFrame("Frame", nil, container, "BackdropTemplate")
     container.border:SetAllPoints()
-    container.border:SetBackdrop({
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    -- Outline only -- container.bg above already paints the interior wash.
+    DF.GUI:CreateElementBackdrop(container.border, {
+        fill        = false,
+        edgeSize    = 1,
+        borderColor = colors.containerBorder,
     })
-    container.border:SetBackdropBorderColor(unpack(colors.containerBorder))
     container.border:SetShown(self.moversShown)
 
     -- Mover frame (parented to UIParent for scale independence)

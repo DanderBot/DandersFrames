@@ -451,13 +451,10 @@ function CC:CreateClickCastUI(parent)
     local collapseBtn = CreateFrame("Button", nil, bindingsHeader, "BackdropTemplate")
     collapseBtn:SetPoint("LEFT", 4, 0)
     collapseBtn:SetSize(20, 20)
-    collapseBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(collapseBtn, {
+        bgColor     = { C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1 },
+        borderColor = { C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5 },
     })
-    collapseBtn:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    collapseBtn:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
     
     local collapseIcon = collapseBtn:CreateTexture(nil, "OVERLAY")
     collapseIcon:SetPoint("CENTER")
@@ -1207,13 +1204,10 @@ function CC:CreateCollapsedBindingRow(parent, binding, index)
     
     local row = CreateFrame("Button", nil, parent, "BackdropTemplate")
     row:SetHeight(58)
-    row:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(row, {
+        bgColor     = { C.element.r, C.element.g, C.element.b, 0.8 },
+        borderColor = { C.border.r, C.border.g, C.border.b, 0.5 },
     })
-    row:SetBackdropColor(C.element.r, C.element.g, C.element.b, 0.8)
-    row:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.5)
     
     -- Icon (centered, larger)
     local icon = row:CreateTexture(nil, "ARTWORK")
@@ -1397,13 +1391,11 @@ function CC:CreateKeybindPopup()
     popup:SetSize(280, popupHeight)
     popup:SetFrameStrata("FULLSCREEN_DIALOG")
     popup:SetFrameLevel(captureFrame:GetFrameLevel() + 10)
-    popup:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
+    DF.GUI:CreateElementBackdrop(popup, {
         edgeSize = 2,
+        bgColor     = { C_BACKGROUND.r, C_BACKGROUND.g, C_BACKGROUND.b, 0.98 },
+        borderColor = { themeColor.r, themeColor.g, themeColor.b, 1 },
     })
-    popup:SetBackdropColor(C_BACKGROUND.r, C_BACKGROUND.g, C_BACKGROUND.b, 0.98)
-    popup:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
     popup:Hide()
     
     -- Title

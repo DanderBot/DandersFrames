@@ -4376,13 +4376,11 @@ DF._MainEventDispatcher = function(self, event, arg1)
             local popup = CreateFrame("Frame", "DFNephUIPopup", UIParent, "BackdropTemplate")
             popup:SetSize(420, 240)
             popup:SetPoint("CENTER")
-            popup:SetBackdrop({
-                bgFile = "Interface\\Buttons\\WHITE8x8",
-                edgeFile = "Interface\\Buttons\\WHITE8x8",
-                edgeSize = 2,
+            DF.GUI:CreateElementBackdrop(popup, {
+                edgeSize    = 2,
+                bgColor     = { 0.1, 0.1, 0.1, 0.98 },
+                borderColor = { themeColor.r, themeColor.g, themeColor.b, 1 },
             })
-            popup:SetBackdropColor(0.1, 0.1, 0.1, 0.98)
-            popup:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
             popup:SetFrameStrata("FULLSCREEN_DIALOG")
             popup:SetFrameLevel(200)
             popup:EnableMouse(true)

@@ -4076,11 +4076,8 @@ function DF:CreateTestPanel()
     local badge = CreateFrame("Frame", nil, panel, "BackdropTemplate")
     badge:SetSize(40, 18)
     badge:SetPoint("LEFT", title, "RIGHT", 8, 0)
-    badge:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
+    -- Colours are pushed per mode (party/raid theme) when the panel refreshes.
+    DF.GUI:CreateElementBackdrop(badge)
     badge.text = badge:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     badge.text:SetPoint("CENTER", 0, 0)
     badge.text:SetText(L["Party"])
@@ -4309,13 +4306,10 @@ function DF:CreateTestPanel()
         -- Background track
         local track = CreateFrame("Frame", nil, container, "BackdropTemplate")
         track:SetAllPoints()
-        track:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
+        DF.GUI:CreateElementBackdrop(track, {
+            bgColor     = { C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1 },
+            borderColor = { C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5 },
         })
-        track:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-        track:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
 
         -- Fill track (coloured portion)
         local fill = track:CreateTexture(nil, "ARTWORK")
@@ -4411,13 +4405,10 @@ function DF:CreateTestPanel()
         local header = CreateFrame("Button", nil, section, "BackdropTemplate")
         header:SetSize(CONTENT_WIDTH, 26)
         header:SetPoint("TOPLEFT", 0, 0)
-        header:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
+        DF.GUI:CreateElementBackdrop(header, {
+            bgColor     = { C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.8 },
+            borderColor = { C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.3 },
         })
-        header:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.8)
-        header:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.3)
         section.header = header
 
         -- Chevron (starts collapsed)

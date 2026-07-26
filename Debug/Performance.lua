@@ -405,13 +405,10 @@ function DF:ShowPerformanceMonitor()
     monitorFrame = CreateFrame("Frame", "DandersFramesPerformanceMonitor", UIParent, "BackdropTemplate")
     monitorFrame:SetSize(300, 220)
     monitorFrame:SetPoint("TOPRIGHT", -20, -200)
-    monitorFrame:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(monitorFrame, {
+        bgColor     = { 0.05, 0.05, 0.05, 0.95 },
+        borderColor = { 0.3, 0.3, 0.3, 1 },
     })
-    monitorFrame:SetBackdropColor(0.05, 0.05, 0.05, 0.95)
-    monitorFrame:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
     monitorFrame:SetMovable(true)
     monitorFrame:EnableMouse(true)
     monitorFrame:RegisterForDrag("LeftButton")
@@ -460,13 +457,10 @@ function DF:ShowPerformanceMonitor()
     local graphContainer = CreateFrame("Frame", nil, monitorFrame, "BackdropTemplate")
     graphContainer:SetPoint("TOPLEFT", 12, -75)
     graphContainer:SetSize(GRAPH_WIDTH + 6, GRAPH_HEIGHT + 6)
-    graphContainer:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(graphContainer, {
+        bgColor     = { 0, 0, 0, 0.5 },
+        borderColor = { 0.2, 0.2, 0.2, 1 },
     })
-    graphContainer:SetBackdropColor(0, 0, 0, 0.5)
-    graphContainer:SetBackdropBorderColor(0.2, 0.2, 0.2, 1)
     
     -- Graph frame (for drawing)
     monitorFrame.memoryGraph = CreateFrame("Frame", nil, graphContainer)

@@ -6,6 +6,7 @@
 
 local addonName, DF = ...
 local GUI = DF.GUI
+local L = DF.L
 local testFrame = nil
 
 -- Theme colors (matching addon)
@@ -16,22 +17,33 @@ local C_ACCENT = {r = 0.45, g = 0.45, b = 0.95}
 local C_TEXT = {r = 0.9, g = 0.9, b = 0.9}
 local C_TEXT_DIM = {r = 0.5, g = 0.5, b = 0.5}
 
--- Class colors
+-- Class colors. The swatch tooltip name is resolved from the CLIENT's own
+-- localised class table rather than a DF locale key -- the game already ships
+-- these in every language, so 13 keys per locale would be duplicated work that
+-- could drift. `name` is the English fallback for the (never seen in practice)
+-- case of a token the client doesn't know.
 local CLASS_COLORS = {
-    {name = "Warrior", r = 0.78, g = 0.61, b = 0.43},
-    {name = "Paladin", r = 0.96, g = 0.55, b = 0.73},
-    {name = "Hunter", r = 0.67, g = 0.83, b = 0.45},
-    {name = "Rogue", r = 1.00, g = 0.96, b = 0.41},
-    {name = "Priest", r = 1.00, g = 1.00, b = 1.00},
-    {name = "Death Knight", r = 0.77, g = 0.12, b = 0.23},
-    {name = "Shaman", r = 0.00, g = 0.44, b = 0.87},
-    {name = "Mage", r = 0.41, g = 0.80, b = 0.94},
-    {name = "Warlock", r = 0.58, g = 0.51, b = 0.79},
-    {name = "Monk", r = 0.00, g = 1.00, b = 0.59},
-    {name = "Druid", r = 1.00, g = 0.49, b = 0.04},
-    {name = "Demon Hunter", r = 0.64, g = 0.19, b = 0.79},
-    {name = "Evoker", r = 0.20, g = 0.58, b = 0.50},
+    {token = "WARRIOR",     name = "Warrior",      r = 0.78, g = 0.61, b = 0.43},
+    {token = "PALADIN",     name = "Paladin",      r = 0.96, g = 0.55, b = 0.73},
+    {token = "HUNTER",      name = "Hunter",       r = 0.67, g = 0.83, b = 0.45},
+    {token = "ROGUE",       name = "Rogue",        r = 1.00, g = 0.96, b = 0.41},
+    {token = "PRIEST",      name = "Priest",       r = 1.00, g = 1.00, b = 1.00},
+    {token = "DEATHKNIGHT", name = "Death Knight", r = 0.77, g = 0.12, b = 0.23},
+    {token = "SHAMAN",      name = "Shaman",       r = 0.00, g = 0.44, b = 0.87},
+    {token = "MAGE",        name = "Mage",         r = 0.41, g = 0.80, b = 0.94},
+    {token = "WARLOCK",     name = "Warlock",      r = 0.58, g = 0.51, b = 0.79},
+    {token = "MONK",        name = "Monk",         r = 0.00, g = 1.00, b = 0.59},
+    {token = "DRUID",       name = "Druid",        r = 1.00, g = 0.49, b = 0.04},
+    {token = "DEMONHUNTER", name = "Demon Hunter", r = 0.64, g = 0.19, b = 0.79},
+    {token = "EVOKER",      name = "Evoker",       r = 0.20, g = 0.58, b = 0.50},
 }
+
+-- Localised class name for a swatch tooltip, from the client's table.
+local function ClassDisplayName(class)
+    local byToken = class.token and LOCALIZED_CLASS_NAMES_MALE
+        and LOCALIZED_CLASS_NAMES_MALE[class.token]
+    return byToken or class.name
+end
 
 -- Saved preferences (would be in SavedVariables)
 local savedColors = {}  -- Will be loaded from DB
@@ -185,14 +197,14 @@ local function CreateColorPickerFrame(hasAlpha)
     
     -- Main frame
     testFrame = CreateFrame("Frame", "DFColorPickerTest", UIParent, "BackdropTemplate")
+    -- Ride the shared GUI pixel grid: this surface is parented to UIParent, so it
+    -- never passes through a settings-page build. See GUI:AttachPixelSnap.
+    if DF.GUI and DF.GUI.AttachPixelSnap then DF.GUI:AttachPixelSnap(testFrame) end
     testFrame:SetSize(320, 450)
-    testFrame:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    GUI:CreateElementBackdrop(testFrame, {
+        bgColor     = { C_BG.r, C_BG.g, C_BG.b, 1 },
+        borderColor = { C_BORDER.r, C_BORDER.g, C_BORDER.b, 1 },
     })
-    testFrame:SetBackdropColor(C_BG.r, C_BG.g, C_BG.b, 1)
-    testFrame:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
     testFrame:SetMovable(true)
     testFrame:EnableMouse(true)
     testFrame:SetFrameStrata("FULLSCREEN_DIALOG")  -- High strata but below TOOLTIP so GameTooltip shows above
@@ -264,55 +276,19 @@ local function CreateColorPickerFrame(hasAlpha)
     
     local title = header:CreateFontString(nil, "OVERLAY", "DFFontNormal")
     title:SetPoint("LEFT", 10, 0)
-    title:SetText("DandersFrames Color Picker")
+    title:SetText(L["DandersFrames Color Picker"])
     title:SetTextColor(C_ACCENT.r, C_ACCENT.g, C_ACCENT.b)
     
-    local closeBtn = CreateFrame("Button", nil, header)
-    closeBtn:SetSize(20, 20)
+    -- OnHide treats a close as cancel.
+    local closeBtn = GUI:CreateCloseButton(header, { onClick = function() testFrame:Hide() end })
     closeBtn:SetPoint("RIGHT", -4, 0)
-    local closeIcon = closeBtn:CreateTexture(nil, "OVERLAY")
-    closeIcon:SetPoint("CENTER")
-    closeIcon:SetSize(12, 12)
-    closeIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close")
-    closeIcon:SetVertexColor(0.6, 0.6, 0.6)
-    closeBtn.icon = closeIcon
-    closeBtn:SetScript("OnClick", function() 
-        -- OnHide will treat this as cancel
-        testFrame:Hide() 
-    end)
-    closeBtn:SetScript("OnEnter", function(self) self.icon:SetVertexColor(1, 0.3, 0.3) end)
-    closeBtn:SetScript("OnLeave", function(self) self.icon:SetVertexColor(0.6, 0.6, 0.6) end)
-    
-    -- Pill toggle for Square/Circle mode
-    local pillContainer = CreateFrame("Frame", nil, header, "BackdropTemplate")
-    pillContainer:SetSize(110, 18)
-    pillContainer:SetPoint("RIGHT", closeBtn, "LEFT", -8, 0)
-    pillContainer:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    pillContainer:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    pillContainer:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
-    
-    local squareBtn = CreateFrame("Button", nil, pillContainer, "BackdropTemplate")
-    squareBtn:SetSize(54, 16)
-    squareBtn:SetPoint("LEFT", 1, 0)
-    squareBtn:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
-    
-    local squareBtnText = squareBtn:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
-    squareBtnText:SetPoint("CENTER")
-    squareBtnText:SetText("Square")
-    
-    local circleBtn = CreateFrame("Button", nil, pillContainer, "BackdropTemplate")
-    circleBtn:SetSize(54, 16)
-    circleBtn:SetPoint("RIGHT", -1, 0)
-    circleBtn:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
-    
-    local circleBtnText = circleBtn:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
-    circleBtnText:SetPoint("CENTER")
-    circleBtnText:SetText("Circle")
-    
+
+    -- Square/Circle picker mode. Transient UI state (a local, persisted via
+    -- SaveColorsToDb) rather than a db key, so it drives the shared segment toggle
+    -- through customGet/customSet. Forward-declared here because it anchors to
+    -- closeBtn but can only be built once UpdatePickerMode exists, further down.
+    local pillContainer
+
     -- Content area
     local content = CreateFrame("Frame", nil, testFrame)
     content:SetPoint("TOPLEFT", 10, -38)
@@ -334,8 +310,10 @@ local function CreateColorPickerFrame(hasAlpha)
     local squareFrame = CreateFrame("Frame", nil, squareContainer, "BackdropTemplate")
     squareFrame:SetSize(squareSize, squareSize)
     squareFrame:SetPoint("TOPLEFT", 0, 0)
-    squareFrame:SetBackdrop({ edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
-    squareFrame:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
+    GUI:CreateElementBackdrop(squareFrame, {
+        fill = false,
+        borderColor = { C_BORDER.r, C_BORDER.g, C_BORDER.b, 1 },
+    })
     
     local hueLayer = squareFrame:CreateTexture(nil, "BACKGROUND")
     hueLayer:SetAllPoints()
@@ -355,8 +333,10 @@ local function CreateColorPickerFrame(hasAlpha)
     local hueBar = CreateFrame("Frame", nil, squareContainer, "BackdropTemplate")
     hueBar:SetSize(hueBarWidth, squareSize)
     hueBar:SetPoint("LEFT", squareFrame, "RIGHT", 8, 0)
-    hueBar:SetBackdrop({ edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
-    hueBar:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
+    GUI:CreateElementBackdrop(hueBar, {
+        fill = false,
+        borderColor = { C_BORDER.r, C_BORDER.g, C_BORDER.b, 1 },
+    })
     
     local hueColors = {{1,0,0}, {1,1,0}, {0,1,0}, {0,1,1}, {0,0,1}, {1,0,1}, {1,0,0}}
     local numSegments = 6
@@ -382,8 +362,10 @@ local function CreateColorPickerFrame(hasAlpha)
     local alphaBar = CreateFrame("Frame", nil, squareContainer, "BackdropTemplate")
     alphaBar:SetSize(alphaBarWidth, squareSize)
     alphaBar:SetPoint("LEFT", hueBar, "RIGHT", 8, 0)
-    alphaBar:SetBackdrop({ edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
-    alphaBar:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
+    GUI:CreateElementBackdrop(alphaBar, {
+        fill = false,
+        borderColor = { C_BORDER.r, C_BORDER.g, C_BORDER.b, 1 },
+    })
     
     -- Checkerboard background for alpha (inset by 1 to match gradient)
     local checkerSize = 8
@@ -450,8 +432,10 @@ local function CreateColorPickerFrame(hasAlpha)
     local circleValueBar = CreateFrame("Frame", nil, circleContainer, "BackdropTemplate")
     circleValueBar:SetSize(hueBarWidth, squareSize)
     circleValueBar:SetPoint("TOPLEFT", squareSize + 8, 0)
-    circleValueBar:SetBackdrop({ edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
-    circleValueBar:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
+    GUI:CreateElementBackdrop(circleValueBar, {
+        fill = false,
+        borderColor = { C_BORDER.r, C_BORDER.g, C_BORDER.b, 1 },
+    })
     
     local circleValueGradient = circleValueBar:CreateTexture(nil, "BACKGROUND")
     circleValueGradient:SetPoint("TOPLEFT", 1, -1)
@@ -470,8 +454,10 @@ local function CreateColorPickerFrame(hasAlpha)
     local circleAlphaBar = CreateFrame("Frame", nil, circleContainer, "BackdropTemplate")
     circleAlphaBar:SetSize(alphaBarWidth, squareSize)
     circleAlphaBar:SetPoint("LEFT", circleValueBar, "RIGHT", 8, 0)
-    circleAlphaBar:SetBackdrop({ edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
-    circleAlphaBar:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
+    GUI:CreateElementBackdrop(circleAlphaBar, {
+        fill = false,
+        borderColor = { C_BORDER.r, C_BORDER.g, C_BORDER.b, 1 },
+    })
     
     -- Checkerboard for circle alpha (inset by 1 to match gradient)
     for row = 0, math.ceil(checkerHeight / checkerSize) - 1 do
@@ -506,8 +492,10 @@ local function CreateColorPickerFrame(hasAlpha)
     local previewFrame = CreateFrame("Frame", nil, content, "BackdropTemplate")
     previewFrame:SetSize(55, 55)
     previewFrame:SetPoint("TOPLEFT", squareContainer, "TOPRIGHT", -50, 0)
-    previewFrame:SetBackdrop({ edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
-    previewFrame:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
+    GUI:CreateElementBackdrop(previewFrame, {
+        fill = false,
+        borderColor = { C_BORDER.r, C_BORDER.g, C_BORDER.b, 1 },
+    })
     
     -- Checkerboard behind preview for alpha (inset by 1 for border)
     local previewInner = 53  -- 55 - 2 for border
@@ -539,8 +527,10 @@ local function CreateColorPickerFrame(hasAlpha)
         local container = CreateFrame("Frame", nil, parent, "BackdropTemplate")
         container:SetSize(width, 22)
         container:SetPoint("LEFT", xOffset, 0)
-        container:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
-        container:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
+        GUI:CreateElementBackdrop(container, {
+            outline = false,
+            bgColor     = { C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1 },
+        })
         
         local lbl = container:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
         lbl:SetPoint("LEFT", 4, 0)
@@ -572,12 +562,14 @@ local function CreateColorPickerFrame(hasAlpha)
     local hexFrame = CreateFrame("Frame", nil, content, "BackdropTemplate")
     hexFrame:SetSize(118, 22)  -- Wider to accommodate copy button
     hexFrame:SetPoint("TOPLEFT", inputFrame, "BOTTOMLEFT", 0, -4)
-    hexFrame:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
-    hexFrame:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
+    GUI:CreateElementBackdrop(hexFrame, {
+        outline = false,
+        bgColor     = { C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1 },
+    })
     
     local hexLabel = hexFrame:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
     hexLabel:SetPoint("LEFT", 4, 0)
-    hexLabel:SetText("Hex")
+    hexLabel:SetText(L["Hex"])
     hexLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     
     local hexInput = CreateFrame("EditBox", nil, hexFrame)
@@ -592,51 +584,38 @@ local function CreateColorPickerFrame(hasAlpha)
     
     -- Copy button
     local copyBtn = CreateFrame("Button", nil, hexFrame, "BackdropTemplate")
-    copyBtn:SetSize(18, 18)
     copyBtn:SetPoint("LEFT", hexInput, "RIGHT", 2, 0)
-    copyBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    GUI:StyleButton(copyBtn, {
+        width = 18, height = 18,
+        icon = {
+            texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\content_copy",
+            size    = 12,
+            color   = C_TEXT,
+        },
     })
-    copyBtn:SetBackdropColor(C_ELEMENT.r * 0.8, C_ELEMENT.g * 0.8, C_ELEMENT.b * 0.8, 1)
-    copyBtn:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
-    
-    local copyIcon = copyBtn:CreateTexture(nil, "OVERLAY")
-    copyIcon:SetPoint("CENTER", 0, 0)
-    copyIcon:SetSize(12, 12)
-    copyIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\content_copy")
-    copyIcon:SetVertexColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    
+
     -- Create a copy popup that appears within the color picker
     local copyPopup = CreateFrame("Frame", nil, testFrame, "BackdropTemplate")
     copyPopup:SetSize(180, 70)
     copyPopup:SetPoint("CENTER", testFrame, "CENTER", 0, 0)
-    copyPopup:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    GUI:CreateElementBackdrop(copyPopup, {
+        bgColor     = { C_BG.r, C_BG.g, C_BG.b, 1 },
+        borderColor = { C_ACCENT.r, C_ACCENT.g, C_ACCENT.b, 1 },
     })
-    copyPopup:SetBackdropColor(C_BG.r, C_BG.g, C_BG.b, 1)
-    copyPopup:SetBackdropBorderColor(C_ACCENT.r, C_ACCENT.g, C_ACCENT.b, 1)
     copyPopup:SetFrameLevel(testFrame:GetFrameLevel() + 10)
     copyPopup:Hide()
     
     local copyPopupLabel = copyPopup:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
     copyPopupLabel:SetPoint("TOP", 0, -8)
-    copyPopupLabel:SetText("Press Ctrl+C to copy:")
+    copyPopupLabel:SetText(L["Press Ctrl+C to copy:"])
     copyPopupLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
     
     local copyPopupEdit = CreateFrame("EditBox", nil, copyPopup, "BackdropTemplate")
     copyPopupEdit:SetSize(160, 22)
     copyPopupEdit:SetPoint("TOP", copyPopupLabel, "BOTTOM", 0, -6)
-    copyPopupEdit:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    copyPopupEdit:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    copyPopupEdit:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
+    -- skipFont: keeps this field's own centred DFFontNormalSmall (it displays a
+    -- hex string to copy, not a normal input), but takes the shared input chrome.
+    GUI:StyleEditBox(copyPopupEdit, { skipFont = true })
     copyPopupEdit:SetFontObject("DFFontNormalSmall")
     copyPopupEdit:SetTextColor(1, 1, 1)
     copyPopupEdit:SetAutoFocus(false)
@@ -644,36 +623,17 @@ local function CreateColorPickerFrame(hasAlpha)
     copyPopupEdit:SetScript("OnEscapePressed", function() copyPopup:Hide() end)
     copyPopupEdit:SetScript("OnEnterPressed", function() copyPopup:Hide() end)
     
+    -- Hover accent (border + wash) is StyleButton's job now, so these buttons
+    -- only carry their own click behaviour and tooltip.
     local copyPopupClose = CreateFrame("Button", nil, copyPopup, "BackdropTemplate")
-    copyPopupClose:SetSize(50, 18)
     copyPopupClose:SetPoint("BOTTOM", 0, 6)
-    copyPopupClose:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    copyPopupClose:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    copyPopupClose:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
-    local copyPopupCloseText = copyPopupClose:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
-    copyPopupCloseText:SetPoint("CENTER")
-    copyPopupCloseText:SetText("Close")
-    copyPopupCloseText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+    GUI:StyleButton(copyPopupClose, { width = 50, height = 18, text = L["Close"], font = "DFFontNormalSmall" })
     copyPopupClose:SetScript("OnClick", function() copyPopup:Hide() end)
-    copyPopupClose:SetScript("OnEnter", function(self) self:SetBackdropBorderColor(C_ACCENT.r, C_ACCENT.g, C_ACCENT.b, 1) end)
-    copyPopupClose:SetScript("OnLeave", function(self) self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1) end)
-    
-    copyBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropBorderColor(C_ACCENT.r, C_ACCENT.g, C_ACCENT.b, 1)
-        copyIcon:SetVertexColor(C_ACCENT.r, C_ACCENT.g, C_ACCENT.b)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText("Copy hex to clipboard")
-        GameTooltip:Show()
+
+    copyBtn:HookScript("OnEnter", function(self)
+        GUI:ShowTooltip(self, { title = L["Copy hex to clipboard"], anchor = "ANCHOR_RIGHT" })
     end)
-    copyBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
-        copyIcon:SetVertexColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-        GameTooltip:Hide()
-    end)
+    copyBtn:HookScript("OnLeave", function() GUI:HideTooltip() end)
     copyBtn:SetScript("OnClick", function()
         local hex = hexInput:GetText()
         if hex and hex ~= "" then
@@ -1015,69 +975,40 @@ local function CreateColorPickerFrame(hasAlpha)
     -- Mode Toggle
     -- ============================================================
     
+    -- Selection highlight + hover now belong to the segment toggle, so this only
+    -- swaps which picker is on screen.
     local function UpdatePickerMode()
         if useSquarePicker then
             squareContainer:Show()
             circleContainer:Hide()
-            -- Highlight square button
-            squareBtn:SetBackdropColor(C_ACCENT.r, C_ACCENT.g, C_ACCENT.b, 1)
-            squareBtnText:SetTextColor(1, 1, 1)
-            circleBtn:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 0)
-            circleBtnText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
         else
             squareContainer:Hide()
             circleContainer:Show()
-            -- Highlight circle button
-            circleBtn:SetBackdropColor(C_ACCENT.r, C_ACCENT.g, C_ACCENT.b, 1)
-            circleBtnText:SetTextColor(1, 1, 1)
-            squareBtn:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 0)
-            squareBtnText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-            -- Update wheel thumb position
             UpdateWheelThumbPosition()
         end
+        if pillContainer then pillContainer:Refresh() end
     end
-    
-    squareBtn:SetScript("OnClick", function()
-        if not useSquarePicker then
-            useSquarePicker = true
-            preferSquarePicker = true
-            SaveColorsToDb()
-            UpdatePickerMode()
-            UpdateAllColors()
-        end
-    end)
-    
-    circleBtn:SetScript("OnClick", function()
-        if useSquarePicker then
-            useSquarePicker = false
-            preferSquarePicker = false
-            SaveColorsToDb()
-            UpdatePickerMode()
-            UpdateAllColors()
-        end
-    end)
-    
-    -- Hover effects
-    squareBtn:SetScript("OnEnter", function(self)
-        if not useSquarePicker then
-            self:SetBackdropColor(C_ELEMENT.r + 0.1, C_ELEMENT.g + 0.1, C_ELEMENT.b + 0.1, 1)
-        end
-    end)
-    squareBtn:SetScript("OnLeave", function(self)
-        if not useSquarePicker then
-            self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 0)
-        end
-    end)
-    circleBtn:SetScript("OnEnter", function(self)
-        if useSquarePicker then
-            self:SetBackdropColor(C_ELEMENT.r + 0.1, C_ELEMENT.g + 0.1, C_ELEMENT.b + 0.1, 1)
-        end
-    end)
-    circleBtn:SetScript("OnLeave", function(self)
-        if useSquarePicker then
-            self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 0)
-        end
-    end)
+
+    -- The Square/Circle pill (declared next to the close button it anchors to).
+    -- Not db-bound: useSquarePicker is a local, and the preference is persisted
+    -- through SaveColorsToDb, so it binds via customGet/customSet.
+    pillContainer = GUI:CreateSegmentToggle(header, {
+        { value = "square", label = L["Square"] },
+        { value = "circle", label = L["Circle"] },
+    }, nil, nil, function()
+        SaveColorsToDb()
+        UpdatePickerMode()
+        UpdateAllColors()
+    end, {
+        segmentWidth = 54,
+        height       = 16,
+        customGet    = function() return useSquarePicker and "square" or "circle" end,
+        customSet    = function(value)
+            useSquarePicker    = (value == "square")
+            preferSquarePicker = useSquarePicker
+        end,
+    })
+    pillContainer:SetPoint("RIGHT", closeBtn, "LEFT", -8, 0)
     
     -- ============================================================
     -- Alpha Visibility
@@ -1110,78 +1041,40 @@ local function CreateColorPickerFrame(hasAlpha)
     tabContent:SetSize(300, 96)  -- 3 rows of 30px swatches + 2px gaps
     tabContent:SetPoint("TOPLEFT", tabFrame, "BOTTOMLEFT", 0, -4)
     
+    -- Shared underline-tab style: StyleButton{tab=true} owns the accent stripe,
+    -- the bright/dim label and the hover wash, all driven by :SetActive().
     local function CreateTab(name, label, xOffset)
-        local btn = CreateFrame("Button", nil, tabFrame)
-        btn:SetSize(55, 20)
+        local btn = CreateFrame("Button", nil, tabFrame, "BackdropTemplate")
         btn:SetPoint("LEFT", xOffset, 0)
-        
-        local text = btn:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
-        text:SetPoint("CENTER")
-        text:SetText(label)
-        btn.text = text
-        
-        local underline = btn:CreateTexture(nil, "OVERLAY")
-        underline:SetHeight(2)
-        underline:SetPoint("BOTTOMLEFT", 0, 0)
-        underline:SetPoint("BOTTOMRIGHT", 0, 0)
-        underline:SetColorTexture(C_ACCENT.r, C_ACCENT.g, C_ACCENT.b, 1)
-        underline:Hide()
-        btn.underline = underline
-        
+        GUI:StyleButton(btn, {
+            width = 55, height = 20,
+            text = label, font = "DFFontNormalSmall",
+            tab = true,
+        })
         btn.name = name
         tabButtons[name] = btn
         return btn
     end
     
-    CreateTab("saved", "Saved", 0)
-    CreateTab("recent", "Recent", 60)
-    CreateTab("class", "Class", 120)
+    CreateTab("saved", L["Saved"], 0)
+    CreateTab("recent", L["Recent"], 60)
+    CreateTab("class", L["Class"], 120)
     
     -- Save button in tab row (top-right)
     local saveBtn = CreateFrame("Button", nil, tabFrame, "BackdropTemplate")
-    saveBtn:SetSize(50, 18)
     saveBtn:SetPoint("TOPRIGHT", 0, 0)
-    saveBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    saveBtn:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    saveBtn:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
-    local saveBtnText = saveBtn:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
-    saveBtnText:SetPoint("CENTER")
-    saveBtnText:SetText("Save")
-    saveBtnText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    saveBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropBorderColor(C_ACCENT.r, C_ACCENT.g, C_ACCENT.b, 1)
-    end)
-    saveBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
-    end)
+    GUI:StyleButton(saveBtn, { width = 50, height = 18, text = L["Save"], font = "DFFontNormalSmall" })
 
     -- Default button: stacked below Save, same width
     local defaultBtn = CreateFrame("Button", nil, tabFrame, "BackdropTemplate")
-    defaultBtn:SetSize(50, 18)
     defaultBtn:SetPoint("TOP", saveBtn, "BOTTOM", 0, -2)
-    defaultBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    defaultBtn:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    defaultBtn:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
-    local defaultBtnText = defaultBtn:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
-    defaultBtnText:SetPoint("CENTER")
-    defaultBtnText:SetText("Default")
-    defaultBtnText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+    GUI:StyleButton(defaultBtn, { width = 50, height = 18, text = L["Default"], font = "DFFontNormalSmall" })
     defaultBtn:SetScript("OnClick", function()
         local d = testFrame.defaultColor
         if not d then return end
         -- SetColor triggers UpdateAllColors which fires onChangeCallback for live preview
         testFrame:SetColor(d.r, d.g, d.b, d.a or 1)
     end)
-    defaultBtn:SetScript("OnEnter", function(self) self:SetBackdropBorderColor(C_ACCENT.r, C_ACCENT.g, C_ACCENT.b, 1) end)
-    defaultBtn:SetScript("OnLeave", function(self) self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1) end)
     defaultBtn:Hide()
     testFrame.defaultBtn = defaultBtn
     
@@ -1223,13 +1116,10 @@ local function CreateColorPickerFrame(hasAlpha)
         local swatch = CreateFrame("Button", nil, parent, "BackdropTemplate")
         swatch:SetSize(SWATCH_SIZE, SWATCH_SIZE)
         swatch:SetPoint("TOPLEFT", col * (SWATCH_SIZE + SWATCH_GAP), -row * (SWATCH_SIZE + SWATCH_GAP))
-        swatch:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
+        GUI:CreateElementBackdrop(swatch, {
+            bgColor     = { r, g, b, 1 },
+            borderColor = { C_BORDER.r, C_BORDER.g, C_BORDER.b, 1 },
         })
-        swatch:SetBackdropColor(r, g, b, 1)
-        swatch:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
         
         swatch:SetScript("OnEnter", function(self)
             self:SetBackdropBorderColor(1, 1, 1, 1)
@@ -1249,7 +1139,7 @@ local function CreateColorPickerFrame(hasAlpha)
     end
     
     for i, class in ipairs(CLASS_COLORS) do
-        CreateColorSwatch(classContent, i, class.r, class.g, class.b, class.name)
+        CreateColorSwatch(classContent, i, class.r, class.g, class.b, ClassDisplayName(class))
     end
     
     -- ============================================================
@@ -1259,7 +1149,7 @@ local function CreateColorPickerFrame(hasAlpha)
     local savedSwatches = {}
     local savedEmptyText = savedContent:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
     savedEmptyText:SetPoint("CENTER", 0, 0)
-    savedEmptyText:SetText("No saved colors yet\nClick 'Save' to add current color")
+    savedEmptyText:SetText(L["No saved colors yet"] .. "\n" .. L["Click 'Save' to add current color"])
     savedEmptyText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     savedEmptyText:SetJustifyH("CENTER")
     
@@ -1282,13 +1172,10 @@ local function CreateColorPickerFrame(hasAlpha)
             local swatch = CreateFrame("Button", nil, savedContent, "BackdropTemplate")
             swatch:SetSize(SWATCH_SIZE, SWATCH_SIZE)
             swatch:SetPoint("TOPLEFT", col * (SWATCH_SIZE + SWATCH_GAP), -row * (SWATCH_SIZE + SWATCH_GAP))
-            swatch:SetBackdrop({
-                bgFile = "Interface\\Buttons\\WHITE8x8",
-                edgeFile = "Interface\\Buttons\\WHITE8x8",
-                edgeSize = 1,
+            GUI:CreateElementBackdrop(swatch, {
+                bgColor     = { color.r, color.g, color.b, 1 },
+                borderColor = { C_BORDER.r, C_BORDER.g, C_BORDER.b, 1 },
             })
-            swatch:SetBackdropColor(color.r, color.g, color.b, 1)
-            swatch:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
             swatch.colorIndex = i
             
             swatch:SetScript("OnEnter", function(self)
@@ -1323,7 +1210,7 @@ local function CreateColorPickerFrame(hasAlpha)
                     RefreshSavedSwatches()
                     
                     -- Print confirmation with hex code
-                    print("|cff7373f2DandersFrames:|r Color deleted: |cffffffff" .. hexCode .. "|r")
+                    print(string.format(L["Color deleted: %s"], "|cffffffff" .. hexCode .. "|r"))
                 end
             end)
             
@@ -1336,7 +1223,7 @@ local function CreateColorPickerFrame(hasAlpha)
     
     saveBtn:SetScript("OnClick", function()
         if #savedColors >= MAX_SAVED then
-            print("|cff7373f2DandersFrames:|r Maximum saved colors reached (" .. MAX_SAVED .. ")")
+            print(string.format(L["Maximum saved colors reached (%d)"], MAX_SAVED))
             return
         end
         
@@ -1347,7 +1234,7 @@ local function CreateColorPickerFrame(hasAlpha)
         -- Check if color already exists (compare without alpha for RGB-only pickers)
         for _, color in ipairs(savedColors) do
             if ColorKey(color.r, color.g, color.b, color.a or 1) == key then
-                print("|cff7373f2DandersFrames:|r Color already saved")
+                print(L["Color already saved"])
                 return
             end
         end
@@ -1361,7 +1248,7 @@ local function CreateColorPickerFrame(hasAlpha)
         
         -- Print confirmation with hex code
         local hexCode = RGBtoHex(r, g, b, a)
-        print("|cff7373f2DandersFrames:|r Color saved: |cffffffff" .. hexCode .. "|r")
+        print(string.format(L["Color saved: %s"], "|cffffffff" .. hexCode .. "|r"))
     end)
     
     -- ============================================================
@@ -1371,7 +1258,7 @@ local function CreateColorPickerFrame(hasAlpha)
     local recentSwatches = {}
     local recentEmptyText = recentContent:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
     recentEmptyText:SetPoint("CENTER", 0, 0)
-    recentEmptyText:SetText("No recent colors yet\nColors appear here when you apply them")
+    recentEmptyText:SetText(L["No recent colors yet"] .. "\n" .. L["Colors appear here when you apply them"])
     recentEmptyText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     recentEmptyText:SetJustifyH("CENTER")
     
@@ -1394,13 +1281,10 @@ local function CreateColorPickerFrame(hasAlpha)
             local swatch = CreateFrame("Button", nil, recentContent, "BackdropTemplate")
             swatch:SetSize(SWATCH_SIZE, SWATCH_SIZE)
             swatch:SetPoint("TOPLEFT", col * (SWATCH_SIZE + SWATCH_GAP), -row * (SWATCH_SIZE + SWATCH_GAP))
-            swatch:SetBackdrop({
-                bgFile = "Interface\\Buttons\\WHITE8x8",
-                edgeFile = "Interface\\Buttons\\WHITE8x8",
-                edgeSize = 1,
+            GUI:CreateElementBackdrop(swatch, {
+                bgColor     = { color.r, color.g, color.b, 1 },
+                borderColor = { C_BORDER.r, C_BORDER.g, C_BORDER.b, 1 },
             })
-            swatch:SetBackdropColor(color.r, color.g, color.b, 1)
-            swatch:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
             swatch.colorData = color
             
             swatch:SetScript("OnEnter", function(self)
@@ -1428,7 +1312,7 @@ local function CreateColorPickerFrame(hasAlpha)
                 elseif button == "RightButton" then
                     -- Save to saved colors
                     if #savedColors >= MAX_SAVED then
-                        print("|cff7373f2DandersFrames:|r Maximum saved colors reached (" .. MAX_SAVED .. ")")
+                        print(string.format(L["Maximum saved colors reached (%d)"], MAX_SAVED))
                         return
                     end
                     
@@ -1437,7 +1321,7 @@ local function CreateColorPickerFrame(hasAlpha)
                     local key = ColorKey(color.r, color.g, color.b, a or 1)
                     for _, saved in ipairs(savedColors) do
                         if ColorKey(saved.r, saved.g, saved.b, saved.a or 1) == key then
-                            print("|cff7373f2DandersFrames:|r Color already saved")
+                            print(L["Color already saved"])
                             return
                         end
                     end
@@ -1451,7 +1335,7 @@ local function CreateColorPickerFrame(hasAlpha)
                     
                     -- Print confirmation with hex code
                     local hexCode = RGBtoHex(color.r, color.g, color.b, a)
-                    print("|cff7373f2DandersFrames:|r Color saved: |cffffffff" .. hexCode .. "|r")
+                    print(string.format(L["Color saved: %s"], "|cffffffff" .. hexCode .. "|r"))
                 end
             end)
             
@@ -1490,13 +1374,7 @@ local function CreateColorPickerFrame(hasAlpha)
     
     local function UpdateTabs()
         for name, btn in pairs(tabButtons) do
-            if name == activeTab then
-                btn.text:SetTextColor(C_ACCENT.r, C_ACCENT.g, C_ACCENT.b)
-                btn.underline:Show()
-            else
-                btn.text:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-                btn.underline:Hide()
-            end
+            btn:SetActive(name == activeTab)   -- stripe + label state, both shared
         end
         classContent:SetShown(activeTab == "class")
         savedContent:SetShown(activeTab == "saved")
@@ -1525,58 +1403,30 @@ local function CreateColorPickerFrame(hasAlpha)
     footer:SetHeight(40)
     footer:SetPoint("BOTTOMLEFT", 0, 0)
     footer:SetPoint("BOTTOMRIGHT", 0, 0)
-    footer:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
-    footer:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
+    GUI:CreateElementBackdrop(footer, {
+        outline = false,
+        bgColor     = { C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1 },
+    })
     
     -- Apply button on the left (matches Blizzard's color picker layout)
     local applyBtn = CreateFrame("Button", nil, footer, "BackdropTemplate")
-    applyBtn:SetSize(80, 26)
     applyBtn:SetPoint("RIGHT", footer, "CENTER", -5, 0)
-    applyBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    -- primary = the filled accent CTA this already was by hand.
+    GUI:StyleButton(applyBtn, {
+        width = 80, height = 26,
+        text = L["Okay"], font = "DFFontNormalSmall",
+        primary = true,
     })
-    applyBtn:SetBackdropColor(C_ACCENT.r, C_ACCENT.g, C_ACCENT.b, 1)
-    applyBtn:SetBackdropBorderColor(C_ACCENT.r, C_ACCENT.g, C_ACCENT.b, 1)
-    local applyText = applyBtn:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
-    applyText:SetPoint("CENTER")
-    applyText:SetText("Okay")
-    applyText:SetTextColor(1, 1, 1)
-    applyBtn:SetScript("OnClick", function()
-        local r, g, b = HSVtoRGB(currentHue, currentSat, currentVal)
-        
-        -- Add to recent colors
-        AddToRecent(r, g, b, testFrame.hasAlpha and currentAlpha or nil)
-        
-        if testFrame.hasAlpha then
-            print(string.format("|cff7373f2DandersFrames:|r Selected color: R=%.2f G=%.2f B=%.2f A=%.2f (%s)", r, g, b, currentAlpha, RGBtoHex(r, g, b, currentAlpha)))
-        else
-            print(string.format("|cff7373f2DandersFrames:|r Selected color: R=%.2f G=%.2f B=%.2f (%s)", r, g, b, RGBtoHex(r, g, b)))
-        end
-        testFrame:Hide()
-    end)
-    applyBtn:SetScript("OnEnter", function(self) self:SetBackdropColor(C_ACCENT.r * 1.2, C_ACCENT.g * 1.2, C_ACCENT.b * 1.2, 1) end)
-    applyBtn:SetScript("OnLeave", function(self) self:SetBackdropColor(C_ACCENT.r, C_ACCENT.g, C_ACCENT.b, 1) end)
-    
+
+    -- NOTE: both buttons had their OnClick set twice — the real handlers are
+    -- installed further down, after the callback API exists, so the earlier pair
+    -- was dead (SetScript replaces). The dead apply handler is removed here rather
+    -- than left to look authoritative; its chat print went with it.
+
     -- Cancel button on the right (matches Blizzard's color picker layout)
     local cancelBtn = CreateFrame("Button", nil, footer, "BackdropTemplate")
-    cancelBtn:SetSize(80, 26)
     cancelBtn:SetPoint("LEFT", footer, "CENTER", 5, 0)
-    cancelBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    cancelBtn:SetBackdropColor(C_BG.r, C_BG.g, C_BG.b, 1)
-    cancelBtn:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
-    local cancelText = cancelBtn:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
-    cancelText:SetPoint("CENTER")
-    cancelText:SetText("Cancel")
-    cancelText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    cancelBtn:SetScript("OnClick", function() testFrame:Hide() end)
-    cancelBtn:SetScript("OnEnter", function(self) self:SetBackdropBorderColor(0.8, 0.4, 0.4, 1) end)
-    cancelBtn:SetScript("OnLeave", function(self) self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1) end)
+    GUI:StyleButton(cancelBtn, { width = 80, height = 26, text = L["Cancel"], font = "DFFontNormalSmall" })
 
     -- ============================================================
     -- API Methods
@@ -2225,23 +2075,25 @@ SlashCmdList["DFCOLORHOOK"] = function(arg)
     if arg == "on" then
         local success = GUI:InstallColorPickerHook()
         if success then
-            print("|cff00ff00DandersFrames:|r Color picker hook installed")
+            print(L["Color picker hook installed"])
         else
-            print("|cffff0000DandersFrames:|r Failed to install hook (already hooked or API not available)")
+            print(L["Failed to install hook (already hooked or API not available)"])
         end
     elseif arg == "off" then
         GUI:UninstallColorPickerHook()
-        print("|cffff0000DandersFrames:|r Color picker hook removed")
+        print(L["Color picker hook removed"])
     elseif arg == "debug" then
         -- Toggle debug mode
         local dfGlobal = DandersFrames
         local db = dfGlobal and dfGlobal.db and dfGlobal.db.party
         if db then
             db.colorPickerDebug = not db.colorPickerDebug
-            print("|cff7373f2DandersFrames:|r Color picker debug " .. (db.colorPickerDebug and "|cff00ff00enabled|r" or "|cffff0000disabled|r"))
-            print("Open a color picker to see debug output")
+            print(string.format(L["Color picker debug %s"],
+                db.colorPickerDebug and "|cff00ff00" .. L["enabled"] .. "|r"
+                                     or "|cffff0000" .. L["disabled"] .. "|r"))
+            print(L["Open a color picker to see debug output"])
         else
-            print("|cffff0000DandersFrames:|r DB not available")
+            print(L["DB not available"])
         end
     elseif arg == "api" then
         -- Show API info
@@ -2282,9 +2134,10 @@ SlashCmdList["DFCOLORHOOK"] = function(arg)
             print("  colorPickerGlobalOverride: " .. (db.colorPickerGlobalOverride and "|cff00ff00true|r" or "|cffff0000false|r"))
             print("  colorPickerDebug: " .. (db.colorPickerDebug and "|cff00ff00true|r" or "|cffff0000false|r"))
         end
-        print("Use |cffeda55f/dfcolorhook on|r or |cffeda55f/dfcolorhook off|r to toggle")
-        print("Use |cffeda55f/dfcolorhook debug|r to toggle debug output")
-        print("Use |cffeda55f/dfcolorhook api|r to show API info")
+        print(string.format(L["Use %s or %s to toggle"],
+            "|cffeda55f/dfcolorhook on|r", "|cffeda55f/dfcolorhook off|r"))
+        print(string.format(L["Use %s to toggle debug output"], "|cffeda55f/dfcolorhook debug|r"))
+        print(string.format(L["Use %s to show API info"], "|cffeda55f/dfcolorhook api|r"))
     end
 end
 

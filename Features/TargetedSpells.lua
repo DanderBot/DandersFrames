@@ -2523,13 +2523,9 @@ function DF:CreatePersonalTargetedSpellsMover()
     local mover = CreateFrame("Frame", "DandersFramesPersonalTargetedSpellsMover", UIParent, "BackdropTemplate")
     mover:SetSize(w, h)
     mover:SetFrameStrata("DIALOG")
-    mover:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 2,
-    })
-    mover:SetBackdropColor(1.0, 0.5, 0.2, 0.3)
-    mover:SetBackdropBorderColor(1.0, 0.5, 0.2, 0.8)
+    -- No mode of its own (this display is not party- or raid-specific), so the
+    -- mover follows whichever mode the options window is showing.
+    DF.GUI:CreateMoverBackdrop(mover)
     mover:EnableMouse(true)
     mover:SetMovable(true)
     mover:RegisterForDrag("LeftButton")
@@ -5133,13 +5129,9 @@ local function TargetedList_CreateMover()
 
     local mover = CreateFrame("Frame", "DandersFramesTargetedListMover", UIParent, "BackdropTemplate")
     mover:SetFrameStrata("DIALOG")
-    mover:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 2,
-    })
-    mover:SetBackdropColor(1.0, 0.5, 0.2, 0.3)
-    mover:SetBackdropBorderColor(1.0, 0.5, 0.2, 0.8)
+    -- No mode of its own (this display is not party- or raid-specific), so the
+    -- mover follows whichever mode the options window is showing.
+    DF.GUI:CreateMoverBackdrop(mover)
     mover:EnableMouse(true)
     mover:SetMovable(true)
     mover:RegisterForDrag("LeftButton")

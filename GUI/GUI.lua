@@ -282,21 +282,262 @@ local function CloseOpenDropdown()
 end
 
 -- Helper to get current theme color
+-- The theme colour for an EXPLICIT mode. Use this for any surface that belongs to
+-- a mode rather than to whatever page the options window happens to be showing --
+-- movers, pinned containers -- so a raid surface stays orange while the window is
+-- on a party page. GetThemeColor() below is the follow-the-window variant.
+local function GetThemeColorFor(isRaid)
+    if isRaid then return C_RAID else return C_ACCENT end
+end
+GUI.GetThemeColorFor = GetThemeColorFor
+
 local function GetThemeColor()
-    if GUI.SelectedMode == "raid" then return C_RAID else return C_ACCENT end
+    return GetThemeColorFor(GUI.SelectedMode == "raid")
 end
 GUI.GetThemeColor = GetThemeColor
 
--- Helper to create element backdrop (for dropdowns, sliders, inputs)
-local function CreateElementBackdrop(frame)
+-- Physical pixels per UI unit, measured from the frame's OWN effective scale.
+-- The GUI window carries a user scale (guiScale) on top of UIParent's and is
+-- freely resizable, so this is almost never 1 and cannot be read from the
+-- addon-wide DF:GetPixelScale (which is relative to UIParent).
+local function PixelsPerUnit(frame)
+    local eff = frame and frame.GetEffectiveScale and frame:GetEffectiveScale()
+    local _, physH = GetPhysicalScreenSize()
+    if not (eff and eff > 0 and physH and physH > 0) then return nil end
+    return eff * physH / 768
+end
+
+-- Land a box's 1px backdrop edge on the physical pixel grid.
+--
+-- A backdrop edge that falls on a fractional device-pixel row is filtered across
+-- two rows at half intensity each. On a typical setup one UI unit is very close
+-- to one device pixel, so a 1px edge splits almost evenly -- and the settings
+-- group edge is 8% alpha over a 3% background, which at half intensity is
+-- indistinguishable from the background. That is the box whose top border
+-- vanishes and reappears as you scroll the page.
+--
+-- Three things have to line up, and snapping only one of them does nothing:
+--   * position -- the box is anchored inside a scroll child at an arbitrary offset
+--   * size     -- the bottom/left edge can be on-grid while the top/right is not
+--   * edgeSize -- a 1-UI-unit edge is a fractional number of device pixels
+--
+-- Size is snapped only for structural boxes (frame._ppSnapSize), i.e. the ones
+-- whose dimensions a layout owns. Controls are deliberately left alone: their
+-- factories size them, and callers measure them to compute scroll ranges and row
+-- flows, so silently resizing several hundred of them to gain a crisp top edge
+-- on a border that is already visible at 50% alpha is a bad trade.
+--
+-- Bounded: the position moves by at most half a pixel, so this can never
+-- mis-place a box. Idempotent, so it cannot drive an OnSizeChanged loop -- the
+-- second call computes the same snapped value and writes nothing.
+local function SnapBoxToPixelGrid(frame)
+    if not frame or not frame.GetNumPoints then return end
+    local ppu = PixelsPerUnit(frame)
+    if not ppu then return end
+
+    -- Geometry can only be corrected on a SINGLE-anchor frame: nudging one that
+    -- is pinned by two corners would resize it rather than move it, and such a
+    -- frame derives its geometry from its parent anyway. The edge snap at the
+    -- bottom still applies to those -- most of the window chrome is two-point.
+    if frame:GetNumPoints() == 1 then
+        -- Size first: the position snap below reads GetLeft/GetBottom, and the
+        -- far edges are those plus the size, so both have to be whole pixels for
+        -- all four edges to land.
+        if frame._ppSnapSize then
+            local w, h = frame:GetWidth(), frame:GetHeight()
+            if w and w > 0 then
+                local sw = math.floor(w * ppu + 0.5) / ppu
+                if math.abs(sw - w) > 1e-4 then frame:SetWidth(sw) end
+            end
+            if h and h > 0 then
+                local sh = math.floor(h * ppu + 0.5) / ppu
+                if math.abs(sh - h) > 1e-4 then frame:SetHeight(sh) end
+            end
+        end
+
+        local point, relTo, relPoint, x, y = frame:GetPoint(1)
+        local l, b = frame:GetLeft(), frame:GetBottom()
+        if x and y and l and b then
+            -- Correct against the offset the LAYOUT asked for, not against
+            -- wherever our own previous nudge left the frame. Re-snapping on
+            -- every scroll and adding each correction to the last would
+            -- random-walk the box away from its laid-out position -- a repeated
+            -- 0.4px scroll step would drift it visibly after a dozen scrolls.
+            local px, py = frame._ppDX or 0, frame._ppDY or 0
+            local baseX, baseY = x - px, y - py
+            local baseL, baseB = l - px, b - py
+            local dx = (math.floor(baseL * ppu + 0.5) - baseL * ppu) / ppu
+            local dy = (math.floor(baseB * ppu + 0.5) - baseB * ppu) / ppu
+            if dx ~= px or dy ~= py then
+                frame._ppDX, frame._ppDY = dx, dy
+                frame:SetPoint(point, relTo, relPoint, baseX + dx, baseY + dy)
+            end
+        end
+    end
+
+    -- Whole number of device pixels, minimum one. Re-issue the backdrop only when
+    -- the width actually changes (i.e. on a scale change, not on every layout):
+    -- SetBackdrop is a full rebuild and drops the current colours, so they have
+    -- to be read back and re-applied.
+    local edge = math.max(1, math.floor(ppu + 0.5)) / ppu
+    if frame.SetBackdrop and frame.GetBackdrop
+       and math.abs((frame._ppEdge or 0) - edge) > 1e-4 then
+        local bd = frame:GetBackdrop()
+        if bd and bd.edgeFile then
+            frame._ppEdge = edge
+            local br, bgc, bb, ba = frame:GetBackdropColor()
+            local er, eg, eb, ea = frame:GetBackdropBorderColor()
+            bd.edgeSize = edge
+            frame:SetBackdrop(bd)
+            if br then frame:SetBackdropColor(br, bgc, bb, ba) end
+            if er then frame:SetBackdropBorderColor(er, eg, eb, ea) end
+        end
+    end
+end
+GUI.SnapBoxToPixelGrid = SnapBoxToPixelGrid
+
+-- Round a LENGTH or OFFSET (in UI units) to a whole number of device pixels at
+-- the scale `frame` is drawn at. This is the layout-side half of the pixel-grid
+-- work, and the half that was missing.
+--
+-- SnapBoxToPixelGrid corrects a box after the fact, but it corrects the box's
+-- LEFT and BOTTOM edges -- that is what GetLeft/GetBottom are. The RIGHT edge is
+-- left + width and the TOP edge is bottom + height, so those two only land on the
+-- grid if the width and height the box was GIVEN were whole pixels already. They
+-- usually are not: a group's inner width is (its width - 2 * padding), and its
+-- padding is 10 UI units, which is a whole number of pixels only when the GUI is
+-- at exactly 1:1 scale. Everywhere else the top border of a section header, or a
+-- banner, splits across two device rows at half intensity and reads as missing.
+--
+-- Snapping here fixes it BY CONSTRUCTION for everything a layout places, with no
+-- per-widget opt-in to forget -- which is the same reason RegisterPixelSnap is
+-- called from the backdrop helpers rather than from call sites.
+local function SnapLen(frame, v)
+    if not v then return v end
+    local ppu = PixelsPerUnit(frame)
+    if not ppu then return v end
+    return math.floor(v * ppu + 0.5) / ppu
+end
+GUI.SnapLen = SnapLen
+
+-- Every frame that carries a 1px backdrop edge, so the sweep below can find them
+-- without any page needing to know what it contains. Weak keys: a retired page's
+-- widgets are reparented to the trash frame rather than destroyed, and this must
+-- not be what keeps them reachable.
+local pixelSnapped = setmetatable({}, { __mode = "k" })
+
+-- Opt a frame into pixel-grid snapping. Called from the shared backdrop helpers,
+-- NOT from call sites -- that is the whole point: every consumer of
+-- CreateElementBackdrop / CreatePanelBackdrop / CreateSettingsGroup inherits this
+-- with no code of its own, and a new one cannot forget to.
+--   snapSize -- structural boxes only; see SnapBoxToPixelGrid.
+local function RegisterPixelSnap(frame, snapSize)
+    if not frame or not frame.HookScript then return frame end
+    if snapSize then frame._ppSnapSize = true end
+    if pixelSnapped[frame] then return frame end
+    pixelSnapped[frame] = true
+    -- On-demand surfaces (dropdown menus, popups, dialogs) are built once and
+    -- then re-anchored every time they open, so snapping at creation is not
+    -- enough and they never pass through a page layout. OnShow is safe to drive
+    -- this from -- snapping shows and hides nothing, so it cannot re-enter.
+    frame:HookScript("OnShow", function(self) SnapBoxToPixelGrid(self) end)
+    return frame
+end
+GUI.RegisterPixelSnap = RegisterPixelSnap
+
+-- Register every frame in a subtree that carries a bordered backdrop, whether it
+-- was built by the shared helpers or hand-rolled with its own SetBackdrop call.
+-- Plenty of the older GUI surfaces do the latter, and a new one always can, so
+-- membership is discovered rather than declared -- nobody has to remember to opt
+-- in. Reads backdropInfo directly (BackdropTemplateMixin's own field) because
+-- GetBackdrop returns a fresh copy every call, and this walks a lot of frames.
+--
+-- Runs ONCE per subtree, not per layout: registration is permanent, so the
+-- repeated work is the cheap IsVisible sweep in SnapAllBoxes, not this walk.
+function GUI:HarvestPixelSnaps(root, depth)
+    if not root or (depth or 0) > 20 then return end
+    local bd = root.backdropInfo
+    if bd and bd.edgeFile and bd.edgeFile ~= "" then
+        RegisterPixelSnap(root, root._ppSnapSize)
+    end
+    if not root.GetChildren then return end
+    for _, child in ipairs({ root:GetChildren() }) do
+        GUI:HarvestPixelSnaps(child, (depth or 0) + 1)
+    end
+end
+
+-- Wire a detached surface (a popup, dialog or picker parented to UIParent rather
+-- than to the settings window) into the pixel grid. Harvesting on OnShow rather
+-- than at creation is deliberate: these build their rows lazily, so at creation
+-- time the subtree is mostly empty.
+function GUI:AttachPixelSnap(root)
+    if not root or not root.HookScript or root._ppAttached then return root end
+    root._ppAttached = true
+    root:HookScript("OnShow", function(self)
+        GUI:HarvestPixelSnaps(self)
+        GUI:SnapAllBoxes()
+    end)
+    return root
+end
+
+-- Re-snap everything currently on screen. IsVisible (not IsShown) is what keeps
+-- this cheap: a widget belonging to a page that is not open has a hidden
+-- ancestor and is skipped, so the work stays proportional to what is actually
+-- displayed rather than to everything the registry has accumulated. Safe to call
+-- repeatedly -- each call corrects to the same grid point rather than
+-- accumulating.
+function GUI:SnapAllBoxes()
+    for frame in pairs(pixelSnapped) do
+        if frame:IsVisible() then SnapBoxToPixelGrid(frame) end
+    end
+end
+
+-- THE element backdrop. Every bordered/filled GUI surface goes through here, so
+-- a change to the look lands everywhere at once. Three shapes, one code path:
+--
+--   (default)          fill + 1px outline -- dropdowns, edit boxes, buttons
+--   opts.fill=false    outline only -- for a surface whose interior is drawn by
+--                      something else (the colour picker's hue/alpha gradients
+--                      and checkerboards), where a fill would paint over it
+--   opts.outline=false fill only -- flat chips, segment buttons, label plates
+--
+-- opts.bgColor / opts.borderColor take {r,g,b[,a]} or {[1],[2],[3][,4]} and
+-- override the C_ELEMENT / C_BORDER defaults. opts.edgeSize thickens the outline
+-- (the popup and wizard chrome use 2). opts.snapSize opts a structural box into
+-- size snapping (see SnapBoxToPixelGrid); controls leave it off, because their
+-- size belongs to their factory and to whatever measures them. opts.inset (a
+-- single number, applied to all four sides) pulls the fill in from the edge so it
+-- does not underlap a translucent border -- default 0, i.e. the fill runs to the
+-- frame edge.
+local function CreateElementBackdrop(frame, opts)
+    opts = opts or {}
+    local fill, outline = opts.fill ~= false, opts.outline ~= false
     if not frame.SetBackdrop then Mixin(frame, BackdropTemplateMixin) end
+    local inset = opts.inset
     frame:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+        bgFile   = fill and "Interface\\Buttons\\WHITE8x8" or nil,
+        edgeFile = outline and "Interface\\Buttons\\WHITE8x8" or nil,
+        edgeSize = outline and (opts.edgeSize or 1) or nil,
+        insets   = inset and { left = inset, right = inset,
+                               top = inset, bottom = inset } or nil,
     })
-    frame:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, C_ELEMENT.a)
-    frame:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
+    if fill then
+        local c = opts.bgColor
+        if c then frame:SetBackdropColor(c.r or c[1], c.g or c[2], c.b or c[3], c.a or c[4] or 1)
+        else      frame:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, C_ELEMENT.a) end
+    end
+    if outline then
+        local c = opts.borderColor
+        if c then frame:SetBackdropBorderColor(c.r or c[1], c.g or c[2], c.b or c[3], c.a or c[4] or 1)
+        else      frame:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5) end
+    end
+    -- Only bordered surfaces are worth snapping: the geometry correction exists to
+    -- stop a 1px edge splitting across two device-pixel rows, and a fill-only
+    -- backdrop has no edge to split. This is also the rule HarvestPixelSnaps uses
+    -- (it registers on edgeFile), so both membership paths agree -- otherwise the
+    -- fill-only hover plates would be registered here but not by a harvest.
+    if outline then RegisterPixelSnap(frame, opts.snapSize) end
+    return frame
 end
 
 -- Helper to create panel backdrop (for main panels)
@@ -309,12 +550,35 @@ local function CreatePanelBackdrop(frame)
     })
     frame:SetBackdropColor(C_BACKGROUND.r, C_BACKGROUND.g, C_BACKGROUND.b, C_BACKGROUND.a)
     frame:SetBackdropBorderColor(0, 0, 0, 1)
+    return RegisterPixelSnap(frame, true)   -- structural: snap size too
 end
 GUI.CreatePanelBackdrop = CreatePanelBackdrop
 
 -- Style a ScrollFrameTemplate scrollbar to use the pill-shaped thumb
 -- All scroll frames must use ScrollFrameTemplate (not UIPanelScrollFrameTemplate)
 local function StyleScrollBar(scrollFrame)
+    -- Quantise the scroll offset to whole device pixels. Blizzard's scrollbar
+    -- drives the offset as a fraction of the range, so it parks the content on an
+    -- arbitrary sub-pixel row and every 1px border inside goes soft or vanishes.
+    -- Snapping the offset means the content keeps the sub-pixel phase it was laid
+    -- out with, so nothing inside has to be re-snapped per scroll event -- which
+    -- is why this is worth doing here rather than sweeping the widgets. The
+    -- correction is under a pixel, so it cannot fight the scrollbar's own state.
+    if not scrollFrame._ppScrollHooked then
+        scrollFrame._ppScrollHooked = true
+        scrollFrame:HookScript("OnVerticalScroll", function(self, offset)
+            if self._ppScrolling or not offset then return end
+            local ppu = PixelsPerUnit(self)
+            if not ppu then return end
+            local snapped = math.floor(offset * ppu + 0.5) / ppu
+            if math.abs(snapped - offset) > 1e-4 then
+                self._ppScrolling = true
+                self:SetVerticalScroll(snapped)
+                self._ppScrolling = nil
+            end
+        end)
+    end
+
     local sb = scrollFrame.ScrollBar
     if not sb then return end
 
@@ -407,16 +671,21 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width)
     section.GetText = function(self) return self.sectionTitleText end
     section.paddingAfter = 8  -- Padding space after header before first child
     
-    -- Header bar with background
-    if not section.SetBackdrop then Mixin(section, BackdropTemplateMixin) end
-    section:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    -- Header bar with background. Same look as before, via the shared backdrop
+    -- helper rather than a private copy of it, so it picks up pixel-grid
+    -- snapping (and anything else that lands there) without its own wiring.
+    GUI:CreateElementBackdrop(section, {
+        bgColor     = { r = C_PANEL.r,  g = C_PANEL.g,  b = C_PANEL.b,  a = 0.8 },
+        borderColor = { r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5 },
+        -- Structural: this frame IS the header bar, its height is fixed at
+        -- construction and it has no OnSizeChanged, so size snapping is free of
+        -- the relayout cascades that keep it off the controls. Without it the bar
+        -- is 28 UI units tall, which is a whole number of DEVICE pixels only at
+        -- 1:1 scale -- so its top border splits across two rows and disappears,
+        -- which is exactly the black-at-50%-alpha edge you cannot afford to lose.
+        snapSize    = true,
     })
-    section:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.8)
-    section:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-    
+
     -- Click area
     local clickArea = CreateFrame("Button", nil, section)
     clickArea:SetAllPoints()
@@ -630,14 +899,14 @@ function GUI:CreateSettingsGroup(parent, width, opts)
     group.padding = padding
     group.margin = margin
 
-    if not group.SetBackdrop then Mixin(group, BackdropTemplateMixin) end
-    group:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    -- Structural box, and the faintest border in the GUI: an 8% edge over a 3%
+    -- fill is invisible once it is split across two device-pixel rows, so this one
+    -- opts into size snapping as well.
+    CreateElementBackdrop(group, {
+        bgColor     = { 1, 1, 1, 0.03 },   -- very subtle white background (3%)
+        borderColor = { 1, 1, 1, 0.08 },   -- subtle white border (8%)
+        snapSize    = true,
     })
-    group:SetBackdropColor(1, 1, 1, 0.03)  -- Very subtle white background (3% opacity)
-    group:SetBackdropBorderColor(1, 1, 1, 0.08)  -- Subtle white border (8% opacity)
 
     -- Bottom collapse bar (only for collapsible groups, shown when expanded)
     if group.collapsible then
@@ -777,7 +1046,11 @@ function GUI:CreateSettingsGroup(parent, width, opts)
 
     -- Calculate total height based on visible children and layout them
     group.LayoutChildren = function(self)
-        local y = -self.padding  -- Start with top padding
+        -- Snapped padding: every child's left edge and first row start from it, so
+        -- if it is a fractional number of device pixels the whole column inherits
+        -- that offset. See SnapLen.
+        local padding = SnapLen(self, self.padding)
+        local y = -padding  -- Start with top padding
         local visibleCount = 0
         -- Width for child widgets. A group whose width is not resolved yet (created but
         -- not laid out, or anchors cleared) yields a non-positive innerWidth. Do NOT
@@ -786,7 +1059,7 @@ function GUI:CreateSettingsGroup(parent, width, opts)
         -- content width), so guessing squeezes those children and truncates their text.
         -- Skip the sizing instead and let the next pass, with a real width, do it. That
         -- matches the old behaviour, where a negative SetWidth was silently a no-op.
-        local innerWidth = (self:GetWidth() or 0) - (self.padding * 2)
+        local innerWidth = SnapLen(self, (self:GetWidth() or 0) - (padding * 2))
         local canSize = innerWidth > 0
 
         for i, entry in ipairs(self.groupChildren) do
@@ -808,7 +1081,9 @@ function GUI:CreateSettingsGroup(parent, width, opts)
 
                 if shouldShow then
                     widget:ClearAllPoints()
-                    widget:SetPoint("TOPLEFT", self, "TOPLEFT", self.padding, y)
+                    -- Snap y at USE, not as it accumulates: rounding each row height
+                    -- in turn would let the error compound down a long column.
+                    widget:SetPoint("TOPLEFT", self, "TOPLEFT", padding, SnapLen(self, y))
                     -- Set width to fit within group padding (only once the group has one)
                     if canSize then widget:SetWidth(innerWidth) end
                     widget:Show()
@@ -849,7 +1124,7 @@ function GUI:CreateSettingsGroup(parent, width, opts)
                     local summaryText = table.concat(labels, "  \194\183  ")  -- separated by  ·
                     self.collapseSummary:SetText(summaryText)
                     self.collapseSummary:ClearAllPoints()
-                    self.collapseSummary:SetPoint("TOPLEFT", self, "TOPLEFT", self.padding, y)
+                    self.collapseSummary:SetPoint("TOPLEFT", self, "TOPLEFT", padding, SnapLen(self, y))
                     self.collapseSummary:SetWidth(innerWidth)
                     self.collapseSummary:Show()
                     -- Measure actual wrapped height
@@ -870,7 +1145,12 @@ function GUI:CreateSettingsGroup(parent, width, opts)
         end
 
         -- Update group height (add padding at bottom)
-        local totalHeight = math.abs(y) + self.padding
+        -- The group's own height, snapped for the same reason its children's
+        -- widths are: this is what puts its TOP border on the grid. (Its size is
+        -- also corrected by SnapBoxToPixelGrid via snapSize, but that runs off
+        -- OnShow / the layout sweep -- getting it right here means it is never
+        -- briefly wrong in between.)
+        local totalHeight = SnapLen(self, math.abs(y) + padding)
         if totalHeight < 1 then totalHeight = 1 end
         self:SetHeight(totalHeight)
         -- Add margin to calculated height for spacing between groups
@@ -1039,147 +1319,6 @@ function GUI:LinkHoverColor(c)
     c = c or (GUI.GetThemeColor and GUI.GetThemeColor()) or { r = 1, g = 1, b = 1 }
     local t = 0.45   -- lift toward white; tune here to re-key every link at once
     return { r = c.r + (1 - c.r) * t, g = c.g + (1 - c.g) * t, b = c.b + (1 - c.b) * t }
-end
-
--- Segmented button group: a row of mutually-exclusive buttons, one selected at
--- a time. Each option shows a primary label and an optional subtitle on a
--- second line. Selected button gets a themed border + tinted fill; unselected
--- buttons use the standard element backdrop.
---
---   options: ordered array of { value=, label=, subtitle= }
---   dbTable/dbKey: reads/writes the selected value
---   callback: called after a selection change
---   totalWidth: total container width (buttons divide it evenly with small gaps)
-function GUI:CreateSegmentedButtonGroup(parent, options, dbTable, dbKey, callback, totalWidth, minBtnWidthOpt)
-    local container = CreateFrame("Frame", nil, parent)
-    totalWidth = totalWidth or 560
-    local btnHeight = 38  -- compact modern height: label + subtitle fit snugly
-    local gap = 4
-    -- minBtnWidth governs when buttons wrap. The default suits 2-3 segment
-    -- groups with full-word labels in the standard ~560px settings panels;
-    -- caller can pass a smaller value when packing more / shorter segments
-    -- into a narrower group (e.g. a 260px border-controls column).
-    local minBtnWidth = minBtnWidthOpt or 110
-    container:SetSize(totalWidth, btnHeight)
-
-    local n = #options
-
-    local buttons = {}
-    container.buttons = buttons
-
-    -- Reposition buttons to fill the container's current width. Wraps to
-    -- additional rows when per-button width would drop below minBtnWidth.
-    -- Called on creation and on OnSizeChanged so buttons reflow when the
-    -- page stretches or shrinks the container.
-    local function Relayout()
-        -- Re-entry guard: OnSizeChanged can fire again when we SetHeight
-        -- below, and we might also be called during a deferred RefreshStates.
-        -- Without this guard the widget rebuild chain loops infinitely and
-        -- drops the framerate to single digits.
-        if container._relayouting then return end
-        container._relayouting = true
-
-        local w = container:GetWidth() or totalWidth
-        if w <= 0 then w = totalWidth end
-
-        local perRow = math.max(1, math.min(n, math.floor((w + gap) / (minBtnWidth + gap))))
-        local rows = math.ceil(n / perRow)
-        local bw = math.floor((w - gap * (perRow - 1)) / perRow)
-
-        for i, btn in ipairs(buttons) do
-            local rowIdx = math.ceil(i / perRow) - 1
-            local colIdx = (i - 1) % perRow
-            btn:SetWidth(bw)
-            btn:ClearAllPoints()
-            btn:SetPoint("TOPLEFT", colIdx * (bw + gap), -(rowIdx * (btnHeight + gap)))
-        end
-
-        local newHeight = rows * btnHeight + (rows - 1) * gap
-        if math.abs((container:GetHeight() or 0) - newHeight) > 0.5 then
-            container:SetHeight(newHeight)
-        end
-
-        -- If the row count changed the required layout space, bump
-        -- layoutHeight so the page reserves the right amount on the next
-        -- layout pass, and defer a layout-only refresh (NOT page:Refresh()
-        -- which would rebuild all widgets and re-enter this path forever).
-        local desiredLayoutH = newHeight + 4
-        if container.layoutHeight ~= desiredLayoutH then
-            container.layoutHeight = desiredLayoutH
-            if not container._relayoutPending then
-                container._relayoutPending = true
-                C_Timer.After(0, function()
-                    container._relayoutPending = false
-                    if parent and parent.RefreshStates then
-                        parent:RefreshStates()
-                    end
-                end)
-            end
-        end
-
-        container._relayouting = false
-    end
-    container:SetScript("OnSizeChanged", function() Relayout() end)
-
-    local function Refresh()
-        local currentVal = dbTable and dbTable[dbKey]
-        for _, btn in ipairs(buttons) do
-            local selected = (btn.value == currentVal)
-            btn.selected = selected
-            btn:SetActive(selected)  -- shared toggle look (accent border + fill)
-        end
-    end
-    container.Refresh = Refresh
-    -- refreshContent hook used by the page layout so external changes to the
-    -- db value (e.g. profile switches) re-sync the selected button.
-    container.refreshContent = function(self) Refresh() end
-
-    for i, opt in ipairs(options) do
-        local btn = CreateFrame("Button", nil, container, "BackdropTemplate")
-        btn:SetHeight(btnHeight)
-        -- Width and position set by Relayout() below (called at end of setup
-        -- and on every OnSizeChanged).
-        -- Shared button styling: hover wash + SetActive() selection state.
-        GUI:StyleButton(btn)
-
-        btn.value = opt.value
-
-        btn.Label = btn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-        btn.Label:SetPoint("TOP", 0, -5)
-        btn.Label:SetText(opt.label or "")
-        btn.Label:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-
-        if opt.subtitle and opt.subtitle ~= "" then
-            btn.Subtitle = btn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-            btn.Subtitle:SetPoint("BOTTOM", 0, 5)
-            btn.Subtitle:SetText(opt.subtitle)
-            btn.Subtitle:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-            -- Nudge subtitle down by ~1 pt for a clearer visual hierarchy.
-            local fPath, fSize, fFlags = btn.Subtitle:GetFont()
-            if fPath and fSize and fSize > 9 then
-                btn.Subtitle:SetFont(fPath, fSize - 1, fFlags or "")
-            end
-        end
-
-        btn:SetScript("OnClick", function(self)
-            if dbTable[dbKey] == self.value then return end
-            dbTable[dbKey] = self.value
-            PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-            Refresh()
-            if callback then callback() end
-        end)
-
-        buttons[i] = btn
-    end
-
-    Relayout()
-    Refresh()
-
-    container.UpdateTheme = function() Refresh() end
-    if not parent.ThemeListeners then parent.ThemeListeners = {} end
-    table.insert(parent.ThemeListeners, container)
-
-    return container
 end
 
 -- ============================================================
@@ -1351,12 +1490,10 @@ function GUI:CreateInfoBanner(parent, opts)
     opts = opts or {}
 
     local banner = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    if not banner.SetBackdrop then Mixin(banner, BackdropTemplateMixin) end
-    banner:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
+    -- SetTone overwrites both colours, and opts.tone is applied at the bottom of
+    -- this function -- so these defaults only show on a tone-less banner, which
+    -- previously drew an untinted (white) box because nothing coloured it.
+    CreateElementBackdrop(banner)
     -- Give the banner a defined initial height so child frames have valid positions
     -- from the very first frame (before DoRecomputeHeight has run).
     banner:SetHeight(opts.minHeight or 34)
@@ -1438,7 +1575,13 @@ function GUI:CreateInfoBanner(parent, opts)
         end
         local h = math.ceil(MeasureContent())
         -- Chrome: 13 px top (icon at -10, text nudged -3) + 9 px bottom = 22 px.
-        local newH = math.max(opts.minHeight or 28, h + 22)
+        -- Snapped to whole device pixels so the banner's TOP border lands on the
+        -- grid. Done HERE rather than by opting into the generic size snapper,
+        -- because this function owns the height and is the thing the cascade
+        -- documented above runs through -- snapping the number before cachedH
+        -- sees it keeps the existing "did it actually change?" guard authoritative
+        -- instead of adding a second writer behind its back.
+        local newH = SnapLen(banner, math.max(opts.minHeight or 28, h + 22))
         if cachedH ~= newH then
             cachedH = newH
             recomputing = true
@@ -1494,7 +1637,12 @@ function GUI:CreateInfoBanner(parent, opts)
             lastMeasuredWidth = w
             RecomputeHeight()
         end)
-        banner:SetScript("OnShow", function()
+        -- HookScript, not SetScript: CreateElementBackdrop already hooked OnShow to
+        -- snap this frame to the pixel grid, and a SetScript here would throw that
+        -- hook away. (The frame stays in the snap registry either way, so the
+        -- layout sweep still reaches it -- but it would lose the snap on its own
+        -- show, which is the one that matters for a banner that appears late.)
+        banner:HookScript("OnShow", function()
             if deferredWhileHidden then
                 deferredWhileHidden = false
                 cachedH = nil
@@ -1890,7 +2038,6 @@ function GUI:FlashWidget(widget, opts)
     if not hl then
         local host = widget:GetParent() or widget
         hl = CreateFrame("Frame", nil, host, "BackdropTemplate")
-        if not hl.SetBackdrop then Mixin(hl, BackdropTemplateMixin) end
         hl:SetPoint("TOPLEFT", widget, "TOPLEFT", -3, 3)
         hl:SetPoint("BOTTOMRIGHT", widget, "BOTTOMRIGHT", 3, -3)
         local wl = (widget.GetFrameLevel and widget:GetFrameLevel())
@@ -1899,13 +2046,14 @@ function GUI:FlashWidget(widget, opts)
         widget._dfFlashHL = hl
     end
     local c = (GUI.GetThemeColor and GUI.GetThemeColor()) or { r = 1, g = 0.82, b = 0 }
-    hl:SetBackdrop({
-        bgFile   = doFill and "Interface\\Buttons\\WHITE8x8" or nil,
-        edgeFile = doBorder and "Interface\\Buttons\\WHITE8x8" or nil,
-        edgeSize = doBorder and (opts.borderSize or 2) or nil,
+    -- Re-issued per call so the pulse picks up the current theme colour.
+    CreateElementBackdrop(hl, {
+        fill        = doFill,
+        outline     = doBorder,
+        edgeSize    = opts.borderSize or 2,
+        bgColor     = { c.r, c.g, c.b, opts.alpha or 0.35 },
+        borderColor = { c.r, c.g, c.b, 1 },
     })
-    hl:SetBackdropColor(c.r, c.g, c.b, doFill and (opts.alpha or 0.35) or 0)
-    if doBorder then hl:SetBackdropBorderColor(c.r, c.g, c.b, 1) end
 
     -- Gentle alpha pulse (mirrors the live "show me" highlight): a few soft
     -- fade in/out cycles then a slow fade to nothing — a calm breathe rather
@@ -2117,7 +2265,15 @@ function GUI:StyleButton(btn, opts)
         or (opts.tone == "success" and { 0.4, 0.85, 0.5 }) or nil
 
     if opts.text ~= nil then
-        btn.Text = btn.Text or btn:CreateFontString(nil, "OVERLAY", opts.font or "DFFontHighlightSmall")
+        if not btn.Text then
+            btn.Text = btn:CreateFontString(nil, "OVERLAY", opts.font or "DFFontHighlightSmall")
+            -- Register it as the button's font string so the NATIVE Button:SetText
+            -- / GetText keep working. Without this, a caller that relabels later
+            -- (a Start/Stop or Pause/Resume toggle) silently no-ops and the button
+            -- freezes on its first label -- an easy regression when converting a
+            -- Blizzard-template button, which always had one.
+            if btn.SetFontString then btn:SetFontString(btn.Text) end
+        end
         btn.Text:SetText(opts.text)
         if toneLabel then
             btn.Text:SetTextColor(toneLabel[1], toneLabel[2], toneLabel[3])
@@ -2200,6 +2356,19 @@ function GUI:StyleButton(btn, opts)
     -- being a neutral button with an accent hover. For role quick-add buttons etc.
     -- where the colour IS the button's identity. Pass a fixed opts.accent.
     local tinted = opts.tinted
+    -- Neutral hover (opts.hoverTone = "neutral"): the wash is the plain C_HOVER
+    -- grey and the border does NOT go accent. For surfaces that are a PLACE
+    -- rather than an action -- a card header, a list row -- where an accent
+    -- hover would read as "this is a call to action". Card headers and dropdown
+    -- rows previously hand-rolled this as an OnEnter/OnLeave SetBackdropColor
+    -- swap, which duplicated the rest colours at every site.
+    local neutralHover = opts.hoverTone == "neutral"
+    -- opts.restBorderColor: let a consumer keep its OWN border identity at rest --
+    -- e.g. an Aura/Text group card header tinted by that group's colour -- while
+    -- fill, hover, selection and disabled all stay shared. Applies ONLY to the
+    -- neutral rest branch; active / primary / tinted keep their accent-derived
+    -- borders, so the override can't fight a state the button is in.
+    local restBorder = opts.restBorderColor
     local hl = btn:GetHighlightTexture() or btn:CreateTexture(nil, "HIGHLIGHT")
     hl:SetTexture("Interface\\Buttons\\WHITE8x8")
     hl:SetAllPoints(btn)
@@ -2266,12 +2435,23 @@ function GUI:StyleButton(btn, opts)
             self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
         else
             self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-            self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
+            if restBorder then
+                self:SetBackdropBorderColor(restBorder.r or restBorder[1],
+                                            restBorder.g or restBorder[2],
+                                            restBorder.b or restBorder[3],
+                                            restBorder.a or restBorder[4] or 1)
+            else
+                self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
+            end
         end
     end
 
     btn.ApplyThemeColor = function(c)
-        hl:SetVertexColor(c.r, c.g, c.b, (isTabStyle or ghost) and 0.15 or 0.30)
+        if neutralHover then
+            hl:SetVertexColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 0.55)
+        else
+            hl:SetVertexColor(c.r, c.g, c.b, (isTabStyle or ghost) and 0.15 or 0.30)
+        end
         if isTabStyle then
             restBackdrop(btn, c)  -- keep the tab transparent (no fill/border)
             -- refresh the stripe colour + the active label to the new accent
@@ -2380,7 +2560,8 @@ function GUI:StyleButton(btn, opts)
     end
 
     btn:SetScript("OnEnter", function(self)
-        if isTabStyle or ghost then return end  -- tab/ghost: only the auto wash, no border
+        -- tab/ghost/neutral: only the auto wash, no accent border
+        if isTabStyle or ghost or neutralHover then return end
         if self:IsEnabled() and not self.dfDisabled then
             local a = accent or GetThemeColor()
             if tinted then
@@ -2460,53 +2641,153 @@ function GUI:CreateCloseButton(parent, opts)
     return btn
 end
 
+-- A bare clickable GLYPH: an icon with a hover cue and NO chrome. This is the
+-- small affordance that lives inside a row or a card header -- reorder arrows, an
+-- eye visibility toggle, a clear-search "x" -- where a button box would be
+-- heavier than the thing it acts on.
+--
+-- Deliberately its own helper: StyleButton always draws chrome, and
+-- CreateCloseButton is specifically the chromed "x". Before this existed, ~16
+-- sites hand-rolled the same three lines (create texture, tint it dim, brighten
+-- it in OnEnter and restore in OnLeave).
+--
+-- NOT this: a labelled row that merely CONTAINS an icon (a collapsible section
+-- header with a title + chevron, a collapse bar). There the click target is the
+-- whole row, not the glyph.
+--
+-- opts:
+--   texture     icon path            tooltip / onClick
+--   size        both dims (16)       width / height  -- button box, when the hit
+--                                    area is deliberately bigger than the art
+--   iconSize    art size (= size)    rotation  -- radians, so one arrow texture
+--                                    can serve both directions
+--   color       rest tint (C_TEXT_DIM)          hoverColor (white)
+--
+-- Returns the button with .Icon plus:
+--   :SetGlyph(texture, color)  re-point the art for a state change. The colour
+--       passed becomes the new REST colour, so a later OnLeave restores the
+--       state rather than snapping back to the original default.
+--   :SetGlyphHover(bool)  suppress the hover brighten -- an "off" state should
+--       not light up under the mouse.
+function GUI:CreateGlyphButton(parent, opts)
+    opts = opts or {}
+    local size = opts.size or 16
+    local iconSize = opts.iconSize or size
+
+    local btn = CreateFrame("Button", nil, parent)
+    btn:SetSize(opts.width or size, opts.height or size)
+
+    local icon = btn:CreateTexture(nil, "OVERLAY")
+    icon:SetSize(iconSize, iconSize)
+    icon:SetPoint("CENTER", 0, 0)
+    if opts.texture then icon:SetTexture(opts.texture) end
+    if opts.rotation then icon:SetRotation(opts.rotation) end
+    btn.Icon = icon
+
+    local function unpackColor(c, dr, dg, db)
+        if not c then return dr, dg, db end
+        return c.r or c[1], c.g or c[2], c.b or c[3]
+    end
+    local hr, hg, hb = unpackColor(opts.hoverColor, 1, 1, 1)
+    btn._glyphHover = true
+    btn._glyphRest = { unpackColor(opts.color, C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b) }
+    icon:SetVertexColor(unpack(btn._glyphRest))
+
+    function btn:SetGlyph(texture, color)
+        if texture then self.Icon:SetTexture(texture) end
+        if color then self._glyphRest = { unpackColor(color) } end
+        self.Icon:SetVertexColor(unpack(self._glyphRest))
+    end
+
+    function btn:SetGlyphHover(enabled)
+        self._glyphHover = enabled and true or false
+    end
+
+    btn:SetScript("OnEnter", function(self)
+        if self._glyphHover then self.Icon:SetVertexColor(hr, hg, hb) end
+        if opts.tooltip then GUI:ShowTooltip(self, { title = opts.tooltip }) end
+    end)
+    btn:SetScript("OnLeave", function(self)
+        self.Icon:SetVertexColor(unpack(self._glyphRest))
+        if opts.tooltip then GUI:HideTooltip() end
+    end)
+    if opts.onClick then
+        btn:SetScript("OnClick", function(self) opts.onClick(self) end)
+    end
+    return btn
+end
+
 -- Shared panel/dialog root backdrop: a solid dark panel with an optional 1px
 -- border. Centralises the inline SetBackdrop blocks scattered across dialogs and
 -- floating panels. opts = { bgAlpha (0.95), border (true), borderColor {r,g,b,a}
 -- or {r,g,b,a array} }.
 function GUI:CreatePanelBackdrop(frame, opts)
     opts = opts or {}
-    if not frame.SetBackdrop then Mixin(frame, BackdropTemplateMixin) end
-    -- Choose the edge with an explicit branch, NOT `cond and nil or X` — in Lua
-    -- that idiom always yields X (the `and nil` falls through the `or`), so
-    -- border=false would still draw an (untinted, i.e. WHITE) edge.
-    local edgeFile = "Interface\\Buttons\\WHITE8x8"
-    if opts.border == false then edgeFile = nil end
-    frame:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = edgeFile,
-        edgeSize = 1,
-    })
     local bg = opts.bgColor or C_PANEL
-    frame:SetBackdropColor(bg.r or bg[1], bg.g or bg[2], bg.b or bg[3], opts.bgAlpha or bg.a or 0.95)
-    if opts.border ~= false then
-        local bc = opts.borderColor
-        if bc then
-            frame:SetBackdropBorderColor(bc.r or bc[1], bc.g or bc[2], bc.b or bc[3], bc.a or bc[4] or 1)
-        else
-            frame:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
-        end
+    -- A panel's border is a full-strength 1px line, where the element default is
+    -- half-alpha, so the border colour is always passed explicitly rather than
+    -- left to CreateElementBackdrop's default.
+    local bc = opts.borderColor
+    return CreateElementBackdrop(frame, {
+        outline     = opts.border ~= false,
+        bgColor     = { bg.r or bg[1], bg.g or bg[2], bg.b or bg[3],
+                        opts.bgAlpha or bg.a or 0.95 },
+        borderColor = bc and { bc.r or bc[1], bc.g or bc[2], bc.b or bc[3],
+                               bc.a or bc[4] or 1 }
+                          or { C_BORDER.r, C_BORDER.g, C_BORDER.b, 1 },
+    })
+end
+
+-- Mover chrome: the translucent tinted plate a drag surface wears while the frames
+-- are unlocked. This is a SEPARATE helper from CreateElementBackdrop, not a flag on
+-- it, because a mover has the opposite job from settings chrome -- it is meant to
+-- shout. Giving movers the neutral element look would be a bug, not consistency.
+--
+-- The hue comes from the GUI theme constants (C_ACCENT party purple-blue / C_RAID
+-- raid orange) instead of a hardcoded literal, so retheming moves the movers too.
+--
+-- ⚠ Which POLE is the caller's choice, not GUI.SelectedMode's, because a mover
+-- belongs to the thing it moves: the raid mover must stay orange even while the
+-- options window happens to be showing a party page. Pass isRaid where the site
+-- knows; omit it only where the mover genuinely has no mode, and it will follow
+-- the selected mode.
+--
+-- opts:
+--   isRaid       true/false pins the pole; omit to follow GUI.SelectedMode
+--   color        {r,g,b} or {[1],[2],[3]} -- explicit override, for a mover whose
+--                colour is a user setting rather than the theme
+--   fillAlpha    default 0.30      borderAlpha  default 0.80
+--   fill = false outline only      edgeSize     default 2
+--
+-- The returned frame gains :RefreshMoverTint(), which re-resolves the hue against
+-- the theme as it stands now -- call it if the mode changes while a mover is shown.
+function GUI:CreateMoverBackdrop(frame, opts)
+    opts = opts or {}
+    local c = opts.color
+    if not c then
+        if opts.isRaid ~= nil then c = GetThemeColorFor(opts.isRaid)
+        else                       c = GetThemeColor() end
+    end
+    local r, g, b = c.r or c[1], c.g or c[2], c.b or c[3]
+    CreateElementBackdrop(frame, {
+        fill        = opts.fill,
+        edgeSize    = opts.edgeSize or 2,
+        bgColor     = { r, g, b, opts.fillAlpha or 0.30 },
+        borderColor = { r, g, b, opts.borderAlpha or 0.80 },
+    })
+    frame.RefreshMoverTint = function(self, newOpts)
+        return GUI:CreateMoverBackdrop(self, newOpts or opts)
     end
     return frame
 end
 
--- Element backdrop as a GUI method (the file-local CreateElementBackdrop is used
--- internally by the stylers; this exposes it to consumer files). Base look =
--- C_ELEMENT fill + C_BORDER border. opts = { bgColor, borderColor } ({r,g,b[,a]})
--- override either when an element panel wants a darker/custom fill or accent edge.
+-- The element backdrop, exposed to consumer files (the stylers in this file use
+-- the local directly). Nothing outside should be calling SetBackdrop itself --
+-- route it through here so the look, and the pixel-grid snapping, stay in one
+-- place. See the local for the opts contract: fill, outline, bgColor,
+-- borderColor, snapSize.
 function GUI:CreateElementBackdrop(frame, opts)
-    CreateElementBackdrop(frame)
-    if opts then
-        if opts.bgColor then
-            local c = opts.bgColor
-            frame:SetBackdropColor(c.r or c[1], c.g or c[2], c.b or c[3], c.a or c[4] or 1)
-        end
-        if opts.borderColor then
-            local c = opts.borderColor
-            frame:SetBackdropBorderColor(c.r or c[1], c.g or c[2], c.b or c[3], c.a or c[4] or 1)
-        end
-    end
-    return frame
+    return CreateElementBackdrop(frame, opts)
 end
 
 -- ============================================================
@@ -2830,13 +3111,10 @@ end
 function GUI:CreateSeeAlso(parent, links)
     local container = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     container:SetHeight(32)
-    container:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    CreateElementBackdrop(container, {
+        bgColor     = { 0.1, 0.1, 0.1, 0.5 },
+        borderColor = { 0.3, 0.3, 0.3, 0.8 },
     })
-    container:SetBackdropColor(0.1, 0.1, 0.1, 0.5)
-    container:SetBackdropBorderColor(0.3, 0.3, 0.3, 0.8)
     
     local label = container:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     label:SetPoint("TOPLEFT", 8, -10)
@@ -3560,6 +3838,10 @@ end
 --   opts.segmentWidth (26) / opts.height (18)
 --   opts.fallbackValue : treated as selected when the stored value matches
 --              no segment, so an unset key still lights the right button
+--   opts.customGet / opts.customSet : same convention as CreateCheckbox /
+--              CreateSlider / CreateDropdown — for a toggle over TRANSIENT UI
+--              state (or one with its own save path) rather than a db key. Pass
+--              dbTable/dbKey as nil when using these.
 -- Returns the container with :Refresh(), :refreshContent() and :SetEnabled().
 -- ============================================================
 function GUI:CreateSegmentToggle(parent, segments, dbTable, dbKey, callback, opts)
@@ -3571,6 +3853,19 @@ function GUI:CreateSegmentToggle(parent, segments, dbTable, dbKey, callback, opt
     local container = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     container:SetSize(segW * #segments + pad * 2, h + pad * 2)
     CreateElementBackdrop(container)   -- the recessed track behind every segment
+
+    -- One read/write pair for both pathways, so the click handler and Refresh
+    -- can't drift apart. Explicit ifs, not `a and b or c` — a stored value of
+    -- false/nil is legitimate.
+    local function GetValue()
+        if opts.customGet then return opts.customGet() end
+        if dbTable and dbKey then return dbTable[dbKey] end
+    end
+    local function SetValue(v)
+        if opts.customSet then opts.customSet(v) return true end
+        if dbTable and dbKey then dbTable[dbKey] = v return true end
+        return false
+    end
 
     local buttons = {}
     for i, seg in ipairs(segments) do
@@ -3586,9 +3881,8 @@ function GUI:CreateSegmentToggle(parent, segments, dbTable, dbKey, callback, opt
             btn:HookScript("OnLeave", function() GUI:HideTooltip() end)
         end
         btn:SetScript("OnClick", function(self)
-            if not (dbTable and dbKey) then return end
-            if dbTable[dbKey] == self.value then return end
-            dbTable[dbKey] = self.value
+            if GetValue() == self.value then return end
+            if not SetValue(self.value) then return end
             container:Refresh()
             if callback then callback(self.value) end
         end)
@@ -3599,7 +3893,7 @@ function GUI:CreateSegmentToggle(parent, segments, dbTable, dbKey, callback, opt
     -- label so the state still reads at a glance in a themed accent that is close
     -- to the resting border colour.
     function container:Refresh()
-        local cur = dbTable and dbKey and dbTable[dbKey]
+        local cur = GetValue()
         local matched = false
         for _, b in ipairs(buttons) do if b.value == cur then matched = true end end
         if not matched then cur = opts.fallbackValue end
@@ -3659,13 +3953,10 @@ function GUI:CreateToggleSwitch(parent, labelA, labelB, dbTable, dbKey, valueA, 
     local txtB = container:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     txtB:SetPoint("LEFT", track, "RIGHT", 8, 0)
     txtB:SetText(labelB)
-    track:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    CreateElementBackdrop(track, {
+        bgColor     = { C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1 },
+        borderColor = { C_BORDER.r, C_BORDER.g, C_BORDER.b, 1 },
     })
-    track:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    track:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
 
     -- Thumb
     local thumbSize = trackHeight - 4
@@ -3905,14 +4196,10 @@ end
 -- opts.skipFont to keep a custom font (e.g. multi-line / monospace inputs).
 function GUI:StyleEditBox(eb, opts)
     opts = opts or {}
-    if not eb.SetBackdrop then Mixin(eb, BackdropTemplateMixin) end
-    eb:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    CreateElementBackdrop(eb, {
+        bgColor     = { 0, 0, 0, 0.5 },
+        borderColor = { 0.3, 0.3, 0.3, 1 },
     })
-    eb:SetBackdropColor(0, 0, 0, 0.5)
-    eb:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
     if not opts.skipFont then
         eb:SetFontObject(DFFontHighlightSmall)
         eb:SetTextInsets(5, 5, opts.multiline and 5 or 0, opts.multiline and 5 or 0)
@@ -3940,16 +4227,7 @@ function GUI:CreateInput(parent, label, width)
     editbox:SetPoint("TOPLEFT", 0, -15)
     editbox:SetPoint("TOPRIGHT", 0, -15)
     editbox:SetHeight(24)
-    if not editbox.SetBackdrop then Mixin(editbox, BackdropTemplateMixin) end
-    editbox:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    editbox:SetBackdropColor(0, 0, 0, 0.5)
-    editbox:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
-    editbox:SetFontObject(DFFontHighlightSmall)
-    editbox:SetTextInsets(5, 5, 0, 0)
+    GUI:StyleEditBox(editbox)   -- shared input chrome: fill, border, font, insets
     editbox:SetAutoFocus(false)
     editbox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     editbox:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
@@ -4008,18 +4286,9 @@ function GUI:CreateEditBox(parent, label, dbTable, dbKey, callback, width, place
     editbox:SetPoint("TOPLEFT", 0, -15)
     editbox:SetPoint("TOPRIGHT", 0, -15)
     editbox:SetHeight(24)
-    if not editbox.SetBackdrop then Mixin(editbox, BackdropTemplateMixin) end
-    editbox:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    editbox:SetBackdropColor(0, 0, 0, 0.5)
-    editbox:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
-    editbox:SetFontObject(DFFontHighlightSmall)
-    editbox:SetTextInsets(5, 5, 0, 0)
+    GUI:StyleEditBox(editbox)   -- shared input chrome: fill, border, font, insets
     editbox:SetAutoFocus(false)
-    
+
     -- Set initial value from db
     if dbTable and dbKey then
         editbox:SetText(dbTable[dbKey] or "")
@@ -4465,13 +4734,10 @@ function GUI:CreateRangeSlider(parent, opts)
 
     local track = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     track:SetSize(width, 12)
-    track:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    CreateElementBackdrop(track, {
+        bgColor     = { 0.03, 0.03, 0.03, 1 },
+        borderColor = { 0.2, 0.2, 0.2, 1 },
     })
-    track:SetBackdropColor(0.03, 0.03, 0.03, 1)
-    track:SetBackdropBorderColor(0.2, 0.2, 0.2, 1)
 
     track.minRange = opts.minRange or 1
     track.maxRange = opts.maxRange or 40
@@ -7575,9 +7841,13 @@ function GUI:CreateRoleOrderList(parent, dbTable, dbKey, callback, separateMelee
                 item.posIndex = i
                 item.numText:SetText(i .. ".")
                 if item ~= draggingItem then
+                    -- Anchored to BOTH sides: the container is created at a placeholder
+                    -- width and only stretched to its real one by the settings group's
+                    -- LayoutChildren, so a width captured here would be stale. Deriving it
+                    -- from the anchors keeps the rows correct at every layout.
                     item:ClearAllPoints()
                     item:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -((i - 1) * ITEM_HEIGHT))
-                    item:SetWidth(container:GetWidth() > 0 and container:GetWidth() or 220)
+                    item:SetPoint("TOPRIGHT", container, "TOPRIGHT", 0, -((i - 1) * ITEM_HEIGHT))
                 end
             end
         end
@@ -7609,13 +7879,10 @@ function GUI:CreateRoleOrderList(parent, dbTable, dbKey, callback, separateMelee
         local item = CreateFrame("Frame", nil, container, "BackdropTemplate")
         item:SetHeight(ITEM_HEIGHT - 2)
         item:EnableMouse(true)
-        item:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
+        CreateElementBackdrop(item, {
+            bgColor     = { 0.12, 0.12, 0.12, 0.9 },
+            borderColor = { 0.3, 0.3, 0.3, 1 },
         })
-        item:SetBackdropColor(0.12, 0.12, 0.12, 0.9)
-        item:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
         
         -- Grip texture
         local grip = CreateGripTexture(item)
@@ -7705,7 +7972,7 @@ function GUI:CreateRoleOrderList(parent, dbTable, dbKey, callback, separateMelee
             
             self:ClearAllPoints()
             self:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -offsetFromTop)
-            self:SetWidth(container:GetWidth())
+            self:SetPoint("TOPRIGHT", container, "TOPRIGHT", 0, -offsetFromTop)
             
             -- Update other items based on where this would drop
             local dropIndex = GetIndexFromY(cursorY)
@@ -7724,7 +7991,7 @@ function GUI:CreateRoleOrderList(parent, dbTable, dbKey, callback, separateMelee
                 if otherItem and otherItem ~= self then
                     otherItem:ClearAllPoints()
                     otherItem:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -((i - 1) * ITEM_HEIGHT))
-                    otherItem:SetWidth(container:GetWidth())
+                    otherItem:SetPoint("TOPRIGHT", container, "TOPRIGHT", 0, -((i - 1) * ITEM_HEIGHT))
                     otherItem.numText:SetText(i .. ".")
                 end
             end
@@ -7896,9 +8163,13 @@ function GUI:CreateClassOrderList(parent, dbTable, dbKey, callback)
                 item.posIndex = i
                 item.numText:SetText(i .. ".")
                 if item ~= draggingItem then
+                    -- Anchored to BOTH sides: the container is created at a placeholder
+                    -- width and only stretched to its real one by the settings group's
+                    -- LayoutChildren, so a width captured here would be stale. Deriving it
+                    -- from the anchors keeps the rows correct at every layout.
                     item:ClearAllPoints()
                     item:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -((i - 1) * ITEM_HEIGHT))
-                    item:SetWidth(container:GetWidth() > 0 and container:GetWidth() or 220)
+                    item:SetPoint("TOPRIGHT", container, "TOPRIGHT", 0, -((i - 1) * ITEM_HEIGHT))
                 end
             end
         end
@@ -7930,13 +8201,10 @@ function GUI:CreateClassOrderList(parent, dbTable, dbKey, callback)
         local item = CreateFrame("Frame", nil, container, "BackdropTemplate")
         item:SetHeight(ITEM_HEIGHT - 2)
         item:EnableMouse(true)
-        item:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
+        CreateElementBackdrop(item, {
+            bgColor     = { 0.12, 0.12, 0.12, 0.9 },
+            borderColor = { 0.3, 0.3, 0.3, 1 },
         })
-        item:SetBackdropColor(0.12, 0.12, 0.12, 0.9)
-        item:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
         
         -- Grip texture
         local grip = CreateGripTexture(item)
@@ -8025,7 +8293,7 @@ function GUI:CreateClassOrderList(parent, dbTable, dbKey, callback)
             
             self:ClearAllPoints()
             self:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -offsetFromTop)
-            self:SetWidth(container:GetWidth())
+            self:SetPoint("TOPRIGHT", container, "TOPRIGHT", 0, -offsetFromTop)
             
             -- Update other items based on where this would drop
             local dropIndex = GetIndexFromY(cursorY)
@@ -8044,7 +8312,7 @@ function GUI:CreateClassOrderList(parent, dbTable, dbKey, callback)
                 if otherItem and otherItem ~= self then
                     otherItem:ClearAllPoints()
                     otherItem:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -((i - 1) * ITEM_HEIGHT))
-                    otherItem:SetWidth(container:GetWidth())
+                    otherItem:SetPoint("TOPRIGHT", container, "TOPRIGHT", 0, -((i - 1) * ITEM_HEIGHT))
                     otherItem.numText:SetText(i .. ".")
                 end
             end
@@ -8198,9 +8466,13 @@ function GUI:CreateGroupOrderList(parent, dbTable, dbKey, callback, playerGroupF
                 item.displayPos = displayPos
                 item.numText:SetText(displayPos .. ".")
                 if item ~= draggingItem then
+                    -- Anchored to BOTH sides: the container is created at a placeholder
+                    -- width and only stretched to its real one by the settings group's
+                    -- LayoutChildren, so a width captured here would be stale. Deriving it
+                    -- from the anchors keeps the rows correct at every layout.
                     item:ClearAllPoints()
                     item:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -((displayPos - 1) * ITEM_HEIGHT))
-                    item:SetWidth(container:GetWidth() > 0 and container:GetWidth() or 180)
+                    item:SetPoint("TOPRIGHT", container, "TOPRIGHT", 0, -((displayPos - 1) * ITEM_HEIGHT))
                 end
             end
         end
@@ -8231,13 +8503,10 @@ function GUI:CreateGroupOrderList(parent, dbTable, dbKey, callback, playerGroupF
         local item = CreateFrame("Frame", nil, container, "BackdropTemplate")
         item:SetHeight(ITEM_HEIGHT - 2)
         item:EnableMouse(true)
-        item:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
+        CreateElementBackdrop(item, {
+            bgColor     = { 0.12, 0.12, 0.12, 0.9 },
+            borderColor = { 0.3, 0.3, 0.3, 1 },
         })
-        item:SetBackdropColor(0.12, 0.12, 0.12, 0.9)
-        item:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
         
         -- Grip texture
         local grip = CreateGripTexture(item)
@@ -8326,7 +8595,7 @@ function GUI:CreateGroupOrderList(parent, dbTable, dbKey, callback, playerGroupF
             
             self:ClearAllPoints()
             self:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -offsetFromTop)
-            self:SetWidth(container:GetWidth())
+            self:SetPoint("TOPRIGHT", container, "TOPRIGHT", 0, -offsetFromTop)
             
             -- Update other items based on where this would drop
             local dropIndex = GetIndexFromY(cursorY)
@@ -8347,7 +8616,7 @@ function GUI:CreateGroupOrderList(parent, dbTable, dbKey, callback, playerGroupF
                 if otherItem and otherItem ~= self then
                     otherItem:ClearAllPoints()
                     otherItem:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -((i - 1) * ITEM_HEIGHT))
-                    otherItem:SetWidth(container:GetWidth())
+                    otherItem:SetPoint("TOPRIGHT", container, "TOPRIGHT", 0, -((i - 1) * ITEM_HEIGHT))
                     otherItem.numText:SetText(i .. ".")
                 end
             end
@@ -8640,10 +8909,9 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
         item:SetHeight(ITEM_HEIGHT - 2)
         item:SetPoint("TOPLEFT", 0, -((index - 1) * ITEM_HEIGHT))
         item:SetPoint("TOPRIGHT", 0, -((index - 1) * ITEM_HEIGHT))
-        item:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-        })
-        item:SetBackdropColor(0, 0, 0, 0)
+        -- Transparent plate: the hover/selected states tint it, so it needs a fill
+        -- to colour but no outline of its own.
+        CreateElementBackdrop(item, { outline = false, bgColor = { 0, 0, 0, 0 } })
         
         item.playerData = playerData
         
@@ -8677,12 +8945,10 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
         local addBtn = CreateFrame("Button", nil, item, "BackdropTemplate")
         addBtn:SetSize(26, 20)
         addBtn:SetPoint("RIGHT", -4, 0)
-        addBtn:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
-        })
-        
+        -- UpdateAddButton (called below, and on every state change) owns both
+        -- colours, so this only supplies the chrome.
+        CreateElementBackdrop(addBtn)
+
         local themeColor = GetThemeColor()
         
         -- Icon for button
@@ -8745,13 +9011,10 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
         item:SetPoint("TOPLEFT", 0, -((index - 1) * ITEM_HEIGHT))
         item:SetPoint("TOPRIGHT", 0, -((index - 1) * ITEM_HEIGHT))
         item:EnableMouse(true)
-        item:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
+        CreateElementBackdrop(item, {
+            bgColor     = { 0.12, 0.12, 0.12, 0.9 },
+            borderColor = { 0.25, 0.25, 0.25, 1 },
         })
-        item:SetBackdropColor(0.12, 0.12, 0.12, 0.9)
-        item:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
         
         item.fullName = fullName
         item.index = index
@@ -8807,13 +9070,10 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
         local removeBtn = CreateFrame("Button", nil, item, "BackdropTemplate")
         removeBtn:SetSize(26, 20)
         removeBtn:SetPoint("RIGHT", -4, 0)
-        removeBtn:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
+        CreateElementBackdrop(removeBtn, {
+            bgColor     = { 0.5, 0.15, 0.15, 0.5 },
+            borderColor = { 0.6, 0.25, 0.25, 0.8 },
         })
-        removeBtn:SetBackdropColor(0.5, 0.15, 0.15, 0.5)
-        removeBtn:SetBackdropBorderColor(0.6, 0.25, 0.25, 0.8)
         
         -- X icon for remove button
         removeBtn.icon = removeBtn:CreateTexture(nil, "OVERLAY")
@@ -9351,6 +9611,7 @@ function DF:CreateGUI()
     CreatePanelBackdrop(frame)
     frame:Hide()
     DF.GUIFrame = frame
+    GUI:AttachPixelSnap(frame)
     
     -- Allow closing with Escape key
     tinsert(UISpecialFrames, "DandersFramesGUI")
@@ -9383,6 +9644,7 @@ function DF:CreateGUI()
             DF.db.party.guiX = x
             DF.db.party.guiY = y
         end
+        GUI:SnapAllBoxes()
     end)
     titleBar:SetFrameStrata("FULLSCREEN_DIALOG")
     titleBar:SetFrameLevel(200)
@@ -9804,8 +10066,11 @@ function DF:CreateGUI()
         if DF.TestPanel then
             DF.TestPanel:SetScale(value)
         end
+        -- A new scale changes how many device pixels a UI unit covers, so both
+        -- the box positions and their edge thickness have to be re-derived.
+        GUI:SnapAllBoxes()
     end)
-    
+
     GUI.ScaleSlider = scaleSlider
     GUI.ScaleContainer = scaleContainer
     -- =========================================================================
@@ -10084,6 +10349,9 @@ function DF:CreateGUI()
     clickCastPanel:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.3)
     clickCastPanel:Hide()
     GUI.clickCastPanel = clickCastPanel
+    -- Built lazily and swapped in over the normal content, so it never passes
+    -- through a page build -- harvest it on its own show instead.
+    GUI:AttachPixelSnap(clickCastPanel)
     
     -- =========================================================================
     -- FOOTER BAR (Discord & Donation links + bottom drag handle)
@@ -10106,6 +10374,7 @@ function DF:CreateGUI()
             DF.db.party.guiX = x
             DF.db.party.guiY = y
         end
+        GUI:SnapAllBoxes()
     end)
 
     local footer = CreateFrame("Frame", nil, bottomBar)
@@ -10451,8 +10720,8 @@ function DF:CreateGUI()
         cat:SetPoint("TOPLEFT", 4, categoryY)
         cat:SetPoint("TOPRIGHT", -4, categoryY)
         cat:SetHeight(28)
-        cat:SetBackdrop({bgFile = "Interface\\Buttons\\WHITE8x8"})
-        cat:SetBackdropColor(0, 0, 0, 0)
+        -- Hover plate only: transparent at rest, tinted by OnEnter/OnLeave.
+        CreateElementBackdrop(cat, { outline = false, bgColor = { 0, 0, 0, 0 } })
         cat.name = name
         cat.children = {}
         
@@ -10518,8 +10787,8 @@ function DF:CreateGUI()
         
         local btn = CreateFrame("Button", nil, tabContainer, "BackdropTemplate")
         btn:SetHeight(26)
-        btn:SetBackdrop({bgFile = "Interface\\Buttons\\WHITE8x8"})
-        btn:SetBackdropColor(0, 0, 0, 0)
+        -- Hover/selected plate only: the accent bar carries the selected state.
+        CreateElementBackdrop(btn, { outline = false, bgColor = { 0, 0, 0, 0 } })
         btn.isTab = true
         btn.tabName = name
         btn.categoryName = categoryName
@@ -10724,6 +10993,10 @@ function DF:CreateGUI()
             end
 
             builderFunc(self, db, Add, AddSpace, AddSyncPoint)
+            -- Pick up every bordered box this page just built, including any that
+            -- rolled its own backdrop instead of going through the helpers. Once
+            -- per build; RefreshStates only re-snaps what is already registered.
+            GUI:HarvestPixelSnaps(self.child)
             self.builtForMode = GUI.SelectedMode
             self.builtForDisabled = false
             self.cacheValid = true
@@ -10909,7 +11182,11 @@ function DF:CreateGUI()
                     end
                     
                     widget:ClearAllPoints()
-                    
+                    -- Drop any pixel-grid nudge from the previous layout: the
+                    -- offsets set below are the new base that SnapBoxToPixelGrid
+                    -- corrects against.
+                    widget._ppDX, widget._ppDY = nil, nil
+
                     -- Set height for frame-based widgets (like header containers)
                     if widget.text and widget.SetHeight and h > 0 then
                         widget:SetHeight(h)
@@ -10926,28 +11203,36 @@ function DF:CreateGUI()
                         end
                     end
                     
+                    -- Snap the offsets and widths this loop hands out, for the same
+                    -- reason CreateSettingsGroup:LayoutChildren does: a widget placed
+                    -- straight onto the page (a banner, a full-width note, a
+                    -- collapsible section) never passes through a group, so this is
+                    -- the only place its geometry can be put on the grid. See SnapLen.
+                    local snapX = SnapLen(widget, x1 + indentOffset)
+
                     if widget.layoutCol == "both" then
                         local startY = math.min(y1, y2)
-                        widget:SetPoint("TOPLEFT", x1 + indentOffset, startY)
+                        widget:SetPoint("TOPLEFT", snapX, SnapLen(widget, startY))
                         -- Set width to span both columns (with scrollbar padding)
-                        widget:SetWidth(usableWidth - indentOffset)
+                        widget:SetWidth(SnapLen(widget, usableWidth - indentOffset))
                         y1 = startY - h
                         y2 = startY - h
                     elseif widget.layoutCol == 2 and usesTwoColumns then
-                        widget:SetPoint("TOPLEFT", col2X + indentOffset, y2)
+                        widget:SetPoint("TOPLEFT", SnapLen(widget, col2X + indentOffset),
+                                        SnapLen(widget, y2))
                         -- Reduce width for indented widgets to maintain alignment
                         if indentOffset > 0 and widget.SetWidth then
                             local defaultColWidth = math.floor((usableWidth - 20) / 2)
-                            widget:SetWidth(defaultColWidth - indentOffset)
+                            widget:SetWidth(SnapLen(widget, defaultColWidth - indentOffset))
                         end
                         y2 = y2 - h
                     else
                         -- Column 1, or column 2 when in single-column mode
-                        widget:SetPoint("TOPLEFT", x1 + indentOffset, y1)
+                        widget:SetPoint("TOPLEFT", snapX, SnapLen(widget, y1))
                         -- Reduce width for indented widgets to maintain alignment
                         if indentOffset > 0 and widget.SetWidth then
                             local defaultColWidth = math.floor((usableWidth - 20) / 2)
-                            widget:SetWidth(defaultColWidth - indentOffset)
+                            widget:SetWidth(SnapLen(widget, defaultColWidth - indentOffset))
                         end
                         y1 = y1 - h
                     end
@@ -10957,7 +11242,12 @@ function DF:CreateGUI()
                 end
             end
             self.child:SetHeight(maxY + 40 + bannerOffset)
-            
+
+            -- Land every box on the physical pixel grid. Must run after the loop
+            -- above: the snap measures each frame's RESOLVED screen position, so
+            -- the SetPoint has to have happened first.
+            GUI:SnapAllBoxes()
+
             -- Update scroll child width to match content area
             if self.child and GUI.contentFrame then
                 self.child:SetWidth(GUI.contentFrame:GetWidth() - 30)

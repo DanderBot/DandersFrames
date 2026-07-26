@@ -478,8 +478,8 @@ function CC:RefreshProfilesPanel()
         item:SetPoint("TOPLEFT", 0, -yOffset)
         item:SetPoint("RIGHT", 0, 0)
         item:SetHeight(28)
-        item:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
+        DF.GUI:CreateElementBackdrop(item, {
+            outline = false,
         })
         
         local isActive = (profileName == activeProfile)
@@ -646,8 +646,10 @@ function CC:RefreshLoadoutAssignments()
             specHeader:SetPoint("TOPLEFT", 0, -yOffset)
             specHeader:SetPoint("RIGHT", 0, 0)
             specHeader:SetHeight(24)
-            specHeader:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
-            specHeader:SetBackdropColor(0.12, 0.12, 0.12, 1)
+            DF.GUI:CreateElementBackdrop(specHeader, {
+                outline = false,
+                bgColor     = { 0.12, 0.12, 0.12, 1 },
+            })
             
             local icon = specHeader:CreateTexture(nil, "ARTWORK")
             icon:SetSize(18, 18)

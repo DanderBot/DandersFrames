@@ -255,13 +255,10 @@ function DA:CreateDebugBar(frame)
     bar:SetFrameLevel(frame:GetFrameLevel() + 100)
     
     -- Background
-    bar:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(bar, {
+        bgColor     = { 0, 0, 0, 0.7 },
+        borderColor = { 0, 0.7, 1, 0.8 },
     })
-    bar:SetBackdropColor(0, 0, 0, 0.7)
-    bar:SetBackdropBorderColor(0, 0.7, 1, 0.8)
     
     -- Label showing current filter
     bar.label = bar:CreateFontString(nil, "OVERLAY")
@@ -517,13 +514,11 @@ function DA:CreateOptionsPanel()
     local frame = CreateFrame("Frame", "DFDebugAurasOptions", UIParent, "BackdropTemplate")
     frame:SetSize(400, 580)
     frame:SetPoint("CENTER")
-    frame:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
+    DF.GUI:CreateElementBackdrop(frame, {
         edgeSize = 2,
+        bgColor     = { 0.1, 0.1, 0.12, 0.95 },
+        borderColor = { 0, 0.7, 1, 1 },
     })
-    frame:SetBackdropColor(0.1, 0.1, 0.12, 0.95)
-    frame:SetBackdropBorderColor(0, 0.7, 1, 1)
     frame:SetMovable(true)
     frame:EnableMouse(true)
     frame:RegisterForDrag("LeftButton")

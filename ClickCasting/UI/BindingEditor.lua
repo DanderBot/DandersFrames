@@ -53,13 +53,10 @@ function CC:CreateBindingRow(parent, binding, index)
     
     local row = CreateFrame("Button", nil, parent, "BackdropTemplate")
     row:SetHeight(BINDING_ROW_HEIGHT - 2)
-    row:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(row, {
+        bgColor     = { C.element.r, C.element.g, C.element.b, 0.8 },
+        borderColor = { C.border.r, C.border.g, C.border.b, 0.5 },
     })
-    row:SetBackdropColor(C.element.r, C.element.g, C.element.b, 0.8)
-    row:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.5)
     
     -- Icon (larger to fill height better)
     local icon = row:CreateTexture(nil, "ARTWORK")
@@ -1832,13 +1829,10 @@ function CC:CreateSpellCell(parent, spellData, index)
     
     local cell = CreateFrame("Button", nil, parent, "BackdropTemplate")
     cell:SetSize(cellWidth, cellHeight)
-    cell:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(cell, {
+        bgColor     = { C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 0.8 },
+        borderColor = { C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5 },
     })
-    cell:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 0.8)
-    cell:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
     cell:RegisterForClicks("AnyDown")
     
     -- Get display info (shows current override name/icon for talent-modified spells)
@@ -2665,13 +2659,10 @@ function CC:RefreshItemsGrid(skipScrollReset)
         dropZone:SetSize(cellWidth, cellHeight)
     end
     dropZone:SetPoint("TOPLEFT", col * (cellWidth + padding), -yOffset)
-    dropZone:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(dropZone, {
+        bgColor     = { C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 0.5 },
+        borderColor = { themeColor.r, themeColor.g, themeColor.b, 0.3 },
     })
-    dropZone:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 0.5)
-    dropZone:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 0.3)
     
     local dropText = dropZone:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     dropText:SetPoint("CENTER")
@@ -2769,13 +2760,10 @@ function CC:CreateItemCell(parent, itemData, index)
     
     local cell = CreateFrame("Button", nil, parent, "BackdropTemplate")
     cell:SetSize(cellWidth, cellHeight)
-    cell:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(cell, {
+        bgColor     = { C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1 },
+        borderColor = { C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5 },
     })
-    cell:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    cell:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
     
     -- Icon
     local iconSize = 40
@@ -2889,13 +2877,10 @@ function CC:CreateItemListRow(parent, itemData, index)
     
     local row = CreateFrame("Button", nil, parent, "BackdropTemplate")
     row:SetSize(containerWidth, 28)
-    row:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(row, {
+        bgColor     = { C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1 },
+        borderColor = { C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5 },
     })
-    row:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    row:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
     
     -- Icon
     local icon = row:CreateTexture(nil, "ARTWORK")
@@ -3002,13 +2987,10 @@ function CC:CreateConsumableCell(parent, itemData, index)
     
     local cell = CreateFrame("Button", nil, parent, "BackdropTemplate")
     cell:SetSize(cellWidth, cellHeight)
-    cell:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(cell, {
+        bgColor     = { C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1 },
+        borderColor = { C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5 },
     })
-    cell:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    cell:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
     
     -- Icon
     local iconSize = 40
@@ -3129,13 +3111,10 @@ function CC:CreateConsumableListRow(parent, itemData, index)
     
     local row = CreateFrame("Button", nil, parent, "BackdropTemplate")
     row:SetSize(containerWidth, 36)
-    row:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(row, {
+        bgColor     = { C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1 },
+        borderColor = { C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5 },
     })
-    row:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    row:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
     
     -- Icon
     local icon = row:CreateTexture(nil, "ARTWORK")
@@ -3310,13 +3289,10 @@ function CC:CreateMacroCell(parent, macroData, index)
     
     local cell = CreateFrame("Button", nil, parent, "BackdropTemplate")
     cell:SetSize(cellWidth, cellHeight)
-    cell:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(cell, {
+        bgColor     = { C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1 },
+        borderColor = { C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5 },
     })
-    cell:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    cell:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
     cell:RegisterForClicks("AnyDown")
     
     -- Try to get icon: auto-detect from body first, then fall back to stored icon
@@ -3449,13 +3425,10 @@ function CC:CreateMacroListRow(parent, macroData, index)
     
     local row = CreateFrame("Button", nil, parent, "BackdropTemplate")
     row:SetSize(containerWidth, rowHeight)
-    row:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(row, {
+        bgColor     = { C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1 },
+        borderColor = { C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5 },
     })
-    row:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    row:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
     row:RegisterForClicks("AnyDown")
     
     -- Try to get icon: auto-detect from body first, then fall back to stored icon
@@ -3601,10 +3574,7 @@ function CC:CreateSpellListRow(parent, spellData, index, isSpecialAction, action
     
     local row = CreateFrame("Button", nil, parent, "BackdropTemplate")
     row:SetSize(containerWidth, rowHeight)
-    row:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(row, {
     })
     
     if isSpecialAction then
@@ -3763,13 +3733,10 @@ function CC:CreateSpecialActionCell(parent, actionType, label, iconPath)
     
     local cell = CreateFrame("Button", nil, parent, "BackdropTemplate")
     cell:SetSize(cellWidth, cellHeight)
-    cell:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(cell, {
+        bgColor     = { specialColor.r * 0.15, specialColor.g * 0.15, specialColor.b * 0.15, 0.8 },
+        borderColor = { specialColor.r * 0.5, specialColor.g * 0.5, specialColor.b * 0.5, 0.8 },
     })
-    cell:SetBackdropColor(specialColor.r * 0.15, specialColor.g * 0.15, specialColor.b * 0.15, 0.8)
-    cell:SetBackdropBorderColor(specialColor.r * 0.5, specialColor.g * 0.5, specialColor.b * 0.5, 0.8)
     cell:RegisterForClicks("AnyDown")
     
     -- Icon (larger now)

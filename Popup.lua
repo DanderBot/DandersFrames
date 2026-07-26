@@ -56,15 +56,14 @@ end
 -- BACKDROP HELPERS
 -- ============================================================
 
+-- Thin wrapper over the shared GUI backdrop so this file's positional call style
+-- keeps working. The look, and the pixel-grid snapping, come from the one place.
 local function ApplyBackdrop(frame, bgColor, borderColor, edgeSize)
-    if not frame.SetBackdrop then Mixin(frame, BackdropTemplateMixin) end
-    frame:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = edgeSize or 1,
+    DF.GUI:CreateElementBackdrop(frame, {
+        bgColor     = bgColor,
+        borderColor = borderColor,
+        edgeSize    = edgeSize,
     })
-    frame:SetBackdropColor(bgColor.r, bgColor.g, bgColor.b, bgColor.a or 1)
-    frame:SetBackdropBorderColor(borderColor.r, borderColor.g, borderColor.b, borderColor.a or 1)
 end
 
 -- ============================================================
@@ -509,11 +508,10 @@ local function CreatePickerOverlay(widget, tabName, dbKey, controlType, callback
     overlay.border:SetPoint("TOPLEFT", -2, 2)
     overlay.border:SetPoint("BOTTOMRIGHT", 2, -2)
     if not overlay.border.SetBackdrop then Mixin(overlay.border, BackdropTemplateMixin) end
-    overlay.border:SetBackdrop({
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(overlay.border, {
+        fill = false,
+        borderColor = { PICKER_COLOR.r, PICKER_COLOR.g, PICKER_COLOR.b, 0 },
     })
-    overlay.border:SetBackdropBorderColor(PICKER_COLOR.r, PICKER_COLOR.g, PICKER_COLOR.b, 0)
 
     overlay:SetScript("OnEnter", function()
         overlay.bg:SetColorTexture(PICKER_COLOR.r, PICKER_COLOR.g, PICKER_COLOR.b, 0.15)
@@ -548,13 +546,10 @@ local function CreatePickerBanner()
     banner:SetFrameStrata("DIALOG")
     banner:SetFrameLevel(300)
     if not banner.SetBackdrop then Mixin(banner, BackdropTemplateMixin) end
-    banner:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(banner, {
+        bgColor     = { PICKER_COLOR.r, PICKER_COLOR.g, PICKER_COLOR.b, 0.9 },
+        borderColor = { PICKER_COLOR.r * 0.7, PICKER_COLOR.g * 0.7, PICKER_COLOR.b * 0.7, 1 },
     })
-    banner:SetBackdropColor(PICKER_COLOR.r, PICKER_COLOR.g, PICKER_COLOR.b, 0.9)
-    banner:SetBackdropBorderColor(PICKER_COLOR.r * 0.7, PICKER_COLOR.g * 0.7, PICKER_COLOR.b * 0.7, 1)
 
     banner.text = banner:CreateFontString(nil, "OVERLAY", "DFFontNormalLarge")
     banner.text:SetPoint("LEFT", 16, 0)
@@ -895,6 +890,9 @@ local function CreatePopupFrame()
     if PopupFrame then return PopupFrame end
 
     local f = CreateFrame("Frame", "DFPopupFrame", UIParent, "BackdropTemplate")
+    -- Ride the shared GUI pixel grid: this surface is parented to UIParent, so it
+    -- never passes through a settings-page build. See GUI:AttachPixelSnap.
+    if DF.GUI and DF.GUI.AttachPixelSnap then DF.GUI:AttachPixelSnap(f) end
     f:SetSize(FRAME_WIDTH, 300)
     f:SetPoint("CENTER")
     f:SetFrameStrata("FULLSCREEN_DIALOG")
@@ -914,8 +912,10 @@ local function CreatePopupFrame()
     titleBar:SetPoint("TOPRIGHT", -2, -2)
     titleBar:SetHeight(32)
     if not titleBar.SetBackdrop then Mixin(titleBar, BackdropTemplateMixin) end
-    titleBar:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
-    titleBar:SetBackdropColor(C.panel.r, C.panel.g, C.panel.b, 1)
+    DF.GUI:CreateElementBackdrop(titleBar, {
+        outline = false,
+        bgColor     = { C.panel.r, C.panel.g, C.panel.b, 1 },
+    })
     titleBar:RegisterForDrag("LeftButton")
     titleBar:SetScript("OnDragStart", function() f:StartMoving() end)
     titleBar:SetScript("OnDragStop", function() f:StopMovingOrSizing() end)
@@ -1066,8 +1066,10 @@ local function CreatePopupFrame()
     buttonBar:SetPoint("BOTTOMRIGHT", -2, 2)
     buttonBar:SetHeight(36)
     if not buttonBar.SetBackdrop then Mixin(buttonBar, BackdropTemplateMixin) end
-    buttonBar:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
-    buttonBar:SetBackdropColor(C.panel.r, C.panel.g, C.panel.b, 1)
+    DF.GUI:CreateElementBackdrop(buttonBar, {
+        outline = false,
+        bgColor     = { C.panel.r, C.panel.g, C.panel.b, 1 },
+    })
     f.ButtonBar = buttonBar
 
     -- Now anchor content bottom to button bar top (content needs height to render children)

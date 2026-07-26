@@ -52,15 +52,15 @@ local function CreateIconPreview()
     
     -- Main frame
     local frame = CreateFrame("Frame", "DFIconPreview", UIParent, "BackdropTemplate")
+    -- Ride the shared GUI pixel grid: this surface is parented to UIParent, so it
+    -- never passes through a settings-page build. See GUI:AttachPixelSnap.
+    if DF.GUI and DF.GUI.AttachPixelSnap then DF.GUI:AttachPixelSnap(frame) end
     frame:SetSize(520, 480)
     frame:SetPoint("CENTER")
-    frame:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(frame, {
+        bgColor     = { C_BG.r, C_BG.g, C_BG.b, 0.95 },
+        borderColor = { C_ACCENT.r, C_ACCENT.g, C_ACCENT.b, 1 },
     })
-    frame:SetBackdropColor(C_BG.r, C_BG.g, C_BG.b, 0.95)
-    frame:SetBackdropBorderColor(C_ACCENT.r, C_ACCENT.g, C_ACCENT.b, 1)
     frame:SetMovable(true)
     frame:EnableMouse(true)
     frame:RegisterForDrag("LeftButton")
@@ -115,13 +115,10 @@ local function CreateIconPreview()
         local btn = CreateFrame("Button", nil, frame, "BackdropTemplate")
         btn:SetSize(20, 20)
         btn:SetPoint("LEFT", colorLabel, "RIGHT", 8 + (i-1) * 24, 0)
-        btn:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
+        DF.GUI:CreateElementBackdrop(btn, {
+            bgColor     = { col.r, col.g, col.b, 1 },
+            borderColor = { 0.2, 0.2, 0.2, 1 },
         })
-        btn:SetBackdropColor(col.r, col.g, col.b, 1)
-        btn:SetBackdropBorderColor(0.2, 0.2, 0.2, 1)
         btn:SetScript("OnClick", function()
             currentColor = col
             UpdateIconColors()
@@ -164,13 +161,10 @@ local function CreateIconPreview()
         local container = CreateFrame("Button", nil, frame, "BackdropTemplate")
         container:SetSize(CELL_SIZE - 4, CELL_SIZE + 12)
         container:SetPoint("TOPLEFT", x, y)
-        container:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
+        DF.GUI:CreateElementBackdrop(container, {
+            bgColor     = { 0.12, 0.12, 0.12, 1 },
+            borderColor = { C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5 },
         })
-        container:SetBackdropColor(0.12, 0.12, 0.12, 1)
-        container:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
         
         -- Icon texture
         local icon = container:CreateTexture(nil, "ARTWORK")

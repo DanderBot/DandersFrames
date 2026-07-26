@@ -56,10 +56,7 @@ local CATEGORY_COLORS = {
 
 local function ApplyBackdrop(frame, bg, border)
     if not frame.SetBackdrop then return end
-    frame:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(frame, {
     })
     if bg then
         frame:SetBackdropColor(bg.r, bg.g, bg.b, bg.a or 1)
@@ -499,40 +496,31 @@ local function BuildContentSection(GUI, parent, elem, tdDB, state, page, card, y
 
                 -- Up/Down arrows stacked vertically on the LEFT. Only created
                 -- when the move is possible (first row has no up, last has no down).
+                -- One arrow texture serves both directions via rotation.
                 if capturedIdx > 1 then
-                    local upBtn = CreateFrame("Button", nil, itemRow)
-                    upBtn:SetSize(20, 13)
+                    local upBtn = DF.GUI:CreateGlyphButton(itemRow, {
+                        width = 20, height = 13, iconSize = 12,
+                        texture  = mediaPath .. "expand_more",
+                        rotation = math.pi,   -- 180° = points up
+                        onClick  = function()
+                            elem.groupItems[capturedIdx], elem.groupItems[capturedIdx - 1] =
+                                elem.groupItems[capturedIdx - 1], elem.groupItems[capturedIdx]
+                            ReRender()
+                        end,
+                    })
                     upBtn:SetPoint("TOPLEFT", 2, -1)
-                    local upIcon = upBtn:CreateTexture(nil, "OVERLAY")
-                    upIcon:SetSize(12, 12)
-                    upIcon:SetPoint("CENTER", 0, 0)
-                    upIcon:SetTexture(mediaPath .. "expand_more")
-                    upIcon:SetRotation(math.pi)  -- 180° = points up
-                    upIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-                    upBtn:SetScript("OnEnter", function() upIcon:SetVertexColor(1, 1, 1) end)
-                    upBtn:SetScript("OnLeave", function() upIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b) end)
-                    upBtn:SetScript("OnClick", function()
-                        elem.groupItems[capturedIdx], elem.groupItems[capturedIdx - 1] =
-                            elem.groupItems[capturedIdx - 1], elem.groupItems[capturedIdx]
-                        ReRender()
-                    end)
                 end
                 if capturedIdx < #elem.groupItems then
-                    local downBtn = CreateFrame("Button", nil, itemRow)
-                    downBtn:SetSize(20, 13)
+                    local downBtn = DF.GUI:CreateGlyphButton(itemRow, {
+                        width = 20, height = 13, iconSize = 12,
+                        texture = mediaPath .. "expand_more",
+                        onClick = function()
+                            elem.groupItems[capturedIdx], elem.groupItems[capturedIdx + 1] =
+                                elem.groupItems[capturedIdx + 1], elem.groupItems[capturedIdx]
+                            ReRender()
+                        end,
+                    })
                     downBtn:SetPoint("BOTTOMLEFT", 2, 1)
-                    local downIcon = downBtn:CreateTexture(nil, "OVERLAY")
-                    downIcon:SetSize(12, 12)
-                    downIcon:SetPoint("CENTER", 0, 0)
-                    downIcon:SetTexture(mediaPath .. "expand_more")
-                    downIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-                    downBtn:SetScript("OnEnter", function() downIcon:SetVertexColor(1, 1, 1) end)
-                    downBtn:SetScript("OnLeave", function() downIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b) end)
-                    downBtn:SetScript("OnClick", function()
-                        elem.groupItems[capturedIdx], elem.groupItems[capturedIdx + 1] =
-                            elem.groupItems[capturedIdx + 1], elem.groupItems[capturedIdx]
-                        ReRender()
-                    end)
                 end
 
                 -- Remove button: shared red-at-rest "×" (tone="danger") on the right.
@@ -550,20 +538,17 @@ local function BuildContentSection(GUI, parent, elem, tdDB, state, page, card, y
                 -- Customise button (left of the remove X) — toggles the per-item
                 -- editor inline (AD-style). A text button instead of a chevron so
                 -- it isn't confused with the up/down move arrows.
+                -- tinted = the shared "accent is the identity" look: faint accent
+                -- fill, accent border and accent label at rest, which is what this
+                -- was hand-mixing from GetThemeColor.
                 local custBtn = CreateFrame("Button", nil, itemRow, "BackdropTemplate")
-                custBtn:SetSize(70, 18)
                 custBtn:SetPoint("RIGHT", removeBtn, "LEFT", -6, 0)
-                local tc = GUI:GetThemeColor()
-                ApplyBackdrop(custBtn,
-                    {r = tc.r * 0.15, g = tc.g * 0.15, b = tc.b * 0.15, a = 1},
-                    {r = tc.r * 0.40, g = tc.g * 0.40, b = tc.b * 0.40, a = 0.7})
-                local custText = custBtn:CreateFontString(nil, "OVERLAY")
-                GUI:SetSettingsFont(custText, 9, "")
-                custText:SetPoint("CENTER", 0, 0)
-                custText:SetText(isExpanded and L["Done"] or L["Customise"])
-                custText:SetTextColor(tc.r, tc.g, tc.b)
-                custBtn:SetScript("OnEnter", function() custText:SetTextColor(1, 1, 1) end)
-                custBtn:SetScript("OnLeave", function() custText:SetTextColor(tc.r, tc.g, tc.b) end)
+                GUI:StyleButton(custBtn, {
+                    width = 70, height = 18,
+                    text = isExpanded and L["Done"] or L["Customise"],
+                    tinted = true,
+                })
+                GUI:SetSettingsFont(custBtn.Text, 9, "")
                 custBtn:SetScript("OnClick", function()
                     if not state then return end
                     state.tdExpandedItems[capturedItem] = not state.tdExpandedItems[capturedItem]
@@ -714,28 +699,18 @@ local function CreateAnchorGrid(GUI, parent, elem, card)
     grid:SetSize(60, 60)
 
     local btns = {}
+    -- Selection is StyleButton's :SetActive (shared accent fill + border); this
+    -- was hand-mixing the same two states from GetThemeColor.
     local function ApplyButtonState(b, active)
-        if active then
-            local tc = GUI:GetThemeColor()
-            b:SetBackdropColor(tc.r, tc.g, tc.b, 0.40)
-            b:SetBackdropBorderColor(tc.r, tc.g, tc.b, 0.90)
-        else
-            b:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.80)
-            b:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.50)
-        end
+        b:SetActive(active)
     end
 
     for row = 1, 3 do
         for col = 1, 3 do
             local point = ANCHOR_GRID[row][col]
             local b = CreateFrame("Button", nil, grid, "BackdropTemplate")
-            b:SetSize(18, 18)
             b:SetPoint("TOPLEFT", grid, "TOPLEFT", (col - 1) * 20, -((row - 1) * 20))
-            b:SetBackdrop({
-                bgFile = "Interface\\Buttons\\WHITE8x8",
-                edgeFile = "Interface\\Buttons\\WHITE8x8",
-                edgeSize = 1,
-            })
+            DF.GUI:StyleButton(b, { width = 18, height = 18 })
             b.point = point
             btns[point] = b
             b:SetScript("OnClick", function()
@@ -1009,13 +984,10 @@ function BuildPicker(GUI, parent, tdDB, onPick, excludeKey)
     local searchBar = CreateFrame("Frame", nil, drop, "BackdropTemplate")
     searchBar:SetSize(248, 28)
     searchBar:SetPoint("TOPLEFT", drop, "TOPLEFT", 16, -12)
-    searchBar:SetBackdrop({
-        bgFile   = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(searchBar, {
+        bgColor     = { 0, 0, 0, 0.7 },
+        borderColor = { 0.3, 0.3, 0.3, 1 },
     })
-    searchBar:SetBackdropColor(0, 0, 0, 0.7)
-    searchBar:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
 
     local searchIcon = searchBar:CreateTexture(nil, "OVERLAY")
     searchIcon:SetPoint("LEFT", 6, 0)
@@ -1037,15 +1009,14 @@ function BuildPicker(GUI, parent, tdDB, onPick, excludeKey)
     searchPlaceholder:SetText(L["Search..."])
     searchPlaceholder:SetTextColor(0.5, 0.5, 0.5)
 
-    local clearBtn = CreateFrame("Button", nil, searchBar)
-    clearBtn:SetSize(16, 16)
+    -- Reddens on hover rather than the default brighten: it discards the query.
+    local clearBtn = DF.GUI:CreateGlyphButton(searchBar, {
+        size       = 16,
+        texture    = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\close",
+        color      = { 0.5, 0.5, 0.5 },
+        hoverColor = { 1, 0.3, 0.3 },
+    })
     clearBtn:SetPoint("RIGHT", -4, 0)
-    local clearIcon = clearBtn:CreateTexture(nil, "OVERLAY")
-    clearIcon:SetAllPoints()
-    clearIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close")
-    clearIcon:SetVertexColor(0.5, 0.5, 0.5)
-    clearBtn:SetScript("OnEnter", function() clearIcon:SetVertexColor(1, 0.3, 0.3) end)
-    clearBtn:SetScript("OnLeave", function() clearIcon:SetVertexColor(0.5, 0.5, 0.5) end)
     clearBtn:Hide()
 
     searchBox:SetScript("OnEditFocusGained", function()
@@ -1156,7 +1127,9 @@ function BuildPicker(GUI, parent, tdDB, onPick, excludeKey)
         end
         local it = CreateFrame("Button", nil, scrollChild, "BackdropTemplate")
         it:SetSize(240, 22)
-        it:SetBackdrop({bgFile = "Interface\\Buttons\\WHITE8x8"})
+        DF.GUI:CreateElementBackdrop(it, {
+            outline = false,
+        })
         do
             local tc = GUI:GetThemeColor()
             it:SetBackdropColor(tc.r, tc.g, tc.b, 0)
@@ -1368,20 +1341,10 @@ local function CreateTextElementCard(GUI, parent, yPos, elem, tdDB, state, page)
     header:SetPoint("TOPLEFT", card, "TOPLEFT", 0, 0)
     header:SetPoint("TOPRIGHT", card, "TOPRIGHT", 0, 0)
     header:SetHeight(HEADER_HEIGHT)
-    header:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    header:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, C_ELEMENT.a)
-    header:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-
-    header:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, C_HOVER.a)
-    end)
-    header:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, C_ELEMENT.a)
-    end)
+    -- hoverTone = "neutral": a card header is a PLACE, not a call to action, so
+    -- it takes the plain C_HOVER wash rather than the accent one. Replaces the
+    -- hand-rolled OnEnter/OnLeave pair that restated the rest colours.
+    DF.GUI:StyleButton(header, { height = HEADER_HEIGHT, hoverTone = "neutral" })
     card.header = header
 
     -- Collapse arrow on the LEFT
@@ -1462,23 +1425,20 @@ local function CreateTextElementCard(GUI, parent, yPos, elem, tdDB, state, page)
     card.deleteBtn = deleteBtn
 
     -- Eye icon (visibility toggle) — TD-specific, left of delete
-    local eyeBtn = CreateFrame("Button", nil, header)
-    eyeBtn:SetSize(ICON_SIZE, ICON_SIZE)
+    local eyeBtn = DF.GUI:CreateGlyphButton(header, { size = ICON_SIZE })
     eyeBtn:SetPoint("RIGHT", deleteBtn, "LEFT", -ICON_GAP, 0)
-    local eyeIcon = eyeBtn:CreateTexture(nil, "OVERLAY")
-    eyeIcon:SetAllPoints()
+    -- SetGlyph makes the state colour the new REST colour, so OnLeave restores
+    -- the state instead of a fixed default. Hover is suppressed while hidden --
+    -- an "off" eye shouldn't light up under the mouse.
     local function updateEyeIcon()
         if elem.enabled then
-            eyeIcon:SetTexture(mediaPath .. "visibility")
-            eyeIcon:SetVertexColor(0.95, 0.95, 0.95)
+            eyeBtn:SetGlyph(mediaPath .. "visibility", { 0.95, 0.95, 0.95 })
         else
-            eyeIcon:SetTexture(mediaPath .. "visibility_off")
-            eyeIcon:SetVertexColor(0.45, 0.45, 0.45)
+            eyeBtn:SetGlyph(mediaPath .. "visibility_off", { 0.45, 0.45, 0.45 })
         end
+        eyeBtn:SetGlyphHover(elem.enabled)
     end
     updateEyeIcon()
-    eyeBtn:SetScript("OnEnter", function() if elem.enabled then eyeIcon:SetVertexColor(1,1,1) end end)
-    eyeBtn:SetScript("OnLeave", function() updateEyeIcon() end)
     card.eyeBtn = eyeBtn
 
     -- Click-through prevention on action icons
@@ -1500,13 +1460,10 @@ local function CreateTextElementCard(GUI, parent, yPos, elem, tdDB, state, page)
     local body = CreateFrame("Frame", nil, card, "BackdropTemplate")
     body:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, 0)
     body:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT", 0, 0)
-    body:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(body, {
+        bgColor     = { C_BODY_BG.r, C_BODY_BG.g, C_BODY_BG.b, C_BODY_BG.a },
+        borderColor = { C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.3 },
     })
-    body:SetBackdropColor(C_BODY_BG.r, C_BODY_BG.g, C_BODY_BG.b, C_BODY_BG.a)
-    body:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.3)
     card.body = body
 
     -- Build content sections inside body. BuildAppearanceSection's signature
@@ -2078,21 +2035,14 @@ local function CreateGroupCard(GUI, parent, yPos, elem, tdDB, state, page)
     header:SetPoint("TOPLEFT", card, "TOPLEFT", 0, 0)
     header:SetPoint("TOPRIGHT", card, "TOPRIGHT", 0, 0)
     header:SetHeight(HEADER_HEIGHT)
-    header:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    -- Same shared header style as the Texts card, but restBorderColor keeps this
+    -- one's group-coloured border at rest -- the group's identity -- while fill,
+    -- hover and disabled stay shared.
+    DF.GUI:StyleButton(header, {
+        height          = HEADER_HEIGHT,
+        hoverTone       = "neutral",
+        restBorderColor = headerBorder,
     })
-    header:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, C_ELEMENT.a)
-    header:SetBackdropBorderColor(headerBorder.r, headerBorder.g, headerBorder.b, headerBorder.a)
-
-    header:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, C_HOVER.a)
-    end)
-    header:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, C_ELEMENT.a)
-        self:SetBackdropBorderColor(headerBorder.r, headerBorder.g, headerBorder.b, headerBorder.a)
-    end)
     card.header = header
 
     local mediaPath = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
@@ -2155,23 +2105,20 @@ local function CreateGroupCard(GUI, parent, yPos, elem, tdDB, state, page)
     card.deleteBtn = deleteBtn
 
     -- Eye icon (visibility toggle) — left of delete.
-    local eyeBtn = CreateFrame("Button", nil, header)
-    eyeBtn:SetSize(ICON_SIZE, ICON_SIZE)
+    local eyeBtn = DF.GUI:CreateGlyphButton(header, { size = ICON_SIZE })
     eyeBtn:SetPoint("RIGHT", deleteBtn, "LEFT", -ICON_GAP, 0)
-    local eyeIcon = eyeBtn:CreateTexture(nil, "OVERLAY")
-    eyeIcon:SetAllPoints()
+    -- SetGlyph makes the state colour the new REST colour, so OnLeave restores
+    -- the state instead of a fixed default. Hover is suppressed while hidden --
+    -- an "off" eye shouldn't light up under the mouse.
     local function updateEyeIcon()
         if elem.enabled then
-            eyeIcon:SetTexture(mediaPath .. "visibility")
-            eyeIcon:SetVertexColor(0.95, 0.95, 0.95)
+            eyeBtn:SetGlyph(mediaPath .. "visibility", { 0.95, 0.95, 0.95 })
         else
-            eyeIcon:SetTexture(mediaPath .. "visibility_off")
-            eyeIcon:SetVertexColor(0.45, 0.45, 0.45)
+            eyeBtn:SetGlyph(mediaPath .. "visibility_off", { 0.45, 0.45, 0.45 })
         end
+        eyeBtn:SetGlyphHover(elem.enabled)
     end
     updateEyeIcon()
-    eyeBtn:SetScript("OnEnter", function() if elem.enabled then eyeIcon:SetVertexColor(1,1,1) end end)
-    eyeBtn:SetScript("OnLeave", function() updateEyeIcon() end)
     eyeBtn:SetScript("OnClick", function()
         elem.enabled = not elem.enabled
         updateEyeIcon()
@@ -2191,13 +2138,10 @@ local function CreateGroupCard(GUI, parent, yPos, elem, tdDB, state, page)
     local body = CreateFrame("Frame", nil, card, "BackdropTemplate")
     body:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, 0)
     body:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT", 0, 0)
-    body:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(body, {
+        bgColor     = { C_BODY_BG.r, C_BODY_BG.g, C_BODY_BG.b, C_BODY_BG.a },
+        borderColor = { bodyBorder.r, bodyBorder.g, bodyBorder.b, bodyBorder.a },
     })
-    body:SetBackdropColor(C_BODY_BG.r, C_BODY_BG.g, C_BODY_BG.b, C_BODY_BG.a)
-    body:SetBackdropBorderColor(bodyBorder.r, bodyBorder.g, bodyBorder.b, bodyBorder.a)
     card.body = body
 
     -- Ensure default fields exist before BuildContentSection runs.

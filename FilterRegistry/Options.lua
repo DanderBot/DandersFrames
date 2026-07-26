@@ -789,7 +789,9 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         end
         row = CreateFrame("Button", nil, leftContent, "BackdropTemplate")
         row:SetHeight(LEFT_ROW_H - 2)
-        row:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
+        DF.GUI:CreateElementBackdrop(row, {
+            outline = false,
+        })
 
         -- Selection accent bar (theme-colored)
         row.accent = row:CreateTexture(nil, "ARTWORK")
@@ -884,8 +886,10 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         end
         row = CreateFrame("Button", nil, scrollContent, "BackdropTemplate")
         row:SetHeight(SPELL_ROW_H - 2)
-        row:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
-        row:SetBackdropColor(0.08, 0.08, 0.08, 0.6)
+        DF.GUI:CreateElementBackdrop(row, {
+            outline = false,
+            bgColor     = { 0.08, 0.08, 0.08, 0.6 },
+        })
 
         -- Spell icon
         row.icon = row:CreateTexture(nil, "ARTWORK")

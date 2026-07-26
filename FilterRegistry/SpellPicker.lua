@@ -283,8 +283,10 @@ local function AcquireRow(inst, i)
     local GUI = DF.GUI
     row = CreateFrame("Button", nil, inst.content, "BackdropTemplate")
     row:SetHeight(SPELL_ROW_H - 2)
-    row:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
-    row:SetBackdropColor(0.08, 0.08, 0.08, 0.6)
+    DF.GUI:CreateElementBackdrop(row, {
+        outline = false,
+        bgColor     = { 0.08, 0.08, 0.08, 0.6 },
+    })
 
     row.icon = row:CreateTexture(nil, "ARTWORK")
     row.icon:SetSize(20, 20)

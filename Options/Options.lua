@@ -9270,38 +9270,18 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Profile buttons inside scroll child
         local py = -3
         for i, p in ipairs(profiles) do
+            -- A row is a PLACE, so it takes the neutral hover; the "this is the
+            -- active profile" cue is SetActive's shared accent fill + border. That
+            -- replaces a hand-rolled state machine which restated both rest looks
+            -- inside OnLeave and so could drift from the rest of the GUI.
             local btn = CreateFrame("Button", nil, profileScrollChild, "BackdropTemplate")
-            btn:SetSize(206, 24)
             btn:SetPoint("TOPLEFT", 2, py)
-            btn:SetBackdrop({
-                bgFile = "Interface\\Buttons\\WHITE8x8",
-                edgeFile = "Interface\\Buttons\\WHITE8x8",
-                edgeSize = 1,
+            DF.GUI:StyleButton(btn, {
+                width = 206, height = 24,
+                text = p, font = "DFFontHighlightSmall",
+                hoverTone = "neutral",
             })
-            btn:SetBackdropColor(0.15, 0.15, 0.15, 1)
-            btn:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
-            
-            local text = btn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-            text:SetPoint("CENTER")
-            text:SetText(p)
-            
-            if p == currentProfile then
-                local c = GUI.GetThemeColor()
-                btn:SetBackdropColor(c.r * 0.3, c.g * 0.3, c.b * 0.3, 1)
-                btn:SetBackdropBorderColor(c.r, c.g, c.b, 1)
-            end
-            
-            btn:SetScript("OnEnter", function(self)
-                self:SetBackdropColor(0.25, 0.25, 0.25, 1)
-            end)
-            btn:SetScript("OnLeave", function(self)
-                if p == currentProfile then
-                    local c = GUI.GetThemeColor()
-                    self:SetBackdropColor(c.r * 0.3, c.g * 0.3, c.b * 0.3, 1)
-                else
-                    self:SetBackdropColor(0.15, 0.15, 0.15, 1)
-                end
-            end)
+            btn:SetActive(p == currentProfile)
             btn:SetScript("OnClick", function() 
                 DF:SetProfile(p) 
                 if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
@@ -10021,9 +10001,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 local row = CreateFrame("Frame", nil, self.child, "BackdropTemplate")
                 row:SetSize(460, 50)
                 if not row.SetBackdrop then Mixin(row, BackdropTemplateMixin) end
-                row:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
-                row:SetBackdropColor(0.14, 0.14, 0.14, 1)
-                row:SetBackdropBorderColor(0.25, 0.25, 0.25, 0.5)
+                DF.GUI:CreateElementBackdrop(row, {
+                    bgColor     = { 0.14, 0.14, 0.14, 1 },
+                    borderColor = { 0.25, 0.25, 0.25, 0.5 },
+                })
 
                 local nameText = row:CreateFontString(nil, "OVERLAY", "DFFontNormal")
                 nameText:SetPoint("TOPLEFT", 12, -8)
@@ -10069,9 +10050,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 local row = CreateFrame("Frame", nil, self.child, "BackdropTemplate")
                 row:SetSize(460, 50)
                 if not row.SetBackdrop then Mixin(row, BackdropTemplateMixin) end
-                row:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
-                row:SetBackdropColor(0.14, 0.14, 0.14, 1)
-                row:SetBackdropBorderColor(0.25, 0.25, 0.25, 0.5)
+                DF.GUI:CreateElementBackdrop(row, {
+                    bgColor     = { 0.14, 0.14, 0.14, 1 },
+                    borderColor = { 0.25, 0.25, 0.25, 0.5 },
+                })
 
                 local nameText = row:CreateFontString(nil, "OVERLAY", "DFFontNormal")
                 nameText:SetPoint("TOPLEFT", 12, -8)
