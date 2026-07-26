@@ -909,9 +909,13 @@ function DF:UnlockRaidFrames()
     local cWidth, cHeight = DF.raidContainer:GetWidth(), DF.raidContainer:GetHeight()
     if cWidth < 50 or cHeight < 50 then
         -- Use fallback size based on settings
-        local frameWidth = db.raidFrameWidth or 80
-        local frameHeight = db.raidFrameHeight or 40
-        local spacing = db.raidFrameSpacing or 2
+        -- frameWidth / frameHeight / frameSpacing are the real keys. The
+        -- raidFrame* spellings have no default anywhere in the addon, so these
+        -- three reads always yielded nil and the fallback container was sized
+        -- 80/40/2 regardless of the user's actual frame dimensions.
+        local frameWidth = db.frameWidth or 80
+        local frameHeight = db.frameHeight or 40
+        local spacing = db.frameSpacing or 2
         
         -- Default to 8 groups x 5 members layout
         DF.raidContainer:SetSize(

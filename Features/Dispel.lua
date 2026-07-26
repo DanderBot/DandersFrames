@@ -1049,14 +1049,15 @@ end
 local function HideOverlay(overlay)
     if not overlay then return end
     
-    -- Stop animation first
-    if overlay.pulseAnim and overlay.pulseAnim:IsPlaying() then
-        overlay.pulseAnim:Stop()
-    end
-    
-    -- Reset alpha
-    overlay:SetAlpha(1)
-    
+    -- Stop the pulse through the SYMMETRIC stop, which covers all THREE groups
+    -- (border + gradient + icon) and resets each host's alpha. Stopping only
+    -- pulseAnim here left gradientPulse and iconPulse looping on a hidden overlay:
+    -- SetLegacyOverlayPulse(on) only plays a group that is `not IsPlaying()`, so on
+    -- the next show the border restarted at phase 0 while the survivors carried on
+    -- at whatever phase they had reached -- permanently breaking the phase lock the
+    -- three groups are built to keep, and leaking a running AnimationGroup per frame.
+    SetLegacyOverlayPulse(overlay, false)
+
     -- Hide all border textures
     overlay.borderTop:Hide()
     overlay.borderBottom:Hide()
@@ -1318,7 +1319,13 @@ end
 local function BindDispelCarriers(btn, carriers, db, key)
     if not (btn and carriers and carriers[1]) then return end
     btn._dfDispelCarriers = carriers
-    btn._dfDispelCurveGen = DF.dispelCurveGen
+    -- _dfDispelCurveGen is stamped AFTER a SUCCESSFUL bind (below), not here. The only
+    -- retry gate is StyleDispelSlots' `_dfDispelCurveGen ~= DF.dispelCurveGen` check,
+    -- so stamping up front meant a failed bind consumed the very generation bump that
+    -- was supposed to force the re-bind: the carrier was marked fresh and never
+    -- retried, leaving the overlay on the previous palette (or untinted) until an
+    -- unrelated structural change rebuilt the container. warnedTintBind is one-shot
+    -- for the whole session, so every later failure was silent too.
     local opts = {
         style = DispelBorderStyle(),
         customDispelColorMap = DispelBorderMapFor(),
@@ -1336,7 +1343,9 @@ local function BindDispelCarriers(btn, carriers, db, key)
     end)
     DF._dispelBindErr = DF._dispelBindErr or {}
     DF._dispelBindErr[key or "?"] = ok and ("ok x" .. #carriers) or tostring(err)
-    if not ok and not warnedTintBind then
+    if ok then
+        btn._dfDispelCurveGen = DF.dispelCurveGen
+    elseif not warnedTintBind then
         warnedTintBind = true
         if DF.DebugWarn then DF:DebugWarn("Dispel", "dispel bind %s failed: %s", tostring(key), tostring(err)) end
     end

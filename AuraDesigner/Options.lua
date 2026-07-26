@@ -117,7 +117,13 @@ local function MigrateToSpecScoped(adDB)
         if adDB.auras then
             local isFlat = false
             for _, val in pairs(adDB.auras) do
-                if type(val) == "table" and (val.priority ~= nil or val.indicators ~= nil) then
+                -- `border` counts too: an entry that only ever had its border
+                -- customised carries neither priority nor indicators, and reading it
+                -- as already-spec-scoped stamped _specScopedV1 without migrating —
+                -- those auras then rendered nothing, permanently. Core.lua's
+                -- equivalent probe has always included it; this copy had drifted.
+                if type(val) == "table"
+                    and (val.priority ~= nil or val.indicators ~= nil or val.border ~= nil) then
                     isFlat = true
                     break
                 end
@@ -126,15 +132,48 @@ local function MigrateToSpecScoped(adDB)
                 local oldAuras = adDB.auras
                 local newAuras = {}
                 local auraToSpecs = {}
-                local trackable = DF.AuraDesigner and DF.AuraDesigner.TrackableAuras
-                if trackable then
-                    for specKey, auraList in pairs(trackable) do
-                        for _, info in ipairs(auraList) do
-                            if not auraToSpecs[info.name] then auraToSpecs[info.name] = {} end
-                            tinsert(auraToSpecs[info.name], specKey)
+                -- Build the name→specs map from the FULL trackable set, not the
+                -- curated TrackableAuras table alone: the real set is curated PLUS
+                -- the SpellDB class pool (Adapter:GetTrackableAuras). Using only the
+                -- curated half meant every pool-sourced aura the user had configured
+                -- matched nothing — and the wholesale `adDB.auras = newAuras` below
+                -- then deleted it, with no read-back and no log.
+                local AD = DF.AuraDesigner
+                local adapter = AD and AD.Adapter
+                if adapter and adapter.GetTrackableAuras and AD.SpecInfo then
+                    for specKey in pairs(AD.SpecInfo) do
+                        local ok, list = pcall(adapter.GetTrackableAuras, adapter, specKey)
+                        if ok and type(list) == "table" then
+                            for _, info in ipairs(list) do
+                                if info.name then
+                                    if not auraToSpecs[info.name] then auraToSpecs[info.name] = {} end
+                                    tinsert(auraToSpecs[info.name], specKey)
+                                end
+                            end
                         end
                     end
                 end
+                -- Curated table as a fallback/supplement (also covers the case where
+                -- the adapter or the registry is not available at migration time).
+                local trackable = AD and AD.TrackableAuras
+                if trackable then
+                    for specKey, auraList in pairs(trackable) do
+                        for _, info in ipairs(auraList) do
+                            local seen = auraToSpecs[info.name]
+                            if not seen then
+                                auraToSpecs[info.name] = { specKey }
+                            else
+                                local dup = false
+                                for _, s in ipairs(seen) do
+                                    if s == specKey then dup = true; break end
+                                end
+                                if not dup then tinsert(seen, specKey) end
+                            end
+                        end
+                    end
+                end
+
+                local orphans, orphanCount = nil, 0
                 for auraName, auraCfg in pairs(oldAuras) do
                     local specs = auraToSpecs[auraName]
                     if specs then
@@ -142,6 +181,22 @@ local function MigrateToSpecScoped(adDB)
                             if not newAuras[specKey] then newAuras[specKey] = {} end
                             newAuras[specKey][auraName] = DF:DeepCopy(auraCfg)
                         end
+                    else
+                        -- NEVER drop it. Park unmatched configs where they can be
+                        -- recovered rather than replacing the table out from under
+                        -- them (a SpellDB regen that renames a spell would otherwise
+                        -- destroy that aura's config on the next load).
+                        orphans = orphans or {}
+                        orphans[auraName] = DF:DeepCopy(auraCfg)
+                        orphanCount = orphanCount + 1
+                    end
+                end
+                if orphans then
+                    adDB._unscopedAuras = orphans
+                    if DF.DebugWarn then
+                        DF:DebugWarn("AuraDesigner",
+                            "spec-scope migration: %d aura config(s) matched no spec; parked in _unscopedAuras",
+                            orphanCount)
                     end
                 end
                 adDB.auras = newAuras

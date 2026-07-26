@@ -1969,15 +1969,17 @@ function CC:RefreshKeyboardBindings()
         end
     end
     
-    -- Also update DandersFrames
-    if DF and DF.unitFrames then
-        for _, frame in pairs(DF.unitFrames) do
-            if frame.dfKeyboardHandlersSetup then
+    -- Also update DandersFrames. `DF.unitFrames` does not exist and never has --
+    -- nothing in the addon assigns it -- so this sweep silently did nothing.
+    -- DF:IterateAllFrames is the real accessor (party + raid).
+    if DF and DF.IterateAllFrames then
+        DF:IterateAllFrames(function(frame)
+            if frame and frame.dfKeyboardHandlersSetup then
                 self:UpdateFrameBindingAttributes(frame)
             end
-        end
+        end)
     end
-    
+
     self.pendingKeyboardRefresh = false
 end
 
@@ -2056,10 +2058,12 @@ function CC:RunBindingRepair(reason, force)
             scrub(frame)
         end
     end
-    if DF.unitFrames then
-        for _, frame in pairs(DF.unitFrames) do
-            scrub(frame)
-        end
+    -- `DF.unitFrames` is never assigned anywhere in the addon, so this scrub was a
+    -- no-op. DF:IterateAllFrames is the real accessor (party + raid).
+    if DF.IterateAllFrames then
+        DF:IterateAllFrames(function(frame)
+            if frame then scrub(frame) end
+        end)
     end
 
     -- 3. Rebuild the macro map and every frame's snippet, in case snippets

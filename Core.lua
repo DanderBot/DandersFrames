@@ -2994,6 +2994,45 @@ function DF:MigrateAbsoluteFrameLevels()
     end
 end
 
+-- A profile created from Config defaults is ALREADY in the current shape, so every
+-- one-time migration has to treat it as done. Most migrations here derive from a
+-- legacy value and are naturally no-ops on a fresh profile (the rule stated in the
+-- ADDON_LOADED block). The exceptions are the ones that write UNCONDITIONALLY behind
+-- a profile-stored flag -- and because that flag is not part of Config, a brand-new
+-- profile did not carry it and got shifted:
+--   * MigrateAbsoluteFrameLevels  -- targetedSpellFrameLevel 30 -> 60,
+--     auraDesigner.defaults.indicatorFrameLevel 40 -> 80 (both already ABSOLUTE in
+--     Config; the render's own `or 30` / `or 40` fallbacks prove it).
+--   * MigratePersonalContainerPosition -- personalTargetedSpellX 0 -> 92.
+-- On a fresh install the AD value was then folded into the Party/Raid designer
+-- preset on first login, making it permanent.
+--
+-- The flag cannot simply be added to PartyDefaults: the defaults backfill runs
+-- BEFORE MigratePersonalContainerPosition, so legacy profiles would be stamped as
+-- migrated before they actually migrated. Stamp at CREATION instead.
+--
+-- Any future migration that cannot derive its answer from a legacy value must list
+-- its flag here as well as writing it.
+local FRESH_PROFILE_MIGRATION_FLAGS = {
+    _absoluteFrameLevelsV1 = true,
+    _defensiveBaselineV2   = true,
+}
+local FRESH_PROFILE_PARTY_MIGRATION_FLAGS = {
+    _personalContainerCenterMigrated = true,
+}
+
+function DF:StampFreshProfileMigrations(profile)
+    if type(profile) ~= "table" then return end
+    for k, v in pairs(FRESH_PROFILE_MIGRATION_FLAGS) do
+        profile[k] = v
+    end
+    if type(profile.party) == "table" then
+        for k, v in pairs(FRESH_PROFILE_PARTY_MIGRATION_FLAGS) do
+            profile.party[k] = v
+        end
+    end
+end
+
 -- Transition shim (unreleased-only): an earlier iteration of the priority flip
 -- converted values to the new higher-wins scale and then stamped a COARSE flag —
 -- profile-level for Aura Designer, store-level for Click Casting. The replacement
@@ -3108,6 +3147,8 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 },
                 wizardConfigs = {},
             }
+            -- Born from current defaults => every one-time migration is already done.
+            DF:StampFreshProfileMigrations(DandersFramesDB_v2.profiles["Default"])
         end
         
         -- Initialize per-character saved variables
@@ -3239,9 +3280,14 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 linkedSections = {},
                 partyEnabled = true,
                 raidEnabled = true,
-                settingsFont = "Friz Quadrata TT",
+                -- Current default, not the pre-Roboto face: seeding Friz here made a
+                -- freshly created profile flip its settings font by itself on the
+                -- next reload (the _settingsFontRobotoDefaultV1 pass below).
+                settingsFont = "DF Roboto SemiBold",
                 settingsFontOutline = "NONE",
             }
+            -- Born from current defaults => every one-time migration is already done.
+            DF:StampFreshProfileMigrations(DandersFramesDB_v2.profiles["Default"])
         end
         
         -- Set current profile (per-character takes priority over account-wide)
@@ -5555,8 +5601,16 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 end
             end
             
+            -- Both mode flags are down now, so hand the shared engine state back:
+            -- the aura data provider and the pinned preview. This path clears the
+            -- flags inline rather than going through HideTestFrames, and skipping
+            -- the handback used to strand C_UnitAuras on the SAMPLE provider for
+            -- the rest of the session -- and the state driver below shows the LIVE
+            -- frames in combat, so they rendered fake auras.
+            DF:TeardownTestModeEngines()
+
             print("|cffff9900DandersFrames:|r " .. L["Test mode ended — entering combat."])
-            
+
             -- Switch from test mode state drivers ([combat] conditions) to group
             -- transition drivers ([group:raid] conditions) so frames stay visible
             -- when combat ends (avoids flicker before UpdateHeaderVisibility runs)

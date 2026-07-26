@@ -109,6 +109,9 @@ local function SortPartyFrames(units)
     DF.partyHeader:SetAttribute("sortMethod", "NAMELIST")
     DF.partyHeader:SetAttribute("groupBy", nil)
     DF.partyHeader:SetAttribute("groupingOrder", nil)
+    -- Written raw, so drop SetHeaderAttribute's cache: it still describes whatever
+    -- DF's own sorting last set, and would skip the write that restores it.
+    if DF.ClearHeaderAttributeCache then DF:ClearHeaderAttributeCache(DF.partyHeader) end
     return true
 end
 
@@ -397,6 +400,13 @@ function FrameSortMod:OnSettingChanged()
             for _, header in ipairs(headers) do
                 header:SetAttribute("nameList", nil)
                 header:SetAttribute("sortMethod", nil)
+                -- These bypass SetHeaderAttribute, so its cache still holds the
+                -- PREVIOUS nameList/sortMethod. Without dropping it, the
+                -- ApplyPartyGroupSorting call just below rebuilds the identical
+                -- string, the cache reports "unchanged", the write is skipped --
+                -- and the header stays on the nils set here, leaving party frames
+                -- in template order until a roster change alters the name list.
+                if DF.ClearHeaderAttributeCache then DF:ClearHeaderAttributeCache(header) end
             end
 
             -- Now re-apply DF's built-in sorting

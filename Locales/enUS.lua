@@ -1097,6 +1097,10 @@ L["Loading..."] = true
 L["Lock"] = true
 L["Lock Frames"] = true
 L["Locked by Auto Layout"] = true
+-- Export-page preset button, resolved dynamically via L[p.name]. Its three
+-- siblings (All / Layout / None) were declared; this one was not, so no locale
+-- could ever translate it.
+L["Look"] = true
 L["Live Log"] = true
 L["Live Testing"] = true
 L["Log entries: %d"] = true

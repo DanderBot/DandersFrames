@@ -1148,6 +1148,15 @@ function FlatRaidFrames:SetEnabled(enabled)
 
     local header = self.header
 
+    -- We are applying the visibility NOW, so any deferred request is satisfied.
+    -- Leaving it set meant a stale value survived: the combat-end drain clears it
+    -- only after several early returns (initialized / ShouldBeActive / pending
+    -- initialize / pending reinitialize), so a request queued while flat mode was
+    -- OFF could fire at the end of an unrelated combat much later and hide the
+    -- raid frames mid-fight. It also raced the header's own combat-end drain,
+    -- which shows the frames and is then immediately undone by the stale false.
+    self.pendingVisibility = nil
+
     -- Tell the grouped-mode secure position handler whether flat mode is active
     -- so it won't resize the shared raidContainer with grouped-grid dimensions
     if DF.raidPositionHandler then

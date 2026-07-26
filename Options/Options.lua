@@ -1660,14 +1660,22 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 DF.SecureSort:PushRaidGroupLayoutConfig()
                 DF.SecureSort:TriggerSecureRaidSort()
             end
-            if not db.raidUseGroups and not InCombatLockdown() then
-                if DF.UpdateRaidGroupLabels then DF:UpdateRaidGroupLabels() end
+            -- Branch on the SETTING only. Folding `not InCombatLockdown()` into this
+            -- test meant that switching TO flat mode while in combat fell into the
+            -- else branch and disabled flat mode outright -- the opposite of what
+            -- the user asked for. SetEnabled already defers correctly in combat
+            -- (it queues pendingVisibility and replays at PLAYER_REGEN_ENABLED), so
+            -- just tell it the truth and let it schedule.
+            if not db.raidUseGroups then
+                if not InCombatLockdown() and DF.UpdateRaidGroupLabels then DF:UpdateRaidGroupLabels() end
                 C_Timer.After(0, function()
-                    if not InCombatLockdown() then
-                        if DF.FlatRaidFrames then
-                            if not DF.FlatRaidFrames.initialized then DF.FlatRaidFrames:Initialize() end
-                            if DF.FlatRaidFrames.initialized then DF.FlatRaidFrames:SetEnabled(true) end
+                    if DF.FlatRaidFrames then
+                        if not DF.FlatRaidFrames.initialized and not InCombatLockdown() then
+                            DF.FlatRaidFrames:Initialize()
                         end
+                        if DF.FlatRaidFrames.initialized then DF.FlatRaidFrames:SetEnabled(true) end
+                    end
+                    if not InCombatLockdown() then
                         if DF.headersInitialized then DF:ApplyHeaderSettings() end
                         if DF.UpdateRaidLayout then DF:UpdateRaidLayout() end
                     end

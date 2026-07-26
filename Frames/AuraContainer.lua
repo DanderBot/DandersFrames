@@ -911,7 +911,11 @@ local function bindNative(slot, config)
     end
 
     if slot.dfDur and slot.SetDurationText and not slot._boundDur then
-        slot._boundDur = true
+        -- _boundDur is stamped AFTER the pcall below, not here: this is a
+        -- bind-once flag, so setting it up front meant a failed bind latched
+        -- permanently and the duration text stayed blank for the life of the slot
+        -- with no retry (and warnedCurve is one-shot per session, so the second
+        -- distinct failure was silent too).
         local durSpec = style.duration or {}
         -- 68914 RESHAPED the options: SetDurationText now only reads { binding |
         -- textFormat | textFormatter | textColor }; the flat formatter/expiredText/
@@ -956,7 +960,9 @@ local function bindNative(slot, config)
             opts.textColor = { curve = durSpec.colorCurve, property = durSpec.colorProperty }
         end
         local ok, err = pcall(function() slot:SetDurationText(slot.dfDur, opts) end)
-        if not ok and not warnedCurve then
+        if ok then
+            slot._boundDur = true
+        elseif not warnedCurve then
             warnedCurve = true
             DF:DebugWarn(DBG, "SetDurationText failed: %s", tostring(err))
         end
@@ -999,8 +1005,11 @@ local function bindNative(slot, config)
     if dispelSpec then
         if slot.dfAuraBorder and (slot.AddDispelTypeTexture or slot.SetAuraBorder)
             and (not slot._boundAuraBorder or slot._dfDispelCurveGen ~= DF.dispelCurveGen) then
-            slot._boundAuraBorder = true
-            slot._dfDispelCurveGen = DF.dispelCurveGen
+            -- Both stamps land AFTER the pcall below. Setting them up front meant a
+            -- failed bind marked the slot as bound AND as carrying the current
+            -- palette generation, so the ring stayed blank until an unrelated
+            -- rebuild -- the curve-gen bump that is supposed to force a re-bind had
+            -- already been consumed by the failure.
             -- Style resolution is SHARED with the dispel overlay (DF:ResolveDispelTextureStyle
             -- in Frames/Border.lua) — it carries the 68914 enum rename/renumber and the
             -- correct last-resort literals. Never resolve the enum locally.
@@ -1032,7 +1041,10 @@ local function bindNative(slot, config)
                     slot:SetAuraBorder(slot.dfAuraBorder, opts)
                 end
             end)
-            if not ok and not warnedNativeDispel then
+            if ok then
+                slot._boundAuraBorder = true
+                slot._dfDispelCurveGen = DF.dispelCurveGen
+            elseif not warnedNativeDispel then
                 warnedNativeDispel = true
                 DF:DebugWarn(DBG, "SetAuraBorder failed (build still ok): %s", tostring(err))
             end
@@ -1695,7 +1707,13 @@ function NativeBackend:build()
     for i, rec in ipairs(filters) do
         local f = rec.f
         local cf = (not testMode) and recordCandidateFilters(rec, config) or nil
-        if cf and filterVulnerableToIdentityGate(f, cf) then
+        -- NOT gated on `cf`: filterVulnerableToIdentityGate's OTHER branch is the
+        -- spell-CATEGORY token case (BIG_DEFENSIVE / EXTERNAL_DEFENSIVE), which is
+        -- precisely the defensive row's empty-selection fallback -- and that config
+        -- carries NO candidateFilters. Requiring cf here made that branch dead, so a
+        -- cleared defensive selection went ungated and filled with ordinary buffs on
+        -- a cross-faction unit. The function is nil-safe on cf.
+        if filterVulnerableToIdentityGate(f, cf) then
             handle._idGateVulnerable = true
         end
         if filterSourceRelative(f, cf) then
@@ -1869,8 +1887,29 @@ function NativeBackend:applyGroupTuning()
     -- filter set is structural and unchanged on this path, so keys line up with
     -- self.groupKeys (rec.key or positional "df<i>").
     local cfByKey = {}
+    -- ★ RE-DERIVE THE IDENTITY-GATE VERDICT. include/excludeSpellIDs live in the
+    -- TUNING signature, not the struct one, so every setting that flips a pool's
+    -- gate exposure -- Show All Buffs, a filter-category selection, missing-buff
+    -- hide-from-bar, defensive dedupe -- lands HERE and never re-enters build().
+    -- The flag used to be written only in build(), and IdentityGateSweep only
+    -- visits handles already flagged, so a handle that BECAME vulnerable was never
+    -- reconsidered: on a cross-faction unit (UnitCanAssist false) the gate fails
+    -- open and an "only these spells" row renders every buff. Recompute from the
+    -- records this call is about to push, then re-apply.
+    local wasVulnerable = self.handle._idGateVulnerable
+    local wasSourceRel  = self.handle._idGateSourceRelative
+    self.handle._idGateVulnerable = nil
+    self.handle._idGateSourceRelative = nil
     for i, rec in ipairs(normalizeFilters(config.filter)) do
-        cfByKey[rec.key or ("df" .. i)] = recordCandidateFilters(rec, config)
+        local key = rec.key or ("df" .. i)
+        local cf = recordCandidateFilters(rec, config)
+        cfByKey[key] = cf
+        if filterVulnerableToIdentityGate(rec.f, cf) then
+            self.handle._idGateVulnerable = true
+        end
+        if filterSourceRelative(rec.f, cf) then
+            self.handle._idGateSourceRelative = true
+        end
     end
     for _, key in ipairs(self.groupKeys) do
         pcall(function() c:SetAuraGroupMaxFrameCount(key, maxCount) end)
@@ -1887,6 +1926,13 @@ function NativeBackend:applyGroupTuning()
     -- parse, same op class as enable).
     if not InCombatLockdown() then
         pcall(function() c:Hide(); c:Show() end)
+    end
+    -- Re-apply the gate whenever this call CHANGED the verdict. Cheap and
+    -- combat-safe (plain frame visibility), but skipped when nothing moved so a
+    -- routine tuning pass does not churn handle visibility.
+    if self.handle._idGateVulnerable ~= wasVulnerable
+        or self.handle._idGateSourceRelative ~= wasSourceRel then
+        pcall(function() self.handle:_applyIdentityGate() end)
     end
 end
 

@@ -421,21 +421,36 @@ local function SetHeaderAttribute(header, attr, value)
         return false
     end
     
-    -- Value changed, update cache and set attribute
-    cache[attr] = value
+    -- Value changed: SET FIRST, then record. Recording first meant a write that
+    -- was blocked or otherwise failed still poisoned the cache into reporting
+    -- success, and every later attempt to set the same value was then skipped.
     header:SetAttribute(attr, value)
+    cache[attr] = value
     if DF and DF.RosterDebugCount then
         DF:RosterDebugCount("SetHeaderAttribute-CHANGED")
     end
     return true
 end
 
--- Clear cache for a header (use when header is destroyed/recreated)
+-- Clear cache for a header (use when header is destroyed/recreated, OR when
+-- anything writes the header's attributes WITHOUT going through
+-- SetHeaderAttribute -- otherwise the cache still describes the old values and
+-- the next matching write is skipped as redundant).
 local function ClearHeaderAttributeCache(header)
     if header then
         local headerName = header:GetName() or tostring(header)
         headerAttributeCache[headerName] = nil
     end
+end
+
+-- Exposed because the bypassing writers live in another file: Features/FrameSort.lua
+-- nils nameList/sortMethod directly when the user turns the external sorter off, and
+-- DF:SetPartySorting writes them raw. Neither went through SetHeaderAttribute, so the
+-- cache kept claiming the old values were live and the re-apply that should have
+-- restored DF's own sorting was skipped -- party frames stayed in template order
+-- until a roster change happened to alter the nameList string.
+function DF:ClearHeaderAttributeCache(header)
+    ClearHeaderAttributeCache(header)
 end
 
 -- ============================================================
@@ -5448,7 +5463,11 @@ function DF:SetPartySorting(sortMethod, groupBy, groupingOrder)
         if sortMethod then
             DF.partyHeader:SetAttribute("sortMethod", sortMethod)
         end
-        
+        -- Written raw (this function predates SetHeaderAttribute), so drop the
+        -- cache -- otherwise it keeps describing the values this call just
+        -- replaced and silently skips the next matching write.
+        ClearHeaderAttributeCache(DF.partyHeader)
+
         -- Force relayout
         for i = 1, 5 do
             local child = DF.partyHeader:GetAttribute("child" .. i)
@@ -7316,6 +7335,12 @@ headerEventFrame:SetScript("OnEvent", function(self, event, arg1, arg2)
                 DF:StopTestAnimation()
                 if DF.testRaidContainer then DF.testRaidContainer:Hide() end
             end
+            -- Both mode flags are down now, so hand the shared engine state back:
+            -- the aura data provider and the pinned preview. This path clears the
+            -- flags inline rather than going through HideTestFrames, and skipping
+            -- the handback used to strand C_UnitAuras on the SAMPLE provider for
+            -- the rest of the session (live frames then rendered fake auras).
+            if DF.TeardownTestModeEngines then DF:TeardownTestModeEngines() end
             -- Clear state drivers if not in combat (can't unregister in combat)
             if not InCombatLockdown() and DF.testModeStateDriversActive then
                 DF:ClearTestModeStateDrivers()

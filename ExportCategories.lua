@@ -467,8 +467,10 @@ DF.ExportCategories = {
         "defensiveBarMax",
         "defensiveBarSpacing",
         "defensiveBarWrap",
-        "defensiveBarX",
-        "defensiveBarY",
+        -- defensiveBarX / defensiveBarY removed: no such settings exist (only
+        -- Growth/Max/Spacing/Wrap do). Harmless at runtime because
+        -- ExtractCategorySettings nil-guards, but they made /df exportaudit
+        -- report two phantoms, so the audit never came back clean.
         "defensiveDurationBarBGColor",
         "defensiveDurationBarColor",
         "defensiveDurationBarEnabled",

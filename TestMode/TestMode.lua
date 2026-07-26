@@ -2243,13 +2243,41 @@ end
 -- Throttled layout refresh for slider changes (avoids flickering)
 DF.lastLayoutRefresh = 0
 
+-- Engine-side test-mode teardown: the state that is NOT owned by the test frames
+-- themselves -- the global aura data provider, and the pinned-frame preview.
+--
+-- HideTestFrames / HideRaidTestFrames do this inline, but two OTHER paths tear test
+-- mode down by clearing DF.testMode / DF.raidTestMode directly: combat entry
+-- (Core.lua, PLAYER_REGEN_DISABLED) and zone change (Frames/Headers.lua,
+-- PLAYER_ENTERING_WORLD). Both used to skip it, which left C_UnitAuras on the
+-- SAMPLE provider for the rest of the session -- the restore lives only in
+-- AuraContainer.SetTestMode's `else` branch. The [combat] state driver shows the
+-- LIVE frames the instant combat starts, so they then rendered fake auras, with the
+-- identity gate off, aura row caps stuck at the test slider value and missing-buff
+-- badges on corpses. The watchdog could not recover it either: ensureProviderWatch
+-- returns early while _ownsProviderSwitch is set, and only this path clears it.
+--
+-- Call AFTER the mode flags are cleared: the provider is shared between party and
+-- raid, so it goes back to real data only when NEITHER mode is left running.
+function DF:TeardownTestModeEngines()
+    local stillTesting = (DF.testMode or DF.raidTestMode) and true or false
+    if DF.AuraContainer and DF.AuraContainer.SetTestMode then
+        DF.AuraContainer.SetTestMode(stillTesting)
+    end
+    -- Pinned previews are shared between the two modes exactly like the provider,
+    -- so only leave the preview once NEITHER mode is left running. ExitTestMode
+    -- carries its own combat guard (it defers via pendingExitTestMode).
+    if not stillTesting and DF.PinnedFrames and DF.PinnedFrames.testModeActive
+        and DF.PinnedFrames.ExitTestMode then
+        DF.PinnedFrames:ExitTestMode()
+    end
+end
+
 function DF:HideTestFrames(silent)
     DF.testMode = false
     -- Restore the real aura provider only when NEITHER test mode remains active
     -- (party + raid share the global data-provider switch).
-    if DF.AuraContainer and DF.AuraContainer.SetTestMode then
-        DF.AuraContainer.SetTestMode(DF.raidTestMode and true or false)
-    end
+    DF:TeardownTestModeEngines()
 
     -- Stop animation only if raid test mode isn't using it
     local raidDb = DF:GetRaidDB()
@@ -2495,9 +2523,7 @@ function DF:HideRaidTestFrames()
     DF.raidTestMode = false
     -- Restore the real aura provider only when NEITHER test mode remains active
     -- (party + raid share the global data-provider switch).
-    if DF.AuraContainer and DF.AuraContainer.SetTestMode then
-        DF.AuraContainer.SetTestMode(DF.testMode and true or false)
-    end
+    DF:TeardownTestModeEngines()
 
     -- Stop animation if party test mode isn't using it
     local partyDb = DF:GetDB()
