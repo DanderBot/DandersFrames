@@ -1214,6 +1214,10 @@ function DF:LightweightUpdateFrameLevel(elementType)
         vehicle      = "vehicleIcon",
         raidRole     = "raidRoleIcon",
         summon       = "summonIcon",
+        -- These two had a slider and an export entry but no live consumer: their
+        -- Frame Level only ever applied in test mode. Wired here 2026-07-25.
+        bgCarrier    = "bgCarrierIcon",
+        combat       = "combatIcon",
     }
 
     local function UpdateLevel(frame)
@@ -1223,52 +1227,24 @@ function DF:LightweightUpdateFrameLevel(elementType)
         local frameBaseLevel = frame:GetFrameLevel()
         
         if elementType == "absorb" and frame.dfAbsorbBar then
-            local level = db.absorbBarFrameLevel or 10
-            frame.dfAbsorbBar:SetFrameLevel(level)
+            frame.dfAbsorbBar:SetFrameLevel(frame:GetFrameLevel() + (db.absorbBarFrameLevel or 11))
         elseif elementType == "role" and frame.roleIcon then
-            local level = db.roleIconFrameLevel or 0
-            if level > 0 then
-                frame.roleIcon:SetFrameLevel(frameBaseLevel + level)
-            else
-                frame.roleIcon:SetFrameLevel(baseLevel + 5)
-            end
+            frame.roleIcon:SetFrameLevel(frameBaseLevel + (db.roleIconFrameLevel or 30))
         elseif elementType == "leader" and frame.leaderIcon then
-            local level = db.leaderIconFrameLevel or 0
-            if level > 0 then
-                frame.leaderIcon:SetFrameLevel(frameBaseLevel + level)
-            else
-                frame.leaderIcon:SetFrameLevel(baseLevel + 5)
-            end
+            frame.leaderIcon:SetFrameLevel(frameBaseLevel + (db.leaderIconFrameLevel or 30))
         elseif elementType == "raidTarget" and frame.raidTargetIcon then
-            local level = db.raidTargetIconFrameLevel or 0
-            if level > 0 then
-                frame.raidTargetIcon:SetFrameLevel(frameBaseLevel + level)
-            else
-                frame.raidTargetIcon:SetFrameLevel(baseLevel + 5)
-            end
+            frame.raidTargetIcon:SetFrameLevel(frameBaseLevel + (db.raidTargetIconFrameLevel or 30))
         elseif elementType == "readyCheck" and frame.readyCheckIcon then
-            local level = db.readyCheckIconFrameLevel or 0
-            if level > 0 then
-                frame.readyCheckIcon:SetFrameLevel(frameBaseLevel + level)
-            else
-                frame.readyCheckIcon:SetFrameLevel(baseLevel + 5)
-            end
+            frame.readyCheckIcon:SetFrameLevel(frameBaseLevel + (db.readyCheckIconFrameLevel or 30))
         elseif elementType == "centerStatus" and frame.centerStatusIcon then
-            local level = db.centerStatusIconFrameLevel or 0
-            if level > 0 then
-                frame.centerStatusIcon:SetFrameLevel(frameBaseLevel + level)
-            else
-                frame.centerStatusIcon:SetFrameLevel(baseLevel + 5)
-            end
+            frame.centerStatusIcon:SetFrameLevel(frameBaseLevel + (db.centerStatusIconFrameLevel or 30))
         else
             -- resurrection / phased / afk / vehicle / raidRole / summon icons
             local field = SIMPLE_LEVEL_ICONS[elementType]
             local icon = field and frame[field]
             if icon then
-                local level = db[field .. "FrameLevel"] or 0
-                if level > 0 then
-                    icon:SetFrameLevel(icon:GetParent():GetParent():GetFrameLevel() + level)
-                end
+                local level = db[field .. "FrameLevel"] or 30
+                icon:SetFrameLevel(icon:GetParent():GetParent():GetFrameLevel() + level)
             end
         end
     end
@@ -2082,7 +2058,7 @@ function DF:LightweightUpdateResourceBarFrameLevel()
     local db = DF.db[mode]
     if not db then return end
     
-    local frameLevelOffset = db.resourceBarFrameLevel or 2
+    local frameLevelOffset = db.resourceBarFrameLevel or 20
     
     local function UpdateFrame(frame)
         if not frame or not frame.dfPowerBar then return end
@@ -2948,6 +2924,76 @@ function DF:MigrateDeprecateRaidGroupOrder()
     end
 end
 
+
+-- One-time conversion to ABSOLUTE frame levels (v5.0.0-alpha.12).
+-- Before: 0 was a SENTINEL meaning "use my built-in default", and that default differed
+-- per element (status icons contentOverlay+5, missing buff contentOverlay+10, defensive 51),
+-- while the Aura Designer slider was an offset silently added to 40. Two sliders both
+-- reading 0 therefore rendered at different heights, and 0 was unreachable as a real value.
+-- After: the stored number IS the offset from the unit frame everywhere, so 50 sits above 40.
+-- Converts stored values so nothing MOVES; only the number shown changes. Per-profile
+-- guarded and idempotent.
+local ABS_LEVEL_SENTINEL_DEFAULT = {
+    roleIconFrameLevel = 30, leaderIconFrameLevel = 30, raidTargetIconFrameLevel = 30,
+    readyCheckIconFrameLevel = 30, centerStatusIconFrameLevel = 30, resurrectionIconFrameLevel = 30,
+    phasedIconFrameLevel = 30, afkIconFrameLevel = 30, vehicleIconFrameLevel = 30,
+    raidRoleIconFrameLevel = 30, summonIconFrameLevel = 30, bgCarrierIconFrameLevel = 30,
+    combatIconFrameLevel = 30, missingBuffIconFrameLevel = 35, defensiveIconFrameLevel = 65,
+}
+-- These were not sentinels: the render added a fixed base to whatever was stored, so EVERY
+-- value shifts by that base (including 0).
+local ABS_LEVEL_ADDEND = { targetedSpellFrameLevel = 30 }
+
+function DF:MigrateAbsoluteFrameLevels()
+    if not DandersFramesDB_v2 or not DandersFramesDB_v2.profiles then return end
+    for _, profile in pairs(DandersFramesDB_v2.profiles) do
+        if type(profile) == "table" and not profile._absoluteFrameLevelsV1 then
+            for _, mode in ipairs({ "party", "raid" }) do
+                local modeDb = profile[mode]
+                if type(modeDb) == "table" then
+                    for key, builtin in pairs(ABS_LEVEL_SENTINEL_DEFAULT) do
+                        -- Only 0 carried the sentinel meaning; a real value was already an
+                        -- offset from the unit frame and is left exactly as the user set it.
+                        if modeDb[key] == 0 or modeDb[key] == nil then modeDb[key] = builtin end
+                    end
+                    for key, addend in pairs(ABS_LEVEL_ADDEND) do
+                        modeDb[key] = (tonumber(modeDb[key]) or 0) + addend
+                    end
+                    -- Aura Designer global default: the render added 40 to it.
+                    local ad = modeDb.auraDesigner
+                    if type(ad) == "table" and type(ad.defaults) == "table" then
+                        ad.defaults.indicatorFrameLevel = (tonumber(ad.defaults.indicatorFrameLevel) or 0) + 40
+                    end
+                end
+            end
+            profile._absoluteFrameLevelsV1 = true
+        end
+
+        -- V2 (alpha-only correction). V1 wrote the defensive baseline as 51, the legacy
+        -- value. A /df zorder dump then showed 51 is BROKEN: an aura row is ~16 levels
+        -- thick, so the buff/debuff rows (base 40) reach 60 and draw over the defensive
+        -- button at 57. The baseline moved to 65, but a profile that already ran V1 has a
+        -- stored 51 that nothing would ever revisit -- Config defaults only fill MISSING
+        -- keys. Correct that one value in place.
+        --
+        -- Deliberately NOT folded into V1: V1 also shifts targetedSpell by +30 and the AD
+        -- default by +40, so re-running it under a new flag would double-shift both.
+        --
+        -- Only touches the exact broken value, and only on a profile V1 has stamped, so a
+        -- fresh install (already 65) and a deliberate non-51 choice are both left alone.
+        if type(profile) == "table" and profile._absoluteFrameLevelsV1
+           and not profile._defensiveBaselineV2 then
+            for _, mode in ipairs({ "party", "raid" }) do
+                local modeDb = profile[mode]
+                if type(modeDb) == "table" and modeDb.defensiveIconFrameLevel == 51 then
+                    modeDb.defensiveIconFrameLevel = 65
+                end
+            end
+            profile._defensiveBaselineV2 = true
+        end
+    end
+end
+
 -- Transition shim (unreleased-only): an earlier iteration of the priority flip
 -- converted values to the new higher-wins scale and then stamped a COARSE flag —
 -- profile-level for Aura Designer, store-level for Click Casting. The replacement
@@ -3260,6 +3306,11 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- DF.db.roleColors so the global Colors settings page manages them.
         if DF.MigrateRoleBorderColors then
             DF:MigrateRoleBorderColors()
+        end
+        -- Frame Level sliders now store an ABSOLUTE offset from the unit frame
+        -- rather than 0-as-sentinel; convert stored values so nothing moves.
+        if DF.MigrateAbsoluteFrameLevels then
+            DF:MigrateAbsoluteFrameLevels()
         end
         
         -- Ensure classColors table exists (shared across party/raid)
@@ -4451,6 +4502,58 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 return
             end
 
+            -- "/df zorder" — dump the REAL resolved frame levels for every aura row on
+            -- the first shown frame. Static reading says defensive (+51) must draw over
+            -- debuffs (+40); when the screen disagrees, this says which link in the chain
+            -- (anchor frame -> CustomAuraContainer -> button -> DF art host) breaks it.
+            if msg == "zorder" then
+                -- unitFrameMap is the addon-wide unit -> frame index (Headers.lua);
+                -- prefer a frame that actually has a defensive row to report on.
+                local frame
+                for _, f in pairs(DF.unitFrameMap or {}) do
+                    if f and f:IsShown() then
+                        frame = frame or f
+                        if f.defensiveFactory then frame = f break end
+                    end
+                end
+                if not frame then
+                    print("|cffff9900DandersFrames:|r no shown frame — enable test mode first.")
+                    return
+                end
+                print(("|cff00ff00DF z-order|r  unit=%s  frame level=%d  strata=%s")
+                    :format(tostring(frame.unit), frame:GetFrameLevel(), tostring(frame:GetFrameStrata())))
+                local rows = {
+                    { "buff", frame.buffFactory }, { "debuff", frame.debuffFactory },
+                    { "defensive", frame.defensiveFactory },
+                }
+                for _, row in ipairs(rows) do
+                    local name, h = row[1], row[2]
+                    if not h then
+                        print(("  %-10s |cff888888(no handle)|r"):format(name))
+                    else
+                        local hf = h.GetFrame and h:GetFrame()
+                        local cont = h.backend and h.backend.container
+                        local btn = h.buttons and h.buttons[1]
+                        print(("  %-10s anchor=%s  container=%s  button1=%s  cfgOffset=%s  strata=%s")
+                            :format(name,
+                                hf and tostring(hf:GetFrameLevel()) or "-",
+                                cont and tostring(cont:GetFrameLevel()) or "-",
+                                btn and tostring(btn:GetFrameLevel()) or "-",
+                                tostring(h.config and h.config.frameLevelOffset or "nil(->40)"),
+                                hf and tostring(hf:GetFrameStrata()) or "-"))
+                        -- Any DF-owned art parented to the first button (border host etc.)
+                        if btn then
+                            for _, k in ipairs({ "dfBorderHost", "dfBorder", "dfCD", "dfBar" }) do
+                                local w = btn[k]
+                                if w and w.GetFrameLevel then
+                                    print(("      .%-14s level=%d"):format(k, w:GetFrameLevel()))
+                                end
+                            end
+                        end
+                    end
+                end
+                return
+            end
             if msg == "unlock" then
                 if DF.UnlockFrames then DF:UnlockFrames() end
             elseif msg == "lock" then

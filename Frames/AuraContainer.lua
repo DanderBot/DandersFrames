@@ -3119,8 +3119,13 @@ end
 -- inheriting, exactly as before. Only once an explicit strata has been applied do we re-assert
 -- the parent's band on the way back to Inherit (there is no "unset" to write) — tracked by
 -- _strataPinned so the restore happens once and never on a container that never opted in.
-function Handle:_applyZOrder()
-    local f, cfg = self.frame, self.config
+-- Public form: pass the INCOMING config to apply a z-order that self.config does not carry yet.
+-- The buff/debuff/defensive row drivers need this. They keep frameLevelOffset out of their sigs
+-- on purpose (a level change is not structural and must not force a Rebuild), so a level-only
+-- change never reaches _build — the driver applies it directly against the new cfg instead.
+function Handle:ApplyZOrder(cfg)
+    local f = self.frame
+    cfg = cfg or self.config
     if not f or not cfg then return end
     local parent = f:GetParent()
     if not parent then return end
@@ -3132,6 +3137,10 @@ function Handle:_applyZOrder()
         f:SetFrameStrata(parent:GetFrameStrata())
         self._strataPinned = nil
     end
+end
+
+function Handle:_applyZOrder()
+    self:ApplyZOrder(self.config)
 end
 
 function Handle:_build()

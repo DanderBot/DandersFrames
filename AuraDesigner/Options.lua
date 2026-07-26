@@ -78,11 +78,6 @@ local function RefreshLocaleStrings()
         _order = {"RIGHT", "LEFT", "UP", "DOWN"},
     }
 
-    OPTS.FRAME_STRATA_OPTIONS = {
-        INHERIT = L["Inherit (Frame)"], BACKGROUND = L["Background"], LOW = L["Low"], MEDIUM = L["Medium"], HIGH = L["High"],
-        _order = {"INHERIT", "BACKGROUND", "LOW", "MEDIUM", "HIGH"},
-    }
-
     OPTS.BORDER_STYLE_OPTIONS = {
         SOLID = L["Solid Border"], ANIMATED = L["Animated Border"], DASHED = L["Dashed Border"],
         GLOW = L["Glow"], CORNERS = L["Corners Only"],
@@ -509,6 +504,45 @@ local function MigratePrioritiesLazy(adDB)
 end
 DF.MigrateAuraDesignerPrioritiesLazy = MigratePrioritiesLazy
 
+-- Per-indicator Frame Level became an ABSOLUTE offset from the unit frame (the render used
+-- to add 40 to whatever was stored). Shifts every stored value by that same 40 so no
+-- indicator moves. Runs on the RESOLVED adDB -- presets, auto-layout overlays and the legacy
+-- inline config are all covered at point of use -- mirroring MigratePrioritiesLazy.
+local function ShiftIndicatorLevels(auraCfg)
+    if type(auraCfg) ~= "table" then return end
+    local inds = auraCfg.indicators
+    if type(inds) ~= "table" then return end
+    for _, ind in pairs(inds) do
+        if type(ind) == "table" and tonumber(ind.frameLevel) then
+            ind.frameLevel = tonumber(ind.frameLevel) + 40
+        end
+    end
+end
+local function MigrateAbsoluteLevelsLazy(adDB)
+    if type(adDB) ~= "table" or adDB._absoluteFrameLevelV1 then return end
+    local auras = adDB.auras
+    if type(auras) == "table" then
+        -- Shape detection off the first entry only, matching MigratePrioritiesLazy.
+        for _, val in pairs(auras) do
+            if type(val) == "table" then
+                if val.priority ~= nil or val.indicators ~= nil or val.icon ~= nil then
+                    for _, auraCfg in pairs(auras) do ShiftIndicatorLevels(auraCfg) end
+                else
+                    for _, specAuras in pairs(auras) do
+                        if type(specAuras) == "table" then
+                            for _, auraCfg in pairs(specAuras) do ShiftIndicatorLevels(auraCfg) end
+                        end
+                    end
+                end
+            end
+            break
+        end
+    end
+    adDB._absoluteFrameLevelV1 = true
+end
+DF.MigrateAuraDesignerAbsoluteLevelsLazy = MigrateAbsoluteLevelsLazy
+
+
 -- Lazy, flag-gated ONE-TIME refresh of the AD global text defaults to the Midnight
 -- baseline: DF Roboto SemiBold + drop shadow, 1.2 duration scale, stack count seated
 -- bottom-right (2,-2). Pre-12.1 the AD shipped Friz Quadrata / plain OUTLINE / 1.0 /
@@ -562,6 +596,11 @@ local function GetAuraDesignerDB()
     MigrateInstancesLazy(adDB)
     MigrateBorderKeysLazy(adDB)
     MigratePrioritiesLazy(adDB)
+    -- MUST match the render-path list in Factory.lua exactly. If the editor resolves an adDB
+    -- the render has not touched yet (a preset, or an auto-layout overlay not currently shown)
+    -- and skips a migration, the editor shows UN-migrated values -- and anything saved from that
+    -- state gets migrated a second time when the render finally runs.
+    MigrateAbsoluteLevelsLazy(adDB)
     MigrateDefaultRefreshLazy(adDB)
     return adDB
 end
@@ -1294,7 +1333,7 @@ local TYPE_DEFAULTS = {
         durationBarColor = {r = 0.2, g = 0.9, b = 0.3, a = 1},
         durationBarBGColor = {r = 0, g = 0, b = 0, a = 0.8},
         durationBarReverseFill = false,
-        frameLevel = 30, frameStrata = "INHERIT",
+        frameLevel = 40, frameStrata = "INHERIT",
         showWhenMissing = false, missingDesaturate = false,
     },
     square = {
@@ -1371,7 +1410,7 @@ local TYPE_DEFAULTS = {
         durationBarColor = {r = 0.2, g = 0.9, b = 0.3, a = 1},
         durationBarBGColor = {r = 0, g = 0, b = 0, a = 0.8},
         durationBarReverseFill = false,
-        frameLevel = 30, frameStrata = "INHERIT",
+        frameLevel = 40, frameStrata = "INHERIT",
         showWhenMissing = false,
     },
     bar = {
@@ -1433,7 +1472,7 @@ local TYPE_DEFAULTS = {
         expiryAlertText = "", expiryAlertGlyph = "WARNING",
         expiryAlertAnchor = "TOP", expiryAlertOffsetX = 0, expiryAlertOffsetY = 0,
         expiryAlertSize = 14,
-        frameLevel = 30, frameStrata = "INHERIT",
+        frameLevel = 40, frameStrata = "INHERIT",
     },
     -- Frame-level types: mirror the inline literals in EnsureTypeConfig so the
     -- colour-picker Default button (and any other consumer of __dfDefaults) can
@@ -3764,8 +3803,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateSlider(parent, L["Size"], 8, 64, 1, proxy, "size"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Scale"], 0.5, 3.0, 0.05, proxy, "scale"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Alpha"], 0, 1, 0.05, proxy, "alpha"), 54)
-            g:AddWidget(GUI:CreateSlider(parent, L["Frame Level"], -10, 30, 1, proxy, "frameLevel"), 54)
-            g:AddWidget(GUI:CreateDropdown(parent, L["Frame Strata"], OPTS.FRAME_STRATA_OPTIONS, proxy, "frameStrata"), 54)
+            g:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(parent, L["Frame Level"], 0, 100, 1, proxy, "frameLevel")), 54)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Cooldown Swipe"], proxy, "hideSwipe"), 28)
             -- Text-only mode: the icon TEXTURE is hidden, so a border (static OR
             -- expiring) would frame nothing. Rebuild the page on toggle so the
@@ -3948,8 +3986,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateSlider(parent, L["Scale"], 0.5, 3.0, 0.05, proxy, "scale"), 54)
             g:AddWidget(GUI:CreateColorPicker(parent, L["Color"], proxy, "color", true, RPL, RPL, true), 28)
             g:AddWidget(GUI:CreateSlider(parent, L["Alpha"], 0, 1, 0.05, proxy, "alpha"), 54)
-            g:AddWidget(GUI:CreateSlider(parent, L["Frame Level"], -10, 30, 1, proxy, "frameLevel"), 54)
-            g:AddWidget(GUI:CreateDropdown(parent, L["Frame Strata"], OPTS.FRAME_STRATA_OPTIONS, proxy, "frameStrata"), 54)
+            g:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(parent, L["Frame Level"], 0, 100, 1, proxy, "frameLevel")), 54)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Cooldown Swipe"], proxy, "hideSwipe"), 28)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Icon (Text Only)"], proxy, "hideIcon"), 28)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Show When Missing"], proxy, "showWhenMissing", function()
@@ -4101,8 +4138,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             curveGated[texW] = true; curveGated[colW] = true
             g:AddWidget(GUI:CreateColorPicker(parent, L["Background Color"], proxy, "bgColor", true, RPL, RPL, true), 28)
             g:AddWidget(GUI:CreateSlider(parent, L["Alpha"], 0, 1, 0.05, proxy, "alpha"), 54)
-            g:AddWidget(GUI:CreateSlider(parent, L["Frame Level"], -10, 30, 1, proxy, "frameLevel"), 54)
-            g:AddWidget(GUI:CreateDropdown(parent, L["Frame Strata"], OPTS.FRAME_STRATA_OPTIONS, proxy, "frameStrata"), 54)
+            g:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(parent, L["Frame Level"], 0, 100, 1, proxy, "frameLevel")), 54)
             UpdateColorModeGrey()   -- initial grey for the curve-gated Texture / Fill Color
         end)
         -- Border (Stage 5.3 — unified controls via CreateBorderControls).
@@ -4636,8 +4672,7 @@ local function BuildGlobalView(parent)
         -- AuraContainer's _applyZOrder sets level and strata from the resolved config.
         -- Both ship as no-ops -- level 0, strata INHERIT -- so an untouched profile renders
         -- exactly where it did before they were wired.
-        g:AddWidget(GUI:CreateSlider(parent, L["Default Frame Level"], -10, 30, 1, defaults, "indicatorFrameLevel"), 50)
-        g:AddWidget(GUI:CreateDropdown(parent, L["Default Frame Strata"], OPTS.FRAME_STRATA_OPTIONS, defaults, "indicatorFrameStrata"), 50)
+        g:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(parent, L["Default Frame Level"], 0, 100, 1, defaults, "indicatorFrameLevel")), 50)
         g:AddWidget(GUI:CreateCheckbox(parent, L["Show Duration"], defaults, "showDuration"), 24)
         g:AddWidget(GUI:CreateCheckbox(parent, L["Show Stacks"], defaults, "showStacks"), 24)
         g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Cooldown Swipe"], defaults, "hideSwipe"), 24)

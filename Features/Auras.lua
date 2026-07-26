@@ -1811,8 +1811,9 @@ function DF:DriveBuffFactory(frame, db)
             frame = frame,   -- for the derived Aura Designer buff-bar dedup union
             filterList = BuildDirectBuffFilters(db),
         })
-        -- Re-apply the z-order level (buffs default to +40 = legacy parity). Not part of the sig.
-        h:GetFrame():SetFrameLevel(math.max(0, frame:GetFrameLevel() + (cfg.frameLevelOffset or 40)))
+        -- Re-apply the z-order via the engine (buffs default to +40 = legacy parity). Frame Level
+        -- is deliberately NOT in the sig, so a level-only change never reaches _build.
+        h:ApplyZOrder(cfg)
         local structSig, tuningSig = rowStructSig(cfg), rowTuningSig(cfg)
         if frame.buffFactoryStructSig ~= structSig then
             frame.buffFactoryStructSig = structSig
@@ -1961,7 +1962,9 @@ function DF:DriveDebuffFactory(frame, db)
             unit = frame.unit,
             filterList = filterList,
         })
-        h:GetFrame():SetFrameLevel(math.max(0, frame:GetFrameLevel() + (cfg.frameLevelOffset or 40)))
+        -- Re-apply the z-order via the engine. Frame Level is deliberately NOT in the sig,
+        -- so a level-only change never reaches _build.
+        h:ApplyZOrder(cfg)
         local structSig, tuningSig = rowStructSig(cfg), rowTuningSig(cfg)
         if frame.debuffFactoryStructSig ~= structSig then
             frame.debuffFactoryStructSig = structSig
@@ -2087,11 +2090,17 @@ function DF:BuildDefensiveRowConfig(db, unit)
         -- curated defensives instead (TestMode drives testMax per role).
         testPool = "defensives",
         tooltips = db.tooltipDefensiveEnabled ~= false,
-        -- Z-order: match the legacy defensive level — contentOverlay+26 = frame+51 when auto
-        -- (defensiveIconFrameLevel 0), else the user's own offset. Applied to the container's
-        -- anchor frame in AuraContainer:Create + on each layout-version re-apply.
-        frameLevelOffset = (db.defensiveIconFrameLevel and db.defensiveIconFrameLevel ~= 0)
-            and db.defensiveIconFrameLevel or 51,
+        -- Z-order: an ABSOLUTE offset from the unit frame. Highest of the aura surfaces, so a
+        -- defensive cue is never buried. Applied via h:ApplyZOrder(cfg) at Create + re-apply.
+        --
+        -- ★ 65, NOT the legacy 51 (fixed 2026-07-25 from a /df zorder dump). A row is not one
+        -- level thick: the anchor sits at +offset, Blizzard's container at +1, its buttons at
+        -- +2, and DF's own slot art stacks ON the button — border +10, duration text +13,
+        -- stack text +14. So ONE row occupies ~16 levels. At 51 the buff/debuff rows (40)
+        -- reached 60 while the defensive BUTTON sat at 57, so debuff borders and text drew
+        -- OVER the defensive icon wherever the rows overlapped. Any new row baseline must
+        -- clear the one below it by at least ~17.
+        frameLevelOffset = db.defensiveIconFrameLevel or 65,
         layout = {
             size     = db.defensiveIconSize or 24,
             scale    = db.defensiveIconScale or 1,
@@ -2171,9 +2180,9 @@ function DF:DriveDefensiveFactory(frame, db)
     if frame.dfDefFactoryVersion ~= ver and not InCombatLockdown() then
         frame.dfDefFactoryVersion = ver
         local cfg = DF:BuildDefensiveRowConfig(db, frame.unit)
-        -- Re-apply the z-order level (honors runtime defensiveIconFrameLevel changes; survives
-        -- Rebuild since the new container inherits relative to h.frame). Not part of the sig.
-        h:GetFrame():SetFrameLevel(math.max(0, frame:GetFrameLevel() + (cfg.frameLevelOffset or 40)))
+        -- Re-apply the z-order via the engine (honors runtime defensiveIconFrameLevel changes).
+        -- Frame Level is deliberately NOT in the sig, so a level-only change never reaches _build.
+        h:ApplyZOrder(cfg)
         local structSig, tuningSig = rowStructSig(cfg), rowTuningSig(cfg)
         if frame.defensiveFactoryStructSig ~= structSig then
             frame.defensiveFactoryStructSig = structSig
@@ -2393,12 +2402,7 @@ local function layoutMissingStrip(frame, db, strip, cellCount)
     strip:ClearAllPoints()
     strip:SetPoint(anchor, frame, anchor, db.missingBuffIconX or 0, db.missingBuffIconY or 0)
     DF:SnapPointToPixelGrid(strip, db.pixelPerfect)
-    local frameLevel = db.missingBuffIconFrameLevel or 0
-    if frameLevel == 0 and frame.contentOverlay then
-        strip:SetFrameLevel(frame.contentOverlay:GetFrameLevel() + 10)
-    else
-        strip:SetFrameLevel(math.max(0, frame:GetFrameLevel() + frameLevel))
-    end
+    strip:SetFrameLevel(math.max(0, frame:GetFrameLevel() + (db.missingBuffIconFrameLevel or 35)))
 end
 
 -- Drive the missing-buff strip for one frame. Mirrors the row drives: lazy create,

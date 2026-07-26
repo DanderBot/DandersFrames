@@ -703,7 +703,9 @@ function DF:CreateRaidMoverFrame()
     -- Position over the container
     local mover = CreateFrame("Frame", "DandersRaidFramesMover", UIParent, "BackdropTemplate")
     mover:SetFrameStrata("MEDIUM")  -- Same strata as unit frames; SetFrameLevel(100) puts us above them
-    mover:SetFrameLevel(100)        -- Unit frame children are level 1-4; 100 renders above them
+                                    -- NOTE: an AuraDesigner indicator set to an explicit Frame Strata
+                                    -- escapes this band entirely and will draw over the mover.
+    mover:SetFrameLevel(100)        -- Unit frame children reach ~parent+70 (AD Frame Level max); 100 clears them
 
     -- Set initial size from container
     local cWidth, cHeight = DF.raidContainer:GetSize()
@@ -946,7 +948,7 @@ function DF:UnlockRaidFrames()
     DF.raidMoverFrame:ClearAllPoints()
     DF.raidMoverFrame:SetPoint("CENTER", UIParent, "CENTER", (db.raidAnchorX or 0) / scale, (db.raidAnchorY or 0) / scale)
     DF.raidMoverFrame:SetFrameStrata("MEDIUM")  -- Keeps mover below DIALOG settings GUI
-    DF.raidMoverFrame:SetFrameLevel(100)        -- Above unit frame children (level 1-4)
+    DF.raidMoverFrame:SetFrameLevel(100)        -- Above unit frame children (which reach ~parent+70)
     DF.raidMoverFrame:SetAlpha(1)
     DF.raidMoverFrame:Show()
 

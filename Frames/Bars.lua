@@ -169,7 +169,7 @@ function DF:LayoutResourceBar(frame, db)
 
     -- Frame level - relative to the main frame. Default 2 puts it below the frame
     -- border (at +10); values above 10 render above it.
-    local frameLevelOffset = db.resourceBarFrameLevel or 2
+    local frameLevelOffset = db.resourceBarFrameLevel or 20
     bar:SetFrameLevel(frame:GetFrameLevel() + frameLevelOffset)
     if bar.border then
         bar.border:SetFrameLevel(bar:GetFrameLevel() + 1)
@@ -339,7 +339,7 @@ local function AbsorbLayoutStateChanged(frame, db)
     if s.offsetX         ~= (db.absorbBarX or 0)                          then return true end
     if s.offsetY         ~= (db.absorbBarY or 0)                          then return true end
     if s.reverse         ~= db.absorbBarReverse                           then return true end
-    if s.frameLevel      ~= (db.absorbBarFrameLevel or 10)                then return true end
+    if s.frameLevel      ~= (db.absorbBarFrameLevel or 11)                then return true end
     local bgC = db.absorbBarBackgroundColor or DEFAULT_ABSORB_BG_COLOR
     if s.bgR ~= bgC.r or s.bgG ~= bgC.g or s.bgB ~= bgC.b or s.bgA ~= bgC.a then return true end
 
@@ -393,7 +393,7 @@ local function CacheAbsorbLayoutState(frame, db)
     s.offsetX         = db.absorbBarX or 0
     s.offsetY         = db.absorbBarY or 0
     s.reverse         = db.absorbBarReverse
-    s.frameLevel      = db.absorbBarFrameLevel or 10
+    s.frameLevel      = db.absorbBarFrameLevel or 11
     local bgC = db.absorbBarBackgroundColor or DEFAULT_ABSORB_BG_COLOR
     s.bgR, s.bgG, s.bgB, s.bgA = bgC.r, bgC.g, bgC.b, bgC.a
     s.healthOrient    = db.healthOrientation or "HORIZONTAL"
@@ -709,8 +709,7 @@ function DF:UpdateAbsorb(frame, testIndex)
         end
         
         -- Use user-configured frame level for floating mode
-        local floatingLevel = db.absorbBarFrameLevel or 10
-        customBar:SetFrameLevel(floatingLevel)
+        customBar:SetFrameLevel(frame:GetFrameLevel() + (db.absorbBarFrameLevel or 11))
         
         if wasShown then customBar:Show() end
         
@@ -1965,8 +1964,7 @@ function DF:UpdateHealPrediction(frame, testIndex)
             bar:SetFrameStrata(frame:GetFrameStrata())
         end
         
-        local floatingLevel = db.healPredictionFrameLevel or 12
-        bar:SetFrameLevel(floatingLevel)
+        bar:SetFrameLevel(frame:GetFrameLevel() + (db.healPredictionFrameLevel or 12))
         
         -- Dimensions & Orientation
         local orientation = db.healPredictionOrientation or "HORIZONTAL"
@@ -2322,10 +2320,7 @@ function DF:UpdateRoleIcon(frame, source)
     frame.roleIcon:SetAlpha(alpha)
     
     -- Apply frame level
-    local frameLevel = db.roleIconFrameLevel or 0
-    if frameLevel > 0 then
-        frame.roleIcon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
-    end
+    frame.roleIcon:SetFrameLevel(frame:GetFrameLevel() + (db.roleIconFrameLevel or 30))
 end
 
 function DF:UpdateAllRoleIcons()
@@ -2405,10 +2400,7 @@ function DF:UpdateLeaderIcon(frame)
     frame.leaderIcon:SetAlpha(alpha)
     
     -- Apply frame level
-    local frameLevel = db.leaderIconFrameLevel or 0
-    if frameLevel > 0 then
-        frame.leaderIcon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
-    end
+    frame.leaderIcon:SetFrameLevel(frame:GetFrameLevel() + (db.leaderIconFrameLevel or 30))
 end
 
 function DF:UpdateRaidTargetIcon(frame)
@@ -2473,10 +2465,7 @@ function DF:UpdateRaidTargetIcon(frame)
     frame.raidTargetIcon:SetAlpha(alpha)
     
     -- Apply frame level
-    local frameLevel = db.raidTargetIconFrameLevel or 0
-    if frameLevel > 0 then
-        frame.raidTargetIcon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
-    end
+    frame.raidTargetIcon:SetFrameLevel(frame:GetFrameLevel() + (db.raidTargetIconFrameLevel or 30))
 end
 
 function DF:UpdateReadyCheckIcon(frame)
@@ -2540,10 +2529,7 @@ function DF:UpdateReadyCheckIcon(frame)
     frame.readyCheckIcon:SetAlpha(alpha)
     
     -- Apply frame level
-    local frameLevel = db.readyCheckIconFrameLevel or 0
-    if frameLevel > 0 then
-        frame.readyCheckIcon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
-    end
+    frame.readyCheckIcon:SetFrameLevel(frame:GetFrameLevel() + (db.readyCheckIconFrameLevel or 30))
 end
 
 -- Schedule ready check icon to hide after a delay

@@ -1216,10 +1216,7 @@ function DF:UpdateTestIcons(frame, testData)
             frame.roleIcon:SetPoint(anchor, frame, anchor, x, y)
             
             -- Apply frame level
-            local frameLevel = db.roleIconFrameLevel or 0
-            if frameLevel > 0 then
-                frame.roleIcon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
-            end
+            frame.roleIcon:SetFrameLevel(frame:GetFrameLevel() + (db.roleIconFrameLevel or 30))
         else
             frame.roleIcon:Hide()
         end
@@ -1243,10 +1240,7 @@ function DF:UpdateTestIcons(frame, testData)
             frame.leaderIcon:SetPoint(anchor, frame, anchor, x, y)
             
             -- Apply frame level
-            local frameLevel = db.leaderIconFrameLevel or 0
-            if frameLevel > 0 then
-                frame.leaderIcon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
-            end
+            frame.leaderIcon:SetFrameLevel(frame:GetFrameLevel() + (db.leaderIconFrameLevel or 30))
         elseif testData.isAssist then
             frame.leaderIcon.texture:SetTexture("Interface\\GroupFrame\\UI-Group-AssistantIcon")
             frame.leaderIcon.texture:SetTexCoord(0, 1, 0, 1)
@@ -1261,10 +1255,7 @@ function DF:UpdateTestIcons(frame, testData)
             frame.leaderIcon:SetPoint(anchor, frame, anchor, x, y)
             
             -- Apply frame level
-            local frameLevel = db.leaderIconFrameLevel or 0
-            if frameLevel > 0 then
-                frame.leaderIcon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
-            end
+            frame.leaderIcon:SetFrameLevel(frame:GetFrameLevel() + (db.leaderIconFrameLevel or 30))
         else
             frame.leaderIcon:Hide()
         end
@@ -1288,10 +1279,7 @@ function DF:UpdateTestIcons(frame, testData)
             frame.raidTargetIcon:Show()
             
             -- Apply frame level
-            local frameLevel = db.raidTargetIconFrameLevel or 0
-            if frameLevel > 0 then
-                frame.raidTargetIcon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
-            end
+            frame.raidTargetIcon:SetFrameLevel(frame:GetFrameLevel() + (db.raidTargetIconFrameLevel or 30))
         else
             frame.raidTargetIcon:Hide()
         end
@@ -1314,10 +1302,7 @@ function DF:UpdateTestIcons(frame, testData)
             frame.readyCheckIcon:Show()
             
             -- Apply frame level
-            local frameLevel = db.readyCheckIconFrameLevel or 0
-            if frameLevel > 0 then
-                frame.readyCheckIcon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
-            end
+            frame.readyCheckIcon:SetFrameLevel(frame:GetFrameLevel() + (db.readyCheckIconFrameLevel or 30))
         else
             frame.readyCheckIcon:Hide()
         end
@@ -1349,10 +1334,7 @@ function DF:UpdateTestIcons(frame, testData)
                 frame.centerStatusIcon:Show()
                 
                 -- Apply frame level
-                local frameLevel = db.centerStatusIconFrameLevel or 0
-                if frameLevel > 0 then
-                    frame.centerStatusIcon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
-                end
+                frame.centerStatusIcon:SetFrameLevel(frame:GetFrameLevel() + (db.centerStatusIconFrameLevel or 30))
             else
                 frame.centerStatusIcon:Hide()
             end
@@ -1472,10 +1454,7 @@ function DF:UpdateTestStatusIcons(frame, testData)
             frame.readyCheckIcon:Show()
             
             -- Apply frame level
-            local frameLevel = db.readyCheckIconFrameLevel or 0
-            if frameLevel > 0 then
-                frame.readyCheckIcon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
-            end
+            frame.readyCheckIcon:SetFrameLevel(frame:GetFrameLevel() + (db.readyCheckIconFrameLevel or 30))
         else
             frame.readyCheckIcon:Hide()
         end
@@ -1501,10 +1480,7 @@ function DF:UpdateTestStatusIcons(frame, testData)
             ShowTestIconAsText(frame.summonIcon, db.summonIconTextPending or "Summon", db.summonIconShowText, db, "summonIcon")
             frame.summonIcon:Show()
             
-            local frameLevel = db.summonIconFrameLevel or 0
-            if frameLevel > 0 then
-                frame.summonIcon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
-            end
+            frame.summonIcon:SetFrameLevel(frame:GetFrameLevel() + (db.summonIconFrameLevel or 30))
         else
             frame.summonIcon:Hide()
         end
@@ -1529,10 +1505,7 @@ function DF:UpdateTestStatusIcons(frame, testData)
             ShowTestIconAsText(frame.bgCarrierIcon, db.bgCarrierIconText or "FC", db.bgCarrierIconShowText, db, "bgCarrierIcon")
             frame.bgCarrierIcon:Show()
 
-            local frameLevel = db.bgCarrierIconFrameLevel or 0
-            if frameLevel > 0 then
-                frame.bgCarrierIcon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
-            end
+            frame.bgCarrierIcon:SetFrameLevel(frame:GetFrameLevel() + (db.bgCarrierIconFrameLevel or 30))
         else
             frame.bgCarrierIcon:Hide()
         end
@@ -1556,10 +1529,7 @@ function DF:UpdateTestStatusIcons(frame, testData)
             frame.combatIcon:SetAlpha(db.combatIconAlpha or 1)
             frame.combatIcon:Show()
 
-            local frameLevel = db.combatIconFrameLevel or 0
-            if frameLevel > 0 then
-                frame.combatIcon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
-            end
+            frame.combatIcon:SetFrameLevel(frame:GetFrameLevel() + (db.combatIconFrameLevel or 30))
         else
             frame.combatIcon:Hide()
         end
@@ -1586,10 +1556,7 @@ function DF:UpdateTestStatusIcons(frame, testData)
             ShowTestIconAsText(frame.resurrectionIcon, db.resurrectionIconTextCasting or "Res...", db.resurrectionIconShowText, db, "resurrectionIcon")
             frame.resurrectionIcon:Show()
             
-            local frameLevel = db.resurrectionIconFrameLevel or 0
-            if frameLevel > 0 then
-                frame.resurrectionIcon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
-            end
+            frame.resurrectionIcon:SetFrameLevel(frame:GetFrameLevel() + (db.resurrectionIconFrameLevel or 30))
         else
             frame.resurrectionIcon:Hide()
         end
@@ -1615,10 +1582,7 @@ function DF:UpdateTestStatusIcons(frame, testData)
             ShowTestIconAsText(frame.phasedIcon, db.phasedIconText or "Phased", db.phasedIconShowText, db, "phasedIcon")
             frame.phasedIcon:Show()
             
-            local frameLevel = db.phasedIconFrameLevel or 0
-            if frameLevel > 0 then
-                frame.phasedIcon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
-            end
+            frame.phasedIcon:SetFrameLevel(frame:GetFrameLevel() + (db.phasedIconFrameLevel or 30))
         else
             frame.phasedIcon:Hide()
         end
@@ -1679,10 +1643,7 @@ function DF:UpdateTestStatusIcons(frame, testData)
             end
             frame.afkIcon:Show()
             
-            local frameLevel = db.afkIconFrameLevel or 0
-            if frameLevel > 0 then
-                frame.afkIcon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
-            end
+            frame.afkIcon:SetFrameLevel(frame:GetFrameLevel() + (db.afkIconFrameLevel or 30))
         else
             frame.afkIcon:Hide()
             if frame.afkIcon.timerText then frame.afkIcon.timerText:Hide() end
@@ -1711,10 +1672,7 @@ function DF:UpdateTestStatusIcons(frame, testData)
             ShowTestIconAsText(frame.vehicleIcon, db.vehicleIconText or "Vehicle", db.vehicleIconShowText, db, "vehicleIcon")
             frame.vehicleIcon:Show()
             
-            local frameLevel = db.vehicleIconFrameLevel or 0
-            if frameLevel > 0 then
-                frame.vehicleIcon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
-            end
+            frame.vehicleIcon:SetFrameLevel(frame:GetFrameLevel() + (db.vehicleIconFrameLevel or 30))
         else
             frame.vehicleIcon:Hide()
         end
@@ -1740,10 +1698,7 @@ function DF:UpdateTestStatusIcons(frame, testData)
             ShowTestIconAsText(frame.raidRoleIcon, db.raidRoleIconTextTank or "MT", db.raidRoleIconShowText, db, "raidRoleIcon")
             frame.raidRoleIcon:Show()
             
-            local frameLevel = db.raidRoleIconFrameLevel or 0
-            if frameLevel > 0 then
-                frame.raidRoleIcon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
-            end
+            frame.raidRoleIcon:SetFrameLevel(frame:GetFrameLevel() + (db.raidRoleIconFrameLevel or 30))
         elseif testData.isMainAssist and db.raidRoleIconShowAssist ~= false then
             DF:SetUpgradedStatusIcon(frame.raidRoleIcon.texture, "Interface\\GroupFrame\\UI-Group-MainAssistIcon")
             
@@ -1760,10 +1715,7 @@ function DF:UpdateTestStatusIcons(frame, testData)
             ShowTestIconAsText(frame.raidRoleIcon, db.raidRoleIconTextAssist or "MA", db.raidRoleIconShowText, db, "raidRoleIcon")
             frame.raidRoleIcon:Show()
             
-            local frameLevel = db.raidRoleIconFrameLevel or 0
-            if frameLevel > 0 then
-                frame.raidRoleIcon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
-            end
+            frame.raidRoleIcon:SetFrameLevel(frame:GetFrameLevel() + (db.raidRoleIconFrameLevel or 30))
         else
             frame.raidRoleIcon:Hide()
         end
@@ -1806,10 +1758,7 @@ function DF:UpdateTestStatusIcons(frame, testData)
                 frame.centerStatusIcon:Show()
                 
                 -- Apply frame level
-                local frameLevel = db.centerStatusIconFrameLevel or 0
-                if frameLevel > 0 then
-                    frame.centerStatusIcon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
-                end
+                frame.centerStatusIcon:SetFrameLevel(frame:GetFrameLevel() + (db.centerStatusIconFrameLevel or 30))
             else
                 frame.centerStatusIcon:Hide()
             end
@@ -3628,7 +3577,7 @@ function DF:UpdateTestTargetedSpell(frame, testData)
         local y = db.targetedSpellY or 0
         local growthDirection = db.targetedSpellGrowth or "DOWN"
         local spacing = db.targetedSpellSpacing or 2
-        local frameLevel = db.targetedSpellFrameLevel or 0
+        local frameLevel = db.targetedSpellFrameLevel or 30
         local highlightImportant = db.targetedSpellHighlightImportant ~= false
 
         if durationOutline == "NONE" then durationOutline = "" end
@@ -3846,7 +3795,7 @@ function DF:UpdateTestTargetedSpell(frame, testData)
                 icon:SetSize(scaledSize, scaledSize)
                 
                 -- Set frame level
-                icon:SetFrameLevel(frame:GetFrameLevel() + 30 + frameLevel + i)
+                icon:SetFrameLevel(frame:GetFrameLevel() + frameLevel + i)
                 
                 icon.iconFrame:SetSize(scaledSize, scaledSize)
                 icon.iconFrame:ClearAllPoints()

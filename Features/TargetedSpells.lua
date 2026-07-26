@@ -549,7 +549,7 @@ local function PositionIcons(frame)
     local y = db.targetedSpellY or 0
     local growthDirection = db.targetedSpellGrowth or "DOWN"
     local spacing = db.targetedSpellSpacing or 2
-    local frameLevel = db.targetedSpellFrameLevel or 0
+    local frameLevel = db.targetedSpellFrameLevel or 30
     local maxIcons = db.targetedSpellMaxIcons or 5
     -- local sortByTime = db.targetedSpellSortByTime ~= false  -- Keep for future use
     -- local newestFirst = db.targetedSpellSortNewestFirst ~= false  -- Keep for future use
@@ -632,7 +632,7 @@ local function PositionIcons(frame)
                 icon:SetSize(scaledSize, scaledSize)
                 
                 -- Set frame level
-                icon:SetFrameLevel(frame:GetFrameLevel() + 30 + frameLevel + data.iconIndex)
+                icon:SetFrameLevel(frame:GetFrameLevel() + frameLevel + data.iconIndex)
                 
                 -- Position icon frame within container
                 icon.iconFrame:SetSize(scaledSize, scaledSize)

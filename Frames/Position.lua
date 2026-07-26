@@ -244,7 +244,7 @@ function DF:CreateMoverFrame()
     local mover = CreateFrame("Frame", "DandersFramesMover", DF.container, "BackdropTemplate")
     mover:SetAllPoints(DF.container)
     mover:SetFrameStrata("MEDIUM")  -- Same strata as unit frames; level 100 renders above them
-    mover:SetFrameLevel(100)        -- Unit frame children are level 1-4; keeps us above them
+    mover:SetFrameLevel(100)        -- Unit frame children reach ~parent+70 (AD Frame Level max); 100 clears them
     mover:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8x8",
         edgeFile = "Interface\\Buttons\\WHITE8x8",
@@ -2410,7 +2410,7 @@ function DF:UnlockFrames()
     DF.moverFrame:ClearAllPoints()
     DF.moverFrame:SetAllPoints(DF.container)
     DF.moverFrame:SetFrameStrata("MEDIUM")  -- Keeps mover below DIALOG settings GUI
-    DF.moverFrame:SetFrameLevel(100)        -- Above unit frame children (level 1-4)
+    DF.moverFrame:SetFrameLevel(100)        -- Above unit frame children (which reach ~parent+70)
     DF.moverFrame:SetAlpha(1)
     DF.moverFrame:Show()
 

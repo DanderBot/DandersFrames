@@ -1147,7 +1147,7 @@ end
 -- Per-indicator FRAME LEVEL, same chain: instance -> global default -> 0. Callers add it to
 -- their own base offset (40 for placed, 41 for the alert companion).
 local function resolveLevel(indicator, defLevel)
-    return tonumber(indicator and indicator.frameLevel) or defLevel or 0
+    return tonumber(indicator and indicator.frameLevel) or defLevel or 40
 end
 
 -- The GLOBAL AD defaults the RENDER honours, resolved ONCE per drive pass and threaded as a
@@ -1162,7 +1162,7 @@ local function resolveDefs(adDB)
     local strata = d and d.indicatorFrameStrata
     return {
         cbt    = resolveDefCBT(adDB),
-        level  = (d and tonumber(d.indicatorFrameLevel)) or 0,
+        level  = (d and tonumber(d.indicatorFrameLevel)) or 40,
         strata = (type(strata) == "string" and STRATA_VALID[strata]) and strata or nil,
     }
 end
@@ -1184,7 +1184,7 @@ local function buildPlacedConfig(unit, map, indicator, isSquare, borderSpec, def
         -- off our own secretRect border textures via the external UIParent driver, not the LCG
         -- glows (which stay stripped by SAFE_OVERLAY_ANIM regardless).
         adBorderAnim = true,
-        frameLevelOffset = 40 + resolveLevel(indicator, defs.level),
+        frameLevelOffset = resolveLevel(indicator, defs.level),
         frameStrata = resolveStrata(indicator, defs.strata),
         layout = buildPlacedLayout(indicator),
         style = buildPlacedStyle(indicator, isSquare, borderSpec, defs),
@@ -1434,7 +1434,7 @@ local function buildBarConfig(frame, unit, map, indicator, borderSpec, defs, min
         enabled = true,
         tooltips = false,
         adBorderAnim = true,   -- opt into DF-owned border animations (see buildPlacedConfig)
-        frameLevelOffset = 40 + resolveLevel(indicator, defs.level),
+        frameLevelOffset = resolveLevel(indicator, defs.level),
         frameStrata = resolveStrata(indicator, defs.strata),
         layout = buildBarLayout(frame, indicator),
         style = buildBarStyle(indicator, borderSpec, defs),
@@ -1489,7 +1489,7 @@ local function buildAlertCompanionConfig(unit, map, indicator, layout, mine, geo
         -- One level above the indicator's own container band so the alert text
         -- draws over the icon / a bar's fill (the companion subtree carries
         -- nothing but the text, so nothing of the indicator is covered).
-        frameLevelOffset = 41 + resolveLevel(indicator, defs.level),
+        frameLevelOffset = 1 + resolveLevel(indicator, defs.level),
         -- MUST mirror the indicator's strata: the +41 level only orders the alert above the
         -- indicator WITHIN a band, so leaving the companion in the frame's band while the
         -- indicator moves to HIGH would strand the alert text underneath it.
@@ -2238,7 +2238,7 @@ local function buildPlacedMissingConfig(unit, map, indicator, mine, defs)
         candidateFilters = { includeSpellIDs = map },
         badge = { w = size, h = size },
         enabled = true,
-        frameLevelOffset = 40 + resolveLevel(indicator, defs.level),
+        frameLevelOffset = resolveLevel(indicator, defs.level),
         frameStrata = resolveStrata(indicator, defs.strata),
     }
 end
@@ -2922,6 +2922,7 @@ function Factory:SyncFrame(frame)
     if DF.MigrateAuraDesignerInstancesLazy then DF.MigrateAuraDesignerInstancesLazy(adDB) end
     if DF.MigrateAuraDesignerBorderKeysLazy then DF.MigrateAuraDesignerBorderKeysLazy(adDB) end
     if DF.MigrateAuraDesignerPrioritiesLazy then DF.MigrateAuraDesignerPrioritiesLazy(adDB) end
+    if DF.MigrateAuraDesignerAbsoluteLevelsLazy then DF.MigrateAuraDesignerAbsoluteLevelsLazy(adDB) end
     -- One-time refresh of the AD global text defaults to the Midnight baseline — must run
     -- on the RENDER-resolved adDB too (not just the editor's GetAuraDesignerDB), or live
     -- frames resolve from the un-migrated defaults while the editor shows the new ones.

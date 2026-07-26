@@ -294,16 +294,14 @@ local function ApplyIconSettings(icon, db, prefix)
     local x = db[prefix .. "X"] or 0
     local y = db[prefix .. "Y"] or 0
     local alpha = db[prefix .. "Alpha"] or 1
-    local frameLevel = db[prefix .. "FrameLevel"] or 0
+    local frameLevel = db[prefix .. "FrameLevel"] or 30
     
     icon:SetScale(scale)
     icon:ClearAllPoints()
     icon:SetPoint(anchor, icon:GetParent():GetParent(), anchor, x, y)
     icon:SetAlpha(alpha)
     
-    if frameLevel > 0 then
-        icon:SetFrameLevel(icon:GetParent():GetParent():GetFrameLevel() + frameLevel)
-    end
+    icon:SetFrameLevel(icon:GetParent():GetParent():GetFrameLevel() + frameLevel)
     
     -- Apply status icon font settings to text. Route through SafeSetFont so the
     -- shadow lands on the font-family's per-alphabet font objects — 12.0.7 no

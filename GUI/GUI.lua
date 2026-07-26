@@ -4111,6 +4111,7 @@ end
 -- top level of dbTable.
 -- accentColor (optional {r,g,b}): fixed thumb/fill colour instead of the mode
 -- theme — for ClickCasting (green) / Search (blue) which keep their identity.
+
 function GUI:CreateSlider(parent, label, minVal, maxVal, step, dbTable, dbKey, callback, lightweightUpdate, usePreviewMode, customGet, customSet, accentColor)
     local container = CreateFrame("Frame", nil, parent)
     container:SetSize(260, 50)
@@ -4414,7 +4415,33 @@ function GUI:CreateSlider(parent, label, minVal, maxVal, step, dbTable, dbKey, c
     -- Expose label for dynamic updates
     container.label = lbl
 
+    -- Optional hover tooltip. Generic: any caller can set .tooltipText (+ optional
+    -- .tooltipSubText) on the returned container and it shows on hover, matching the
+    -- convention CreateOverrideMarker already uses. Hooked on the slider rather than
+    -- the container so the hit area is the control itself, and the slider had no
+    -- OnEnter/OnLeave of its own, so nothing is being displaced.
+    slider:SetScript("OnEnter", function()
+        if container.tooltipText then
+            GUI:ShowTooltip(slider, {
+                title = container.tooltipText,
+                lines = container.tooltipSubText and { container.tooltipSubText } or nil,
+            })
+        end
+    end)
+    slider:SetScript("OnLeave", function() GUI:HideTooltip() end)
+
     return container
+end
+
+-- Stamp the shared Frame Level explanation onto a slider. One helper rather than the same
+-- two strings at 21 call sites, and it keeps the wording in ONE place -- the old per-page
+-- label went stale the moment the scale changed (it still read "0=Auto" afterwards).
+-- Takes the CONTAINER that CreateSlider returns, which is what every call site has.
+function GUI:SetFrameLevelTooltip(container)
+    if not container then return end
+    container.tooltipText    = L["Frame Level"]
+    container.tooltipSubText = L["Higher numbers draw on top of lower ones. Every Frame Level in DandersFrames uses the same scale, counted up from the unit frame, so you can compare them directly."]
+    return container   -- chainable, so it wraps a CreateSlider call in place
 end
 
 -- Dual-handle range slider: two draggable handles select a [lo, hi] sub-range of
