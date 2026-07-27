@@ -695,8 +695,6 @@ end
 -- ============================================================
 
 -- Pool of secure action buttons for global bindings
-CC.globalBindingButtons = CC.globalBindingButtons or {}
-CC.globalBindingCount = CC.globalBindingCount or 0
 
 -- ============================================================
 
@@ -1054,14 +1052,6 @@ function CC:ClearGlobalBindings()
         end)
     end
     
-    -- Also clear legacy global binding buttons
-    for i, button in ipairs(self.globalBindingButtons) do
-        if button and button.isActive then
-            ClearOverrideBindings(button)
-            button.isActive = false
-            button.bindingKey = nil
-        end
-    end
 end
 
 -- Encode a captured key name into an ASCII-only token for use inside derived

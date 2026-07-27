@@ -1528,12 +1528,6 @@ end
 -- ============================================================
 
 
--- Minimum gap between repair requests from the 200ms diagnostic ticker below.
--- Unthrottled it asked 5x/second for as long as the condition persisted, which
--- flooded the log and spent the repair's hover budget almost immediately. Declared
--- here, above its use site: a Lua local is not visible before its declaration, so
--- defining it further down would silently resolve to a nil global at runtime.
-local TICKER_REPAIR_THROTTLE = 2
 local DIAG_INTERVAL = 0.2  -- seconds between polls
 
 function CC:StartDiagnosticTicker(frame)
@@ -1560,8 +1554,17 @@ function CC:StartDiagnosticTicker(frame)
         -- dfIsSecureMouseover is set to true on WrapScript OnEnter, cleared when another frame enters
         local isSecureMouseover = frame:GetAttribute("dfIsSecureMouseover") and true or false
 
-        -- Detect transition: bindings were active, now they're not
-        if CC.diagLastBindState and not bindingsActive then
+        -- Detect transition: bindings were active, now they're not.
+        --
+        -- Only meaningful while this frame is STILL the one the cursor is on. The
+        -- ticker polls one frame, and a fast sweep across the raid grid leaves it
+        -- polling a frame the cursor has already left -- whose binds the state
+        -- driver then legitimately cleared. That is correct behaviour being read as
+        -- a fault: it logged BINDINGS VANISHED and requested a repair that
+        -- re-wrapped every registered frame, for nothing (field log 2026-07-27,
+        -- nine enter/leave pairs inside one second).
+        local stillOurs = (CC.currentHoveredFrame == frame) and frame:IsMouseOver()
+        if CC.diagLastBindState and not bindingsActive and stillOurs then
             DF:DebugError("CLICK", "BINDINGS VANISHED on %s at tick %d! wrapEnter=%d wrapLeave=%d isSecureMO=%s visible=%s mouseOver=%s combat=%s",
                 frameName, CC.diagTickCount, wrapEnterCount, wrapLeaveCount, tostring(isSecureMouseover),
                 tostring(frame:IsVisible()), tostring(frame:IsMouseOver()), tostring(InCombatLockdown()))
@@ -1575,23 +1578,20 @@ function CC:StartDiagnosticTicker(frame)
             -- The latch suppresses only the LOG. It used to gate the repair
             -- request too, and it is cleared only when the desync ends -- which
             -- cannot happen while the desync persists -- so if that single
-            -- request landed inside another repair's 5s cooldown it was dropped
-            -- and never retried. The log then showed a loud DESYNC followed by
-            -- silence, reading as though the repair had run. Keep asking; the
-            -- repair is itself cooldown-throttled, so this cannot spin.
+            -- REPORT ONLY -- deliberately no repair request.
+            --
+            -- This fires when dfIsSecureMouseover is falsy, which since the OnShow
+            -- wrap landed is almost always one of two benign things: a non-motion
+            -- enter (Blizzard skips the snippet, and OnShow now covers the case a
+            -- repair never could), or the state driver having legitimately cleared
+            -- a frame the cursor already swept off. A repair cannot fix either, and
+            -- asking for one cost a teardown of every registered frame -- which is
+            -- how this detector came to CAUSE the outage it was watching for. The
+            -- latch keeps it to one line per episode.
             if not CC.diagDesyncReported then
                 CC.diagDesyncReported = true
                 DF:DebugError("CLICK", "MOUSEOVERBUTTON DESYNC on %s at tick %d! dfIsSecureMouseover=nil wrapEnter=%d wrapLeave=%d kbActive=%s",
                     frameName, CC.diagTickCount, wrapEnterCount, wrapLeaveCount, tostring(bindingsActive))
-            end
-            -- Throttled: this ticker runs every 200ms, so an unthrottled request
-            -- here asked for a repair 5x/second for as long as the condition
-            -- lasted. Most of those are the benign non-motion enter that OnShow
-            -- now handles, and a repair cannot fix that case anyway.
-            local now = GetTime()
-            if not CC.lastTickerRepairRequest or (now - CC.lastTickerRepairRequest) >= TICKER_REPAIR_THROTTLE then
-                CC.lastTickerRepairRequest = now
-                CC:RequestBindingRepair("mouseover-desync")
             end
         else
             CC.diagDesyncReported = nil
@@ -1750,7 +1750,6 @@ function CC:SetupSecureHandlers(frame)
                 self:SetAttribute("dfEnterPhase", 6)
             else
                 self:SetAttribute("dfBindingsActive", false)
-                self:SetAttribute("dfEnterPhase", -1)
             end
 
             -- Phase 7: Post-completion verification
@@ -1986,8 +1985,13 @@ function CC:SetupSecureHandlers(frame)
         if hasKeyboardBindings and not bindingsActive then
             DF:DebugWarn("CLICK", "HOVER BUT NO KB BINDINGS on %s! Key presses will go to action bar (phase=%d)", frameName, enterPhase)
             if not wrapEnterFired then
+                -- Reported, not repaired. Blizzard runs a wrapped OnEnter snippet
+                -- only when the enter came from cursor MOTION, so this is expected
+                -- client behaviour rather than a fault, and the OnShow wrap is what
+                -- actually covers it. The repair request that used to live here
+                -- re-wrapped every registered frame for a condition it could not
+                -- affect.
                 DF:DebugWarn("CLICK", "  WrapScript OnEnter DID NOT FIRE (enterCount=%d leaveCount=%d)", wrapEnterCount, wrapLeaveCount)
-                CC:RequestBindingRepair("wrap-not-firing")
                 DF:DebugWarn("CLICK", "  frame visible=%s shown=%s mouseOver=%s combat=%s",
                     tostring(self:IsVisible()), tostring(self:IsShown()),
                     tostring(self:IsMouseOver()), tostring(InCombatLockdown()))

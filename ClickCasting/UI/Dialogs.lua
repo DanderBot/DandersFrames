@@ -2009,7 +2009,6 @@ SlashCmdList["DFCCGLOBAL"] = function(msg)
         print("  Unit Frames + Blizzard: " .. counts.blizzard)
         print("  On Hover (@mouseover): " .. counts.onhover)
         print("  Target Cast: " .. counts.targetcast)
-        print("|cff33cc66Active global keybinds:|r " .. (CC.globalBindingCount or 0))
         
         -- Count registered frames
         local frameCount = 0
