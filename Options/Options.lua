@@ -1598,6 +1598,15 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end)
         end
         
+        -- Column 1 is the layout chain -- size, direction, raid mode, and
+        -- whichever group detail that mode implies. Column 2 keeps
+        -- Appearance at the top, where styling sits on every other page.
+        --
+        -- Six boxes against three is not the imbalance it looks: FIVE of
+        -- the left column's boxes are raid-only, so in party mode the page
+        -- is Frame Size + Layout Direction against Appearance + Permanent
+        -- Mover. Permanent Mover is also by far the biggest box here, which
+        -- carries column 2 in raid.
         -- ===== FRAME SIZE GROUP (Column 1) =====
         local sizeGroup = GUI:CreateSettingsGroup(self.child, 280)
         sizeGroup:AddWidget(GUI:CreateHeader(self.child, L["Frame Size"]), 40)
@@ -1663,7 +1672,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         
         Add(layoutGroup, nil, 1)
         
-        -- ===== RAID LAYOUT MODE GROUP (Column 2, raid only) =====
+        -- ===== RAID LAYOUT MODE GROUP (Column 1, raid only) =====
         local raidModeGroup = GUI:CreateSettingsGroup(self.child, 280)
         raidModeGroup:AddWidget(GUI:CreateHeader(self.child, L["Raid Layout Mode"]), 40)
         raidModeGroup.hideOn = function() return GUI.SelectedMode ~= "raid" end
@@ -1703,7 +1712,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end), 30)
         
         raidModeGroup:AddWidget(GUI:CreateLabel(self.child, L["Enabled: Players organized by raid groups (1-8).\nDisabled: All players in one flat grid."], 250), 45)
-        Add(raidModeGroup, nil, 2)
+        Add(raidModeGroup, nil, 1)
         
         -- ===== GROUP LAYOUT SETTINGS (Column 1, raid+groups only) =====
         local groupLayoutGroup = GUI:CreateSettingsGroup(self.child, 280)
@@ -5763,7 +5772,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local bfHidePerm = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Permanent Auras"], db, "buffHidePermanent", DirectFilterChanged), 30)
         bfHidePerm.hideOn = function(d) return not DF:FactoryOwnsBuffRow(d) end
         bfHidePerm.tooltip = L["Hide buffs with no duration, such as auras that last until cancelled. Hide Long Buffs also hides these while it is on."]
-        Add(buffGroup, nil, 2)
+        Add(buffGroup, nil, 1)
 
         -- ===== DEBUFF FILTERS (Column 1, Direct mode only) =====
         local function HideDebuffSubFilters(d)
@@ -5925,7 +5934,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             if dfKeepImportant.SetEnabled then dfKeepImportant:SetEnabled(enabled) end
         end
         debuffGroup:AddWidget(dfKeepImportantRow, 30)
-        Add(debuffGroup, nil, 1)
+        Add(debuffGroup, nil, 2)
 
         -- ===== SEE ALSO =====
         -- (The Aura Blacklist pointer section that lived here was removed with the
@@ -8784,15 +8793,14 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         overlayColorsLink.hideOn = HideIfDisabled
         Add(settingsGroup, nil, 1)
 
-        -- ===== APPEARANCE COLLAPSIBLE SECTION =====
-        -- Wraps all overlay-appearance SettingsGroups below. Header hides
-        -- entirely when the overlay is off; groups hide via their own hideOn
-        -- + the section's collapsed state.
-        AddSyncPoint()
-        AddSpace(GUI.Space.section, "both")
-        local dfSection = GUI:CreateCollapsibleSection(self.child, L["Appearance"], true, 560)
-        dfSection.hideOn = HideIfDisabled
-        Add(dfSection, 36, "both")
+        -- The four boxes below used to sit under an "Appearance" collapsible
+        -- header -- the last section in the addon named for a CATEGORY rather
+        -- than for a thing. A header means "here is another one of these",
+        -- which is why Icons and Highlights keep theirs and this one goes.
+        --
+        -- It costs nothing to remove: every box already declares the same
+        -- hideOn it was inheriting from the section, so the whole block still
+        -- disappears when the overlay is off.
 
         -- Display group (quick toggles) — Column 1
         local displayGroup = GUI:CreateSettingsGroup(self.child, 280)
@@ -8814,7 +8822,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- path was the legacy test-mode show, so it tinted the preview and did nothing
         -- live; a real version needs an occlusion-safe name tint on the slot overlay.)
         displayGroup.hideOn = HideDispelOptions
-        dfSection:RegisterChild(displayGroup)
         Add(displayGroup, nil, 1)
 
         -- ===== ICON GROUP (Column 2) =====
@@ -8857,7 +8864,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         iconOffsetY.hideOn = HideDispelOptions
         iconOffsetY.disableOn = DisableIfNoIcon
         iconGroup.hideOn = HideDispelOptions
-        dfSection:RegisterChild(iconGroup)
         Add(iconGroup, nil, 2)
 
         -- ===== BORDER GROUP (Column 1) =====
@@ -8884,7 +8890,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         borderAlpha.hideOn = HideDispelOptions
         borderAlpha.disableOn = DisableIfNoBorder
         borderGroup.hideOn = HideDispelOptions   -- works in BOTH modes (game = ring slot)
-        dfSection:RegisterChild(borderGroup)
         Add(borderGroup, nil, 2)
 
         -- ===== GRADIENT GROUP (Column 1) =====
@@ -8947,7 +8952,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             return d.dispelShowGradient == false or not d.dispelGradientDarkenEnabled
         end
         gradientGroup.hideOn = HideDispelOptions
-        dfSection:RegisterChild(gradientGroup)
         Add(gradientGroup, nil, 1)
 
 
