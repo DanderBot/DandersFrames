@@ -2640,9 +2640,16 @@ end
 -- binding per frame. ApplyBindingsToFrameUnified runs over every registered frame
 -- (100-150+ with other unit-frame addons loaded) times every binding, and it is
 -- already batched specifically because it hits Lua's time limit -- so allocating
--- a table per binding was the wrong direction. Safe to reuse: ApplyActionToSlot
--- only ever reads fields off the descriptor, it never stores it, and the two
--- calls in the mouse branch are strictly sequential.
+-- a table per binding was the wrong direction.
+--
+-- The load-bearing property is NON-RE-ENTRANCY, which is what a future caller
+-- could break silently. Safe today because: ApplyActionToSlot only reads fields
+-- off the descriptor and never stores it; the two calls in the mouse branch are
+-- strictly sequential; and RouteProxyAction copies typeAttr/clickbuttonAttr into
+-- locals at call time, so a later mutation cannot reach back into an in-flight
+-- route. Anything that makes this walk re-entrant -- a coroutine yield, a
+-- callback that re-enters ApplyBindingsToFrameUnified -- must give itself its own
+-- descriptor rather than reuse these.
 local slotScratch = {}
 local ctxScratch = {}
 
