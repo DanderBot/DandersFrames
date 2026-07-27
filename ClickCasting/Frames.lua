@@ -713,28 +713,44 @@ function CC:DisableBlizzardClickCasting()
 end
 
 -- Clear Blizzard's click cast overlay/settings from a specific frame
+-- Record the frame's OWN click behaviour once, before anything of ours touches
+-- it, so handing the frame back restores what was actually there instead of
+-- assuming Blizzard's target/togglemenu. This matters for third-party unit frames
+-- picked up via ClickCastFrames: some deliberately have no left-click target, and
+-- hardcoding the default rewrote their behaviour permanently.
+--
+-- MUST be called unconditionally at registration, not only from
+-- ClearBlizzardClickCastFromFrame. That path is gated on
+-- ShouldClearBlizzardFromFrame (= AnyBindingNeedsOtherFrames for a
+-- non-DandersFrame), so with every binding DandersFrames-scoped the capture never
+-- ran, RestoreBlizzardDefaults fell back to the hardcoded defaults, and the bug
+-- reproduced at registration -- no unregister cycle needed. Worse, if the user
+-- later added an other-frames binding the gate opened and the capture recorded
+-- OUR OWN type1="target" as the frame's original, making it permanently wrong
+-- rather than merely absent.
+--
+-- `false` records "capture refused" (secret values) so this neither retries every
+-- call nor lets the restore side trust a partial capture.
+function CC:CaptureOriginalClickBindings(frame)
+    if not frame or frame.dfOriginalClickBindings ~= nil then return end
+    if not frame.GetAttribute then return end
+
+    local t1, t2 = frame:GetAttribute("type1"), frame:GetAttribute("type2")
+    local s1, s2 = frame:GetAttribute("*type1"), frame:GetAttribute("*type2")
+    if issecretvalue(t1) or issecretvalue(t2) or issecretvalue(s1) or issecretvalue(s2) then
+        frame.dfOriginalClickBindings = false
+    else
+        frame.dfOriginalClickBindings = {
+            type1 = t1, type2 = t2, starType1 = s1, starType2 = s2,
+        }
+    end
+end
+
 function CC:ClearBlizzardClickCastFromFrame(frame)
     if not frame then return end
     if InCombatLockdown() then return end
     
-    -- Capture the frame's OWN click behaviour once, before overwriting any of it,
-    -- so unregistering can put back what was actually there rather than assuming
-    -- Blizzard's target/togglemenu. This matters for third-party unit frames
-    -- picked up via ClickCastFrames: some deliberately have no left-click target,
-    -- and hardcoding the default permanently rewrote their behaviour after a
-    -- single register/unregister cycle. `false` records "capture refused" so this
-    -- does not retry on every call and the restore side knows to use defaults.
-    if frame.dfOriginalClickBindings == nil then
-        local t1, t2 = frame:GetAttribute("type1"), frame:GetAttribute("type2")
-        local s1, s2 = frame:GetAttribute("*type1"), frame:GetAttribute("*type2")
-        if issecretvalue(t1) or issecretvalue(t2) or issecretvalue(s1) or issecretvalue(s2) then
-            frame.dfOriginalClickBindings = false
-        else
-            frame.dfOriginalClickBindings = {
-                type1 = t1, type2 = t2, starType1 = s1, starType2 = s2,
-            }
-        end
-    end
+    self:CaptureOriginalClickBindings(frame)
 
     -- Clear Blizzard's click-cast attributes
     -- Use empty string "" not nil - SecureUnitButtonTemplate defaults kick in with nil
@@ -1416,11 +1432,12 @@ function CC:RegisterFrame(frame)
         return
     end
     
-    -- (The frame's original click behaviour is captured in
-    -- ClearBlizzardClickCastFromFrame, which is the actual first-touch point --
-    -- it also runs on frames that never reach here. There used to be an empty
-    -- `frame.dfOriginalClickBindings = {}` stub on this line that nothing ever
-    -- populated or read.)
+    -- Capture the frame's own click behaviour BEFORE anything below touches it --
+    -- unconditionally, because every path that follows (the gated Blizzard clear,
+    -- SetupSecureHandlers, ApplyBindingsToFrameUnified) can write click attributes.
+    -- This is where the old empty `dfOriginalClickBindings = {}` stub sat, and it
+    -- was the right place; it just never recorded anything.
+    self:CaptureOriginalClickBindings(frame)
 
     -- Mark as registered
     self.registeredFrames[frame] = true
@@ -1785,6 +1802,14 @@ function CC:SetupSecureHandlers(frame)
             return
         end
         frame.dfWrapApplied = true
+        -- Fresh budget for the NEXT failure episode. Without this the counter is
+        -- cumulative for the session: a frame that burned three attempts while the
+        -- header was still coming up at login would have two left when its wrap
+        -- died mid-session — the player-housing case this branch exists to fix —
+        -- and would then latch dfWrapRetryGaveUp permanently. A successful install
+        -- means the frame is healthy, so the previous episode is over.
+        frame.dfWrapRetries = nil
+        frame.dfWrapRetryGaveUp = nil
     end
     
     -- Diagnostic logging for OnHide (insecure side)
@@ -2239,6 +2264,13 @@ function CC:RewrapSecureHandlers(frame)
         self.header:WrapScript(frame, "OnHide", snippets.hide)
     end)
     frame.dfWrapApplied = ok or nil
+    if ok then
+        -- A successful re-wrap also ends the failure episode, so the retry budget
+        -- resets here too (see the matching reset in SetupSecureHandlers). The
+        -- repair is the other way a frame gets healthy again.
+        frame.dfWrapRetries = nil
+        frame.dfWrapRetryGaveUp = nil
+    end
     return ok
 end
 
