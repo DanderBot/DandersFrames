@@ -830,9 +830,17 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         
         Add(deadGroup, nil, 2)
         
-        -- ===== HEALTH THRESHOLD FADING (above health threshold) =====
-        AddSpace(GUI.Space.block, "both")
-        local hfGroup = GUI:CreateSettingsGroup(self.child, 560)
+        -- ===== HEALTH THRESHOLD FADING (col2) =====
+        -- Column width, and the spacer above it is column 2 as well. A "both"
+        -- widget takes the LOWER of the two columns and drops both to it, so a
+        -- "both" spacer here would push column 2 down past the bottom of the
+        -- out-of-range group in column 1 and leave a hole under Dead/Offline.
+        --
+        -- Column 2 rather than 1 because column 1 carries the out-of-range group
+        -- and its long stack of per-element sliders, far and away the tallest
+        -- thing on the page.
+        AddSpace(GUI.Space.block, 2)
+        local hfGroup = GUI:CreateSettingsGroup(self.child, 280)
         hfGroup:AddWidget(GUI:CreateHeader(self.child, L["Health Threshold Fading"]), 40)
         hfGroup.tooltip = L["Fade frames or elements when a unit's health is above the set threshold (e.g. 100% or 80%)."]
 
@@ -867,7 +875,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local hfFrameAlpha = hfGroup:AddWidget(GUI:CreateSlider(self.child, L["Frame Alpha (Above Threshold)"], 0.1, 1.0, 0.05, db, "healthFadeAlpha", nil, RefreshHealthFade, true), 55)
         hfFrameAlpha.tooltip = L["Frame opacity when health is above the threshold."]
 
-        Add(hfGroup, nil, "both")
+        Add(hfGroup, nil, 2)
         
         -- See Also links
         AddSpace(GUI.Space.block, "both")
@@ -888,8 +896,12 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local isGroupedMode = db.petGroupMode == "GROUPED"
         local isRaidMode = GUI.SelectedMode == "raid"
         
-        -- ===== GENERAL GROUP (full width) =====
-        local generalGroup = GUI:CreateSettingsGroup(self.child, 560)
+        -- ===== GENERAL GROUP (col1) =====
+        -- Column width, not full width. A full-width box belongs to a page that
+        -- genuinely needs the room -- Pinned Frames, Nicknames -- and everything
+        -- below these two here is ordinary two-column controls, so stretching
+        -- them across the top reads as two different layouts stacked together.
+        local generalGroup = GUI:CreateSettingsGroup(self.child, 280)
         generalGroup:AddWidget(GUI:CreateHeader(self.child, L["Pet Frame Settings"]), 40)
         local petEnable = generalGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Pet Frames"], db, "petEnabled", function()
             if DF.ApplyPetSettings then DF:ApplyPetSettings() end
@@ -897,14 +909,18 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end), 30)
         petEnable.keepEnabled = true
         generalGroup.disableChildrenOn = function(d) return not d.petEnabled end
-        generalGroup:AddWidget(GUI:CreateLabel(self.child, L["Show health bars for player and party/raid member pets, anchored to their owner's frame. Pet frames hide when owner dies."], 530), 30)
-        Add(generalGroup, nil, "both")
-        
-        -- ===== LAYOUT MODE GROUP (full width) =====
-        local layoutGroup = GUI:CreateSettingsGroup(self.child, 560)
+        -- No slot height on the blurbs here or in the group below: at 250 they
+        -- wrap to more lines than they did at 530, and CreateLabel measures
+        -- itself whenever the call site does not pin it. Guessing a replacement
+        -- number by hand is what puts a blurb through the control beneath it.
+        generalGroup:AddWidget(GUI:CreateLabel(self.child, L["Show health bars for player and party/raid member pets, anchored to their owner's frame. Pet frames hide when owner dies."], 250))
+        Add(generalGroup, nil, 1)
+
+        -- ===== LAYOUT MODE GROUP (col2) =====
+        local layoutGroup = GUI:CreateSettingsGroup(self.child, 280)
         layoutGroup:AddWidget(GUI:CreateHeader(self.child, L["Layout Mode"]), 40)
         layoutGroup.disableChildrenOn = function(d) return not d.petEnabled end
-        
+
         local groupModeValues = {
             ATTACHED = L["Attached to Owner"],
             GROUPED = L["Separate Pet Group"],
@@ -914,13 +930,19 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             if DF.UpdateAllRaidPetFrames then DF:UpdateAllRaidPetFrames(true) end
             GUI:RefreshCurrentPage()
         end), 55)
-        
+
         if not isGroupedMode then
-            layoutGroup:AddWidget(GUI:CreateLabel(self.child, L["Pet frames are positioned relative to their owner's frame."], 530), 25)
+            layoutGroup:AddWidget(GUI:CreateLabel(self.child, L["Pet frames are positioned relative to their owner's frame."], 250))
         else
-            layoutGroup:AddWidget(GUI:CreateLabel(self.child, L["Pet frames are grouped together in a separate container."], 530), 25)
+            layoutGroup:AddWidget(GUI:CreateLabel(self.child, L["Pet frames are grouped together in a separate container."], 250))
         end
-        Add(layoutGroup, nil, "both")
+        Add(layoutGroup, nil, 2)
+
+        -- The two boxes above are a pair, and the groups below them are a fresh
+        -- start in both columns. Without this the shorter of the two would let
+        -- its column run ahead, and the row of boxes under them would sit at two
+        -- different heights.
+        AddSyncPoint()
         
         -- ===== COLUMN 1 GROUPS =====
         
@@ -3771,7 +3793,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         rosterWidget.hideOn = membersHideOn
 
         -- ===== AUTO-POPULATE GROUP (full width, under the roster) =====
-        local autoPopGroup = GUI:CreateSettingsGroup(self.child, 280)
+        local autoPopGroup = GUI:CreateSettingsGroup(self.child, 560)
         autoPopGroup:AddWidget(GUI:CreateHeader(self.child, L["Auto-Populate"]), 40)
         autoPopGroup:AddWidget(GUI:CreateLabel(self.child, L["Automatically add players by role when they join your group."], 510), 20)
 
