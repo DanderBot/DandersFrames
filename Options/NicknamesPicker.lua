@@ -157,7 +157,7 @@ local function buildPicker()
         r.fav:SetScript("OnEnter", function(self)
             GUI:ShowTooltip(self, { title = L["Favourite"] })
         end)
-        r.fav:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        r.fav:SetScript("OnLeave", function() GUI:HideTooltip() end)
 
         r.nameFS = r:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
         r.nameFS:SetPoint("LEFT", r.fav, "RIGHT", 4, 0)

@@ -497,7 +497,7 @@ local function CreateAtlasBrowser()
         end)
         icon:SetScript("OnLeave", function(self)
             self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
-            GameTooltip:Hide()
+            DF.GUI:HideTooltip()
         end)
         icon:SetScript("OnClick", function(self)
             if self.atlasName then

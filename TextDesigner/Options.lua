@@ -2519,7 +2519,6 @@ function DF.BuildTextDesignerPage(GUI, page, db)
             wipe(state.cardFrames)
         end
         if state.presetBar         then state.presetBar:Hide();         state.presetBar:ClearAllPoints()         end
-        if state.copyBtnContainer  then state.copyBtnContainer:Hide();  state.copyBtnContainer:ClearAllPoints()  end
         if state.controlsBar       then state.controlsBar:Hide();       state.controlsBar:ClearAllPoints()       end
         if state.enableCheck       then state.enableCheck:Hide();       state.enableCheck:ClearAllPoints()       end
         if state.previewPanel      then state.previewPanel:Hide();      state.previewPanel:ClearAllPoints()      end
@@ -2563,7 +2562,6 @@ function DF.BuildTextDesignerPage(GUI, page, db)
             wipe(state.tabContents)
         end
         state.presetBar         = nil
-        state.copyBtnContainer  = nil
         state.controlsBar       = nil
         state.enableCheck       = nil
         state.previewPanel      = nil
@@ -2637,9 +2635,9 @@ function DF.BuildTextDesignerPage(GUI, page, db)
     end
 
     -- ── TOP BANNER (one compact row) ───────────────────────────
-    -- Boxed banner: master Enable toggle (left) + Sync/Copy (right) in their own
-    -- bordered box at the TOP; the preset bar anchors BELOW it (further down) —
-    -- mirrors the Aura Designer header so the two designers match.
+    -- Boxed banner: master Enable toggle in its own bordered box at the TOP; the
+    -- preset bar anchors BELOW it (further down) — mirrors the Aura Designer
+    -- header so the two designers match.
     local controlsBar = CreateFrame("Frame", nil, page.child, "BackdropTemplate")
     controlsBar:SetHeight(44)  -- room for the enable label + subtitle (matches AD)
     controlsBar:SetPoint("TOPLEFT", page.child, "TOPLEFT", 0, _tdTopY)
@@ -2650,21 +2648,9 @@ function DF.BuildTextDesignerPage(GUI, page, db)
     })
     state.controlsBar = controlsBar
 
-    -- Copy / Sync trio anchored to the right edge of the controls bar.
-    -- omitReset = true matches the prior decision to hide the Reset Page
-    -- button until we have a dedicated reset flow.
-    -- Preset-aware Copy/Sync wording + an additive un-sync — see the Aura
-    -- Designer's matching call and GUI:DesignerCopyHooks.
-    local copyBtnContainer = GUI.CreateCopyButton(
-        controlsBar,
-        {"textDesigner"},
-        L["Text Designer"],
-        "text_designer",
-        true,
-        GUI.DesignerCopyHooks and GUI:DesignerCopyHooks("text")
-    )
-    copyBtnContainer:SetPoint("RIGHT", controlsBar, "RIGHT", -8, 0)
-    state.copyBtnContainer = copyBtnContainer
+    -- No Copy / Sync pair here — see the Aura Designer's matching note. The one
+    -- key this page owns is the template NAME, which the preset bar sets
+    -- directly, so both buttons were a second way to write one value.
 
     -- Local refresher for the "disabled" overlay — defined after the overlay
     -- is created below, but referenced from the master toggle's callback.
@@ -2866,28 +2852,14 @@ function DF.BuildTextDesignerPage(GUI, page, db)
     state.tabContents[state.activeTab]:Show()
 
     -- ── DISABLED OVERLAY ──────────────────────────────────────
-    -- Semi-opaque grey overlay covering both the preview panel and the right
-    -- panel when tdDB.enabled is false. Mirrors AuraDesigner/Options.lua:
-    -- 6266-6297 (AD's splitContainer overlay).
-    local disabledOverlay = CreateFrame("Frame", nil, page.child, "BackdropTemplate")
+    -- Covers both the preview panel and the right panel when tdDB.enabled is
+    -- false. Shared with the Aura Designer and Raid Auto Layouts via
+    -- GUI:CreateDisabledOverlay — this page only owns the extent and the label.
+    local disabledOverlay = GUI:CreateDisabledOverlay(page.child, {
+        label = L["Text Designer is disabled"],
+    })
     disabledOverlay:SetPoint("TOPLEFT", headerBottom, "BOTTOMLEFT", 0, 0)
     disabledOverlay:SetPoint("BOTTOMRIGHT", page.child, "BOTTOMRIGHT", 0, 0)
-    disabledOverlay:SetFrameLevel(page.child:GetFrameLevel() + 50)
-    disabledOverlay:EnableMouse(true)
-
-    local overlayBg = disabledOverlay:CreateTexture(nil, "BACKGROUND")
-    overlayBg:SetAllPoints()
-    overlayBg:SetColorTexture(0.08, 0.08, 0.08, 0.85)
-
-    local overlayLabel = disabledOverlay:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    overlayLabel:SetPoint("CENTER", 0, 10)
-    overlayLabel:SetText(L["Text Designer is disabled"])
-    overlayLabel:SetTextColor(0.6, 0.6, 0.6, 1)
-
-    local overlaySub = disabledOverlay:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    overlaySub:SetPoint("TOP", overlayLabel, "BOTTOM", 0, -4)
-    overlaySub:SetText(L["Enable the checkbox above to use"])
-    overlaySub:SetTextColor(0.45, 0.45, 0.45, 1)
 
     state.disabledOverlay = disabledOverlay
 

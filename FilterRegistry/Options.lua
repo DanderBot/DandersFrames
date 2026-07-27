@@ -256,6 +256,58 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     local ROW_REST_R,  ROW_REST_G,  ROW_REST_B  = C.background.r, C.background.g, C.background.b
     local ROW_HOVER_R, ROW_HOVER_G, ROW_HOVER_B = C.hover.r, C.hover.g, C.hover.b
     local ROW_REST_A, ROW_HOVER_A = 0.6, 1
+
+    -- ⚠ SPELL ROWS ONLY (right panel). A hovered row climbs to C_HOVER (0.22) —
+    -- which is where its own controls live. Their fill is C_ELEMENT (0.18) and
+    -- their rest border is C_BORDER at HALF alpha, which over a hovered row
+    -- composites to ~0.235: a 0.015 difference, so a button dissolves into the
+    -- highlight it is sitting on. At rest the row is ~0.10 and the same button
+    -- is 0.084 clear, which is why they only merge on hover.
+    --
+    -- Two different answers, split by whether the ROW's click does that control's
+    -- job (row:OnClick fires _onAction, and only when _rowToggles):
+    --
+    --   row.action  the row IS its hit area, so it takes the button's real hover
+    --               state (accent border + wash) via SetHovered. That says what
+    --               clicking the row does AND separates it from the highlight by
+    --               HUE, which no pair of greys this close can do.
+    --   row.info    the row does not fire either, so they only get their border
+    --   row.remove  brightened enough to stay legible. Priming a destructive "x"
+    --               the row will NOT trigger would be worse than the merge.
+    --
+    -- Neither moves the row's own colour, which the main nav shares. The buttons'
+    -- own OnEnter/OnLeave still own their look while the mouse is on them;
+    -- leaving a child re-enters the row, so the row's OnEnter re-applies after.
+    --
+    -- Left-hand filter rows carry no chromed controls (a label, a count and the
+    -- override dot), so they are deliberately not wired to this.
+    -- Derived, not picked by eye: at rest the border reads ~0.235 on a ~0.096 row,
+    -- a separation of ~0.14. Holding that same separation above a 0.22 hovered row
+    -- wants ~0.36 at full alpha. 0.40 gives a little margin without making the
+    -- button louder under the row's hover than under its own. One constant to
+    -- nudge if it wants more or less in game.
+    local ROW_CTRL_BORDER = 0.40
+    -- No table + ipairs: these run on every hover and this file keeps the pooled
+    -- row handlers allocation-free on purpose (see the file-local note up top).
+    local function ShadeControl(btn, r, g, b, a)
+        -- A disabled control must stay dim — SetDisabled parks its own faint
+        -- border and expects nothing to light it up.
+        if btn and not btn.dfDisabled then btn:SetBackdropBorderColor(r, g, b, a) end
+    end
+    local function ShadeRowControls(row, hovered)
+        local r, g, b, a
+        if hovered then
+            r, g, b, a = ROW_CTRL_BORDER, ROW_CTRL_BORDER, ROW_CTRL_BORDER, 1
+        else
+            r, g, b, a = C.border.r, C.border.g, C.border.b, 0.5   -- StyleButton's rest
+        end
+        ShadeControl(row.info,   r, g, b, a)
+        ShadeControl(row.remove, r, g, b, a)
+        -- The action button gets the real thing instead — but only while the row
+        -- actually fires it (_rowToggles is false in the custom view, where the
+        -- row click is inert and lighting anything would be a lie).
+        if row.action then row.action:SetHovered(hovered and row._rowToggles and true or false) end
+    end
     local SECTION_H = 26 -- section-label slot (bumped for the larger DFFontNormal labels)
     local SPELL_ROW_H = 26
     local CLASS_HEADER_H = 22
@@ -377,10 +429,22 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
 
     -- ========== INFO BANNER ==========
     -- The banner text + tone swap by selection: the buff filters are a whitelist
-    -- (opt-in — nothing shows until enabled), the blacklist is the inverse
-    -- (opt-out — debuffs show until hidden). Naming that flip is what keeps the
-    -- Hide/Show rows from reading like the Enable/Disable ones above. Both texts
-    -- are ~2 lines, so the swap barely changes the banner height. RefreshRight
+    -- (opt-in — nothing shows until a filter carrying it is on), the blacklist is
+    -- the inverse (opt-out — you name what to hide rather than what to show).
+    -- Naming that flip is what keeps the Hide/Show rows from reading like the
+    -- Enable/Disable ones above.
+    --
+    -- ⚠ The blacklist copy must NOT say debuffs "all show" — the Aura Filters page
+    -- carries a debuffFilter selection that already restricts them, so opt-out
+    -- describes the MECHANISM here, not the starting state.
+    --
+    -- Each text also has to carry what you can DO, because the two halves differ:
+    -- buff filters are editable and you can add your own, while the blacklist is a
+    -- fixed catalog (BlacklistDebuffs) with search, add-by-ID, add-from-database
+    -- and Duplicate all hidden or disabled. "This list is fixed" is what answers
+    -- the missing add button.
+    --
+    -- Both texts are ~2 lines, so the swap barely changes the banner height. RefreshRight
     -- drives the swap; SetHTML is idempotent so it only recomputes on a real
     -- buff<->blacklist transition. HTML mode so the buff copy links back to the
     -- Aura Filters page (which links here) — SetHTML re-tints the link per theme.
@@ -393,9 +457,9 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     local function fdBannerLinkClick(pageId)
         if GUI.SelectTab then GUI.SelectTab(pageId) end
     end
-    local BUFF_BANNER = L["Opt-in buff filters — you choose which buffs show. Enable or disable spells in the built-in presets, or create custom filters, then turn them on from the"]
+    local BUFF_BANNER = L["Buffs are opt-in: nothing shows until a filter containing it is turned on. Edit the built-in filters or build your own, then turn them on from"]
         .. " " .. fdBannerLink(L["Aura Filters"], "auras_filters") .. "."
-    local BLACKLIST_BANNER = L["The reverse of the opt-in buff filters: instead of choosing what to show, you choose nuisance debuffs to hide from the debuff bar. Only debuffs Blizzard keeps non-secret can be hidden."]
+    local BLACKLIST_BANNER = L["Debuffs are opt-out: instead of choosing what shows, you pick what to hide. Blizzard allows only a limited set, so this list is fixed."]
     local banner = GUI:CreateInfoBanner(parent, {
         tone = "info",
         html = true,
@@ -1022,9 +1086,11 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         end)
         row:SetScript("OnEnter", function(self)
             self:SetBackdropColor(ROW_HOVER_R, ROW_HOVER_G, ROW_HOVER_B, ROW_HOVER_A)
+            ShadeRowControls(self, true)
         end)
         row:SetScript("OnLeave", function(self)
             self:SetBackdropColor(ROW_REST_R, ROW_REST_G, ROW_REST_B, ROW_REST_A)
+            ShadeRowControls(self, false)
             GUI:HideTooltip()
         end)
 
@@ -1039,6 +1105,13 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         row:ClearAllPoints()
         row:SetPoint("TOPLEFT", 0, -y)
         row:SetPoint("TOPRIGHT", 0, -y)
+
+        -- Release any proxied hover left over from the spell this pool slot was
+        -- showing. A locked highlight has no OnLeave to release it, and the list
+        -- rebinds under a stationary mouse on every toggle. Skipped while the
+        -- cursor is still somewhere on this row — the row's own OnLeave owns that
+        -- case, and resetting here would drop the border mid-hover.
+        if not row:IsMouseOver() then ShadeRowControls(row, false) end
 
         row.icon:SetTexture(item.icon or FALLBACK_ICON)
         row.name:SetText(item.name)

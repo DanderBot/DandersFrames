@@ -8547,16 +8547,11 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     enableBanner:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 0, yPos)
     enableBanner:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", 0, yPos)
 
-    if GUI.CreateCopyButton then
-        -- Preset-aware Copy/Sync wording + an additive un-sync (GUI:DesignerCopyHooks):
-        -- the one key this section owns is the preset NAME, so both buttons SHARE a
-        -- preset rather than copy one.
-        local copyBtn = GUI.CreateCopyButton(enableBanner, {"auraDesigner"}, L["Aura Designer"], "auras_auradesigner", true,
-            GUI.DesignerCopyHooks and GUI:DesignerCopyHooks("aura"))
-        copyBtn:ClearAllPoints()
-        -- Row 1 centre is 16px above banner centre, so y = +16.
-        copyBtn:SetPoint("RIGHT", enableBanner, "RIGHT", -5, 16)
-    end
+    -- No Copy / Sync pair here (every other mode-specific page has one). The one
+    -- key this page owns is the template NAME, and the template bar below sets
+    -- it directly — so Copy was "pick that name in the other tab" and Sync was a
+    -- link that could only ever hold one name in step. Sharing is now stated and
+    -- undone on the bar itself; see GUI:CreateDesignerPresetBar.
 
     -- ========================================
     -- PRESET BAR (which named preset this mode uses + library management)
@@ -8643,7 +8638,7 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
         -- hover wash, and replacing them would leave the tab stuck lit.
         local tipTitle, tipLines = def.label, def.tooltip
         btn:HookScript("OnEnter", function(self)
-            GUI:ShowTooltip(self, { title = tipTitle, lines = tipLines, anchor = "ANCHOR_BOTTOM" })
+            GUI:ShowTooltip(self, { title = tipTitle, lines = tipLines })
         end)
         btn:HookScript("OnLeave", function() GUI:HideTooltip() end)
         btn:SetActive(activeBuffTab == def.key)
@@ -8897,25 +8892,12 @@ function DF:AuraDesigner_RefreshPage()
         local adEnabled = GetAuraDesignerDB().enabled
         if not adEnabled then
             if not mainFrame.disabledOverlay then
-                local overlay = CreateFrame("Frame", nil, mainFrame.splitContainer)
+                -- Shared with the Text Designer and Raid Auto Layouts; this page
+                -- only owns the extent (the whole split container) and the label.
+                local overlay = GUI:CreateDisabledOverlay(mainFrame.splitContainer, {
+                    label = L["Aura Designer is disabled"],
+                })
                 overlay:SetAllPoints()
-                overlay:SetFrameLevel(mainFrame.splitContainer:GetFrameLevel() + 50)
-                overlay:EnableMouse(true)
-
-                local bg = overlay:CreateTexture(nil, "BACKGROUND")
-                bg:SetAllPoints()
-                bg:SetColorTexture(0.08, 0.08, 0.08, 0.85)
-
-                local label = overlay:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-                label:SetPoint("CENTER", 0, 10)
-                label:SetText(L["Aura Designer is disabled"])
-                label:SetTextColor(0.6, 0.6, 0.6, 1)
-
-                local sublabel = overlay:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-                sublabel:SetPoint("TOP", label, "BOTTOM", 0, -4)
-                sublabel:SetText(L["Enable the checkbox above to use"])
-                sublabel:SetTextColor(0.45, 0.45, 0.45, 1)
-
                 mainFrame.disabledOverlay = overlay
             end
             mainFrame.disabledOverlay:Show()

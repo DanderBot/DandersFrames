@@ -1061,6 +1061,9 @@ end
 
 -- ============================================================
 -- TARGETED SPELL CONTAINER APPEARANCE
+-- ⚰ DEPRECATED-TARGETED-SPELLS — goes with the on-frame feature. This is the
+-- GROUP container only; Personal Targeted does not come through here. See the
+-- block comment at the top of Features\TargetedSpells.lua.
 -- ============================================================
 
 function DF:UpdateTargetedSpellAppearance(frame)

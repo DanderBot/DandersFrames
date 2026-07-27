@@ -535,6 +535,11 @@ DF.ExportCategories = {
         "defensiveSortOrder",
     },
     -- Targeted spells (incl. personal)
+    -- ⚰ DEPRECATED-TARGETED-SPELLS — ⚠ this category is MIXED: the
+    -- personalTargetedSpell* keys are live and stay, the targetedSpell* ones go
+    -- with the on-frame feature. Do not delete the category wholesale; the
+    -- personal display would silently stop exporting. See the block comment at
+    -- the top of Features\TargetedSpells.lua.
     targetedSpells = {
         "personalTargetedSpellAlpha",
         "personalTargetedSpellBorderAnimationColor",

@@ -2036,6 +2036,9 @@ DF.PartyDefaults = {
     combatIconX = 0,
     combatIconY = 6,
 
+    -- ⚰ DEPRECATED-TARGETED-SPELLS — this whole block goes when the feature does
+    -- (there is a second stray key, targetedSpellWarnDuplicates, further down).
+    -- See the block comment at the top of Features\TargetedSpells.lua.
     -- Targeted Spells (on-frame)
     targetedSpellAlpha = 1,
     targetedSpellAnchor = "BOTTOM",

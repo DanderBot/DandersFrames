@@ -5262,30 +5262,20 @@ DF._MainEventDispatcher = function(self, event, arg1)
             end
         end)
 
-        -- Show the Targeted Spells opt-in setup wizard once per account.
-        -- The feature defaults OFF; this wizard explains what it does, its
-        -- limitations, and that it relies on unsupported Blizzard behaviour
-        -- before letting the user turn it on. Mark seen at schedule time so a
-        -- close/cancel still counts (no re-nag on the next login).
-        if DandersFramesDB_v2 and not DandersFramesDB_v2.targetedSpellWizardSeen then
-            DandersFramesDB_v2.targetedSpellWizardSeen = true
-            if DF.ShowTargetedSpellSetupWizard then
-                -- Delay so it doesn't fight the loading screen. Longer than the
-                -- Aura Setup wizard's 3s so the two don't collide on a brand-new
-                -- account that qualifies for both; if a popup is already showing
-                -- when we fire, wait a bit and retry once rather than stomp it.
-                local function ShowTSWizard(attempt)
-                    if DF.IsPopupShown and DF:IsPopupShown() then
-                        if attempt < 3 then
-                            C_Timer.After(5, function() ShowTSWizard(attempt + 1) end)
-                        end
-                        return
-                    end
-                    DF:ShowTargetedSpellSetupWizard()
-                end
-                C_Timer.After(5, function() ShowTSWizard(1) end)
-            end
-        end
+        -- ⚰ DEPRECATED-TARGETED-SPELLS — the once-per-account Targeted Spells
+        -- setup wizard used to fire here, 5s after login, offering to turn the
+        -- feature on. It cannot stay: the feature is force-disabled at load
+        -- (ForceDisableGroupTargetedSpellSettings) and its settings page is no
+        -- longer in the sidebar, so the wizard would sell a feature that can
+        -- neither run nor be configured, and its "Open settings" button would
+        -- land on a page with no nav row.
+        --
+        -- DF:ShowTargetedSpellSetupWizard itself is untouched in
+        -- Features\TargetedSpells.lua — only the auto-fire is gone. Restoring it
+        -- means putting this block back, with its 5s delay, its retry-if-a-popup-
+        -- is-up loop, and the mark-seen-at-schedule-time behaviour (so a cancel
+        -- still counts and doesn't re-nag next login). The saved flag
+        -- DandersFramesDB_v2.targetedSpellWizardSeen is deliberately left alone.
 
     elseif event == "GROUP_ROSTER_UPDATE" then
         if DF.RosterDebugEvent then DF:RosterDebugEvent("Core.lua:GROUP_ROSTER_UPDATE") end

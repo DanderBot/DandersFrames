@@ -192,7 +192,6 @@ function CC:CreateClickCastUI(parent)
         self.Icon:SetVertexColor(themeColor.r, themeColor.g, themeColor.b)
         DF.GUI:ShowTooltip(self, {
             title = L["Profile Settings"],
-            anchor = "ANCHOR_BOTTOM",
             lines = { L["Open the Profiles tab to manage profiles"] },
         })
     end)
@@ -295,7 +294,6 @@ function CC:CreateClickCastUI(parent)
     quickBindCb:SetScript("OnEnter", function(self)
         DF.GUI:ShowTooltip(self, {
             title = L["Quick Bind Mode"],
-            anchor = "ANCHOR_TOP",
             lines = {
                 L["When enabled: Click spell, press key to bind instantly."],
                 L["When disabled: Click spell to open Binding Editor."],
@@ -505,7 +503,6 @@ function CC:CreateClickCastUI(parent)
     clearAllBtn:HookScript("OnEnter", function(self)
         DF.GUI:ShowTooltip(self, {
             title = L["Clear All Bindings"],
-            anchor = "ANCHOR_TOP",
             tone = "danger",
             lines = { L["Remove all bindings from the current profile."] },
         })
@@ -706,7 +703,7 @@ function CC:CreateClickCastUI(parent)
         -- Tooltip rides on top of the styler's own hover scripts.
         if tooltip then
             btn:HookScript("OnEnter", function(self)
-                DF.GUI:ShowTooltip(self, { title = tooltip, anchor = "ANCHOR_TOP" })
+                DF.GUI:ShowTooltip(self, { title = tooltip })
             end)
             btn:HookScript("OnLeave", function()
                 DF.GUI:HideTooltip()
@@ -815,7 +812,6 @@ function CC:CreateClickCastUI(parent)
     quickMacroBtn:HookScript("OnEnter", function(self)
         DF.GUI:ShowTooltip(self, {
             title = L["Quick Macro"],
-            anchor = "ANCHOR_TOP",
             lines = { L["Create a simple macro without opening the full editor."] },
         })
     end)
@@ -1283,7 +1279,7 @@ function CC:CreateCollapsedBindingRow(parent, binding, index)
     row:SetScript("OnLeave", function(self)
         self:SetBackdropColor(C.element.r, C.element.g, C.element.b, 0.8)
         self:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.5)
-        GameTooltip:Hide()
+        DF.GUI:HideTooltip()
     end)
     
     -- Click to edit

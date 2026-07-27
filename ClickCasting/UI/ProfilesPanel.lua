@@ -437,6 +437,11 @@ function CC:RefreshProfilesPanel()
             child:Hide()
             child:SetParent(nil)
         end
+        -- StyleButton registers each row on the parent's ThemeListeners. This
+        -- content frame OUTLIVES its rows (a settings page throws its whole
+        -- child away and starts over), so without this the table would keep
+        -- growing a reference to every row we just discarded.
+        self.profileListContent.ThemeListeners = nil
     end
     
     -- Update auto-create checkbox state
@@ -472,27 +477,31 @@ function CC:RefreshProfilesPanel()
     local activeProfile = self:GetActiveProfileName()
     local yOffset = 0
     
+    -- Both row states ride the shared styler, so the hover is the same theme wash
+    -- as every other button in the addon. These rows used to hand-roll a flat
+    -- 0.15 grey in OnEnter and restate all three rest fills in OnLeave, which is
+    -- how they ended up as the one hover that ignored the theme entirely.
+    --   SELECTED (what Rename/Delete act on) -> SetActive's accent fill + border
+    --   ACTIVE   (the profile actually in use) -> green rest border + the dot
+    -- Two separate cues, so a row that is selected but NOT active still reads
+    -- apart from the active one. The green is the styler's own affirmative tone
+    -- (opts.tone = "success"), not a fourth colour invented here.
+    local ACTIVE_BORDER = { r = 0.4, g = 0.85, b = 0.5, a = 0.8 }
+
     -- Create profile items
     for _, profileName in ipairs(profiles) do
+        local isActive = (profileName == activeProfile)
+        local isSelected = (profileName == self.selectedProfileName)
+
         local item = CreateFrame("Button", nil, self.profileListContent, "BackdropTemplate")
         item:SetPoint("TOPLEFT", 0, -yOffset)
         item:SetPoint("RIGHT", 0, 0)
         item:SetHeight(28)
-        DF.GUI:CreateElementBackdrop(item, {
-            outline = false,
+        DF.GUI:StyleButton(item, {
+            restBorderColor = isActive and ACTIVE_BORDER or nil,
         })
-        
-        local isActive = (profileName == activeProfile)
-        local isSelected = (profileName == self.selectedProfileName)
-        
-        if isSelected then
-            item:SetBackdropColor(themeColor.r * 0.3, themeColor.g * 0.3, themeColor.b * 0.3, 1)
-        elseif isActive then
-            item:SetBackdropColor(0.15, 0.25, 0.15, 1)
-        else
-            item:SetBackdropColor(0.1, 0.1, 0.1, 1)
-        end
-        
+        item:SetActive(isSelected)
+
         -- Active indicator
         if isActive then
             local dot = item:CreateTexture(nil, "OVERLAY")
@@ -543,28 +552,22 @@ function CC:RefreshProfilesPanel()
             -- Double-click does the same as single-click
         end)
         
-        item:SetScript("OnEnter", function(self)
-            if not isSelected then
-                self:SetBackdropColor(0.15, 0.15, 0.15, 1)
-            end
+        -- Hooked, not Set: the styler owns OnEnter/OnLeave now, and overwriting
+        -- them would take the hover wash straight back out again.
+        item:HookScript("OnEnter", function(self)
             -- Show tooltip with full profile name
             if self.fullProfileName and #self.fullProfileName > 20 then
                 DF.GUI:ShowTooltip(self, { title = self.fullProfileName, anchor = "ANCHOR_RIGHT" })
             end
         end)
-        
-        item:SetScript("OnLeave", function(self)
-            if not isSelected then
-                if isActive then
-                    self:SetBackdropColor(0.15, 0.25, 0.15, 1)
-                else
-                    self:SetBackdropColor(0.1, 0.1, 0.1, 1)
-                end
-            end
+
+        item:HookScript("OnLeave", function(self)
             DF.GUI:HideTooltip()
         end)
-        
-        yOffset = yOffset + 30
+
+        -- 4px between rows: the rows carry a real border now, and at the old
+        -- 2px pitch two adjacent borders read as one thick divider.
+        yOffset = yOffset + 32
     end
     
     self.profileListContent:SetHeight(math.max(yOffset, 1))
@@ -773,13 +776,11 @@ function CC:CreateLoadoutRow(parent, specIndex, configID, loadoutName, profiles,
             if assignedProfile then
                 DF.GUI:ShowTooltip(btn, {
                     title = format(L["Profile: %s"], assignedProfile),
-                    anchor = "ANCHOR_TOP",
                     lines = { L["Click to change assignment"] },
                 })
             elseif configID == 0 then
                 DF.GUI:ShowTooltip(btn, {
                     title = L["No default profile set"],
-                    anchor = "ANCHOR_TOP",
                     lines = {
                         L["Click to assign a profile that activates"],
                         L["when switching to this spec"],
@@ -788,7 +789,6 @@ function CC:CreateLoadoutRow(parent, specIndex, configID, loadoutName, profiles,
             else
                 DF.GUI:ShowTooltip(btn, {
                     title = L["Using spec default"],
-                    anchor = "ANCHOR_TOP",
                     lines = { L["Click to assign a specific profile"] },
                 })
             end

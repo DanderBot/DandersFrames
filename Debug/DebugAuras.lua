@@ -241,7 +241,7 @@ local function CreateDebugIcon(parent, index)
         end
     end)
     icon:SetScript("OnLeave", function()
-        GameTooltip:Hide()
+        DF.GUI:HideTooltip()
     end)
     
     return icon

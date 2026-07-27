@@ -118,7 +118,6 @@ local function StylePinnedHandle(mover, borderTex, innerTex, textFS, colors)
         self.dfHovered = true
         restyle()
         DF.GUI:ShowTooltip(self, {
-            anchor = "ANCHOR_TOP",
             title = textFS and textFS:GetText() or DF.L["Pinned"],
             lines = {
                 DF.L["Drag to move"],

@@ -1440,14 +1440,14 @@ function Profiler:CreateUI()
     end)
     printBtn:SetScript("OnEnter", function(self)
         DF.GUI:ShowTooltip(self, {
-            title = "Print to Chat", anchor = "ANCHOR_TOP",
+            title = "Print to Chat",
             lines = {
                 "Left-click: dump the current view (functions/events/onupdate)",
                 "Right-click: print Top 5 across all categories (summary)",
             },
         })
     end)
-    printBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    printBtn:SetScript("OnLeave", function() DF.GUI:HideTooltip() end)
 
     -- Custom duration input box
     local durationInput = CreateFrame("EditBox", nil, f, "BackdropTemplate")
@@ -1508,14 +1508,14 @@ function Profiler:CreateUI()
     end)
     f.combatBtn:SetScript("OnEnter", function(self)
         DF.GUI:ShowTooltip(self, {
-            title = "Combat Auto-Profile", anchor = "ANCHOR_TOP",
+            title = "Combat Auto-Profile",
             lines = { Profiler.combatAuto
                 and { text = "ON: Profiling starts on combat, stops + prints on combat end.",
                       color = { 0, 1, 0 } }
                 or  "OFF: Click to enable automatic combat profiling." },
         })
     end)
-    f.combatBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    f.combatBtn:SetScript("OnLeave", function() DF.GUI:HideTooltip() end)
     UpdateCombatBtnText()
 
     -- View cycle button (Functions / Events / OnUpdate). Top-right, left of Split.
@@ -1545,7 +1545,7 @@ function Profiler:CreateUI()
     end)
     f.viewBtn:SetScript("OnEnter", function(self)
         DF.GUI:ShowTooltip(self, {
-            title = "View Mode", anchor = "ANCHOR_TOP",
+            title = "View Mode",
             lines = {
                 "Click to cycle: Functions → Events → OnUpdate.",
                 "Functions: time per DF method",
@@ -1554,7 +1554,7 @@ function Profiler:CreateUI()
             },
         })
     end)
-    f.viewBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    f.viewBtn:SetScript("OnLeave", function() DF.GUI:HideTooltip() end)
     UpdateViewBtnText()
 
     -- Split by Frame Type toggle button
@@ -1577,14 +1577,14 @@ function Profiler:CreateUI()
     end)
     f.splitBtn:SetScript("OnEnter", function(self)
         DF.GUI:ShowTooltip(self, {
-            title = "Split by Frame Type", anchor = "ANCHOR_TOP",
+            title = "Split by Frame Type",
             lines = { Profiler.splitByFrame
                 and { text = "ON: Showing per-type breakdown (Party, Raid, HL-Party, HL-Raid).",
                       color = { 0, 1, 0 } }
                 or  "OFF: Click to split results by frame type." },
         })
     end)
-    f.splitBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    f.splitBtn:SetScript("OnLeave", function() DF.GUI:HideTooltip() end)
     UpdateSplitBtnText()
 
     -- OnUpdate Hook warning banner (shown when hook is disabled)

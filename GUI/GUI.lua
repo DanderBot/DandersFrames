@@ -2573,6 +2573,53 @@ local function FlowSpaceWidth(tmpl, sizePx)
     return sp
 end
 
+-- ============================================================
+-- DISABLED OVERLAY — the "this feature is switched off" scrim.
+--
+-- A dimming plate over the part of a page you cannot act on yet, carrying the
+-- feature's name and a pointer at the toggle that turns it on. EnableMouse is
+-- the working half: greying a control says "not now", but a page of buttons
+-- that still FUNCTION while the feature is off reads as though it were on, and
+-- the user builds a thing that silently does nothing.
+--
+-- The caller anchors it, because the extent is a per-page judgement — cover
+-- what can be acted on, not necessarily everything below the toggle. Explaining
+-- content (a "how it works" box) is worth leaving readable; a user staring at
+-- the scrim is exactly the one who still needs it.
+--
+--   opts.label     the big line, e.g. L["Aura Designer is disabled"]
+--   opts.sublabel  the small line (defaults to the shared "Enable the checkbox
+--                  above to use")
+--   opts.level     frame-level bump over the parent (default 50)
+--
+-- Returns the frame; drive it with :SetShown(not enabled) from wherever the
+-- flag changes.
+-- ============================================================
+function GUI:CreateDisabledOverlay(parent, opts)
+    opts = opts or {}
+    local overlay = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    overlay:SetFrameLevel((parent:GetFrameLevel() or 0) + (opts.level or 50))
+    overlay:EnableMouse(true)
+
+    local bg = overlay:CreateTexture(nil, "BACKGROUND")
+    bg:SetAllPoints()
+    bg:SetColorTexture(C_BACKGROUND.r, C_BACKGROUND.g, C_BACKGROUND.b, 0.85)
+
+    local label = overlay:CreateFontString(nil, "OVERLAY", "DFFontNormal")
+    label:SetPoint("CENTER", 0, 10)
+    label:SetText(opts.label or "")
+    label:SetTextColor(0.6, 0.6, 0.6, 1)
+    overlay.Label = label
+
+    local sub = overlay:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    sub:SetPoint("TOP", label, "BOTTOM", 0, -4)
+    sub:SetText(opts.sublabel or L["Enable the checkbox above to use"])
+    sub:SetTextColor(0.45, 0.45, 0.45, 1)
+    overlay.SubLabel = sub
+
+    return overlay
+end
+
 function GUI:CreateInfoBanner(parent, opts)
     opts = opts or {}
 
@@ -3269,11 +3316,19 @@ end
 -- GUI TOOLTIP  (settings-UI tooltips only — NOT unit-frame/aura tooltips)
 -- Single source for our own widget tooltips. Call from OnEnter — use HookScript
 -- on StyleButton'd widgets so it composes with the hover wash; SetScript on
--- plain frames. Pair with OnLeave -> GameTooltip:Hide().
+-- plain frames. Pair with OnLeave -> GUI:HideTooltip().
 --   opts.title  (string)   white by default, or tone-coloured
 --   opts.tone   nil | "warning" (gold) | "danger" (red)
---   opts.anchor "ANCHOR_RIGHT" (default; edge-safe — avoid ANCHOR_TOP which
---               clamps over the owner near the frame top)
+--   opts.anchor  default: at the CURSOR, lifted clear of it (see CURSOR_LIFT).
+--               Krathe's call, 2026-07-27: a settings tooltip should appear where
+--               you are pointing, not pinned to a widget edge whose size you are
+--               not thinking about — but sitting ON the cursor buried the control
+--               you were reading about, so it is offset upward.
+--               ⚠ Do NOT pass one per call site. The whole point of the default
+--               living here is that every tooltip in the settings UI behaves the
+--               same; a page that sets its own is the disjointedness we just
+--               removed. ANCHOR_TOP in particular clamps over the owner near the
+--               top of the frame — it was in use 14 times and is now gone.
 --   opts.lines  array; each element is one of:
 --       "text"                     -> body grey (0.7), wrapped
 --       " "                        -> blank spacer
@@ -3315,9 +3370,31 @@ local function AddTooltipLines(lines)
     end
 end
 
+-- How far the cursor-anchored tooltip is nudged off the pointer. ONE dial.
+--
+-- Small on purpose. This started at 24 while the tooltip could still appear over
+-- a slider or dropdown, where it had to clear the whole control. Now that the
+-- hover lives on the LABEL only (see GUI:AttachTooltip) there is nothing
+-- underneath worth clearing — the lift just has to keep the tooltip off the
+-- words you are reading, so a nudge does it.
+--
+-- ⚠ ANCHOR_CURSOR_RIGHT, not ANCHOR_CURSOR — plain ANCHOR_CURSOR DISCARDS the
+-- offsets. Verified against the client's own code rather than assumed:
+-- Blizzard_AuraContainer/Blizzard_AuraButton.lua asserts the signature
+-- SetOwner(point, offsetX, offsetY) with both offsets optional numbers, and
+-- Blizzard's own callers only ever pass offsets alongside the _RIGHT / _LEFT
+-- variants (QuestDataProvider "ANCHOR_CURSOR_RIGHT", 5, 2 — never with the plain
+-- cursor anchor). Positive Y is up in WoW, so this lifts regardless of which
+-- edge the anchor pins.
+local CURSOR_LIFT_X, CURSOR_LIFT_Y = 0, 8
+
 function GUI:ShowTooltip(owner, opts)
     if not owner or not opts or not opts.title then return end
-    GameTooltip:SetOwner(owner, opts.anchor or "ANCHOR_RIGHT")
+    if opts.anchor then
+        GameTooltip:SetOwner(owner, opts.anchor)
+    else
+        GameTooltip:SetOwner(owner, "ANCHOR_CURSOR_RIGHT", CURSOR_LIFT_X, CURSOR_LIFT_Y)
+    end
     -- Title colour is single-sourced from the tone's inline accent so a tooltip
     -- title reads the same as inline ToneHex text of the same tone. Untoned = white.
     local toneDef = opts.tone and INFO_BANNER_TONES[opts.tone]
@@ -3394,7 +3471,14 @@ function GUI:ShowGameTooltip(owner, opts)
         return seeded
     end
 
-    GameTooltip:SetOwner(owner, opts.anchor or "ANCHOR_RIGHT")
+    -- Same cursor default as ShowTooltip — a spell tooltip on a settings row has
+    -- to behave like every other tooltip in the window, and this one was still on
+    -- the old ANCHOR_RIGHT.
+    if opts.anchor then
+        GameTooltip:SetOwner(owner, opts.anchor)
+    else
+        GameTooltip:SetOwner(owner, "ANCHOR_CURSOR_RIGHT", CURSOR_LIFT_X, CURSOR_LIFT_Y)
+    end
     if Fill() or not opts.spellID then return end
 
     -- Nothing rendered. If the data exists server-side but is not loaded yet,
@@ -3417,6 +3501,95 @@ end
 -- route through GUI instead of poking GameTooltip directly.
 function GUI:HideTooltip()
     GameTooltip:Hide()
+end
+
+-- ============================================================
+-- ATTACHING a tooltip to a settings widget — ONE way, for every factory.
+--
+-- Three factories used to each have their own idea, and on one page the same
+-- gesture did three different things:
+--     checkbox   .tooltip       hover the container   ANCHOR_CURSOR
+--     dropdown   .tooltip       hover the BUTTON      ANCHOR_CURSOR
+--     slider     .tooltipText   hover the SLIDER      ANCHOR_RIGHT
+-- Worse, on a dropdown and a slider the LABEL sits above the control, outside
+-- its hit rect, so hovering the words never did anything — while on a checkbox
+-- (label beside the box, inside the container) it did. Five more factories —
+-- colour picker, font / texture dropdown, input, growth control — had no
+-- tooltip support at all, so ~136 controls could not carry one.
+--
+-- The rule now: THE HIT AREA IS THE LABEL, and only the label.
+--
+-- ⚠ This is deliberately NOT the whole widget. The first version of this hovered
+-- the control too, which is the obvious reading of "make the label work" — but a
+-- cursor-anchored tooltip then sits on top of the slider or dropdown you are
+-- trying to read and operate, and no amount of offsetting it fully solves that,
+-- because the thing you point at IS the thing being covered. Krathe's call,
+-- 2026-07-27, after trying both. Reading and adjusting are separate gestures:
+-- point at the words to find out what it does, point at the control to use it.
+--
+-- The label is a FontString and cannot take mouse input, so each widget gets one
+-- invisible frame sized to the label's own rect. That also handles a label wider
+-- than its container for free (the checkbox case) — the frame follows the TEXT,
+-- not the box, so there is no hit-rect arithmetic to keep in sync.
+--
+-- The anchor is whatever ShowTooltip defaults to — set in ONE place so no page
+-- can drift. Nothing here passes an anchor, deliberately.
+--
+-- The spec is read AT HOVER TIME, not when it is attached — every call site
+-- sets it after creation, on the container the factory returned:
+--     widget.tooltip = "body"                  title = the widget's own label
+--     widget.tooltip = { title=, lines=, tone= }   the full ShowTooltip shape
+--     widget.tooltipText / .tooltipSubText     legacy pair, still honoured
+-- ============================================================
+local function ResolveTooltipSpec(widget, label)
+    local t = widget.tooltip
+    if type(t) == "table" then
+        -- Full spec from the caller. Default the title to the label so the
+        -- common case only has to say what the setting DOES.
+        if t.title == nil then t.title = label end
+        return t
+    end
+    if type(t) == "string" and t ~= "" then
+        return { title = label, lines = { t } }
+    end
+    -- Legacy pair. Deliberately NOT re-titled from the label: these read as
+    -- title-then-subtitle by design (the Frame Level explainer, the override
+    -- markers), and re-titling them would change tooltips that are already
+    -- correct. New code should use .tooltip.
+    if widget.tooltipText then
+        return {
+            title = widget.tooltipText,
+            lines = widget.tooltipSubText and { widget.tooltipSubText } or nil,
+        }
+    end
+    return nil
+end
+
+--   widget       the frame the caller holds and sets .tooltip on (the container)
+--   label        the default title
+--   labelRegion  the label FontString — the hit frame is built over ITS rect
+function GUI:AttachTooltip(widget, label, labelRegion)
+    if not labelRegion then return end
+
+    local hit = CreateFrame("Frame", nil, widget)
+    -- Two-corner anchored to the FontString, so it tracks the text if the label
+    -- is ever re-set or re-fonted. The 2px vertical bleed makes a single line of
+    -- small text comfortable to hit without reaching the control below it.
+    hit:SetPoint("TOPLEFT", labelRegion, "TOPLEFT", 0, 2)
+    hit:SetPoint("BOTTOMRIGHT", labelRegion, "BOTTOMRIGHT", 0, -2)
+    hit:EnableMouse(true)
+    -- Above the widget's own children so the label area wins the mouse, but it
+    -- only ever covers the TEXT, so nothing clickable is behind it.
+    hit:SetFrameLevel((widget:GetFrameLevel() or 0) + 5)
+
+    hit:SetScript("OnEnter", function()
+        local spec = ResolveTooltipSpec(widget, label)
+        if spec then GUI:ShowTooltip(hit, spec) end
+    end)
+    hit:SetScript("OnLeave", function() GUI:HideTooltip() end)
+
+    widget.dfTooltipHit = hit   -- exposed for a caller that needs to re-anchor it
+    return hit
 end
 
 function GUI:StyleButton(btn, opts)
@@ -3766,7 +3939,34 @@ function GUI:StyleButton(btn, opts)
         end
     end
 
-    btn:SetScript("OnEnter", function(self)
+    -- WHAT HOVERED LOOKS LIKE — the single implementation, so the mouse and a
+    -- proxying owner cannot drift apart. OnEnter/OnLeave below are thin wrappers.
+    --
+    -- Call btn:SetHovered(true/false) when something ELSE owns the hit area and
+    -- forwards the click: a list row whose OnClick fires this button's action.
+    -- The row lighting its button says "this is what clicking the row does", and
+    -- it separates the button from the row's highlight by HUE, which is far more
+    -- robust than the couple of hundredths of grey that sit between C_HOVER and
+    -- C_ELEMENT (the Filter Designer's spell rows are exactly that case).
+    --
+    -- ⚠ Only wire this where the owner's click REALLY performs this button's
+    -- action. A control the owner does not fire must not light up with it —
+    -- priming a destructive button that the row will not actually trigger is
+    -- worse than the legibility problem it would be solving.
+    --
+    -- The wash lives on the HIGHLIGHT layer, which the client shows only for the
+    -- frame under the mouse, so a proxied hover needs Lock/UnlockHighlight — it
+    -- cannot just Show() the texture. The real mouseover is unaffected either
+    -- way: locking an already-hovered button is a no-op, and unlocking one still
+    -- under the mouse leaves the client's own highlight up.
+    local function applyHoverState(self, hovered)
+        if not hovered then
+            if isTabStyle or ghost then return end
+            if self:IsEnabled() and not self.dfDisabled then
+                restBackdrop(self, accent or GetThemeColor())
+            end
+            return
+        end
         -- Re-resolve the wash against the CURRENT theme, exactly as the border does
         -- below (see applyWash). Skipped when the caller pinned a fixed accent, and
         -- while disabled -- SetDisabled parks the wash at alpha 0 and it must stay
@@ -3790,13 +3990,24 @@ function GUI:StyleButton(btn, opts)
                 self:SetBackdropBorderColor(a.r * 0.4, a.g * 0.4, a.b * 0.4, 1)
             end
         end
-    end)
-    btn:SetScript("OnLeave", function(self)
-        if isTabStyle or ghost then return end
-        if self:IsEnabled() and not self.dfDisabled then
-            restBackdrop(self, accent or GetThemeColor())
+    end
+
+    -- The proxied entry point. Lock/Unlock is HERE and not in applyHoverState so
+    -- a real mouseover never locks: a pooled button hidden mid-hover (a list
+    -- refreshing under a stationary mouse) would miss its OnLeave and come back
+    -- lit. An owner calling SetHovered accepts that responsibility instead and
+    -- must clear it when it rebinds the row.
+    function btn:SetHovered(hovered)
+        -- Lock/UnlockHighlight are Button-only, and StyleButton is applied to a
+        -- few plain Frames too; those still get the border half of the state.
+        if self.LockHighlight then
+            if hovered then self:LockHighlight() else self:UnlockHighlight() end
         end
-    end)
+        applyHoverState(self, hovered)
+    end
+
+    btn:SetScript("OnEnter", function(self) applyHoverState(self, true) end)
+    btn:SetScript("OnLeave", function(self) applyHoverState(self, false) end)
     return btn
 end
 
@@ -3846,7 +4057,7 @@ function GUI:CreateCloseButton(parent, opts)
     end)
     if opts.tooltip then
         btn:HookScript("OnEnter", function(self)
-            GUI:ShowTooltip(self, { title = opts.tooltip, anchor = "ANCHOR_TOP" })
+            GUI:ShowTooltip(self, { title = opts.tooltip})
         end)
         btn:HookScript("OnLeave", function() GUI:HideTooltip() end)
     end
@@ -4181,10 +4392,14 @@ function GUI:CreateDesignerPresetBar(parent, opts)
         if menu:IsShown() then menu:Hide() else BuildMenu(); menu:Show() end
     end)
 
-    -- SHARING MARKER. A preset can be pointed at by the other mode, a pinned set
-    -- or an auto layout, and editing it then changes every one of them — which
-    -- nothing on this bar used to say. The dropdown is a fixed 150px, so the
-    -- FACT rides as a glyph and the NAMES go in the tooltip, which is free.
+    -- SHARING MARKER. A template can be pointed at by the other mode, a pinned
+    -- set or an auto layout, and editing it then changes every one of them —
+    -- which nothing on this bar used to say. The dropdown is a fixed 150px, so
+    -- the FACT rides as a glyph and the NAMES go in the tooltip, which is free.
+    --
+    -- Deliberately NOT clickable. Splitting a shared template off for this mode
+    -- is exactly what Duplicate does, two buttons to the right, and Duplicate
+    -- also lets you name the copy.
     local shareIcon = ddBtn:CreateTexture(nil, "OVERLAY")
     shareIcon:SetSize(12, 12)
     shareIcon:SetPoint("RIGHT", arrow, "LEFT", -3, 0)
@@ -4202,20 +4417,25 @@ function GUI:CreateDesignerPresetBar(parent, opts)
         return (DF.ListDesignerPresetUsers and DF:ListDesignerPresetUsers(kind, CurrentName(), getMode())) or {}
     end
 
-    -- What a preset IS isn't guessable from a dropdown of names, and the
-    -- consumers (party/raid, auto layouts, pinned sets) are spread across three
-    -- other pages. Explained here once, for both designers.
+    -- The consumers (Party/Raid, Auto Layouts, Pinned Frames) are spread across
+    -- three other pages, so naming them is the one thing this tooltip has to do
+    -- — the bar itself already shows what a template is. "can" holds for all
+    -- four: Auto Layouts and Pinned Frames may inherit their mode's instead
+    -- (a nil ref), and Party/Raid resolve to a default when nothing is set.
+    -- Names match their page titles so they are findable.
     ddBtn:SetScript("OnEnter", function(self)
         local lines = {
-            L["A template is a saved designer setup, kept under a name."],
-            L["Party and Raid each pick one, so they can share a setup or use different ones."],
-            L["Auto layouts and pinned frame sets can pick their own, or inherit the one their mode is using."],
+            L["Templates can be used by Party, Raid, Auto Layouts and Pinned Frames."],
         }
         local shared = SharedWith()
         if #shared > 0 then
             lines[#lines + 1] = " "
-            lines[#lines + 1] = { text = format(L["Shared with: %s"], table.concat(shared, ", ")), accent = true }
-            lines[#lines + 1] = L["Editing this template changes all of them."]
+            lines[#lines + 1] = { text = format(L["Also used by: %s"], table.concat(shared, ", ")), accent = true }
+            -- "there" points back at the list above, so the consequence needs no
+            -- nouns of its own. It has to be said: a shared template's edits
+            -- reach a screen you are not looking at, and naming the users is
+            -- only the fact, not the warning.
+            lines[#lines + 1] = L["Edits apply there too."]
         end
         GUI:ShowTooltip(self, { title = L["Templates"], lines = lines })
     end)
@@ -4253,7 +4473,7 @@ function GUI:CreateDesignerPresetBar(parent, opts)
                 PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
             end)
             b:HookScript("OnEnter", function(self)
-                GUI:ShowTooltip(self, { title = labelText, anchor = "ANCHOR_TOP" })
+                GUI:ShowTooltip(self, { title = labelText})
             end)
             b:HookScript("OnLeave", function() GUI:HideTooltip() end)
             return b
@@ -4336,12 +4556,13 @@ function GUI:CreateDesignerPresetBar(parent, opts)
     end
 
     bar:Refresh()
-    -- The sharing glyph reflects the OTHER mode's ref, which Copy / Sync / a
-    -- split all change without changing THIS mode's — and both designer pages
-    -- early-return their rebuild when their own preset is unchanged, so the
-    -- glyph would sit stale. Register the live bar so the shared page refresh
-    -- can reach it. One slot per kind: a rebuilt page overwrites its own entry,
-    -- and a torn-down bar is hidden, so nothing accumulates.
+    -- The sharing glyph reflects OTHER refs (the other mode, a pinned set, an
+    -- auto layout), which can change without changing THIS mode's — and both
+    -- designer pages early-return their rebuild when their own preset is
+    -- unchanged, so the glyph would sit stale. Register the live bar so the
+    -- shared page refresh can reach it. One slot per kind: a rebuilt page
+    -- overwrites its own entry, and a torn-down bar is hidden, so nothing
+    -- accumulates.
     GUI._designerPresetBars = GUI._designerPresetBars or {}
     GUI._designerPresetBars[kind] = bar
     return bar
@@ -4351,86 +4572,6 @@ function GUI:RefreshDesignerPresetBars()
     for _, bar in pairs(GUI._designerPresetBars or {}) do
         if bar.Refresh and bar:IsShown() then bar:Refresh() end
     end
-end
-
--- Copy/Sync hooks for the two designer pages (see CreateCopyButton's `hooks`).
---
--- Their "section" is not a bag of settings — the migration moved the configs
--- into the preset library and strips the inline table on every load, so the ONE
--- key Copy/Sync move is the preset NAME. That makes both buttons share a preset
--- rather than duplicate one, which the generic wording does not say, and it made
--- un-syncing a no-op: the other mode stayed on your preset with nothing to
--- signal it. These hooks say what actually happens, and give un-sync a way out
--- that is purely additive — never a revert, never an overwrite.
-function GUI:DesignerCopyHooks(kind)
-    local sectionLabel = (kind == "aura") and L["Aura Designer"] or L["Text Designer"]
-    local function ModeLabel(mode) return (mode == "raid") and L["Raid"] or L["Party"] end
-    local function Other(mode) return (mode == "party") and "raid" or "party" end
-    local function NameFor(mode) return DF:GetModeDesignerPresetName(kind, mode) end
-
-    return {
-        copyLine = function(src, dest)
-            return format(L["Points %s at the template %s is using, so both share one setup."], dest, src)
-        end,
-
-        copyMessage = function(mode, dest)
-            return format(
-                L["Use the template \"%s\" for %s as well?\n\nThis shares one setup rather than copying it — editing either mode then changes both. %s's current template \"%s\" stays in the list."],
-                NameFor(mode), dest, dest, NameFor(Other(mode)))
-        end,
-
-        syncMessage = function(mode, dest)
-            local cur, destName = NameFor(mode), NameFor(Other(mode))
-            if destName == cur then
-                -- Already sharing by hand: syncing adds the running link, not the sharing.
-                return format(
-                    L["Keep %s and %s on the template \"%s\", and keep the choice in step?\n\nThey already share it, so nothing changes on screen."],
-                    ModeLabel(mode), dest, cur)
-            end
-            return format(
-                L["Use the template \"%s\" for %s as well, and keep the choice in step?\n\nEditing either mode then changes both. %s's current template \"%s\" stays in the list and is not deleted."],
-                cur, dest, dest, destName)
-        end,
-
-        unsyncLine = function()
-            return L["Party & Raid are keeping their template choice in step.\nClick to stop, and optionally give each its own copy."]
-        end,
-
-        onUnsync = function(mode, doUnsync)
-            -- Nothing to split when the two modes are already on different
-            -- presets (someone changed a dropdown by hand) — plain unlink.
-            local cur = NameFor(mode)
-            if NameFor(Other(mode)) ~= cur then
-                doUnsync()
-                return
-            end
-            -- The copy always goes to RAID, whichever tab you are standing on.
-            -- It is byte-identical to the original, so which mode "moves" is
-            -- purely cosmetic — but the copy gets named after its mode, and
-            -- "Raid" is the only naming that reads right. Party is the base mode
-            -- everywhere else in the addon (DefaultPresetNameForMode included).
-            DF:ShowPopupAlert({
-                title = format(L["Stop syncing: %s"], sectionLabel),
-                -- Three buttons at 150 need 466px; the alert default is 440.
-                width = 500,
-                buttonWidth = 150,
-                message = format(
-                    L["%s and %s are both using the template \"%s\".\n\nGive %s its own copy so the two can differ from here? The copy starts out identical, so nothing changes on screen and nothing is deleted or overwritten."],
-                    L["Party"], L["Raid"], cur, L["Raid"]),
-                buttons = {
-                    {
-                        label = format(L["Give %s a Copy"], L["Raid"]),
-                        onClick = function()
-                            if DF.SplitDesignerPreset then DF:SplitDesignerPreset(kind, "raid") end
-                            doUnsync()
-                        end,
-                    },
-                    { label = L["Stop Syncing Only"], onClick = doUnsync },
-                    { label = L["Cancel"] },
-                },
-            })
-        end,
-    }
 end
 
 -- Creates a button with an icon and text
@@ -5164,14 +5305,11 @@ function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, 
         end
     end
 
-    -- Tooltip support: show container.tooltip on hover
-    container:EnableMouse(true)
-    container:SetScript("OnEnter", function(self)
-        if self.tooltip then
-            GUI:ShowTooltip(self, { title = label, anchor = "ANCHOR_CURSOR", lines = { self.tooltip } })
-        end
-    end)
-    container:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    -- Tooltip: shared attach on the LABEL only (see GUI:AttachTooltip). The
+    -- earlier hit-rect arithmetic here is gone with it — the hit frame is anchored
+    -- to the FontString, so a label overflowing the fixed 220 container is covered
+    -- for free rather than by widening the container's hit rect to match.
+    GUI:AttachTooltip(container, label, txt)
 
     UpdateState()
     
@@ -5366,7 +5504,7 @@ function GUI:CreateDebugCategoryRow(parent, categoryKey, description, width)
     end)
     row:SetScript("OnLeave", function(self)
         self.hoverBg:Hide()
-        GameTooltip:Hide()
+        GUI:HideTooltip()
     end)
 
     row:SetScript("OnShow", row.RefreshState)
@@ -5441,6 +5579,12 @@ function GUI:CreateInput(parent, label, width)
     end
 
     frame.EditBox = editbox
+    -- Tooltip: shared attach on the LABEL only. This factory carried no tooltip
+    -- support at all, so a caller that set .tooltip on it got silence —
+    -- Options.lua's custom range-spell input did exactly that, and its
+    -- explanation never appeared. Keeping it off the edit box also means it can't
+    -- cover what you are typing.
+    GUI:AttachTooltip(frame, label, lbl)
     return frame
 end
 
@@ -6046,20 +6190,11 @@ function GUI:CreateSlider(parent, label, minVal, maxVal, step, dbTable, dbKey, c
     -- Expose label for dynamic updates
     container.label = lbl
 
-    -- Optional hover tooltip. Generic: any caller can set .tooltipText (+ optional
-    -- .tooltipSubText) on the returned container and it shows on hover, matching the
-    -- convention CreateOverrideMarker already uses. Hooked on the slider rather than
-    -- the container so the hit area is the control itself, and the slider had no
-    -- OnEnter/OnLeave of its own, so nothing is being displaced.
-    slider:SetScript("OnEnter", function()
-        if container.tooltipText then
-            GUI:ShowTooltip(slider, {
-                title = container.tooltipText,
-                lines = container.tooltipSubText and { container.tooltipSubText } or nil,
-            })
-        end
-    end)
-    slider:SetScript("OnLeave", function() GUI:HideTooltip() end)
+    -- Tooltip: shared attach on the LABEL only (see GUI:AttachTooltip). Keeping it
+    -- off the bar matters most here — a tooltip over a slider you are dragging is
+    -- the worst case of the problem. Both .tooltip (title from the label) and the
+    -- legacy .tooltipText/.tooltipSubText pair are honoured.
+    GUI:AttachTooltip(container, label, lbl)
 
     return container
 end
@@ -6291,7 +6426,12 @@ function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback
     btn:SetScript("OnLeave", function(self)
         self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
     end)
-    
+
+    -- Tooltip: shared attach on the LABEL only. This factory carried none, across
+    -- 87 colour pickers. The btn keeps its own hover scripts untouched — the hit
+    -- frame is over the text, not the swatch.
+    GUI:AttachTooltip(container, label, txt)
+
     btn:SetScript("OnClick", function()
         if not dbTable then return end
         local c = dbTable[dbKey]
@@ -6933,18 +7073,10 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
         end
     end
     
-    -- Tooltip support: show container.tooltip on hover (assign after creation,
-    -- same idiom as CreateCheckbox). Hover on the BUTTON so the tooltip also
-    -- shows when the label area is covered by other widgets; HookScript keeps
-    -- the button's own handlers (menu open) intact.
-    btn:HookScript("OnEnter", function()
-        if container.tooltip then
-            GUI:ShowTooltip(container, { title = label, anchor = "ANCHOR_CURSOR", lines = { container.tooltip } })
-        end
-    end)
-    btn:HookScript("OnLeave", function()
-        if container.tooltip then GUI:HideTooltip() end
-    end)
+    -- Tooltip: shared attach on the LABEL only (see GUI:AttachTooltip). The label
+    -- sits at the container's TOPLEFT, above the opener, so it is well clear of
+    -- the menu you are about to click.
+    GUI:AttachTooltip(container, label, lbl)
 
     -- SEARCH: Register this setting
     if DF.Search and dbKey and type(dbKey) == "string" then
@@ -7008,10 +7140,18 @@ end
 --   lightColors  = callback for live colour-picker preview
 --   refreshStates = optional hook fired when Show/Gradient/Shadow toggles
 --                   change visibility of other widgets
+--   disableWhen  = optional predicate fn(db) → bool. When true, EVERY widget
+--                  (including the Show toggle itself) GREYS OUT in place. This
+--                  is what a consumer whose border sits under a feature toggle
+--                  wants — the addon-wide rule is that a deactivated control
+--                  greys where it is, so the page doesn't reflow and you can
+--                  still see what turning the feature on would give you.
 --   hideWhen     = optional predicate fn(db) → bool. When true, EVERY widget
---                  (including the Show toggle itself) hides — used by
---                  consumers whose border section sits inside a parent panel
---                  with its own enable toggle (e.g. defensiveIconEnabled).
+--                  (including the Show toggle itself) HIDES. Reserve this for a
+--                  gate that changes WHAT the page offers — a variant switch
+--                  like Pinned Frames' per-set border override, where the
+--                  controls belong to a mode you are not in. A plain on/off
+--                  feature toggle is disableWhen, not this.
 --   sizeMin / sizeMax / sizeStep      = slider range overrides
 --   offsetMin / offsetMax / offsetStep
 -- }
@@ -7163,21 +7303,28 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
         0, 4, 0.05, dbTable, aKey("Frequency"),
         fullUpdate, lightUpdate, true), 55)
     w.animationFrequency.hideOn = hideUnless(hasFrequency)
+    -- ⚠ This slider genuinely means different things per effect (see the comment
+    -- above), which is exactly why it needs saying out loud — nobody discovers
+    -- "0 = hold still" by dragging.
+    w.animationFrequency.tooltip = L["How fast the effect runs. On DF Dash this is how quickly the dashes march around the edge, and 0 holds them still. On the others it is the pulse rate, where 0 means the effect's own default speed."]
 
     w.animationParticles = group:AddWidget(GUI:CreateSlider(parent, L["Animation Particles"],
         1, 16, 1, dbTable, aKey("Particles"),
         fullUpdate, lightUpdate, true), 55)
     w.animationParticles.hideOn = hideUnless(hasParticles)
+    w.animationParticles.tooltip = L["How many separate lights travel around the border. More reads as busier and costs a little more to draw."]
 
     w.animationLength = group:AddWidget(GUI:CreateSlider(parent, L["Animation Length"],
         1, 30, 1, dbTable, aKey("Length"),
         fullUpdate, lightUpdate, true), 55)
     w.animationLength.hideOn = hideUnless(hasLength)
+    w.animationLength.tooltip = L["How long each moving segment is. Short values read as darting sparks, long ones as a sweeping tail."]
 
     w.animationThickness = group:AddWidget(GUI:CreateSlider(parent, L["Animation Thickness"],
         1, 12, 1, dbTable, aKey("Thickness"),
         fullUpdate, lightUpdate, true), 55)
     w.animationThickness.hideOn = hideUnless(hasThickness)
+    w.animationThickness.tooltip = L["How heavy the moving effect is. Separate from Border Thickness — the animation draws on its own layer, so it can be thicker or thinner than the border underneath."]
 
     w.animationScale = group:AddWidget(GUI:CreateSlider(parent, L["Animation Scale"],
         0.5, 3, 0.05, dbTable, aKey("Scale"),
@@ -7188,6 +7335,7 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
         -50, 50, 1, dbTable, aKey("Inset"),
         fullUpdate, lightUpdate, true), 55)
     w.animationInset.hideOn = hideUnless(hasPositioning)
+    w.animationInset.tooltip = L["Moves the effect in or out from the edge, independently of the border. Push it outward to make a glow spill past the frame."]
 
     w.animationOffsetX = group:AddWidget(GUI:CreateSlider(parent, L["Animation Offset X"],
         -50, 50, 1, dbTable, aKey("OffsetX"),
@@ -7203,11 +7351,13 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
     w.animationHideIntro = group:AddWidget(GUI:CreateCheckbox(parent, L["Hide Intro Flash"],
         dbTable, aKey("ProcStart"), fullUpdate), 30)
     w.animationHideIntro.hideOn = hideUnless({ DF_FLASH = 1, DF_PROC = 1 })
+    w.animationHideIntro.tooltip = L["These effects open with a one-off burst before settling into their loop. Turn this on to skip the burst and go straight to the loop."]
 
     w.animationCornerLength = group:AddWidget(GUI:CreateSlider(parent, L["Corner Length"],
         2, 40, 1, dbTable, aKey("CornerLength"),
         fullUpdate, lightUpdate, true), 55)
     w.animationCornerLength.hideOn = hideUnless(cornersOnly)
+    w.animationCornerLength.tooltip = L["How far the effect runs along each edge from the corner before stopping. Small values leave four short brackets instead of a full outline."]
 
     return w
 end
@@ -7222,6 +7372,7 @@ function GUI:CreateBorderControls(group, dbTable, prefix, opts)
     local lightColors  = opts.lightColors
     local refreshStates = opts.refreshStates
     local hideWhen     = opts.hideWhen
+    local disableWhen  = opts.disableWhen
 
     local sizeMin, sizeMax, sizeStep = opts.sizeMin or 0, opts.sizeMax or 8, opts.sizeStep or 1
     local offMin, offMax, offStep    = opts.offsetMin or -50, opts.offsetMax or 50, opts.offsetStep or 1
@@ -7364,6 +7515,7 @@ function GUI:CreateBorderControls(group, dbTable, prefix, opts)
                 fullUpdate()
             end), 55)
         w.colorSource.hideOn = function() return hideOff() or isGradient() end
+        w.colorSource.tooltip = L["Where the border colour comes from. Static uses the colour below; Class and Role read it from the unit, so the border tells you who you are looking at without reading the name."]
     end
 
     -- Static colour picker — only visible when source is STATIC (or when the
@@ -7421,6 +7573,10 @@ function GUI:CreateBorderControls(group, dbTable, prefix, opts)
         w.inset = group:AddWidget(GUI:CreateSlider(parent, L["Border Inset"], -20, 20, 1,
             dbTable, key("BorderInset"), fullUpdate, lightUpdate, true), 55)
         w.inset.hideOn = hideOff
+        -- Thickness / Inset / Offset are three similar-sounding sliders that do
+        -- different things; the tooltip lives here because Inset is the one
+        -- nobody guesses.
+        w.inset.tooltip = L["Pulls the border inward (positive) or pushes it outward (negative) from the edge. Thickness is how heavy the line is, Inset is how far in it sits, Offset slides the whole border sideways."]
     end
 
     if include.offset then
@@ -7430,6 +7586,13 @@ function GUI:CreateBorderControls(group, dbTable, prefix, opts)
         w.offsetY = group:AddWidget(GUI:CreateSlider(parent, L["Border Offset Y"], offMin, offMax, offStep,
             dbTable, key("BorderOffsetY"), fullUpdate, lightUpdate, true), 55)
         w.offsetY.hideOn = hideOff
+        -- No tooltip on Offset X/Y, deliberately, and the same goes for every
+        -- other Offset slider in the addon (~60 of them): an offset is a well
+        -- understood control and a tooltip restating it is noise. Inset is the
+        -- one that needs explaining, so the Thickness / Inset / Offset
+        -- distinction is spelled out THERE, once. Krathe's call, 2026-07-27 —
+        -- these two briefly had tooltips and Border Shadow's offsets did not,
+        -- which is the inconsistency that prompted it.
     end
 
     if include.blendMode then
@@ -7437,6 +7600,7 @@ function GUI:CreateBorderControls(group, dbTable, prefix, opts)
             { BLEND = L["Blend"], ADD = L["Add"], MOD = L["Modulate"], DISABLE = L["Disable"] },
             dbTable, key("BorderBlendMode"), fullUpdate), 55)
         w.blendMode.hideOn = hideOff
+        w.blendMode.tooltip = L["How the border colour mixes with whatever is behind it. Blend is normal. Add brightens and is what makes a colour glow. Modulate darkens. Disable ignores opacity entirely and draws the colour flat."]
     end
 
     if include.shadow then
@@ -7520,16 +7684,25 @@ function GUI:CreateBorderControls(group, dbTable, prefix, opts)
         w.colorByType.hideOn = hideOff
     end
 
-    -- Grey (don't hide) every border control when "Show Border" is OFF, so the panel
-    -- still previews the controls. Composes with each control's own disableOn (e.g.
-    -- the shadow sub-controls) and leaves the variant/parent hideOn untouched. Skips
-    -- the "Show Border" checkbox itself so it stays clickable. RefreshChildStates
-    -- applies disableOn to group children, and CreateCheckbox auto-refreshes on
-    -- toggle, so the grey updates live.
+    -- Two independent greys, both composed on top of whatever disableOn a control
+    -- already carries (e.g. the shadow sub-controls), and both leaving the
+    -- variant hideOn untouched:
+    --   disableWhen — the CONSUMER's gate: the feature this border belongs to is
+    --     switched off. Applies to EVERY widget including the Show Border
+    --     checkbox, since with the feature off there is nothing for it to show.
+    --   borderOff   — Show Border itself is off. Applies to everything EXCEPT the
+    --     Show Border checkbox, which has to stay clickable to turn it back on.
+    -- RefreshChildStates applies disableOn to group children, and CreateCheckbox
+    -- auto-refreshes on toggle, so both greys update live.
     for k, widget in pairs(w) do
-        if k ~= "show" and type(widget) == "table" and widget.SetEnabled then
+        if type(widget) == "table" and widget.SetEnabled then
             local prev = widget.disableOn
-            widget.disableOn = function(d) return borderOff() or (prev and prev(d)) end
+            local isShow = (k == "show")
+            widget.disableOn = function(d)
+                if disableWhen and disableWhen(dbTable) then return true end
+                if not isShow and borderOff() then return true end
+                return (prev and prev(d)) or false
+            end
         end
     end
 
@@ -7600,6 +7773,9 @@ function GUI:CreateTextControls(group, dbTable, prefix, opts)
             TOPLEFT = L["Top Left"], TOPRIGHT = L["Top Right"], BOTTOMLEFT = L["Bottom Left"], BOTTOMRIGHT = L["Bottom Right"],
         }
         widgets.anchor = gate(group:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], anchorOptions, dbTable, key("Anchor"), onChange), 55))
+        -- Anchor vs Justify is the pair people get wrong: one places the text,
+        -- the other arranges it within its own box. Both say so, from their side.
+        widgets.anchor.tooltip = L["Which part of the element the text is pinned to. Offset X and Y then nudge it from there."]
     end
 
     if include.offsets ~= false then
@@ -7615,7 +7791,9 @@ function GUI:CreateTextControls(group, dbTable, prefix, opts)
         local justifyHOptions = { [""] = L["Default"], LEFT = L["Left"], CENTER = L["Center"], RIGHT = L["Right"] }
         local justifyVOptions = { [""] = L["Default"], TOP = L["Top"], MIDDLE = L["Middle"], BOTTOM = L["Bottom"] }
         widgets.justifyH = gate(group:AddWidget(GUI:CreateDropdown(parent, L["Justify H"], justifyHOptions, dbTable, key("JustifyH"), onChange), 55))
+        widgets.justifyH.tooltip = L["How the text sits inside its own box, once Anchor has decided where that box goes. Only visible on text wide enough to have slack — Anchor is what moves it around the element."]
         widgets.justifyV = gate(group:AddWidget(GUI:CreateDropdown(parent, L["Justify V"], justifyVOptions, dbTable, key("JustifyV"), onChange), 55))
+        widgets.justifyV.tooltip = L["How the text sits inside its own box, once Anchor has decided where that box goes. Only visible on text wide enough to have slack — Anchor is what moves it around the element."]
     end
 
     return widgets
@@ -7810,6 +7988,7 @@ function GUI:CreateExpirationControls(group, dbTable, opts)
     -- ── Placement: Inset (a frame/tint's fit off the icon edge), Anchor (Text/Glyph), Offsets.
     w.inset = group:AddWidget(GUI:CreateSlider(parent, L["Inset"], -10, 10, 1, dbTable, "expiryAlertBorderInset"), 54)
     w.inset.hideOn = hideNonFrame
+    w.inset.tooltip = L["How far inside the icon edge the reveal sits. Negative values push it outward, so it rings the icon rather than sitting on it."]
 
     -- Anchor: Text/Glyph only — a frame/tint always centres (the engine forces CENTER), so
     -- hide it in those modes rather than let a stale anchor de-centre the overlay.
@@ -8188,8 +8367,11 @@ function GUI:CreateGrowthControl(parent, db, dbKey, callback)
             end
         end)
 
-        -- Expose btn for external enable/disable
+        -- Expose btn for external enable/disable, and the label so the tooltip
+        -- attach at the bottom of this factory has a real region to sit on — lbl
+        -- is local to THIS builder, so reaching for it out there is a nil global.
         frame.btn = btn
+        frame.Label = lbl
         frame:Rebuild(options)
         return frame
     end
@@ -8240,6 +8422,16 @@ function GUI:CreateGrowthControl(parent, db, dbKey, callback)
         wrapDD:Rebuild(WRAP_OPTIONS[curOrientation])
         dirDD:Rebuild(DIR_OPTIONS[curOrientation])
     end
+
+    -- Tooltip: shared attach. This widget has no label of its own — it is three
+    -- stacked mini dropdowns (Orientation / Wrap / Grow), each built by the local
+    -- BuildMiniDropdown rather than CreateDropdown, so none of them carries an
+    -- attach either. The top row's label stands in for the group.
+    --
+    -- ⚠ NOT `lbl`: that name IS in this file, but it is local to
+    -- BuildMiniDropdown, so reading it here is a nil global — legal Lua, parses
+    -- clean, and would have silently left this control with no tooltip at all.
+    GUI:AttachTooltip(container, L["Growth Direction"], orientDD.Label)
 
     return container
 end
@@ -8551,7 +8743,11 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
         local currentOptions = customOptions or DF:GetTextureList()
         container.searchEntry = DF.Search:RegisterDropdown(label, dbKey, currentOptions, nil, callback)
     end
-    
+
+    -- Tooltip: shared attach on the LABEL only. Hand-rolled preview dropdown, so
+    -- it never picked up CreateDropdown's tooltip support.
+    GUI:AttachTooltip(container, label or L["Texture"], lbl)
+
     return container
 end
 
@@ -8864,7 +9060,11 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback, inherit
     if DF.Search and dbKey and type(dbKey) == "string" then
         container.searchEntry = DF.Search:RegisterDropdown(label, dbKey, DF:GetFontList(), nil, callback)
     end
-    
+
+    -- Tooltip: shared attach on the LABEL only. Hand-rolled preview dropdown, so
+    -- it never picked up CreateDropdown's tooltip support.
+    GUI:AttachTooltip(container, label or L["Font"], lbl)
+
     return container
 end
 
@@ -11331,7 +11531,7 @@ function DF:CreateGUI()
             })
         end
     end)
-    btnLock:HookScript("OnLeave", function() GameTooltip:Hide() end)
+    btnLock:HookScript("OnLeave", function() GUI:HideTooltip() end)
 
     btnLock:SetScript("OnClick", function()
         if btnLock.dfDisabled then
@@ -12233,7 +12433,12 @@ function DF:CreateGUI()
         return cat
     end
     
-    local function CreateSubTab(categoryName, name, label)
+    -- `hidden`: build and register the page exactly as normal, but keep its row
+    -- OUT of the sidebar. For a page that is DEPRECATED but not yet deleted --
+    -- the code stays whole and greppable, GUI.Pages/GUI.Tabs still resolve so
+    -- nothing that walks them has to special-case it, and deleting one word at
+    -- the call site puts the page back. See DEPRECATED-TARGETED-SPELLS.
+    local function CreateSubTab(categoryName, name, label, hidden)
         local cat = GUI.Categories[categoryName]
         if not cat then return end
         
@@ -12324,8 +12529,15 @@ function DF:CreateGUI()
         
         GUI.Tabs[name] = btn
         GUI.Pages[name] = page
-        table.insert(cat.children, btn)
-        
+        if hidden then
+            -- Staying out of cat.children is what actually hides it: UpdateTabLayout
+            -- only ever anchors and sizes that list, so this row is never given a
+            -- position. Hidden explicitly too, so nothing rests on that detail.
+            btn:Hide()
+        else
+            table.insert(cat.children, btn)
+        end
+
         return page
     end
     

@@ -4872,9 +4872,13 @@ function DF:CreateTestPanel()
     end)
     -- The (new fingerprint) Targeted Spells icons + the Personal Targeted display.
     -- UpdateAllTestTargetedSpell drives BOTH previews, so both share it.
+    -- ⚰ DEPRECATED-TARGETED-SPELLS: the jump-to-page link is gone with the
+    -- sidebar row (it would have opened a page you can't navigate back to). The
+    -- checkbox stays because it drives the Personal Targeted preview too — it
+    -- goes when the feature does.
     panel.showTargetedSpellCheck = secIndicators:AddCheckbox(L["Targeted Spells"], "testShowTargetedSpell", function()
         if DF.testMode or DF.raidTestMode then DF:UpdateAllTestTargetedSpell() end
-    end, "indicators_targetedspells")
+    end)
     panel.showPersonalTargetedCheck = secIndicators:AddCheckbox(L["Personal Targeted"], "testShowPersonalTargeted", function()
         if DF.testMode or DF.raidTestMode then DF:UpdateAllTestTargetedSpell() end
     end, "indicators_personal_targeted")

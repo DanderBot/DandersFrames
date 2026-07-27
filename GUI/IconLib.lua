@@ -132,7 +132,7 @@ local function CreateIconPreview()
         btn:SetScript("OnEnter", function(self)
             DF.GUI:ShowTooltip(self, { title = col.name })
         end)
-        btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        btn:SetScript("OnLeave", function() DF.GUI:HideTooltip() end)
         
         if i == 1 then
             btn:SetBackdropBorderColor(1, 1, 1, 1)
@@ -194,7 +194,7 @@ local function CreateIconPreview()
         end)
         container:SetScript("OnLeave", function(self)
             self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-            GameTooltip:Hide()
+            DF.GUI:HideTooltip()
         end)
         container:SetScript("OnClick", function()
             local path = ICONS_PATH .. iconName

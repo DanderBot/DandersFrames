@@ -774,7 +774,7 @@ local function CreateOptionRowFrame(parent, optIndex, step, onUpdate)
     end)
     row.GearBtn:SetScript("OnLeave", function(self)
         ApplyBuilderBackdrop(self, BC.element, BC.border, 1)
-        GameTooltip:Hide()
+        DF.GUI:HideTooltip()
     end)
 
     -- Tooltip for branch
@@ -792,7 +792,7 @@ local function CreateOptionRowFrame(parent, optIndex, step, onUpdate)
     end)
     row.BranchBtn:SetScript("OnLeave", function(self)
         ApplyBuilderBackdrop(self, BC.element, BC.border, 1)
-        GameTooltip:Hide()
+        DF.GUI:HideTooltip()
     end)
 
     row:Show()

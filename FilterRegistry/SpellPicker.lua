@@ -48,11 +48,9 @@ local function ShowSpellTooltip(row, spellID, fallbackName, isCurrent)
     if type(name) ~= "string" or name == "" then name = fallbackName end
     DF.GUI:ShowGameTooltip(row, {
         spellID   = spellID,
-        -- ANCHOR_CURSOR, not ANCHOR_RIGHT: the owner is a full-width list row, so
-        -- anchoring to its right edge threw the tooltip out to the far side of the
-        -- panel, nowhere near what you were pointing at. The owner stays the ROW so
-        -- IsOwned / IsMouseOver / isCurrent keep working against row identity.
-        anchor        = "ANCHOR_CURSOR",
+        -- No anchor: cursor is the shared default now, which is what this call
+        -- always wanted. The owner stays the ROW so IsOwned / IsMouseOver /
+        -- isCurrent keep working against row identity.
         fallbackTitle = name,
         isCurrent     = isCurrent,
     })

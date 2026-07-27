@@ -280,7 +280,7 @@ function CC:CreateBindingRow(parent, binding, index)
     row:SetScript("OnLeave", function(self)
         self:SetBackdropColor(C.element.r, C.element.g, C.element.b, 0.8)
         self:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.5)
-        GameTooltip:Hide()
+        DF.GUI:HideTooltip()
     end)
     
     -- Click handler - open edit panel
@@ -1925,7 +1925,7 @@ function CC:CreateSpellCell(parent, spellData, index)
     
     cell:SetScript("OnLeave", function(self)
         self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 0.8)
-        GameTooltip:Hide()
+        DF.GUI:HideTooltip()
     end)
     
     -- Click handlers
@@ -2864,7 +2864,7 @@ function CC:CreateItemCell(parent, itemData, index)
         if #(self.existingBindings or {}) == 0 then
             self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
         end
-        GameTooltip:Hide()
+        DF.GUI:HideTooltip()
     end)
     
     -- Click to bind
@@ -2961,7 +2961,7 @@ function CC:CreateItemListRow(parent, itemData, index)
         if #(self.existingBindings or {}) == 0 then
             self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
         end
-        GameTooltip:Hide()
+        DF.GUI:HideTooltip()
     end)
     
     -- Click to bind
@@ -3073,7 +3073,7 @@ function CC:CreateConsumableCell(parent, itemData, index)
         if #(self.existingBindings or {}) == 0 then
             self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
         end
-        GameTooltip:Hide()
+        DF.GUI:HideTooltip()
     end)
     
     -- Click to bind
@@ -3170,7 +3170,7 @@ function CC:CreateConsumableListRow(parent, itemData, index)
     end)
     row:SetScript("OnLeave", function(self)
         self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-        GameTooltip:Hide()
+        DF.GUI:HideTooltip()
     end)
     
     -- Click to bind
@@ -3353,7 +3353,7 @@ function CC:CreateMacroCell(parent, macroData, index)
 
     cell:SetScript("OnLeave", function(self)
         self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-        GameTooltip:Hide()
+        DF.GUI:HideTooltip()
     end)
     
     cell:SetScript("OnClick", function(self, button)
@@ -3455,7 +3455,7 @@ function CC:CreateMacroListRow(parent, macroData, index)
 
     row:SetScript("OnLeave", function(self)
         self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-        GameTooltip:Hide()
+        DF.GUI:HideTooltip()
     end)
     
     row:SetScript("OnClick", function(self, button)
@@ -3608,7 +3608,7 @@ function CC:CreateSpellListRow(parent, spellData, index, isSpecialAction, action
         else
             self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 0.8)
         end
-        GameTooltip:Hide()
+        DF.GUI:HideTooltip()
     end)
     
     -- Click handler
@@ -3705,7 +3705,7 @@ function CC:CreateSpecialActionCell(parent, actionType, label, iconPath)
     
     cell:SetScript("OnLeave", function(self)
         self:SetBackdropColor(specialColor.r * 0.15, specialColor.g * 0.15, specialColor.b * 0.15, 0.8)
-        GameTooltip:Hide()
+        DF.GUI:HideTooltip()
     end)
     
     -- Click handlers

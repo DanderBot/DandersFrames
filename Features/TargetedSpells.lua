@@ -1,5 +1,66 @@
 local addonName, DF = ...
 
+-- ############################################################
+-- ⚰ DEPRECATED-TARGETED-SPELLS — QUEUED FOR DELETION
+-- ############################################################
+-- Grep DEPRECATED-TARGETED-SPELLS to find every site. THIS comment is the
+-- canonical one; the others are signposts back to here.
+--
+-- WHAT IS DOOMED: the GROUP-FRAME (on-frame) targeted-spell icons — the
+-- `targetedSpell*` saved keys, the Indicators > Targeted Spells page, and the
+-- icon pool / cast tracking / roster-fingerprint machinery that feeds them.
+--
+-- WHAT IS NOT: the PERSONAL display (`personalTargetedSpell*`, Indicators >
+-- Personal Targeted) and the Targeted List. Both are live, both are supported,
+-- and BOTH SHARE THIS FILE — the personal path compares against "player", which
+-- is in UnitIsUnit's always-allowed list, so Blizzard's change never touched it.
+-- ⚠ Do not delete this file. Deleting the feature means deleting the group half
+-- OUT of it.
+--
+-- WHY: Blizzard's 2026-04-07 UnitIsUnit hotfix (detailed in the API
+-- COMPATIBILITY block below) removed the only way to answer "is this enemy
+-- casting at THIS group member". The feature has been force-disabled
+-- unconditionally at load ever since — every setting on its page configured
+-- something that could not render.
+--
+-- STATUS 2026-07-27: page pulled from the sidebar; the code stays put. Two more
+-- PTR builds could still restore the API — unlikely, but cheap to wait for.
+-- REVERSE IT: delete the `true` 4th arg on the CreateSubTab call in
+-- Options\Options.lua, restore the three See Also links and the Core.lua wizard
+-- auto-fire (all marked), and re-check ForceDisableGroupTargetedSpellSettings.
+--
+-- DELETION CHECKLIST — everything that goes when the call is made:
+--   Features\TargetedSpells.lua   the group half of this file: activeCasters,
+--                                 the icon pool, PositionIcons,
+--                                 Show/HideTargetedSpellIcon, the roster
+--                                 fingerprint resolver, the cast/roster event
+--                                 handlers, the setup wizard.
+--                                 ⚠ NOT a contiguous block — the personal
+--                                 helpers (ShouldShowPersonalTargetedSpells,
+--                                 GetPersonalDB, the Show/Hide/Update Personal*
+--                                 functions) are interleaved with them, and the
+--                                 unit/content-type helpers near the top are
+--                                 shared by both. Cut by function, not by range.
+--   Options\Options.lua           the Indicators > Targeted Spells page,
+--                                 GUI.RefreshTargetedSpellsOverlay, the
+--                                 apiBlockedOverlay
+--   Config.lua                    the targetedSpell* defaults (party + raid)
+--   ExportCategories.lua          the targetedSpell export category
+--   TestMode\TestMode.lua         the on-frame test painter + its panel checkbox
+--                                 (⚠ shared with Personal Targeted — check
+--                                 UpdateAllTestTargetedSpell before cutting)
+--   Core.lua                      migrations + the wizard auto-fire (already out)
+--   Features\ElementAppearance.lua, Frames\Position.lua (mover),
+--   Frames\Headers.lua, Options\AutoProfiles.lua (override→page map),
+--   Profile.lua, Debug\Profiler.lua, Debug\PerformanceTest.lua
+--   Locales\enUS.lua              the page's strings, once nothing else uses them
+--   DandersFrames.toc             only if the file itself ever goes, which it
+--                                 does not — Personal Targeted lives here
+--
+-- ⚠ Saved profiles keep their targetedSpell* keys either way. Stripping them is
+-- a separate call (see the change-the-baseline rule) — do NOT fold it in.
+-- ############################################################
+
 -- ============================================================
 -- TARGETED SPELLS SYSTEM
 -- Shows incoming spell casts targeting party/raid members

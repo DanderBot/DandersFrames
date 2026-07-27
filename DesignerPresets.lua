@@ -767,27 +767,6 @@ function DF:ListDesignerPresetUsers(kind, name, excludeMode)
     return users
 end
 
--- Give `mode` its OWN copy of the preset it is currently sharing, and point it
--- at the copy. Purely additive: the shared preset is untouched, so the other
--- mode keeps rendering exactly what it rendered before, and this mode keeps the
--- look it had a moment ago rather than reverting to some older setup. Returns
--- the new preset's name, or nil if there was nothing to split.
-function DF:SplitDesignerPreset(kind, mode)
-    if not DESIGNER_KINDS[kind] then return nil end
-    -- Never while editing a raid auto-layout: the real raid table is the
-    -- layout's there, so a split would silently land on the layout instead of
-    -- the base raid (the same reason SyncLinkedSections bails).
-    local apu = DF.AutoProfilesUI
-    if apu and apu.IsEditing and apu:IsEditing() then return nil end
-    local current = DF:GetModeDesignerPresetName(kind, mode)
-    if #DF:ListDesignerPresetUsers(kind, current, mode) == 0 then return nil end
-    -- Base the copy's name on the mode, not the source: "Raid 2" reads as
-    -- raid's own setup where "Party copy" would not.
-    local newName = DF:DuplicateDesignerPreset(kind, current, DefaultPresetNameForMode(mode))
-    if newName then DF:SetModeDesignerPreset(kind, mode, newName) end
-    return newName
-end
-
 -- While editing a raid auto-layout: is the layout currently INHERITING the
 -- global designer preset? True when the layout has NO stored preset override —
 -- based on override presence, NOT name equality, so explicitly picking a preset

@@ -248,6 +248,10 @@ local function RefreshOverrideTabMap()
     -- Indicators (specific before generic)
     {"personalTargeted",    "indicators_personal_targeted", L["Personal Targeted"]},
     {"targetedList",        "indicators_targetedlist", L["Targeted List"]},
+    -- ⚰ DEPRECATED-TARGETED-SPELLS — kept on purpose for now: this row is what
+    -- labels an existing profile's stale targetedSpell* overrides. Dropping it
+    -- would leave those overrides unattributed rather than making them go away.
+    -- It goes when the keys do. See Features\TargetedSpells.lua.
     {"targetedSpell",       "indicators_targetedspells", L["Targeted Spells"]},
     {"roleIcon",            "indicators_icons",     L["Icons"]},
     {"leaderIcon",          "indicators_icons",     L["Icons"]},
@@ -821,6 +825,10 @@ function AutoProfilesUI:BuildPage(GUI, pageFrame, db, Add, AddSpace)
     
     -- Only show for Raid mode
     if GUI.SelectedMode ~= "raid" then
+        -- The disabled overlay survives page rebuilds (see the bottom of this
+        -- function), so a raid -> party switch has to put it away explicitly or
+        -- it hangs over the Raid-only message anchored to a discarded section.
+        if pageFrame.autoDisabledOverlay then pageFrame.autoDisabledOverlay:Hide() end
         Add(GUI:CreateHeader(pageFrame.child, L["Raid Auto Layouts"]), 40, "both")
         Add(GUI:CreateLabel(pageFrame.child,
             L["Auto Layouts is a Raid-only feature. Switch to Raid mode to configure automatic layout switching based on content type and group size."],
@@ -848,19 +856,20 @@ function AutoProfilesUI:BuildPage(GUI, pageFrame, db, Add, AddSpace)
 
     AddSpace(5, "both")
 
-    -- Grey-when-disabled. When "Enable Raid Auto-Switching Layouts" is OFF, the
-    -- page stays VISIBLE but dependent content greys in place. The toggle's
-    -- callback runs pageFrame:Refresh() (a full rebuild), so reading autoDb.enabled
-    -- at build time is self-refreshing — no disableOn/RefreshStates wiring needed
-    -- for these raw frames (they have no SetEnabled, so the page gate loop skips
-    -- them anyway).
+    -- When "Enable Raid Auto-Switching Layouts" is OFF the page stays VISIBLE,
+    -- but the layout MANAGEMENT sections are covered by the shared disabled
+    -- overlay (built at the bottom of this function) — the same treatment the
+    -- Aura and Text Designers get. The toggle's callback runs pageFrame:Refresh()
+    -- (a full rebuild), so reading autoDb.enabled at build time is
+    -- self-refreshing — no disableOn/RefreshStates wiring needed for these raw
+    -- frames (they have no SetEnabled, so the page gate loop skips them anyway).
     --
-    -- CONFIGURE-WHILE-OFF: the layout MANAGEMENT controls (the content-type
-    -- sections: add / edit / delete / rename / copy / range layouts) stay fully
-    -- interactive while off — users routinely build their layouts before switching
-    -- auto-switching on. Only the runtime auto-switch *behaviour* indicator (the
-    -- Current Status box) is greyed; the header and the "How it works"
-    -- documentation also stay full-colour/readable so the page is still usable.
+    -- ⚠ This REVERSES an earlier "configure-while-off" decision, which left add /
+    -- edit / delete / rename / copy fully live on the theory that people build
+    -- layouts before switching auto-switching on. In practice that read as though
+    -- the feature were already running: you could build a whole set of layouts
+    -- that would never fire, with nothing on the page saying so. Krathe called it
+    -- 2026-07-27. Turning it back on is the one line at the bottom.
     local autoOff = not autoDb.enabled
 
     -- =============================================
@@ -1096,11 +1105,48 @@ function AutoProfilesUI:BuildPage(GUI, pageFrame, db, Add, AddSpace)
     -- =============================================
     -- Content Type Sections (dynamic height via layoutHeight)
     -- =============================================
+    local firstSection
     for _, ct in ipairs(CONTENT_TYPES) do
         local section = self:CreateContentTypeSection(GUI, pageFrame, ct)
+        firstSection = firstSection or section
         -- Add section with its current height
         Add(section, section.totalHeight, "both")
         AddSpace(8, "both")
+    end
+
+    -- =============================================
+    -- Disabled overlay (see the note by `autoOff` above)
+    -- =============================================
+    -- Covers the layout sections ONLY. Everything above it — the enable
+    -- checkbox, the Current Status box, the "How it works" documentation — stays
+    -- readable, because the person looking at this scrim is exactly the one who
+    -- still needs to read it. That is the one deliberate difference from the
+    -- Designers, which have no explaining content to preserve.
+    --
+    -- Kept on pageFrame and re-anchored rather than rebuilt: it is NOT in
+    -- self.children (the flow must not reserve height for it), so a page rebuild
+    -- would otherwise leave the old one behind and stack a new one on top.
+    -- firstSection is a fresh frame every build, hence the re-anchor.
+    if firstSection then
+        if not pageFrame.autoDisabledOverlay then
+            pageFrame.autoDisabledOverlay = GUI:CreateDisabledOverlay(pageFrame.child, {
+                label = L["Auto Layouts is disabled"],
+            })
+            -- Re-anchored to the TOP rather than the helper's centre: this scrim
+            -- can span three expanded sections, and a centred message on a tall
+            -- one lands below the fold — the user would see a dead grey slab and
+            -- have to scroll to find out why. The Designers don't need this;
+            -- their overlay is a fixed viewport-sized panel.
+            pageFrame.autoDisabledOverlay.Label:ClearAllPoints()
+            pageFrame.autoDisabledOverlay.Label:SetPoint("TOP", 0, -40)
+        end
+        local overlay = pageFrame.autoDisabledOverlay
+        overlay:ClearAllPoints()
+        overlay:SetPoint("TOPLEFT", firstSection, "TOPLEFT", 0, 0)
+        overlay:SetPoint("BOTTOMRIGHT", pageFrame.child, "BOTTOMRIGHT", 0, 0)
+        overlay:SetShown(autoOff)
+    elseif pageFrame.autoDisabledOverlay then
+        pageFrame.autoDisabledOverlay:Hide()
     end
 end
 
@@ -1406,7 +1452,7 @@ function AutoProfilesUI:CreateProfileRow(GUI, pageFrame, parent, contentType, pr
 
         overrideBtn:SetScript("OnLeave", function()
             overrideText:SetTextColor(1, 0.67, 0)
-            GameTooltip:Hide()
+            GUI:HideTooltip()
         end)
     end
 

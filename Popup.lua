@@ -505,7 +505,6 @@ local function CreatePickerOverlay(widget, tabName, dbKey, controlType, callback
         overlay.border:SetBackdropBorderColor(PICKER_COLOR.r, PICKER_COLOR.g, PICKER_COLOR.b, 0.8)
         DF.GUI:ShowTooltip(overlay, {
             title = L["Click to select this setting"],
-            anchor = "ANCHOR_CURSOR",
             lines = {
                 { text = dbKey, color = PICKER_COLOR },
             },
@@ -514,10 +513,10 @@ local function CreatePickerOverlay(widget, tabName, dbKey, controlType, callback
     overlay:SetScript("OnLeave", function()
         overlay.bg:SetColorTexture(PICKER_COLOR.r, PICKER_COLOR.g, PICKER_COLOR.b, 0)
         overlay.border:SetBackdropBorderColor(PICKER_COLOR.r, PICKER_COLOR.g, PICKER_COLOR.b, 0)
-        GameTooltip:Hide()
+        DF.GUI:HideTooltip()
     end)
     overlay:SetScript("OnClick", function()
-        GameTooltip:Hide()
+        DF.GUI:HideTooltip()
         callback(tabName, dbKey, controlType)
     end)
 
@@ -2191,7 +2190,12 @@ function DF:ShowSubWizard(config)
     ConfigureForWizard(config)
 end
 
--- Check if popup is currently showing
+-- Check if popup is currently showing.
+-- ⚠ Currently has NO callers: its one caller was the Targeted Spells wizard
+-- auto-fire in Core.lua, removed under DEPRECATED-TARGETED-SPELLS. Kept because
+-- restoring that block needs it back, and because "don't stomp a popup that's
+-- already up" is the right check for any future scheduled popup. A dead-code
+-- sweep should skip this one rather than report it.
 function DF:IsPopupShown()
     return PopupFrame and PopupFrame:IsShown()
 end
