@@ -396,10 +396,12 @@ end
 -- a caller further up the stack to have set a flag.
 function CC:CombatGuard(job, payload)
     if not InCombatLockdown() then return false end
-    -- Only tell the caller to abort if the work is genuinely queued. On an
-    -- unrecognised job name Defer returns false, and aborting then would drop
-    -- the work silently; better to let the caller proceed and fail loudly.
-    return self:Defer(job, payload) and true or false
+    -- Always abort in combat, even if Defer rejected the job name. "Fail loudly"
+    -- on a bad name would mean letting the caller go on to touch secure state
+    -- during lockdown, which errors -- strictly worse than dropping the work.
+    -- Defer already logs an unknown job as an error, so it is not silent.
+    self:Defer(job, payload)
+    return true
 end
 
 function CC:OnCombatEnd()

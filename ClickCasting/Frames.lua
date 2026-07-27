@@ -393,9 +393,15 @@ function CC:InitializeSecureFrames()
             if not CC.registeredFrames or not CC.registeredFrames[frame] then return end
             if not (CC.db and CC.db.enabled) then return end
             CC:Defer("reassert", frame)
-            -- Visible so a roster-reset reapply can be seen in the log (was silent)
-            DF:Debug("CLICK", "Reassert queued for %s (SecureUnitButton_OnLoad, combat=%s)",
-                frame:GetName() or "unnamed", tostring(InCombatLockdown()))
+            -- Visible so a roster-reset reapply can be seen in the log (was
+            -- silent). Guarded on DF.debugEnabled because this fires on every
+            -- CompactUnitFrame_SetUnit roster shuffle: DF:Debug drops the line
+            -- itself when debug is off, but its ARGUMENTS are evaluated first, so
+            -- the GetName and tostring calls happened regardless.
+            if DF.debugEnabled then
+                DF:Debug("CLICK", "Reassert queued for %s (SecureUnitButton_OnLoad, combat=%s)",
+                    frame:GetName() or "unnamed", tostring(InCombatLockdown()))
+            end
             if not InCombatLockdown() then
                 CC:DeferAfter("reassertDrain", 0.2, function()
                     CC:DrainDeferred("reassert")
@@ -711,6 +717,25 @@ function CC:ClearBlizzardClickCastFromFrame(frame)
     if not frame then return end
     if InCombatLockdown() then return end
     
+    -- Capture the frame's OWN click behaviour once, before overwriting any of it,
+    -- so unregistering can put back what was actually there rather than assuming
+    -- Blizzard's target/togglemenu. This matters for third-party unit frames
+    -- picked up via ClickCastFrames: some deliberately have no left-click target,
+    -- and hardcoding the default permanently rewrote their behaviour after a
+    -- single register/unregister cycle. `false` records "capture refused" so this
+    -- does not retry on every call and the restore side knows to use defaults.
+    if frame.dfOriginalClickBindings == nil then
+        local t1, t2 = frame:GetAttribute("type1"), frame:GetAttribute("type2")
+        local s1, s2 = frame:GetAttribute("*type1"), frame:GetAttribute("*type2")
+        if issecretvalue(t1) or issecretvalue(t2) or issecretvalue(s1) or issecretvalue(s2) then
+            frame.dfOriginalClickBindings = false
+        else
+            frame.dfOriginalClickBindings = {
+                type1 = t1, type2 = t2, starType1 = s1, starType2 = s2,
+            }
+        end
+    end
+
     -- Clear Blizzard's click-cast attributes
     -- Use empty string "" not nil - SecureUnitButtonTemplate defaults kick in with nil
     -- Setting to "" overrides the template defaults with "do nothing"
@@ -1112,8 +1137,9 @@ function CC:RegisterBlizzardFrames()
     end
     
     -- Frames skipped because the client returned secret values for the checks
-    -- below. Tracked so the "registered" flag is not latched on a pass that
-    -- actually registered nothing -- see the end of this function.
+    -- below. Counted so an incomplete pass can be distinguished from a complete
+    -- one and retried -- see the end of this function. Re-running is safe:
+    -- RegisterFrame early-returns on frames already in registeredFrames.
     local skippedSecret = 0
 
     -- Helper to validate and register a Blizzard frame
@@ -1169,18 +1195,26 @@ function CC:RegisterBlizzardFrames()
         registerBlizzardFrame(frameName)
     end
     
-    -- Only latch on a pass that was not cut short. UpdateBlizzardFrameRegistration
-    -- is gated on `not blizzardFramesRegistered`, so setting this after a pass
-    -- that skipped frames on secret values meant click casting stayed dead on
-    -- Blizzard's raid/party/boss/arena frames for the whole session, with nothing
-    -- in the log and the flag claiming success. Frames that are simply absent do
+    -- Two separate facts, deliberately two separate fields.
+    --
+    -- blizzardFramesRegistered means "we have registered frames that need
+    -- unregistering later". It must latch even on an incomplete pass, because
+    -- UpdateBlizzardFrameRegistration's unregister branch is gated on it: if a
+    -- partial pass left it unset, a user who later turned Blizzard-frame
+    -- bindings off could never unregister the frames that DID register.
+    --
+    -- blizzardRegistrationPartial means "some frames were skipped, so a retry
+    -- has work to do". It is what reopens the register branch, which would
+    -- otherwise be closed by the flag above. Frames that are simply absent do
     -- not count -- there is nothing to retry for those.
+    self.blizzardFramesRegistered = true
     if skippedSecret > 0 then
+        self.blizzardRegistrationPartial = true
         DF:DebugWarn("CLICK", "Blizzard frame registration incomplete (%d skipped on secret values) — will retry",
             skippedSecret)
-        return
+    else
+        self.blizzardRegistrationPartial = nil
     end
-    self.blizzardFramesRegistered = true
 end
 
 function CC:UnregisterBlizzardFrames()
@@ -1214,13 +1248,18 @@ function CC:UnregisterBlizzardFrames()
     end
     
     self.blizzardFramesRegistered = false
+    -- Nothing is registered any more, so there is no partial pass left to retry.
+    self.blizzardRegistrationPartial = nil
 end
 
 -- Update Blizzard frame registration based on current bindings
 function CC:UpdateBlizzardFrameRegistration()
     local needsBlizzard = self:AnyBindingNeedsBlizzardFrames()
     
-    if needsBlizzard and not self.blizzardFramesRegistered then
+    -- blizzardRegistrationPartial reopens the register branch after a pass that
+    -- skipped frames on secret values, without unsetting blizzardFramesRegistered
+    -- (which the unregister branch below depends on).
+    if needsBlizzard and (not self.blizzardFramesRegistered or self.blizzardRegistrationPartial) then
         if not InCombatLockdown() then
             self:RegisterBlizzardFrames()
         else
@@ -1377,11 +1416,12 @@ function CC:RegisterFrame(frame)
         return
     end
     
-    -- Store original click bindings if not already stored
-    if not frame.dfOriginalClickBindings then
-        frame.dfOriginalClickBindings = {}
-    end
-    
+    -- (The frame's original click behaviour is captured in
+    -- ClearBlizzardClickCastFromFrame, which is the actual first-touch point --
+    -- it also runs on frames that never reach here. There used to be an empty
+    -- `frame.dfOriginalClickBindings = {}` stub on this line that nothing ever
+    -- populated or read.)
+
     -- Mark as registered
     self.registeredFrames[frame] = true
     frame.dfClickCastRegistered = true
@@ -1513,6 +1553,41 @@ function CC:StopDiagnosticTicker()
     self.diagDesyncReported = nil
 end
 
+-- Bounded retry for the two ways hover-handler setup can fail without erroring
+-- (no secure header, or WrapScript itself refusing). Both used to re-arm every
+-- 2s forever with a log line per pass: across 40 raid frames that is ~20 lines a
+-- second indefinitely, which buries the very diagnosis the log exists for.
+--
+-- Retry a few times, then give up ONCE, loudly. Giving up leaves
+-- dfKeyboardHandlersSetup unset, so a later organic trigger (zone-in
+-- registration, a repair) can still pick the frame up -- this bounds the noise,
+-- it does not permanently abandon the frame the way the pre-4.9 code did.
+--
+-- Returns true when a retry was scheduled, false when the attempt budget is
+-- spent (the caller should just return either way).
+local WRAP_RETRY_LIMIT = 5
+local WRAP_RETRY_DELAY = 2
+
+function CC:ScheduleWrapRetry(frame, frameName, reason)
+    frame.dfWrapRetries = (frame.dfWrapRetries or 0) + 1
+
+    if frame.dfWrapRetries > WRAP_RETRY_LIMIT then
+        if not frame.dfWrapRetryGaveUp then
+            frame.dfWrapRetryGaveUp = true
+            DF:DebugError("CLICK", "Hover-bind setup for %s failed %d times (%s) — giving up; no more retries will be logged for this frame",
+                frameName, WRAP_RETRY_LIMIT, tostring(reason))
+        end
+        return false
+    end
+
+    DF:DebugWarn("CLICK", "Hover-bind setup for %s failed (%s) — retry %d/%d in %ds",
+        frameName, tostring(reason), frame.dfWrapRetries, WRAP_RETRY_LIMIT, WRAP_RETRY_DELAY)
+    self:DeferAfter("wrapRetry:" .. frameName, WRAP_RETRY_DELAY, function()
+        CC:SetupSecureHandlers(frame)
+    end)
+    return true
+end
+
 -- Set up keyboard binding handlers for a frame using override bindings
 -- This uses SetOverrideBindingClick to temporarily bind keyboard keys when hovering
 function CC:SetupSecureHandlers(frame)
@@ -1535,14 +1610,12 @@ function CC:SetupSecureHandlers(frame)
     -- set up, so the frame reported handlersSetup=true with enterCount=0 forever
     -- (the "HOVER BUT NO KB BINDINGS / OnEnter DID NOT FIRE" signature) and no
     -- retry was ever scheduled, because nothing errored. Treat it like the
-    -- WrapScript failure below: say so, and retry.
+    -- WrapScript failure below: say so, and retry -- but bounded (see
+    -- WRAP_RETRY_LIMIT), because an unbounded 2s re-arm across 40 raid frames is
+    -- a log flood, and the log is how these get diagnosed.
     if not (self.header and self.header.WrapScript) then
-        DF:DebugError("CLICK", "No secure header when wrapping %s — hover binds cannot be installed; retrying in 2s",
-            frameName)
+        if not self:ScheduleWrapRetry(frame, frameName, "no secure header") then return end
         self:CreateClickCastHeader()
-        self:DeferAfter("wrapRetry:" .. frameName, 2, function()
-            CC:SetupSecureHandlers(frame)
-        end)
         return
     end
 
@@ -1706,12 +1779,9 @@ function CC:SetupSecureHandlers(frame)
             -- WrapScript failed. This used to mark the frame as set up anyway,
             -- which made the failure PERMANENT for the session — the guard at
             -- the top of this function blocked every later attempt. Retry
-            -- instead: leave the flag unset so the retry re-runs the full
-            -- setup (hooks included, since we return before installing them).
-            DF:DebugWarn("CLICK", "WrapScript failed for %s — retrying in 2s", frameName)
-            self:DeferAfter("wrapRetry:" .. frameName, 2, function()
-                CC:SetupSecureHandlers(frame)
-            end)
+            -- instead (bounded): leave the flag unset so the retry re-runs the
+            -- full setup, hooks included, since we return before installing them.
+            self:ScheduleWrapRetry(frame, frameName, "WrapScript failed")
             return
         end
         frame.dfWrapApplied = true
@@ -2113,14 +2183,12 @@ function CC:RefreshKeyboardBindings()
         end
     end
     
-    -- Also update DandersFrames
-    if DF and DF.unitFrames then
-        for _, frame in pairs(DF.unitFrames) do
-            if frame.dfKeyboardHandlersSetup then
-                self:UpdateFrameBindingAttributes(frame)
-            end
-        end
-    end
+    -- (No separate DandersFrames pass. There used to be a loop over
+    -- `DF.unitFrames` here, but that table is never assigned anywhere in the
+    -- addon -- it was a dead read that made this look like it covered our own
+    -- frames by a second route. It does cover them: RegisterAllFrames walks the
+    -- party/raid header children through RegisterFrame, so DF's own frames are
+    -- in registeredFrames above.)
 end
 
 -- ============================================================
@@ -2234,11 +2302,6 @@ function CC:RunBindingRepair(reason, force)
             scrub(frame)
         end
     end
-    if DF.unitFrames then
-        for _, frame in pairs(DF.unitFrames) do
-            scrub(frame)
-        end
-    end
 
     -- 2b. Re-wrap the secure OnEnter/OnLeave/OnHide handlers on every frame
     --     that has them. A wrap can DIE mid-session while the frame's insecure
@@ -2259,11 +2322,6 @@ function CC:RunBindingRepair(reason, force)
     end
     if self.registeredFrames then
         for frame in pairs(self.registeredFrames) do
-            rewrap(frame)
-        end
-    end
-    if DF.unitFrames then
-        for _, frame in pairs(DF.unitFrames) do
             rewrap(frame)
         end
     end

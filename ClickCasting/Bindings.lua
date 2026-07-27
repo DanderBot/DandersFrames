@@ -78,7 +78,7 @@ function CC:RouteProxyAction(frame, typeAttr, clickbuttonAttr, realAction, comba
         -- attribute must not escape the bookkeeping).
         frame:SetAttribute(typeAttr, realAction)
         frame.dfWrittenAttrs = frame.dfWrittenAttrs or {}
-        frame.dfWrittenAttrs[typeAttr] = true
+        frame.dfWrittenAttrs[typeAttr] = "type"
         if combatCond then AddCombatConditional(frame, typeAttr, realAction, combatCond) end
         return
     end
@@ -398,8 +398,8 @@ function CC:ClearBindingsFromFrame(frame, preserveSnippet)
     -- current bindings right after, and its uncovered-base-button pass
     -- restores target/togglemenu defaults on non-DandersFrames.
     if frame.dfWrittenAttrs then
-        for attr in pairs(frame.dfWrittenAttrs) do
-            if attr:find("type", 1, true) then
+        for attr, kind in pairs(frame.dfWrittenAttrs) do
+            if kind == "type" then
                 frame:SetAttribute(attr, "")
             else
                 frame:SetAttribute(attr, nil)
@@ -446,7 +446,22 @@ function CC:ScrubAllClickAttributes(frame)
             frame:SetAttribute(mod .. "clickbutton" .. btn, nil)
         end
     end
+    -- The numeric sweep above only reaches <mod>type1..5 style mouse slots.
+    -- Keyboard and scroll binds live in NAMED slots (type-<vbtn>,
+    -- macrotext-<vbtn>, unit-<vbtn>, clickbutton-<vbtn>) whose names cannot be
+    -- enumerated, so the manifest is the only record of them. Clearing it before
+    -- discarding it matters: dropping the manifest first ORPHANED those
+    -- attributes, leaving them set with no record for any later clear to find --
+    -- precisely the state this last-resort escape hatch exists to undo.
+    if frame.dfWrittenAttrs then
+        for attr in pairs(frame.dfWrittenAttrs) do
+            frame:SetAttribute(attr, nil)
+        end
+    end
     frame.dfWrittenAttrs = nil
+    -- And the hover-key snippet, which is where keyboard binds are actually
+    -- applied from; leaving it set meant the next hover re-applied them.
+    frame:SetAttribute("dfBindingSnippet", "")
     if frame.dfAttrDriverList then
         for _, attr in ipairs(frame.dfAttrDriverList) do
             UnregisterAttributeDriver(frame, attr)
@@ -471,6 +486,9 @@ function CC:RestoreBlizzardDefaults(frame)
     -- nil semantics here (not ""): the base type1/type2 defaults are written
     -- right below, and everything else should fall back to Blizzard behavior.
     if frame.dfWrittenAttrs then
+        -- The recorded kind is irrelevant here: handing the frame back means
+        -- everything we wrote goes to nil, so the frame's own behaviour
+        -- (restored below) and Blizzard's wildcards apply again.
         for attr in pairs(frame.dfWrittenAttrs) do
             frame:SetAttribute(attr, nil)
         end
@@ -508,11 +526,25 @@ function CC:RestoreBlizzardDefaults(frame)
         frame:SetAttribute(mod .. "type2", nil)
     end
 
-    -- Set standard Blizzard unit frame behavior
-    -- type1 = left click = target
-    -- type2 = right click = togglemenu
-    frame:SetAttribute("type1", "target")
-    frame:SetAttribute("type2", "togglemenu")
+    -- Put back what the frame actually had, not what we assume it had.
+    -- ClearBlizzardClickCastFromFrame captures type1/type2/*type1/*type2 once
+    -- before the first takeover; a table means the capture succeeded, `false`
+    -- means the client returned secret values and we fall back to Blizzard's
+    -- stock behaviour. Restoring the capture matters for third-party unit frames,
+    -- which may intentionally have no left-click target -- hardcoding
+    -- target/togglemenu rewrote their click behaviour permanently after one
+    -- register/unregister cycle.
+    local orig = frame.dfOriginalClickBindings
+    if type(orig) == "table" then
+        frame:SetAttribute("type1", orig.type1)
+        frame:SetAttribute("type2", orig.type2)
+        frame:SetAttribute("*type1", orig.starType1)
+        frame:SetAttribute("*type2", orig.starType2)
+    else
+        -- type1 = left click = target, type2 = right click = togglemenu
+        frame:SetAttribute("type1", "target")
+        frame:SetAttribute("type2", "togglemenu")
+    end
     
     -- Reset to standard click registration (AnyUp is default)
     if frame.RegisterForClicks then
@@ -640,11 +672,12 @@ function CC:ApplyBindings()
             -- Process first batch immediately (synchronous), defer the rest
             ProcessNextBatch()
         else
-            -- An empty (or absent) registry does NOT mean there are no snippets
-            -- to rewrite: RefreshKeyboardBindings also walks DF.unitFrames. With
-            -- nothing Blizzard or third-party registered -- only our own frames
-            -- -- the batch-end call above was unreachable, so hover keyboard
-            -- binds silently stopped tracking binding edits.
+            -- Nothing registered, so there are no per-frame snippets to rewrite.
+            -- The map has still just been rebuilt though, and RefreshKeyboardBindings
+            -- is what makes a rebuilt map visible; with the only call site at the
+            -- tail of the batch walker, this path did nothing at all. Cheap here
+            -- (it iterates an empty registry) and keeps "ApplyBindings always
+            -- leaves keyboard state consistent with the map" true on every path.
             self:RefreshKeyboardBindings()
         end
     end
@@ -2578,33 +2611,63 @@ end
 -- per frame per clear). The proxy path keeps its own dfProxyRoutes
 -- bookkeeping and combat drivers keep dfAttrDriverList; this manifest covers
 -- only direct frame attributes.
+-- The manifest records HOW each attribute must be cleared, not just that it was
+-- written: type attributes clear to "" (a nil type falls through to the wildcard
+-- *type attributes and to Blizzard's own interaction bindings, which we do not
+-- want), everything else clears to nil. Recording the kind at write time replaces
+-- inferring it later from `attr:find("type")`, which was a substring test over
+-- attribute names that include a caller-supplied virtual button name.
 local function WriteAttr(frame, attr, value)
     frame:SetAttribute(attr, value)
     frame.dfWrittenAttrs = frame.dfWrittenAttrs or {}
-    frame.dfWrittenAttrs[attr] = true
+    -- do not downgrade an existing "type" marker
+    if frame.dfWrittenAttrs[attr] == nil then
+        frame.dfWrittenAttrs[attr] = true
+    end
+end
+
+local function WriteTypeAttr(frame, attr, value)
+    frame:SetAttribute(attr, value)
+    frame.dfWrittenAttrs = frame.dfWrittenAttrs or {}
+    frame.dfWrittenAttrs[attr] = "type"
 end
 
 -- An attribute slot: where one action lands on a frame. Mouse slots spell
 -- their attributes "shift-macrotext2" style (prefix..name..button); virtual
 -- slots (keyboard, scroll, meta-mouse, third-party copies) use the named
 -- "macrotext-<vbtn>" style.
+-- Slot descriptors are filled into ONE reusable table rather than allocated per
+-- binding per frame. ApplyBindingsToFrameUnified runs over every registered frame
+-- (100-150+ with other unit-frame addons loaded) times every binding, and it is
+-- already batched specifically because it hits Lua's time limit -- so allocating
+-- a table per binding was the wrong direction. Safe to reuse: ApplyActionToSlot
+-- only ever reads fields off the descriptor, it never stores it, and the two
+-- calls in the mouse branch are strictly sequential.
+local slotScratch = {}
+local ctxScratch = {}
+
+-- Blizzard's stock behaviour for the unmodified mouse buttons. Constant, so it is
+-- not rebuilt once per frame inside the same batched walk.
+local BASE_BUTTON_DEFAULTS = { [1] = "target", [2] = "togglemenu" }
+
 local function MouseSlot(modPrefix, buttonNum)
-    return {
-        typeAttr  = modPrefix .. "type" .. buttonNum,
-        macroAttr = modPrefix .. "macrotext" .. buttonNum,
-        unitAttr  = modPrefix .. "unit" .. buttonNum,
-        clickAttr = modPrefix .. "clickbutton" .. buttonNum,
-    }
+    local s = slotScratch
+    s.typeAttr  = modPrefix .. "type" .. buttonNum
+    s.macroAttr = modPrefix .. "macrotext" .. buttonNum
+    s.unitAttr  = modPrefix .. "unit" .. buttonNum
+    s.clickAttr = modPrefix .. "clickbutton" .. buttonNum
+    s.isVirtual = nil
+    return s
 end
 
 local function VirtualSlot(virtualBtn)
-    return {
-        typeAttr  = "type-" .. virtualBtn,
-        macroAttr = "macrotext-" .. virtualBtn,
-        unitAttr  = "unit-" .. virtualBtn,
-        clickAttr = "clickbutton-" .. virtualBtn,
-        isVirtual = true,
-    }
+    local s = slotScratch
+    s.typeAttr  = "type-" .. virtualBtn
+    s.macroAttr = "macrotext-" .. virtualBtn
+    s.unitAttr  = "unit-" .. virtualBtn
+    s.clickAttr = "clickbutton-" .. virtualBtn
+    s.isVirtual = true
+    return s
 end
 
 -- Write one resolved action into one slot. Single dispatch replacing four
@@ -2623,7 +2686,7 @@ end
 function CC:ApplyActionToSlot(frame, slot, ctx)
     local actionType = ctx.actionType
     if not ctx.isSpecialAction then
-        WriteAttr(frame, slot.typeAttr, "macro")
+        WriteTypeAttr(frame, slot.typeAttr, "macro")
         WriteAttr(frame, slot.macroAttr, ctx.macroText)
         return
     end
@@ -2632,7 +2695,7 @@ function CC:ApplyActionToSlot(frame, slot, ctx)
         if ctx.useProxy then
             self:RouteProxyAction(frame, slot.typeAttr, slot.clickAttr, "togglemenu", ctx.combatCond)
         else
-            WriteAttr(frame, slot.typeAttr, "togglemenu")
+            WriteTypeAttr(frame, slot.typeAttr, "togglemenu")
             if ctx.combatCond then
                 AddCombatConditional(frame, slot.typeAttr, "togglemenu", ctx.combatCond)
             end
@@ -2641,7 +2704,7 @@ function CC:ApplyActionToSlot(frame, slot, ctx)
         if ctx.useProxy and not (ctx.plainLeftClick and not slot.isVirtual) then
             self:RouteProxyAction(frame, slot.typeAttr, slot.clickAttr, "target", ctx.combatCond)
         else
-            WriteAttr(frame, slot.typeAttr, "target")
+            WriteTypeAttr(frame, slot.typeAttr, "target")
             if slot.isVirtual then
                 WriteAttr(frame, slot.unitAttr, "mouseover")
             end
@@ -2650,9 +2713,9 @@ function CC:ApplyActionToSlot(frame, slot, ctx)
             end
         end
     elseif actionType == "focus" or actionType == self.ACTION_TYPES.FOCUS then
-        WriteAttr(frame, slot.typeAttr, "focus")
+        WriteTypeAttr(frame, slot.typeAttr, "focus")
     elseif actionType == "assist" or actionType == self.ACTION_TYPES.ASSIST then
-        WriteAttr(frame, slot.typeAttr, "assist")
+        WriteTypeAttr(frame, slot.typeAttr, "assist")
     end
 end
 
@@ -2787,13 +2850,16 @@ function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate)
                                    actionType == self.ACTION_TYPES.ASSIST)
             end
 
-            local ctx = {
-                actionType = actionType,
-                isSpecialAction = isSpecialAction,
-                macroText = data.macroText,
-                combatCond = GetCombatCondition(binding),
-                useProxy = useProxy,
-            }
+            -- Reused, like the slot descriptors above: one table for the whole
+            -- walk instead of one per binding per frame. plainLeftClick is reset
+            -- here because only the mouse branch sets it.
+            local ctx = ctxScratch
+            ctx.actionType = actionType
+            ctx.isSpecialAction = isSpecialAction
+            ctx.macroText = data.macroText
+            ctx.combatCond = GetCombatCondition(binding)
+            ctx.useProxy = useProxy
+            ctx.plainLeftClick = nil
 
             if bindType == "mouse" then
                 local buttonNum = GetButtonNumber(binding.button)
@@ -2834,8 +2900,7 @@ function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate)
     -- bindings may be DandersFrames-only. Without this, right-click menu (or left-click
     -- target) breaks on Blizzard frames when the binding doesn't apply to them.
     if not isDandersFrame then
-        local defaults = { [1] = "target", [2] = "togglemenu" }
-        for btn, defaultType in pairs(defaults) do
+        for btn, defaultType in pairs(BASE_BUTTON_DEFAULTS) do
             if not coveredBaseButtons[btn] then
                 local currentType = frame:GetAttribute("type" .. btn)
                 if not currentType or currentType == "" then
