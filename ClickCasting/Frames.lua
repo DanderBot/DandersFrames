@@ -1949,11 +1949,24 @@ function CC:SetupSecureHandlers(frame)
         local prevMouseover = self:GetAttribute("dfSecurePrevMouseover") or "?"
         local postCheck = self:GetAttribute("dfPostCheck") or "?"
 
-        DF:Debug("CLICK", "OnEnter %s unit=%s kbActive=%s hasKB=%s type1=%s wrapEnter=%s(%d) wrapLeave=%d phase=%d prev=%s postCheck=%s",
+        -- showClaimed: times the secure OnShow wrap had to claim this frame because
+        -- OnEnter arrived without motion (the frame appeared under a resting cursor).
+        -- reasserted: times ReassertHoverBinds put binds back after a rebuild wiped
+        -- them mid-hover. Both read zero on a frame the cursor simply moved onto;
+        -- non-zero means a redundant path earned its keep. Surfaced here because a
+        -- counter nothing ever reads is not a diagnostic.
+        local showClaimed = self:GetAttribute("dfShowClaimed") or 0
+        local reasserted = self:GetAttribute("dfReasserted") or 0
+
+        -- CAUTION reading phase/prev/postCheck: those attributes are written ONLY by
+        -- the wrap snippet, so when wrapEnter is false they are STALE values from the
+        -- last successful cycle, not a description of THIS hover. "phase=7 with
+        -- wrapEnter=false" means the PREVIOUS enter completed, nothing more.
+        DF:Debug("CLICK", "OnEnter %s unit=%s kbActive=%s hasKB=%s type1=%s wrapEnter=%s(%d) wrapLeave=%d phase=%d prev=%s postCheck=%s showClaimed=%d reasserted=%d",
             frameName, tostring(unit), tostring(bindingsActive),
             tostring(hasKeyboardBindings), tostring(type1),
             tostring(wrapEnterFired), wrapEnterCount, wrapLeaveCount,
-            enterPhase, prevMouseover, postCheck)
+            enterPhase, prevMouseover, postCheck, showClaimed, reasserted)
 
         -- Key diagnostic: mouseoverbutton was not self after OnEnter completed
         if wrapEnterFired and postCheck ~= "ok" then
@@ -1985,10 +1998,15 @@ function CC:SetupSecureHandlers(frame)
                 -- handlersSetup say whether our wrap is even installed; visFlips
                 -- says whether the frame has been show/hide-churning under it.
                 local parent = self:GetParent()
-                DF:DebugWarn("CLICK", "  parent=%s pinnedBoss=%s pinned=%s visFlips=%d wrapApplied=%s",
+                -- showClaimed here is the decisive field: OnEnter arriving without
+                -- motion is exactly what the OnShow wrap exists to cover, so a
+                -- non-zero value means the gap was already closed before this
+                -- warning fired, and a zero means it was not.
+                DF:DebugWarn("CLICK", "  parent=%s pinnedBoss=%s pinned=%s visFlips=%d wrapApplied=%s showClaimed=%d",
                     parent and parent:GetName() or "nil",
                     tostring(self.isPinnedBossFrame), tostring(self.isPinnedFrame),
-                    self.dfVisFlips or 0, tostring(self.dfWrapApplied))
+                    self.dfVisFlips or 0, tostring(self.dfWrapApplied),
+                    self:GetAttribute("dfShowClaimed") or 0)
             else
                 DF:DebugWarn("CLICK", "  WrapScript fired (enterCount=%d phase=%d) but dfBindingsActive=%s snippet=%d chars",
                     wrapEnterCount, enterPhase, tostring(bindingsActive), #snippet)
