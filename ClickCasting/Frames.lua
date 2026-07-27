@@ -452,6 +452,13 @@ function CC:CreateClickCastHeader()
         DF:DebugError("CLICK", "CC.header held a non-secure frame (%s) — rebuilding the secure header",
             tostring((self.header.GetName and self.header:GetName()) or "unnamed"))
         self.header = nil
+        -- Frame refs live on the OLD header, so the driver's rescue path would be
+        -- dead on the new one. Drop the bookkeeping so refs re-register; the
+        -- repair's re-wrap loop re-adds them for every frame.
+        self.secureFrameRefs = nil
+        self.secureFrameRefCount = nil
+        self.secureContainerRefs = nil
+        self.secureContainerRefCount = nil
     end
 
     -- Don't create during combat
@@ -529,7 +536,72 @@ function CC:CreateClickCastHeader()
     -- perform the anchoring-restricted check, so they keep working in combat.
     -- The rect is still read below purely as a diagnostic.
     self.header:SetAttribute("_onstate-mouseoverstate", [[
-        if newstate == "false" and mouseoverbutton then
+        if newstate == "true" then
+            -- SECOND PATH TO SETTING HOVER BINDS.
+            --
+            -- The secure OnEnter wrap is otherwise the ONLY thing that sets them,
+            -- and every hover-bind failure this module has ever had was that one
+            -- path dying: wraps invalidated by a player-housing session, a wrap
+            -- silently not installed, WrapScript refusing, and a pinned boss frame
+            -- appearing under a stationary cursor mid-combat so no OnEnter event is
+            -- generated at all (field log 2026-07-27: wrapApplied=true, enterCount=0,
+            -- and the frame worked again on the next hover). All the repair
+            -- machinery exists to compensate for having no redundancy here.
+            --
+            -- [@mouseover,exists] flipping true is a macro-conditional state change,
+            -- not a frame mouse event, so it fires in exactly the cases where OnEnter
+            -- did not. If a mouseover exists and NO frame claimed it, find the frame
+            -- and do what OnEnter would have done.
+            --
+            -- mouseoverbutton being nil is the normal state for any non-DF mouseover
+            -- (nameplates, world mobs), so the container tier gates the expensive
+            -- scan: IsUnderMouse(true) walks children, so a few container checks
+            -- answer "is the cursor over our UI at all" before we walk every frame.
+            if not mouseoverbutton then
+                local overOurs = false
+                local containers = self:GetAttribute("dfCCContainerCount") or 0
+                for i = 1, containers do
+                    local c = self:GetFrameRef("dfccc" .. i)
+                    if c and c:IsUnderMouse(true) then
+                        overOurs = true
+                        break
+                    end
+                end
+
+                if overOurs then
+                    local frames = self:GetAttribute("dfCCFrameCount") or 0
+                    for i = 1, frames do
+                        local f = self:GetFrameRef("dfccf" .. i)
+                        if f and f:IsUnderMouse() then
+                            local snippet = f:GetAttribute("dfBindingSnippet")
+                            if snippet and snippet ~= "" then
+                                -- Mirror the OnEnter phases in the same order.
+                                -- `owner` is assigned explicitly rather than assumed:
+                                -- the binding snippet calls owner:SetBindingClick, and
+                                -- 4.7.4 shipped a whole release where header ownership
+                                -- silently did not exist because a snippet ran in the
+                                -- wrong environment. In here `self` IS the header, so
+                                -- this makes ownership true by construction instead of
+                                -- depending on what the env happens to hold.
+                                owner = self
+                                self:ClearBindings()
+                                mouseoverbutton = f
+                                mouseovername = f:GetName() or "unnamed"
+                                f:SetAttribute("dfIsSecureMouseover", true)
+                                f:SetAttribute("dfClearedBy", nil)
+                                f:ClearBindings()
+                                self:RunFor(f, snippet)
+                                f:SetAttribute("dfBindingsActive", true)
+                                -- Counted so a log can prove the rescue fired, and
+                                -- how often, rather than leaving it invisible.
+                                f:SetAttribute("dfDriverRescued", (f:GetAttribute("dfDriverRescued") or 0) + 1)
+                            end
+                            break
+                        end
+                    end
+                end
+            end
+        elseif mouseoverbutton then
             local l, b, w, h = mouseoverbutton:GetRect()
             local rectKnown = l and w and h and w > 0 and h > 0
             local underMouse = mouseoverbutton:IsUnderMouse()
@@ -1570,6 +1642,47 @@ function CC:StopDiagnosticTicker()
     self.diagDesyncReported = nil
 end
 
+-- Expose a frame to the restricted environment so the mouseoverstate driver can
+-- reach it. The driver is our SECOND path to setting hover binds (see the
+-- newstate == "true" branch in CreateClickCastHeader): when a mouseover exists
+-- that no secure OnEnter claimed, the driver has to find the frame itself, and
+-- the only way it can touch a frame is through a frame ref.
+--
+-- Two tiers, because the cheap check has to come first. `mouseoverbutton == nil`
+-- while a mouseover exists is the NORMAL state for anything that is not one of
+-- our frames -- nameplates, 3D-world units -- so scanning every registered frame
+-- on that condition alone would scan hundreds of frames every time the cursor
+-- crosses a mob. The container tier (a handful of headers/containers, tested with
+-- IsUnderMouse(true), which walks children) answers "is the cursor over our UI at
+-- all" in ~10 calls; only then is the per-frame tier worth walking.
+function CC:RegisterSecureFrameRef(frame)
+    if not frame or InCombatLockdown() then return end
+    if not (self.header and self.header.SetFrameRef) then return end
+
+    self.secureFrameRefs = self.secureFrameRefs or {}
+    if not self.secureFrameRefs[frame] then
+        local n = (self.secureFrameRefCount or 0) + 1
+        self.secureFrameRefCount = n
+        self.secureFrameRefs[frame] = n
+        self.header:SetFrameRef("dfccf" .. n, frame)
+        self.header:SetAttribute("dfCCFrameCount", n)
+    end
+
+    -- Container tier: the frame's parent, deduplicated. Party/raid group headers
+    -- and pinned containers collapse to a handful of entries.
+    local parent = frame.GetParent and frame:GetParent()
+    if parent then
+        self.secureContainerRefs = self.secureContainerRefs or {}
+        if not self.secureContainerRefs[parent] then
+            local c = (self.secureContainerRefCount or 0) + 1
+            self.secureContainerRefCount = c
+            self.secureContainerRefs[parent] = c
+            self.header:SetFrameRef("dfccc" .. c, parent)
+            self.header:SetAttribute("dfCCContainerCount", c)
+        end
+    end
+end
+
 -- Bounded retry for the two ways hover-handler setup can fail without erroring
 -- (no secure header, or WrapScript itself refusing). Both used to re-arm every
 -- 2s forever with a log line per pass: across 40 raid frames that is ~20 lines a
@@ -1635,6 +1748,11 @@ function CC:SetupSecureHandlers(frame)
         self:CreateClickCastHeader()
         return
     end
+
+    -- Before installing the wrap, not after: a frame whose WrapScript fails is
+    -- exactly the one that needs the driver's rescue path, so it must be
+    -- reachable from the restricted env either way.
+    self:RegisterSecureFrameRef(frame)
 
     if self.header and self.header.WrapScript then
         -- WrapScript OnEnter: Set up bindings
@@ -1864,11 +1982,16 @@ function CC:SetupSecureHandlers(frame)
         local prevMouseover = self:GetAttribute("dfSecurePrevMouseover") or "?"
         local postCheck = self:GetAttribute("dfPostCheck") or "?"
 
-        DF:Debug("CLICK", "OnEnter %s unit=%s kbActive=%s hasKB=%s type1=%s wrapEnter=%s(%d) wrapLeave=%d phase=%d prev=%s postCheck=%s",
+        -- rescued = how many times the mouseoverstate driver had to set this
+        -- frame's hover binds because the secure OnEnter never ran for it. Zero
+        -- on a healthy frame; non-zero is the redundant path earning its keep.
+        local driverRescued = self:GetAttribute("dfDriverRescued") or 0
+
+        DF:Debug("CLICK", "OnEnter %s unit=%s kbActive=%s hasKB=%s type1=%s wrapEnter=%s(%d) wrapLeave=%d phase=%d prev=%s postCheck=%s rescued=%d",
             frameName, tostring(unit), tostring(bindingsActive),
             tostring(hasKeyboardBindings), tostring(type1),
             tostring(wrapEnterFired), wrapEnterCount, wrapLeaveCount,
-            enterPhase, prevMouseover, postCheck)
+            enterPhase, prevMouseover, postCheck, driverRescued)
 
         -- Key diagnostic: mouseoverbutton was not self after OnEnter completed
         if wrapEnterFired and postCheck ~= "ok" then
@@ -2408,6 +2531,9 @@ function CC:RunBindingRepair(reason, force)
     local function rewrap(frame)
         if rewrapSeen[frame] then return end
         rewrapSeen[frame] = true
+        -- Idempotent, and the recovery point after a header rebuild: refs live on
+        -- the header, so a rebuilt header has none until they are re-added here.
+        self:RegisterSecureFrameRef(frame)
         if frame.dfKeyboardHandlersSetup and self:RewrapSecureHandlers(frame) then
             rewrapped = rewrapped + 1
         end
