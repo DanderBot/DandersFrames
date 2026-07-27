@@ -666,6 +666,8 @@ function CC:ApplyBindings()
                     -- All frames processed - refresh keyboard bindings once for all frames
                     CC.batchBindingTimer = nil
                     CC:RefreshKeyboardBindings()
+                    -- The header wipe above kills a live hover; put it straight back.
+                    CC:ReassertHoverBinds()
                 end
             end
 
@@ -679,6 +681,7 @@ function CC:ApplyBindings()
             -- (it iterates an empty registry) and keeps "ApplyBindings always
             -- leaves keyboard state consistent with the map" true on every path.
             self:RefreshKeyboardBindings()
+            self:ReassertHoverBinds()
         end
     end
 

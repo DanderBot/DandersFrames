@@ -1527,6 +1527,13 @@ end
 -- RequestBindingRepair defers/cooldowns the actual secure work.
 -- ============================================================
 
+
+-- Minimum gap between repair requests from the 200ms diagnostic ticker below.
+-- Unthrottled it asked 5x/second for as long as the condition persisted, which
+-- flooded the log and spent the repair's hover budget almost immediately. Declared
+-- here, above its use site: a Lua local is not visible before its declaration, so
+-- defining it further down would silently resolve to a nil global at runtime.
+local TICKER_REPAIR_THROTTLE = 2
 local DIAG_INTERVAL = 0.2  -- seconds between polls
 
 function CC:StartDiagnosticTicker(frame)
@@ -1577,7 +1584,15 @@ function CC:StartDiagnosticTicker(frame)
                 DF:DebugError("CLICK", "MOUSEOVERBUTTON DESYNC on %s at tick %d! dfIsSecureMouseover=nil wrapEnter=%d wrapLeave=%d kbActive=%s",
                     frameName, CC.diagTickCount, wrapEnterCount, wrapLeaveCount, tostring(bindingsActive))
             end
-            CC:RequestBindingRepair("mouseover-desync")
+            -- Throttled: this ticker runs every 200ms, so an unthrottled request
+            -- here asked for a repair 5x/second for as long as the condition
+            -- lasted. Most of those are the benign non-motion enter that OnShow
+            -- now handles, and a repair cannot fix that case anyway.
+            local now = GetTime()
+            if not CC.lastTickerRepairRequest or (now - CC.lastTickerRepairRequest) >= TICKER_REPAIR_THROTTLE then
+                CC.lastTickerRepairRequest = now
+                CC:RequestBindingRepair("mouseover-desync")
+            end
         else
             CC.diagDesyncReported = nil
         end
@@ -1798,6 +1813,47 @@ function CC:SetupSecureHandlers(frame)
             end
         ]]
 
+        -- OnShow: the ONLY combat-legal way to claim a frame that becomes visible
+        -- under a resting cursor.
+        --
+        -- Blizzard's Wrapped_OnEnter runs our snippet only `if (motion)` --
+        -- i.e. only when the enter was caused by physical cursor movement
+        -- (RestrictedAddOnEnvironment/SecureHandlers.lua). A frame that APPEARS
+        -- under a stationary cursor therefore gets no snippet and no hover binds,
+        -- while the insecure OnEnter hook still fires -- which is why the log
+        -- reads wrapEnter=false(0) with mouseOver=true and wrapApplied=true. It
+        -- compounds: Wrapped_OnLeave requires both motion AND the _wrapentered
+        -- attribute that only that skipped block sets, so the matching leave is
+        -- disarmed too and a previous frame's binds can survive pointing at the
+        -- wrong unit.
+        --
+        -- OnShow/OnHide go through CreateSimpleWrapper instead, which has NO
+        -- motion parameter -- they fire unconditionally. So this closes the gap
+        -- in one frame, during combat, using only sanctioned secure calls.
+        -- Field-measured before this existed: ~1s of dead keys on a pinned boss
+        -- frame the moment it spawned (2026-07-27), recovering only when the
+        -- cursor moved off and back.
+        --
+        -- Guarded on IsUnderMouse so a frame merely being shown does not steal
+        -- the hover, and on mouseoverbutton ~= self so a show while already
+        -- claimed is a no-op. Mirrors OnEnter's phases 3-6 in the same order.
+        local onShowSnippet = [[
+            if self:IsUnderMouse() and mouseoverbutton ~= self then
+                local snippet = self:GetAttribute("dfBindingSnippet")
+                if snippet and snippet ~= "" then
+                    owner:ClearBindings()
+                    mouseoverbutton = self
+                    mouseovername = self:GetName() or "unnamed"
+                    self:SetAttribute("dfIsSecureMouseover", true)
+                    self:SetAttribute("dfClearedBy", nil)
+                    self:ClearBindings()
+                    control:RunFor(self, snippet)
+                    self:SetAttribute("dfBindingsActive", true)
+                    self:SetAttribute("dfShowClaimed", (self:GetAttribute("dfShowClaimed") or 0) + 1)
+                end
+            end
+        ]]
+
         -- Keep the snippets for re-wrapping: a frame's wrap can DIE mid-session
         -- (field-verified 2026-07-20: after a player-housing session, the party
         -- buttons' OnEnter wraps stopped executing entirely — enterCount stayed
@@ -1808,6 +1864,7 @@ function CC:SetupSecureHandlers(frame)
             enter = onEnterSnippet,
             leave = onLeaveSnippet,
             hide  = onHideSnippet,
+            show  = onShowSnippet,
         }
 
         local wrapSuccess = pcall(function()
@@ -1817,6 +1874,7 @@ function CC:SetupSecureHandlers(frame)
             self.header:WrapScript(frame, "OnEnter", onEnterSnippet)
             self.header:WrapScript(frame, "OnLeave", onLeaveSnippet)
             self.header:WrapScript(frame, "OnHide", onHideSnippet)
+            self.header:WrapScript(frame, "OnShow", onShowSnippet)
         end)
 
         if not wrapSuccess then
@@ -2278,12 +2336,12 @@ end
 
 local REPAIR_COOLDOWN = 5  -- seconds between repair attempts
 
--- How long to wait for the cursor to leave a frame before repairing anyway, and
--- how many times. 1s x 10 = the repair will hold off for up to ten seconds of
--- continuous hover; past that a genuine breakage matters more than one frame's
--- live binds.
+-- Re-check interval while waiting for the cursor to leave, and the total wall-clock
+-- budget before the repair proceeds anyway. Past the budget a genuine breakage
+-- matters more than one frame's live binds. Measured in elapsed time, NOT in
+-- number of attempts -- see the note in RunBindingRepair.
 local REPAIR_HOVER_WAIT = 1
-local REPAIR_HOVER_MAX_WAITS = 10
+local REPAIR_HOVER_BUDGET = 10
 
 -- Safe to call from anywhere, including combat and secure-hook callbacks
 -- Unwrap + re-wrap a frame's secure OnEnter/OnLeave/OnHide handlers using the
@@ -2310,11 +2368,13 @@ function CC:RewrapSecureHandlers(frame)
     pcall(function() self.header:UnwrapScript(frame, "OnEnter") end)
     pcall(function() self.header:UnwrapScript(frame, "OnLeave") end)
     pcall(function() self.header:UnwrapScript(frame, "OnHide") end)
+    pcall(function() self.header:UnwrapScript(frame, "OnShow") end)
 
     local ok = pcall(function()
         self.header:WrapScript(frame, "OnEnter", snippets.enter)
         self.header:WrapScript(frame, "OnLeave", snippets.leave)
         self.header:WrapScript(frame, "OnHide", snippets.hide)
+        self.header:WrapScript(frame, "OnShow", snippets.show)
     end)
     frame.dfWrapApplied = ok or nil
     if ok then
@@ -2325,6 +2385,60 @@ function CC:RewrapSecureHandlers(frame)
         frame.dfWrapRetryGaveUp = nil
     end
     return ok
+end
+
+-- Re-establish hover binds on a frame the cursor is currently on, without waiting
+-- for a leave/enter cycle.
+--
+-- ApplyBindings wipes the header's override bindings unconditionally -- it has to,
+-- or the outgoing set survives -- and it runs on every talent change, profile
+-- switch, UI edit, and as the bindingRefresh drain job at combat end. If the user
+-- is hovering someone at that moment, their hover binds die until they move off and
+-- back on. At combat end that is exactly when a healer is most likely to be parked
+-- on a frame. RunBindingRepair carefully postpones for this reason, and then
+-- bindingRefresh ran two slots later in DRAIN_ORDER and undid the courtesy.
+--
+-- Out of combat only, by necessity: SetFrameRef and Execute are both blocked in
+-- lockdown. That is sufficient here, because ApplyBindings itself defers in combat.
+function CC:ReassertHoverBinds(frame)
+    frame = frame or self.currentHoveredFrame
+    if not frame or InCombatLockdown() then return end
+    if not (self.header and self.header.Execute and self.header.SetFrameRef) then return end
+    if not (frame.IsMouseOver and frame:IsMouseOver()) then return end
+
+    local snippet = frame:GetAttribute("dfBindingSnippet")
+    if not snippet or snippet == "" then return end
+
+    -- Mirrors the OnEnter phases. `owner` is assigned explicitly rather than
+    -- assumed: the binding snippet calls owner:SetBindingClick, and inside Execute
+    -- `self` IS the header, so this makes ownership correct by construction rather
+    -- than depending on what the environment happens to hold.
+    local ok = pcall(function()
+        self.header:SetFrameRef("dfReassert", frame)
+        self.header:Execute([[
+            local f = self:GetFrameRef("dfReassert")
+            if f then
+                owner = self
+                self:ClearBindings()
+                mouseoverbutton = f
+                mouseovername = f:GetName() or "unnamed"
+                f:SetAttribute("dfIsSecureMouseover", true)
+                f:SetAttribute("dfClearedBy", nil)
+                f:ClearBindings()
+                self:RunFor(f, f:GetAttribute("dfBindingSnippet"))
+                f:SetAttribute("dfBindingsActive", true)
+                f:SetAttribute("dfReasserted", (f:GetAttribute("dfReasserted") or 0) + 1)
+            end
+        ]])
+    end)
+
+    if ok then
+        DF:Debug("CLICK", "Re-asserted hover binds on %s (a rebuild happened while it was hovered)",
+            frame:GetName() or "unnamed")
+    else
+        DF:DebugWarn("CLICK", "Hover re-assert failed for %s — binds return on the next hover",
+            frame:GetName() or "unnamed")
+    end
 end
 
 function CC:RequestBindingRepair(reason)
@@ -2366,25 +2480,33 @@ function CC:RunBindingRepair(reason, force)
     -- BINDINGS VANISHED + MOUSEOVERBUTTON DESYNC on that frame. Combat end is
     -- exactly when a healer is most likely to be hovering someone.
     --
-    -- Wait for the cursor to leave, bounded: a parked cursor must not postpone
-    -- a genuine repair forever, so after REPAIR_HOVER_MAX_WAITS we proceed and
-    -- say that the hover will need re-establishing.
+    -- Wait for the cursor to leave, bounded on WALL CLOCK -- not on a count of
+    -- calls, which is what this was and why it failed.
+    --
+    -- It counted one per call against a limit of 10, intended as 10 x
+    -- REPAIR_HOVER_WAIT = 10s of tolerated hover. But the diagnostic ticker asks
+    -- for a repair every 200ms while dfIsSecureMouseover is falsy, and a
+    -- POSTPONED call never stamps lastBindingRepair, so the 5s cooldown did not
+    -- gate those either: ten ticks spent the entire budget in ~2s and then tore
+    -- down all ~371 frames with the cursor still sitting on one of them. Ordinary
+    -- non-motion enters triggered it, and the teardown could not fix them.
+    -- Elapsed time makes the budget mean what it claims however often we are asked.
     local hovered = self.currentHoveredFrame
     if hovered and hovered.IsMouseOver and hovered:IsMouseOver() then
-        self.repairHoverWaits = (self.repairHoverWaits or 0) + 1
-        if self.repairHoverWaits <= REPAIR_HOVER_MAX_WAITS then
-            DF:Debug("CLICK", "Binding repair (%s) postponed — cursor is on %s (wait %d/%d)",
-                tostring(reason), hovered:GetName() or "unnamed",
-                self.repairHoverWaits, REPAIR_HOVER_MAX_WAITS)
+        self.repairHoverSince = self.repairHoverSince or GetTime()
+        local waited = GetTime() - self.repairHoverSince
+        if waited < REPAIR_HOVER_BUDGET then
+            DF:Debug("CLICK", "Binding repair (%s) postponed — cursor is on %s (%.1fs of %ds)",
+                tostring(reason), hovered:GetName() or "unnamed", waited, REPAIR_HOVER_BUDGET)
             self:DeferAfter("repairHoverWait", REPAIR_HOVER_WAIT, function()
                 CC:RunBindingRepair(reason, force)
             end)
             return
         end
-        DF:DebugWarn("CLICK", "Binding repair (%s) proceeding with %s still hovered after %d postponements — its hover binds will need a re-hover",
-            tostring(reason), hovered:GetName() or "unnamed", REPAIR_HOVER_MAX_WAITS)
+        DF:DebugWarn("CLICK", "Binding repair (%s) proceeding with %s still hovered after %.1fs — its hover binds will need a re-hover",
+            tostring(reason), hovered:GetName() or "unnamed", waited)
     end
-    self.repairHoverWaits = nil
+    self.repairHoverSince = nil
 
     self.lastBindingRepair = GetTime()
 
