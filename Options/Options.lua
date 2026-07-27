@@ -916,7 +916,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         generalGroup:AddWidget(GUI:CreateLabel(self.child, L["Show health bars for player and party/raid member pets, anchored to their owner's frame. Pet frames hide when owner dies."], 250))
         Add(generalGroup, nil, 1)
 
-        -- ===== LAYOUT MODE GROUP (col2) =====
+        -- ===== LAYOUT MODE GROUP (col1) =====
         local layoutGroup = GUI:CreateSettingsGroup(self.child, 280)
         layoutGroup:AddWidget(GUI:CreateHeader(self.child, L["Layout Mode"]), 40)
         layoutGroup.disableChildrenOn = function(d) return not d.petEnabled end
@@ -936,16 +936,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         else
             layoutGroup:AddWidget(GUI:CreateLabel(self.child, L["Pet frames are grouped together in a separate container."], 250))
         end
-        Add(layoutGroup, nil, 2)
+        Add(layoutGroup, nil, 1)
 
-        -- The two boxes above are a pair, and the groups below them are a fresh
-        -- start in both columns. Without this the shorter of the two would let
-        -- its column run ahead, and the row of boxes under them would sit at two
-        -- different heights.
-        AddSyncPoint()
-        
-        -- ===== COLUMN 1 GROUPS =====
-        
         -- GROUPED MODE: Group Settings (col1)
         if isGroupedMode then
             local groupedSettingsGroup = GUI:CreateSettingsGroup(self.child, 280)
@@ -1011,7 +1003,40 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         
         Add(sizeGroup, nil, 1)
         
-        -- HEALTH BAR GROUP (col1)
+        -- APPEARANCE GROUP (col2)
+        local appearanceGroup = GUI:CreateSettingsGroup(self.child, 280)
+        appearanceGroup:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 40)
+        appearanceGroup.disableChildrenOn = function(d) return not d.petEnabled end
+        appearanceGroup:AddWidget(GUI:CreateTextureDropdown(self.child, L["Health Bar Texture"], db, "petTexture", function()
+            if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
+        end), 55)
+        appearanceGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Background Color"], db, "petBackgroundColor", true, function()
+            if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
+        end, function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end, true), 35)
+        Add(appearanceGroup, nil, 2)
+
+        -- ===== BORDER GROUP (Stage 4.3) =====
+        -- include set tailored for a mini unit frame's border. Skipped:
+        -- animate (decoration, not alert), offset (Pet Frame has its own
+        -- Offset X / Y in the Position group in column 1), class / role colour
+        -- (UnitClass("pet") returns the pet family, not a class token),
+        -- colour-by-time / colour-by-type (no aura-state context).
+        local petBorderGroup = GUI:CreateSettingsGroup(self.child, 280)
+        petBorderGroup:AddWidget(GUI:CreateHeader(self.child, L["Border"]), 40)
+        petBorderGroup.disableChildrenOn = function(d) return not d.petEnabled end
+        GUI:CreateBorderControls(petBorderGroup, db, "pet", {
+            parent       = self.child,
+            include      = { alpha = true, inset = true, blendMode = true,
+                             gradient = true, shadow = true },
+            fullUpdate   = function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end,
+            lightUpdate  = function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end,
+            lightColors  = function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end,
+            refreshStates = function() self:RefreshStates() end,
+            sizeMin = 1, sizeMax = 6, sizeStep = 1,
+        })
+        Add(petBorderGroup, nil, 2)
+        
+        -- HEALTH BAR GROUP (col2)
         local healthBarGroup = GUI:CreateSettingsGroup(self.child, 280)
         healthBarGroup:AddWidget(GUI:CreateHeader(self.child, L["Health Bar"]), 40)
         healthBarGroup.disableChildrenOn = function(d) return not d.petEnabled end
@@ -1065,9 +1090,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         customPowerColor.disableOn = function(d) return not d.petShowPowerBar end
         customPowerColor.hideOn = function(d) return d.petPowerColorMode ~= "CUSTOM" end
 
-        Add(healthBarGroup, nil, 1)
+        Add(healthBarGroup, nil, 2)
         
-        -- NAME TEXT GROUP (col1)
+        -- NAME TEXT GROUP (col2)
         local textAnchorValues = {
             TOPLEFT= L["Top Left"], TOP= L["Top"], TOPRIGHT= L["Top Right"],
             LEFT= L["Left"], CENTER= L["Center"], RIGHT= L["Right"],
@@ -1104,11 +1129,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         nameTextGroup:AddWidget(GUI:CreateSlider(self.child, L["Name Y Offset"], -15, 15, 1, db, "petNameY", function()
             if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
         end, function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end, true), 55)
-        Add(nameTextGroup, nil, 1)
+        Add(nameTextGroup, nil, 2)
         
-        -- ===== COLUMN 2 GROUPS =====
-        
-        -- POSITION GROUP (col2, Attached mode only)
+        -- POSITION GROUP (col1, Attached mode only)
         if not isGroupedMode then
             local positionGroup = GUI:CreateSettingsGroup(self.child, 280)
             positionGroup:AddWidget(GUI:CreateHeader(self.child, L["Position"]), 40)
@@ -1130,41 +1153,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 if DF.UpdateAllPetFramePositions then DF:UpdateAllPetFramePositions() end
             end, function() if DF.UpdateAllPetFramePositions then DF:UpdateAllPetFramePositions() end end, true), 55)
             
-            Add(positionGroup, nil, 2)
+            Add(positionGroup, nil, 1)
         end
-        
-        -- APPEARANCE GROUP (col2)
-        local appearanceGroup = GUI:CreateSettingsGroup(self.child, 280)
-        appearanceGroup:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 40)
-        appearanceGroup.disableChildrenOn = function(d) return not d.petEnabled end
-        appearanceGroup:AddWidget(GUI:CreateTextureDropdown(self.child, L["Health Bar Texture"], db, "petTexture", function()
-            if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
-        end), 55)
-        appearanceGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Background Color"], db, "petBackgroundColor", true, function()
-            if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
-        end, function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end, true), 35)
-        Add(appearanceGroup, nil, 2)
-
-        -- ===== BORDER GROUP (Stage 4.3) =====
-        -- include set tailored for a mini unit frame's border. Skipped:
-        -- animate (decoration, not alert), offset (Pet Frame has its own
-        -- Offset X / Y in the Position group above), class / role colour
-        -- (UnitClass("pet") returns the pet family, not a class token),
-        -- colour-by-time / colour-by-type (no aura-state context).
-        local petBorderGroup = GUI:CreateSettingsGroup(self.child, 280)
-        petBorderGroup:AddWidget(GUI:CreateHeader(self.child, L["Border"]), 40)
-        petBorderGroup.disableChildrenOn = function(d) return not d.petEnabled end
-        GUI:CreateBorderControls(petBorderGroup, db, "pet", {
-            parent       = self.child,
-            include      = { alpha = true, inset = true, blendMode = true,
-                             gradient = true, shadow = true },
-            fullUpdate   = function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end,
-            lightUpdate  = function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end,
-            lightColors  = function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end,
-            refreshStates = function() self:RefreshStates() end,
-            sizeMin = 1, sizeMax = 6, sizeStep = 1,
-        })
-        Add(petBorderGroup, nil, 1)
         
         -- HEALTH TEXT GROUP (col2)
         local healthTextGroup = GUI:CreateSettingsGroup(self.child, 280)
@@ -2176,7 +2166,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         formatGroup:AddWidget(GUI:CreateDropdown(self.child, L["Label Format"], formatOptions, db, "groupLabelFormat", UpdateLabels), 55)
         formatGroup.hideOn = HideGroupLabelOptions
         formatGroup.disableChildrenOn = DisableGroupLabelOptions
-        Add(formatGroup, nil, 1)
+        Add(formatGroup, nil, 2)
         
         -- ===== FONT GROUP (Column 1) =====
         local fontGroup = GUI:CreateSettingsGroup(self.child, 280)
@@ -2189,7 +2179,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         fontGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Label Color"], db, "groupLabelColor", true, UpdateLabels, function() DF:LightweightUpdateGroupLabelColor() end, true), 35)
         fontGroup.hideOn = HideGroupLabelOptions
         fontGroup.disableChildrenOn = DisableGroupLabelOptions
-        Add(fontGroup, nil, 1)
+        Add(fontGroup, nil, 2)
         
         -- ===== POSITION GROUP (Column 2) =====
         local positionGroup = GUI:CreateSettingsGroup(self.child, 280)
@@ -2206,7 +2196,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         positionGroup:AddWidget(GUI:CreateLabel(self.child, L["Start: Above/left of groups.\nCenter: Middle of the group.\nEnd: Below/right of groups."], 250), 50)
         positionGroup.hideOn = HideGroupLabelOptions
         positionGroup.disableChildrenOn = DisableGroupLabelOptions
-        Add(positionGroup, nil, 2)
+        Add(positionGroup, nil, 1)
         
         -- Party mode message
         local partyMsg = Add(GUI:CreateLabel(self.child, L["Group labels are only available for raid frames.\n\nSwitch to Raid mode using the toggle at the top\nof the settings panel to configure group labels."], 400), 80, "both")
@@ -5030,7 +5020,17 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end
         Add(classFilterGroup, nil, 1)
 
-        -- ===== POSITION GROUP (Column 2) =====
+        -- ===== SIZE GROUP (Column 1) =====
+        local sizeGroup = GUI:CreateSettingsGroup(self.child, 280)
+        sizeGroup:AddWidget(GUI:CreateHeader(self.child, L["Size"]), 40)
+        sizeGroup.disableChildrenOn = function(d) return not d.resourceBarEnabled end
+        sizeGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Match Health Bar Width/Height"], db, "resourceBarMatchWidth", function() DF:UpdateAllFrames() end), 30)
+        local widthSlider = sizeGroup:AddWidget(GUI:CreateSlider(self.child, L["Width / Length"], 10, 200, 1, db, "resourceBarWidth", nil, function() DF:LightweightUpdatePowerBarSize() end, true), 55)
+        widthSlider.disableOn = function(d) return d.resourceBarMatchWidth end
+        sizeGroup:AddWidget(GUI:CreateSlider(self.child, L["Height / Thickness"], 1, 20, 1, db, "resourceBarHeight", nil, function() DF:LightweightUpdatePowerBarSize() end, true), 55)
+        Add(sizeGroup, nil, 1)
+        
+        -- ===== POSITION GROUP (Column 1) =====
         local positionGroup = GUI:CreateSettingsGroup(self.child, 280)
         positionGroup:AddWidget(GUI:CreateHeader(self.child, L["Position"]), 40)
         positionGroup.disableChildrenOn = function(d) return not d.resourceBarEnabled end
@@ -5042,24 +5042,24 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         positionGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "resourceBarAnchor", function() DF:UpdateAllFrames() end), 55)
         positionGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "resourceBarX", nil, function() DF:LightweightUpdatePowerBarPosition() end, true), 55)
         positionGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -50, 50, 1, db, "resourceBarY", nil, function() DF:LightweightUpdatePowerBarPosition() end, true), 55)
-        Add(positionGroup, nil, 2)
+        Add(positionGroup, nil, 1)
         
-        -- ===== TEXTURE GROUP (Column 1) — mirrors the Health Bar's Texture group:
+        -- ===== APPEARANCE GROUP (Column 2) — mirrors the Health Bar's Texture group:
         -- Texture, Orientation / Reverse Fill, and Smooth Bar Animation in one place. =====
-        local textureGroup = GUI:CreateSettingsGroup(self.child, 280)
-        textureGroup:AddWidget(GUI:CreateHeader(self.child, L["Texture"]), 40)
-        textureGroup.disableChildrenOn = function(d) return not d.resourceBarEnabled end
-        textureGroup:AddWidget(GUI:CreateTextureDropdown(self.child, L["Texture"], db, "resourceBarTexture", function() DF:UpdateAllFrames() end), 55)
+        local appearanceGroup = GUI:CreateSettingsGroup(self.child, 280)
+        appearanceGroup:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 40)
+        appearanceGroup.disableChildrenOn = function(d) return not d.resourceBarEnabled end
+        appearanceGroup:AddWidget(GUI:CreateTextureDropdown(self.child, L["Texture"], db, "resourceBarTexture", function() DF:UpdateAllFrames() end), 55)
 
         -- Keep Orientation (Horizontal/Vertical) and Reverse Fill as two explicit
         -- controls — clearer than a combined "Fill Direction" dropdown, where an
         -- option like "Bottom to Top" silently changes the orientation too.
         local orientOptions = { HORIZONTAL = L["Horizontal"], VERTICAL = L["Vertical"] }
-        textureGroup:AddWidget(GUI:CreateDropdown(self.child, L["Orientation"], orientOptions, db, "resourceBarOrientation", function() DF:UpdateAllFrames() end), 55)
-        textureGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Reverse Fill Direction"], db, "resourceBarReverseFill", function() DF:UpdateAllFrames() end), 30)
+        appearanceGroup:AddWidget(GUI:CreateDropdown(self.child, L["Orientation"], orientOptions, db, "resourceBarOrientation", function() DF:UpdateAllFrames() end), 55)
+        appearanceGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Reverse Fill Direction"], db, "resourceBarReverseFill", function() DF:UpdateAllFrames() end), 30)
 
-        textureGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Smooth Bar Animation"], db, "resourceBarSmooth", function() DF:UpdateAllFrames() end), 30)
-        Add(textureGroup, nil, 1)
+        appearanceGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Smooth Bar Animation"], db, "resourceBarSmooth", function() DF:UpdateAllFrames() end), 30)
+        Add(appearanceGroup, nil, 2)
         
         -- ===== BACKGROUND GROUP (Column 2) =====
         local bgGroup = GUI:CreateSettingsGroup(self.child, 280)
@@ -5073,7 +5073,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         bgColor.disableOn = function(d) return not d.resourceBarBackgroundEnabled end
         Add(bgGroup, nil, 2)
         
-        -- ===== BORDER GROUP (Column 1) =====
+        -- ===== BORDER GROUP (Column 2) =====
         -- Stage 4.2: hand-rolled Show + Colour block expanded to the full
         -- unified helper. include set tailored for a resource indicator:
         -- alpha / inset / blendMode / gradient / shadow keep the visual
@@ -5096,24 +5096,14 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             refreshStates = function() self:RefreshStates() end,
             sizeMin = 1, sizeMax = 6, sizeStep = 1,
         })
-        Add(borderGroup, nil, 1)
+        Add(borderGroup, nil, 2)
         
-        -- ===== FRAME LEVEL GROUP (Column 2) =====
+        -- ===== FRAME LEVEL GROUP (Column 1) =====
         local frameLevelGroup = GUI:CreateSettingsGroup(self.child, 280)
         frameLevelGroup:AddWidget(GUI:CreateHeader(self.child, L["Frame Level"]), 40)
         frameLevelGroup.disableChildrenOn = function(d) return not d.resourceBarEnabled end
         frameLevelGroup:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "resourceBarFrameLevel", nil, function() DF:LightweightUpdateResourceBarFrameLevel() end, true)), 55)
-        Add(frameLevelGroup, nil, 2)
-        
-        -- ===== SIZE GROUP (Column 1) =====
-        local sizeGroup = GUI:CreateSettingsGroup(self.child, 280)
-        sizeGroup:AddWidget(GUI:CreateHeader(self.child, L["Size"]), 40)
-        sizeGroup.disableChildrenOn = function(d) return not d.resourceBarEnabled end
-        sizeGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Match Health Bar Width/Height"], db, "resourceBarMatchWidth", function() DF:UpdateAllFrames() end), 30)
-        local widthSlider = sizeGroup:AddWidget(GUI:CreateSlider(self.child, L["Width / Length"], 10, 200, 1, db, "resourceBarWidth", nil, function() DF:LightweightUpdatePowerBarSize() end, true), 55)
-        widthSlider.disableOn = function(d) return d.resourceBarMatchWidth end
-        sizeGroup:AddWidget(GUI:CreateSlider(self.child, L["Height / Thickness"], 1, 20, 1, db, "resourceBarHeight", nil, function() DF:LightweightUpdatePowerBarSize() end, true), 55)
-        Add(sizeGroup, nil, 1)
+        Add(frameLevelGroup, nil, 1)
         
         -- ===== RESOURCE COLORS GROUP (Column 2) =====
         local colorGroup = GUI:CreateSettingsGroup(self.child, 280)
@@ -6649,7 +6639,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- there is nothing to print. Removed 2026-07-25 as its own comment long proposed.)
         Add(settingsGroup, nil, 1)
         
-        -- ===== BUFFS TO CHECK GROUP (Column 2) =====
+        -- ===== BUFFS TO CHECK GROUP (Column 1) =====
         local buffsGroup = GUI:CreateSettingsGroup(self.child, 280)
         buffsGroup:AddWidget(GUI:CreateHeader(self.child, L["Buffs to Check (Manual Mode)"]), 40)
         buffsGroup:AddWidget(GUI:CreateLabel(self.child, L["When auto-detect is OFF, select which raid buffs to monitor manually."], 250), 35)
@@ -6673,9 +6663,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end), 30)
         buffsGroup.hideOn = HideManualBuffVariant
         buffsGroup.disableChildrenOn = HideMissingBuffOptions
-        Add(buffsGroup, nil, 2)
+        Add(buffsGroup, nil, 1)
         
-        -- ===== APPEARANCE GROUP (Column 1) =====
+        -- ===== APPEARANCE GROUP (Column 2) =====
         local appearanceGroup = GUI:CreateSettingsGroup(self.child, 280)
         appearanceGroup:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 40)
         appearanceGroup.disableChildrenOn = HideMissingBuffOptions
@@ -6688,9 +6678,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         appearanceGroup:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "missingBuffIconFrameLevel", function()
             refreshMissing()
         end, function() DF:LightweightUpdateFrameLevel("missingBuff") end, true)), 55)
-        Add(appearanceGroup, nil, 1)
+        Add(appearanceGroup, nil, 2)
         
-        -- ===== POSITION GROUP (Column 2) =====
+        -- ===== POSITION GROUP (Column 1) =====
         local positionGroup = GUI:CreateSettingsGroup(self.child, 280)
         positionGroup:AddWidget(GUI:CreateHeader(self.child, L["Position"]), 40)
         positionGroup.disableChildrenOn = HideMissingBuffOptions
@@ -6703,9 +6693,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         positionGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -150, 150, 1, db, "missingBuffIconY", function()
             refreshMissing()
         end, function() DF:LightweightUpdateMissingBuff() end, true), 55)
-        Add(positionGroup, nil, 2)
+        Add(positionGroup, nil, 1)
         
-        -- ===== BORDER GROUP (Column 1) =====
+        -- ===== BORDER GROUP (Column 2) =====
         -- Stage 4.1: hand-rolled border block replaced by the unified helper.
         -- include set tailored for a "needs attention" alert: alpha / inset /
         -- offset / blendMode / gradient / shadow / animate (matches the
@@ -6728,7 +6718,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             sizeMin = 0, sizeMax = 6, sizeStep = 1,  -- 0 = animation-only (no solid edge)
         })
         borderGroup.disableChildrenOn = HideMissingBuffOptions
-        Add(borderGroup, nil, 1)
+        Add(borderGroup, nil, 2)
         
         -- See Also links
         AddSpace(GUI.Space.block, "both")
@@ -6778,6 +6768,52 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end), 30)
         Add(settingsGroup, nil, 1)
         
+        -- ===== LAYOUT GROUP (Column 1) =====
+        local layoutGroup = GUI:CreateSettingsGroup(self.child, 280)
+        layoutGroup:AddWidget(GUI:CreateHeader(self.child, L["Layout"]), 40)
+        layoutGroup:AddWidget(GUI:CreateLabel(self.child, L["Controls how multiple defensive icons are arranged."], 250), 45)
+        layoutGroup.disableChildrenOn = HideDefensiveIconOptions
+
+        layoutGroup:AddWidget(GUI:CreateGrowthControl(self.child, db, "defensiveBarGrowth", function()
+            if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
+        end), 155)
+        layoutGroup:AddWidget(GUI:CreateSlider(self.child, L["Max Icons"], 1, 5, 1, db, "defensiveBarMax", function()
+            if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
+        end, nil, true), 55)
+
+        -- Native rows only — the legacy fallback keeps its own fixed order.
+        local defSortOptions = {
+            DEFAULT = L["Default (Slot Order)"],
+            TIME = L["Most Urgent"],
+            EXTERNALS = L["Externals First"],
+        }
+        local defSortDrop = layoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Sort Order"], defSortOptions, db, "defensiveSortOrder", function()
+            if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
+        end), 55)
+        defSortDrop.hideOn = function(d) return not DF:FactoryOwnsDefensiveRow(d) end
+        defSortDrop.tooltip = L["Externals First: defensives cast on this player by others show first, their own last. Most Urgent: soonest to expire first."]
+
+        local defWrap = layoutGroup:AddWidget(GUI:CreateSlider(self.child, L["Icons Per Row"], 1, 5, 1, db, "defensiveBarWrap", function()
+            if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
+        end, nil, true), 55)
+        -- Greys out on vertical-primary growth, where the native row-primary flow renders a
+        -- single column and there is nothing for a per-row count to do. Normal contextual
+        -- state via the grey seam, NOT a 12.1 frost — the control works horizontally, and the
+        -- blocked registry is for things the game genuinely cannot do. Mirrors the Buffs page,
+        -- including its 68914 re-verification of the flow-layout options.
+        defWrap.disableOn = function(d)
+            local g = d.defensiveBarGrowth or ""
+            -- Vertical-primary AND vertical-centred growth both render a single column.
+            return DF:FactoryOwnsDefensiveRow(d) and (g:sub(1, 2) == "UP" or g:sub(1, 4) == "DOWN"
+                or g == "CENTER_LEFT" or g == "CENTER_RIGHT")
+        end
+
+        layoutGroup:AddWidget(GUI:CreateSlider(self.child, L["Spacing"], -10, 10, 1, db, "defensiveBarSpacing", function()
+            if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
+        end, function() DF:LightweightUpdateDefensiveIcons() end, true), 55)
+
+        Add(layoutGroup, nil, 1)
+
         -- ===== APPEARANCE GROUP (Column 2) =====
         local appearanceGroup = GUI:CreateSettingsGroup(self.child, 280)
         appearanceGroup:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 40)
@@ -7004,52 +7040,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- (The old "Duration Position" group is gone: CreateTextControls above already
         -- renders Anchor + Offset X/Y on the same defensiveIconDurationX/Y keys — the
         -- separate group was a duplicate left behind by the TextStyle conversion.)
-
-        -- ===== LAYOUT GROUP (Column 1) =====
-        local layoutGroup = GUI:CreateSettingsGroup(self.child, 280)
-        layoutGroup:AddWidget(GUI:CreateHeader(self.child, L["Layout"]), 40)
-        layoutGroup:AddWidget(GUI:CreateLabel(self.child, L["Controls how multiple defensive icons are arranged."], 250), 45)
-        layoutGroup.disableChildrenOn = HideDefensiveIconOptions
-
-        layoutGroup:AddWidget(GUI:CreateGrowthControl(self.child, db, "defensiveBarGrowth", function()
-            if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
-        end), 155)
-        layoutGroup:AddWidget(GUI:CreateSlider(self.child, L["Max Icons"], 1, 5, 1, db, "defensiveBarMax", function()
-            if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
-        end, nil, true), 55)
-
-        -- Native rows only — the legacy fallback keeps its own fixed order.
-        local defSortOptions = {
-            DEFAULT = L["Default (Slot Order)"],
-            TIME = L["Most Urgent"],
-            EXTERNALS = L["Externals First"],
-        }
-        local defSortDrop = layoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Sort Order"], defSortOptions, db, "defensiveSortOrder", function()
-            if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
-        end), 55)
-        defSortDrop.hideOn = function(d) return not DF:FactoryOwnsDefensiveRow(d) end
-        defSortDrop.tooltip = L["Externals First: defensives cast on this player by others show first, their own last. Most Urgent: soonest to expire first."]
-
-        local defWrap = layoutGroup:AddWidget(GUI:CreateSlider(self.child, L["Icons Per Row"], 1, 5, 1, db, "defensiveBarWrap", function()
-            if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
-        end, nil, true), 55)
-        -- Greys out on vertical-primary growth, where the native row-primary flow renders a
-        -- single column and there is nothing for a per-row count to do. Normal contextual
-        -- state via the grey seam, NOT a 12.1 frost — the control works horizontally, and the
-        -- blocked registry is for things the game genuinely cannot do. Mirrors the Buffs page,
-        -- including its 68914 re-verification of the flow-layout options.
-        defWrap.disableOn = function(d)
-            local g = d.defensiveBarGrowth or ""
-            -- Vertical-primary AND vertical-centred growth both render a single column.
-            return DF:FactoryOwnsDefensiveRow(d) and (g:sub(1, 2) == "UP" or g:sub(1, 4) == "DOWN"
-                or g == "CENTER_LEFT" or g == "CENTER_RIGHT")
-        end
-
-        layoutGroup:AddWidget(GUI:CreateSlider(self.child, L["Spacing"], -10, 10, 1, db, "defensiveBarSpacing", function()
-            if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
-        end, function() DF:LightweightUpdateDefensiveIcons() end, true), 55)
-
-        Add(layoutGroup, nil, 1)
 
         -- ===== DURATION BAR GROUP (Column 1) ===== (12.1 factory rows only —
         -- mirrors the Buffs page's block; UpdateAllDefensiveBars bumps the layout
@@ -9033,9 +9023,12 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         borderAlpha.disableOn = DisableIfNoBorder
         borderGroup.hideOn = HideDispelOptions   -- works in BOTH modes (game = ring slot)
         dfSection:RegisterChild(borderGroup)
-        Add(borderGroup, nil, 1)
+        Add(borderGroup, nil, 2)
 
         -- ===== GRADIENT GROUP (Column 1) =====
+        -- Column 1 with Display, not column 2 with Border: this is the OVERLAY's
+        -- own gradient (Full Frame / Top Edge / Edge Glow), so it belongs with
+        -- the overlay's display mode rather than with the border drawn over it.
         local gradientGroup = GUI:CreateSettingsGroup(self.child, 280)
         gradientGroup:AddWidget(GUI:CreateHeader(self.child, L["Gradient"]), 40)
         local showGradient = gradientGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Gradient"], db, "dispelShowGradient", function()

@@ -12447,6 +12447,40 @@ function DF:CreateGUI()
             self.child.RefreshStates = function() self:RefreshStates() end
             local parent = self.child
 
+            -- col = 1, 2, or "both". THE PAGE LAYOUT STANDARD lives here, because
+            -- this is the call that decides it and the only thing every page has
+            -- in common:
+            --
+            --   column 1 -- structure and geometry, in this order:
+            --               Settings -> [Layout] -> [Size] -> Position
+            --   column 2 -- styling, in this order:
+            --               Appearance -> Border -> element extras (text, bars)
+            --   "both"   -- ONLY on a page that genuinely needs the width
+            --               (Pinned Frames, Nicknames). It is also a sync point:
+            --               it takes the lower of the two columns and drops both
+            --               to it, whether or not you wanted that.
+            --
+            -- Columns rather than a flat order, because a page is read as two
+            -- columns and not as a sequence -- putting Appearance third and
+            -- Border fifth still separates them on screen if they land on
+            -- opposite sides. Grouping by column keeps the two natural pairs
+            -- (Layout+Position, Appearance+Border) together where the eye is.
+            --
+            -- ⚠ The split only MEANS anything where both categories are present.
+            -- A surface holding nothing but geometry (an aura page's Layout
+            -- section) or nothing but styling (its Appearance section) has no
+            -- left/right distinction to preserve, so its boxes fill both columns
+            -- for balance and reading order instead. Forcing the rule there
+            -- empties one column, which is worse than the inconsistency it was
+            -- meant to fix.
+            --
+            -- Sections (GUI:CreateCollapsibleSection) hold a page's boxes when
+            -- the page needs a second level -- either PARALLEL SUB-FEATURES
+            -- (Icons, Highlights, Health Bar) or broad CATEGORIES whose box
+            -- names only make sense inside them (the aura pages, where Layout
+            -- and Duration Bar each contain their own "Settings" box). The rule
+            -- above then applies within each section rather than across the
+            -- page. A page that needs neither stays as plain boxes.
             local function Add(widget, height, col)
                 table.insert(self.children, widget)
                 widget:SetParent(parent)
