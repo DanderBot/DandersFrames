@@ -680,7 +680,18 @@ function CC:DisableBlizzardClickCasting()
             -- Prevent ClickBindingFrame from registering clicks when over our frames
             hooksecurefunc(ClickBindingFrame, "Show", function(self)
                 if CC.db and CC.db.enabled then
-                    local mouseoverFrame = GetMouseFocus()
+                    -- Version-safe: 12.x documents only GetMouseFoci (which is
+                    -- topmost-first); GetMouseFocus is legacy. This was the one
+                    -- unguarded call site left in the addon, and it sits inside a
+                    -- secure hook that runs every time Blizzard's click-cast panel
+                    -- opens -- so if the old global goes away it throws in there
+                    -- and our own "hide it over our frames" protection never runs.
+                    local mouseoverFrame
+                    if GetMouseFoci then
+                        mouseoverFrame = GetMouseFoci()[1]
+                    elseif GetMouseFocus then
+                        mouseoverFrame = GetMouseFocus()
+                    end
                     if mouseoverFrame and CC.registeredFrames and CC.registeredFrames[mouseoverFrame] then
                         if CC:ShouldClearBlizzardFromFrame(mouseoverFrame) then
                             self:Hide()
@@ -1129,17 +1140,33 @@ function CC:PropagateMouseOnChildren(frame)
     
     local children = {frame:GetChildren()}
     for _, child in ipairs(children) do
-        -- Skip forbidden frames — these can't be touched at all
-        if child.IsForbidden and child:IsForbidden() then
-            -- Skip
+        -- Everything here is pcall'd, and anything unreadable counts as "leave it
+        -- alone". This walk recurses over EVERY child of every Blizzard frame we
+        -- take over, and it runs inside the PLAYER_ENTERING_WORLD settle callback:
+        -- RegisterBlizzardFrames -> registerBlizzardFrame ->
+        -- FixBlizzardFrameStatusBars -> here. So an error on one child did not
+        -- merely skip that child, it aborted the rest of that callback -- taking
+        -- ApplyGlobalBindings, RunBindingRepair("zone-in") and
+        -- ResolveColdStartProfile down with it. An unguarded call that can kill
+        -- our own recovery path is the worst possible place to be optimistic.
+        --
+        -- Both calls are known to be refusable: some frames stopped accepting
+        -- SetPropagateMouseMotion in 12.0.5, and IsForbidden can itself throw or
+        -- hand back a secret value on frames the client is protecting. The sibling
+        -- walk FindHealthManaBars already guards secret values; this one did not.
+        local readable, forbidden = pcall(function()
+            return child.IsForbidden and child:IsForbidden()
+        end)
+        if not readable or issecretvalue(forbidden) or forbidden then
+            -- Unreadable or forbidden: skip it, and do not recurse into it.
         else
             if child.SetPropagateMouseMotion then
-                child:SetPropagateMouseMotion(true)
+                pcall(child.SetPropagateMouseMotion, child, true)
             end
             if child.SetPropagateMouseClicks then
-                child:SetPropagateMouseClicks(true)
+                pcall(child.SetPropagateMouseClicks, child, true)
             end
-            
+
             -- Recurse into children
             self:PropagateMouseOnChildren(child)
         end
