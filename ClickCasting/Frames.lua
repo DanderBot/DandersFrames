@@ -2008,7 +2008,26 @@ function CC:SetupSecureHandlers(frame)
                 end
             end
 
-            if not overRegisteredFrame then
+            -- FALSE-POSITIVE GUARD: the cursor may never have left at all.
+            -- Pinned boss frames carry a per-frame [@bossN,help] visibility
+            -- driver, so as boss units spawn/despawn/phase the frame flicks
+            -- hidden and shown under a stationary cursor. That fires the
+            -- INSECURE OnLeave while the secure wrap correctly does not, and
+            -- GetMouseFoci can omit the frame during the flicker, so the
+            -- overRegisteredFrame check above does not catch it.
+            --
+            -- Field log (mythic pull, 2026-07-27): DandersPinnedBoss1Raid_3
+            -- reported "OnLeave DID NOT FIRE" twice with underMouse=true and
+            -- mouseoverbutton still itself. Bindings being active there is
+            -- CORRECT, and the queued repair then ran at combat end and wiped
+            -- the hover binds off whatever frame the cursor was on by then.
+            -- Ask the frame directly rather than trusting the insecure leave.
+            local stillHovered = (self.IsMouseOver and self:IsMouseOver()) and isSecureMouseover
+
+            if stillHovered then
+                DF:Debug("CLICK", "OnLeave %s ignored — cursor is still on the frame and the secure mouseover is intact; the insecure leave was spurious",
+                    frameName)
+            elseif not overRegisteredFrame then
                 if InCombatLockdown() then
                     CC:RequestBindingRepair("stuck-binds-onleave")
                 else
@@ -2232,6 +2251,13 @@ end
 
 local REPAIR_COOLDOWN = 5  -- seconds between repair attempts
 
+-- How long to wait for the cursor to leave a frame before repairing anyway, and
+-- how many times. 1s x 10 = the repair will hold off for up to ten seconds of
+-- continuous hover; past that a genuine breakage matters more than one frame's
+-- live binds.
+local REPAIR_HOVER_WAIT = 1
+local REPAIR_HOVER_MAX_WAITS = 10
+
 -- Safe to call from anywhere, including combat and secure-hook callbacks
 -- Unwrap + re-wrap a frame's secure OnEnter/OnLeave/OnHide handlers using the
 -- snippets kept by SetupSecureHandlers. WrapScript STACKS, so the unwrap must
@@ -2299,6 +2325,40 @@ function CC:RunBindingRepair(reason, force)
             return
         end
     end
+
+    -- Do not tear down hover state while the cursor is sitting on a frame.
+    -- The repair wipes the header's override bindings, resets the restricted
+    -- env's mouseoverbutton, and unwraps/re-wraps the secure handlers on every
+    -- registered frame (371 of them in a raid). Doing that mid-hover destroys
+    -- the live hover: nothing re-establishes it, so the binds stay dead until
+    -- the user moves off and back on.
+    --
+    -- Field log (mythic pull, 2026-07-27): a repair deferred from a boss-frame
+    -- false positive drained at combat end while the cursor was on
+    -- DandersRaidGroup3HeaderUnitButton5, and the very next tick reported
+    -- BINDINGS VANISHED + MOUSEOVERBUTTON DESYNC on that frame. Combat end is
+    -- exactly when a healer is most likely to be hovering someone.
+    --
+    -- Wait for the cursor to leave, bounded: a parked cursor must not postpone
+    -- a genuine repair forever, so after REPAIR_HOVER_MAX_WAITS we proceed and
+    -- say that the hover will need re-establishing.
+    local hovered = self.currentHoveredFrame
+    if hovered and hovered.IsMouseOver and hovered:IsMouseOver() then
+        self.repairHoverWaits = (self.repairHoverWaits or 0) + 1
+        if self.repairHoverWaits <= REPAIR_HOVER_MAX_WAITS then
+            DF:Debug("CLICK", "Binding repair (%s) postponed — cursor is on %s (wait %d/%d)",
+                tostring(reason), hovered:GetName() or "unnamed",
+                self.repairHoverWaits, REPAIR_HOVER_MAX_WAITS)
+            self:DeferAfter("repairHoverWait", REPAIR_HOVER_WAIT, function()
+                CC:RunBindingRepair(reason, force)
+            end)
+            return
+        end
+        DF:DebugWarn("CLICK", "Binding repair (%s) proceeding with %s still hovered after %d postponements — its hover binds will need a re-hover",
+            tostring(reason), hovered:GetName() or "unnamed", REPAIR_HOVER_MAX_WAITS)
+    end
+    self.repairHoverWaits = nil
+
     self.lastBindingRepair = GetTime()
 
     DF:DebugWarn("CLICK", "Running binding repair (%s)", tostring(reason))
