@@ -992,8 +992,21 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\refresh", size = 14 },
         text = L["Reset"],
     })
+    -- Title + one scope line, matching every other Reset on the addon (see the
+    -- Reset Page button in Options.lua). The title names WHAT is being reset —
+    -- this button is per-selection, not per-page — and the line says what it
+    -- leaves alone. The button only ever shows for a modified preset or for
+    -- Optional Debuffs, so those are the only two cases to word.
     resetBtn:HookScript("OnEnter", function(self)
-        GUI:ShowTooltip(self, { title = L["Reset to Default"] })
+        local isBlacklist = (selKind == "blacklist")
+        GUI:ShowTooltip(self, {
+            title = format(L["Reset: %s"], isBlacklist and L["Optional Debuffs"] or CurrentDisplayName()),
+            lines = {
+                isBlacklist
+                    and L["Restore every optional debuff to its default setting. Other filters are not affected."]
+                    or L["Restore this filter's spell list to its defaults. Other filters are not affected."],
+            },
+        })
     end)
     resetBtn:HookScript("OnLeave", function() GUI:HideTooltip() end)
     resetBtn:Hide()
