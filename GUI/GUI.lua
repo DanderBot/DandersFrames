@@ -11874,6 +11874,10 @@ function DF:CreateGUI()
             -- Disable raid test mode if active
             if DF.raidTestMode then
                 carryTest = true
+                -- Hand-over: stay in container/pinned test mode across the swap rather
+                -- than tearing every aura container down for live data we never show
+                -- and rebuilding it a moment later. Cleared below.
+                DF._testModeHandover = true
                 DF:HideRaidTestFrames(true)  -- silent
             end
         end
@@ -11898,6 +11902,14 @@ function DF:CreateGUI()
                 DF.TestPanel:UpdateStateNoCallback()
             end
         end
+        if carryTest then
+            -- End the hand-over and settle: ShowTestFrames can bail (combat, party
+            -- frames disabled), which would otherwise leave the engines parked in
+            -- test mode with nothing testing. Teardown re-reads the real flags, so
+            -- it is a no-op when the incoming mode did start.
+            DF._testModeHandover = nil
+            if DF.TeardownTestModeEngines then DF:TeardownTestModeEngines() end
+        end
     end)
     btnRaid:SetScript("OnClick", function()
         DF:SyncLinkedSections()
@@ -11919,6 +11931,8 @@ function DF:CreateGUI()
             -- Disable party test mode if active
             if DF.testMode then
                 carryTest = true
+                -- Hand-over: see the raid->party handler above.
+                DF._testModeHandover = true
                 DF:HideTestFrames(true)  -- silent
             end
         end
@@ -11936,6 +11950,11 @@ function DF:CreateGUI()
         -- Keep test mode active when switching modes (just switch which mode it runs in)
         if carryTest and DF.ShowRaidTestFrames then
             DF:ShowRaidTestFrames()
+        end
+        if carryTest then
+            -- End the hand-over and settle; see the raid->party handler above.
+            DF._testModeHandover = nil
+            if DF.TeardownTestModeEngines then DF:TeardownTestModeEngines() end
         end
     end)
     

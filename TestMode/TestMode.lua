@@ -2176,8 +2176,16 @@ DF.lastLayoutRefresh = 0
 --
 -- Call AFTER the mode flags are cleared: the provider is shared between party and
 -- raid, so it goes back to real data only when NEITHER mode is left running.
+-- DF._testModeHandover covers the gap in a party<->raid SWAP. The GUI clears the
+-- outgoing mode's flag before it sets the incoming one, so for that instant neither
+-- is true and this would tear the engines down and immediately rebuild them — every
+-- aura container reconfigured to parse LIVE data that nothing ever renders, plus a
+-- full provider reset/switch round-trip. That intermediate state is invisible and
+-- pure cost; the swap sets the flag across the hand-over so we simply stay in test
+-- mode. The GUI clears it and calls this again, so a Show* that bails (raid frames
+-- disabled, combat) still settles correctly.
 function DF:TeardownTestModeEngines()
-    local stillTesting = (DF.testMode or DF.raidTestMode) and true or false
+    local stillTesting = (DF.testMode or DF.raidTestMode or DF._testModeHandover) and true or false
     if DF.AuraContainer and DF.AuraContainer.SetTestMode then
         DF.AuraContainer.SetTestMode(stillTesting)
     end

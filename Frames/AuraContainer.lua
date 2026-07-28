@@ -2205,7 +2205,17 @@ function Handle:_paintTestSlot(slot, index)
         if d > 0 then
             local u = self.config.unit
             local useed = (type(u) == "string" and tonumber(u:match("%d+"))) or 0
-            local offset = (index * 3 + useed * 5) % math.max(d - 1, 1)
+            -- ⚠ The whole-second term staggers the VALUE but NOT the phase. Every slot
+            -- paints in the same frame, so with d and the offset both integral every
+            -- expiry carries the same fractional part and all countdowns flip their
+            -- digit on the same tick — a raid of auras ticking in lockstep, which is
+            -- the one thing real auras never do. The sub-second term breaks that;
+            -- scheduleTestRearm then loops on (d - offset) so they stay out of phase.
+            -- 17 is coprime with the row/unit counts, so the phases don't collapse
+            -- back into groups. Bounded below d: the integer part is at most d-2
+            -- (d >= 2) or 0 (d == 1), and frac < 1.
+            local frac = ((index * 7 + useed * 13) % 17) / 17
+            local offset = (index * 3 + useed * 5) % math.max(d - 1, 1) + frac
             barFill = (d - offset) / d
             -- Invalidate any re-arm still pending from the previous paint.
             slot._dfTestGen = (slot._dfTestGen or 0) + 1
