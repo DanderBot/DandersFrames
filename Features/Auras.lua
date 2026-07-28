@@ -54,8 +54,29 @@ local cachedDefensiveFilters = nil   -- mode-independent
 -- Build the filter string for buffs. One native group: category selection is
 -- expressed via candidateFilters spell-ID maps (see BuildAuraRowConfig), so the
 -- filterString only carries HELPFUL + Only Mine.
+--
+-- Defensive Bar dedup, HALF ONE — the CATEGORY case. When the defensive bar has
+-- no filter selection it falls back to Blizzard's BIG_DEFENSIVE category, whose
+-- contents are not spell IDs and cannot be enumerated. The expressible
+-- complement is the negated token: the grammar takes a "!" prefix on any
+-- AuraFilters component (AuraUtil.AuraFilterNegationPrefix), which is how the
+-- debuff row already keeps its groups disjoint. HALF TWO — the exact,
+-- spell-ID case — is in BuildAuraRowConfig.
+--
+-- Gated on the bar actually being ON: excluding the category while nothing else
+-- displays it would make those buffs invisible on every bar.
 local function BuildDirectBuffFilters(db)
-    return { db.directBuffOnlyMine and "HELPFUL|PLAYER" or "HELPFUL" }
+    local f = db.directBuffOnlyMine and "HELPFUL|PLAYER" or "HELPFUL"
+    if db.buffDeduplicateDefensives and db.defensiveIconEnabled
+        and AuraFilters.BigDefensive and DF.FilterRegistry then
+        local res = DF.FilterRegistry:ResolveSelection(db.defensiveFilterSelection, false)
+        -- Only the "all" fallback is category-driven; include/exclude modes are
+        -- spell-ID driven and handled exactly in HALF TWO.
+        if res.kind ~= "include" and res.kind ~= "exclude" then
+            f = f .. "|!" .. AuraFilters.BigDefensive
+        end
+    end
+    return { f }
 end
 
 -- Blizzard's AuraUtil.DispellableDebuffTypes verbatim — the map form of the
@@ -1430,9 +1451,7 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
         -- switch and spec change. UNIONED into (never replacing) the exclude
         -- map above, and folded into the row tuning signature via excludeSig, so a
         -- change in the tracked set re-applies the buff row's candidate filters in
-        -- place (see rowTuningSig / ApplyTuning). On 12.1 only
-        -- the AD half of the legacy toggle is expressible — the defensive row's contents
-        -- aren't enumerable as spell IDs read-free (category-filter driven).
+        -- place (see rowTuningSig / ApplyTuning).
         if db.buffDeduplicateDefensives and opts.frame and DF.GetADTrackedSpellIDs then
             local adIDs = DF:GetADTrackedSpellIDs(opts.frame, db)
             if adIDs then
@@ -1440,6 +1459,28 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
                 local map = candidateFilters.excludeSpellIDs or {}
                 candidateFilters.excludeSpellIDs = map
                 for id in pairs(adIDs) do map[id] = true end
+            end
+        end
+        -- Defensive Bar dedup, HALF TWO — the EXACT case. The defensive row runs
+        -- the SAME FilterRegistry resolution (DriveDefensiveFactory), so in
+        -- include-mode its contents already ARE a spell-ID map: union it and the
+        -- two bars agree exactly, with no category approximation. HALF ONE (the
+        -- "all" fallback, negated category) is in BuildDirectBuffFilters.
+        --
+        -- Exclude-mode is deliberately uncovered: the bar then shows "everything
+        -- helpful EXCEPT this map", an unbounded set with no expressible
+        -- complement here. Approximating it with !BIG_DEFENSIVE would hide the
+        -- whole Blizzard category from the buff bar while the defensive bar was
+        -- only showing part of it — buffs would vanish from both.
+        --
+        -- Gated on the bar being ON for the same reason.
+        if db.buffDeduplicateDefensives and db.defensiveIconEnabled and DF.FilterRegistry then
+            local dres = DF.FilterRegistry:ResolveSelection(db.defensiveFilterSelection, false)
+            if dres.kind == "include" and dres.map then
+                candidateFilters = candidateFilters or {}
+                local map = candidateFilters.excludeSpellIDs or {}
+                candidateFilters.excludeSpellIDs = map
+                for id in pairs(dres.map) do map[id] = true end
             end
         end
         -- FILTER REGISTRY: fold the category selection into this group's spec.

@@ -5694,18 +5694,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- ===== DEDUPLICATION =====
         local dedupGroup = GUI:CreateSettingsGroup(self.child, 280)
         dedupGroup:AddWidget(GUI:CreateHeader(self.child, L["Deduplication"]), 40)
-        -- 12.1: dedup semantics changed (Aura Designer auras only; the Defensive Bar's
-        -- contents aren't enumerable read-free, and multi-filter duplicates remain a game
-        -- limitation) — surface it as a high-alert (danger) info banner, not a plain note.
-        if DF.AuraContainer and DF.AuraContainer.IsSupported and DF.AuraContainer.IsSupported() then
-            local dedupBanner = GUI:CreateInfoBanner(self.child, {
-                tone = "danger",
-                text = L["Changed in WoW 12.1: hides auras shown by the Aura Designer from the buff bar. It can no longer hide Defensive Bar duplicates, and a buff matching several buff filters may still show more than once."],
-            })
-            dedupGroup:AddWidget(dedupBanner, dedupBanner.layoutHeight or 44)
-        else
-            dedupGroup:AddWidget(GUI:CreateLabel(self.child, L["Hide buffs from the buff bar when they are already displayed by the Defensive Bar or Aura Designer."], 250), 45)
-        end
+        -- The 12.1 alert banner that used to sit here is gone: both halves of the
+        -- toggle are expressible again (Aura Designer via excludeSpellIDs, the
+        -- Defensive Bar via its own resolved spell-ID map or a negated category —
+        -- see BuildDirectBuffFilters / BuildAuraRowConfig), and the multi-filter
+        -- duplicate it warned about cannot happen on a single-group buff row.
+        -- What the checkbox does now fits a tooltip; a danger banner would read as
+        -- "something is broken here".
         local dedupCb = GUI:CreateCheckbox(self.child, L["Hide Duplicate Buffs"], db, "buffDeduplicateDefensives", function()
             -- Bump the aura layout version so the factory buff row rebuilds with the new
             -- exclusion set (InvalidateAuraLayout -> RefreshFactoryRows -> DriveBuffFactory);
@@ -5713,11 +5708,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             DF:InvalidateAuraLayout()
             DF:UpdateAllAuras()
         end)
-        -- On the 12.1 native buff row only the Aura Designer half of this toggle is
-        -- expressible (the Defensive Bar's contents aren't enumerable as spell IDs
-        -- read-free). The tooltip states the modern behaviour + the known multi-filter
-        -- duplicate limitation.
-        dedupCb.tooltip = L["Auras shown by the Aura Designer are hidden from the buff bar so they don't appear twice. A buff that matches several buff filters can still show more than once."]
+        dedupCb.tooltip = L["Hides buffs that are already shown elsewhere — by an Aura Designer indicator, or on the Defensive Bar — so they don't appear twice."]
         dedupGroup:AddWidget(dedupCb, 30)
         Add(dedupGroup, nil, 1)
 
