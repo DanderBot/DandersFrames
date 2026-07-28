@@ -529,7 +529,44 @@ function CC:CreateClickCastHeader()
     -- perform the anchoring-restricted check, so they keep working in combat.
     -- The rect is still read below purely as a diagnostic.
     self.header:SetAttribute("_onstate-mouseoverstate", [[
-        if newstate == "false" and mouseoverbutton then
+        if newstate == "true" then
+            -- RECLAIM AFTER A NON-MOTION RE-ENTRY.
+            --
+            -- Blizzard runs a wrapped OnEnter snippet only when the enter came from
+            -- cursor motion, so leaving a frame and returning to it without moving
+            -- sets no binds and nothing notices. Field logs show it as wrapEnter
+            -- unchanged with kbActive nil, and on one frame as 184 enters against 92
+            -- leaves. The OnShow wrap cannot cover it -- the frame was never hidden,
+            -- so there is no show event to hook.
+            --
+            -- This IS reachable from the driver, because leaving the frame drops the
+            -- mouseover entirely: [@mouseover,exists] goes true, false, true, and a
+            -- state driver fires on exactly that boundary. It does NOT fire when the
+            -- cursor moves between two frames, which is why an earlier attempt at
+            -- this measured zero -- it was tested against the wrong case.
+            --
+            -- One IsUnderMouse call, on the only frame that can be involved: a
+            -- re-entry is by definition a return to the frame just released. No
+            -- scanning, so this costs nothing on the common path where the mouseover
+            -- is a nameplate or a world mob.
+            if not mouseoverbutton and lastreleased and lastreleased:IsUnderMouse() then
+                local snippet = lastreleased:GetAttribute("dfBindingSnippet")
+                if snippet and snippet ~= "" then
+                    -- owner assigned explicitly rather than assumed: the binding
+                    -- snippet calls owner:SetBindingClick, and here self IS the header.
+                    owner = self
+                    self:ClearBindings()
+                    mouseoverbutton = lastreleased
+                    mouseovername = lastreleased:GetName() or "unnamed"
+                    lastreleased:SetAttribute("dfIsSecureMouseover", true)
+                    lastreleased:SetAttribute("dfClearedBy", nil)
+                    lastreleased:ClearBindings()
+                    self:RunFor(lastreleased, snippet)
+                    lastreleased:SetAttribute("dfBindingsActive", true)
+                    lastreleased:SetAttribute("dfDriverClaimed", (lastreleased:GetAttribute("dfDriverClaimed") or 0) + 1)
+                end
+            end
+        elseif newstate == "false" and mouseoverbutton then
             local l, b, w, h = mouseoverbutton:GetRect()
             local rectKnown = l and w and h and w > 0 and h > 0
             local underMouse = mouseoverbutton:IsUnderMouse()
@@ -557,6 +594,7 @@ function CC:CreateClickCastHeader()
                 self:ClearBindings()
                 mouseoverbutton:SetAttribute("dfBindingsActive", nil)
                 mouseoverbutton:SetAttribute("dfIsSecureMouseover", nil)
+                lastreleased = mouseoverbutton
                 mouseoverbutton = nil
                 mouseovername = nil
             end
@@ -1782,6 +1820,10 @@ function CC:SetupSecureHandlers(frame)
 
             if mouseoverbutton == self then
                 self:SetAttribute("dfClearedBy", "onleave")
+                -- Remember what we just released. If the cursor returns to this same
+                -- frame without motion, Blizzard skips the OnEnter snippet and nothing
+                -- would re-bind; the mouseoverstate driver reclaims it from here.
+                lastreleased = self
                 -- Binds are owner-owned; owner:ClearBindings() is the release
                 -- that matters. self:ClearBindings() stays as defense-in-depth
                 -- against any frame-owned stray (self is always fresh here) —
@@ -1801,6 +1843,9 @@ function CC:SetupSecureHandlers(frame)
         -- Covers the case where a frame is hidden while hovered (e.g., party
         -- member leaves group, pet dies) and OnLeave doesn't fire.
         local onHideSnippet = [[
+            if lastreleased == self then
+                lastreleased = nil
+            end
             if mouseoverbutton == self then
                 self:SetAttribute("dfClearedBy", "onhide")
                 self:ClearBindings()
@@ -1956,16 +2001,17 @@ function CC:SetupSecureHandlers(frame)
         -- counter nothing ever reads is not a diagnostic.
         local showClaimed = self:GetAttribute("dfShowClaimed") or 0
         local reasserted = self:GetAttribute("dfReasserted") or 0
+        local driverClaimed = self:GetAttribute("dfDriverClaimed") or 0
 
         -- CAUTION reading phase/prev/postCheck: those attributes are written ONLY by
         -- the wrap snippet, so when wrapEnter is false they are STALE values from the
         -- last successful cycle, not a description of THIS hover. "phase=7 with
         -- wrapEnter=false" means the PREVIOUS enter completed, nothing more.
-        DF:Debug("CLICK", "OnEnter %s unit=%s kbActive=%s hasKB=%s type1=%s wrapEnter=%s(%d) wrapLeave=%d phase=%d prev=%s postCheck=%s showClaimed=%d reasserted=%d",
+        DF:Debug("CLICK", "OnEnter %s unit=%s kbActive=%s hasKB=%s type1=%s wrapEnter=%s(%d) wrapLeave=%d phase=%d prev=%s postCheck=%s showClaimed=%d driverClaimed=%d reasserted=%d",
             frameName, tostring(unit), tostring(bindingsActive),
             tostring(hasKeyboardBindings), tostring(type1),
             tostring(wrapEnterFired), wrapEnterCount, wrapLeaveCount,
-            enterPhase, prevMouseover, postCheck, showClaimed, reasserted)
+            enterPhase, prevMouseover, postCheck, showClaimed, driverClaimed, reasserted)
 
         -- Key diagnostic: mouseoverbutton was not self after OnEnter completed
         if wrapEnterFired and postCheck ~= "ok" then
@@ -2006,11 +2052,12 @@ function CC:SetupSecureHandlers(frame)
                 -- motion is exactly what the OnShow wrap exists to cover, so a
                 -- non-zero value means the gap was already closed before this
                 -- warning fired, and a zero means it was not.
-                DF:DebugWarn("CLICK", "  parent=%s pinnedBoss=%s pinned=%s visFlips=%d wrapApplied=%s showClaimed=%d",
+                DF:DebugWarn("CLICK", "  parent=%s pinnedBoss=%s pinned=%s visFlips=%d wrapApplied=%s showClaimed=%d driverClaimed=%d",
                     parent and parent:GetName() or "nil",
                     tostring(self.isPinnedBossFrame), tostring(self.isPinnedFrame),
                     self.dfVisFlips or 0, tostring(self.dfWrapApplied),
-                    self:GetAttribute("dfShowClaimed") or 0)
+                    self:GetAttribute("dfShowClaimed") or 0,
+                    self:GetAttribute("dfDriverClaimed") or 0)
             else
                 DF:DebugWarn("CLICK", "  WrapScript fired (enterCount=%d phase=%d) but dfBindingsActive=%s snippet=%d chars",
                     wrapEnterCount, enterPhase, tostring(bindingsActive), #snippet)
