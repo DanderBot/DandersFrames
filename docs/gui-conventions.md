@@ -7,21 +7,50 @@ grey-when-disabled everywhere, and fully translatable text.
 > This file travels with the repo and with pull requests, but is **excluded from the packaged
 > addon** via `.pkgmeta` (`ignore: docs`) — it is for contributors, not for users.
 
-## The core rule — build from helpers, don't hand-roll
+## The core rule — build from helpers, never hand-roll
+
+**One edit must be able to change the whole addon.** That is the entire point of the helper layer,
+and it is not an abstract nicety — before the factory existed, moving a border by one pixel or
+changing a hover colour meant editing hundreds of call sites by hand, and the ones that were missed
+are exactly why the UI had drifted out of alignment. Every widget that goes through a helper is a
+widget the next sweeping change reaches for free. Every widget that doesn't is a site somebody has
+to find and fix by hand, forever.
+
+So: **hand-rolling is the last resort, not a judgement call.**
 
 1. **Need a button / checkbox / dropdown / slider / edit box / colour picker / tooltip / panel /
-   banner / section box?** Use the helper. Do **not** hand-roll a widget a helper already covers.
+   banner / section box?** Use the helper. Do **not** hand-roll a widget a helper already covers,
+   even "just this once" and even if the helper is slightly more than you need.
 2. **Helper missing a capability you need?** **Extend the helper** — add an option/mode and keep
-   existing callers working — so every consumer benefits. Don't fork a one-off.
-3. **Genuinely bespoke and single-use** (a stateful drag widget, a pooled list row, a complex
-   custom control where generalising makes no sense)? Then hand-roll — but still reuse the palette
-   (`GUI.Colors`), the backdrop helpers, `ShowTooltip`, and wire up grey-when-disabled. Add a short
-   comment saying why it's bespoke.
-4. **New user-facing text** → wrap in `L["..."]` and add the key to `Locales/enUS.lua`.
-5. **New disable-able setting** → wire grey-when-disabled (see below).
+   existing callers working — so every consumer benefits. Don't fork a one-off. A new option on an
+   existing helper is almost always the right change; a second near-identical widget almost never is.
+3. **Nothing fits at all?** Then the answer is usually a **new helper**, not a local widget. If two
+   pages would plausibly want it, it belongs in `GUI/`.
+4. **Genuinely bespoke and single-use** (a stateful drag widget, a pooled list row, a complex
+   custom control where generalising makes no sense)? Only then hand-roll — but still reuse the
+   palette (`GUI.Colors`), the backdrop helpers, `ShowTooltip`/`AttachTooltip`, the pixel-snap
+   helpers, and wire up grey-when-disabled. Add a short comment saying **why** it's bespoke, so the
+   next reader knows it was a decision and not an oversight.
+5. **New user-facing text** → wrap in `L["..."]` and add the key to `Locales/enUS.lua`.
+6. **New disable-able setting** → wire grey-when-disabled (see below).
 
-If you find yourself copying backdrop/hover/border code from another widget, that's the signal to
-use or extend a helper instead.
+If you find yourself copying backdrop / hover / border / spacing code from another widget, stop —
+that is the signal to use or extend a helper instead. Copied code is the drift.
+
+## Consistency is the feature
+
+A user should not be able to tell which page they are on from how the controls look or what they
+are called. Two things get us there, and both are cheap at the time of writing and expensive later:
+
+- **Uniform layout.** Same two-column order on every page, same box vocabulary, same row heights,
+  same spacing — all of which come from the factory, so following the standard is mostly a matter
+  of *not* overriding it. See "Page layout standard" and "Row heights are factory-owned" below.
+  Call-site geometry that fights the factory is how pages start looking subtly different.
+- **Uniform naming.** Reuse the established name for a box, a setting, or an action rather than
+  inventing a synonym for the same thing. `Appearance` is always `Appearance`; a thing that adds is
+  always `Add`. Different words imply different behaviour, and users read them that way. If a new
+  concept genuinely needs a new word, pick one and then use it *everywhere* that concept appears —
+  including the locale keys and the tooltips.
 
 ☠ **Search by what a surface *is*, not by the constructor you expect it to call.** A sweep for
 `CreateFrame` / `SetBackdrop` once missed 26 dialogs, because the Blizzard dialog they were built
@@ -103,7 +132,11 @@ chrome, which `CreateLabel` adds to the measured text height.
 
 ## Shared GUI helpers (`GUI/GUI.lua`)
 
-49 `GUI:Create*` helpers. The ones you'll reach for:
+85 `GUI:` helpers, 49 of them `Create*`. **Check here before you build anything** — the table below
+is the widget layer, and the one after it is the behaviour layer that is easiest to miss and most
+often hand-rolled by accident.
+
+### Widgets
 
 | Need | Helper(s) | Notes |
 |------|-----------|-------|
@@ -121,9 +154,17 @@ chrome, which `CreateLabel` adds to the measured text height.
 | Banner / prose | `CreateInfoBanner` (tones info/caution/warning/danger/success; `:SetContent`), `CreateNote` | |
 | Cross-links | `CreateLink`, `CreateSeeAlso`, `CreateColorsPageLink`, `CreateDispelColorsPageLink` | jump to a related page and flash the target section |
 | Text | `CreateHeader`, `CreateLabel` | fonts via `SetSettingsFont` / `SafeSetFont` |
-| Tooltip (ours) | `GUI:ShowTooltip(owner, {title, lines, ...})` / `GUI:HideTooltip()` | **never** raw `GameTooltip` for our own tooltips |
+| Tooltip (attach one) | `GUI:AttachTooltip(widget, label, labelRegion)` | **the one you want for a setting.** Builds the hit frame over the *label's* rect, which is what makes "hover the label, not the control" true everywhere. Reads `widget.tooltip` |
+| Tooltip (ours) | `GUI:ShowTooltip(owner, {title, lines, ...})` / `GUI:HideTooltip()` | the raw show/hide, for bespoke owners. **Never** raw `GameTooltip` for our own tooltips |
 | Tooltip (game data) | `GUI:ShowGameTooltip(owner, opts)` | for real spells/auras — seeds from `SetSpellByID` / `SetUnitAura`, falls back to `fallbackTitle` + spell ID, then appends our own lines. Re-paints after a late spell load so the appended lines survive |
 | Tooltip (canned) | `GUI:SetFrameLevelTooltip(container)` | the standard Frame Level explainer |
+| Name prompt | `GUI:PromptName{title, message, default, acceptLabel, maxLetters, onAccept}` | "name this thing" — templates, filters, profiles. Wraps the DF input popup; don't build your own |
+| Colour picker (raw) | `GUI:OpenColorPicker(initial, hasAlpha, onAccept, onCancel, onChange, default)` | for bespoke owners; `CreateColorPicker` is the db-bound widget |
+| Search / icon in a box | `GUI:AddEditBoxIcon(editbox, texture, size)` | pass `frame.EditBox`, **not** the frame — it insets the text so neither the value nor the hint runs under the icon |
+| "New" badge | `GUI:AddSectionNewBadge(widget, tabName, sectionId)` | marks a section as new until seen |
+| Gradient preview | `CreateGradientBar(parent, w, h, db, prefix)` | colour-by-time preview strip |
+| Debug row | `CreateDebugCategoryRow(parent, categoryKey, description, width)` | Debug page only |
+| Roster picker | `CreateHighlightRosterWidget(parent, get, set, onChange)` | name-list picker |
 | Ordered lists | `CreateClassOrderList`, `CreateRoleOrderList`, `CreateGroupOrderList` | drag-to-reorder |
 | Tabs | `StyleButton{tab=true}` | one underline-tab style everywhere |
 | Designer presets | `CreateDesignerPresetBar` | AD/TD named-preset bars |
@@ -131,8 +172,25 @@ chrome, which `CreateLabel` adds to the measured text height.
 | Border / expiry | `CreateBorderControls` + `CreateExpirationControls` (+ `CreateExpiringSubheader`, `CreateExpiringThresholdRow`) | each consumer opts into a subset via `opts.include` |
 | Text style block | `CreateTextControls` | font / scale / outline / shadow / colour / anchor / justify as one unit |
 | Animation | `CreateAnimationControls` | border animation type + tuning |
-| Override affordances | `CreateOverrideMarker`, `CreateOverrideResetButton`, `CreateDisabledOverlay` | |
+| Override affordances | `CreateOverrideMarker`, `CreateOverrideResetButton`, `CreateDisabledOverlay` | register the widget with `GUI.RegisterOverrideWidget(widget)` or its indicator never refreshes |
 | Theme | `GUI.GetThemeColor()`, `GUI.Colors`, `GUI.DialogColors`, `root.ThemeListeners` | |
+
+### Behaviour — the layer that gets hand-rolled by accident
+
+A bespoke widget still has to participate in these. Skipping one doesn't error; it just makes that
+one surface behave unlike the rest of the addon.
+
+| Need | Helper | ☠ What breaks if you skip it |
+|------|--------|------------------------------|
+| A dropdown-style popup menu | `GUI:RegisterMenu(frame)`, `GUI:CloseAllMenus()` | **Register every menu frame at creation.** A menu that isn't registered stays open through a page change, mode switch or window close, and floats over whatever comes next |
+| A widget that changes height | `GUI:RelayoutHost(widget, slotHeight)` | Updates the group's stored slot, re-lays the group, **then bubbles to the page** so sibling groups re-anchor. Without the bubble a grown group's backdrop overshoots the next group's anchor and paints an empty rectangle above it |
+| A border on a bespoke frame | `GUI:ApplyPixelBorder(frame, {r,g,b,a}, weight)`, `GUI:HidePixelBorder(frame)`, `GUI:RefreshPixelBorders()` | Our two-device-pixel border. A `SetBackdrop` edge instead gives you the thinning / vanishing hairline the whole system exists to avoid — see "The pixel grid" |
+| Whole-pixel geometry | `GUI.SnapLen`, `GUI.SnapLenUp` | Right/top edges land mid-pixel and clip whatever they contain |
+| Jump to a related setting | `GUI:LinkToSetting(target)`, `GUI:FlashWidget(widget, opts)` | `LinkToSetting` takes `scrollTo` for custom containers (e.g. an AD card) and `flash` to pick or suppress the pulse; `FlashWidget` works on a raw FontString too, so section headers can flash |
+| Colour a word inline | `GUI:ToneHex(toneName)`, `GUI:GetToneColor(toneName)` | Hardcoded hex drifts from the palette and doesn't theme |
+| Tab availability | `GUI:UpdateTabAvailability()`, `GUI:IsTabDisabledForCurrentMode(tabName)` | Call after anything that changes which tabs apply to the current mode |
+| Colour-picker interop | `GUI:InstallColorPickerHook()` / `Uninstall…` / `IsColorPickerHookInstalled()` / `MarkColorPickerCall()` | Keeps Blizzard's picker from stomping our own; mark your call or the hook can't tell whose it is |
+| Section collapse state | `GUI:GetCollapsedGroups()` | Persisted collapse state — read it, don't track your own |
 
 ## Popups — never Blizzard's
 
@@ -144,6 +202,7 @@ popup system in `Popup.lua`:
 | `DF:ShowPopupAlert(config)` | a message or a confirm |
 | `DF:ShowPopupInput(config)` | a message plus one text field |
 | `DF:ShowPopupWizard(config)` | a multi-step flow |
+| `GUI:PromptName(opts)` | the common "name this thing" case — prefer this over calling `ShowPopupInput` yourself |
 
 ☠ Three things that bite:
 * The popup is a **singleton** — park the widgets you aren't using, or the last dialog's leftovers
