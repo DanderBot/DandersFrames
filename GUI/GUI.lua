@@ -4841,6 +4841,76 @@ function GUI:CreateOverrideMarker(parent, size)
     return btn
 end
 
+-- A bare checkbox sized for a LIST ROW — no label, no db binding, no settings-row
+-- geometry. GUI:CreateCheckbox is a whole 30px settings row with its own label and
+-- hit rect, which is the wrong shape entirely inside a 22px pooled list row that
+-- already owns its own text, count and selection accent.
+--
+-- The caller drives it: :SetChecked(bool) to paint, opts.onClick to react. It does
+-- NOT read or write the db itself, because a list row's meaning changes per bind
+-- (a pooled row is a different filter every refresh) and a captured dbKey would go
+-- stale the moment the pool rebinds.
+--
+-- ⚠ Clicks deliberately do NOT propagate. The override marker above lets them fall
+-- through because it is a passive marker; this is a control, and on a clickable row
+-- the two gestures must stay separate — tick the box to switch the filter on, click
+-- anywhere else to select it. Nothing here calls SetPropagateMouseClicks, which is
+-- PROTECTED on 12.1 anyway (see the note in CreateOverrideMarker).
+--
+-- ⚠ The BOX ITSELF is GUI:StyleCheckButton, the addon's one checkbox look — do not
+-- hand-roll it again. This was hand-rolled once and drifted four ways: it drew the
+-- Media\Icons\check GLYPH where every other checkbox in the addon draws a filled
+-- WHITE8x8 square (a different SYMBOL, not a different style), it skipped PixelUtil
+-- so it alone was unsnapped, it had no hover wash, and it recoloured its BORDER when
+-- checked, which nothing else does. CreateDebugCategoryRow is the precedent for this
+-- exact case — a list row with a checkbox — at the same size.
+--
+-- manualCheck because this is a plain Button, not a CheckButton: SetChecked below
+-- drives the mark. A real CheckButton would draw its checked mark through the native
+-- checked state, which has no disabled-checked texture here — so a greyed-but-ticked
+-- row (every filter row while All Buffs is on) would lose its tick entirely.
+--
+-- opts: { size = 16, checkSize = 9, onClick = function(checked) end,
+--         tooltip = title, tooltipDesc = line }
+function GUI:CreateRowToggle(parent, opts)
+    opts = opts or {}
+    local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
+    GUI:StyleCheckButton(btn, {
+        size        = opts.size or 16,
+        checkSize   = opts.checkSize or 9,
+        manualCheck = true,
+    })
+
+    btn.checked = false
+    function btn:SetChecked(on)
+        self.checked = on and true or false
+        -- Re-tint on every paint. StyleCheckButton registers its theme listener on
+        -- this button's PARENT, which for a pooled list row is a frame inside a
+        -- scroll child that the page's theme walk never visits (same trap as
+        -- StyleButton's wash). The list rebinds every row on refresh, and a refresh
+        -- is what a mode switch produces, so painting the accent here is what
+        -- actually carries party purple -> raid orange.
+        self.ApplyThemeColor(GetThemeColor())
+        self.Check:SetShown(self.checked)
+    end
+
+    btn:SetScript("OnClick", function(s)
+        if s.onClick then s.onClick(not s.checked) end
+    end)
+    btn:SetScript("OnEnter", function(s)
+        if s.tooltipText then
+            GUI:ShowTooltip(s, { title = s.tooltipText, lines = s.tooltipDesc and { s.tooltipDesc } or nil })
+        end
+    end)
+    btn:SetScript("OnLeave", function() GUI:HideTooltip() end)
+
+    btn.onClick = opts.onClick
+    btn.tooltipText = opts.tooltip
+    btn.tooltipDesc = opts.tooltipDesc
+    btn:SetChecked(false)
+    return btn
+end
+
 -- A "reset to global" button — red, icon-only, danger tone (matches the Reset
 -- Page button). Returns a hidden Button. opts: { size = 18, tooltip = title,
 -- tooltipDesc = line, onClick = fn }.
@@ -5680,6 +5750,9 @@ function GUI:CreateEditBox(parent, label, dbTable, dbKey, callback, width, place
         local function UpdatePlaceholder()
             ph:SetShown(not editbox:HasFocus() and editbox:GetText() == "")
         end
+        -- Exposed so a caller that puts something INSIDE the box (see
+        -- GUI:AddEditBoxIcon) can move the placeholder clear of it.
+        editbox.Placeholder = ph
         editbox.UpdatePlaceholder = UpdatePlaceholder
         editbox:HookScript("OnTextChanged", UpdatePlaceholder)
         editbox:HookScript("OnEditFocusGained", UpdatePlaceholder)
@@ -5713,6 +5786,35 @@ function GUI:CreateEditBox(parent, label, dbTable, dbKey, callback, width, place
 
     frame.EditBox = editbox
     return frame
+end
+
+-- ============================================================
+-- LEADING ICON INSIDE AN EDIT BOX
+-- The search-bar look from the main addon search (Features/Search.lua), made
+-- available to any CreateEditBox rather than re-rolled per search field: the
+-- glyph, the same 0.72 grey, and — the part that is easy to forget — the text
+-- inset AND the placeholder both moved clear of it, so neither the typed text
+-- nor the "Search..." hint runs underneath the icon.
+--
+-- Pass frame.EditBox, not the frame.
+-- ============================================================
+function GUI:AddEditBoxIcon(editbox, texture, size)
+    if not editbox or not texture then return end
+    size = size or 14
+    local icon = editbox:CreateTexture(nil, "OVERLAY")
+    icon:SetSize(size, size)
+    icon:SetPoint("LEFT", 6, 0)
+    icon:SetTexture(texture)
+    icon:SetVertexColor(0.72, 0.72, 0.72)
+    editbox.Icon = icon
+
+    local left = 6 + size + 5
+    local _, right, top, bottom = editbox:GetTextInsets()
+    editbox:SetTextInsets(left, right, top, bottom)
+    if editbox.Placeholder then
+        editbox.Placeholder:SetPoint("LEFT", left, 0)
+    end
+    return icon
 end
 
 -- ============================================================
