@@ -1989,6 +1989,13 @@ function CC:SetupSecureHandlers(frame)
 
         local wrapEnterFired = wrapEnterCount > prevWrapEnterCount
 
+        -- Same delta treatment for the two redundant set paths, so we can tell a
+        -- claim that SAVED this hover from one that merely duplicated a working
+        -- OnEnter. Cumulative counters cannot answer that; only the per-hover
+        -- delta can.
+        local prevDriverClaimed = self.dfLastDriverClaimed or 0
+        local prevShowClaimed = self.dfLastShowClaimed or 0
+
         local enterPhase = self:GetAttribute("dfEnterPhase") or -99
         local prevMouseover = self:GetAttribute("dfSecurePrevMouseover") or "?"
         local postCheck = self:GetAttribute("dfPostCheck") or "?"
@@ -2002,6 +2009,8 @@ function CC:SetupSecureHandlers(frame)
         local showClaimed = self:GetAttribute("dfShowClaimed") or 0
         local reasserted = self:GetAttribute("dfReasserted") or 0
         local driverClaimed = self:GetAttribute("dfDriverClaimed") or 0
+        self.dfLastDriverClaimed = driverClaimed
+        self.dfLastShowClaimed = showClaimed
 
         -- CAUTION reading phase/prev/postCheck: those attributes are written ONLY by
         -- the wrap snippet, so when wrapEnter is false they are STALE values from the
@@ -2012,6 +2021,26 @@ function CC:SetupSecureHandlers(frame)
             tostring(hasKeyboardBindings), tostring(type1),
             tostring(wrapEnterFired), wrapEnterCount, wrapLeaveCount,
             enterPhase, prevMouseover, postCheck, showClaimed, driverClaimed, reasserted)
+
+        -- THE MEASUREMENT: was a redundant set path load-bearing on THIS hover?
+        --
+        -- A claim only earned its place if it set the binds when the secure OnEnter
+        -- did not. If OnEnter fired as well, the claim merely repeated work that was
+        -- already going to happen -- harmless, but not a justification for carrying
+        -- the path. Logged at WARN so it stands out in a capture; these lines are
+        -- the evidence for whether the driver reclaim stays or goes.
+        local driverClaimedNow = driverClaimed > prevDriverClaimed
+        local showClaimedNow = showClaimed > prevShowClaimed
+        if (driverClaimedNow or showClaimedNow) and hasKeyboardBindings then
+            local via = driverClaimedNow and "driver reclaim" or "OnShow"
+            if not wrapEnterFired and bindingsActive then
+                DF:DebugWarn("CLICK", "CLAIM WAS LOAD-BEARING on %s — binds came from the %s, secure OnEnter did NOT fire",
+                    frameName, via)
+            elseif wrapEnterFired then
+                DF:Debug("CLICK", "Claim redundant on %s — the %s ran but secure OnEnter fired too",
+                    frameName, via)
+            end
+        end
 
         -- Key diagnostic: mouseoverbutton was not self after OnEnter completed
         if wrapEnterFired and postCheck ~= "ok" then
