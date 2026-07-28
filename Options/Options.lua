@@ -600,8 +600,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     -- Display > Fading (moved from Indicators > Out of Range + Dead/Offline fading)
     local pageFading = CreateSubTab("display", "display_fading", L["Fading"])
     BuildPage(pageFading, function(self, db, Add, AddSpace, AddSyncPoint)
-        -- Copy button at top right
-        Add(CreateCopyButton(self.child, {"rangeFade", "oor", "dead", "offline", "healthFade", "hf"}, L["Fading"], "display_fading"), 25, 2)
+        -- Copy button at top right.
+        -- ☠ These prefixes are matched CASE-SENSITIVELY from the START of the key
+        -- (DF:SectionOwnsKey), and the SAME list drives Copy, Sync AND Reset Page.
+        -- "dead" and "offline" matched nothing: the keys are fadeDead*, which begins
+        -- "fade". So the entire Dead/Offline Fading box was silently dropped from all
+        -- three. Prefixes must be real key prefixes, not the box's name.
+        Add(CreateCopyButton(self.child, {"rangeFade", "rangeCheck", "rangeUpdate", "oor", "fadeDead", "healthFade", "hf"}, L["Fading"], "display_fading"), 25, 2)
         
         -- Element-specific alpha sliders grey out (disabled-in-place) when the
         -- "Enable Element-Specific Alpha" toggle is off. The frame-level alpha
@@ -1524,7 +1529,21 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- "background"/"missingHealth" belong to bars_health (which hosts all
         -- controls for those keys) — not registered here so its Copy/Sync/Reset
         -- solely owns them.
-        Add(CreateCopyButton(self.child, {"frame", "border", "anchor"}, L["Frame"], "general_frame"), 25, 2)
+        -- "permanentMover" (16 keys) and the two growth keys were reached by nothing:
+        -- the whole permanent mover was skipped by Copy, Sync and Reset. ("border" and
+        -- "anchor" match nothing either — the real keys are frameBorder* / frameAnchor*,
+        -- already covered by "frame"; left in place as harmless intent.)
+        --
+        -- ⚠ DELIBERATELY NOT LISTED: the 14 raid* layout keys (raidUseGroups,
+        -- raidPlayersPerRow, raidGroup*, raidFlat*, raidRowColSpacing...). They are
+        -- per-mode and so DO exist on the party side, but only the raid page ever
+        -- edits them — so party's copies sit at their untouched defaults. One list
+        -- drives Copy, Sync AND Reset, so owning them would make "Copy to Raid" from
+        -- the party page overwrite the user's raid layout with those defaults. The
+        -- cost of leaving them out is that Reset Page does not clear raid layout;
+        -- that is the lesser of the two, and fixing it properly needs per-direction
+        -- ownership, which SectionOwnsKey does not currently express.
+        Add(CreateCopyButton(self.child, {"frame", "permanentMover", "growDirection", "growthAnchor", "border", "anchor"}, L["Frame"], "general_frame"), 25, 2)
         
         -- Migration: Ensure new flat raid settings have defaults
         if db.raidFlatGrowthAnchor == nil then db.raidFlatGrowthAnchor = "START" end
@@ -3862,7 +3881,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     local pageSorting = CreateSubTab("general", "general_sorting", L["Sorting"])
     BuildPage(pageSorting, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top
-        Add(CreateCopyButton(self.child, {"sort", "selfPosition", "rolePriority", "classPriority"}, L["Sorting"], "general_sorting"), 25, 2)
+        -- "useFrameSort" is the FrameSort integration toggle — a real per-mode key
+        -- that no prefix reached. (selfPosition / rolePriority / classPriority match
+        -- nothing: those settings are stored as sort*, which the first prefix covers.
+        -- Harmless, kept so the intent of the list stays readable.)
+        Add(CreateCopyButton(self.child, {"sort", "useFrameSort", "selfPosition", "rolePriority", "classPriority"}, L["Sorting"], "general_sorting"), 25, 2)
         
         -- Helper function to trigger sort for current mode
         local function TriggerSortForCurrentMode()
@@ -5663,7 +5686,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         Add(adPromoBanner, 32, "both")
 
         -- Copy button at top right
-        Add(CreateCopyButton(self.child, {"buff", "showBuffs"}, L["Buffs"], "auras_buffs"), 25, 2)
+        -- "directBuff" covers the Order & Limits sort keys (directBuffSortOrder /
+        -- SortMineFirst / SortReverse) — they do not start with "buff", so they were
+        -- owned by no section and skipped by Copy, Sync and Reset alike.
+        Add(CreateCopyButton(self.child, {"buff", "showBuffs", "directBuff"}, L["Buffs"], "auras_buffs"), 25, 2)
 
         -- ===== DEDUPLICATION =====
         local dedupGroup = GUI:CreateSettingsGroup(self.child, 280)
@@ -5978,7 +6004,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     local pageDebuffs = CreateSubTab("auras", "auras_debuffs", L["Debuffs"])
     BuildPage(pageDebuffs, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top
-        Add(CreateCopyButton(self.child, {"debuff", "showDebuffs"}, L["Debuffs"], "auras_debuffs"), 25, 2)
+        -- "directDebuff" — same omission as Buffs above, plus ShowAll / DispellableMode.
+        Add(CreateCopyButton(self.child, {"debuff", "showDebuffs", "directDebuff"}, L["Debuffs"], "auras_debuffs"), 25, 2)
         
         
         
@@ -6468,7 +6495,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- (prefix matcher, see Profile.lua) so the category selection edited on
         -- this page rides this page's Copy/Sync/Reset. It is also registered on
         -- the Aura Filters page — overlap is fine, both DeepCopy the same value.
-        Add(CreateCopyButton(self.child, {"defensiveIcon", "defensiveFilterSelection", "defensiveSortOrder", "defensiveDurationBar"}, L["Defensive Icon"], "auras_defensiveicon"), 25, 2)
+        -- "defensiveBar" covers the row's Layout box (Max / Growth / Spacing / Wrap),
+        -- which none of the other prefixes reached.
+        Add(CreateCopyButton(self.child, {"defensiveIcon", "defensiveFilterSelection", "defensiveSortOrder", "defensiveDurationBar", "defensiveBar"}, L["Defensive Icon"], "auras_defensiveicon"), 25, 2)
         
         local anchorOptions = {
             CENTER= L["Center"], TOP= L["Top"], BOTTOM= L["Bottom"], LEFT= L["Left"], RIGHT= L["Right"],
@@ -7691,7 +7720,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     local pageIcons = CreateSubTab("indicators", "indicators_icons", L["Icons"])
     BuildPage(pageIcons, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top
-        Add(CreateCopyButton(self.child, {"roleIcon", "leaderIcon", "raidTargetIcon", "readyCheckIcon", "summonIcon", "resurrectionIcon", "phasedIcon", "afkIcon", "vehicleIcon", "raidRoleIcon", "bgCarrierIcon", "statusIconFont", "statusIconFontSize", "statusIconFontOutline"}, L["Icons"], "indicators_icons"), 25, 2)
+        -- Every icon on the page needs its own prefix; "combatIcon" was the one
+        -- omission, so the Combat icon's seven settings were skipped by Copy, Sync
+        -- and Reset while every other icon on the same page travelled.
+        Add(CreateCopyButton(self.child, {"roleIcon", "leaderIcon", "raidTargetIcon", "readyCheckIcon", "summonIcon", "resurrectionIcon", "phasedIcon", "afkIcon", "vehicleIcon", "raidRoleIcon", "bgCarrierIcon", "combatIcon", "statusIconFont", "statusIconFontSize", "statusIconFontOutline"}, L["Icons"], "indicators_icons"), 25, 2)
         
         local anchorOptions = {
             CENTER = L["Center"],
