@@ -1069,7 +1069,11 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     if testData.status then
         if db.statusTextEnabled ~= false then
             DF:StyleStatusText(frame)
-            frame.statusText:SetText(testData.status)
+            -- testData.status is a KEY, not display text -- it is compared against
+            -- "Dead"/"Offline" for colour and fade decisions elsewhere in this file,
+            -- so it stays raw in the roster and resolves only here, at display.
+            -- No fallback needed: both DF.L metatables return the key on a miss.
+            frame.statusText:SetText(L[testData.status])
             frame.statusText:Show()
             frame.healthText:Hide()
         end

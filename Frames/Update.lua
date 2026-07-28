@@ -5,6 +5,10 @@ local addonName, DF = ...
 -- Contains frame update and layout functions
 -- ============================================================
 
+-- Core.lua sets DF.L and is listed well before this file in the .toc, so grabbing
+-- it at file scope is safe -- the same thing TextDesigner/Resolver.lua does.
+local L = DF.L
+
 -- Local caching of frequently used globals and WoW API for performance.
 -- Audit finding #3 (2026-04-06): UpdateHealthFast and UpdatePower are
 -- called once per unit per UNIT_HEALTH / UNIT_POWER event, and each
@@ -453,7 +457,7 @@ function DF:UpdateUnitFrame(frame, source)
             if hideLegacyText or db.statusTextEnabled == false then
                 frame.statusText:Hide()
             else
-                frame.statusText:SetText("Offline")
+                frame.statusText:SetText(L["Offline"])
                 frame.statusText:Show()
             end
         end
@@ -512,7 +516,7 @@ function DF:UpdateUnitFrame(frame, source)
             if hideLegacyText or db.statusTextEnabled == false then
                 frame.statusText:Hide()
             else
-                frame.statusText:SetText(isGhost and "Ghost" or "Dead")
+                frame.statusText:SetText(isGhost and L["Ghost"] or L["Dead"])
                 frame.statusText:Show()
             end
         end
@@ -783,7 +787,7 @@ function DF:UpdateHealthFast(frame)
             if hideLegacyText or db.statusTextEnabled == false then
                 frame.statusText:Hide()
             else
-                frame.statusText:SetText("Offline")
+                frame.statusText:SetText(L["Offline"])
                 frame.statusText:Show()
             end
         end
@@ -823,7 +827,7 @@ function DF:UpdateHealthFast(frame)
             if hideLegacyText or db.statusTextEnabled == false then
                 frame.statusText:Hide()
             else
-                frame.statusText:SetText(isGhost and "Ghost" or "Dead")
+                frame.statusText:SetText(isGhost and L["Ghost"] or L["Dead"])
                 frame.statusText:Show()
             end
         end
@@ -1088,9 +1092,9 @@ function DF:UpdateHealth(frame)
             else
                 DF:StyleStatusText(frame)
                 if isOffline then
-                    frame.statusText:SetText("Offline")
+                    frame.statusText:SetText(L["Offline"])
                 elseif isDead then
-                    frame.statusText:SetText("Dead")
+                    frame.statusText:SetText(L["Dead"])
                 end
                 frame.statusText:Show()
                 frame.healthText:Hide()
