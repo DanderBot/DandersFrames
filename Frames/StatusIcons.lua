@@ -189,12 +189,6 @@ function DF:CreateStatusIcons(frame)
     -- texcoord alone, so this crop persists.
     frame.combatIcon.texture:SetTexture("Interface\\CharacterFrame\\UI-StateIcon")
     frame.combatIcon.texture:SetTexCoord(0.5, 1.0, 0, 0.49)
-
-    -- ========================================
-    -- CENTER STATUS ICON (DEPRECATED - backward compat)
-    -- ========================================
-    frame.centerStatusIcon = CreateStatusIcon(overlay, 16)
-    frame.centerStatusIcon:SetPoint("CENTER", frame, "CENTER", 0, 0)
 end
 
 -- ============================================================

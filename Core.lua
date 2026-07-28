@@ -589,12 +589,6 @@ function DF:LightweightUpdateIconPosition(iconType)
             x = db.readyCheckIconX or 0
             y = db.readyCheckIconY or 0
             anchor = db.readyCheckIconAnchor or "CENTER"
-        elseif iconType == "centerStatus" then
-            icon = frame.centerStatusIcon
-            scale = db.centerStatusIconScale or 1
-            x = db.centerStatusIconX or 0
-            y = db.centerStatusIconY or 0
-            anchor = db.centerStatusIconAnchor or "CENTER"
         elseif iconType == "leader" then
             icon = frame.leaderIcon
             scale = db.leaderIconScale or 1
@@ -1178,8 +1172,6 @@ function DF:LightweightUpdateFrameLevel(elementType)
             frame.raidTargetIcon:SetFrameLevel(frameBaseLevel + (db.raidTargetIconFrameLevel or 30))
         elseif elementType == "readyCheck" and frame.readyCheckIcon then
             frame.readyCheckIcon:SetFrameLevel(frameBaseLevel + (db.readyCheckIconFrameLevel or 30))
-        elseif elementType == "centerStatus" and frame.centerStatusIcon then
-            frame.centerStatusIcon:SetFrameLevel(frameBaseLevel + (db.centerStatusIconFrameLevel or 30))
         else
             -- resurrection / phased / afk / vehicle / raidRole / summon icons
             local field = SIMPLE_LEVEL_ICONS[elementType]

@@ -1178,14 +1178,6 @@ DF.PartyDefaults = {
     buffWrap = 2,
     showBuffs = true,
 
-    -- Center Status Icon
-    centerStatusIconAnchor = "CENTER",
-    centerStatusIconEnabled = true,
-    centerStatusIconFrameLevel = 30,
-    centerStatusIconScale = 1,
-    centerStatusIconX = 0,
-    centerStatusIconY = 0,
-
     -- Class Color
     classColorAlpha = 1,
     colorPickerGlobalOverride = false,
@@ -1592,8 +1584,6 @@ DF.PartyDefaults = {
     missingBuffIconSize = 24,
     missingBuffIconX = 0,
     missingBuffIconY = 0,
-
-    -- My Buff Indicator (DEPRECATED — hidden from UI, force-disabled on load)
 
     -- Name Text
     nameColorClass = false,

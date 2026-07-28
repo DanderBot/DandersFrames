@@ -341,17 +341,6 @@ function DF:ApplyFrameLayout(frame)
     end
     
     -- ========================================
-    -- CENTER STATUS ICON
-    -- ========================================
-    if frame.centerStatusIcon then
-        local centerStatusSize = 16
-        if db.pixelPerfect then
-            centerStatusSize = DF:PixelPerfect(centerStatusSize)
-        end
-        frame.centerStatusIcon:SetSize(centerStatusSize, centerStatusSize)
-    end
-    
-    -- ========================================
     -- RESTED INDICATOR
     -- ========================================
     if frame.restedIndicator then
@@ -398,73 +387,6 @@ function DF:ApplyFrameLayout(frame)
         
         -- Delegate color to ElementAppearance for centralized handling
         DF:UpdateBackgroundAppearance(frame)
-        
-        --[[ TODO CLEANUP: Old background color code - now handled by ElementAppearance
-        local bgMode = db.backgroundColorMode or "CUSTOM"
-        
-        -- For BLACK/BLIZZARD mode, treat as CUSTOM with black color
-        -- This ensures identical code path to avoid any flickering differences
-        local effectiveBgMode = bgMode
-        local effectiveBgColor
-        if bgMode == "BLIZZARD" or bgMode == "BLACK" then
-            effectiveBgMode = "CUSTOM"
-            effectiveBgColor = {r = 0, g = 0, b = 0, a = 0.8}
-        end
-        
-        -- Apply texture (use Solid as fallback for ColorTexture behavior)
-        if bgTexture == "Solid" or bgTexture == "" then
-            -- Solid color mode - update cache and use key tracking to prevent flickering
-            frame.dfCurrentBgTexture = "Solid"
-            if effectiveBgMode == "CUSTOM" then
-                local c = effectiveBgColor or db.backgroundColor or {r = 0.1, g = 0.1, b = 0.1, a = 0.8}
-                local key = string.format("CUSTOM:%.2f:%.2f:%.2f:%.2f", c.r, c.g, c.b, c.a or 0.8)
-                if frame.dfCurrentBgKey ~= key then
-                    frame.background:SetColorTexture(c.r, c.g, c.b, c.a or 0.8)
-                    frame.dfCurrentBgKey = key
-                end
-            elseif effectiveBgMode == "CLASS" then
-                local unit = frame.unit
-                local classColor = {r = 0, g = 0, b = 0}
-                if unit and UnitExists(unit) then
-                    local _, class = UnitClass(unit)
-                    classColor = DF:GetClassColor(class)
-                end
-                local bgAlpha = db.backgroundClassAlpha or 0.3
-                local key = string.format("CLASS:%.2f:%.2f:%.2f:%.2f", classColor.r, classColor.g, classColor.b, bgAlpha)
-                if frame.dfCurrentBgKey ~= key then
-                    frame.background:SetColorTexture(classColor.r, classColor.g, classColor.b, bgAlpha)
-                    frame.dfCurrentBgKey = key
-                end
-            end
-        else
-            -- Textured background - only call SetTexture if texture path changed
-            if frame.dfCurrentBgTexture ~= bgTexture then
-                DF:SafeSetTexture(frame.background, bgTexture)
-                frame.background:SetHorizTile(false)
-                frame.background:SetVertTile(false)
-                frame.dfCurrentBgTexture = bgTexture
-                frame.dfCurrentBgKey = nil  -- Clear key when switching to textured
-            end
-            
-            -- Ensure SetAlpha is 1.0 for textured backgrounds (alpha controlled via vertex color)
-            frame.background:SetAlpha(1.0)
-            
-            -- Always update vertex color (includes alpha)
-            if effectiveBgMode == "CUSTOM" then
-                local c = effectiveBgColor or db.backgroundColor or {r = 0.1, g = 0.1, b = 0.1, a = 0.8}
-                frame.background:SetVertexColor(c.r, c.g, c.b, c.a or 0.8)
-            elseif effectiveBgMode == "CLASS" then
-                local unit = frame.unit
-                local classColor = {r = 0, g = 0, b = 0}
-                if unit and UnitExists(unit) then
-                    local _, class = UnitClass(unit)
-                    classColor = DF:GetClassColor(class)
-                end
-                local bgAlpha = db.backgroundClassAlpha or 0.3
-                frame.background:SetVertexColor(classColor.r, classColor.g, classColor.b, bgAlpha)
-            end
-        end
-        --]]
     end
     
 end
@@ -508,8 +430,6 @@ function DF:UpdateUnitFrame(frame, source)
             -- 1% health if the bar range was 0-100 from a prior SetHealthBarValue call.
             frame.healthBar:SetMinMaxValues(0, 100)
             frame.healthBar:SetValue(100)
-            -- TODO CLEANUP: Color now handled by ElementAppearance via ApplyDeadFade
-            -- frame.healthBar:SetStatusBarColor(0.5, 0.5, 0.5, 1)
         end
         if frame.nameText then
             if hideLegacyText then
@@ -527,8 +447,6 @@ function DF:UpdateUnitFrame(frame, source)
                 end
                 frame.nameText:SetText(name)
                 frame.nameText:Show()
-                -- TODO CLEANUP: Color now handled by ElementAppearance via ApplyDeadFade
-                -- frame.nameText:SetTextColor(0.5, 0.5, 0.5, 1)
             end
         end
         if frame.statusText then
@@ -571,8 +489,6 @@ function DF:UpdateUnitFrame(frame, source)
         if frame.healthBar then
             frame.healthBar:SetMinMaxValues(0, 100)
             frame.healthBar:SetValue(0)
-            -- TODO CLEANUP: Color now handled by ElementAppearance via ApplyDeadFade
-            -- frame.healthBar:SetStatusBarColor(0.3, 0.3, 0.3, 1)
         end
         if frame.nameText then
             if hideLegacyText then
@@ -590,8 +506,6 @@ function DF:UpdateUnitFrame(frame, source)
                 end
                 frame.nameText:SetText(name)
                 frame.nameText:Show()
-                -- TODO CLEANUP: Color now handled by ElementAppearance via ApplyDeadFade
-                -- frame.nameText:SetTextColor(0.5, 0.5, 0.5, 1)
             end
         end
         if frame.statusText then
@@ -649,41 +563,6 @@ function DF:UpdateUnitFrame(frame, source)
         -- Delegate color to ElementAppearance for centralized handling
         -- This prevents conflicts between multiple code paths trying to set color
         DF:UpdateHealthBarAppearance(frame)
-        
-        --[[ TODO CLEANUP: Old color code - now handled by ElementAppearance
-        -- Skip color setting if aggro color override is active
-        if not (frame.dfAggroActive and frame.dfAggroColor) then
-            -- Health color based on mode
-            local colorMode = db.healthColorMode or "CLASS"
-            local _, class = UnitClass(unit)
-            local classColor = DF:GetClassColor(class)
-            local alpha = db.classColorAlpha or 1.0
-            
-            if colorMode == "CLASS" then
-                frame.healthBar:SetStatusBarColor(classColor.r, classColor.g, classColor.b, alpha)
-            elseif colorMode == "PERCENT" then
-                -- Use UnitHealthPercent with a curve as 3rd arg - returns color directly
-                local curve = DF:GetCurveForUnit(unit, db)
-                if curve and UnitHealthPercent then
-                    local color = UnitHealthPercent(unit, true, curve)
-                    if color then
-                        local tex = frame.healthBar:GetStatusBarTexture()
-                        if tex then
-                            tex:SetVertexColor(color:GetRGB())
-                            tex:SetAlpha(alpha)
-                        end
-                    else
-                        frame.healthBar:SetStatusBarColor(classColor.r, classColor.g, classColor.b, alpha)
-                    end
-                else
-                    frame.healthBar:SetStatusBarColor(classColor.r, classColor.g, classColor.b, alpha)
-                end
-            elseif colorMode == "CUSTOM" then
-                local c = db.healthColor or {r = 0.2, g = 0.8, b = 0.2, a = 1}
-                frame.healthBar:SetStatusBarColor(c.r, c.g, c.b, c.a or 1)
-            end
-        end
-        --]]
     end
     
     -- ========================================
@@ -699,73 +578,7 @@ function DF:UpdateUnitFrame(frame, source)
     -- Delegate to ElementAppearance for centralized handling
     -- This prevents conflicts between Update.lua, Colors.lua, and Range.lua
     DF:UpdateBackgroundAppearance(frame)
-    
-    --[[ TODO CLEANUP: Old background color code - now handled by ElementAppearance
-    if frame.background then
-        local bgMode = db.backgroundColorMode or "CUSTOM"
-        local bgTexture = db.backgroundTexture or "Solid"
-        
-        -- For BLACK/BLIZZARD mode, treat as CUSTOM with black color
-        -- This ensures identical code path to avoid any flickering differences
-        local effectiveBgMode = bgMode
-        local effectiveBgColor
-        if bgMode == "BLIZZARD" or bgMode == "BLACK" then
-            effectiveBgMode = "CUSTOM"
-            effectiveBgColor = {r = 0, g = 0, b = 0, a = 0.8}
-        end
-        
-        -- Apply texture (use Solid as fallback for ColorTexture behavior)
-        if bgTexture == "Solid" or bgTexture == "" then
-            -- Solid color mode - only update if texture type changed
-            if frame.dfCurrentBgTexture ~= "Solid" then
-                frame.dfCurrentBgTexture = "Solid"
-            end
-            -- Use key tracking to prevent flickering from repeated SetColorTexture calls
-            if effectiveBgMode == "CUSTOM" then
-                local c = effectiveBgColor or db.backgroundColor or {r = 0.1, g = 0.1, b = 0.1, a = 0.8}
-                local key = string.format("CUSTOM:%.2f:%.2f:%.2f:%.2f", c.r, c.g, c.b, c.a or 0.8)
-                if frame.dfCurrentBgKey ~= key then
-                    frame.background:SetColorTexture(c.r, c.g, c.b, c.a or 0.8)
-                    frame.dfCurrentBgKey = key
-                end
-            elseif effectiveBgMode == "CLASS" then
-                local _, class = UnitClass(unit)
-                local classColor = DF:GetClassColor(class)
-                local bgAlpha = db.backgroundClassAlpha or 0.3
-                local key = string.format("CLASS:%.2f:%.2f:%.2f:%.2f", classColor.r, classColor.g, classColor.b, bgAlpha)
-                if frame.dfCurrentBgKey ~= key then
-                    frame.background:SetColorTexture(classColor.r, classColor.g, classColor.b, bgAlpha)
-                    frame.dfCurrentBgKey = key
-                end
-            end
-        else
-            -- Textured background - only call SetTexture if texture path changed
-            -- This prevents flickering on every health update
-            if frame.dfCurrentBgTexture ~= bgTexture then
-                DF:SafeSetTexture(frame.background, bgTexture)
-                frame.background:SetHorizTile(false)
-                frame.background:SetVertTile(false)
-                frame.dfCurrentBgTexture = bgTexture
-                frame.dfCurrentBgKey = nil  -- Clear key when switching to textured
-                -- Reset SetAlpha to 1.0 when texture changes so only vertex color controls alpha
-                frame.background:SetAlpha(1.0)
-            end
-            
-            -- Always update vertex color (this doesn't cause flicker)
-            -- Alpha is controlled entirely through vertex color for textured backgrounds
-            if effectiveBgMode == "CUSTOM" then
-                local c = effectiveBgColor or db.backgroundColor or {r = 0.1, g = 0.1, b = 0.1, a = 0.8}
-                frame.background:SetVertexColor(c.r, c.g, c.b, c.a or 0.8)
-            elseif effectiveBgMode == "CLASS" then
-                local _, class = UnitClass(unit)
-                local classColor = DF:GetClassColor(class)
-                local bgAlpha = db.backgroundClassAlpha or 0.3
-                frame.background:SetVertexColor(classColor.r, classColor.g, classColor.b, bgAlpha)
-            end
-        end
-    end
-    --]]
-    
+
     -- ========================================
     -- NAME
     -- ========================================
@@ -1388,11 +1201,12 @@ function DF:UpdateHealth(frame)
 end
 
 -- ============================================================
--- Apply all visual styles to a frame (called when settings change)
--- Apply all visual styles to a frame (DEPRECATED - use ApplyFrameLayout instead)
+-- Apply all visual styles to a frame (called when settings change).
+-- A thin alias for ApplyFrameLayout, and the name most call sites use — 14 of them
+-- across Core, Init, PinnedFrames, TestFramePool and TestMode. It carried a
+-- "DEPRECATED - use ApplyFrameLayout instead" label that was simply untrue.
 function DF:ApplyFrameStyle(frame)
     if not frame then return end
-    -- Use unified layout function
     DF:ApplyFrameLayout(frame)
 end
 

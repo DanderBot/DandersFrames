@@ -3942,6 +3942,11 @@ function GUI:StyleButton(btn, opts)
     -- WHAT HOVERED LOOKS LIKE — the single implementation, so the mouse and a
     -- proxying owner cannot drift apart. OnEnter/OnLeave below are thin wrappers.
     --
+    -- ⚠ NO CURRENT CONSUMER. The Filter Designer's membership button was the one
+    -- caller and went with the filters merge (FilterRegistry/Options.lua says so).
+    -- Kept because the pattern recurs and the Lock/UnlockHighlight subtlety below
+    -- is not obvious enough to want rediscovered.
+    --
     -- Call btn:SetHovered(true/false) when something ELSE owns the hit area and
     -- forwards the click: a list row whose OnClick fires this button's action.
     -- The row lighting its button says "this is what clicking the row does", and
@@ -6314,7 +6319,8 @@ end
 
 -- Dual-handle range slider: two draggable handles select a [lo, hi] sub-range of
 -- [minRange, maxRange]. Self-contained — the caller anchors the returned track
--- frame and reads values via :GetValues() / the onChange callback. Drag is
+-- frame and reads values via the onChange callback. (:GetValues() also exists and
+-- completes the SetValues pair, but no current consumer polls it.) Drag is
 -- tracked on the track's own OnUpdate (no dependence on parent scripts), and a
 -- mouse-button check releases the drag even if the cursor leaves the handle.
 -- opts:

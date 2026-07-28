@@ -792,31 +792,6 @@ function DF:UpdateReadyCheckIconAppearance(frame)
     end
 end
 
-function DF:UpdateCenterStatusIconAppearance(frame)
-    if not IsDandersFrame(frame) then return end
-    if not frame.centerStatusIcon then return end
-    
-    local db = GetDB(frame)
-    if not db then return end
-    
-    if DF.testMode or DF.raidTestMode then return end
-    
-    local deadOrOffline = IsDeadOrOffline(frame)
-    local inRange = GetInRange(frame)
-    
-    local alpha = 1.0
-    if deadOrOffline and db.fadeDeadFrames then
-        alpha = db.fadeDeadIcons or 1.0
-    end
-
-    if db.oorEnabled then
-        local oorAlpha = db.oorIconsAlpha or 0.5
-        ApplyOORAlpha(frame.centerStatusIcon, inRange, alpha, oorAlpha)
-    else
-        frame.centerStatusIcon:SetAlpha(alpha)
-    end
-end
-
 -- ============================================================
 -- DISPEL OVERLAY APPEARANCE
 -- ============================================================
@@ -1226,7 +1201,6 @@ function DF:UpdateAllElementAppearances(frame)
     DF:UpdateLeaderIconAppearance(frame)
     DF:UpdateRaidTargetIconAppearance(frame)
     DF:UpdateReadyCheckIconAppearance(frame)
-    DF:UpdateCenterStatusIconAppearance(frame)
     DF:UpdateDispelOverlayAppearance(frame)
     DF:UpdateMissingBuffAppearance(frame)
     DF:UpdateAbsorbBarAppearance(frame)
@@ -1291,7 +1265,6 @@ DF.UpdateRoleIconAlpha = DF.UpdateRoleIconAppearance
 DF.UpdateLeaderIconAlpha = DF.UpdateLeaderIconAppearance
 DF.UpdateRaidTargetIconAlpha = DF.UpdateRaidTargetIconAppearance
 DF.UpdateReadyCheckIconAlpha = DF.UpdateReadyCheckIconAppearance
-DF.UpdateCenterStatusIconAlpha = DF.UpdateCenterStatusIconAppearance
 DF.UpdateDispelOverlayAlpha = DF.UpdateDispelOverlayAppearance
 DF.UpdateMissingBuffAlpha = DF.UpdateMissingBuffAppearance
 DF.UpdateDefensiveIconAlpha = DF.UpdateDefensiveIconAppearance

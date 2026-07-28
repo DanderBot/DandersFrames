@@ -1308,41 +1308,6 @@ function DF:UpdateTestIcons(frame, testData)
         end
     end
     
-    -- Center Status Icon (show if testData has centerStatus)
-    if frame.centerStatusIcon then
-        if not db.centerStatusIconEnabled or db.testShowStatusIcons == false then
-            frame.centerStatusIcon:Hide()
-        elseif testData.centerStatus then
-            local texture = nil
-            if testData.centerStatus == "resurrect" then
-                texture = "Interface\\RaidFrame\\Raid-Icon-Rez"
-            elseif testData.centerStatus == "summon" then
-                texture = "Interface\\RaidFrame\\Raid-Icon-SummonPending"
-            end
-            
-            if texture then
-                DF:SetUpgradedStatusIcon(frame.centerStatusIcon.texture, texture)
-                
-                local scale = db.centerStatusIconScale or 1.0
-                local anchor = db.centerStatusIconAnchor or "CENTER"
-                local x = db.centerStatusIconX or 0
-                local y = db.centerStatusIconY or 0
-                
-                frame.centerStatusIcon:SetScale(scale)
-                frame.centerStatusIcon:ClearAllPoints()
-                frame.centerStatusIcon:SetPoint(anchor, frame, anchor, x, y)
-                frame.centerStatusIcon:Show()
-                
-                -- Apply frame level
-                frame.centerStatusIcon:SetFrameLevel(frame:GetFrameLevel() + (db.centerStatusIconFrameLevel or 30))
-            else
-                frame.centerStatusIcon:Hide()
-            end
-        else
-            frame.centerStatusIcon:Hide()
-        end
-    end
-    
     -- Apply alpha to icons - check dead fade first, then health-based fade, then OOR alpha
     local alpha = 1.0
     if frame.dfTestDeadFadeAlphas and frame.dfTestDeadFadeAlphas.icons then
@@ -1366,9 +1331,6 @@ function DF:UpdateTestIcons(frame, testData)
     end
     if frame.readyCheckIcon and frame.readyCheckIcon:IsShown() then
         frame.readyCheckIcon:SetAlpha(alpha)
-    end
-    if frame.centerStatusIcon and frame.centerStatusIcon:IsShown() then
-        frame.centerStatusIcon:SetAlpha(alpha)
     end
 end
 
@@ -1721,52 +1683,6 @@ function DF:UpdateTestStatusIcons(frame, testData)
         end
     end
     
-    -- Legacy Center Status Icon (for backward compatibility)
-    -- Only show if individual summon/res icons are disabled
-    if frame.centerStatusIcon then
-        local showCenterStatus = db.centerStatusIconEnabled and db.testShowStatusIcons ~= false
-        -- Don't show centerStatus for summon if summonIcon is enabled
-        if testData.centerStatus == "summon" and db.summonIconEnabled then
-            showCenterStatus = false
-        end
-        -- Don't show centerStatus for resurrect if resurrectionIcon is enabled
-        if testData.centerStatus == "resurrect" and db.resurrectionIconEnabled then
-            showCenterStatus = false
-        end
-        
-        if not showCenterStatus then
-            frame.centerStatusIcon:Hide()
-        elseif testData.centerStatus then
-            local texture = nil
-            if testData.centerStatus == "resurrect" then
-                texture = "Interface\\RaidFrame\\Raid-Icon-Rez"
-            elseif testData.centerStatus == "summon" then
-                texture = "Interface\\RaidFrame\\Raid-Icon-SummonPending"
-            end
-            
-            if texture then
-                DF:SetUpgradedStatusIcon(frame.centerStatusIcon.texture, texture)
-                
-                local scale = db.centerStatusIconScale or 1.0
-                local anchor = db.centerStatusIconAnchor or "CENTER"
-                local x = db.centerStatusIconX or 0
-                local y = db.centerStatusIconY or 0
-                
-                frame.centerStatusIcon:SetScale(scale)
-                frame.centerStatusIcon:ClearAllPoints()
-                frame.centerStatusIcon:SetPoint(anchor, frame, anchor, x, y)
-                frame.centerStatusIcon:Show()
-                
-                -- Apply frame level
-                frame.centerStatusIcon:SetFrameLevel(frame:GetFrameLevel() + (db.centerStatusIconFrameLevel or 30))
-            else
-                frame.centerStatusIcon:Hide()
-            end
-        else
-            frame.centerStatusIcon:Hide()
-        end
-    end
-    
     -- Apply alpha to status icons based on dead / health-based / OOR fade
     local alpha = 1.0
     if frame.dfTestDeadFadeAlphas and frame.dfTestDeadFadeAlphas.icons then
@@ -1807,9 +1723,6 @@ function DF:UpdateTestStatusIcons(frame, testData)
     if frame.raidRoleIcon and frame.raidRoleIcon:IsShown() then
         local baseAlpha = db.raidRoleIconAlpha or 1
         frame.raidRoleIcon:SetAlpha(baseAlpha * alpha)
-    end
-    if frame.centerStatusIcon and frame.centerStatusIcon:IsShown() then
-        frame.centerStatusIcon:SetAlpha(alpha)
     end
 end
 
@@ -2932,100 +2845,8 @@ function DF:LightweightPositionRaidTestFramesFlat(testFrameCount)
         return
     end
     
-    -- TODO: CLEANUP - Remove old positioning code below once SecureSort raid positioning is fully tested
-    --[[ OLD POSITIONING CODE - COMMENTED OUT
-    local frameWidth = db.frameWidth or 80
-    local frameHeight = db.frameHeight or 35
-    local playersPerRow = db.raidPlayersPerRow or 5
-    local hSpacing = db.raidFlatHorizontalSpacing or 2
-    local vSpacing = db.raidFlatVerticalSpacing or 2
-    local growDirection = db.growDirection or "HORIZONTAL"
-    local gridAnchor = db.raidFlatPlayerAnchor or "START"
-    local reverseFill = db.raidFlatReverseFillOrder
-    
-    -- Apply pixel-perfect adjustments
-    if db.pixelPerfect then
-        frameWidth = DF:PixelPerfect(frameWidth)
-        frameHeight = DF:PixelPerfect(frameHeight)
-        hSpacing = DF:PixelPerfect(hSpacing)
-        vSpacing = DF:PixelPerfect(vSpacing)
-    end
-    
-    local horizontal = (growDirection == "HORIZONTAL")
-    
-    -- Calculate grid dimensions for visible players
-    local numRows, numCols
-    if horizontal then
-        numCols = math.min(playersPerRow, testFrameCount)
-        numRows = math.ceil(testFrameCount / playersPerRow)
-    else
-        numRows = math.min(playersPerRow, testFrameCount)
-        numCols = math.ceil(testFrameCount / playersPerRow)
-    end
-    
-    -- Calculate MAX grid dimensions for full 40-player raid (for container sizing)
-    local maxNumRows, maxNumCols
-    if horizontal then
-        maxNumCols = playersPerRow
-        maxNumRows = math.ceil(40 / playersPerRow)
-    else
-        maxNumRows = playersPerRow
-        maxNumCols = math.ceil(40 / playersPerRow)
-    end
-    
-    -- Calculate sizes
-    local visibleWidth = numCols * frameWidth + (numCols - 1) * hSpacing
-    local visibleHeight = numRows * frameHeight + (numRows - 1) * vSpacing
-    local maxWidth = maxNumCols * frameWidth + (maxNumCols - 1) * hSpacing
-    local maxHeight = maxNumRows * frameHeight + (maxNumRows - 1) * vSpacing
-    
-    -- Size the container to full 40-player size
-    DF.raidContainer:SetSize(maxWidth, maxHeight)
-    
-    -- Position each visible frame
-    for i = 1, testFrameCount do
-        local frame = DF.raidFrames[i]
-        if frame and frame:IsShown() then
-            local pos = i - 1  -- 0-based position
-            
-            local row, col
-            if horizontal then
-                row = math.floor(pos / playersPerRow)
-                col = pos % playersPerRow
-                if reverseFill then
-                    col = (playersPerRow - 1) - col
-                end
-            else
-                col = math.floor(pos / playersPerRow)
-                row = pos % playersPerRow
-                if reverseFill then
-                    row = (playersPerRow - 1) - row
-                end
-            end
-            
-            frame:ClearAllPoints()
-            
-            -- Position based on anchor
-            if gridAnchor == "START" then
-                local x = col * (frameWidth + hSpacing)
-                local y = -row * (frameHeight + vSpacing)
-                frame:SetPoint("TOPLEFT", DF.raidContainer, "TOPLEFT", x, y)
-            elseif gridAnchor == "CENTER" then
-                local halfGridWidth = visibleWidth / 2
-                local halfGridHeight = visibleHeight / 2
-                local x = -halfGridWidth + col * (frameWidth + hSpacing) + frameWidth / 2
-                local y = halfGridHeight - row * (frameHeight + vSpacing) - frameHeight / 2
-                frame:SetPoint("CENTER", DF.raidContainer, "CENTER", x, y)
-            else  -- END
-                local x = -col * (frameWidth + hSpacing)
-                local y = row * (frameHeight + vSpacing)
-                frame:SetPoint("BOTTOMRIGHT", DF.raidContainer, "BOTTOMRIGHT", x, y)
-            end
-            
-            frame:SetSize(frameWidth, frameHeight)
-        end
-    end
-    --]] -- END OLD POSITIONING CODE
+    -- No fallback below: SecureSort owns flat raid test positioning. Without it there is
+    -- nothing to place the frames, which is the same behaviour this has always had.
 end
 
 -- Lightweight positioning for party test frames

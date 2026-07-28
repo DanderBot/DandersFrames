@@ -799,21 +799,7 @@ function DF:CreateFrameElementsExtended(frame, db)
     frame.readyCheckIcon.texture:SetDrawLayer("OVERLAY", 7)
     
     -- ========================================
-    -- CENTER STATUS ICON (DEPRECATED - kept for backward compatibility)
-    -- New individual icons created via CreateStatusIcons
-    -- ========================================
-    frame.centerStatusIcon = CreateFrame("Frame", nil, frame.contentOverlay)
-    frame.centerStatusIcon:SetSize(16, 16)
-    frame.centerStatusIcon:SetPoint("CENTER", frame, "CENTER", 0, 0)
-    frame.centerStatusIcon:SetFrameLevel(frame.contentOverlay:GetFrameLevel() + 5)
-    frame.centerStatusIcon:Hide()
-    
-    frame.centerStatusIcon.texture = frame.centerStatusIcon:CreateTexture(nil, "OVERLAY")
-    frame.centerStatusIcon.texture:SetAllPoints()
-    frame.centerStatusIcon.texture:SetDrawLayer("OVERLAY", 6)
-    
-    -- ========================================
-    -- NEW STATUS ICONS (Summon, Res, Phased, AFK, Vehicle, RaidRole)
+    -- STATUS ICONS (Summon, Res, Phased, AFK, Vehicle, RaidRole)
     -- ========================================
     DF:CreateStatusIcons(frame)
     
@@ -1178,21 +1164,7 @@ function DF:CreateUnitFrame(unit, index, isRaid)
     frame.readyCheckIcon.texture:SetDrawLayer("OVERLAY", 7)
     
     -- ========================================
-    -- CENTER STATUS ICON (DEPRECATED - kept for backward compatibility)
-    -- New individual icons created via CreateStatusIcons
-    -- ========================================
-    frame.centerStatusIcon = CreateFrame("Frame", nil, frame.contentOverlay)
-    frame.centerStatusIcon:SetSize(16, 16)
-    frame.centerStatusIcon:SetPoint("CENTER", frame, "CENTER", 0, 0)
-    frame.centerStatusIcon:SetFrameLevel(frame.contentOverlay:GetFrameLevel() + 5)
-    frame.centerStatusIcon:Hide()
-    
-    frame.centerStatusIcon.texture = frame.centerStatusIcon:CreateTexture(nil, "OVERLAY")
-    frame.centerStatusIcon.texture:SetAllPoints()
-    frame.centerStatusIcon.texture:SetDrawLayer("OVERLAY", 6)
-    
-    -- ========================================
-    -- NEW STATUS ICONS (Summon, Res, Phased, AFK, Vehicle, RaidRole)
+    -- STATUS ICONS (Summon, Res, Phased, AFK, Vehicle, RaidRole)
     -- ========================================
     DF:CreateStatusIcons(frame)
     

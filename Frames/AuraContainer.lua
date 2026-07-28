@@ -18,21 +18,28 @@ local addonName, DF = ...
 -- owns the POLICY (which filter, layout, config keys). The factory never reads
 -- aura data, never loops-and-draws — it configures and hands off.
 --
--- PUBLIC API:
+-- PUBLIC API:  († = provided, no internal consumer yet -- see the note below)
 --   DF.AuraContainer.IsSupported()       -- 12.1+ widget types exist (version gate)
---   DF.AuraContainer.HasSpellFilter()    -- PTR-4: per-Spell-ID filter available
---   DF.AuraContainer.HasSort()           -- PTR-4: sort rule/direction available
+--   DF.AuraContainer.HasSpellFilter() †  -- PTR-4: per-Spell-ID filter available
+--   DF.AuraContainer.HasSort()        †  -- PTR-4: sort rule/direction available
 --   local h = DF.AuraContainer:Create(parent, config)  -- nil if unsupported
 --   h:SetUnit(unit) / h:SetShown(b) / h:Enable() / h:Disable()
 --   h:ApplyStyle(style) -- in-place cosmetic restyle (no teardown)
 --   h:ApplyTuning(tuning) -- in-place max/sort/candidateFilters mutate (no teardown;
 --                            OOC-only, defers to regen in combat). REPLACES all three keys.
---   h:SetFilter(filter) -- structural (rebuild)
+--   h:SetFilter(filter) † -- structural (rebuild)
 --   h:Rebuild(config)      -- structural rebuild (max / region toggles / frozen opts); a
 --                             table REPLACES the config wholesale (callers pass complete configs)
 --   h:Refresh() -- force a re-scan (Hide/Show bounce; for dynamic-unit consumers)
 --   h:GetFrame() -- the plain positioning frame DF anchors (SetPoint/SetSize on it)
 --   h:Destroy()
+--
+-- † HasSpellFilter / HasSort / SetFilter have no internal caller. An earlier review
+--   deferred the question to container Wave 1; W1 has since shipped, and it used
+--   SetSort / _getConfig / _getAnchorFrame / _layoutSlots but not these three. They
+--   stay as published API — capability probes are the natural shape for a later wave
+--   to gate on, and they are one-liners over IsSupported(). Recorded here so the next
+--   dead-code sweep gets the answer instead of re-raising the question.
 --
 -- GOTCHAS baked in (12.1.0 @ 68569 — the PTR-4 API; validated in-game via DF_AuraLab):
 --   1. Addons NO LONGER create AuraButtons (AddAuraFrame/AddAuraFramesFromTemplate removed).

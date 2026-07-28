@@ -2568,15 +2568,6 @@ function DF:UpdateCenterStatusIcon(frame)
     if DF.UpdateAFKIcon then DF:UpdateAFKIcon(frame) end
     if DF.UpdateVehicleIcon then DF:UpdateVehicleIcon(frame) end
     if DF.UpdateRaidRoleIcon then DF:UpdateRaidRoleIcon(frame) end
-    
-    -- Legacy centerStatusIcon: all cases (summon, resurrection) are now handled
-    -- by the individual icons above (frame.summonIcon, frame.resurrectionIcon).
-    -- This block exists only to defensively hide any centerStatusIcon that may
-    -- still be visible from a prior session or settings export — drawing on it
-    -- here would duplicate the modern icons. (#908)
-    if frame.centerStatusIcon then
-        frame.centerStatusIcon:Hide()
-    end
 end
 
 -- ============================================================

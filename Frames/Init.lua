@@ -1631,17 +1631,8 @@ function DF:UpdateAllFrames()
         end
     end
     
-    -- TODO: CLEANUP - Old sorting commented out
-    -- SecureSort now handles all party frame sorting/positioning
-    -- This was only used to determine iteration order for visibility setup,
-    -- which doesn't depend on sort order.
-    --[[
-    -- Apply sorting if enabled
-    if db.sortEnabled and DF.Sort then
-        visibleFrames = DF.Sort:SortFrameList(visibleFrames, db, DF.testMode)
-    end
-    --]]
-    
+    -- No sort pass here: SecureSort owns party sorting/positioning, and this list
+    -- only drives visibility setup, which does not depend on order.
     local frameCount = #visibleFrames
     
     -- Calculate sizes (use pixel-perfect values)
@@ -1705,52 +1696,6 @@ function DF:UpdateAllFrames()
             DF.partyGroupContainer:SetPoint("BOTTOM", DF.container, "BOTTOM", 0, 0)
         end
     end
-    
-    -- Position each frame within the party group container
-    -- TODO: CLEANUP - This old positioning code is commented out.
-    -- SecureSort now handles ALL party frame positioning via secure code.
-    -- Remove this block entirely once we confirm SecureSort works in all cases.
-    --[[
-    -- LEGACY POSITIONING CODE - COMMENTED OUT
-    local secureSortActive = DF.SecureSort and DF.SecureSort.initialized and DF.SecureSort.framesRegistered
-    
-    for idx, frameData in ipairs(visibleFrames) do
-        local frame = frameData.frame
-        local slotIndex = idx - 1  -- 0-based slot index
-        
-        -- Reparent to party group container
-        frame:SetParent(DF.partyGroupContainer)
-        
-        -- Only position frames if SecureSort is NOT active
-        -- SecureSort handles all positioning via TriggerSecureSort
-        if not secureSortActive then
-            frame:ClearAllPoints()
-            
-            -- Use SecureSort positioning functions (handles all growth modes: START/CENTER/END)
-            if DF.SecureSort and DF.SecureSort.CalculateSlotPosition then
-                local layoutParams = {
-                    frameWidth = ppFrameWidth,
-                    frameHeight = ppFrameHeight,
-                    spacing = ppSpacing,
-                    horizontal = horizontal,
-                    growthAnchor = growthAnchor,
-                }
-                local x, y = DF.SecureSort:CalculateSlotPosition(slotIndex, frameCount, layoutParams)
-                local anchor, relAnchor = DF.SecureSort:GetSlotAnchors(layoutParams)
-                frame:SetPoint(anchor, DF.partyGroupContainer, relAnchor, x, y)
-            else
-                -- Fallback: Simple START-only positioning (legacy behavior)
-                if horizontal then
-                    local x = slotIndex * (ppFrameWidth + ppSpacing)
-                    frame:SetPoint("LEFT", DF.partyGroupContainer, "LEFT", x, 0)
-                else
-                    local y = -slotIndex * (ppFrameHeight + ppSpacing)
-                    frame:SetPoint("TOP", DF.partyGroupContainer, "TOP", 0, y)
-                end
-            end
-        end
-    end
-    --]]
     
     -- SecureSort handles positioning - we just need to set up visibility and content
     for idx, frameData in ipairs(visibleFrames) do

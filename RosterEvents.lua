@@ -38,6 +38,9 @@ local addonName, DF = ...
 --   DF:UnregisterAllRosterUnitEvents(object)
 --      Convenience for module shutdown — removes all of this object's
 --      subscriptions across every event.
+--      ⚠ No internal caller: nothing in DF tears a subscriber down wholesale
+--      today. Kept as the bulk half of the Register/Unregister pair, so a module
+--      that does need shutdown is not the one that has to write it.
 --
 -- Test mode boundary:
 --   Test mode uses fake unit tokens like "testparty1" which the WoW engine
@@ -314,9 +317,10 @@ end
 --   * Roster transitions (party<->raid, joins, leaves) work correctly
 --
 -- Usage (no /reload required):
---   /run DandersFrames:EnableRosterEventsSelfTest()
---   -- ... do stuff, watch /df console ROSTER category ...
---   /run DandersFrames:DisableRosterEventsSelfTest()
+--   /dfrostertest    -- toggles the probe; watch /df console, ROSTER category
+--
+-- Was /run-only, which made it undiscoverable: nothing pointed at it and nothing
+-- called it, so a dead-code sweep found it before any developer would have.
 --
 -- The probe is a single shared object so calling Enable twice is idempotent.
 
@@ -339,4 +343,23 @@ function DF:DisableRosterEventsSelfTest()
     if DF.Debug then
         DF:Debug("ROSTER", "Self-test DISABLED.")
     end
+end
+
+-- Dev-only slash toggle, so the probe is reachable without knowing the function
+-- names. devOnly = true keeps it off non-dev builds entirely.
+DF.rosterSelfTestActive = false
+-- ⚠ NOT "DFROSTER" -- Frames/Headers.lua already owns that for the roster/unit map
+-- dump, and SlashCmdList keys are global: reusing it silently replaces the handler
+-- of whichever file loads first.
+DF:RegisterDebugSlash("DFROSTERTEST", "Roster unit-event dispatcher self-test", true, "/dfrostertest")
+SlashCmdList["DFROSTERTEST"] = function()
+    DF.rosterSelfTestActive = not DF.rosterSelfTestActive
+    if DF.rosterSelfTestActive then
+        DF:EnableRosterEventsSelfTest()
+    else
+        DF:DisableRosterEventsSelfTest()
+    end
+    print("|cff00ff00DandersFrames:|r Roster self-test "
+        .. (DF.rosterSelfTestActive and "|cff00ff00ENABLED|r" or "|cffff9900DISABLED|r")
+        .. " (watch the ROSTER category in /df console)")
 end
