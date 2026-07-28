@@ -9,6 +9,11 @@ local addonName, DF = ...
 DF.petFrames = DF.petFrames or {}
 DF.partyPetFrames = DF.partyPetFrames or {}
 DF.raidPetFrames = DF.raidPetFrames or {}
+-- Arena pets are their own set, mirroring the separate arenaHeader. They CANNOT
+-- share DF.raidPetFrames: those are anchored to the raid header's children, which
+-- is a different (hidden) frame set in arena, and they carry isRaidFrame = true,
+-- which would resolve their settings to the RAID config. See UpdateAllRaidPetFrames.
+DF.arenaPetFrames = DF.arenaPetFrames or {}
 
 -- Storage for test mode pet frames (non-secure, independent of live frames)
 DF.testPetFrames = DF.testPetFrames or {}       -- [0]=player pet, [1-4]=party pets
@@ -817,6 +822,14 @@ function DF:LightweightUpdatePetFrames()
                 DF:PositionPetFrame(DF.raidPetFrames[i])
             end
         end
+        -- Arena pets are a separate set (see UpdateAllRaidPetFrames); without this
+        -- they would keep their creation-time look and ignore every settings change.
+        for i = 1, 5 do
+            if DF.arenaPetFrames[i] then
+                DF:ApplyPetFrameStyle(DF.arenaPetFrames[i])
+                DF:PositionPetFrame(DF.arenaPetFrames[i])
+            end
+        end
     end
 end
 
@@ -912,6 +925,18 @@ function DF:UpdatePetGroupLayout()
         for i = 1, 4 do
             if (i + 1) <= testFrameCount and DF.testPetFrames[i] then
                 table.insert(petFrames, DF.testPetFrames[i])
+            end
+        end
+    elseif DF.IsInArena and DF:IsInArena() then
+        -- Arena: the team is raid-kind, so the pets are raidpet* on the arena
+        -- header's frames — partypet* does not exist here and collecting it would
+        -- leave the group empty. The container itself is fine: the arena header is
+        -- parented to DF.partyContainer, which this layout already anchors against.
+        -- (Grouped arena pets read the party config for the same reason the
+        -- attached ones do — see UpdateArenaPetFrames.)
+        for i = 1, 5 do
+            if DF.arenaPetFrames[i] and UnitExists("raidpet" .. i) then
+                table.insert(petFrames, DF.arenaPetFrames[i])
             end
         end
     else
@@ -1403,6 +1428,10 @@ function DF:UpdateAllPetFrames(force)
     -- Mirrors the raid-test-mode guard above, for real raids. Without this the party pet frames can
     -- linger as an orphaned overlay over the raid frames, since the party frames they anchor to are
     -- hidden once raid frames take over.
+    -- ⚠ ARENA lands here too — IsInRaid() is true and the units are raid-kind. Handing over is
+    -- still right (partypet* does not exist in arena), but the receiver is the ARENA track in
+    -- UpdateAllRaidPetFrames, not the raid one; the raid header is hidden in arena. Before that
+    -- existed, this early return was half of why pets never appeared in 2v2 / 3v3 / shuffle.
     if not DF.testMode and IsInRaid() then
         DF:Debug("PET", "UpdateAllPetFrames: hiding party pets (live raid active)")
         if DF.petFrames.player then DF:SetPetFrameVisible(DF.petFrames.player, false) end
@@ -1494,11 +1523,78 @@ end
 
 local lastRaidPetUpdateTime = 0
 
+-- Hide every arena pet (leaving arena, or pets switched off).
+local function HideArenaPetFrames()
+    for i = 1, 5 do
+        if DF.arenaPetFrames[i] then DF:SetPetFrameVisible(DF.arenaPetFrames[i], false) end
+    end
+end
+
+-- ARENA PETS. Arena is the odd one out: the group is RAID-kind (IsInRaid() is true,
+-- units are raid1-5), so the party pet track hides itself and hands over to the raid
+-- track — but the raid track walks the raid header, which is hidden in arena, while
+-- DF shows its own arenaHeader. Nothing walked the arena header, so pets simply never
+-- appeared in 2v2 / 3v3 / shuffle, with no error to show for it.
+--
+-- Settings come from the PARTY config even though the units are raidpet*: an arena
+-- team reads as a party to a player, and that is where they will have configured it.
+-- That is why the frames are created with isRaid = false — every downstream path
+-- resolves through DF:GetFrameDB(frame), which keys off frame.isRaidFrame, so this
+-- one flag routes size, layout and petEnabled to the party settings for free.
+local function UpdateArenaPetFrames()
+    local db = DF:GetDB()   -- party config, deliberately (see above)
+
+    if not db.petEnabled then
+        HideArenaPetFrames()
+        DF:HidePetGroupContainer(DF.raidPetGroupContainer)
+        return
+    end
+
+    -- Deferred creation, same shape as the raid track. The arena header's children
+    -- are the owners; raidpet<N> matches its raid<N> unit tokens.
+    local idx = 0
+    if DF.IterateArenaFrames then
+        DF:IterateArenaFrames(function(frame)
+            idx = idx + 1
+            if frame and not DF.arenaPetFrames[idx] then
+                DF.arenaPetFrames[idx] = DF:CreatePetFrame("raidpet" .. idx, frame, false)
+            end
+        end)
+    end
+
+    for i = 1, 5 do
+        if DF.arenaPetFrames[i] then
+            DF:UpdatePetFrame(DF.arenaPetFrames[i])
+            DF:PositionPetFrame(DF.arenaPetFrames[i])
+        end
+    end
+
+    -- GROUPED mode positions from the layout pass, not per-frame (PositionPetFrame
+    -- returns early for it). The party layout is the right one — same config — and
+    -- it collects arenaPetFrames when in arena.
+    if db.petGroupMode == "GROUPED" then
+        DF:UpdatePetGroupLayout()
+    end
+end
+
 function DF:UpdateAllRaidPetFrames(force)
     -- Throttle: skip if already ran this frame (multiple callers during startup/updates)
     local now = GetTime()
     if not force and now == lastRaidPetUpdateTime then return end
     lastRaidPetUpdateTime = now
+
+    -- Arena runs its own track (party settings, arena header) and never the raid one:
+    -- the raid header is hidden here, so its pets would anchor to invisible frames.
+    if not (DF.testMode or DF.raidTestMode) and DF.IsInArena and DF:IsInArena() then
+        for i = 1, 40 do
+            if DF.raidPetFrames[i] then DF:SetPetFrameVisible(DF.raidPetFrames[i], false) end
+        end
+        UpdateArenaPetFrames()
+        return
+    end
+    -- Left arena (or never in one): make sure no arena pet is left hanging over the
+    -- party/raid frames. Cheap — the table is empty until arena has been entered once.
+    HideArenaPetFrames()
 
     local db = DF:GetRaidDB()
 
@@ -1604,6 +1700,15 @@ end
 -- PET EVENT HANDLING
 -- ============================================================
 
+-- raid<N> / raidpet<N> tokens are used by BOTH the raid frames and the arena team,
+-- so the token alone does not say which pet set owns the index. A pet summoned or
+-- resurrected mid-match fires these; without the arena case the event would look up
+-- the raid set, find nothing, and the frame would sit stale until the next full pass.
+local function PetSetForRaidIndex()
+    if DF.IsInArena and DF:IsInArena() then return DF.arenaPetFrames end
+    return DF.raidPetFrames
+end
+
 function DF:OnPetChanged(unit)
     -- Determine which pet frame to update based on unit
     if unit == "player" or unit == "pet" then
@@ -1622,13 +1727,15 @@ function DF:OnPetChanged(unit)
         end
     elseif unit:match("^raid%d+$") then
         local index = tonumber(unit:match("raid(%d+)"))
-        if index and DF.raidPetFrames[index] then
-            DF:UpdatePetFrame(DF.raidPetFrames[index])
+        local set = PetSetForRaidIndex()
+        if index and set[index] then
+            DF:UpdatePetFrame(set[index])
         end
     elseif unit:match("^raidpet%d+$") then
         local index = tonumber(unit:match("raidpet(%d+)"))
-        if index and DF.raidPetFrames[index] then
-            DF:UpdatePetFrame(DF.raidPetFrames[index])
+        local set = PetSetForRaidIndex()
+        if index and set[index] then
+            DF:UpdatePetFrame(set[index])
         end
     end
 end

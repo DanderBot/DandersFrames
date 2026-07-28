@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Bug Fixes
+
+* (Pet Frames) Fixed pet frames never appearing in arena (2v2, 3v3 and Solo Shuffle). Arena counts as a raid to the game, so pet frames were being looked for on the raid frames — which arena does not use. They now build alongside the arena frames, and follow your Party pet settings. (by Krathe)
+
 ## [4.8.0]
 
 ### Bug Fixes
