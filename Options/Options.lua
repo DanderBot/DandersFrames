@@ -5744,17 +5744,25 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end
         local buffMax = settingsGroup:AddWidget(GUI:CreateSlider(self.child, L["Max Buffs"], 0, 8, 1, db, "buffMax", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
         buffMax.disableOn = function(d) return not d.showBuffs end
-        local buffSize = settingsGroup:AddWidget(GUI:CreateSlider(self.child, L["Icon Size"], 10, 40, 1, db, "buffSize", nil, function() DF:LightweightUpdateAuraPosition("buff") end, true), 55)
-        buffSize.disableOn = function(d) return not d.showBuffs end
-        local buffScale = settingsGroup:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.0, 0.05, db, "buffScale", nil, function() DF:LightweightUpdateAuraPosition("buff") end, true), 55)
-        buffScale.disableOn = function(d) return not d.showBuffs end
-        local buffAlpha = settingsGroup:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.0, 1.0, 0.05, db, "buffAlpha", nil, function() DF:LightweightUpdateAuraPosition("buff") end, true), 55)
-        buffAlpha.disableOn = function(d) return not d.showBuffs end
         Add(settingsGroup, nil, 1)
-        
-        -- Grid Layout Group (col1)
+
+        -- Appearance Group (col2). Icon Size / Scale / Alpha are how the row LOOKS, so
+        -- they sit in column 2 with the other styling, matching Missing Buffs and
+        -- Defensive Icon. They used to live in Settings above, which made this the only
+        -- aura family where the same three sliders were classed as geometry.
+        local appearanceGroup = GUI:CreateSettingsGroup(self.child, 280)
+        appearanceGroup:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 40)
+        local buffSize = appearanceGroup:AddWidget(GUI:CreateSlider(self.child, L["Icon Size"], 10, 40, 1, db, "buffSize", nil, function() DF:LightweightUpdateAuraPosition("buff") end, true), 55)
+        buffSize.disableOn = function(d) return not d.showBuffs end
+        local buffScale = appearanceGroup:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.0, 0.05, db, "buffScale", nil, function() DF:LightweightUpdateAuraPosition("buff") end, true), 55)
+        buffScale.disableOn = function(d) return not d.showBuffs end
+        local buffAlpha = appearanceGroup:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.0, 1.0, 0.05, db, "buffAlpha", nil, function() DF:LightweightUpdateAuraPosition("buff") end, true), 55)
+        buffAlpha.disableOn = function(d) return not d.showBuffs end
+        Add(appearanceGroup, nil, 2)
+
+        -- Layout Group (col1)
         local gridGroup = GUI:CreateSettingsGroup(self.child, 280)
-        gridGroup:AddWidget(GUI:CreateHeader(self.child, L["Grid Layout"]), 40)
+        gridGroup:AddWidget(GUI:CreateHeader(self.child, L["Layout"]), 40)
         local buffWrap = gridGroup:AddWidget(GUI:CreateSlider(self.child, L["Icons Per Row"], 1, 8, 1, db, "buffWrap", nil, function() DF:LightweightUpdateAuraPosition("buff") end, true), 55)
         -- Greys out (NOT a 12.1 frost) whenever the row can't have more than one icon per
         -- line: the row is off, or the growth is vertical-primary, where the native flow
@@ -6025,17 +6033,22 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end), 30)
         local debuffMax = settingsGroup:AddWidget(GUI:CreateSlider(self.child, L["Max Debuffs"], 0, 8, 1, db, "debuffMax", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
         debuffMax.disableOn = function(d) return not d.showDebuffs end
-        local debuffSize = settingsGroup:AddWidget(GUI:CreateSlider(self.child, L["Icon Size"], 10, 40, 1, db, "debuffSize", nil, function() DF:LightweightUpdateAuraPosition("debuff") end, true), 55)
-        debuffSize.disableOn = function(d) return not d.showDebuffs end
-        local debuffScale = settingsGroup:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.0, 0.05, db, "debuffScale", nil, function() DF:LightweightUpdateAuraPosition("debuff") end, true), 55)
-        debuffScale.disableOn = function(d) return not d.showDebuffs end
-        local debuffAlpha = settingsGroup:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.0, 1.0, 0.05, db, "debuffAlpha", nil, function() DF:LightweightUpdateAuraPosition("debuff") end, true), 55)
-        debuffAlpha.disableOn = function(d) return not d.showDebuffs end
         Add(settingsGroup, nil, 1)
-        
-        -- Grid Layout Group (col1)
+
+        -- Appearance Group (col2) -- mirrors Buffs; see the note there.
+        local appearanceGroup = GUI:CreateSettingsGroup(self.child, 280)
+        appearanceGroup:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 40)
+        local debuffSize = appearanceGroup:AddWidget(GUI:CreateSlider(self.child, L["Icon Size"], 10, 40, 1, db, "debuffSize", nil, function() DF:LightweightUpdateAuraPosition("debuff") end, true), 55)
+        debuffSize.disableOn = function(d) return not d.showDebuffs end
+        local debuffScale = appearanceGroup:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.0, 0.05, db, "debuffScale", nil, function() DF:LightweightUpdateAuraPosition("debuff") end, true), 55)
+        debuffScale.disableOn = function(d) return not d.showDebuffs end
+        local debuffAlpha = appearanceGroup:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.0, 1.0, 0.05, db, "debuffAlpha", nil, function() DF:LightweightUpdateAuraPosition("debuff") end, true), 55)
+        debuffAlpha.disableOn = function(d) return not d.showDebuffs end
+        Add(appearanceGroup, nil, 2)
+
+        -- Layout Group (col1)
         local gridGroup = GUI:CreateSettingsGroup(self.child, 280)
-        gridGroup:AddWidget(GUI:CreateHeader(self.child, L["Grid Layout"]), 40)
+        gridGroup:AddWidget(GUI:CreateHeader(self.child, L["Layout"]), 40)
         local debuffWrap = gridGroup:AddWidget(GUI:CreateSlider(self.child, L["Icons Per Row"], 1, 8, 1, db, "debuffWrap", nil, function() DF:LightweightUpdateAuraPosition("debuff") end, true), 55)
         debuffWrap.disableOn = function(d) return not d.showDebuffs end
         local debuffPaddingX = gridGroup:AddWidget(GUI:CreateSlider(self.child, L["Spacing X"], -5, 10, 1, db, "debuffPaddingX", nil, function() DF:LightweightUpdateAuraPosition("debuff") end, true), 55)
@@ -9123,9 +9136,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- COLUMN 1: EXPORT
         -- ========================================
         
-        -- Export Settings Group
+        -- "What to Export" group: picks the profile, the mode and the categories.
+        -- Named for the question it answers -- "Export Settings" read as both
+        -- "settings for exporting" and "export your settings".
         local exportSettingsGroup = GUI:CreateSettingsGroup(self.child, 280)
-        exportSettingsGroup:AddWidget(GUI:CreateHeader(self.child, L["Export Settings"]), 40)
+        exportSettingsGroup:AddWidget(GUI:CreateHeader(self.child, L["What to Export"]), 40)
         
         -- Profile name input
         local nameInput = GUI:CreateInput(self.child, L["Profile Name"], 240)
@@ -9344,9 +9359,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         
         AddToSection(importStringGroup, nil, 2)
         
-        -- Import Settings Group
+        -- "What to Import" group: the target profile, the mode and the categories.
+        -- Mirrors the export side; see the note there on why "Import Settings" went.
         local importSettingsGroup = GUI:CreateSettingsGroup(self.child, 280)
-        importSettingsGroup:AddWidget(GUI:CreateHeader(self.child, L["Import Settings"]), 40)
+        importSettingsGroup:AddWidget(GUI:CreateHeader(self.child, L["What to Import"]), 40)
         
         -- Profile name input for import
         local impNameInput = GUI:CreateInput(self.child, L["Profile Name"], 240)
