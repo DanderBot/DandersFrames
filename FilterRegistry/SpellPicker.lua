@@ -43,7 +43,11 @@ end
 -- showing this spell? Guards the async re-render against rebinds
 -- and hover moves.
 -- ============================================================
-local function ShowSpellTooltip(row, spellID, fallbackName, isCurrent)
+--
+-- `lines` (optional) are appended after the game data. ShowGameTooltip re-appends
+-- them when a late spell load repaints, so they survive that too -- which is what
+-- let the filter lists retire their per-row 'i' button and hang the spell IDs here.
+local function ShowSpellTooltip(row, spellID, fallbackName, isCurrent, lines)
     local name = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(spellID)
     if type(name) ~= "string" or name == "" then name = fallbackName end
     DF.GUI:ShowGameTooltip(row, {
@@ -53,6 +57,7 @@ local function ShowSpellTooltip(row, spellID, fallbackName, isCurrent)
         -- isCurrent keep working against row identity.
         fallbackTitle = name,
         isCurrent     = isCurrent,
+        lines         = lines,
     })
 end
 R.ShowSpellTooltip = ShowSpellTooltip

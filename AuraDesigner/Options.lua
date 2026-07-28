@@ -4892,11 +4892,11 @@ local function BuildGlobalView(parent)
         g:AddWidget(descFrame, 24)
 
         local filtersBtn = GUI:CreateButton(parent, L["Aura Filters"], 140, 22, function()
-            if GUI.SelectTab and GUI.Pages and GUI.Pages["auras_filters"] then
-                GUI.SelectTab("auras_filters")
+            if GUI.SelectTab and GUI.Pages and GUI.Pages["auras_filterdesigner"] then
+                GUI.SelectTab("auras_filterdesigner")
             end
         end)
-        if not (GUI.Pages and GUI.Pages["auras_filters"]) then
+        if not (GUI.Pages and GUI.Pages["auras_filterdesigner"]) then
             filtersBtn:Disable()
             filtersBtn.Text:SetTextColor(0.4, 0.4, 0.4)
         end

@@ -5538,427 +5538,46 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     -- ========================================
     CreateCategory("auras", L["Auras"])
 
-    -- Auras > Aura Filters (master switch for Blizzard vs Direct API mode)
-    local pageAuraFilters = CreateSubTab("auras", "auras_filters", L["Aura Filters"])
-    BuildPage(pageAuraFilters, function(self, db, Add, AddSpace, AddSyncPoint)
-        -- Copy button at top. buffFilterSelection is an exact-key entry: the
-        -- registry matcher is a string-prefix test with longest-match-wins
-        -- ownership (DF:SectionOwnsKey in Profile.lua), and a full key is just
-        -- a prefix that matches only itself. Longest-match means this page's
-        -- "debuffFilter" / "debuffMaxDuration" / "buffMaxDuration" entries
-        -- take those keys away from the Buffs/Debuffs layout pages' broad
-        -- "buff"/"debuff" prefixes. The selection table is DeepCopy'd by the
-        -- copy path, so the modes never alias one table.
-        -- defensiveFilterSelection deliberately does NOT appear here: the
-        -- Defensive Icon page owns that key (its own registration includes
-        -- it), and listing it on both pages made this page's section
-        -- reset/copy silently touch another page's setting.
-        -- debuffFilter/debuffMaxDuration carry the 12.1 debuff category keys.
-        Add(CreateCopyButton(self.child, {"directBuff", "directDebuff", "buffFilterSelection", "debuffFilter", "debuffMaxDuration", "buffMaxDuration"}, L["Aura Filters"], "auras_filters"), 25, 2)
+    -- Auras > Aura Filters (the merged page: pick filters AND edit their spells)
+    --
+    -- Keeps the FAMILIAR NAME while the page id stays "auras_filterdesigner". That is
+    -- deliberate: every cross-link, Search entry and _fdSelect* entry point already
+    -- targets that id, so relabelling costs nothing whereas renaming the id would mean
+    -- chasing all of them. The old "auras_filters" page is gone -- its filter switches
+    -- moved into this page's left-hand list, its ordering and duration controls onto
+    -- the Buffs and Debuffs pages.
+    --
+    -- SECTION KEYS, spelled out rather than stemmed. Ownership is longest-prefix-wins
+    -- (DF:SectionOwnsKey), so:
+    --   * "buffFilterSelection" beats the Buffs page's broad "buff"
+    --   * "debuffFilter" / "debuffBlacklist" beat the Debuffs page's broad "debuff"
+    --   * the three scope keys are listed INDIVIDUALLY because the sort keys that just
+    --     moved away (directBuffSortOrder, directDebuffSort*) share the "directBuff" /
+    --     "directDebuff" stems. A stem here would drag them back, and this page's
+    --     Copy/Reset would silently reach into the bar pages.
+    local pageFilterDesigner = CreateSubTab("auras", "auras_filterdesigner", L["Aura Filters"])
+    BuildPage(pageFilterDesigner, function(self, db, Add, AddSpace, AddSyncPoint)
+        Add(CreateCopyButton(self.child, {
+            "buffFilterSelection", "debuffFilter", "debuffBlacklist",
+            "directBuffShowAll", "directBuffOnlyMine", "directDebuffShowAll",
+        }, L["Aura Filters"], "auras_filterdesigner"), 25, 2)
+        if DF.BuildFilterDesignerPage then DF.BuildFilterDesignerPage(GUI, self, db) end
 
-        -- ===== INFO BANNER =====
-        -- How buff vs debuff filtering works, then that Aura Filters only affect
-        -- the buff/debuff bars — with inline links to the independent systems.
-        do
-            local tc = GUI.GetThemeColor()
-            local linkColor = string.format("|cFF%02X%02X%02X",
-                math.floor((tc.r or 1) * 255),
-                math.floor((tc.g or 1) * 255),
-                math.floor((tc.b or 1) * 255))
-            local function L_link(text, pageId)
-                return linkColor .. "|HdfPage:" .. pageId .. "|h" .. text .. "|h|r"
-            end
-            -- Two format strings rather than a dozen concatenated fragments: the
-            -- links are %s placeholders, so a translator can reorder the sentence
-            -- around them. Concatenation locked English word order in place.
-            local bodyText = string.format(
-                    L["Choose which filters are active. Buff filters can be fully customised in the %s; debuff filters are limited to Blizzard's fixed categories, with the %s the only per-spell control."],
-                    L_link(L["Filter Designer"], "auras_filterdesigner"),
-                    -- Pseudo-id, resolved in onLinkClick below. It cannot be
-                    -- "auras_filterdesigner:blacklist": the banner's link parser
-                    -- strsplits on ":" and keeps only the second field, so the
-                    -- anchor would be dropped and this would land on whatever mode
-                    -- the Filter Designer was last left in.
-                    L_link(L["Debuff Blacklist"], "auras_blacklist"))
-                .. "\n\n"
-                .. string.format(
-                    L["These filters apply to the %s and %s only. The %s and %s pick their own (per indicator), and the %s takes no filter selection."],
-                    L_link(L["Buff Bar"], "auras_buffs"),
-                    L_link(L["Debuff Bar"], "auras_debuffs"),
-                    L_link(L["Defensive Icon"], "auras_defensiveicon"),
-                    L_link(L["Aura Designer"], "auras_auradesigner"),
-                    L_link(L["Dispel Overlay"], "auras_dispel"))
-
-            local infoBanner = GUI:CreateInfoBanner(self.child, {
-                tone = "info",
-                html = true,
-                text = bodyText,
-                onLinkClick = function(pageId)
-                    if not GUI.SelectTab then return end
-                    -- The Blacklist is a MODE of the Filter Designer, not a page, so
-                    -- it takes the same two-step as the "Edit Debuff Blacklist" button
-                    -- further down this page: select the page (which builds its
-                    -- content on first show, so the ref exists straight after), then
-                    -- jump to the section.
-                    if pageId == "auras_blacklist" then
-                        if not (GUI.Pages and GUI.Pages["auras_filterdesigner"]) then return end
-                        GUI.SelectTab("auras_filterdesigner")
-                        local fdPage = GUI.Pages["auras_filterdesigner"]
-                        if fdPage and fdPage._fdSelectBlacklist then fdPage._fdSelectBlacklist() end
-                        return
-                    end
-                    GUI.SelectTab(pageId)
-                end,
-                minHeight = 90,
-            })
-            Add(infoBanner, infoBanner.layoutHeight, "both")
-            AddSpace(4, "both")
-        end
-
-        -- Callback that rebuilds the native filter strings and re-drives the
-        -- container rows (they rebuild when their filter signature changes).
-        local function DirectFilterChanged()
-            if DF.RebuildDirectFilterStrings then
-                DF:RebuildDirectFilterStrings()
-            end
-            if DF.InvalidateAuraLayout then
-                DF:InvalidateAuraLayout()
-            end
-        end
-
-        -- ===== BUFF FILTERS (Column 2, Direct mode only) =====
-        local function HideBuffSubFilters(d)
-            return d.directBuffShowAll
-        end
-
-        local buffGroup = GUI:CreateSettingsGroup(self.child, 280)
-        local buffHeader = buffGroup:AddWidget(GUI:CreateHeader(self.child, L["Buff Filters"]), 40)
-
-        -- Top-of-section link: which filters are active is set here; the spells in
-        -- each preset and your own custom filters are edited in the Filter Designer.
-        local bfManage = buffGroup:AddWidget(GUI:CreateButton(self.child, L["Customise in Filter Designer"], 220, 22, function()
-            if not (GUI.SelectTab and GUI.Pages and GUI.Pages["auras_filterdesigner"]) then return end
-            GUI.SelectTab("auras_filterdesigner")
-            -- Land on a buff filter, not whatever was last open (e.g. the Blacklist
-            -- if the debuff button was used previously).
-            local fdPage = GUI.Pages["auras_filterdesigner"]
-            if fdPage and fdPage._fdSelectBuffs then fdPage._fdSelectBuffs() end
-        end), 30)
-        bfManage.disableOn = function() return not (GUI.Pages and GUI.Pages["auras_filterdesigner"]) end
-
-        local bfAll = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["All Buffs"], db, "directBuffShowAll", function()
-            DirectFilterChanged()
-            self:RefreshStates()
-        end), 30)
-        bfAll.tooltip = L["Show every buff with no filtering."]
-
-        local bfOnlyMine = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Only My Buffs"], db, "directBuffOnlyMine", function()
-            DirectFilterChanged()
-            self:RefreshStates()
-        end), 30)
-        bfOnlyMine.tooltip = L["Only show buffs that you cast. Applies to all buff filters."]
-
-        local buffSubInfo = buffGroup:AddWidget(GUI:CreateLabel(self.child, "|cff888888" .. L["Enabled filters are combined \226\128\148 buffs matching any selected filter will be shown."] .. "|r", 250), 35)
-        buffSubInfo.hideOn = HideBuffSubFilters
-
-        -- Category filter selection (Filter Registry presets + custom filters).
-        -- Replaces the legacy Blizzard-token checkboxes. Each row toggles a key
-        -- inside db.buffFilterSelection — always mutate the inner tables in place
-        -- (the aura pipeline holds references to them; never reassign them).
-        -- |cff888888 matches the page's existing secondary-text colour (see the
-        -- combined-filters info labels on this page).
-        local R = DF.FilterRegistry
-        local function SelectionCheckbox(labelText, getSel, setSel)
-            -- CreateCheckbox's OnClick already runs the page RefreshStates via
-            -- its parent (self.child), same as the legacy rows relied on.
-            local cb = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, labelText, nil, nil, DirectFilterChanged, getSel, setSel), 30)
-            cb.hideOn = HideBuffSubFilters
-            return cb
-        end
-
-        for _, cat in ipairs(R.Categories) do
-            local key = cat.key
-            local enabled, total = R:PresetCounts(key)
-            local counts = R:IsPresetModified(key)
-                and format("(%d/%d, %s)", enabled, total, L["Modified"])
-                or  format("(%d/%d)", enabled, total)
-            SelectionCheckbox(format("%s |cff888888%s|r", L[cat.name], counts),
-                function() return db.buffFilterSelection.presets[key] or false end,
-                function(v) db.buffFilterSelection.presets[key] = v or nil end)
-        end
-
-        -- Custom filters, sorted by name for a stable order (the store is id-keyed)
-        local sortedCustoms = {}
-        for cfId in pairs(R:GetStore().customFilters) do
-            sortedCustoms[#sortedCustoms + 1] = cfId
-        end
-        table.sort(sortedCustoms, function(a, b)
-            local fa, fb = R:GetCustomFilter(a), R:GetCustomFilter(b)
-            local na, nb = (fa and fa.name or ""), (fb and fb.name or "")
-            if na ~= nb then return na < nb end
-            return a < b
-        end)
-        for _, cfId in ipairs(sortedCustoms) do
-            local f = R:GetCustomFilter(cfId)
-            SelectionCheckbox(format("%s |c%s(%s)|r", f.name or cfId, GUI:ToneHex("info"), L["Custom"]),
-                function() return db.buffFilterSelection.customs[cfId] or false end,
-                function(v) db.buffFilterSelection.customs[cfId] = v or nil end)
-        end
-
-        -- Complement bucket: buffs that belong to no category
-        SelectionCheckbox(L["Uncategorised Buffs"],
-            function() return db.buffFilterSelection.uncategorised end,
-            function(v) db.buffFilterSelection.uncategorised = v and true or false end)
-
-        -- The page build is cached across tab switches, but preset counts and the
-        -- custom-filter list can change while this page is hidden (Filter Designer
-        -- edits). On show, invalidate the page cache when the registry signature
-        -- moved so RefreshCached() rebuilds fresh rows instead of serving stale ones.
-        local function RegistrySignature()
-            local parts = {}
-            for _, cat in ipairs(R.Categories) do
-                local enabled, total = R:PresetCounts(cat.key)
-                parts[#parts + 1] = format("%s:%d/%d%s", cat.key, enabled, total,
-                    R:IsPresetModified(cat.key) and "*" or "")
-            end
-            for cfId, f in pairs(R:GetStore().customFilters) do
-                parts[#parts + 1] = cfId .. "=" .. (f.name or "")
-            end
-            table.sort(parts)
-            return table.concat(parts, ";")
-        end
-        self.dfBuffFilterSignature = RegistrySignature()
-        if not self.dfBuffFilterSigHooked then
-            self.dfBuffFilterSigHooked = true
-            self:HookScript("OnShow", function(page)
-                if page.dfBuffFilterSignature ~= RegistrySignature() then
-                    page:Invalidate()
-                end
-            end)
-        end
-
-        local buffSortOptions = {
-            DEFAULT = L["Default (Slot Order)"],
-            TIME = L["Time Remaining"],
-            NAME = L["Alphabetical"],
-            APPLIED = L["Order Applied"],
-            _order = { "DEFAULT", "TIME", "NAME", "APPLIED" },
-        }
-        -- Sort works on BOTH paths: legacy rows sort in the Lua scan; factory rows map
-        -- the same key onto the native AuraContainerSortMethod (TIME -> ExpirationOnly,
-        -- NAME -> NameOnly) declared at AddAuraGroup — see BuildAuraRowConfig. (The
-        -- 12.1 frost this control used to carry was lifted once the native mapping landed.)
-        local bfSort = buffGroup:AddWidget(GUI:CreateDropdown(self.child, L["Sort Order"], buffSortOptions, db, "directBuffSortOrder", function()
-            DirectFilterChanged()
-            self:RefreshStates()   -- Mine First greys while Sort Order = Default
-        end), 55)
-
-        -- Sort refinements (native rows only — the legacy Lua scan doesn't read them)
-        local bfSortMine = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["My Auras First"], db, "directBuffSortMineFirst", DirectFilterChanged), 30)
-        bfSortMine.hideOn = function(d) return not DF:FactoryOwnsBuffRow(d) end
-        bfSortMine.disableOn = function(d) return not DF:SortOrderSupportsMineFirst(d.directBuffSortOrder) end
-        bfSortMine.tooltip = L["Sort your own auras before other players'. Unavailable on Default (which already shows yours first) and on Order Applied (which keeps one fixed order)."]
-        local bfSortRev = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Reverse Order"], db, "directBuffSortReverse", DirectFilterChanged), 30)
-        bfSortRev.hideOn = function(d) return not DF:FactoryOwnsBuffRow(d) end
-        bfSortRev.tooltip = L["Reverse the sort direction."]
-
-        -- Native-only: max TOTAL duration filter (12.1 candidateFilters.maxDuration).
-        -- Hidden while the legacy render owns the row (not expressible there).
-        local bfMaxDur = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Long Buffs"], db, "buffMaxDurationEnabled", function()
-            DirectFilterChanged()
-            self:RefreshStates()
-        end), 30)
-        bfMaxDur.hideOn = function(d) return not DF:FactoryOwnsBuffRow(d) end
-        bfMaxDur.tooltip = L["Hide buffs whose total duration is longer than the threshold - e.g. hour-long food and flask buffs. Buffs with no duration (permanent auras) are also hidden while this is on."]
-        local bfMaxDurSlider = buffGroup:AddWidget(GUI:CreateSlider(self.child, L["Hide Longer Than (minutes)"], 1, 30, 1, db, "buffMaxDurationMinutes", nil, DirectFilterChanged), 55)
-        bfMaxDurSlider.hideOn = function(d) return not DF:FactoryOwnsBuffRow(d) end
-        bfMaxDurSlider.disableOn = function(d) return not d.buffMaxDurationEnabled end
-
-        -- Native-only: permanent-aura hide (max-finite candidateFilters.maxDuration).
-        -- Independent of Hide Long Buffs — but subsumed by it (a finite cap already
-        -- rejects duration-0 auras), hence the tooltip honesty.
-        local bfHidePerm = buffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Permanent Auras"], db, "buffHidePermanent", DirectFilterChanged), 30)
-        bfHidePerm.hideOn = function(d) return not DF:FactoryOwnsBuffRow(d) end
-        bfHidePerm.tooltip = L["Hide buffs with no duration, such as auras that last until cancelled. Hide Long Buffs also hides these while it is on."]
-        Add(buffGroup, nil, 1)
-
-        -- ===== DEBUFF FILTERS (Column 1, Direct mode only) =====
-        local function HideDebuffSubFilters(d)
-            return d.directDebuffShowAll
-        end
-
-        local debuffGroup = GUI:CreateSettingsGroup(self.child, 280)
-        local debuffHeader = debuffGroup:AddWidget(GUI:CreateHeader(self.child, L["Debuff Filters"]), 40)
-
-        -- Top-of-section link: the debuff categories are set here; the one per-spell
-        -- debuff control (the Blacklist) lives in the Filter Designer, so land there.
-        local dfManage = debuffGroup:AddWidget(GUI:CreateButton(self.child, L["Edit Debuff Blacklist"], 220, 22, function()
-            if not (GUI.SelectTab and GUI.Pages and GUI.Pages["auras_filterdesigner"]) then return end
-            GUI.SelectTab("auras_filterdesigner")
-            -- Page content builds on first show (inside SelectTab), so the entry
-            -- ref exists now — land on the Blacklist directly.
-            local fdPage = GUI.Pages["auras_filterdesigner"]
-            if fdPage and fdPage._fdSelectBlacklist then fdPage._fdSelectBlacklist() end
-        end), 30)
-        dfManage.disableOn = function() return not (GUI.Pages and GUI.Pages["auras_filterdesigner"]) end
-
-        local dfAll = debuffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["All Debuffs"], db, "directDebuffShowAll", function()
-            DirectFilterChanged()
-            self:RefreshStates()
-        end), 30)
-        dfAll.tooltip = L["Show every debuff with no filtering."]
-
-        -- ===== CAUTION BANNER: category filters are incomplete =====
-        -- Shown while All Debuffs is OFF (category mode). Blizzard's category tokens
-        -- (boss/role/priority/CC/raid/dispellable) are not exhaustive — some harmful
-        -- debuffs are tagged with NONE of them, so they're missed even with every
-        -- box below ticked. "All Debuffs" is the only complete option, and we can't
-        -- widen the categories (they're Blizzard-defined).
-        local debuffWarningBanner = GUI:CreateInfoBanner(self.child, {
-            tone = "caution",
-            text = L["Blizzard's debuff categories aren't complete: even with all of them enabled, some debuffs Blizzard doesn't tag are still missed. Only 'All Debuffs' shows every debuff, and the categories can't be changed (they're Blizzard-defined)."],
-        })
-        debuffWarningBanner.hideOn = function(d)
-            return d.directDebuffShowAll
-        end
-        debuffGroup:AddWidget(debuffWarningBanner, debuffWarningBanner.layoutHeight)
-
-        local debuffSubInfo = debuffGroup:AddWidget(GUI:CreateLabel(self.child, "|cff888888" .. L["Enabled filters are combined \226\128\148 debuffs matching any selected filter will be shown."] .. "|r", 250), 35)
-        debuffSubInfo.hideOn = HideDebuffSubFilters
-
-        -- Native 12.1 category filters (flat per-mode booleans; Blizzard-curated
-        -- membership). Every change routes through DirectFilterChanged, which
-        -- rebuilds the filter records and re-drives the container rows.
-        local dfBoss = debuffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Boss Debuffs"], db, "debuffFilterBoss", DirectFilterChanged), 30)
-        dfBoss.hideOn = HideDebuffSubFilters
-        dfBoss.tooltip = L["Debuffs applied by dungeon and raid bosses."]
-
-        local dfRole = debuffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Role Debuffs"], db, "debuffFilterRole", DirectFilterChanged), 30)
-        dfRole.hideOn = HideDebuffSubFilters
-        dfRole.tooltip = L["Debuffs Blizzard flags as important for your role."]
-
-        local dfPriority = debuffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Priority Debuffs"], db, "debuffFilterPriority", DirectFilterChanged), 30)
-        dfPriority.hideOn = HideDebuffSubFilters
-        dfPriority.tooltip = L["Debuffs Blizzard flags as high priority."]
-
-        local dfCC = debuffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Crowd Control"], db, "debuffFilterCrowdControl", DirectFilterChanged), 30)
-        dfCC.hideOn = HideDebuffSubFilters
-        dfCC.tooltip = L["CC effects like stuns, roots, and incapacitates."]
-
-        local dfRaid = debuffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Raid Debuffs"], db, "debuffFilterRaid", DirectFilterChanged), 30)
-        dfRaid.hideOn = HideDebuffSubFilters
-        local dfRaidHint = debuffGroup:AddWidget(GUI:CreateLabel(self.child, "|cff888888" .. L["Other debuffs Blizzard flags for raid frames."] .. "|r", 250), 20)
-        dfRaidHint.hideOn = HideDebuffSubFilters
-
-        local dfDispellable = debuffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Dispellable Debuffs"], db, "debuffFilterDispellable", function()
-            DirectFilterChanged()
-            self:RefreshStates()
-        end), 30)
-        dfDispellable.hideOn = HideDebuffSubFilters
-        dfDispellable.tooltip = L["Debuffs that can be dispelled. Use the dropdown below to choose which dispels count."]
-
-        -- Mode dropdown, indented under Dispellable Debuffs (was a two-state
-        -- toggle until the PTR-5 DISPELLABLE token added a third mode). The
-        -- group layout has no per-child indent, so a wrapper row supplies the
-        -- offset (same composed-row idea as the Nicknames marker dropdowns).
-        -- searchEntry is forwarded so HighlightSettings (wizard) still finds
-        -- the dbKey on the group child it inspects.
-        local dfDispelModeRow = CreateFrame("Frame", nil, self.child)
-        dfDispelModeRow:SetSize(250, 50)
-        local dispelModeOptions = {
-            PLAYER = L["Dispellable By Me"],
-            ALL = L["All Dispellable"],
-            ANY = L["Any Dispel Type"],
-            _order = { "PLAYER", "ALL", "ANY" },
-        }
-        local dfDispelMode = GUI:CreateDropdown(self.child, L["Mode"], dispelModeOptions, db, "directDebuffDispellableMode", DirectFilterChanged)
-        dfDispelMode:SetParent(dfDispelModeRow)
-        dfDispelMode:ClearAllPoints()
-        dfDispelMode:SetPoint("TOPLEFT", dfDispelModeRow, "TOPLEFT", 16, 0)
-        dfDispelMode:SetPoint("BOTTOMRIGHT", dfDispelModeRow, "BOTTOMRIGHT", 0, 0)
-        dfDispelMode.tooltip = L["Dispellable By Me: only debuffs you can dispel. All Dispellable: any debuff that can be dispelled. Any Dispel Type: every debuff with a dispel type, even ones that cannot be dispelled."]
-        dfDispelModeRow.searchEntry = dfDispelMode.searchEntry
-        dfDispelModeRow.hideOn = function(d)
-            return d.directDebuffShowAll or not d.debuffFilterDispellable
-        end
-        debuffGroup:AddWidget(dfDispelModeRow, 55)
-
-        local debuffSortOptions = {
-            DEFAULT = L["Default (Slot Order)"],
-            TIME = L["Time Remaining"],
-            NAME = L["Alphabetical"],
-            APPLIED = L["Order Applied"],
-            _order = { "DEFAULT", "TIME", "NAME", "APPLIED" },
-        }
-        local dfSort = debuffGroup:AddWidget(GUI:CreateDropdown(self.child, L["Sort Order"], debuffSortOptions, db, "directDebuffSortOrder", function()
-            DirectFilterChanged()
-            self:RefreshStates()   -- Mine First greys while Sort Order = Default
-        end), 55)
-
-        -- Sort refinements (native rows only — the legacy Lua scan doesn't read them)
-        local dfSortMine = debuffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["My Auras First"], db, "directDebuffSortMineFirst", DirectFilterChanged), 30)
-        dfSortMine.hideOn = function(d) return not DF:FactoryOwnsDebuffRow(d) end
-        dfSortMine.disableOn = function(d) return not DF:SortOrderSupportsMineFirst(d.directDebuffSortOrder) end
-        dfSortMine.tooltip = L["Sort your own auras before other players'. Unavailable on Default (which already shows yours first) and on Order Applied (which keeps one fixed order)."]
-        local dfSortRev = debuffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Reverse Order"], db, "directDebuffSortReverse", DirectFilterChanged), 30)
-        dfSortRev.hideOn = function(d) return not DF:FactoryOwnsDebuffRow(d) end
-        dfSortRev.tooltip = L["Reverse the sort direction."]
-
-        -- Native-only: max TOTAL duration filter (12.1 candidateFilters.maxDuration).
-        -- Hidden while the legacy render owns the row. Works in ALL-debuffs mode too
-        -- (single maxDuration record) — only Keep Important needs the category
-        -- filters (boolean flags can't be negated on the ALL record), so THAT
-        -- toggle alone hides while All Debuffs is on.
-        local function HideDebuffMaxDurControls(d)
-            return not DF:FactoryOwnsDebuffRow(d)
-        end
-        local dfMaxDur = debuffGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Long Debuffs"], db, "debuffMaxDurationEnabled", function()
-            DirectFilterChanged()
-            self:RefreshStates()
-        end), 30)
-        dfMaxDur.hideOn = HideDebuffMaxDurControls
-        dfMaxDur.tooltip = L["Hide debuffs whose total duration is longer than the threshold. Debuffs with no duration (permanent auras) are also hidden while this is on."]
-        local dfMaxDurSlider = debuffGroup:AddWidget(GUI:CreateSlider(self.child, L["Hide Longer Than (minutes)"], 1, 30, 1, db, "debuffMaxDurationMinutes", nil, DirectFilterChanged), 55)
-        dfMaxDurSlider.hideOn = HideDebuffMaxDurControls
-        dfMaxDurSlider.disableOn = function(d) return not d.debuffMaxDurationEnabled end
-
-        -- Keep-important checkbox, indented under Hide Long Debuffs (same wrapper
-        -- pattern as the dispellable mode toggle above; SetEnabled forwards so
-        -- disableOn greys the inner checkbox).
-        local dfKeepImportantRow = CreateFrame("Frame", nil, self.child)
-        dfKeepImportantRow:SetSize(250, 24)
-        local dfKeepImportant = GUI:CreateCheckbox(self.child, L["Keep important debuffs"], db, "debuffMaxDurationKeepImportant", DirectFilterChanged)
-        dfKeepImportant:SetParent(dfKeepImportantRow)
-        dfKeepImportant:ClearAllPoints()
-        dfKeepImportant:SetPoint("TOPLEFT", dfKeepImportantRow, "TOPLEFT", 16, 0)
-        dfKeepImportant:SetPoint("BOTTOMRIGHT", dfKeepImportantRow, "BOTTOMRIGHT", 0, 0)
-        dfKeepImportant.tooltip = L["Boss, Role, and Priority debuffs stay visible even when their duration is over the threshold."]
-        dfKeepImportantRow.searchEntry = dfKeepImportant.searchEntry
-        dfKeepImportantRow.hideOn = function(d)
-            return d.directDebuffShowAll or not DF:FactoryOwnsDebuffRow(d)
-        end
-        dfKeepImportantRow.disableOn = function(d) return not d.debuffMaxDurationEnabled end
-        dfKeepImportantRow.SetEnabled = function(_, enabled)
-            if dfKeepImportant.SetEnabled then dfKeepImportant:SetEnabled(enabled) end
-        end
-        debuffGroup:AddWidget(dfKeepImportantRow, 30)
-        Add(debuffGroup, nil, 2)
-
-        -- ===== SEE ALSO =====
-        -- (The Aura Blacklist pointer section that lived here was removed with the
-        -- blacklist's retirement; the See Also entry points at its replacement.)
+        -- See Also, after the page's own content. This page positions its panels
+        -- absolutely and reports its height through an Add()ed spacer, so anything
+        -- Add()ed afterwards lands below them -- which is where a footer belongs.
+        --
+        -- It also does real work here rather than being decoration: the four links
+        -- ARE the answer to "what uses these filters". Naming the consumers as
+        -- somewhere you can go beats another sentence explaining that they exist,
+        -- and this was the only page under Auras without a See Also bar.
+        AddSpace(GUI.Space.block, "both")
         Add(GUI:CreateSeeAlso(self.child, {
-            {pageId = "auras_buffs", label = L["Buff Icons"]},
-            {pageId = "auras_debuffs", label = L["Debuff Icons"]},
-            {pageId = "auras_filterdesigner", label = L["Filter Designer"]},
+            {pageId = "auras_buffs", label = L["Buffs"]},
+            {pageId = "auras_debuffs", label = L["Debuffs"]},
+            {pageId = "auras_defensiveicon", label = L["Defensive Icon"]},
             {pageId = "auras_auradesigner", label = L["Aura Designer"]},
         }), 30, "both")
-    end)
-
-    -- Auras > Filter Designer (buff filter registry editor)
-    local pageFilterDesigner = CreateSubTab("auras", "auras_filterdesigner", L["Filter Designer"])
-    BuildPage(pageFilterDesigner, function(self, db, Add, AddSpace, AddSyncPoint)
-        if DF.BuildFilterDesignerPage then DF.BuildFilterDesignerPage(GUI, self, db) end
     end)
 
     -- Auras > Aura Designer
@@ -6290,13 +5909,68 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         durBarGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Reverse Fill"], db, "buffDurationBarReverseFill", BuffBarChanged), 30)
         Add(durBarGroup, nil, 2)
 
+        -- ========================================
+        -- ORDER & LIMITS  (moved here from the old Aura Filters page)
+        -- ========================================
+        -- These decide the ORDER of what already passed the filters, and cap it by
+        -- duration. Neither is a filter in the sense the Filters page means -- a
+        -- named set of spells you switch on -- so they belong with the bar they act
+        -- on. Which filters are active is on Aura Filters.
+        local BuffOrderChanged = function()
+            if DF.RebuildDirectFilterStrings then DF:RebuildDirectFilterStrings() end
+            if DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
+        end
+
+        local buffOrderGroup = GUI:CreateSettingsGroup(self.child, 280)
+        buffOrderGroup:AddWidget(GUI:CreateHeader(self.child, L["Order & Limits"]), GUI.RowHeight.sectionHeader)
+
+        local buffSortOptions = {
+            DEFAULT = L["Default (Slot Order)"],
+            TIME = L["Time Remaining"],
+            NAME = L["Alphabetical"],
+            APPLIED = L["Order Applied"],
+            _order = { "DEFAULT", "TIME", "NAME", "APPLIED" },
+        }
+        buffOrderGroup:AddWidget(GUI:CreateDropdown(self.child, L["Sort Order"], buffSortOptions, db, "directBuffSortOrder", function()
+            BuffOrderChanged()
+            self:RefreshStates()   -- Mine First greys while Sort Order = Default
+        end), 55)
+
+        -- Sort refinements (native rows only — the legacy Lua scan doesn't read them)
+        local bfSortMine = buffOrderGroup:AddWidget(GUI:CreateCheckbox(self.child, L["My Auras First"], db, "directBuffSortMineFirst", BuffOrderChanged), 30)
+        bfSortMine.hideOn = function(d) return not DF:FactoryOwnsBuffRow(d) end
+        bfSortMine.disableOn = function(d) return not DF:SortOrderSupportsMineFirst(d.directBuffSortOrder) end
+        bfSortMine.tooltip = L["Sort your own auras before other players'. Unavailable on Default (which already shows yours first) and on Order Applied (which keeps one fixed order)."]
+        local bfSortRev = buffOrderGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Reverse Order"], db, "directBuffSortReverse", BuffOrderChanged), 30)
+        bfSortRev.hideOn = function(d) return not DF:FactoryOwnsBuffRow(d) end
+        bfSortRev.tooltip = L["Reverse the sort direction."]
+
+        -- Native-only: max TOTAL duration filter (12.1 candidateFilters.maxDuration).
+        -- Hidden while the legacy render owns the row (not expressible there).
+        local bfMaxDur = buffOrderGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Long Buffs"], db, "buffMaxDurationEnabled", function()
+            BuffOrderChanged()
+            self:RefreshStates()
+        end), 30)
+        bfMaxDur.hideOn = function(d) return not DF:FactoryOwnsBuffRow(d) end
+        bfMaxDur.tooltip = L["Hide buffs whose total duration is longer than the threshold - e.g. hour-long food and flask buffs. Buffs with no duration (permanent auras) are also hidden while this is on."]
+        local bfMaxDurSlider = buffOrderGroup:AddWidget(GUI:CreateSlider(self.child, L["Hide Longer Than (minutes)"], 1, 30, 1, db, "buffMaxDurationMinutes", nil, BuffOrderChanged), 55)
+        bfMaxDurSlider.hideOn = function(d) return not DF:FactoryOwnsBuffRow(d) end
+        bfMaxDurSlider.disableOn = function(d) return not d.buffMaxDurationEnabled end
+
+        -- Independent of Hide Long Buffs — but subsumed by it (a finite cap already
+        -- rejects duration-0 auras), hence the tooltip honesty.
+        local bfHidePerm = buffOrderGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Permanent Auras"], db, "buffHidePermanent", BuffOrderChanged), 30)
+        bfHidePerm.hideOn = function(d) return not DF:FactoryOwnsBuffRow(d) end
+        bfHidePerm.tooltip = L["Hide buffs with no duration, such as auras that last until cancelled. Hide Long Buffs also hides these while it is on."]
+        Add(buffOrderGroup, nil, 1)
+
         -- See Also links
         AddSpace(GUI.Space.block, "both")
         Add(GUI:CreateSeeAlso(self.child, {
+            {pageId = "auras_filterdesigner", label = L["Aura Filters"]},
             {pageId = "display_tooltips", label = L["Buff Tooltips"]},
             {pageId = "general_integrations", label = L["Integrations"]},
             {pageId = "auras_missingbuffs", label = L["Missing Buffs"]},
-            {pageId = "auras_defensiveicon", label = L["Defensive Icon"]},
         }), 30, "both")
     end)
 
@@ -6537,8 +6211,83 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         Add(durBarGroup, nil, 2)
 
         -- See Also links
+        -- ========================================
+        -- ORDER & LIMITS  (moved here from the old Aura Filters page)
+        -- ========================================
+        -- Ordering and the duration cap act on what already passed the filters, so
+        -- they live with the bar. Which debuff categories are active is on Aura
+        -- Filters. The Dispellable MODE dropdown comes with them: it refines a
+        -- category rather than being one, and the category row's tooltip on the
+        -- Filters page points here for it.
+        local DebuffOrderChanged = function()
+            if DF.RebuildDirectFilterStrings then DF:RebuildDirectFilterStrings() end
+            if DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
+        end
+
+        local debuffOrderGroup = GUI:CreateSettingsGroup(self.child, 280)
+        debuffOrderGroup:AddWidget(GUI:CreateHeader(self.child, L["Order & Limits"]), GUI.RowHeight.sectionHeader)
+
+        local debuffSortOptions = {
+            DEFAULT = L["Default (Slot Order)"],
+            TIME = L["Time Remaining"],
+            NAME = L["Alphabetical"],
+            APPLIED = L["Order Applied"],
+            _order = { "DEFAULT", "TIME", "NAME", "APPLIED" },
+        }
+        debuffOrderGroup:AddWidget(GUI:CreateDropdown(self.child, L["Sort Order"], debuffSortOptions, db, "directDebuffSortOrder", function()
+            DebuffOrderChanged()
+            self:RefreshStates()
+        end), 55)
+
+        local dfSortMine = debuffOrderGroup:AddWidget(GUI:CreateCheckbox(self.child, L["My Auras First"], db, "directDebuffSortMineFirst", DebuffOrderChanged), 30)
+        dfSortMine.hideOn = function(d) return not DF:FactoryOwnsDebuffRow(d) end
+        dfSortMine.disableOn = function(d) return not DF:SortOrderSupportsMineFirst(d.directDebuffSortOrder) end
+        dfSortMine.tooltip = L["Sort your own auras before other players'. Unavailable on Default (which already shows yours first) and on Order Applied (which keeps one fixed order)."]
+        local dfSortRev = debuffOrderGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Reverse Order"], db, "directDebuffSortReverse", DebuffOrderChanged), 30)
+        dfSortRev.hideOn = function(d) return not DF:FactoryOwnsDebuffRow(d) end
+        dfSortRev.tooltip = L["Reverse the sort direction."]
+
+        -- Which dispels count for the Dispellable Debuffs category. Greys rather
+        -- than hides while that category is off, so you can see what you would be
+        -- turning back on -- and it is inert while All Debuffs is on.
+        local dfDispelMode = debuffOrderGroup:AddWidget(GUI:CreateDropdown(self.child, L["Dispellable Debuffs"], {
+            PLAYER = L["Dispellable By Me"],
+            ALL = L["All Dispellable"],
+            ANY = L["Any Dispel Type"],
+            _order = { "PLAYER", "ALL", "ANY" },
+        }, db, "directDebuffDispellableMode", DebuffOrderChanged), 55)
+        dfDispelMode.disableOn = function(d)
+            return d.directDebuffShowAll or not d.debuffFilterDispellable
+        end
+        dfDispelMode.tooltip = L["Dispellable By Me: only debuffs you can dispel. All Dispellable: any debuff that can be dispelled. Any Dispel Type: every debuff with a dispel type, even ones that cannot be dispelled."]
+
+        -- Works in ALL-debuffs mode too (single maxDuration record) — only Keep
+        -- Important needs the category filters (boolean flags can't be negated on
+        -- the ALL record), so THAT toggle alone greys while All Debuffs is on.
+        local function HideDebuffMaxDurControls(d)
+            return not DF:FactoryOwnsDebuffRow(d)
+        end
+        local dfMaxDur = debuffOrderGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Long Debuffs"], db, "debuffMaxDurationEnabled", function()
+            DebuffOrderChanged()
+            self:RefreshStates()
+        end), 30)
+        dfMaxDur.hideOn = HideDebuffMaxDurControls
+        dfMaxDur.tooltip = L["Hide debuffs whose total duration is longer than the threshold. Debuffs with no duration (permanent auras) are also hidden while this is on."]
+        local dfMaxDurSlider = debuffOrderGroup:AddWidget(GUI:CreateSlider(self.child, L["Hide Longer Than (minutes)"], 1, 30, 1, db, "debuffMaxDurationMinutes", nil, DebuffOrderChanged), 55)
+        dfMaxDurSlider.hideOn = HideDebuffMaxDurControls
+        dfMaxDurSlider.disableOn = function(d) return not d.debuffMaxDurationEnabled end
+
+        local dfKeepImportant = debuffOrderGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Keep important debuffs"], db, "debuffMaxDurationKeepImportant", DebuffOrderChanged), 30)
+        dfKeepImportant.hideOn = HideDebuffMaxDurControls
+        dfKeepImportant.disableOn = function(d)
+            return d.directDebuffShowAll or not d.debuffMaxDurationEnabled
+        end
+        dfKeepImportant.tooltip = L["Boss, Role, and Priority debuffs stay visible even when their duration is over the threshold."]
+        Add(debuffOrderGroup, nil, 1)
+
         AddSpace(GUI.Space.block, "both")
         Add(GUI:CreateSeeAlso(self.child, {
+            {pageId = "auras_filterdesigner", label = L["Aura Filters"]},
             {pageId = "display_tooltips", label = L["Debuff Tooltips"]},
             {pageId = "general_integrations", label = L["Integrations"]},
             {pageId = "auras_dispel", label = L["Dispel Overlay"]},
@@ -7061,7 +6810,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         Add(GUI:CreateSeeAlso(self.child, {
             {pageId = "auras_buffs", label = L["Buffs"]},
             {pageId = "auras_debuffs", label = L["Debuffs"]},
-            {pageId = "auras_filters", label = L["Aura Filters"]},
+            {pageId = "auras_filterdesigner", label = L["Aura Filters"]},
             {pageId = "general_integrations", label = L["Integrations"]},
         }), 30, "both")
     end)

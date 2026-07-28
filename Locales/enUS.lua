@@ -375,7 +375,7 @@ L["USE"] = true
 -- End ClickCasting UI strings
 L["    Show ZZZ Icon"] = true
 L["%d - %d players"] = true
-L["%d of %d hidden"] = true
+L["%d of %d shown"] = true
 L["%d of %d tracked"] = true
 L["%d override"] = true
 L["%d overrides"] = true
@@ -698,7 +698,7 @@ L["Dead Background Color"] = true
 L["Dead/Offline Fading"] = true
 L["Death Knight"] = true
 L["Debuff Bar"] = true
-L["Debuff Blacklist"] = true
+L["Optional Debuffs"] = true
 L["Debuff Filters"] = true
 L["Debuff Icon"] = true
 L["Debuff Icons"] = true
@@ -1318,7 +1318,7 @@ L["Ready Check"] = true
 L["Ready Check Icon"] = true
 L["Ready to copy"] = true
 L["Rebuild the element list from your current built-in name, health, and status text. This replaces all existing Text Designer elements for this mode."] = true
-L["Blizzard's debuff categories aren't complete: even with all of them enabled, some debuffs Blizzard doesn't tag are still missed. Only 'All Debuffs' shows every debuff, and the categories can't be changed (they're Blizzard-defined)."] = true
+L["Only All Debuffs shows every debuff: all the categories combined still miss some debuffs."] = true
 L["Recovered %d raid settings from interrupted auto layout editing session."] = true
 L["Red X"] = true
 L["Reduced Max Health"] = true
@@ -1585,7 +1585,6 @@ L["Text Groups"] = true
 L["Text Position"] = true
 L["Texts"] = true
 L["Texture"] = true
-L["Debuffs are opt-out: instead of choosing what shows, you pick what to hide. Blizzard allows only a limited set, so this list is fixed."] = true
 L["These defaults apply to all text elements that haven't been individually customized."] = true
 L["These indicators trigger no matter who casts the buff."] = true
 L["These settings apply when using 'Shadow' outline style. Use larger offsets for more dramatic shadows."] = true
@@ -2269,5 +2268,95 @@ L["How far inside the icon edge the reveal sits. Negative values push it outward
 L["How far the dispel-type ring sits inside the icon edge. Negative values push it outward into a halo around the icon instead."] = true
 L["How far inside the frame edge the highlight sits. Negative values push it outward, so it rings the frame instead of hugging it — useful when the highlight would otherwise sit under auras or text."] = true
 L["How far inside the frame edge the dispel border sits. Negative values push it outward, ringing the frame rather than hugging it."] = true
+
+-- ============================================================
+-- FILTER MEMBERSHIP
+-- No strings here, and that is the answer rather than an omission. A buff
+-- filter's spell rows spent four rounds hunting for a verb — Enable/Disable,
+-- Included/Excluded, Tracked/Untracked, and a checkbox on the row's left — and
+-- what they landed on was a checkbox in the row's RIGHT-hand control slot, which
+-- needs no verb at all.
+--   * Enable/Disable claimed authority the control lacks (the filter may be off).
+--   * Included/Excluded disagreed with the header count.
+--   * Tracked/Untracked was accurate but needed an 80px button on sixty rows.
+--   * Show/Hide and Show/Skip belong to the BLACKLIST, which keeps them.
+--   * On/Off is the FILTER switch's vocabulary, in the left list and status line.
+--   * A box on the LEFT put every heavy element on one side of the row.
+-- "tracked" survives once, as a noun, in the header count below.
+-- ============================================================
+
+-- Left-list row tooltips on the merged Filters page. The rows that carry these
+-- are tick-only (no spell list of their own), so the tooltip is where their
+-- explanation lives.
+L["Buffs that belong to none of the filters above."] = true
+L["Debuffs that can be dispelled. Which dispels count is set on the Debuffs page."] = true
+
+-- Merged Filters page: the status line above the spell list. It answers ONE
+-- question -- where does this filter apply -- with ONE polarity. "On" lists the
+-- places; "Off" means nowhere at all. The earlier phrasing put a negative and a
+-- positive in the same sentence ("Off · Party buff bar · also Defensive Icon")
+-- and read as though the filter were off in both. %s is a comma-joined list, so
+-- a translator must keep it as one slot.
+L["On · %s"] = true
+L["Off · not in use"] = true
+L["Buff bar (%s)"] = true
+L["Per mode: the blacklist you edit here applies to this mode only."] = true
+L["Selecting a filter in the list adds it to the buffs bar. Other pages, like the Defensive Icon, choose filters for themselves — so a filter can still be in use while it is unselected here."] = true
+
+-- Merged page banner + the section-header hints. Between them these say the whole
+-- model: the HEADERS say what the row switch does (drives that bar), the BANNER says
+-- the filters are a shared library other pages draw from. Two labels and one
+-- sentence, where the predecessor was two paragraphs and six links.
+--
+-- ⚠ "Selected", everywhere on this page. Both lists draw the same checkbox, so both
+-- read the same way: a filter is selected, a spell inside it is selected, and the
+-- blacklist banner says "unselect one to hide it". Never "ticked" — the box draws
+-- the shared filled square, not a tick glyph, so the word names a mark that is not
+-- on screen.
+--
+-- This overrides an earlier call that banned "selected" from the FILTER rows,
+-- because clicking a row there also selects that filter for editing in the right
+-- pane. That collision is real but harmless in practice: the sentence is about the
+-- checkbox column it sits above, and one word across the whole page beats a split
+-- vocabulary that has to be learned twice. Krathe's call, 2026-07-28.
+-- Own line under the section header, at DFFontNormalSmall. NOT appended to the
+-- header's own text with a colour code: that recolours but does not resize, so it
+-- rendered at full header weight and ran off a 240px panel.
+L["Selected filters show on the buffs bar"] = true
+L["Selected filters show on the debuffs bar"] = true
+
+-- Heads the filter list under the Buffs/Debuffs tabs. Bare "Filters" because the
+-- tab above already says which kind — "Buff Filters" on the Buffs tab would be
+-- saying it twice.
+L["Filters"] = true
+-- The Buffs tab's banner. Leads with what this tab lets you DO, because the buff half
+-- is the one place on the page where everything is yours to change — the exact
+-- opposite of the Debuffs banner below, which has to say almost nothing here is.
+--
+-- ⚠ "%s filter groups", not "the %s". A normal Aura Designer group holds spells you
+-- placed yourself and never touches these filters; only a Filter Group carries a
+-- filterSelection. An earlier version named the Aura Designer as a peer of the
+-- Defensive Icon, which is untrue of most of what the Aura Designer does.
+L["You have full control over buff filters. Edit the built-in ones or create your own — and use them on the %s and in %s filter groups too."] = true
+-- The Debuffs tab's banner — one string covering the whole tab, because the tab has
+-- exactly one selectable row (the Blacklist; the categories are switches, not
+-- selections). So it says both what the debuff filters are, and how the one editable
+-- thing works, including the unselect-to-hide polarity nobody can guess.
+L["Debuff filters are Blizzard's: the categories are fixed and can't be changed. Optional Debuffs are the few you can turn off — unselect one to hide it."] = true
+
+-- Buffs / Debuffs pages: the ordering + duration box that moved off Aura Filters.
+L["Order & Limits"] = true
+
+-- Status line + its hover tooltip. Three different scopes, which is why the line
+-- stays short and the explanation lives on hover: which filters are SELECTED is per
+-- MODE, a built-in
+-- filter's spells are per PROFILE (both modes), custom filter spells are per
+-- ACCOUNT (every profile). Mistaking one for another is what makes filters look
+-- broken after a Party/Raid switch.
+L["Always in force"] = true
+L["Where this applies"] = true
+L["Optional Debuffs are per mode: what you hide here applies to this mode only."] = true
+L["Which filters are selected is per mode, so Party and Raid keep separate choices — use Copy or Sync above to share them. What a filter CONTAINS is not per mode: editing its spells changes both."] = true
+L["Which filters are selected is per mode, so Party and Raid keep separate choices — use Copy or Sync above to share them. A custom filter's spells are shared by every profile on the account."] = true
 
 --@end-do-not-package@
