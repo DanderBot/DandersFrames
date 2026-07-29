@@ -3349,14 +3349,22 @@ DF._MainEventDispatcher = function(self, event, arg1)
                         if ad.defaults.indicatorFrameStrata == nil then
                             ad.defaults.indicatorFrameStrata = "INHERIT"
                         end
-                        -- 0, matching the Config baseline: the render adds 40 + this, so a
-                        -- seeded profile keeps its indicators exactly where they are today.
-                        -- Seeding 30 here (the old value) would move every untouched
-                        -- indicator to +70 the moment the global default is wired to the
-                        -- render. Only ever SEEDS a missing key — a stored value, including
-                        -- an auto-stamped 30 from before this change, is left untouched.
+                        -- 40, matching the Config baseline. This value is ABSOLUTE:
+                        -- AuraDesigner/Factory.lua resolves it as
+                        --   level = (d and tonumber(d.indicatorFrameLevel)) or 40
+                        -- so nothing adds a base to it, and the `or 40` is only a
+                        -- fallback for a MISSING key. Seeding 0 therefore did not mean
+                        -- "baseline" — 0 is truthy in Lua, so it beat the fallback and
+                        -- dropped every untouched indicator from 40 to 0.
+                        --
+                        -- Reachable for any profile with an auraDesigner subtable but no
+                        -- defaults table: MigrateAbsoluteFrameLevels skips those (it
+                        -- requires defaults to already be a table), which leaves this
+                        -- seed as the only thing that ever fills the key.
+                        --
+                        -- Only ever SEEDS a missing key — a stored value is left alone.
                         if ad.defaults.indicatorFrameLevel == nil then
-                            ad.defaults.indicatorFrameLevel = 0
+                            ad.defaults.indicatorFrameLevel = 40
                         end
                     end
                 end
