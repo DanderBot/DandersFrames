@@ -118,7 +118,7 @@ function DF:InitializeRaidFrames()
     DF.raidContainer:Hide()  -- Hidden by default, shown when in raid
     
     -- Raid frames are children of SecureGroupHeaderTemplate headers
-    -- Access via DF:GetRaidFrame(index) or DF:GetAllRaidFrames()
+    -- Access via DF:GetRaidFrame(index) or DF:IterateRaidFrames(callback)
     
     -- Create raid mover frame
     DF:CreateRaidMoverFrame()
@@ -1162,7 +1162,7 @@ end
 -- after Clique's metatable is in place.
 --
 -- Iterates ALL header children directly (not via unit-based lookups like
--- IteratePartyFrames/GetAllRaidFrames) because at commit time some frames
+-- IteratePartyFrames/IterateRaidFrames) because at commit time some frames
 -- may not have units assigned yet (e.g., party frames when solo-queuing
 -- for a dungeon — the header pre-creates children but units aren't set
 -- until group members actually appear).

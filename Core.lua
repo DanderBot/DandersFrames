@@ -2798,7 +2798,7 @@ end
 -- guarded and idempotent.
 local ABS_LEVEL_SENTINEL_DEFAULT = {
     roleIconFrameLevel = 30, leaderIconFrameLevel = 30, raidTargetIconFrameLevel = 30,
-    readyCheckIconFrameLevel = 30, centerStatusIconFrameLevel = 30, resurrectionIconFrameLevel = 30,
+    readyCheckIconFrameLevel = 30, resurrectionIconFrameLevel = 30,
     phasedIconFrameLevel = 30, afkIconFrameLevel = 30, vehicleIconFrameLevel = 30,
     raidRoleIconFrameLevel = 30, summonIconFrameLevel = 30, bgCarrierIconFrameLevel = 30,
     combatIconFrameLevel = 30, missingBuffIconFrameLevel = 35, defensiveIconFrameLevel = 65,

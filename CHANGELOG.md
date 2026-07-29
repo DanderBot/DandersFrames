@@ -175,16 +175,8 @@ DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally chan
 * (Profiles) **Fixed a brand-new profile being run through the one-time upgrade steps meant for old ones**, which have nothing to upgrade and the wrong shape to upgrade from. Fixed one of those steps deleting Aura Designer configurations outright while re-scoping them per spec.
 * (Auras) Fixed a dispel pulse continuing on two of its three groups after it should have stopped, a failed aura-border attachment giving up instead of retrying, and a stale cache of frame attributes surviving a rebuild.
 * (Frames) **Fixed dead and offline units not updating their status text or their missing-buff badge.** A unit that died kept whatever its frame was showing a moment earlier — no "Dead" or "Offline" status, and a missing-buff badge still asking you to buff someone who could no longer receive it. Both corrected only when something else forced a full refresh, often when you died as well, which is what made it look like your own state mattered. Neither check was wrong; neither was being re-run. Most visible in follower dungeons, where companions go down often.
-* (Internal) **Code cleanup, round two** — 33 unreferenced functions, 39 orphaned locale strings, six permanently-disabled blocks and seven calls to methods that no longer exist. The dead list was re-derived rather than taken from the audit that found it: the audit ran before its own fixes landed, so following it as written would have deleted code those fixes had just brought back to life. No behaviour change.
-
-### Known Issues (12.1 alpha)
-
-* The 12.1 aura displays are rebuilt on Blizzard's new container system and are under active testing — please report any case where buff, debuff, defensive or missing-buff displays stop updating, **especially in combat**.
-* A debuff that counts as both a Priority debuff and a Boss/Role debuff can show one icon per matching filter when both are enabled — the only duplicate case the new filter system can't remove. "Show All Debuffs" avoids it.
-* Dispel Overlay: a unit with dispellable debuffs of two different types can show both type icons overlapped (rare).
-* Aura Designer text colouring is drawn as a cover over the text: it ignores the out-of-range text fade, and group parts with their own inline colours keep them.
-* Dragging certain aura sliders can briefly stutter.
-* Settings-window borders re-derive their thickness from DandersFrames' own **UI Scale** slider (top of the settings window). Changing WoW's global UI Scale instead won't re-derive them for pages already on screen — reopen the window, or nudge the addon's own slider, if a border looks off after doing that.
+* (Profiles) Fixed Copy, Sync and Reset Page quietly leaving some settings behind on seven pages, with nothing to say they'd been skipped. Fading was the reported case.
+* (Internal) Code cleanup: removed unreferenced functions, orphaned locale strings and permanently-disabled blocks. No behaviour change.
 
 ### Bug Fixes
 
@@ -201,6 +193,15 @@ DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally chan
 * (Click Casting) Applying and clearing bindings now tracks exactly which click attributes were written on each frame instead of a ~500-write blanket sweep, which also fixes the previous profile's action lingering on an unmodified mouse button until reload. (by Krathe)
 * (Click Casting) **Removed:** the hidden per-binding "load only for these specs" field, which no settings screen could ever set and which could filter your binding list using unresolved spec data at login — per-spec click casting is unchanged via loadout-assigned profiles. (by Krathe)
 
+
+### Known Issues (12.1 alpha)
+
+* The 12.1 aura displays are rebuilt on Blizzard's new container system and are under active testing — please report any case where buff, debuff, defensive or missing-buff displays stop updating, **especially in combat**.
+* A debuff that counts as both a Priority debuff and a Boss/Role debuff can show one icon per matching filter when both are enabled — the only duplicate case the new filter system can't remove. "Show All Debuffs" avoids it.
+* Dispel Overlay: a unit with dispellable debuffs of two different types can show both type icons overlapped (rare).
+* Aura Designer text colouring is drawn as a cover over the text: it ignores the out-of-range text fade, and group parts with their own inline colours keep them.
+* Dragging certain aura sliders can briefly stutter.
+* Settings-window borders re-derive their thickness from DandersFrames' own **UI Scale** slider (top of the settings window). Changing WoW's global UI Scale instead won't re-derive them for pages already on screen — reopen the window, or nudge the addon's own slider, if a border looks off after doing that.
 
 ## [4.8.0]
 

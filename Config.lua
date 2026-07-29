@@ -2404,13 +2404,15 @@ DF.PartyDefaults = {
             durationColor = {r = 1, g = 1, b = 1, a = 1},
             stackColor = {r = 1, g = 1, b = 1, a = 1},
             hideIcon = false,
-            -- Global AD indicator z-order defaults. BOTH are no-ops at their shipped value,
-            -- deliberately: the render adds frameLevelOffset 40 + this, so 0 keeps an
-            -- indicator that has never had a level set exactly where it renders today (+40,
-            -- below the defensive row at +51). Was 30 — which the editor displayed as the
-            -- default while the render ignored it entirely, so wiring it up would have moved
-            -- every untouched indicator to +70 and above the defensive row. Baseline changed
-            -- rather than migrated: saved profiles keep whatever they hold.
+            -- Global AD indicator z-order defaults. The stored number is an ABSOLUTE
+            -- offset from the unit frame — the render uses it as-is (resolveDefs in
+            -- AuraDesigner\Factory.lua, `or 40`), it does not add a base to it. 40 is
+            -- therefore a no-op at its shipped value: an indicator that has never had a
+            -- level set renders exactly where it does today, below the defensive row.
+            -- Was 30 — which the editor displayed as the default while the render ignored
+            -- it entirely. Baseline changed rather than migrated: saved profiles keep
+            -- whatever they hold. Keep this in step with the render fallback and with the
+            -- backfill seed in Core.lua; all three must agree.
             indicatorFrameLevel = 40,
             indicatorFrameStrata = "INHERIT",
         },
