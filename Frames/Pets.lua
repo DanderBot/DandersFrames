@@ -1550,6 +1550,22 @@ local function UpdateArenaPetFrames()
         return
     end
 
+    -- Everything below this point touches protected state: CreatePetFrame builds a
+    -- SecureUnitButtonTemplate and calls SetSize/SetAttribute, and PositionPetFrame
+    -- does ClearAllPoints/SetParent/SetPoint. The raid track gets away without a
+    -- guard because you only reach it forming a group, out of combat. Arena does
+    -- not: a pet summoned or resurrected mid-match, a Solo Shuffle round
+    -- transition, or Core's PLAYER_REGEN_DISABLED handler ending test mode all
+    -- land here with the lockdown up.
+    --
+    -- Defer rather than drop, so the pets appear the moment combat ends instead of
+    -- waiting for whatever roster event happens to come next.
+    if InCombatLockdown() then
+        DF.pendingArenaPetUpdate = true
+        return
+    end
+    DF.pendingArenaPetUpdate = nil
+
     -- Deferred creation, same shape as the raid track. The arena header's children
     -- are the owners; raidpet<N> matches its raid<N> unit tokens.
     local idx = 0
