@@ -480,6 +480,14 @@ function DF:UpdateUnitFrame(frame, source)
         -- Apply dead fade for offline units
         DF:ApplyDeadFade(frame, "Offline")
         frame.dfLastKnownConnected = false
+        -- ☠ This branch RETURNS, so the Text Designer render and the
+        -- missing-buff visibility gate further down this function are never
+        -- reached. Without them the TD keeps painting the last ALIVE state
+        -- (a blank status) and the badge keeps claiming "missing" on a unit
+        -- that can no longer be buffed — the field-reported follower-dungeon
+        -- bug. Both are no-ops when nothing changed.
+        if DF.UpdateTextDesigner then DF:UpdateTextDesigner(frame, "all") end
+        if DF.RefreshMissingBuffVisibility then DF:RefreshMissingBuffVisibility(frame) end
         return
     end
 
@@ -542,9 +550,14 @@ function DF:UpdateUnitFrame(frame, source)
         DF:UpdateRaidTargetIcon(frame)
         -- Apply dead fade for dead/ghost units
         DF:ApplyDeadFade(frame, "Dead")
+        -- See the note on the offline branch above: this return skips the TD
+        -- render and the missing-buff gate, which is why "Dead" never appeared
+        -- while the Text Designer owned the text.
+        if DF.UpdateTextDesigner then DF:UpdateTextDesigner(frame, "all") end
+        if DF.RefreshMissingBuffVisibility then DF:RefreshMissingBuffVisibility(frame) end
         return
     end
-    
+
     -- Unit is alive and connected - reset dead fade if it was applied
     DF:ResetDeadFade(frame)
     frame.dfLastKnownConnected = true
@@ -809,6 +822,9 @@ function DF:UpdateHealthFast(frame)
         end
         DF:ApplyDeadFade(frame, "Offline")
         frame.dfLastKnownConnected = false
+        -- Same early-return gap as UpdateUnitFrame (see the note there).
+        if DF.UpdateTextDesigner then DF:UpdateTextDesigner(frame, "all") end
+        if DF.RefreshMissingBuffVisibility then DF:RefreshMissingBuffVisibility(frame) end
         return
     end
 
@@ -856,6 +872,12 @@ function DF:UpdateHealthFast(frame)
             frame.dfLastKnownDead = true
             if DF.UpdateAuras_Enhanced then DF:UpdateAuras_Enhanced(frame) end
         end
+        -- Same early-return gap as UpdateUnitFrame. Note the comment above: WoW
+        -- does not fire UNIT_AURA on death, which is exactly why the aura-driven
+        -- missing-buff gate never re-ran on its own. Both calls are no-ops when
+        -- the state is unchanged, so they are safe on this per-tick path.
+        if DF.UpdateTextDesigner then DF:UpdateTextDesigner(frame, "all") end
+        if DF.RefreshMissingBuffVisibility then DF:RefreshMissingBuffVisibility(frame) end
         return
     end
 

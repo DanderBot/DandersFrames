@@ -2408,6 +2408,56 @@ end
 -- hide the legacy icon (no double render), guard visibility on the NON-aura state
 -- (dead/offline/range/UnitCanAssist — the read-free mechanism only answers aura
 -- presence), keep cells on the frame's unit, re-apply on a layout-version bump.
+-- Non-aura visibility for the missing-buff strip: the badge must never claim
+-- "missing" on a corpse / offline / out-of-range / unassistable unit. All
+-- non-secret reads; range mirrors the legacy issecretvalue guard. DELIBERATE
+-- change vs legacy: no UnitIsPlayer — legacy excluded NPC group members because
+-- its aura SCAN couldn't check them, but raid buffs are castable on
+-- follower-dungeon NPCs (Krathe-verified) and the read-free widget works on any
+-- assistable unit. Pets stay excluded (pet frames don't run this feature).
+--
+-- ☠ SPLIT OUT of DriveMissingBuffFactory on purpose. The drive only runs from
+-- RefreshFactoryRows, which fires on an aura-LAYOUT bump (a settings change) and
+-- additionally bails in combat. Death is neither, so a companion dying mid-pull
+-- left the badge asserting "missing Fortitude" on a corpse until the next
+-- settings change or combat end — field-reported in a follower dungeon,
+-- confirmed via /dfdead (UnitIsDeadOrGhost was already true; nothing re-asked).
+-- Unit-state changes call THIS instead: non-secret reads plus one SetShown on a
+-- DF-owned strip, so it is combat-safe and a no-op when nothing changed.
+function DF:RefreshMissingBuffVisibility(frame)
+    if not frame then return end
+    local strip = frame.missingBuffStrip
+    if not strip then return end   -- feature never built on this frame
+
+    local unit = frame.unit
+    local visible
+    if DF.AuraContainer and DF.AuraContainer._testMode then
+        -- P5 preview: fabricated test units fail every unit API — visibility is
+        -- the test panel's toggle (UpdateTestMissingBuff gates on it before
+        -- calling). The badges show because missing containers stay DISABLED
+        -- for the test session (the provider bounce skips them), so every
+        -- group is empty and every badge sits parked in its window.
+        visible = true
+    else
+        visible = unit and UnitExists(unit)
+            and not UnitIsDeadOrGhost(unit) and UnitIsConnected(unit)
+            and not frame.isPetFrame and UnitCanAssist("player", unit)
+        if visible then
+            local inRange = frame.dfInRange
+            if issecretvalue and issecretvalue(inRange) then
+                visible = false
+            elseif inRange == false then
+                visible = false
+            end
+        end
+    end
+    visible = visible and true or false
+    if frame.dfMissingStripShown ~= visible then
+        frame.dfMissingStripShown = visible
+        strip:SetShown(visible)
+    end
+end
+
 function DF:DriveMissingBuffFactory(frame, db)
 
     local strip = frame.missingBuffStrip
@@ -2480,40 +2530,12 @@ function DF:DriveMissingBuffFactory(frame, db)
         layoutMissingStrip(frame, db, strip, #tracked)
     end
 
-    -- Non-aura visibility guards: the badge must never claim "missing" on a
-    -- corpse / offline / out-of-range / unassistable unit. All non-secret reads;
-    -- range mirrors the legacy issecretvalue guard. DELIBERATE change vs legacy:
-    -- no UnitIsPlayer — legacy excluded NPC group members because its aura SCAN
-    -- couldn't check them, but raid buffs are castable on follower-dungeon NPCs
-    -- (Krathe-verified) and the read-free widget works on any assistable unit.
-    -- Pets stay excluded (pet frames don't run this feature).
+    -- Non-aura visibility (corpse / offline / out-of-range / unassistable).
+    -- Owned by RefreshMissingBuffVisibility so unit-state changes can re-apply
+    -- it without coming through this drive — see the note on that function.
+    DF:RefreshMissingBuffVisibility(frame)
+
     local unit = frame.unit
-    local visible
-    if DF.AuraContainer and DF.AuraContainer._testMode then
-        -- P5 preview: fabricated test units fail every unit API — visibility is
-        -- the test panel's toggle (UpdateTestMissingBuff gates on it before
-        -- calling). The badges show because missing containers stay DISABLED
-        -- for the test session (the provider bounce skips them), so every
-        -- group is empty and every badge sits parked in its window.
-        visible = true
-    else
-        visible = unit and UnitExists(unit)
-            and not UnitIsDeadOrGhost(unit) and UnitIsConnected(unit)
-            and not frame.isPetFrame and UnitCanAssist("player", unit)
-        if visible then
-            local inRange = frame.dfInRange
-            if issecretvalue and issecretvalue(inRange) then
-                visible = false
-            elseif inRange == false then
-                visible = false
-            end
-        end
-    end
-    visible = visible and true or false
-    if frame.dfMissingStripShown ~= visible then
-        frame.dfMissingStripShown = visible
-        strip:SetShown(visible)
-    end
 
     -- Keep cells on the frame's unit (roster churn); refresh the border spec with
     -- the new unit's class/role colour. Combat: SetUnit self-defers in the factory.
