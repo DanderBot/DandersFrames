@@ -137,9 +137,17 @@ local function GetPlayerClass()
 end
 CC.GetPlayerClass = GetPlayerClass
 
--- Get current spec index
+-- Get current spec index, or nil if the game has not resolved it yet.
+--
+-- Deliberately does NOT fall back to spec 1. This helper used to return
+-- `GetSpecialization() or 1`, and that mask is what shipped the "none of my
+-- binds work in my first arena of the day" bug: at the first login of a session
+-- GetSpecialization() is briefly nil, the fallback made that look like spec 1,
+-- and the loadout check switched spec-2+ players onto spec 1's profile for the
+-- rest of the session. Returning nil makes the unresolved state visible, so a
+-- caller cannot be silently wrong by forgetting to pre-check.
 local function GetCurrentSpec()
-    return GetSpecialization() or 1
+    return GetSpecialization()
 end
 
 -- Get current talent loadout config ID
@@ -307,7 +315,7 @@ end
 function CC:SetActiveProfile(profileName)
     if InCombatLockdown() then
         -- Queue the switch for after combat
-        self.pendingProfileSwitch = profileName
+        self:Defer("profileSwitch", profileName)
         print("|cffff9900DandersFrames:|r Profile switch to '" .. profileName .. "' queued (in combat)")
         return false
     end
@@ -494,18 +502,20 @@ function CC:CheckLoadoutProfileSwitch()
     if InCombatLockdown() then
         -- Defer, don't drop: entering an arena/dungeon starts combat quickly,
         -- and silently losing the check leaves the previous spec's profile
-        -- active for the whole match. OnCombatEnd drains pendingLoadoutCheck.
-        self.pendingLoadoutCheck = true
+        -- active for the whole match. The "loadoutCheck" queue job re-runs this
+        -- function and the drain on PLAYER_REGEN_ENABLED is automatic.
+        self:Defer("loadoutCheck")
         return
     end
 
     -- Cold-start guard: at the first login of a session this can run BEFORE
-    -- GetSpecialization() resolves. GetCurrentSpec()'s `or 1` fallback would
-    -- then MASK the missing data and switch to spec 1's profile — the wrong
-    -- profile for anyone whose actual spec is 2+ ("none of my binds work in
-    -- my first arena of the day until I reload"). Record the unresolved state
-    -- and let the resolve watchers (spec/spell events, loading screens, arena
-    -- prep) re-run this check once real data arrives.
+    -- GetSpecialization() resolves, and picking a profile off an unknown spec
+    -- switched spec-2+ players onto spec 1's profile for the rest of the session
+    -- ("none of my binds work in my first arena of the day until I reload").
+    -- Record the unresolved state and let the resolve watchers (spec/spell
+    -- events, loading screens, arena prep) re-run this check once real data
+    -- arrives. GetCurrentSpec() now returns nil rather than masking to 1, so
+    -- this is the one place that decides what an unknown spec means.
     if not GetSpecialization() then
         self.loadoutCheckUnresolved = true
         DF:Debug("CLICK", "CheckLoadoutProfileSwitch: spec data not ready — deferred to resolve watchers")
@@ -805,7 +815,10 @@ function CC:GetSpellValidityStatus(spellName)
     -- If spellInfo exists and has a spellID, it's likely a valid WoW spell
     -- We can check if it's a class talent by looking at all specs
     if C_ClassTalents then
-        local currentSpec = GetSpecialization() or 1
+        -- No `or 1` mask: if spec is unresolved, every specIndex comparison below
+        -- fails and the spell is reported "valid_class" rather than being falsely
+        -- claimed as spec 1's.
+        local currentSpec = GetSpecialization()
         local numSpecs = GetNumSpecializations() or 4
         
         for specIndex = 1, numSpecs do
@@ -846,12 +859,6 @@ function CC:GetSpellValidityStatus(spellName)
     end
     
     return "invalid"
-end
-
--- Legacy function for compatibility
-local function IsSpellValidForCurrentClass(spellName)
-    local status = CC:GetSpellValidityStatus(spellName)
-    return status == "valid_spec" or status == "valid_class"
 end
 
 -- ============================================================

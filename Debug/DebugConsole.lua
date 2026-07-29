@@ -275,11 +275,60 @@ end
 -- LOG MANAGEMENT
 -- ============================================================
 
+-- How far the buffer may run over the cap before a compaction. Pruning on every
+-- single Log() meant a table.remove per line once full, and each table.remove
+-- shifts the whole array; the scan for the oldest INFO also had to walk past
+-- every leading WARN/ERROR first. Both costs peak when the buffer is mostly
+-- failures — exactly when the log is being relied on. Letting it overshoot and
+-- compacting once turns that into a single pass per PRUNE_OVERSHOOT lines.
+local PRUNE_OVERSHOOT = 500
+
 function DebugConsole:PruneLog()
     if not debugLog or not debugDb then return end
     local maxLines = debugDb.maxLines or 500
-    while #debugLog > maxLines do
-        tremove(debugLog, 1)
+    if #debugLog <= maxLines + PRUNE_OVERSHOOT then return end
+
+    local total = #debugLog
+    local excess = total - maxLines
+
+    -- Level-aware eviction. The old policy removed the oldest entry regardless
+    -- of level, so a flood of routine INFO (per-hover OnEnter/OnLeave during a
+    -- raid) would bury and then EVICT the rare WARN/ERROR entries that actually
+    -- diagnose a problem — the failure was gone by the time the log was read.
+    --
+    -- Oldest INFO goes first, and WARN/ERROR are not touched while any INFO
+    -- remains. That is a deliberate call: a buffer full of warnings and errors
+    -- is the useful kind, and INFO is largely noise the log fills with anyway.
+    -- If the buffer genuinely is all WARN/ERROR and still over cap, the oldest
+    -- of those go, so this degrades to FIFO rather than wedging.
+    local drop, remaining = {}, excess
+    for i = 1, total do
+        if remaining == 0 then break end
+        if debugLog[i][2] == "INFO" then
+            drop[i] = true
+            remaining = remaining - 1
+        end
+    end
+    if remaining > 0 then
+        for i = 1, total do
+            if remaining == 0 then break end
+            if not drop[i] then
+                drop[i] = true
+                remaining = remaining - 1
+            end
+        end
+    end
+
+    -- Compact in one pass rather than shifting the array once per removal.
+    local write = 1
+    for read = 1, total do
+        if not drop[read] then
+            debugLog[write] = debugLog[read]
+            write = write + 1
+        end
+    end
+    for i = total, write, -1 do
+        debugLog[i] = nil
     end
 end
 

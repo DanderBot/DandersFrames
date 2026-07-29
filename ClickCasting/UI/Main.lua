@@ -108,12 +108,17 @@ function CC:CreateClickCastUI(parent)
     -- =========================================================================
     -- HEADER: Two rows for better organization
     -- =========================================================================
+    -- Panel row only -- deliberately NOT stored on CC. `CC.header` holds the
+    -- SECURE click-cast header (DandersFramesClickCastHeader), which owns every
+    -- hover bind, the mouseoverstate driver, and all WrapScript install/removal.
+    -- Assigning this plain panel row over that field replaced the secure frame
+    -- for the rest of the session, silently disabling hover-bind setup on every
+    -- frame created afterwards. Nothing ever read it back.
     local header = CreateFrame("Frame", nil, parent)
     header:SetPoint("TOPLEFT", 10, -8)
     header:SetPoint("TOPRIGHT", -10, -8)
     header:SetHeight(48)  -- Two rows
-    CC.header = header
-    
+
     -- === ROW 1: Title + Enable + Profile Dropdown ===
     local row1 = CreateFrame("Frame", nil, header)
     row1:SetPoint("TOPLEFT", 0, 0)

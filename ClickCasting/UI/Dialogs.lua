@@ -2009,7 +2009,6 @@ SlashCmdList["DFCCGLOBAL"] = function(msg)
         print("  Unit Frames + Blizzard: " .. counts.blizzard)
         print("  On Hover (@mouseover): " .. counts.onhover)
         print("  Target Cast: " .. counts.targetcast)
-        print("|cff33cc66Active global keybinds:|r " .. (CC.globalBindingCount or 0))
         
         -- Count registered frames
         local frameCount = 0
@@ -2247,9 +2246,64 @@ SlashCmdList["DFCCGLOBAL"] = function(msg)
         else
             print("  Smart res would NOT be added to spells (mode disabled or no spells)")
         end
+    elseif msg == "deferred" then
+        -- Inspect the combat-deferred work queue (see CC:Defer in Events.lua).
+        -- Anything listed here was blocked by combat lockdown and runs on
+        -- PLAYER_REGEN_ENABLED. A non-empty queue OUT of combat means the
+        -- drain did not fire, which is a bug.
+        print("|cff33cc66Deferred work queue:|r")
+        print("  In combat: " .. tostring(InCombatLockdown()))
+        local q = CC.deferred
+        if not q or next(q) == nil then
+            print("  (empty)")
+        else
+            for job, payload in pairs(q) do
+                local detail
+                if type(payload) == "table" then
+                    local n = 0
+                    for _ in pairs(payload) do n = n + 1 end
+                    detail = n .. " item(s)"
+                elseif payload == true then
+                    detail = "queued"
+                else
+                    detail = tostring(payload)
+                end
+                print("  " .. job .. ": " .. detail)
+            end
+            if not InCombatLockdown() then
+                print("  |cffff6666Queue is non-empty out of combat - drain did not run.|r")
+            end
+        end
+    elseif msg == "scrub" then
+        -- Manual recovery: full attribute sweep on every registered frame,
+        -- then a complete reapply. Use if a binding seems stuck in a way
+        -- /dfccglobal apply does not fix (suspected stale manifest).
+        if InCombatLockdown() then
+            print("|cffff6666Cannot scrub in combat.|r")
+        else
+            local n = 0
+            if CC.registeredFrames then
+                for frame in pairs(CC.registeredFrames) do
+                    CC:ScrubAllClickAttributes(frame)
+                    n = n + 1
+                end
+            end
+            print("|cff33cc66Scrubbed " .. n .. " frame(s); reapplying bindings...|r")
+            CC.unifiedMacroMap = nil
+            CC:ApplyBindings()
+        end
+    elseif msg == "drain" then
+        -- Force a drain, to test the queue without waiting for combat to end
+        print("|cff33cc66Forcing deferred drain...|r")
+        CC:DrainDeferred()
+        local left = CC.deferred and next(CC.deferred)
+        print("  Done. Queue is now " .. (left and "non-empty" or "empty") .. ".")
     else
         print("|cff33cc66/dfccglobal commands:|r")
         print("  debug - Toggle debug output")
+        print("  deferred - Show the combat-deferred work queue")
+        print("  drain - Force the deferred queue to drain now")
+        print("  scrub - Full attribute sweep + reapply (manifest recovery)")
         print("  apply - Reapply all bindings")
         print("  list - Show binding counts and status")
         print("  inspect - Inspect frame under mouse cursor")
